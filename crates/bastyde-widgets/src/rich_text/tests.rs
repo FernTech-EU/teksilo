@@ -7217,3 +7217,65 @@ fn overlapping_annotations_each_get_their_own_body_node() {
     assert!(bodies.contains(&"first"), "got {bodies:?}");
     assert!(bodies.contains(&"second"), "got {bodies:?}");
 }
+
+// ---------------------------------------------------------------------------
+// EditorHandle::range_rect — geometry for decorations drawn outside the editor
+// ---------------------------------------------------------------------------
+
+/// A laid-out range must report a rectangle that is inside the editor, non-empty,
+/// and ordered left-to-right / top-to-bottom.
+///
+/// This is the primitive a margin annotation lines itself up with, so a wrong
+/// answer here misplaces every connector and bracket drawn from it.
+#[test]
+fn range_rect_reports_a_plausible_box_for_a_laid_out_span() {
+    let doc = TextDocument::new();
+    doc.set_plain_text("The lamp guttered, and then it did not.")
+        .unwrap();
+    let editor = RichTextEditor::editor(doc);
+    let handle = editor.handle();
+
+    let mut tree = WidgetTree::new();
+    let _id = tree.add(editor);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    let _ = tree.render();
+
+    let r = handle
+        .range_rect(4, 8)
+        .expect("a laid-out editor must report a rect for a real range");
+    assert!(r.width > 0.0, "a four-character span has width: {r:?}");
+    assert!(r.height > 0.0, "and a line's height: {r:?}");
+}
+
+/// A later range sits further right on the same line — the ordering a leader line
+/// depends on when it decides which end of the span to leave from.
+#[test]
+fn range_rect_advances_along_the_line() {
+    let doc = TextDocument::new();
+    doc.set_plain_text("aaaa bbbb cccc").unwrap();
+    let editor = RichTextEditor::editor(doc);
+    let handle = editor.handle();
+
+    let mut tree = WidgetTree::new();
+    let _id = tree.add(editor);
+    tree.layout(SizeProposal::exact(600.0, 300.0));
+    let _ = tree.render();
+
+    let first = handle.range_rect(0, 4).expect("first word");
+    let last = handle.range_rect(10, 14).expect("last word");
+    assert!(
+        last.x > first.x,
+        "a later span must start further right: {first:?} then {last:?}"
+    );
+}
+
+/// Before layout there is no geometry to report, and the answer is `None` rather
+/// than a zero rect a caller would happily draw at the origin.
+#[test]
+fn range_rect_is_none_before_layout() {
+    let doc = TextDocument::new();
+    doc.set_plain_text("hello").unwrap();
+    let editor = RichTextEditor::editor(doc);
+    let handle = editor.handle();
+    assert!(handle.range_rect(0, 5).is_none());
+}

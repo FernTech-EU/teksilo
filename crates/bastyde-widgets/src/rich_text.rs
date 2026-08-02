@@ -2012,6 +2012,32 @@ impl EditorHandle {
         (st.cursor.anchor(), st.cursor.position())
     }
 
+    /// The **window-space** rectangle enclosing the character range `[start, end)`.
+    ///
+    /// The inverse of [`offset_at_point`](Self::offset_at_point): that maps a point
+    /// to an offset, this maps offsets back to a point. It is what a decoration
+    /// drawn *outside* the editor — a margin annotation, a connector leader, a
+    /// bracket spanning a paragraph — needs in order to line itself up with the
+    /// text it refers to.
+    ///
+    /// Coordinates match what the arena stores (`viewport_origin` + engine-local −
+    /// scroll), so the result can be compared with any other widget's bounds
+    /// directly, and it tracks scrolling for free.
+    ///
+    /// `None` before the first full layout. Focus is **not** required — a margin
+    /// annotation must stay aligned whether or not the writer is typing.
+    pub fn range_rect(&self, start: usize, end: usize) -> Option<Rect> {
+        let st = self.state.borrow();
+        keyboard::range_window_rect(&st, start, end)
+    }
+
+    /// The **window-space** caret rectangle at one offset — a zero-width
+    /// [`range_rect`](Self::range_rect), and the anchor point for a marker drawn at
+    /// one end of a span (the triangle at a comment's tail).
+    pub fn offset_rect(&self, offset: usize) -> Option<Rect> {
+        self.range_rect(offset, offset)
+    }
+
     /// Hit-test a point — **in window coordinates**, as a
     /// [`context_menu`](RichTextEditor::context_menu) factory receives it — to a
     /// document character offset. `None` when the point resolves to no text
