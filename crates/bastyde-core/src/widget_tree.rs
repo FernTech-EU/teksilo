@@ -173,6 +173,10 @@ pub struct WidgetTree {
     idle_queue: crate::idle::IdleQueue,
     /// Simulated clock for deterministic time-dependent testing.
     sim_clock: std::time::Instant,
+    /// Whether [`tick_animations`](Self::tick_animations) has ever driven this
+    /// tree — i.e. whether [`Self::sim_clock`], rather than the wall clock, is
+    /// the one animations are measured against. See [`Self::animation_clock`].
+    sim_driven: bool,
     /// Overlay manager for tooltips, menus, popovers.
     pub(crate) overlay_manager: crate::overlay::OverlayManager,
     /// Tooltip attachments: (anchor_id, content_id, text, delay, hover_start, overlay_id).
@@ -585,6 +589,7 @@ impl WidgetTree {
             binding_registry: crate::binding::BindingRegistry::new(),
             idle_queue: crate::idle::IdleQueue::new(),
             sim_clock: std::time::Instant::now(),
+            sim_driven: false,
             focus_origin: None,
             overlay_manager: crate::overlay::OverlayManager::new(),
             tooltips: Vec::new(),
@@ -1374,10 +1379,38 @@ impl WidgetTree {
         self.animation_scheduler.has_active()
     }
 
+    /// The clock a newly promoted animation must be stamped with: the same one
+    /// the scheduler will later be ticked against.
+    ///
+    /// Normally the wall clock. But once [`tick_animations`](Self::tick_animations)
+    /// has driven this tree, the scheduler is *only* ever ticked at
+    /// [`Self::sim_clock`] — so an animation stamped `Instant::now()` is measured
+    /// against a clock that may never reach its start. A headless test
+    /// interleaving `layout()` (which promotes) with `tick_animations()` (which
+    /// ticks) advances the two clocks independently: simulated time by whatever
+    /// the test asks for, real time by however long the test actually takes. The
+    /// moment real time overtakes simulated time, every animation armed from then
+    /// on has a start in the scheduler's future and its progress **freezes** —
+    /// not slowly, completely, and no number of further ticks recovers it.
+    ///
+    /// That made animated layout tests fail as a function of machine load rather
+    /// than of behaviour: green run alone or on a couple of threads, red once the
+    /// runner filled the cores and each test's wall-clock time stretched past the
+    /// simulated time it was asking for. The overlay manager already keeps its
+    /// real and simulated timestamps apart for this reason; animations now agree
+    /// on one clock the same way.
+    fn animation_clock(&self) -> std::time::Instant {
+        if self.sim_driven {
+            self.sim_clock
+        } else {
+            std::time::Instant::now()
+        }
+    }
+
     /// Pick up pending `animate_to` requests from registered signals
     /// and start them on the animation scheduler.
     fn process_pending_animations(&mut self) {
-        let now = std::time::Instant::now();
+        let now = self.animation_clock();
         self.process_pending_animations_at(now);
     }
 
@@ -1579,6 +1612,10 @@ impl WidgetTree {
     /// Pending `animate_to` requests are started at the current sim_clock,
     /// then time advances by `duration`, and the scheduler ticks at the new time.
     pub fn tick_animations(&mut self, duration: std::time::Duration) {
+        // From here on this tree is simulation-driven: `layout` must stamp the
+        // animations it promotes with `sim_clock` too, or they are measured
+        // against a clock that never reaches them. See `animation_clock`.
+        self.sim_driven = true;
         self.process_pending_animations_at(self.sim_clock);
 
         self.sim_clock += duration;
@@ -3738,6 +3775,57 @@ mod cross_window_redraw_signal_tests {
         assert!(
             !anim.has_pending_animation(),
             "the reconcile promoted it into the scheduler"
+        );
+    }
+
+    /// An animation armed *after* the wall clock has overtaken the simulated one
+    /// must still run.
+    ///
+    /// `layout` promotes a pending `animate_to` into the scheduler; once
+    /// `tick_animations` is driving the tree, the scheduler is only ever ticked at
+    /// `sim_clock`. Stamping the promotion with `Instant::now()` therefore put the
+    /// start in the scheduler's *future* the moment a test's real time outran the
+    /// simulated time it had asked for — and a start in the future does not run
+    /// slow, it does not run at all. That made animated headless tests a function
+    /// of machine load: green run alone, frozen once a full suite filled the cores
+    /// and stretched each test's wall-clock time past its simulated budget.
+    ///
+    /// The two clocks below are the shape of that: 90 ms simulated against at
+    /// least 100 ms real, so simulated time never catches up. Under the old
+    /// behaviour the animation stays pinned at its start value forever.
+    #[test]
+    fn an_animation_armed_after_real_time_outran_the_sim_clock_still_runs() {
+        let mut tree = WidgetTree::new();
+        let id = tree.add(FillWidget::new());
+        tree.layout(SizeProposal::exact(50.0, 50.0));
+
+        // Put the tree in simulated time, then let the wall clock get ahead of it.
+        tree.tick_animations(std::time::Duration::from_millis(10));
+        std::thread::sleep(std::time::Duration::from_millis(100));
+
+        let anim = Signal::new_animated(0.0_f32);
+        tree.register_animated_signal(&anim, id);
+        anim.animate_to(
+            1.0,
+            std::time::Duration::from_millis(50),
+            bastyde_tokens::Easing::Linear,
+        );
+        tree.layout(SizeProposal::exact(50.0, 50.0));
+
+        // 80 ms of simulated time against a 50 ms animation: comfortably finished
+        // on the only clock the scheduler is ever ticked with, and still short of
+        // the ~100 ms of real time that has passed.
+        tree.tick_animations(std::time::Duration::from_millis(80));
+
+        assert_eq!(
+            anim.get(),
+            1.0,
+            "the animation must be measured against the clock it is ticked with, \
+             not the wall clock that has already run past it"
+        );
+        assert!(
+            !tree.has_active_animations(),
+            "and having reached its target it must be off the scheduler"
         );
     }
 
