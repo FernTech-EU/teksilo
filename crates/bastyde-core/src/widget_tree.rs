@@ -1892,6 +1892,19 @@ impl WidgetTree {
             }
         }
 
+        // The parentless nodes the *previous* build owned. Taken now so
+        // `build()` records its new set into an empty list, and destroyed after
+        // it returns — by then the widget's own fields point at the new nodes,
+        // so tearing the old ones down cannot strand a live id in the widget.
+        // Both the `preserve_children` reconcile and the plain path want this:
+        // detached content is rebuilt wholesale either way (it is not addressed
+        // by id from the outside, so there is nothing to preserve).
+        let old_detached: Vec<WidgetId> = self
+            .arena
+            .get_mut(widget_id)
+            .map(|node| std::mem::take(&mut node.detached))
+            .unwrap_or_default();
+
         let mut widget_box = match self.arena.take_widget(widget_id) {
             Some(widget) => widget,
             None => return,
@@ -1938,6 +1951,39 @@ impl WidgetTree {
             node.effect_handles = effect_handles;
             node.subscription_handles = subscription_handles;
         }
+
+        // Reap the previous build's parentless content, now that the fresh set
+        // is recorded and the widget points at it.
+        for id in old_detached {
+            self.destroy_subtree_inner(id, false);
+        }
+    }
+
+    /// Record that `owner` created and owns the parentless node `detached` —
+    /// pre-built overlay content that is deliberately not a child. See
+    /// [`BuildContext::add_detached`](crate::build_context::BuildContext::add_detached)
+    /// and [`WidgetNode::detached`](crate::arena::WidgetNode).
+    pub(crate) fn record_detached(&mut self, owner: WidgetId, detached: WidgetId) {
+        if let Some(node) = self.arena.get_mut(owner) {
+            node.detached.push(detached);
+        }
+    }
+
+    /// Destroy every parentless node `owner` owns, and forget them.
+    ///
+    /// Taken out of the node first: the destroy walk below can re-enter this
+    /// function (a detached node may own detached nodes of its own — a rich
+    /// tooltip's cascade children each pre-build their own), and it must not
+    /// see a list it is halfway through consuming.
+    fn destroy_detached_of(&mut self, owner: WidgetId) {
+        let detached = self
+            .arena
+            .get_mut(owner)
+            .map(|node| std::mem::take(&mut node.detached))
+            .unwrap_or_default();
+        for id in detached {
+            self.destroy_subtree_inner(id, false);
+        }
     }
 
     /// Recursively destroy a subtree, dropping per-widget subscription
@@ -1975,6 +2021,11 @@ impl WidgetTree {
         // walk below never reaches it — reap it explicitly or the entry and
         // its node outlive the anchor for the lifetime of the tree.
         self.retire_tooltips_of_destroyed_anchor(widget_id);
+        // Same reasoning, one level up: every *other* parentless node this
+        // widget built (a dropdown menu, a calendar, a tooltip's nested
+        // cascade children) is unreachable from the child walk and dies here
+        // or never.
+        self.destroy_detached_of(widget_id);
 
         let children: Vec<WidgetId> = self.arena.children(widget_id).to_vec();
         for child in children {

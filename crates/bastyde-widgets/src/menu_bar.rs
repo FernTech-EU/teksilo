@@ -995,7 +995,11 @@ impl Widget for MenuBar {
                 menu_index: i,
                 inner_id: None,
             };
-            let content_id = ctx.add(host);
+            // Detached: a menu's content is shown through an overlay, never
+            // inline under the bar. Owned all the same, so a rebuilt menubar
+            // reaps the menus it replaced instead of stranding one host — and
+            // its whole `MenuList` — per rebuild.
+            let content_id = ctx.add_detached(host);
             ctx.set_dormant(content_id);
 
             let trigger = MenuBarTrigger {

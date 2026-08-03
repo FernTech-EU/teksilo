@@ -300,6 +300,20 @@ pub struct WidgetNode {
     /// opaque source-side handle whose `Drop` removes the subscriber from
     /// the source's internal registry.
     pub(crate) subscription_handles: Vec<(SubscriptionId, SubscriptionHandle)>,
+    /// Parentless nodes this widget created during `build()` and still owns —
+    /// pre-built overlay content (a menu, a calendar, a tooltip's nested
+    /// cascade children) that is deliberately *not* a child.
+    ///
+    /// Such content cannot be a child: activation and the paint walk both
+    /// descend through `children`, so a dormant popup parked there wakes with
+    /// its host and paints inline at zero size. Keeping it parentless fixes
+    /// that and creates the opposite problem — no teardown walk reaches it, so
+    /// every rebuild of the host strands another copy in the arena for the
+    /// lifetime of the process. This list is the missing ownership edge:
+    /// [`WidgetTree::destroy_subtree`](crate::widget_tree::WidgetTree) reaps it
+    /// with the owner, and a rebuild reaps the previous generation. Recorded
+    /// via `BuildContext::add_detached`.
+    pub(crate) detached: Vec<WidgetId>,
     /// Context menu factory — invoked on right-click to produce overlay content.
     pub(crate) context_menu_factory: Option<crate::widget_builder::ContextMenuFactory>,
     /// Intent-bound actions attached by this widget during `build()`.
@@ -387,6 +401,7 @@ impl WidgetNode {
             node_cursor: None,
             effect_handles: Vec::new(),
             subscription_handles: Vec::new(),
+            detached: Vec::new(),
             context_menu_factory: None,
             actions: Vec::new(),
             access_overrides: None,

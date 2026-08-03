@@ -238,3 +238,37 @@ fn date_edit_validation_feedback_signal_starts_pristine() {
     let feedback = editor.validation_feedback_signal();
     assert!(matches!(feedback.get(), ValidationFeedback::Pristine));
 }
+
+#[test]
+fn rebuilding_a_date_edit_reaps_its_calendar() {
+    // The calendar popup is detached — parked dormant and shown through an
+    // overlay, never laid out inline under the field. Held by a bare
+    // `ctx.add` it belonged to nobody, so every rebuild stranded a whole
+    // ~200-widget month grid in the arena.
+    let mut tree = light_tree();
+    let value = Signal::new(Some(Date::constant(2026, 5, 2)));
+    let id = tree.add(DateEdit::new(value));
+    let proposal = SizeProposal {
+        width: Some(300.0),
+        height: None,
+    };
+    tree.layout(proposal);
+
+    let baseline = tree.widget_count();
+    for _ in 0..5 {
+        tree.arena_mark_needs_rebuild_for_testing(id);
+        tree.layout(proposal);
+    }
+    assert_eq!(
+        tree.widget_count(),
+        baseline,
+        "each rebuild stranded another calendar"
+    );
+
+    tree.destroy_subtree_for_testing(id);
+    assert_eq!(
+        tree.widget_count(),
+        0,
+        "the calendar must die with the field that owns it"
+    );
+}

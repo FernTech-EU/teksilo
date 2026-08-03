@@ -4234,6 +4234,76 @@ mod tests {
         }
     }
 
+    /// `build()` mints one **detached** node every time — the shape of every
+    /// pre-built popup in the widget crate (a dropdown, a calendar, a
+    /// tooltip's cascade children): parked dormant, shown later through an
+    /// overlay, and deliberately not a child, since activation and paint both
+    /// descend through `children`.
+    #[derive(Debug)]
+    struct DetachedContentHost {
+        preserve: bool,
+    }
+    impl Widget for DetachedContentHost {
+        fn build(&mut self, ctx: &mut crate::build_context::BuildContext) -> Vec<WidgetId> {
+            let popup = ctx.add_detached(FillWidget::new());
+            ctx.set_dormant(popup);
+            vec![ctx.add(FillWidget::new())]
+        }
+        fn layout_response(
+            &self,
+            p: SizeProposal,
+            _c: &LayoutContext,
+        ) -> crate::widget::LayoutResponse {
+            p.resolve(10.0, 10.0).into()
+        }
+        fn preserves_children_on_rebuild(&self) -> bool {
+            self.preserve
+        }
+    }
+
+    #[test]
+    fn rebuilding_reaps_detached_content_no_leak() {
+        // A parentless node is reachable from no walk at all — not the child
+        // teardown, not the accessibility tree, not `active_widget_count`. Held
+        // by a bare `ctx.add` it simply accumulated: one stranded popup per
+        // rebuild, for the lifetime of the process. `add_detached` records the
+        // ownership edge that makes it reapable.
+        for preserve in [false, true] {
+            let mut tree = WidgetTree::new();
+            let host = tree.add(DetachedContentHost { preserve });
+            tree.layout(SizeProposal::exact(100.0, 100.0));
+            let total0 = tree.arena.len();
+            for _ in 0..5 {
+                tree.arena_mark_needs_rebuild_for_testing(host);
+                tree.layout(SizeProposal::exact(100.0, 100.0));
+            }
+            assert_eq!(
+                tree.arena.len(),
+                total0,
+                "preserve={preserve}: the previous build's detached content must be reaped"
+            );
+        }
+    }
+
+    #[test]
+    fn destroying_a_host_reaps_its_detached_content() {
+        let mut tree = WidgetTree::new();
+        let outer = tree.add(FillWidget::new());
+        tree.layout(SizeProposal::exact(100.0, 100.0));
+        let empty = tree.arena.len();
+
+        let host = tree.add_child(outer, DetachedContentHost { preserve: false });
+        tree.layout(SizeProposal::exact(100.0, 100.0));
+        assert!(tree.arena.len() > empty);
+
+        tree.destroy_subtree(host);
+        assert_eq!(
+            tree.arena.len(),
+            empty,
+            "the popup must die with the widget that built it"
+        );
+    }
+
     /// Memoizes one child and re-attaches the same id every build.
     #[derive(Debug)]
     struct StableChildHost {

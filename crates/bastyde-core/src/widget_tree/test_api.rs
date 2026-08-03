@@ -137,6 +137,29 @@ impl WidgetTree {
         self.tooltips.len()
     }
 
+    /// Every widget the arena still holds — active, dormant and orphaned alike.
+    ///
+    /// The number a leak test must assert on. `active_widget_count` walks the
+    /// tree from its roots and so cannot see the failure mode that matters
+    /// here: a node kept alive in the arena with nothing pointing at it. A
+    /// parentless orphan (tooltip content is `ctx.add`ed, hence parentless by
+    /// construction) is invisible to every other count in this file, and to the
+    /// accessibility tree, while still paying for itself in the arena's slotmap
+    /// forever.
+    pub fn widget_count(&self) -> usize {
+        self.arena.len()
+    }
+
+    /// Tear down a widget and everything it owns — its subtree, its tooltip,
+    /// and the parentless content it built with
+    /// [`add_detached`](crate::build_context::BuildContext::add_detached).
+    ///
+    /// The application-facing door is `BuildContext::destroy_subtree`; this is
+    /// the same call for tests that hold the tree directly.
+    pub fn destroy_subtree_for_testing(&mut self, id: WidgetId) {
+        self.destroy_subtree(id);
+    }
+
     /// Mark a widget as needing repaint.
     pub fn mark_needs_paint(&mut self, id: WidgetId) {
         self.arena.mark_needs_paint(id);

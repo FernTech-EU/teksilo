@@ -370,7 +370,7 @@ impl Widget for Snackbar {
         } else {
             Some(ctx.theme().motion.duration_normal)
         };
-        let content_id = ctx.add(
+        let content_id = ctx.add_detached(
             SnackbarSurface::new(
                 self.pending_content
                     .take()
@@ -380,6 +380,9 @@ impl Widget for Snackbar {
             .with_style(self.style_override.clone()),
         );
         ctx.set_dormant(content_id);
+        // The surface is shown through an overlay, so it stays out of the
+        // child walk — but `add_detached` above still records who owns it, so
+        // it is reaped with this Snackbar rather than stranded.
 
         let root_id = if let Some(trigger) = self.pending_trigger.take() {
             // A custom trigger is an arbitrary widget with no built-in

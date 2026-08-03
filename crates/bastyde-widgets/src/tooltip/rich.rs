@@ -315,27 +315,29 @@ impl Widget for RichTooltipWidget {
             let nested = RichTooltipWidget::from_key(key.clone())
                 .cascade_child()
                 .with_cascade_ancestors(child_ancestors.clone());
-            let nested_id = ctx.add(nested);
-            // Mark dormant immediately. `ctx.add` inserts widgets at
-            // arena top-level (not as children of `self`), so without
-            // this they would render alongside the main scene and
-            // never wait for a hover event. Activation happens in
-            // `make_link_click_handler` when the user clicks a `:key`
-            // link.
-            // Keep nested tooltips as orphan arena roots (not linked
-            // as children of this widget). The cascading-overlay nature
-            // of tooltips means that adding them under `children()`
-            // would propagate `ctx.activate(nested)` down to their own
-            // sub-nested tooltips when the user clicks a link to open
-            // one. The sub-nested tooltips have no overlay registration
-            // (yet) so they wouldn't land in `overlay_skip` — the paint
-            // walk would render them as regular children at zero size,
-            // and TextWidgets inside would leak glyphs at the parent
-            // origin (the "ghost text" cascade bug). The trade-off is
-            // that nested tooltip widgets leak memory across rebuilds
-            // of the host; this is acceptable because RichTooltipWidget
-            // is built once per overlay show and lives only as long as
-            // the surrounding tooltip stack.
+            // Detached, not a child. Adding these under `children()` would
+            // propagate `ctx.activate(nested)` down to their own sub-nested
+            // tooltips when the user clicks a link to open one. Those have no
+            // overlay registration yet, so they would miss `overlay_skip` and
+            // the paint walk would render them as ordinary children at zero
+            // size, spilling their TextWidgets' glyphs at the parent origin
+            // (the "ghost text" cascade bug).
+            //
+            // `add_detached` keeps them out of that walk while still recording
+            // who owns them, so the arena reaps them with this tooltip. They
+            // used to be added with a bare `ctx.add`, which owns nothing: the
+            // note here read "nested tooltip widgets leak memory across
+            // rebuilds of the host; this is acceptable because
+            // RichTooltipWidget is built once per overlay show". It is not
+            // built once per show — the content widget is `ctx.add`ed and
+            // built on every build of its *anchor*, and each build pre-creates
+            // this whole cascade recursively. A writer clicking around an
+            // outline stranded thousands of ~16-widget subtrees a minute.
+            let nested_id = ctx.add_detached(nested);
+            // Dormant immediately: a parentless node is laid out and painted
+            // as a root otherwise, instead of waiting for a hover. Activation
+            // happens in `make_link_click_handler` when the user clicks a
+            // `:key` link.
             ctx.set_dormant(nested_id);
             nested_ids.insert(key.clone(), nested_id);
         }
@@ -797,6 +799,61 @@ mod tests {
         let id = tree.add(RichTooltipWidget::from_key("a"));
         tree.layout(SizeProposal::with_width(400.0));
         assert!(tree.bounds(id).height >= 0.0);
+
+        _reset_tooltip_registry();
+    }
+
+    /// Rebuilding a rich tooltip must not strand the cascade children it
+    /// pre-creates.
+    ///
+    /// `build()` eagerly pre-creates one `RichTooltipWidget` per `[label](:key)`
+    /// link in the body, recursively — and those are deliberately not children
+    /// (activating one would propagate down to its own sub-nested tooltips,
+    /// which paint inline as "ghost text"). Held by a bare `ctx.add` they were
+    /// owned by nobody, so every rebuild left the whole cascade behind: in
+    /// Skribisto, whose outline attaches these to its Create/Convert menus,
+    /// clicking between two rows stranded ~2 600 widgets *per click* and grew
+    /// the arena's slotmap past 124 MiB in a couple of minutes.
+    #[test]
+    fn rebuilding_a_rich_tooltip_reaps_its_cascade_children() {
+        use crate::tooltip::registry::{_reset_tooltip_registry, install_tooltip_registry};
+        use bastyde_canvas::MockTextBackend;
+        use bastyde_core::widget_tree::WidgetTree;
+        use std::cell::RefCell;
+
+        _reset_tooltip_registry();
+        install_tooltip_registry(vec![
+            TooltipContent::new("root", lit!("Root cites [b](:b) and [c](:c)")),
+            TooltipContent::new("b", lit!("B cites [d](:d)")),
+            TooltipContent::new("c", lit!("C is a leaf")),
+            TooltipContent::new("d", lit!("D is a leaf")),
+        ]);
+
+        let mut tree =
+            WidgetTree::new().with_text_backend(Rc::new(RefCell::new(MockTextBackend::new())));
+        let id = tree.add(RichTooltipWidget::from_key("root"));
+        tree.layout(SizeProposal::with_width(400.0));
+
+        let baseline = tree.widget_count();
+        assert!(baseline > 1, "the cascade must actually pre-create children");
+        for _ in 0..10 {
+            tree.arena_mark_needs_rebuild_for_testing(id);
+            tree.layout(SizeProposal::with_width(400.0));
+        }
+        assert_eq!(
+            tree.widget_count(),
+            baseline,
+            "each rebuild stranded another copy of the cascade"
+        );
+
+        // …and destroying the tooltip takes the cascade with it.
+        tree.destroy_subtree_for_testing(id);
+        tree.layout(SizeProposal::with_width(400.0));
+        assert_eq!(
+            tree.widget_count(),
+            0,
+            "the whole cascade must die with the tooltip that owns it"
+        );
 
         _reset_tooltip_registry();
     }

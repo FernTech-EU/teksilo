@@ -41,6 +41,34 @@ impl<'a> BuildContext<'a> {
         self.tree.add_boxed(widget)
     }
 
+    /// Add a **parentless** widget this one owns: pre-built overlay content
+    /// (a dropdown menu, a date picker's calendar, a tooltip's nested cascade
+    /// children) that must not be reached by the child walk.
+    ///
+    /// Use this — never a bare [`add`](Self::add) — for anything built ahead of
+    /// time and parked with [`set_dormant`](Self::set_dormant) to be shown later
+    /// through an overlay. The two differ only in bookkeeping: `add` hands back
+    /// a node nothing owns, so the builder's own teardown cannot reach it and
+    /// every rebuild strands another copy in the arena; this records the
+    /// ownership edge, so the node dies with its owner and the previous
+    /// generation dies with each rebuild.
+    ///
+    /// Content that *can* be a child should be returned from `build()` as one
+    /// instead. This exists for content that cannot: activation and the paint
+    /// walk both descend through `children`, so a dormant popup parked there
+    /// wakes with its host and paints inline at zero size.
+    pub fn add_detached(&mut self, widget: impl crate::widget::Widget + 'static) -> WidgetId {
+        self.add_detached_boxed(Box::new(widget))
+    }
+
+    /// [`add_detached`](Self::add_detached) for an already-boxed widget.
+    pub fn add_detached_boxed(&mut self, widget: Box<dyn crate::widget::Widget>) -> WidgetId {
+        let id = self.tree.add_boxed(widget);
+        let owner = self.self_id();
+        self.tree.record_detached(owner, id);
+        id
+    }
+
     /// Add a Level 2 widget as a child of another widget.
     pub fn add_child(
         &mut self,

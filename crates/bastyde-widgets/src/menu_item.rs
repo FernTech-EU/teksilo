@@ -783,7 +783,10 @@ impl Widget for MenuItem {
         // dormant until hover opens the overlay.
         let submenu_content_id = if let Some(factory) = self.submenu_factory.take() {
             let submenu_widget = factory();
-            let id = ctx.add_boxed(submenu_widget);
+            // Detached (a submenu opens in an overlay beside the item, never
+            // inline) but owned, so it dies with the item instead of outliving
+            // every menu the user ever opened.
+            let id = ctx.add_detached_boxed(submenu_widget);
             ctx.set_dormant(id);
             self.submenu_content_id = Some(id);
             Some(id)
@@ -934,7 +937,13 @@ impl Widget for MenuItem {
                 delay,
                 TooltipPlacement::Side,
             );
-        } else if let Some(source) = self.rich_tooltip_source.take() {
+        } else if let Some(source) = self.rich_tooltip_source.clone() {
+            // Cloned, not taken: `build()` re-runs on every rebuild, and an item
+            // that consumed its source attached a tooltip once and then silently
+            // lost it — the surviving entry pointed at the previous build's body,
+            // which the rebuild had just destroyed. (`composite_tooltip_content`
+            // above is a `Box<dyn Widget>` with no way to clone, so it keeps the
+            // take and its one-shot behaviour.)
             let delay = ctx.theme().motion.tooltip_delay;
             crate::tooltip::attach_rich_tooltip_source_with_placement(
                 ctx,
@@ -1998,6 +2007,66 @@ mod tests {
             before, after,
             "a shortcut-bearing menu item must NOT rebuild when an unrelated \
              shortcut is registered; its accelerator now updates as a leaf"
+        );
+    }
+
+    // --- Regression: a rebuilt item must not leak its tooltip ---
+
+    /// Rebuilding a tooltip-bearing menu item must neither leak the old
+    /// tooltip's widgets nor lose the tooltip.
+    ///
+    /// `build()` consumes the tooltip source (`.take()`), so a second build
+    /// attaches nothing: the entry that survives points at the *previous*
+    /// build's body, which the rebuild has just destroyed. Every later rebuild
+    /// then strands one more content subtree — parentless by construction, so
+    /// no teardown walk can ever reach it — in the arena for the process's
+    /// lifetime.
+    #[test]
+    fn rebuilding_a_menu_item_neither_leaks_nor_loses_its_tooltip() {
+        let mut t = tree();
+        let list_id = t.add(MenuList::new().item(MenuItem::new(lit!("Bold")).tooltip(lit!("Tip"))));
+        layout(&mut t);
+        let item_id = first_descendant_with_role(&t, list_id, Role::MenuItem);
+
+        let baseline = t.widget_count();
+        for _ in 0..10 {
+            t.arena_mark_needs_rebuild_for_testing(item_id);
+            layout(&mut t);
+            assert_eq!(
+                t.tooltip_entry_count(),
+                1,
+                "the item must keep exactly one tooltip across rebuilds"
+            );
+        }
+
+        assert_eq!(
+            t.widget_count(),
+            baseline,
+            "each rebuild stranded a tooltip content subtree in the arena"
+        );
+    }
+
+    /// The same contract for the rich (registry-keyed) tier, which carries a
+    /// whole Accordion body — ~15 widgets per stranded copy.
+    #[test]
+    fn rebuilding_a_menu_item_neither_leaks_nor_loses_its_rich_tooltip() {
+        let mut t = tree();
+        let list_id =
+            t.add(MenuList::new().item(MenuItem::new(lit!("Bold")).rich_tooltip("bold-details")));
+        layout(&mut t);
+        let item_id = first_descendant_with_role(&t, list_id, Role::MenuItem);
+
+        let baseline = t.widget_count();
+        for _ in 0..10 {
+            t.arena_mark_needs_rebuild_for_testing(item_id);
+            layout(&mut t);
+            assert_eq!(t.tooltip_entry_count(), 1);
+        }
+
+        assert_eq!(
+            t.widget_count(),
+            baseline,
+            "each rebuild stranded a rich-tooltip content subtree in the arena"
         );
     }
 }

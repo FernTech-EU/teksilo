@@ -459,7 +459,9 @@ impl Widget for DateRangeEdit {
         if let Some(fdow) = self.first_day_of_week {
             cal = cal.first_day_of_week(fdow);
         }
-        let cal_id = ctx.add(cal);
+        // Detached rather than a child, and owned rather than orphaned — see
+        // `DateEdit`'s calendar for why both halves matter.
+        let cal_id = ctx.add_detached(cal);
         ctx.set_dormant(cal_id);
 
         let popover_open = self.range_popover_open.clone();

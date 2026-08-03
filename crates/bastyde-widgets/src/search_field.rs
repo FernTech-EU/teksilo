@@ -398,15 +398,13 @@ impl Widget for SearchField {
         }
 
         // ── Suggestions panel (overlay content, anchored to the field) ─
-        // Tear down a previous panel subtree before building a fresh
-        // one — the panel is registered as an arena root via
-        // `ctx.add(..)` + `ctx.set_dormant(..)`, so the framework's
-        // rebuild path (which only destroys direct arena children)
-        // would leave it as an orphan otherwise. Same dance ComboBox
-        // does for its dropdown.
-        if let Some(old_id) = self.panel_content_id.take() {
-            ctx.destroy_subtree(old_id);
-        }
+        // Detached rather than a child (it must not wake or paint with the
+        // field), and `add_detached` rather than `ctx.add` so the framework
+        // owns it: the previous panel is reaped on rebuild, and the live one
+        // when the field itself is destroyed. This used to be a hand-rolled
+        // `destroy_subtree` of the old id here, which covered the rebuild but
+        // not the destroy — a `SearchField` that went away took nothing with
+        // it.
         let panel = SuggestionPanel {
             text: self.text.clone(),
             suggestions: suggestions.clone(),
@@ -417,7 +415,7 @@ impl Widget for SearchField {
             row_ids_slot: self.row_ids_slot.clone(),
             root_child_id: None,
         };
-        let panel_id = ctx.add(panel);
+        let panel_id = ctx.add_detached(panel);
         ctx.set_dormant(panel_id);
         self.panel_content_id = Some(panel_id);
         // Expose `highlighted` to `accessibility()` so it can publish

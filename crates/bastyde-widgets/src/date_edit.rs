@@ -642,7 +642,12 @@ impl Widget for DateEdit {
             if let Some(fdow) = self.first_day_of_week {
                 calendar = calendar.first_day_of_week(fdow);
             }
-            let calendar_id = ctx.add(calendar);
+            // Detached, not a child: the popup must not wake or paint with the
+            // field. `add_detached` records the ownership edge anyway, so the
+            // calendar dies with this widget and each rebuild reaps the
+            // previous one — a bare `ctx.add` stranded a ~200-widget calendar
+            // in the arena per rebuild.
+            let calendar_id = ctx.add_detached(calendar);
             ctx.set_dormant(calendar_id);
             Some(calendar_id)
         } else {
