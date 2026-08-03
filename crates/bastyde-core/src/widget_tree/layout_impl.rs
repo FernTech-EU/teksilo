@@ -395,6 +395,13 @@ impl WidgetTree {
         self.process_drag_tick(&mut *ops);
 
         self.process_state_changes(&mut *ops);
+        // A drag owns the pointer. `handle_pointer_move` is short-circuited for
+        // the duration, so a dwell armed just before the drag started would sit
+        // frozen at its hover origin and then mature here — popping a tooltip
+        // over the drag. Keep the timers cleared instead of letting them ripen.
+        if self.active_drag.is_some() {
+            self.tooltip_cancel_pending_dwell();
+        }
         self.process_tooltips_real();
         self.process_delayed_overlays_real(&mut *ops);
         self.process_pointer_leave_overlays_real(&mut *ops);
@@ -605,6 +612,12 @@ impl WidgetTree {
             if new_target.is_some() {
                 if let Some(new) = new_target {
                     self.dispatch_to_widget(new, &WidgetEvent::PointerEnter, &mut *ops);
+                    // Seed the tooltip dwell too, exactly as `handle_pointer_move`
+                    // pairs these two. The rebuild replaced the anchor's tooltip
+                    // entry with a fresh one whose `hover_start` is `None`, and
+                    // the pointer is not going to move again — so without this the
+                    // widget's tooltip is unreachable for the rest of the hover.
+                    self.tooltip_pointer_enter(new);
                 }
                 self.set_hovered(new_target);
             }

@@ -115,8 +115,8 @@ impl Widget for DwellIndicator {
         }
 
         // Non-sticky: empty circle outline + pie wedge for the
-        // current dwell step. Step is clamped 0..=4.
-        let step = self.step.get().min(4);
+        // current dwell step. Step is clamped 0..=DWELL_STEPS.
+        let step = self.step.get().min(crate::tooltip::rich::DWELL_STEPS);
 
         canvas.stroke_circle(
             center,
@@ -129,10 +129,10 @@ impl Widget for DwellIndicator {
             return;
         }
 
-        // Build a pie wedge from 12 o'clock (top), sweeping clockwise
-        // by `step * 90` degrees. `Path::arc_to` takes the inscribing
-        // rect and start/sweep angles in degrees; canvas draws angle
-        // 0° at the right (3 o'clock), so we offset by -90° to start
+        // Build a pie wedge from 12 o'clock (top), sweeping clockwise by
+        // `step / DWELL_STEPS` of a full turn. `Path::arc_to` takes the
+        // inscribing rect and start/sweep angles in degrees; canvas draws
+        // angle 0° at the right (3 o'clock), so we offset by -90° to start
         // at the top.
         let inscribed = Rect::new(
             center.x - radius,
@@ -141,7 +141,7 @@ impl Widget for DwellIndicator {
             radius * 2.0,
         );
         let start_angle = -90.0;
-        let sweep_angle = (step as f32) * 90.0;
+        let sweep_angle = 360.0 * (step as f32) / (crate::tooltip::rich::DWELL_STEPS as f32);
         let mut wedge = Path::new();
         wedge.move_to(center);
         wedge.arc_to(inscribed, start_angle, sweep_angle);

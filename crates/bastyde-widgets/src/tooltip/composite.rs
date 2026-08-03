@@ -25,7 +25,7 @@
 
 use std::cell::Cell;
 use std::rc::Rc;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use bastyde_canvas::{Canvas, Rect, Size, SizeProposal};
 use bastyde_core::accessibility::AccessNodeBuilder;
@@ -40,12 +40,9 @@ use bastyde_tokens::{CornerRadius, TextRole};
 use crate::primitives::{Grid, Padding, Spacer, TrackSize, VStack};
 use crate::scroll_area::{ScrollArea, ScrollBarPolicy};
 use crate::tooltip::dwell_indicator::DwellIndicator;
-use crate::tooltip::rich::DWELL_PROMOTION;
-
-/// Step granularity matches `RichTooltipWidget`'s indicator (0..=4).
-const DWELL_STEPS: u32 = 4;
-const DWELL_STEP_DURATION: Duration =
-    Duration::from_millis((DWELL_PROMOTION.as_millis() / DWELL_STEPS as u128) as u64);
+// Step granularity is shared with `RichTooltipWidget`'s indicator (0..=4) —
+// imported, not restated, so the two tiers cannot drift apart.
+use crate::tooltip::rich::{DWELL_STEP_DURATION, DWELL_STEPS};
 
 /// Composite tooltip surface — hosts an arbitrary widget body with the
 /// same dwell-to-sticky promotion as the rich tooltip.
@@ -395,6 +392,7 @@ mod tests {
     use bastyde_i18n::lit;
     use std::cell::RefCell;
     use std::rc::Rc;
+    use std::time::Duration;
 
     fn tree_with_backend() -> WidgetTree {
         WidgetTree::new().with_text_backend(Rc::new(RefCell::new(MockTextBackend::new())))
@@ -465,6 +463,33 @@ mod tests {
             tree.active_overlays().len(),
             1,
             "composite tooltip should have appeared after the hover delay"
+        );
+    }
+
+    #[test]
+    fn composite_tooltip_does_not_appear_at_the_light_tier_delay() {
+        // The test above jumps straight from t=0 to heavy+50 ms, so it would
+        // pass just as happily if the composite path were wired to the 500 ms
+        // `tooltip_delay` instead of the 700 ms `tooltip_delay_heavy`. This is
+        // the missing checkpoint in between: a composite surface is heavier to
+        // read and to dismiss, and must demand the longer statement of intent.
+        let mut tree = tree_with_backend();
+        let tooltip_id_sink = Rc::new(Cell::new(None));
+        let host = tree.add(ComposeTooltipHost::new(tooltip_id_sink.clone()));
+        tree.layout(SizeProposal::exact(400.0, 200.0));
+
+        tree.pointer_move(tree.bounds(host).center());
+        tree.advance_time(tree.theme().motion.tooltip_delay + Duration::from_millis(50));
+        assert!(
+            tree.active_overlays().is_empty(),
+            "a composite tooltip must still be waiting at the plain 500 ms delay"
+        );
+
+        tree.advance_time(Duration::from_millis(200));
+        assert_eq!(
+            tree.active_overlays().len(),
+            1,
+            "and appear once the 700 ms heavy delay elapses"
         );
     }
 

@@ -126,6 +126,17 @@ impl WidgetTree {
         self.sim_clock
     }
 
+    /// Total number of live tooltip attachments, dead ones included.
+    ///
+    /// Distinct from `pending_tooltip_count`, which only counts entries with a
+    /// running dwell. This is the raw table size — the number that must stay
+    /// flat across rebuilds, since `attach_tooltip*` is called from `build()`
+    /// and the table is scanned on every pointer move, every layout pass and
+    /// once per widget in the accessibility walk.
+    pub fn tooltip_entry_count(&self) -> usize {
+        self.tooltips.len()
+    }
+
     /// Mark a widget as needing repaint.
     pub fn mark_needs_paint(&mut self, id: WidgetId) {
         self.arena.mark_needs_paint(id);

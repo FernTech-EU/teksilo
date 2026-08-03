@@ -64,12 +64,37 @@ use crate::tooltip::dwell_indicator::DwellIndicator;
 use crate::tooltip::registry::{TooltipContent, TooltipRegistry, with_tooltip_registry};
 
 /// Total dwell time before the tooltip promotes to sticky.
+///
+/// **The single source of truth for the dwell clock.** `composite.rs`, the
+/// tree's dwell wake-up scheduler (`WidgetTree::next_timer_deadline`) and the
+/// `DwellIndicator`'s wedge geometry all derive from these three constants
+/// rather than restating them; they used to be four unlinked copies, so a
+/// change here silently desynced the visible indicator from the promotion it
+/// was supposed to be counting down.
 pub(crate) const DWELL_PROMOTION: Duration = Duration::from_secs(2);
 /// Maximum step value (4 = full circle = pin icon).
-const DWELL_STEPS: u32 = 4;
+///
+/// Pinned to the tree's `TOOLTIP_DWELL_STEPS`, which is what decides how often
+/// the event loop wakes during a dwell: if the indicator drew more steps than
+/// the tree scheduled wake-ups for, the wedge would skip; fewer, and it would
+/// repaint identically on wake-ups that changed nothing.
+pub(crate) const DWELL_STEPS: u32 = bastyde_core::widget_tree::TOOLTIP_DWELL_STEPS;
 /// Per-step dwell duration: total / steps = 500 ms.
-const DWELL_STEP_DURATION: Duration =
+pub(crate) const DWELL_STEP_DURATION: Duration =
     Duration::from_millis((DWELL_PROMOTION.as_millis() / DWELL_STEPS as u128) as u64);
+
+// The step arithmetic above truncates. Unless the promotion window divides
+// exactly into its steps, the indicator's last wedge and the actual promotion
+// drift apart — four 490 ms steps would fill the circle 40 ms early and sit
+// full while nothing happened.
+const _: () = assert!(
+    DWELL_PROMOTION.as_millis() % DWELL_STEPS as u128 == 0,
+    "DWELL_PROMOTION must divide exactly into DWELL_STEPS"
+);
+const _: () = assert!(
+    DWELL_STEP_DURATION.as_millis() * DWELL_STEPS as u128 == DWELL_PROMOTION.as_millis(),
+    "dwell steps must sum to exactly DWELL_PROMOTION"
+);
 
 /// Rich tooltip content widget.
 ///

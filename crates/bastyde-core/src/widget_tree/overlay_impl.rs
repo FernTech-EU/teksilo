@@ -112,6 +112,68 @@ impl WidgetTree {
         );
     }
 
+    /// Drop every tooltip previously attached to `anchor_id` whose content is
+    /// not `keep_content_id`: dismiss a live overlay, destroy the orphaned
+    /// content subtree, and remove the entry.
+    ///
+    /// **An anchor owns at most one tooltip.** `attach_tooltip*` is called from
+    /// `build()`, which re-runs on every rebuild with a freshly-`ctx.add`ed
+    /// content widget — and `ctx.add` creates a *parentless* node, so the
+    /// rebuild teardown (which walks `old_children`) never reaches it. Without
+    /// this retirement the entry table would gain one dead row plus one
+    /// orphaned arena node per rebuild, forever. That table is not cold
+    /// storage: it is scanned on every pointer move, four times per layout
+    /// pass, on every event-loop wake (`next_timer_deadline`) and — worst —
+    /// once *per widget* during the accessibility walk, so the leak is O(n)
+    /// on the hottest paths in the tree.
+    fn retire_tooltips_for_anchor(&mut self, anchor_id: WidgetId, keep_content_id: WidgetId) {
+        let stale: Vec<(WidgetId, Option<crate::overlay::OverlayId>)> = self
+            .tooltips
+            .iter()
+            .filter(|entry| entry.anchor_id == anchor_id && entry.content_id != keep_content_id)
+            .map(|entry| (entry.content_id, entry.overlay_id))
+            .collect();
+        if stale.is_empty() {
+            return;
+        }
+        self.tooltips
+            .retain(|entry| entry.anchor_id != anchor_id || entry.content_id == keep_content_id);
+        for (content_id, overlay_id) in stale {
+            // Retire the overlay before the widget: `dismiss_overlay` walks the
+            // content subtree for focus/hover restoration, which needs the
+            // nodes to still exist.
+            if let Some(overlay_id) = overlay_id {
+                self.dismiss_overlay(overlay_id);
+            }
+            self.destroy_subtree(content_id);
+        }
+    }
+
+    /// Reap the tooltip owned by a widget that is being destroyed.
+    ///
+    /// The anchor's own teardown never reaches the tooltip content — it is a
+    /// parentless node (see [`retire_tooltips_for_anchor`]) — so a destroyed
+    /// widget would otherwise leave its entry and content node behind for the
+    /// lifetime of the tree. Called from `destroy_subtree_inner`.
+    pub(super) fn retire_tooltips_of_destroyed_anchor(&mut self, anchor_id: WidgetId) {
+        let stale: Vec<(WidgetId, Option<crate::overlay::OverlayId>)> = self
+            .tooltips
+            .iter()
+            .filter(|entry| entry.anchor_id == anchor_id)
+            .map(|entry| (entry.content_id, entry.overlay_id))
+            .collect();
+        if stale.is_empty() {
+            return;
+        }
+        self.tooltips.retain(|entry| entry.anchor_id != anchor_id);
+        for (content_id, overlay_id) in stale {
+            if let Some(overlay_id) = overlay_id {
+                self.dismiss_overlay(overlay_id);
+            }
+            self.destroy_subtree(content_id);
+        }
+    }
+
     fn attach_tooltip_inner(
         &mut self,
         anchor_id: WidgetId,
@@ -121,6 +183,22 @@ impl WidgetTree {
         shown_at_sink: Option<std::rc::Rc<std::cell::Cell<Option<std::time::Instant>>>>,
         placement: crate::overlay::TooltipPlacement,
     ) {
+        self.retire_tooltips_for_anchor(anchor_id, content_id);
+        // A re-attach with the *same* content id (a widget whose build reuses
+        // its tooltip node) updates in place rather than stacking a duplicate.
+        if let Some(entry) = self
+            .tooltips
+            .iter_mut()
+            .find(|entry| entry.anchor_id == anchor_id && entry.content_id == content_id)
+        {
+            entry.delay = delay;
+            entry.sticky_after = sticky_after;
+            entry.placement = placement;
+            if shown_at_sink.is_some() {
+                entry.shown_at_sink = shown_at_sink;
+            }
+            return;
+        }
         self.arena.set_dormant(content_id);
         self.tooltips.push(TooltipEntry {
             anchor_id,
@@ -189,9 +267,23 @@ impl WidgetTree {
         );
     }
 
+    /// Whether any tooltip is visible *and still part of an active hover
+    /// session*.
+    ///
+    /// A pointer-dwelled **sticky** tooltip is deliberately excluded. It
+    /// survives pointer-leave and stays up until Escape or a click outside, so
+    /// counting it would keep the reshow session warm for as long as it is
+    /// pinned — every other anchor in the window would then fire on the 100 ms
+    /// path indefinitely, which is not a "session", it is a stuck state.
+    fn any_tooltip_in_session(&self) -> bool {
+        self.tooltips
+            .iter()
+            .any(|e| e.overlay_id.is_some() && !e.is_sticky)
+    }
+
     /// Whether the shortened reshow delay applies right now (sim clock).
     fn tooltip_session_active_sim(&self, now: std::time::Instant) -> bool {
-        self.tooltips.iter().any(|e| e.overlay_id.is_some())
+        self.any_tooltip_in_session()
             || self
                 .tooltip_session_until_sim
                 .is_some_and(|until| now < until)
@@ -199,24 +291,43 @@ impl WidgetTree {
 
     /// Whether the shortened reshow delay applies right now (real clock).
     fn tooltip_session_active_real(&self, now: std::time::Instant) -> bool {
-        self.tooltips.iter().any(|e| e.overlay_id.is_some())
+        self.any_tooltip_in_session()
             || self
                 .tooltip_session_until_real
                 .is_some_and(|until| now < until)
     }
 
     /// Resolve the delay for a pending tooltip: full initial delay, or the
-    /// shorter reshow delay while a tooltip session is active.
+    /// shortened reshow delay while a tooltip session is active.
+    ///
+    /// The shortening is **proportional**, not a flat floor. Windows derives
+    /// `TTDT_RESHOW` as `TTDT_INITIAL / 5` rather than pinning an absolute
+    /// number, and that ratio is what the two theme tokens encode (100 ms of
+    /// 500 ms). Clamping every entry to the absolute `tooltip_reshow_delay`
+    /// instead collapsed `tooltip_delay_heavy` to the light tier's 100 ms
+    /// whenever a session happened to be warm — so a composite surface or a
+    /// scene-item tip, which exists precisely because heavier content needs a
+    /// longer statement of intent, popped after an incidental 100 ms brush.
+    /// Scaling keeps the light tier at exactly 100 ms while a 700 ms heavy
+    /// entry reshows at 140 ms.
     fn effective_tooltip_delay(
         &self,
         entry_delay: std::time::Duration,
         session_active: bool,
     ) -> std::time::Duration {
-        if session_active {
-            entry_delay.min(self.theme.motion.tooltip_reshow_delay)
-        } else {
-            entry_delay
+        if !session_active {
+            return entry_delay;
         }
+        let motion = &self.theme.motion;
+        let base = motion.tooltip_delay.as_secs_f64();
+        if base <= 0.0 {
+            // Degenerate theme (no initial delay to take a ratio of) — fall
+            // back to the absolute token.
+            return entry_delay.min(motion.tooltip_reshow_delay);
+        }
+        let ratio = motion.tooltip_reshow_delay.as_secs_f64() / base;
+        // Never *lengthen* a delay on the warm path, whatever the theme says.
+        entry_delay.mul_f64(ratio).min(entry_delay)
     }
 
     fn process_tooltips_impl(
@@ -259,15 +370,16 @@ impl WidgetTree {
             if use_sim_clock {
                 self.tooltip_session_until_sim = Some(self.sim_clock + grace);
             } else {
-                self.tooltip_session_until_real =
-                    Some(std::time::Instant::now() + grace);
+                self.tooltip_session_until_real = Some(std::time::Instant::now() + grace);
             }
         }
 
         // Re-evaluate session after dismiss bookkeeping: a still-visible
-        // sibling tip, or the grace we just opened, both count.
+        // sibling tip, or the grace we just opened, both count. Uses the same
+        // sticky-excluding predicate as the two `tooltip_session_active_*`
+        // helpers — a pinned tip is not an active session.
         let session_active = session_active
-            || self.tooltips.iter().any(|e| e.overlay_id.is_some())
+            || self.any_tooltip_in_session()
             || if use_sim_clock {
                 self.tooltip_session_active_sim(self.sim_clock)
             } else {
@@ -290,6 +402,23 @@ impl WidgetTree {
             })
             .collect();
         for index in pending {
+            // A tooltip with nothing to say must not open. An unresolved or
+            // blank i18n key would otherwise pop an empty chromed bubble,
+            // which reads as a rendering fault rather than as "no tip here".
+            // The content widget decides — see `Widget::tooltip_has_content`,
+            // which defaults to `true` so arbitrary bodies are never
+            // suppressed by a check they did not opt into.
+            if !self
+                .arena
+                .get(self.tooltips[index].content_id)
+                .is_none_or(|node| node.widget.tooltip_has_content())
+            {
+                let entry = &mut self.tooltips[index];
+                entry.hover_start = None;
+                entry.real_hover_start = None;
+                entry.hover_origin = None;
+                continue;
+            }
             let entry = &mut self.tooltips[index];
             to_show.push((entry.anchor_id, entry.content_id, entry.placement));
             entry.hover_start = None;
@@ -300,8 +429,11 @@ impl WidgetTree {
         let real_now = std::time::Instant::now();
         // Tooltips fade in over `duration_fast` (~120 ms) — matches the
         // MotionTokens recommendation for "tooltip fade, popup fade".
-        // Reduced-motion users get an instant snap.
-        let fade_duration = if self.prefers_reduced_motion {
+        // Reduced-motion users get an instant snap, and so does the warm
+        // reshow path: on a toolbar sweep the whole point of the ~100 ms
+        // reshow is that the next tip is *already there*, and a 120 ms fade
+        // on top of it costs more than the delay it just saved.
+        let fade_duration = if self.prefers_reduced_motion || session_active {
             None
         } else {
             Some(self.theme.motion.duration_fast)
@@ -966,26 +1098,131 @@ impl WidgetTree {
         true
     }
 
+    /// Arm the dwell for the tooltip that owns this hover.
+    ///
+    /// A hover target can sit inside several tooltip anchors at once (a row
+    /// with its own tip inside a panel with a tip). Only the **innermost**
+    /// anchor arms: it is the most specific description of what the pointer is
+    /// actually over, and arming the outer ones too would let two tooltips
+    /// mature and open simultaneously, one on top of the other.
+    ///
+    /// "Innermost" is measured by arena depth from the hovered widget, so
+    /// nesting order — not the order the anchors happened to be attached in —
+    /// decides the winner.
     pub(super) fn tooltip_pointer_enter(&mut self, widget_id: WidgetId) {
-        let matching: Vec<usize> = self
+        let innermost: Option<usize> = self
             .tooltips
             .iter()
             .enumerate()
             .filter(|(_, entry)| self.tooltip_hover_targets_anchor(widget_id, entry.anchor_id))
-            .map(|(index, _)| index)
+            .filter_map(|(index, entry)| {
+                self.ancestor_distance(widget_id, entry.anchor_id)
+                    .map(|depth| (depth, index))
+            })
+            .min()
+            .map(|(_, index)| index);
+        let Some(index) = innermost else {
+            return;
+        };
+        // Don't restart a timer for a tip that is already showing.
+        if self.tooltips[index].overlay_id.is_some() {
+            return;
+        }
+        self.tooltips[index].hover_start = Some(self.sim_clock);
+        self.tooltips[index].real_hover_start = Some(std::time::Instant::now());
+        self.tooltips[index].hover_origin = self.last_pointer_position;
+        self.arena.mark_needs_paint(self.tooltips[index].anchor_id);
+    }
+
+    /// Number of parent hops from `widget_id` up to `ancestor`, or `None` if
+    /// `ancestor` is not on the chain. `0` when they are the same widget.
+    fn ancestor_distance(&self, widget_id: WidgetId, ancestor: WidgetId) -> Option<usize> {
+        let mut current = widget_id;
+        let mut depth = 0usize;
+        loop {
+            if current == ancestor {
+                return Some(depth);
+            }
+            current = self.arena.parent(current)?;
+            depth += 1;
+        }
+    }
+
+    /// Cancel tooltip activity on a pointer press.
+    ///
+    /// A press is a statement that the user already knows what the control
+    /// does: a pending dwell is cancelled (so a tooltip does not pop *after*
+    /// the click that answered it), and a shown non-sticky tooltip is
+    /// dismissed (so it stops covering what was just clicked). Re-hovering
+    /// restarts the delay from scratch, matching Windows and GTK.
+    ///
+    /// Pointer-dwelled **sticky** tooltips are left alone — they are an
+    /// interactive surface the user deliberately pinned, and they own their
+    /// own Escape / click-outside dismissal.
+    /// `at` is the press position, when there is one. A press landing *inside*
+    /// a tooltip's own surface is the user reaching into it (a rich tooltip's
+    /// inline link), not dismissing it, so that tooltip is spared.
+    pub(super) fn tooltip_pointer_press(&mut self, at: Option<bastyde_canvas::Point>) {
+        let mut to_dismiss = Vec::new();
+        let candidates: Vec<(usize, Option<crate::overlay::OverlayId>)> = self
+            .tooltips
+            .iter()
+            .enumerate()
+            .map(|(i, e)| (i, if e.is_sticky { None } else { e.overlay_id }))
             .collect();
-        let now = self.sim_clock;
-        let real_now = std::time::Instant::now();
-        let origin = self.last_pointer_position;
-        for index in matching {
-            // Don't restart a timer for a tip that is already showing.
-            if self.tooltips[index].overlay_id.is_some() {
+        for (index, overlay_id) in candidates {
+            // Content rect only — deliberately NOT `pointer_inside_overlay_region`,
+            // which also counts the anchor (it exists to keep the tip alive
+            // while the pointer crosses the gap). A press on the *anchor* is
+            // exactly the case that must dismiss.
+            let inside = match (overlay_id, at) {
+                (Some(oid), Some(pos)) => self
+                    .overlay_content_bounds(oid)
+                    .is_some_and(|rect| rect.contains(pos)),
+                _ => false,
+            };
+            if inside {
                 continue;
             }
-            self.tooltips[index].hover_start = Some(now);
-            self.tooltips[index].real_hover_start = Some(real_now);
-            self.tooltips[index].hover_origin = origin;
-            self.arena.mark_needs_paint(self.tooltips[index].anchor_id);
+            let entry = &mut self.tooltips[index];
+            entry.hover_start = None;
+            entry.real_hover_start = None;
+            entry.hover_origin = None;
+            if let Some(oid) = overlay_id {
+                to_dismiss.push(oid);
+            }
+        }
+        for overlay_id in to_dismiss {
+            self.dismiss_overlay(overlay_id);
+        }
+    }
+
+    /// Retire hover tooltips when the window stops being active.
+    ///
+    /// Same shape as [`tooltip_pointer_press`](Self::tooltip_pointer_press) —
+    /// pending dwells cancelled, shown non-sticky tips dismissed, pinned
+    /// stickies preserved — but triggered by the window losing focus rather
+    /// than by a click.
+    pub(super) fn tooltip_window_deactivated(&mut self) {
+        // No position: the window is going away, so every non-sticky tip goes
+        // with it regardless of where the pointer happened to be.
+        self.tooltip_pointer_press(None);
+    }
+
+    /// Cancel every pending (not-yet-shown) tooltip dwell.
+    ///
+    /// Called when a drag session starts: the pointer is now carrying
+    /// something, and a tooltip that pops mid-drag is a stray overlay in the
+    /// user's way. `process_tooltips_real` runs from the layout pass, which a
+    /// drag keeps driving, so the dwell would otherwise mature and show even
+    /// though the pointer-move path is short-circuited for the drag.
+    pub(crate) fn tooltip_cancel_pending_dwell(&mut self) {
+        for entry in &mut self.tooltips {
+            if entry.overlay_id.is_none() {
+                entry.hover_start = None;
+                entry.real_hover_start = None;
+                entry.hover_origin = None;
+            }
         }
     }
 
@@ -1122,10 +1359,13 @@ impl WidgetTree {
             })
             .min();
 
-        // Sticky-on-dwell wake-ups: once a rich tooltip is shown, wake every
-        // 500 ms so the step indicator advances and the 2 s promotion fires,
-        // even with the pointer held still. Without these deadlines the loop
-        // would only wake on user input, freezing the dwell counter.
+        // Sticky-on-dwell wake-ups: once a rich tooltip is shown, wake once per
+        // indicator step (500 ms for the default 2 s promotion) so the step
+        // indicator advances and the promotion fires, even with the pointer
+        // held still. Without these deadlines the loop would only wake on user
+        // input, freezing the dwell counter. The step is derived per entry from
+        // its own `sticky_after` rather than hardcoded, so a caller with a
+        // non-default promotion window still gets evenly-spaced wake-ups.
         //
         // The step boundary is rounded off `last_frame_time` (the last rendered
         // frame) — NOT `Instant::now()`. The app's `request_redraw_due`
@@ -1140,7 +1380,6 @@ impl WidgetTree {
         // `<= now` at its own wake until a render actually advances the frame
         // time to the next step — one redraw per 500 ms boundary, no free-run.
         let ref_time = self.last_frame_time.unwrap_or_else(std::time::Instant::now);
-        let dwell_step = std::time::Duration::from_millis(500);
         let dwell_tooltip_deadline = self
             .tooltips
             .iter()
@@ -1148,6 +1387,10 @@ impl WidgetTree {
                 let sticky_after = entry.sticky_after?;
                 let shown_at = entry.shown_at_real?;
                 if entry.overlay_id.is_none() || entry.is_sticky {
+                    return None;
+                }
+                let dwell_step = sticky_after / super::TOOLTIP_DWELL_STEPS;
+                if dwell_step.is_zero() {
                     return None;
                 }
                 let elapsed = ref_time.saturating_duration_since(shown_at);
@@ -1167,6 +1410,13 @@ impl WidgetTree {
             .map(|pending| pending.real_requested_at + pending.delay)
             .min();
         let auto_dismiss_deadline = self.overlay_manager.next_auto_dismiss_deadline();
+        // Hover-opened overlays (every shown tooltip, hover submenus) dismiss
+        // on a `PointerLeave { delay }` grace that only advances when a frame
+        // runs. The pointer's last motion event is the *start* of that grace,
+        // not a reason to wake at its end — so without this term a tooltip the
+        // user has walked away from stays on screen for as long as the app
+        // stays idle.
+        let pointer_leave_deadline = self.overlay_manager.next_pointer_leave_deadline();
         let animation_deadline = self
             .animation_scheduler
             .next_deadline(&self.arena, self.paint_epoch);
@@ -1191,6 +1441,7 @@ impl WidgetTree {
             dwell_tooltip_deadline,
             delayed_overlay_deadline,
             auto_dismiss_deadline,
+            pointer_leave_deadline,
             animation_deadline,
             animated_quad_deadline,
             gesture_deadline,
@@ -1216,6 +1467,25 @@ impl WidgetTree {
 
     pub fn active_overlays(&self) -> Vec<crate::overlay::OverlayId> {
         self.overlay_manager.active_ids()
+    }
+
+    /// Laid-out bounds of an open overlay's content surface.
+    ///
+    /// This is the size the overlay pass actually measured — taken with an
+    /// *unbounded* proposal, independent of the host tree's own proposal — so
+    /// it is the right thing to assert against for content that must cap or
+    /// wrap itself (tooltips against `TOOLTIP_MAX_WIDTH`, popovers against
+    /// their max height). Reading `bounds(content_id)` instead would report
+    /// whatever the surrounding layout handed the widget.
+    pub fn overlay_content_bounds(
+        &self,
+        id: crate::overlay::OverlayId,
+    ) -> Option<bastyde_canvas::Rect> {
+        self.overlay_manager
+            .stack
+            .iter()
+            .find(|o| o.id == id)
+            .map(|o| o.bounds)
     }
 
     pub fn show_overlay(
@@ -1371,8 +1641,7 @@ impl WidgetTree {
         if any_tooltip_dismissed {
             let grace = super::TOOLTIP_SESSION_GRACE;
             self.tooltip_session_until_sim = Some(self.sim_clock + grace);
-            self.tooltip_session_until_real =
-                Some(std::time::Instant::now() + grace);
+            self.tooltip_session_until_real = Some(std::time::Instant::now() + grace);
         }
         for &id in content_ids {
             let focused_in_subtree = self
@@ -2045,7 +2314,11 @@ mod tests {
             "must not appear before full initial delay"
         );
         tree.advance_time(std::time::Duration::from_millis(400));
-        assert_eq!(tree.active_overlays().len(), 1, "first tip after initial delay");
+        assert_eq!(
+            tree.active_overlays().len(),
+            1,
+            "first tip after initial delay"
+        );
         assert!(tree.find_by_label("Tip A").is_some());
 
         // While A is still shown the reshow session is active — B uses 100 ms.
@@ -2057,6 +2330,345 @@ mod tests {
             tree.find_by_label("Tip B").is_some(),
             "second tip should use the short reshow delay while session is warm"
         );
+    }
+
+    #[test]
+    fn reshow_delay_reverts_to_full_after_the_session_grace_expires() {
+        // The reshow session is a *session*: once the last tip has been gone
+        // for TOOLTIP_SESSION_GRACE, a fresh hover is a new deliberate act and
+        // pays the full delay again. Regression guard for a grace that is
+        // never cleared (permanent 100 ms flash on every control) or cleared
+        // too eagerly (the toolbar sweep loses its snappiness).
+        let mut tree = WidgetTree::new();
+        // Reduced motion removes the fade-out, so the dismissal — and with it
+        // the start of the grace window — lands on the pass that dismisses
+        // rather than on the one that finishes the tween.
+        tree.set_accessibility_preferences(false, true, 1.0);
+        let a = tree.add(FillWidget::new());
+        let b = tree.add(FillWidget::new());
+        let tip_a = tree.add(FillWidget::new().label("Tip A"));
+        let tip_b = tree.add(FillWidget::new().label("Tip B"));
+        tree.layout(SizeProposal::exact(400.0, 200.0));
+
+        let delay = std::time::Duration::from_millis(500);
+        tree.attach_tooltip(a, tip_a, delay);
+        tree.attach_tooltip(b, tip_b, delay);
+
+        // Warm the session, then close A and let the grace run out.
+        tree.tooltip_pointer_enter(a);
+        tree.advance_time(std::time::Duration::from_millis(550));
+        assert!(tree.find_by_label("Tip A").is_some(), "first tip shown");
+
+        tree.pointer_move(Point::new(900.0, 900.0));
+        tree.advance_time(std::time::Duration::from_millis(150));
+        assert!(tree.active_overlays().is_empty(), "A dismissed on leave");
+
+        // Past the 1 s grace with nothing shown, the session is cold.
+        tree.advance_time(super::TOOLTIP_SESSION_GRACE + std::time::Duration::from_millis(50));
+
+        tree.tooltip_pointer_enter(b);
+        tree.advance_time(std::time::Duration::from_millis(150));
+        assert!(
+            tree.active_overlays().is_empty(),
+            "session went cold — B must pay the FULL delay, not the 100 ms reshow"
+        );
+        tree.advance_time(std::time::Duration::from_millis(400));
+        assert!(
+            tree.find_by_label("Tip B").is_some(),
+            "B still appears once its full delay elapses"
+        );
+    }
+
+    #[test]
+    fn warm_reshow_scales_the_delay_rather_than_flattening_every_tier() {
+        // The reshow shortcut is proportional (Windows TTDT_RESHOW =
+        // TTDT_INITIAL / 5), not an absolute floor. A *heavy* 700 ms entry
+        // exists because its content needs a longer statement of intent, so on
+        // the warm path it must reshow at 140 ms — not collapse to the light
+        // tier's 100 ms.
+        let mut tree = WidgetTree::new();
+        let light = tree.add(FillWidget::new());
+        let heavy = tree.add(FillWidget::new());
+        let tip_light = tree.add(FillWidget::new().label("Light"));
+        let tip_heavy = tree.add(FillWidget::new().label("Heavy"));
+        tree.layout(SizeProposal::exact(400.0, 200.0));
+
+        tree.attach_tooltip(light, tip_light, std::time::Duration::from_millis(500));
+        tree.attach_tooltip(heavy, tip_heavy, std::time::Duration::from_millis(700));
+
+        // Warm the session with the light tip and leave it open.
+        tree.tooltip_pointer_enter(light);
+        tree.advance_time(std::time::Duration::from_millis(550));
+        assert!(tree.find_by_label("Light").is_some(), "session warm");
+
+        let mut noop = crate::window::NoopWindowOps;
+        tree.tooltip_pointer_leave(light, &mut noop);
+        tree.tooltip_pointer_enter(heavy);
+
+        // 120 ms would have been enough under the old flat 100 ms clamp.
+        tree.advance_time(std::time::Duration::from_millis(120));
+        assert!(
+            tree.find_by_label("Heavy").is_none(),
+            "a heavy tooltip must not fire at the light tier's reshow delay"
+        );
+        // 700 * (100/500) = 140 ms.
+        tree.advance_time(std::time::Duration::from_millis(40));
+        assert!(
+            tree.find_by_label("Heavy").is_some(),
+            "heavy reshow is the scaled 140 ms"
+        );
+    }
+
+    #[test]
+    fn a_pinned_sticky_tooltip_does_not_hold_the_session_warm() {
+        // A sticky tip survives pointer-leave and stays up until Escape or a
+        // click outside. Counting it as an active session would put every
+        // other anchor on the 100 ms path for as long as it is pinned.
+        let mut tree = WidgetTree::new();
+        tree.set_accessibility_preferences(false, true, 1.0); // no fade deferral
+        let a = tree.add(FillWidget::new());
+        let b = tree.add(FillWidget::new());
+        let tip_a = tree.add(FillWidget::new().label("Pinned"));
+        let tip_b = tree.add(FillWidget::new().label("Other"));
+        tree.layout(SizeProposal::exact(400.0, 200.0));
+
+        tree.attach_tooltip_with_sticky(
+            a,
+            tip_a,
+            std::time::Duration::from_millis(500),
+            Some(std::time::Duration::from_millis(100)),
+        );
+        tree.attach_tooltip(b, tip_b, std::time::Duration::from_millis(500));
+
+        tree.tooltip_pointer_enter(a);
+        tree.advance_time(std::time::Duration::from_millis(550));
+        assert!(tree.find_by_label("Pinned").is_some());
+        tree.promote_tooltip_to_sticky(tip_a);
+
+        // Let the dismiss-grace from nothing elapse, then hover B.
+        tree.advance_time(super::TOOLTIP_SESSION_GRACE + std::time::Duration::from_millis(50));
+        tree.tooltip_pointer_enter(b);
+        tree.advance_time(std::time::Duration::from_millis(150));
+        assert!(
+            tree.find_by_label("Other").is_none(),
+            "a pinned sticky must not keep every other anchor on the reshow path"
+        );
+    }
+
+    #[test]
+    fn reattaching_a_tooltip_does_not_grow_the_entry_table() {
+        // `attach_tooltip*` is called from `build()`, so it re-runs on every
+        // rebuild. An anchor owns at most one tooltip: without retirement the
+        // table gains a dead row (and an orphaned, parentless content node) per
+        // rebuild, forever — and it is scanned on every pointer move, four
+        // times per layout pass, and once per widget in the a11y walk.
+        let mut tree = WidgetTree::new();
+        let anchor = tree.add(FillWidget::new());
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        let delay = std::time::Duration::from_millis(100);
+        for _ in 0..25 {
+            // Each "rebuild" mints a fresh content widget, as `ctx.add` does.
+            let tip = tree.add(FillWidget::new().label("Tip"));
+            tree.attach_tooltip(anchor, tip, delay);
+            assert_eq!(
+                tree.tooltip_entry_count(),
+                1,
+                "an anchor must own exactly one tooltip entry across rebuilds"
+            );
+        }
+
+        // The surviving entry is the newest one and still works.
+        tree.tooltip_pointer_enter(anchor);
+        tree.advance_time(delay + std::time::Duration::from_millis(50));
+        assert_eq!(
+            tree.active_overlays().len(),
+            1,
+            "latest tooltip still shows"
+        );
+    }
+
+    #[test]
+    fn destroying_an_anchor_reaps_its_tooltip_entry() {
+        // The content widget is parentless (`ctx.add`), so the anchor's own
+        // subtree teardown never reaches it.
+        let mut tree = WidgetTree::new();
+        let host = tree.add(FillWidget::new());
+        let anchor = tree.add_child(host, FillWidget::new());
+        let tip = tree.add(FillWidget::new().label("Tip"));
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        tree.attach_tooltip(anchor, tip, std::time::Duration::from_millis(100));
+        assert_eq!(tree.tooltip_entry_count(), 1);
+
+        tree.destroy_subtree(anchor);
+        assert_eq!(
+            tree.tooltip_entry_count(),
+            0,
+            "destroying the anchor must reap its entry and content node"
+        );
+    }
+
+    #[test]
+    fn a_leaving_tooltip_schedules_a_wake_for_its_dismissal() {
+        // The pointer's last motion event only *starts* the PointerLeave
+        // grace. Without a deadline for its end the loop parks in
+        // `ControlFlow::Wait` and the tooltip hangs on screen until unrelated
+        // input redraws the window.
+        let mut tree = WidgetTree::new();
+        tree.set_accessibility_preferences(false, true, 1.0); // no fade deadline
+        let anchor = tree.add(FillWidget::new());
+        let tip = tree.add(FillWidget::new().label("Tip"));
+        tree.layout(SizeProposal::exact(400.0, 200.0));
+
+        tree.attach_tooltip(anchor, tip, std::time::Duration::from_millis(100));
+        tree.pointer_move(tree.bounds(anchor).center());
+        tree.advance_time(std::time::Duration::from_millis(150));
+        assert_eq!(tree.active_overlays().len(), 1, "tooltip shown");
+
+        // Shown, pointer still inside: nothing pending, so no deadline.
+        assert!(
+            tree.next_timer_deadline().is_none(),
+            "a settled tooltip under the pointer schedules nothing"
+        );
+
+        // Pointer leaves — now the 100 ms grace is running and MUST be a wake
+        // source, or nothing will ever dismiss the tooltip on an idle app.
+        tree.pointer_move(Point::new(900.0, 900.0));
+        assert!(
+            tree.next_timer_deadline().is_some(),
+            "the PointerLeave grace must contribute a wake deadline"
+        );
+    }
+
+    #[test]
+    fn pressing_cancels_a_pending_dwell_and_dismisses_a_shown_tooltip() {
+        let mut tree = WidgetTree::new();
+        let anchor = tree.add(FillWidget::new());
+        let tip = tree.add(FillWidget::new().label("Tip"));
+        tree.layout(SizeProposal::exact(400.0, 200.0));
+
+        let delay = std::time::Duration::from_millis(500);
+        tree.attach_tooltip(anchor, tip, delay);
+
+        // Press partway through the dwell: the user has answered their own
+        // question, so the tip must not arrive afterwards.
+        tree.pointer_move(tree.bounds(anchor).center());
+        tree.advance_time(std::time::Duration::from_millis(300));
+        tree.tooltip_pointer_press(None);
+        tree.advance_time(std::time::Duration::from_millis(400));
+        assert!(
+            tree.active_overlays().is_empty(),
+            "a press must cancel the pending dwell, not merely delay it"
+        );
+
+        // And a press while one is shown retires it rather than leaving it
+        // covering the control that was just clicked.
+        tree.tooltip_pointer_enter(anchor);
+        tree.advance_time(delay + std::time::Duration::from_millis(50));
+        assert_eq!(tree.active_overlays().len(), 1, "tooltip shown again");
+        tree.tooltip_pointer_press(Some(tree.bounds(anchor).center()));
+        assert!(
+            tree.active_overlays().is_empty(),
+            "a press must dismiss the shown tooltip"
+        );
+    }
+
+    #[test]
+    fn window_deactivation_retires_hover_tooltips() {
+        let mut tree = WidgetTree::new();
+        let anchor = tree.add(FillWidget::new());
+        let tip = tree.add(FillWidget::new().label("Tip"));
+        tree.layout(SizeProposal::exact(400.0, 200.0));
+
+        tree.attach_tooltip(anchor, tip, std::time::Duration::from_millis(100));
+        tree.pointer_move(tree.bounds(anchor).center());
+        tree.advance_time(std::time::Duration::from_millis(150));
+        assert_eq!(tree.active_overlays().len(), 1);
+
+        tree.set_window_active(false);
+        assert!(
+            tree.active_overlays().is_empty(),
+            "a tooltip must not float over another window's chrome"
+        );
+    }
+
+    #[test]
+    fn only_the_innermost_anchor_arms_its_dwell() {
+        // A row inside a panel, both with tooltips. Arming both would mature
+        // two tips and stack them on top of each other.
+        let mut tree = WidgetTree::new();
+        let panel = tree.add(FillWidget::new());
+        let row = tree.add_child(panel, FillWidget::new());
+        let panel_tip = tree.add(FillWidget::new().label("Panel"));
+        let row_tip = tree.add(FillWidget::new().label("Row"));
+        tree.layout(SizeProposal::exact(400.0, 200.0));
+
+        let delay = std::time::Duration::from_millis(100);
+        tree.attach_tooltip(panel, panel_tip, delay);
+        tree.attach_tooltip(row, row_tip, delay);
+
+        tree.tooltip_pointer_enter(row);
+        tree.advance_time(delay + std::time::Duration::from_millis(50));
+
+        assert_eq!(
+            tree.active_overlays().len(),
+            1,
+            "exactly one tooltip may open for a hover"
+        );
+        assert!(
+            tree.find_by_label("Row").is_some(),
+            "the innermost anchor wins"
+        );
+    }
+
+    #[test]
+    fn escape_dismisses_a_hover_tooltip_and_falls_through_to_the_menu_below() {
+        // WCAG 2.2 SC 1.4.13(a): hover content must be dismissible without
+        // moving the pointer. And a tooltip raised over an open menu must not
+        // swallow the Escape meant for the menu underneath.
+        let mut tree = WidgetTree::new();
+        tree.set_accessibility_preferences(false, true, 1.0); // no fade deferral
+        let anchor = tree.add(FillWidget::new());
+        let menu = tree.add(FillWidget::new());
+        let tip = tree.add(FillWidget::new().label("Tip"));
+        tree.layout(SizeProposal::exact(400.0, 200.0));
+
+        let menu_overlay = tree.show_overlay(crate::overlay::OverlayRequest {
+            content_id: menu,
+            anchor,
+            placement: crate::overlay::OverlayPlacement::Below,
+            dismiss: crate::overlay::DismissBehavior::EscapeOrClickOutside,
+            layer: crate::overlay::OverlayLayer::InTree,
+            parent_overlay: None,
+            on_dismiss: None,
+            fade_duration: None,
+        });
+        assert_eq!(tree.active_overlays().len(), 1);
+
+        // Raise a tooltip on top of the menu.
+        tree.attach_tooltip(anchor, tip, std::time::Duration::from_millis(100));
+        tree.tooltip_pointer_enter(anchor);
+        tree.advance_time(std::time::Duration::from_millis(150));
+        assert_eq!(
+            tree.active_overlays().len(),
+            2,
+            "tooltip sits above the menu"
+        );
+
+        // First Escape takes the tooltip...
+        let dismissed = tree.overlay_manager.try_dismiss_top_on_escape();
+        assert!(dismissed.is_some(), "Escape must dismiss the hover tooltip");
+        assert_eq!(tree.active_overlays().len(), 1);
+
+        // ...the second reaches the menu, which was previously unreachable.
+        let dismissed = tree.overlay_manager.try_dismiss_top_on_escape();
+        assert_eq!(
+            dismissed.map(|(id, _, _)| id),
+            Some(menu_overlay),
+            "Escape must then reach the menu underneath"
+        );
+        assert!(tree.active_overlays().is_empty());
     }
 
     #[test]

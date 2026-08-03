@@ -351,6 +351,19 @@ Defaults match desktop OS norms (Windows `TTDT_INITIAL` / GTK
 (including Material 3) inherit `MotionTokens::default()` unless they
 override `motion`.
 
+The reshow shortening is **proportional, not a floor**. Windows derives
+`TTDT_RESHOW` as `TTDT_INITIAL / 5`, and the two tokens encode exactly that
+ratio (100 ms of 500 ms); `effective_tooltip_delay` applies the ratio rather
+than clamping to the absolute value. So on the warm path a 500 ms entry
+reshows at 100 ms and a 700 ms *heavy* entry at 140 ms — a heavier surface
+keeps the proportionally longer statement of intent it exists for, instead of
+collapsing to the light tier's 100 ms.
+
+Two things deliberately do **not** keep a session warm: a pinned (sticky)
+tooltip, which would otherwise hold every other anchor on the 100 ms path for
+as long as it stays up, and — since the grace is 1 s — any hover that starts
+more than a second after the last tip closed.
+
 Widgets that need a custom value pass an explicit `Duration` to
 `attach_tooltip`.
 
@@ -370,32 +383,80 @@ Widgets that need a custom value pass an explicit `Duration` to
 The `WidgetTree` keeps a `Vec<TooltipEntry>` and visits it once per processed
 event batch. The state-machine is:
 
-1. **Hover enter** (`tooltip_pointer_enter`). Every entry whose `anchor_id`
-   contains the entered widget records `hover_start = now` and the pointer
-   position as `hover_origin`. No overlay yet.
+1. **Hover enter** (`tooltip_pointer_enter`). The **innermost** entry whose
+   `anchor_id` contains the entered widget records `hover_start = now` and the
+   pointer position as `hover_origin`. No overlay yet. Only one entry arms: a
+   row inside a panel that both carry tooltips would otherwise mature two tips
+   and stack them on top of each other, so the most specific anchor — measured
+   by arena depth, not attach order — wins.
 2. **Stationary filter** (`tooltip_pointer_moved`). While the tip is still
    pending, moving more than ~4 logical px from `hover_origin` restarts the
    timer (Windows-style hover-tracking slop). Intentional pause, not
    fly-by, shows the tip.
 3. **Delay tick** (`process_tooltips` / `process_tooltips_real`). Each entry
    whose elapsed time since `hover_start` ≥ the *effective* delay is shown.
-   Effective delay is the entry's `delay`, or `min(delay, tooltip_reshow_delay)`
-   while a tooltip session is active (any tip currently shown, or within
-   ~1 s of the last dismiss — Windows `TTDT_RESHOW`). On show:
-   `arena.activate` on the dormant content, `show_overlay` with placement
+   Effective delay is the entry's `delay`, scaled by the theme's
+   `tooltip_reshow_delay : tooltip_delay` ratio while a tooltip session is
+   active (any non-sticky tip currently shown, or within `TOOLTIP_SESSION_GRACE`
+   = 1 s of the last dismiss). An entry whose content announces no text is
+   skipped rather than opening an empty bubble. On show: `arena.activate` on
+   the dormant content, `show_overlay` with placement
    `NearAnchor { offset: (0, 8) }` and dismiss behavior
    `PointerLeave { delay: 100 ms }`. The `shown_at_sim` / `shown_at_real`
    timestamps are recorded; the optional `shown_at_sink` is updated.
 4. **Fade-in.** Tooltips fade in over `MotionTokens::duration_fast` (~120 ms).
-   Reduced-motion users get an instant snap (no fade animation).
+   Reduced-motion users get an instant snap (no fade animation), and so does
+   the warm reshow path — a 120 ms fade would cost more than the ~100 ms the
+   shortened delay just saved.
 5. **Hover leave** (`tooltip_pointer_leave`). Pending timers are cancelled.
    Shown non-sticky tips stay until the overlay stack's 100 ms
    leave-grace (WCAG 1.4.13 Hoverable). Sticky tooltips (post-promotion)
    survive — the user dismisses them via `EscapeOrClickOutside`.
 
-`WidgetTree::next_timer_deadline()` returns the earliest pending tooltip /
-delayed-overlay deadline so the idle-event loop knows when to wake (see
-[idle-and-animation.md](idle-and-animation.md)).
+### Suppression and dismissal
+
+Beyond hover-leave, four things retire a tooltip:
+
+| Trigger | Pending dwell | Shown non-sticky | Sticky |
+|---|---|---|---|
+| `PointerDown` anywhere (`tooltip_pointer_press`) | cancelled | dismissed | kept |
+| Drag session active (`tooltip_cancel_pending_dwell`) | cancelled | — | kept |
+| Window deactivated (`tooltip_window_deactivated`) | cancelled | dismissed | kept |
+| <kbd>Escape</kbd> (`try_dismiss_top_on_escape`) | — | dismissed | dismissed |
+
+A press means the user already knows what the control does, so a tip must not
+pop *after* the click that answered it, nor sit over what was just clicked —
+Windows and GTK both behave this way. A drag owns the pointer, and
+`process_tooltips_real` runs from the layout pass the drag keeps driving, so
+dwells are cleared each pass rather than left to ripen into a stray overlay.
+
+<kbd>Escape</kbd> scans the overlay stack top-down for the first
+Escape-dismissible overlay instead of consulting only the top. That satisfies
+WCAG 2.2 SC 1.4.13(a) *Dismissible* for hover content, and stops a tooltip
+raised over an open menu from swallowing the keystroke meant for the menu
+underneath. `Manual` overlays remain opaque to the scan.
+
+### Waking the event loop
+
+`WidgetTree::next_timer_deadline()` folds every timing source the tooltip
+machinery needs the loop to wake for: the pending-tooltip delay, the per-step
+dwell wake-ups, delayed overlays, auto-dismiss, **and the `PointerLeave`
+leave-grace**. That last one matters as much as the first: the pointer's final
+motion event only *starts* the 100 ms grace, so without a deadline for its end
+the loop would sit in `ControlFlow::Wait` and the tooltip would stay on screen
+until some unrelated input redrew the window. See
+[idle-and-animation.md](idle-and-animation.md).
+
+### Entry lifetime
+
+`attach_tooltip*` is called from `build()`, so it re-runs on every rebuild.
+**An anchor owns at most one tooltip**: attaching retires any previous entry
+for that anchor and destroys its content subtree, and destroying a widget
+reaps the tooltip it anchored. Without both, the entry table would grow by one
+dead row (plus one orphaned arena node, since `ctx.add` creates a parentless
+one that the rebuild teardown never reaches) on every rebuild — and that table
+is scanned on every pointer move, four times per layout pass, on every
+event-loop wake, and once per widget during the accessibility walk.
 
 ---
 
@@ -470,9 +531,26 @@ root but keep focus on the outer node, so the check accepts an
 ancestor-or-descendant relationship).
 
 Plain tooltips are deliberately **not** auto-shown on focus — their text
-reaches assistive tech via the anchor's `aria-describedby` / `Tooltip`
-role link wired in the AccessKit pass, which is the W3C-recommended
-pattern for supplementary hints.
+reaches assistive tech through the anchor's accessible **description**,
+wired in the AccessKit pass, which is the W3C-recommended pattern for
+supplementary hints.
+
+The AccessKit pass emits one of two forms, depending on whether the tooltip
+is currently on screen:
+
+- **Shown** — `described_by` pointing at the live tooltip content node, the
+  richer relation, since the node is genuinely in the tree and navigable.
+- **Not shown** — the content's announced text copied onto the anchor as a
+  static `description`, harvested from the content widget's own
+  `accessibility()` (all three tiers publish their body as the node *name*).
+
+The second form is what actually carries the majority tier. A `described_by`
+relation can only reference a node that exists in the emitted tree, and a
+dormant tooltip's content is excluded from it — so gating the wiring on "is
+the overlay shown" left plain tooltips, which are never auto-shown on focus,
+with no screen-reader path at all. The text is read at walk time, so a locale
+change or a `Signal<String>` swap is picked up by the same AT re-walk that
+already tracks both.
 
 When focus moves away from a focus-promoted tooltip,
 `tooltip_focus_leave_outside` dismisses it unless the new focus is

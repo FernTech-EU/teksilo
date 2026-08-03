@@ -68,6 +68,9 @@ struct BreadcrumbEntry {
     label: LocalizedString,
     action: Option<CommandFactory>,
     current: bool,
+    tooltip_text: Option<LocalizedString>,
+    rich_tooltip_source: Option<crate::tooltip::RichTooltipSource>,
+    composite_tooltip_content: Option<Box<dyn Widget>>,
 }
 
 impl std::fmt::Debug for BreadcrumbEntry {
@@ -196,6 +199,9 @@ struct BreadcrumbSegment {
     action: Option<CommandFactory>,
     current: bool,
     interaction: Signal<SegmentInteraction>,
+    tooltip_text: Option<LocalizedString>,
+    rich_tooltip_source: Option<crate::tooltip::RichTooltipSource>,
+    composite_tooltip_content: Option<Box<dyn Widget>>,
 }
 
 impl std::fmt::Debug for BreadcrumbSegment {
@@ -215,7 +221,25 @@ impl BreadcrumbSegment {
             action,
             current,
             interaction: Signal::new(SegmentInteraction::Idle),
+            tooltip_text: None,
+            rich_tooltip_source: None,
+            composite_tooltip_content: None,
         }
+    }
+
+    /// Move a [`BreadcrumbItem`]'s tooltip slots onto the built segment.
+    /// The three are mutually exclusive by construction (every `BreadcrumbItem`
+    /// setter clears the other two), so at most one is ever `Some`.
+    fn with_tooltip(
+        mut self,
+        tooltip_text: Option<LocalizedString>,
+        rich_tooltip_source: Option<crate::tooltip::RichTooltipSource>,
+        composite_tooltip_content: Option<Box<dyn Widget>>,
+    ) -> Self {
+        self.tooltip_text = tooltip_text;
+        self.rich_tooltip_source = rich_tooltip_source;
+        self.composite_tooltip_content = composite_tooltip_content;
+        self
     }
 
     fn is_interactive(&self) -> bool {
@@ -339,6 +363,24 @@ impl Widget for BreadcrumbSegment {
             });
 
         ctx.apply_self_handlers(handler_set);
+
+        // Attach the tooltip carried over from `BreadcrumbItem`. The segment
+        // paints itself and returns no children, so it is its own anchor.
+        // `Side` placement: crumbs sit in a horizontal strip, but the trail can
+        // wrap, and a `Below` tip would cover the row beneath.
+        if let Some(content) = self.composite_tooltip_content.take() {
+            let delay = ctx.theme().motion.tooltip_delay_heavy;
+            crate::tooltip::attach_composite_tooltip_boxed(ctx, self_id, content, delay);
+        } else if let Some(source) = self.rich_tooltip_source.take() {
+            let delay = ctx.theme().motion.tooltip_delay;
+            crate::tooltip::attach_rich_tooltip_source(ctx, self_id, source, delay);
+        } else if let Some(tooltip_text) = self.tooltip_text.clone() {
+            let tooltip_widget = crate::tooltip::TooltipWidget::new(tooltip_text);
+            let tooltip_id = ctx.add(tooltip_widget);
+            let delay = ctx.theme().motion.tooltip_delay;
+            ctx.attach_tooltip(self_id, tooltip_id, delay);
+        }
+
         Vec::new()
     }
 
@@ -590,6 +632,9 @@ impl Breadcrumb {
             label: item.label,
             action: item.action,
             current: item.current,
+            tooltip_text: item.tooltip_text,
+            rich_tooltip_source: item.rich_tooltip_source,
+            composite_tooltip_content: item.composite_tooltip_content,
         }));
         self
     }
@@ -663,6 +708,11 @@ impl Widget for Breadcrumb {
                             entry.label.clone(),
                             action.clone(),
                             entry.current,
+                        )
+                        .with_tooltip(
+                            entry.tooltip_text,
+                            entry.rich_tooltip_source,
+                            entry.composite_tooltip_content,
                         );
                         (ctx.add(seg), Some((entry.label, action)))
                     }
@@ -960,6 +1010,66 @@ mod tests {
             bc = bc.item(item);
         }
         bc
+    }
+
+    // ── tooltips ─────────────────────────────────────────────────────────────
+
+    #[test]
+    fn breadcrumb_tooltip_appears_after_the_hover_delay() {
+        // Regression: `BreadcrumbItem::tooltip()` / `.rich_tooltip*()` /
+        // `.composite_tooltip()` set their fields, but `Breadcrumb::item()`
+        // copied only label/action/current into the entry — so all four
+        // setters were silently dead. Nothing in this module hovered a
+        // segment, so nothing caught it.
+        let mut tree = themed_tree();
+        let bc = Breadcrumb::new()
+            .item(BreadcrumbItem::new(lit!("Home")).on_activate_fn(|_| {}))
+            .item(BreadcrumbItem::current(lit!("Here")).tooltip(lit!("Where you are")));
+        tree.add(bc);
+        tree.layout(SizeProposal::exact(400.0, 60.0));
+
+        let segment = tree
+            .find_by_label("Here")
+            .expect("the current crumb renders");
+        tree.pointer_move(tree.bounds(segment).center());
+        assert!(
+            tree.active_overlays().is_empty(),
+            "must wait for the hover delay"
+        );
+
+        let delay = tree.theme().motion.tooltip_delay;
+        tree.advance_time(delay + std::time::Duration::from_millis(50));
+        assert_eq!(
+            tree.active_overlays().len(),
+            1,
+            "a breadcrumb crumb's tooltip must actually open"
+        );
+        assert!(tree.find_by_label("Where you are").is_some());
+    }
+
+    #[test]
+    fn a_crumb_contributes_a_tooltip_entry_only_when_it_has_one() {
+        // Measured as a delta against the identical trail, so the count is
+        // unaffected by whatever chrome the breadcrumb attaches on its own
+        // (the overflow chevron carries a tooltip of its own).
+        let mut bare = themed_tree();
+        bare.add(trail(3));
+        bare.layout(SizeProposal::exact(400.0, 60.0));
+        let baseline = bare.tooltip_entry_count();
+
+        let mut tipped = themed_tree();
+        let bc = Breadcrumb::new()
+            .item(BreadcrumbItem::new(lit!("Crumb 0")).on_activate_fn(|_| {}))
+            .item(BreadcrumbItem::new(lit!("Crumb 1")).on_activate_fn(|_| {}))
+            .item(BreadcrumbItem::current(lit!("Crumb 2")).tooltip(lit!("Tip")));
+        tipped.add(bc);
+        tipped.layout(SizeProposal::exact(400.0, 60.0));
+
+        assert_eq!(
+            tipped.tooltip_entry_count(),
+            baseline + 1,
+            "exactly the one crumb carrying a tooltip adds an entry"
+        );
     }
 
     // ── compute_breadcrumb_overflow ──────────────────────────────────────────

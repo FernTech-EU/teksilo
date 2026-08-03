@@ -469,6 +469,19 @@ const AUTOMATION_ANNOUNCE_CAP: usize = 256;
 /// delay. Not a theme token — it is session bookkeeping, not a visual feel.
 const TOOLTIP_SESSION_GRACE: std::time::Duration = std::time::Duration::from_millis(1000);
 
+/// Number of visible steps a sticky-on-dwell tooltip's promotion window is
+/// divided into.
+///
+/// The tree uses this only to decide *how often to wake* while a dwell is
+/// running — one redraw per step boundary rather than a free-run — but it must
+/// match the step count the content widget actually renders, or the indicator
+/// would advance on a different beat from the wake-ups driving it.
+/// `bastyde-widgets`' `DWELL_STEPS` is pinned to this value by a compile-time
+/// assertion; the per-step *duration* is derived from each entry's own
+/// `sticky_after`, so a caller that picks a non-default promotion window still
+/// gets correctly-spaced wake-ups.
+pub const TOOLTIP_DWELL_STEPS: u32 = 4;
+
 /// Max pointer travel (logical px) from the hover-origin before a pending
 /// tooltip timer restarts. Mirrors Windows hover-tracking slop
 /// (`SPI_GETMOUSEHOVERWIDTH` / height, typically ~4 px): the tip waits for a
@@ -1441,6 +1454,15 @@ impl WidgetTree {
         if self.window_active_signal.get() != active {
             self.window_active_signal.set(active);
             self.arena.mark_all_needs_paint_only();
+            if !active {
+                // The pointer has left for another window; the OS sends no
+                // leave event we can rely on, so a tooltip shown at the moment
+                // of the switch would float over the newly-focused window's
+                // chrome with nothing left to dismiss it. Retire tips and
+                // cancel pending dwells — but leave *sticky* ones, which the
+                // user pinned deliberately and expects to find on return.
+                self.tooltip_window_deactivated();
+            }
         }
     }
 
@@ -1683,7 +1705,11 @@ impl WidgetTree {
                 // Direct: no bubble through dormant ancestors, no overlay
                 // dismiss side-effects — this is a teardown signal, not a
                 // user-driven focus move.
-                self.dispatch_to_widget_direct(id, &crate::event::WidgetEvent::FocusLost, &mut *ops);
+                self.dispatch_to_widget_direct(
+                    id,
+                    &crate::event::WidgetEvent::FocusLost,
+                    &mut *ops,
+                );
             }
             self.set_focused(None);
             self.focus_origin = None;
@@ -1945,6 +1971,10 @@ impl WidgetTree {
         self.animation_scheduler.cancel_by_widget(widget_id);
         // Release the animated-quad slot(s) too.
         self.animated_quads.cancel_by_widget(widget_id);
+        // A tooltip's content widget is parentless (`ctx.add`), so the child
+        // walk below never reaches it — reap it explicitly or the entry and
+        // its node outlive the anchor for the lifetime of the tree.
+        self.retire_tooltips_of_destroyed_anchor(widget_id);
 
         let children: Vec<WidgetId> = self.arena.children(widget_id).to_vec();
         for child in children {

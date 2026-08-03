@@ -547,6 +547,24 @@ pub trait Widget: std::fmt::Debug + std::any::Any {
         false
     }
 
+    /// Whether this widget, used as tooltip content, currently has anything
+    /// worth showing.
+    ///
+    /// Consulted by `WidgetTree` just before a dwell matures into an overlay.
+    /// Returning `false` cancels the show — the anchor simply has no tooltip
+    /// this time — so a blank or unresolved string does not pop an empty
+    /// chromed bubble, which reads as a rendering fault rather than as
+    /// "nothing to say here".
+    ///
+    /// Defaults to `true`: content that hosts an arbitrary widget tree (a
+    /// chart, a progress row) is meaningful without any text, and a custom
+    /// content widget must never be suppressed by a check it did not opt into.
+    /// Only widgets whose *whole* payload is a string — `TooltipWidget` — have
+    /// a well-defined notion of being empty.
+    fn tooltip_has_content(&self) -> bool {
+        true
+    }
+
     /// Declare the rebindable keyboard shortcuts this widget exposes,
     /// *without* installing handlers. The framework calls this at
     /// arena insertion time (before `build()`) and at certain lazy

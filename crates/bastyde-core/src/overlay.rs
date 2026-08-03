@@ -448,6 +448,28 @@ impl OverlayManager {
             .min()
     }
 
+    /// Earliest instant at which a [`DismissBehavior::PointerLeave`] overlay
+    /// whose leave-grace is already running becomes due for dismissal.
+    ///
+    /// The counterpart of
+    /// [`next_auto_dismiss_deadline`](Self::next_auto_dismiss_deadline) for the
+    /// hover-opened overlays (tooltips, hover submenus). Without it the event
+    /// loop has no reason to wake between the pointer's last motion event and
+    /// the end of the grace window: `next_timer_deadline` would return `None`,
+    /// winit would sit in `ControlFlow::Wait`, and the overlay would stay on
+    /// screen until some unrelated input happened to redraw the window.
+    pub fn next_pointer_leave_deadline(&self) -> Option<std::time::Instant> {
+        self.stack
+            .iter()
+            .filter_map(|overlay| {
+                let DismissBehavior::PointerLeave { delay } = overlay.dismiss else {
+                    return None;
+                };
+                Some(overlay.pointer_leave_started_real? + delay)
+            })
+            .min()
+    }
+
     /// Pause the auto-dismiss timer for an overlay shown with
     /// [`show_for`](Self::show_for). The remaining time
     /// (`auto_dismiss_after - elapsed`) is stashed; subsequent calls
@@ -838,24 +860,54 @@ impl OverlayManager {
         }
     }
 
-    /// Try to dismiss the topmost overlay on Escape, respecting `DismissBehavior`.
-    /// Only dismisses if the overlay's behavior includes Escape dismissal.
-    /// Returns the overlay ID, content widget IDs, and focus_restore target, or `None`
-    /// if the topmost overlay does not allow Escape dismissal.
+    /// Try to dismiss an overlay on Escape, respecting `DismissBehavior`.
+    ///
+    /// Scans the stack top-down for the first overlay that Escape may close,
+    /// rather than consulting only `stack.last()`. Two reasons:
+    ///
+    /// - A hover-opened overlay (`PointerLeave` — every shown tooltip) is
+    ///   Escape-dismissible. WCAG 2.2 SC 1.4.13(a) requires content shown on
+    ///   hover to be dismissible *without moving the pointer*, and Escape is
+    ///   that mechanism; previously no key could close a plain tooltip.
+    /// - A tooltip lives on the same stack as whatever it is anchored inside.
+    ///   Hovering a menu item long enough to raise its tooltip put a
+    ///   non-Escape overlay on top, so Escape silently did nothing at all
+    ///   until the tooltip's own 100 ms leave-grace expired — the keystroke
+    ///   was swallowed, not forwarded to the menu underneath.
+    ///
+    /// `Manual` overlays still block the scan: they are modal-ish by
+    /// construction and own the keystroke.
     pub fn try_dismiss_top_on_escape(
         &mut self,
     ) -> Option<(OverlayId, Vec<WidgetId>, Option<WidgetId>)> {
-        let dominated_by_escape = self.stack.last().is_some_and(|o| {
-            matches!(
-                o.dismiss,
-                DismissBehavior::EscapeKey | DismissBehavior::EscapeOrClickOutside
-            )
-        });
-        if dominated_by_escape {
-            self.dismiss_top()
-        } else {
-            None
-        }
+        let target = self
+            .stack
+            .iter()
+            .rev()
+            // An overlay already fading out stays on the stack until its tween
+            // finishes, but it is on its way out and no longer owns the
+            // keystroke — targeting it again would spend an Escape on a corpse
+            // and leave whatever is underneath unreachable.
+            .filter(|o| {
+                o.fade
+                    .as_ref()
+                    .is_none_or(|f| f.dismissing_started_real.is_none())
+            })
+            .find_map(|o| match o.dismiss {
+                DismissBehavior::EscapeKey
+                | DismissBehavior::EscapeOrClickOutside
+                | DismissBehavior::PointerLeave { .. } => Some(Some(o.id)),
+                // Opaque to Escape and to everything under it.
+                DismissBehavior::Manual => Some(None),
+                DismissBehavior::ClickOutside => None,
+            })??;
+        let focus_restore = self
+            .stack
+            .iter()
+            .find(|o| o.id == target)
+            .and_then(|o| o.focus_restore);
+        let content_ids = self.dismiss(target);
+        Some((target, content_ids, focus_restore))
     }
 
     /// Set the focus_restore target for the topmost overlay.

@@ -490,14 +490,23 @@ impl WidgetTree {
             builder.set_disabled();
         }
 
-        if let Some(tooltip) = self
-            .tooltips
-            .iter()
-            .find(|t| t.anchor_id == id && t.overlay_id.is_some())
-        {
-            builder
-                .inner_mut()
-                .push_described_by(widget_id_to_node_id(tooltip.content_id));
+        if let Some(tooltip) = self.tooltips.iter().find(|t| t.anchor_id == id) {
+            if tooltip.overlay_id.is_some() {
+                // Shown: the content node is live in the AT tree, so the
+                // richer `described_by` relation can point straight at it.
+                builder
+                    .inner_mut()
+                    .push_described_by(widget_id_to_node_id(tooltip.content_id));
+            } else if let Some(text) = self.tooltip_access_description(tooltip.content_id) {
+                // Not shown. `described_by` cannot be used — the content is a
+                // dormant node and absent from the AT tree — and a *plain*
+                // tooltip is never auto-shown on focus, so gating the relation
+                // on `overlay_id` left the whole tier (the majority of call
+                // sites) with no screen-reader path at all. Copy the text onto
+                // the anchor as a static description instead, which is what a
+                // keyboard-only or screen-reader user actually reaches.
+                builder.set_description(text);
+            }
         }
 
         let (node_id, ak_node, synthetic_children) = builder.build(id);
@@ -587,6 +596,30 @@ impl WidgetTree {
             merge_descendants_into(&mut builder, id, &self.arena);
         }
         builder
+    }
+
+    /// The text a tooltip would announce, harvested from its (dormant)
+    /// content widget so an anchor can carry it as a static AT description
+    /// while the tooltip is not shown.
+    ///
+    /// All three tiers publish their body through `accessibility()` as the
+    /// node *name* (`TooltipWidget::accessibility` → `set_name(text)`), so
+    /// probing the widget is enough — no parallel copy of the text has to be
+    /// threaded through `attach_tooltip*` and kept in sync. Reads at walk
+    /// time, so a locale change or a `Signal<String>` swap is picked up by the
+    /// same AT re-walk that already tracks them.
+    pub(crate) fn tooltip_access_description(&self, content_id: WidgetId) -> Option<String> {
+        let node = self.arena.get(content_id)?;
+        let mut probe = AccessNodeBuilder::for_widget(content_id);
+        node.widget.accessibility(&mut probe);
+        if let Some(ov) = node.access_overrides.as_deref() {
+            ov.apply(&mut probe);
+        }
+        probe
+            .name()
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+            .map(str::to_owned)
     }
 
     pub fn accessibility_node(&self, id: WidgetId) -> AccessibilityInfo {
@@ -1435,6 +1468,52 @@ mod tests {
         let id = tree.add(FillWidget::new().label("H").access_role(Role::Heading));
         tree.layout(SizeProposal::exact(100.0, 40.0));
         assert_eq!(tree.accessibility_node(id).role(), Role::Heading);
+    }
+
+    #[test]
+    fn an_unshown_tooltip_still_describes_its_anchor_for_screen_readers() {
+        // The pass used to wire `described_by` only while the tooltip's
+        // overlay was live. A plain tooltip is never auto-shown on focus, and
+        // a dormant content node is excluded from the emitted tree (so it
+        // cannot be a relation target anyway) — which left the whole plain
+        // tier with no screen-reader path at all. With no hover, the anchor
+        // must still carry the text as a static description.
+        let mut tree = WidgetTree::new();
+        let anchor = tree.add(FillWidget::new().label("Save"));
+        let tip = tree.add(FillWidget::new().label("Save the file"));
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+        tree.attach_tooltip(anchor, tip, std::time::Duration::from_millis(500));
+
+        assert!(tree.active_overlays().is_empty(), "not hovered, not shown");
+        let update = tree.sync_accessibility();
+        let node = find_node(&update, anchor).expect("anchor node present");
+        assert_eq!(
+            node.description(),
+            Some("Save the file"),
+            "the anchor must describe itself with its tooltip text while unshown"
+        );
+    }
+
+    #[test]
+    fn a_shown_tooltip_switches_the_anchor_to_the_described_by_relation() {
+        // Once the content is genuinely in the tree, the richer relation is
+        // used instead of the copied string.
+        let mut tree = WidgetTree::new();
+        let anchor = tree.add(FillWidget::new().label("Save"));
+        let tip = tree.add(FillWidget::new().label("Save the file"));
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+        tree.attach_tooltip(anchor, tip, std::time::Duration::from_millis(100));
+
+        tree.pointer_move(tree.bounds(anchor).center());
+        tree.advance_time(std::time::Duration::from_millis(150));
+        assert_eq!(tree.active_overlays().len(), 1, "tooltip shown");
+
+        let update = tree.sync_accessibility();
+        let node = find_node(&update, anchor).expect("anchor node present");
+        assert!(
+            !node.described_by().is_empty(),
+            "a shown tooltip is wired as a described_by relation"
+        );
     }
 
     // Test 5

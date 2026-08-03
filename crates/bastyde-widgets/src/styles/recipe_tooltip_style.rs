@@ -122,8 +122,15 @@ impl Widget for TooltipFrame {
         let inset_w = pad_h * 2.0;
         let inset_h = pad_v * 2.0;
         if let Some(child_id) = self.child_id {
+            // Cap the content width at the recipe's `max_width` even when the
+            // proposal is unbounded (the overlay measurement pass proposes
+            // `None`), so the body wraps at the token instead of running on.
+            let bounded_w = proposal
+                .width
+                .map(|w| w.min(self.recipe.max_width))
+                .unwrap_or(self.recipe.max_width);
             let inner = SizeProposal {
-                width: proposal.width.map(|w| (w - inset_w).max(0.0)),
+                width: Some((bounded_w - inset_w).max(0.0)),
                 height: proposal.height.map(|h| (h - inset_h).max(0.0)),
             };
             if let Some(child_size) = ctx.child_size(child_id, inner) {

@@ -421,6 +421,13 @@ impl WidgetTree {
             WidgetEvent::PointerDown {
                 position, button, ..
             } => {
+                // The user has acted — a tooltip that has not yet appeared is
+                // now answering a question nobody is asking any more, and one
+                // already up is covering the thing being clicked. Cancel the
+                // pending dwell and retire any shown non-sticky tip, the way
+                // Windows and GTK both do. Runs before hit-testing so it fires
+                // even for a press that lands on nothing.
+                self.tooltip_pointer_press(Some(*position));
                 if let Some(target) = self.hit_test(*position) {
                     if *button == PointerButton::Secondary
                         && self.show_context_menu_for(target, *position, &mut *ops)

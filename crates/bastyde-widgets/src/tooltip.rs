@@ -184,11 +184,16 @@ impl TooltipWidget {
 
 impl Widget for TooltipWidget {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+        // Wrap, don't ellipsize. `single_line()` only truncates against a
+        // *bounded* width, and the overlay measures its content with an
+        // unbounded proposal — so a long body used to render as one endless
+        // line running off the window rather than as the capped, wrapped block
+        // the `TOOLTIP_MAX_WIDTH` token describes. `layout_response` below
+        // supplies the bound; `TextOverflow::Wrap` is the default.
         let text = TextWidget::new(lit!(""))
             .text(self.text.clone())
             .style(TextStyleRole::Small)
-            .color(TextRole::TooltipText)
-            .single_line();
+            .color(TextRole::TooltipText);
         let text_id = ctx.add(text);
 
         let style: SharedTooltipStyle = self
@@ -207,8 +212,18 @@ impl Widget for TooltipWidget {
         proposal: SizeProposal,
         ctx: &LayoutContext,
     ) -> bastyde_core::widget::LayoutResponse {
+        // Clamp the proposal to the tooltip max-width token, mirroring
+        // `RichTooltipWidget::layout_response`. The overlay content pass
+        // measures with `width: None`, so without this the body has no width
+        // to wrap against and the surface stretches to the full length of the
+        // string.
+        let max_w = crate::styles::recipe_tooltip_style::TOOLTIP_MAX_WIDTH;
+        let clamped = SizeProposal {
+            width: Some(proposal.width.map(|w| w.min(max_w)).unwrap_or(max_w)),
+            height: proposal.height,
+        };
         if let Some(root) = self.root_child_id
-            && let Some(size) = ctx.child_size(root, proposal)
+            && let Some(size) = ctx.child_size(root, clamped)
         {
             return size.into();
         }
@@ -239,6 +254,14 @@ impl Widget for TooltipWidget {
     fn children(&self) -> Vec<WidgetId> {
         self.root_child_id.into_iter().collect()
     }
+
+    /// A plain tooltip is entirely its string, so an empty or whitespace-only
+    /// body — an unresolved i18n key, a `Signal<String>` not yet filled in —
+    /// has nothing to show and must not open a blank bubble. Read at show
+    /// time, so a bound tooltip that gains text later shows normally.
+    fn tooltip_has_content(&self) -> bool {
+        !self.text.get().trim().is_empty()
+    }
 }
 
 #[cfg(test)]
@@ -247,6 +270,82 @@ mod tests {
     use bastyde_canvas::SizeProposal;
     use bastyde_core::overlay::{DismissBehavior, OverlayLayer, OverlayPlacement, OverlayRequest};
     use bastyde_core::widget_tree::WidgetTree;
+
+    /// A long single-word-free string that would run far past the cap if the
+    /// body did not wrap.
+    const LONG_BODY: &str = "This tooltip body is deliberately long enough that \
+         it must wrap onto several lines instead of stretching the surface into \
+         one endless ribbon that runs straight off the edge of the window.";
+
+    /// Show a plain tooltip through the real overlay path (attach + hover +
+    /// delay) and return the surface's laid-out bounds. The overlay content
+    /// pass measures with an *unbounded* proposal, which is exactly the
+    /// condition the wrapping fix has to survive — measuring the widget as a
+    /// tree root instead would just hand it the root proposal.
+    fn shown_tooltip_bounds(text: &str) -> bastyde_canvas::Rect {
+        let mut tree = WidgetTree::new()
+            .with_theme(bastyde_core::presets::intui::light())
+            .with_text_backend(std::rc::Rc::new(std::cell::RefCell::new(
+                bastyde_canvas::MockTextBackend::new(),
+            )));
+        let anchor = tree.add(crate::button::Button::new(lit!("Anchor")).tooltip(lit!(text)));
+        tree.layout(SizeProposal::exact(2000.0, 600.0));
+        tree.pointer_move(tree.bounds(anchor).center());
+        tree.advance_time(std::time::Duration::from_secs(1));
+        tree.layout(SizeProposal::exact(2000.0, 600.0));
+        let overlay = *tree
+            .active_overlays()
+            .first()
+            .expect("the tooltip is shown");
+        tree.overlay_content_bounds(overlay)
+            .expect("the shown overlay has content bounds")
+    }
+
+    #[test]
+    fn a_long_plain_tooltip_wraps_at_the_max_width() {
+        // Regression: the body was `single_line()` (ellipsis), which only
+        // truncates against a *bounded* width — and the overlay measures its
+        // content with `width: None`. So a long body rendered as one
+        // unwrapped line running off the window, and TOOLTIP_MAX_WIDTH was
+        // dead code for this tier (RichTooltipWidget clamps; plain did not).
+        let long = shown_tooltip_bounds(LONG_BODY);
+        assert!(
+            long.width <= crate::styles::recipe_tooltip_style::TOOLTIP_MAX_WIDTH + 0.5,
+            "a long tooltip must wrap at TOOLTIP_MAX_WIDTH, got {}",
+            long.width
+        );
+
+        // ...and it wrapped rather than being truncated to one row.
+        let short = shown_tooltip_bounds("short");
+        assert!(
+            long.height > short.height,
+            "the wrapped body must occupy more than one line ({} vs {})",
+            long.height,
+            short.height
+        );
+    }
+
+    #[test]
+    fn an_empty_tooltip_has_no_content_to_show() {
+        // A blank or unresolved string must not pop an empty chromed bubble.
+        assert!(!TooltipWidget::new(lit!("")).tooltip_has_content());
+        assert!(!TooltipWidget::new(lit!("   ")).tooltip_has_content());
+        assert!(TooltipWidget::new(lit!("real")).tooltip_has_content());
+    }
+
+    #[test]
+    fn an_empty_tooltip_never_opens_an_overlay() {
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        let anchor = tree.add(crate::button::Button::new(lit!("Go")).tooltip(lit!("  ")));
+        tree.layout(SizeProposal::exact(400.0, 200.0));
+
+        tree.pointer_move(tree.bounds(anchor).center());
+        tree.advance_time(std::time::Duration::from_secs(1));
+        assert!(
+            tree.active_overlays().is_empty(),
+            "a whitespace-only tooltip must not open an empty bubble"
+        );
+    }
 
     #[test]
     fn tooltip_widget_emits_shadow() {
