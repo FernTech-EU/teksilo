@@ -6,9 +6,9 @@ use bastyde_i18n::lit;
 use std::cell::Cell;
 use std::rc::Rc;
 
-use bastyde_canvas::{Size, SizeProposal};
+use bastyde_canvas::{Point, Size, SizeProposal};
 use bastyde_core::accesskit;
-use bastyde_core::event::{Key, Modifiers};
+use bastyde_core::event::{Key, Modifiers, ScrollDelta, WidgetEvent};
 use bastyde_core::signal::Signal;
 use bastyde_core::widget::{LayoutContext, LayoutResponse, Widget};
 use bastyde_core::widget_id::WidgetId;
@@ -1501,6 +1501,251 @@ fn pinned_tab_renders_in_leading_strip() {
         tree.children(header_row).len(),
         1,
         "only the unpinned tab is in the scroll row"
+    );
+}
+
+// ─── TabBar — scroll the active tab into view ───────────────────────
+//
+// A tab activated by pointer or keyboard is revealed for free: both move
+// focus, and the framework's focus follow walks the clipping ancestors.
+// Selection written *programmatically* moves no focus, so before the
+// reveal plumbing the active tab could sit outside the strip's viewport
+// with nothing to bring it back.
+
+/// The strip's scroll viewport — the `ScrollArea` wrapping the header row.
+fn strip_viewport(tree: &WidgetTree, bar_id: WidgetId) -> WidgetId {
+    let row_outer = bar_content(tree, bar_id);
+    let expand = expand_in_row_outer(tree, row_outer);
+    tree.child_widget(expand, 0)
+}
+
+/// How far the strip is scrolled along `axis`, read off placed geometry
+/// (the content row's origin against the viewport's).
+fn strip_offset(tree: &WidgetTree, bar_id: WidgetId, axis: TabBarOrientation) -> f32 {
+    let viewport = tree.bounds(strip_viewport(tree, bar_id));
+    let row = tree.bounds(data_source_header_row(tree, bar_id));
+    match axis {
+        TabBarOrientation::Horizontal => viewport.x - row.x,
+        TabBarOrientation::Vertical => viewport.y - row.y,
+    }
+}
+
+/// Whether unpinned header `index` sits entirely inside the viewport.
+fn header_fully_visible(tree: &WidgetTree, bar_id: WidgetId, index: usize) -> bool {
+    let viewport = tree.bounds(strip_viewport(tree, bar_id));
+    let header = tree.bounds(tree.children(data_source_header_row(tree, bar_id))[index]);
+    header.x >= viewport.x - 0.5
+        && header.right() <= viewport.right() + 0.5
+        && header.y >= viewport.y - 0.5
+        && header.bottom() <= viewport.bottom() + 0.5
+}
+
+fn many_tabs(count: usize) -> (Vec<TabId>, ListModel<TabHandle>) {
+    let ids: Vec<TabId> = (0..count).map(|_| TabId::fresh()).collect();
+    let model = ListModel::from_vec(
+        ids.iter()
+            .enumerate()
+            .map(|(i, &id)| {
+                TabHandle::dynamic(id, "doc", TabInfo::new().title(label(&format!("T{i}"))), ())
+            })
+            .collect(),
+    );
+    (ids, model)
+}
+
+fn overflowing_bar(model: ListModel<TabHandle>, selected: Signal<Option<TabId>>) -> TabBar<TabHandle> {
+    let delegate =
+        TabDelegate::new(|_, h: &TabHandle| h.info.title.clone().unwrap_or_else(|| label("")));
+    TabBar::horizontal(model, delegate, selected, |_, h: &TabHandle| h.id)
+        .tab_sizing(TabSizing::Shared)
+        .min_tab_width(120.0)
+        .max_tab_width(120.0)
+        .tab_spacing(0.0)
+        .show_scroll_arrows(false)
+        .show_overflow_dropdown(false)
+}
+
+#[test]
+fn programmatic_selection_scrolls_the_active_tab_into_view() {
+    // 20 tabs × 120 dp = 2400 dp of headers in a 480 dp strip: the tail
+    // is well outside the viewport. Selecting it by id — the path an app
+    // takes when it focuses an already-open document — must bring it in.
+    let (ids, model) = many_tabs(20);
+    let selected: Signal<Option<TabId>> = Signal::new(None);
+
+    let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+    let bar_id = tree.add(overflowing_bar(model, selected.clone()));
+    tree.layout(SizeProposal::exact(480.0, 60.0));
+
+    assert!(
+        header_fully_visible(&tree, bar_id, 0),
+        "the first tab starts visible"
+    );
+    assert!(
+        !header_fully_visible(&tree, bar_id, 19),
+        "the last tab starts outside the viewport — otherwise this test proves nothing"
+    );
+
+    selected.set(Some(ids[19]));
+    tree.layout(SizeProposal::exact(480.0, 60.0));
+
+    assert!(
+        header_fully_visible(&tree, bar_id, 19),
+        "activating a tab by id must scroll it into view; strip offset is {}",
+        strip_offset(&tree, bar_id, TabBarOrientation::Horizontal)
+    );
+}
+
+#[test]
+fn reveal_moves_the_minimum_and_leaves_a_visible_tab_alone() {
+    // The `ScrollIntoView` convention: chase only the edge the tab fell
+    // off. A tab already inside the viewport must not recentre the strip.
+    let (ids, model) = many_tabs(20);
+    let selected: Signal<Option<TabId>> = Signal::new(None);
+
+    let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+    let bar_id = tree.add(overflowing_bar(model, selected.clone()));
+    tree.layout(SizeProposal::exact(480.0, 60.0));
+
+    selected.set(Some(ids[19]));
+    tree.layout(SizeProposal::exact(480.0, 60.0));
+    let at_tail = strip_offset(&tree, bar_id, TabBarOrientation::Horizontal);
+    // 2400 dp of content in 480 dp: the trailing edge is 1920 dp in.
+    assert!(
+        (at_tail - 1920.0).abs() < 1.0,
+        "revealing the last tab should land flush with the trailing edge, got {at_tail}"
+    );
+
+    // Tab 18 is already visible (the viewport shows 16..19), so this
+    // must not move the strip at all.
+    selected.set(Some(ids[18]));
+    tree.layout(SizeProposal::exact(480.0, 60.0));
+    assert!(
+        (strip_offset(&tree, bar_id, TabBarOrientation::Horizontal) - at_tail).abs() < 0.5,
+        "revealing an already-visible tab must not scroll"
+    );
+
+    // Tab 15 is one step off the leading edge: chase that edge only.
+    selected.set(Some(ids[15]));
+    tree.layout(SizeProposal::exact(480.0, 60.0));
+    let at_head = strip_offset(&tree, bar_id, TabBarOrientation::Horizontal);
+    assert!(
+        (at_head - 1800.0).abs() < 1.0,
+        "revealing a tab just past the leading edge should align it flush there, got {at_head}"
+    );
+}
+
+#[test]
+fn opening_a_new_tab_reveals_it_on_the_first_layout() {
+    // The app pattern: push the tab, then select it. The bar rebuilds,
+    // so the reveal has to be resolved against the *new* tab order — and
+    // land on the pass that first lays the new header out, or the strip
+    // visibly lurches a frame later.
+    let (ids, model) = many_tabs(20);
+    let selected: Signal<Option<TabId>> = Signal::new(Some(ids[0]));
+
+    let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+    let bar_id = tree.add(overflowing_bar(model.clone(), selected.clone()));
+    tree.layout(SizeProposal::exact(480.0, 60.0));
+
+    let fresh = TabId::fresh();
+    model.push(TabHandle::dynamic(
+        fresh,
+        "doc",
+        TabInfo::new().title(label("New")),
+        (),
+    ));
+    selected.set(Some(fresh));
+    tree.layout(SizeProposal::exact(480.0, 60.0));
+
+    assert!(
+        header_fully_visible(&tree, bar_id, 20),
+        "a newly opened tab must be visible as soon as it is laid out; strip offset is {}",
+        strip_offset(&tree, bar_id, TabBarOrientation::Horizontal)
+    );
+}
+
+#[test]
+fn an_unrelated_rebuild_does_not_yank_the_strip_back() {
+    // The reveal is edge-triggered on the selection, not an invariant
+    // re-asserted every pass. Once the user has scrolled away from the
+    // active tab by hand, a rebuild for some other reason — a retitled
+    // tab, a locale flip, a tab opened elsewhere in the strip — must
+    // leave the viewport where they put it.
+    let (ids, model) = many_tabs(20);
+    let selected: Signal<Option<TabId>> = Signal::new(None);
+
+    let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+    let bar_id = tree.add(overflowing_bar(model.clone(), selected.clone()));
+    tree.layout(SizeProposal::exact(480.0, 60.0));
+
+    selected.set(Some(ids[19]));
+    tree.layout(SizeProposal::exact(480.0, 60.0));
+    assert!(header_fully_visible(&tree, bar_id, 19));
+
+    // Scroll back to the head by hand. The bar remaps a vertical wheel
+    // onto its horizontal axis, so a negative delta walks left.
+    tree.pointer_move(Point::new(240.0, 20.0));
+    tree.dispatch_event(WidgetEvent::Scroll {
+        delta: ScrollDelta::Pixels {
+            x: 0.0,
+            y: -5000.0,
+        },
+        modifiers: Modifiers::default(),
+    });
+    tree.layout(SizeProposal::exact(480.0, 60.0));
+    let by_hand = strip_offset(&tree, bar_id, TabBarOrientation::Horizontal);
+    assert!(
+        by_hand.abs() < 0.5,
+        "the wheel should have walked the strip back to the head, got {by_hand}"
+    );
+
+    // A rebuild that does not touch the selection.
+    model.push(TabHandle::dynamic(
+        TabId::fresh(),
+        "doc",
+        TabInfo::new().title(label("Elsewhere")),
+        (),
+    ));
+    tree.layout(SizeProposal::exact(480.0, 60.0));
+
+    assert!(
+        strip_offset(&tree, bar_id, TabBarOrientation::Horizontal).abs() < 0.5,
+        "an unrelated rebuild must not re-reveal the active tab"
+    );
+}
+
+#[test]
+fn a_vertical_bar_reveals_its_active_tab_too() {
+    // A vertical bar's content is measured with `height: None`, so the
+    // row cannot recover the viewport extent from its size proposal and
+    // reads the area's last-placed viewport instead.
+    let (ids, model) = many_tabs(20);
+    let selected: Signal<Option<TabId>> = Signal::new(None);
+    let delegate =
+        TabDelegate::new(|_, h: &TabHandle| h.info.title.clone().unwrap_or_else(|| label("")));
+
+    let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+    let bar_id = tree.add(
+        TabBar::vertical(model, delegate, selected.clone(), |_, h: &TabHandle| h.id)
+            .tab_spacing(0.0)
+            .show_scroll_arrows(false)
+            .show_overflow_dropdown(false),
+    );
+    tree.layout(SizeProposal::exact(200.0, 200.0));
+
+    assert!(
+        !header_fully_visible(&tree, bar_id, 19),
+        "the last pill starts outside the 200 dp column"
+    );
+
+    selected.set(Some(ids[19]));
+    tree.layout(SizeProposal::exact(200.0, 200.0));
+
+    assert!(
+        header_fully_visible(&tree, bar_id, 19),
+        "a vertical bar must reveal its active pill too; strip offset is {}",
+        strip_offset(&tree, bar_id, TabBarOrientation::Vertical)
     );
 }
 

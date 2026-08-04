@@ -410,6 +410,19 @@ impl ScrollArea {
         &self.max_scroll_x
     }
 
+    /// The viewport size this area last placed its content into, shared
+    /// live (an `Rc<Cell<_>>`, not a snapshot).
+    ///
+    /// Deliberately not public: it reports the *previous* layout pass, so
+    /// it is only sound for a widget that also knows when that pass is
+    /// still current. `TabBar` reads it to resolve the axis its own
+    /// measurement leaves unbounded — a vertical bar's content is
+    /// measured with `height: None`, so the row cannot recover the
+    /// viewport height from its size proposal.
+    pub(crate) fn viewport_size_cell(&self) -> Rc<Cell<Size>> {
+        self.viewport_size.clone()
+    }
+
     fn clamp_and_set_scroll(&self) {
         let max_y = self.max_scroll_y.get();
         let max_x = self.max_scroll_x.get();

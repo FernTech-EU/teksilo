@@ -30,6 +30,23 @@ tabs follow. Selection is by stable `TabId` — drag-reorder and
 model mutations never silently send the active selection to a
 different tab.
 
+## Activating a tab scrolls it into view
+
+When more tabs are open than the strip can show, activating one
+always reveals it — including when the activation is programmatic
+(writing the selection signal, the "show all tabs" overflow
+dropdown, an assistive-technology click). Pointer and keyboard
+activation move focus and would be revealed by the framework's focus
+follow anyway; the other paths move no focus, so the bar scrolls the
+header in itself, by the minimum needed to bring it fully inside the
+viewport.
+
+The reveal is edge-triggered on the selection changing, not an
+invariant re-asserted every layout pass: once the reader has scrolled
+away from the active tab by hand, a rebuild for an unrelated reason —
+a retitled tab, a locale change, a tab opened elsewhere in the strip —
+leaves the viewport where they left it.
+
 ## Accessibility
 
 Both `TabWidget` and `TabBar` emit `Role::TabList` on the bar

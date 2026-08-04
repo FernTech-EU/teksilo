@@ -7,10 +7,11 @@
 //! sizing. Bar-leading and bar-trailing slots are wired. Overflow is
 //! handled by a `ScrollArea` around the headers row, plus optional
 //! scroll arrows and a "show all tabs" overflow dropdown (both on by
-//! default). Closable tabs (with middle-click close), drag-to-reorder
-//! with edge auto-scroll, and a leading icon-only pinned-tab strip are
-//! all supported. Multi-line (multi-row) wrapping is the one layout
-//! mode not yet implemented.
+//! default); whichever tab is activated is scrolled back into view (see
+//! [`RevealState`]). Closable tabs (with middle-click close),
+//! drag-to-reorder with edge auto-scroll, and a leading icon-only
+//! pinned-tab strip are all supported. Multi-line (multi-row) wrapping
+//! is the one layout mode not yet implemented.
 //!
 //! The data source is consumed via the `pub(crate)` [`ListSource`]
 //! abstraction so callers can pass either a `ListModel<T>` (clonable,
@@ -286,6 +287,12 @@ pub struct TabBar<T: 'static> {
     /// at build time and into the bar's paint via `paint_state`.
     paint_state: PaintState,
 
+    /// "Scroll the active tab into view" plumbing, shared with the
+    /// header row. Lives on the bar (not on the row, which is rebuilt
+    /// from scratch every pass) so `revealed` remembers across rebuilds
+    /// what the strip was last scrolled to.
+    reveal: RevealState,
+
     root_child_id: Option<WidgetId>,
 
     /// Direct widget-id handles to the bar's natural-width
@@ -337,6 +344,89 @@ impl std::fmt::Debug for PaintState {
         f.debug_struct("PaintState")
             .field("drop_indicator_x", &self.drop_indicator_x.get())
             .field("last_bar_bounds", &self.last_bar_bounds.get())
+            .finish()
+    }
+}
+
+/// Below this many logical pixels a reveal is not worth a scroll write —
+/// the tab is already flush with the edge it was chasing.
+const REVEAL_EPSILON: f32 = 0.5;
+
+/// The enclosing `ScrollArea`'s handles, resolved once it exists.
+///
+/// The area is built *from* the header row's id, so the row cannot be
+/// handed these at construction — [`RevealState::area`] is filled in
+/// immediately afterwards, which is still long before any layout runs.
+#[derive(Clone)]
+struct RevealArea {
+    /// Offset along the bar's layout axis: `scroll_x` for a horizontal
+    /// bar, `scroll_y` for a vertical one.
+    scroll_main: Signal<f32>,
+    /// The viewport the area last placed its content into.
+    viewport: Rc<std::cell::Cell<Size>>,
+}
+
+/// "Scroll the active tab back into view", as an edge-triggered request
+/// shared between the bar and its header row.
+///
+/// A tab activated by pointer or keyboard is revealed for free: both move
+/// focus, and the framework's focus follow dispatches `ScrollIntoView` up
+/// the ancestor chain. Selection written *programmatically* — an app
+/// setting `selected_id`, the overflow dropdown, the AT click path — moves
+/// no focus, so without this the active tab can sit outside the strip's
+/// viewport indefinitely.
+///
+/// The bar arms; [`TabHeaderRow`] consumes, because that is where the
+/// per-tab extents live.
+#[derive(Clone)]
+struct RevealState {
+    /// Position of the tab to reveal **in unpinned-header space** (the
+    /// space the row's extents are indexed by), or `None` when nothing is
+    /// pending. Taken by the row's next real measurement.
+    pending: Rc<std::cell::Cell<Option<usize>>>,
+    /// Bumped on every arm, and bound to the header row at
+    /// [`BindingLevel::Relayout`] so arming schedules the layout pass
+    /// that consumes it. Without it, a selection change that resizes
+    /// nothing would only repaint and the request would sit unread until
+    /// some unrelated relayout happened by.
+    generation: Signal<u64>,
+    /// The tab the strip was last scrolled to. Guards the build-time arm:
+    /// a rebuild for an unrelated reason — a locale flip, a retitled tab,
+    /// a tab added elsewhere in the strip — must not yank the viewport
+    /// back to the active tab after the user scrolled away from it by
+    /// hand.
+    revealed: Rc<std::cell::Cell<Option<TabId>>>,
+    /// Set once the enclosing `ScrollArea` is built. See [`RevealArea`].
+    area: Rc<RefCell<Option<RevealArea>>>,
+}
+
+impl Default for RevealState {
+    fn default() -> Self {
+        Self {
+            pending: Rc::new(std::cell::Cell::new(None)),
+            generation: Signal::new(0),
+            revealed: Rc::new(std::cell::Cell::new(None)),
+            area: Rc::new(RefCell::new(None)),
+        }
+    }
+}
+
+impl RevealState {
+    /// Request that unpinned header `position` be scrolled into view on
+    /// the next layout pass, and schedule that pass.
+    fn arm(&self, position: usize) {
+        self.pending.set(Some(position));
+        self.generation.set(self.generation.get().wrapping_add(1));
+    }
+}
+
+impl std::fmt::Debug for RevealState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RevealState")
+            .field("pending", &self.pending.get())
+            .field("generation", &self.generation.get())
+            .field("revealed", &self.revealed.get())
+            .field("area", &self.area.borrow().is_some())
             .finish()
     }
 }
@@ -481,6 +571,7 @@ impl<T: 'static> TabBar<T> {
             panel_ids_buffer: None,
             header_ids_buffer: None,
             paint_state: PaintState::default(),
+            reveal: RevealState::default(),
             root_child_id: None,
             header_row_id: None,
             pinned_strip_id: None,
@@ -1371,6 +1462,58 @@ impl<T: 'static> Widget for TabBar<T> {
         let unpinned_to_model = Rc::new(unpinned_to_model);
         let model_len = n;
 
+        // ── Scroll-the-active-tab-into-view ───────────────────────────
+        //
+        // Model index → position in the *unpinned* row, which is the
+        // space `TabHeaderRow`'s extents are indexed by. A pinned tab
+        // maps to `None`: it lives in the leading strip, which never
+        // scrolls, so it is visible by construction.
+        let mut model_to_unpinned: Vec<Option<usize>> = vec![None; n];
+        for (position, &model_index) in unpinned_to_model.iter().enumerate() {
+            model_to_unpinned[model_index] = Some(position);
+        }
+        let model_to_unpinned = Rc::new(model_to_unpinned);
+
+        // Arm on the way out of a build. Two things reach this point: a
+        // selection that changed while the bar was rebuilding anyway (a
+        // tab was opened, or closed and its neighbour promoted), and a
+        // request armed by the effect below just before the rebuild —
+        // whose position was resolved against the *old* tab order, so it
+        // is re-resolved here against the new one.
+        let selected_target = self.selected_id.get();
+        if selected_target.is_some()
+            && (self.reveal.revealed.get() != selected_target || self.reveal.pending.get().is_some())
+        {
+            self.reveal.revealed.set(selected_target);
+            match model_to_unpinned.get(self.selected.get()).copied().flatten() {
+                Some(position) => self.reveal.arm(position),
+                None => self.reveal.pending.set(None),
+            }
+        }
+
+        // Steady state: selection written from outside (an app setting
+        // `selected_id`, the overflow dropdown below, the AT click path)
+        // moves the index without rebuilding the bar, so the arm above
+        // never runs. Neither does the framework's focus follow, which is
+        // what reveals a pointer- or keyboard-activated tab for free.
+        // This is the case the bar used to have no answer for.
+        {
+            let reveal = self.reveal.clone();
+            let positions = model_to_unpinned.clone();
+            let ids = index_to_id.clone();
+            ctx.effect(&self.selected, move |index| {
+                let target = ids.get(*index).copied();
+                if target.is_none() || reveal.revealed.get() == target {
+                    return;
+                }
+                reveal.revealed.set(target);
+                match positions.get(*index).copied().flatten() {
+                    Some(position) => reveal.arm(position),
+                    None => reveal.pending.set(None),
+                }
+            });
+        }
+
         // ScrollArea wants a fixed `preferred_size.height` so the
         // viewport doesn't get squashed by the focus-ring envelope
         // headers reserve. Snapshot the theme values up front — we
@@ -1420,6 +1563,7 @@ impl<T: 'static> Widget for TabBar<T> {
             row_bounds_buf: row_bounds_buf.clone(),
             divider: divider_prop.clone().map(|c| (c, self.spacing)),
             overlay_id: None,
+            reveal: self.reveal.clone(),
         };
         let row_id = ctx.add(row);
         self.header_row_id = Some(row_id);
@@ -1445,6 +1589,7 @@ impl<T: 'static> Widget for TabBar<T> {
         let max_scroll_x = scroll.max_scroll_x_signal().clone();
         let scroll_y = scroll.scroll_y_signal().clone();
         let max_scroll_y = scroll.max_scroll_y_signal().clone();
+        let scroll_viewport = scroll.viewport_size_cell();
         let scroll_id = ctx.add(scroll);
 
         // Wrap the scroll area in a stack so the bar slots have a
@@ -1461,6 +1606,13 @@ impl<T: 'static> Widget for TabBar<T> {
             TabBarOrientation::Horizontal => max_scroll_x.clone(),
             TabBarOrientation::Vertical => max_scroll_y.clone(),
         };
+        // Hand the header row the two things it can only get from the
+        // area — which is built *from* the row's id, so this is the
+        // earliest it can be done. Still long before any layout runs.
+        *self.reveal.area.borrow_mut() = Some(RevealArea {
+            scroll_main: scroll_main.clone(),
+            viewport: scroll_viewport,
+        });
         // Accumulate the outer-stack children into a Vec, then
         // construct the actual HStack / VStack at the end based on
         // orientation. Keeps the body axis-agnostic.
@@ -2074,6 +2226,9 @@ struct TabHeaderRow {
     /// The appended divider-overlay child id, set in `build` when
     /// `divider` is `Some`. Kept so `children()` reports it too.
     overlay_id: Option<WidgetId>,
+    /// Shared "scroll the active tab into view" request. Armed by the
+    /// bar, consumed here — see [`Self::apply_pending_reveal`].
+    reveal: RevealState,
 }
 
 impl TabHeaderRow {
@@ -2158,6 +2313,65 @@ impl TabHeaderRow {
 }
 
 impl TabHeaderRow {
+    /// Consume a pending "scroll the active tab into view" request,
+    /// given this pass's per-tab extents and the viewport's extent along
+    /// the layout axis.
+    ///
+    /// Called from `layout_response`, deliberately, and not from
+    /// `place_children`: the enclosing `ScrollArea` measures its content
+    /// (this row) *before* it clamps and reads `scroll_x` to position
+    /// that content, so an offset written here lands in the very same
+    /// layout pass. Written from `place_children` — which runs after the
+    /// area has already placed the row — it would be a frame late, and
+    /// the strip would visibly lurch one frame after the tab activated.
+    ///
+    /// The move is minimal, matching the `ScrollIntoView` convention:
+    /// only the edge the tab fell off is chased, so revealing a tab
+    /// that is already visible is a no-op rather than a recentring.
+    fn apply_pending_reveal(&self, extents: &[f32], viewport_main: f32) {
+        // Not yet measurable — keep the request rather than resolve it
+        // against a viewport we don't have.
+        if viewport_main <= 0.0 {
+            return;
+        }
+        let Some(target) = self.reveal.pending.get() else {
+            return;
+        };
+        let Some(&extent) = extents.get(target) else {
+            // The row no longer has that header — it was closed or
+            // pinned between the arm and this pass. Drop the request
+            // rather than scroll to whatever now sits at that position.
+            self.reveal.pending.set(None);
+            return;
+        };
+        let area_guard = self.reveal.area.borrow();
+        let Some(area) = area_guard.as_ref() else {
+            return;
+        };
+        self.reveal.pending.set(None);
+
+        let content =
+            extents.iter().sum::<f32>() + self.spacing * extents.len().saturating_sub(1) as f32;
+        let max_scroll = (content - viewport_main).max(0.0);
+        if max_scroll <= 0.0 {
+            // Everything fits; there is nothing to reveal.
+            return;
+        }
+        let lead = extents[..target].iter().sum::<f32>() + self.spacing * target as f32;
+        let current = area.scroll_main.get();
+        let next = if lead < current {
+            lead
+        } else if lead + extent > current + viewport_main {
+            lead + extent - viewport_main
+        } else {
+            current
+        }
+        .clamp(0.0, max_scroll);
+        if (next - current).abs() > REVEAL_EPSILON {
+            area.scroll_main.set(next);
+        }
+    }
+
     /// The full child list: the pre-registered headers plus the optional
     /// divider overlay appended last.
     fn child_ids(&self) -> Vec<WidgetId> {
@@ -2169,6 +2383,14 @@ impl TabHeaderRow {
 
 impl Widget for TabHeaderRow {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+        // Arming a reveal has to schedule the layout pass that consumes
+        // it: activating a tab changes no size, so on its own it would
+        // only repaint and the request would sit unread.
+        self.reveal.generation.bind_to(
+            ctx.self_id(),
+            ctx.binding_registry(),
+            BindingLevel::Relayout,
+        );
         // Headers are pre-registered with the bar's BuildContext; the row
         // just exposes them. When dividers are on, append a single overlay
         // leaf (last child → painted on top of the headers) that reads the
@@ -2208,6 +2430,16 @@ impl Widget for TabHeaderRow {
                     .unwrap_or(intrinsic);
                 let extents = self.compute_extents(proposal.width, ctx);
                 let total = extents.iter().sum::<f32>() + total_spacing;
+                // Resolve any pending reveal now that both halves of the
+                // arithmetic are known. Only against a real width
+                // proposal: an unbounded probe (the vertical bar's
+                // natural-size measurement, a11y sizing) makes
+                // `compute_extents` fall back to `min_extent` for every
+                // tab, which would place the target at the wrong offset.
+                // The area's own measurement always supplies a width.
+                if let Some(viewport_main) = proposal.width {
+                    self.apply_pending_reveal(&extents, viewport_main);
+                }
                 Size::new(total, height).into()
             }
             TabBarOrientation::Vertical => {
@@ -2238,6 +2470,21 @@ impl Widget for TabHeaderRow {
                 };
                 let extents = self.compute_extents(proposal.height, ctx);
                 let total = extents.iter().sum::<f32>() + total_spacing;
+                // Vertical extents are the intrinsic per-tab height and
+                // don't depend on the proposal (see `compute_extents`),
+                // so a probe can't skew them — but the viewport height
+                // *is* missing here: the `ScrollArea` measures its
+                // content with `height: None`. Read the viewport it last
+                // placed instead; it only goes stale on the frame the
+                // bar is resized, which is not a frame a reveal is in
+                // flight on.
+                let viewport_main = self
+                    .reveal
+                    .area
+                    .borrow()
+                    .as_ref()
+                    .map_or(0.0, |a| a.viewport.get().height);
+                self.apply_pending_reveal(&extents, viewport_main);
                 Size::new(width, total).into()
             }
         }
