@@ -1029,6 +1029,19 @@ impl Widget for TextInputField {
             let interaction = self.interaction.clone();
             ctx.effect(&activation, move |&active| {
                 if active {
+                    // **Re-activated** — re-arm the frame loop. The dormant branch
+                    // below does not re-arm `frame_request` (a parked surface has
+                    // nothing to paint) and the frame-tick effect is skipped
+                    // entirely while dormant, so nothing restarts the tick on the
+                    // way back. Same defect and same fix as `RichTextEditor` /
+                    // `CodeEditor`: the in-tree modal path builds content, parks it
+                    // dormant, mounts it, activates it and *then* moves focus in
+                    // (`present_in_tree_modal_request`), so without this a field in
+                    // a dialog draws no caret at all.
+                    let st = state.borrow();
+                    if let Some(handle) = &st.frame_request {
+                        handle.set(true);
+                    }
                     return;
                 }
                 let mut st = state.borrow_mut();

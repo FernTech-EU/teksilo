@@ -228,6 +228,16 @@ impl Widget for LogView {
             let state = self.state.clone();
             ctx.effect(&activation, move |&active| {
                 if active {
+                    // **Re-activated** — re-arm the frame loop. The dormant branch
+                    // below does not re-arm `frame_request` and the frame-tick
+                    // effect (the streaming step: drain, evict, window, follow) is
+                    // skipped entirely while dormant, so without this a log pane
+                    // that is hidden and shown again never resumes streaming. Same
+                    // defect and same fix as the editors.
+                    let st = state.borrow();
+                    if let Some(handle) = &st.frame_request {
+                        handle.set(true);
+                    }
                     return;
                 }
                 let mut st = state.borrow_mut();

@@ -4336,6 +4336,198 @@ mod tests {
         assert_eq!(tree.focused(), Some(continue_button));
     }
 
+    /// **A modal whose content is a text editor opens with the caret in it.**
+    ///
+    /// The editors are the one focusable widget family that carries no label,
+    /// so `first_focusable_descendant` is the only thing that can find them —
+    /// and a modal that fails to focus one opens with no caret at all, which
+    /// reads as a broken surface rather than an unfocused one.
+    #[test]
+    fn present_in_tree_modal_focuses_a_rich_text_editor() {
+        use bastyde_widgets::rich_text::RichTextEditor;
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        let source = tree.add(Button::new(lit!("Trigger")));
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+        tree.focus(source);
+
+        let doc = bastyde_text::text_document::TextDocument::new();
+        doc.set_plain_text("hello").unwrap();
+        present_in_tree_modal_request(
+            &mut tree,
+            source,
+            ModalRequest::deferred(move |tree| {
+                tree.add(ModalContainer::new(RichTextEditor::editor(doc)))
+            })
+            .presentation(ModalPresentation::InTree),
+        );
+
+        let focused = tree.focused().expect("the modal moved focus into itself");
+        assert_ne!(
+            focused, source,
+            "focus must leave the trigger and land inside the modal"
+        );
+        let name = tree.widget_type_name(focused).unwrap_or("<none>");
+        assert!(
+            name.contains("RichTextEditor"),
+            "focus landed on {name}, not the editor — the modal opens caretless"
+        );
+    }
+
+    /// **A modal that opens over a text editor shows its caret.**
+    ///
+    /// Focus landing on the editor is not enough: the caret is gated on the
+    /// editor's *own* `has_focus`, and `present_in_tree_modal_request` parks
+    /// the content dormant and re-activates it in the same batch, before
+    /// moving focus in. Those two activation edges used to be replayed in
+    /// order *after* the focus dispatch, so the superseded `false` arrived
+    /// last and the editor's dormancy handler wiped the focus it had just
+    /// been granted — the dialog opened with the text visible and no caret,
+    /// which reads as a dead surface rather than an unfocused one.
+    ///
+    /// Asserted on the painted frame rather than on any internal flag,
+    /// because the caret is the whole point: a thin, full-line-height rect
+    /// in the theme's `editor_caret` colour, at the editor's origin.
+    #[test]
+    fn present_in_tree_modal_paints_the_editor_caret() {
+        use bastyde_widgets::rich_text::RichTextEditor;
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        let source = tree.add(Button::new(lit!("Trigger")));
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+        tree.focus(source);
+
+        let doc = bastyde_text::text_document::TextDocument::new();
+        doc.set_plain_text("hello").unwrap();
+        present_in_tree_modal_request(
+            &mut tree,
+            source,
+            ModalRequest::deferred(move |tree| {
+                tree.add(ModalContainer::new(RichTextEditor::editor(doc)))
+            })
+            .presentation(ModalPresentation::InTree),
+        );
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+
+        let editor = tree.focused().expect("the modal moved focus into itself");
+        let editor_bounds = tree.bounds(editor);
+        let frame = tree.render();
+
+        // The caret is emitted through `Canvas::fill_rect`, which lands in the
+        // frame as a `WidgetBackground` decoration — so identify it by shape
+        // and colour rather than by kind.
+        let caret_color = bastyde_core::presets::intui::light()
+            .colors
+            .editor_caret
+            .to_array();
+        let caret = frame.decorations.iter().find(|d| {
+            d.color == caret_color && d.rect[2] > 0.0 && d.rect[2] <= 4.0 && d.rect[3] > 4.0
+        });
+        let caret = caret.unwrap_or_else(|| {
+            panic!(
+                "the modal painted no caret — {} glyphs and {} decorations, none caret-shaped: {:?}",
+                frame.glyphs.len(),
+                frame.decorations.len(),
+                frame.decorations,
+            )
+        });
+
+        // ...and it sits inside the editor, not stranded at the viewport origin.
+        assert!(
+            caret.rect[0] >= editor_bounds.x
+                && caret.rect[0] <= editor_bounds.x + editor_bounds.width
+                && caret.rect[1] >= editor_bounds.y
+                && caret.rect[1] <= editor_bounds.y + editor_bounds.height,
+            "caret at {:?} must fall inside the editor's bounds {editor_bounds:?}",
+            caret.rect,
+        );
+    }
+
+    /// Same, but with the editor buried under the chrome a real dialog wraps it
+    /// in — a titled panel, a column, a fixed-size box, padding. The walk has to
+    /// reach through all of it.
+    #[test]
+    fn present_in_tree_modal_focuses_an_editor_under_chrome() {
+        use bastyde_widgets::rich_text::RichTextEditor;
+        use bastyde_widgets::{Divider, FixedSize, Padding, Panel, TextWidget, VStack};
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        let source = tree.add(Button::new(lit!("Trigger")));
+        tree.layout(SizeProposal::exact(900.0, 700.0));
+        tree.focus(source);
+
+        let doc = bastyde_text::text_document::TextDocument::new();
+        doc.set_plain_text("hello").unwrap();
+        present_in_tree_modal_request(
+            &mut tree,
+            source,
+            ModalRequest::deferred(move |tree| {
+                tree.add(ModalContainer::new(
+                    Panel::new().corner_radius(10.0).padding(0.0).child(
+                        VStack::new()
+                            .spacing(0.0)
+                            .child(
+                                Padding::symmetric(8.0, 14.0)
+                                    .child(TextWidget::new(lit!("Synopsis"))),
+                            )
+                            .child(Divider::new())
+                            .child(
+                                FixedSize::new().width(600.0).height(400.0).child(
+                                    Padding::uniform(16.0).child(RichTextEditor::editor(doc)),
+                                ),
+                            ),
+                    ),
+                ))
+            })
+            .presentation(ModalPresentation::InTree),
+        );
+
+        let focused = tree.focused().expect("the modal moved focus into itself");
+        let name = tree.widget_type_name(focused).unwrap_or("<none>");
+        assert!(
+            name.contains("RichTextEditor"),
+            "focus landed on {name}, not the editor — chrome between the modal root \
+             and the editor is hiding it from the focus walk"
+        );
+    }
+
+    /// And with **no `ModalContainer`** — the shape an app takes when its dialog
+    /// owns its own chrome (Skribisto's synopsis / picker panels do). The focus
+    /// walk starts at whatever the deferred builder returned.
+    #[test]
+    fn present_in_tree_modal_focuses_an_editor_without_a_modal_container() {
+        use bastyde_widgets::rich_text::RichTextEditor;
+        use bastyde_widgets::{FixedSize, Padding, Panel, VStack};
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        let source = tree.add(Button::new(lit!("Trigger")));
+        tree.layout(SizeProposal::exact(900.0, 700.0));
+        tree.focus(source);
+
+        let doc = bastyde_text::text_document::TextDocument::new();
+        doc.set_plain_text("hello").unwrap();
+        present_in_tree_modal_request(
+            &mut tree,
+            source,
+            ModalRequest::deferred(move |tree| {
+                tree.add(
+                    Panel::new().corner_radius(10.0).padding(0.0).child(
+                        VStack::new().spacing(0.0).child(
+                            FixedSize::new()
+                                .width(600.0)
+                                .height(400.0)
+                                .child(Padding::uniform(16.0).child(RichTextEditor::editor(doc))),
+                        ),
+                    ),
+                )
+            })
+            .presentation(ModalPresentation::InTree),
+        );
+
+        let focused = tree.focused().expect("the modal moved focus into itself");
+        let name = tree.widget_type_name(focused).unwrap_or("<none>");
+        assert!(
+            name.contains("RichTextEditor"),
+            "focus landed on {name}, not the editor"
+        );
+    }
+
     #[test]
     fn present_in_tree_modal_restores_focus_to_trigger_on_dismiss() {
         // Regression: tabbing to a trigger, opening a modal, then

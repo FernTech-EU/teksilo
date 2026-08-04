@@ -94,6 +94,21 @@ impl WidgetTree {
         });
     }
 
+    /// The draggable ancestors armed by the current pointer press — the
+    /// observable state of the cross-widget tap-vs-drag disambiguation (see
+    /// `arm_drag_observers`).
+    ///
+    /// Empty when the press landed inside a
+    /// [`gesture_dead_zone`](crate::arena::WidgetNode::gesture_dead_zone), or when
+    /// the pressed widget carries its own drag (the innermost drag owns the
+    /// gesture). Exposed so an **app** built on bastyde can assert the same thing
+    /// this crate's own `gesture_dead_zone_blocks_ancestor_drag_arming` asserts —
+    /// that a press on an interactive control inside a draggable container cannot
+    /// start the container's drag. Read-only; test support.
+    pub fn armed_drag_observers(&self) -> &[WidgetId] {
+        &self.drag_observers
+    }
+
     /// Get bounds of a child by index.
     pub fn child_bounds(&self, parent: WidgetId, index: usize) -> Rect {
         let children = self.children(parent);

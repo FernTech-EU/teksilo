@@ -892,6 +892,46 @@ fn selection_color_desaturates_when_window_inactive() {
 }
 
 #[test]
+fn a_reactivated_editor_re_arms_its_frame_loop() {
+    // Regression: an editor that goes dormant and comes back must restart its
+    // frame tick. The dormant branch of the activation effect deliberately does
+    // not re-arm `frame_request` (a parked editor has nothing to paint) and the
+    // tick effect is skipped entirely while dormant — so without an explicit
+    // re-arm on the way back, the editor paints once and then goes quiet.
+    //
+    // The caret is what makes that visible: `on_focus` restarts the blink, but
+    // only the tick pushes the cursor through to the engine, so a re-activated
+    // editor that is then focused draws no caret at all. The in-tree modal path
+    // takes exactly this route on every open — build, `set_dormant`, mount,
+    // `activate`, then focus.
+    let doc = TextDocument::new();
+    doc.set_plain_text("hello").unwrap();
+    let editor = RichTextEditor::editor(doc);
+    let state = editor.state_handle();
+
+    let mut tree = WidgetTree::new();
+    let id = tree.add(editor);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    let _ = tree.render();
+
+    // Park it, then bring it back — the modal presenter's exact sequence.
+    tree.set_dormant(id);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    // Clear whatever the parking left armed, so the assertion below can only be
+    // satisfied by the re-activation itself.
+    state.borrow().frame_request.as_ref().unwrap().set(false);
+
+    tree.activate(id);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+
+    assert!(
+        state.borrow().frame_request.as_ref().unwrap().get(),
+        "a re-activated editor must re-arm its frame loop, or its caret never \
+         blinks again and a modal opens caretless"
+    );
+}
+
+#[test]
 fn custom_selection_color_is_not_desaturated_when_inactive() {
     use bastyde_tokens::Color;
     let custom = Color::from_hex("#FF00FF");

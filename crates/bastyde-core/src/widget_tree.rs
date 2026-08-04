@@ -3030,10 +3030,40 @@ impl WidgetTree {
     /// matching the `focus_within` / `hover_within` update discipline.
     pub(crate) fn flush_activation_signals(&mut self) {
         let changes = self.arena.take_activation_changes();
-        for (id, active) in changes {
-            // Re-read the signal at flush time; the node still exists (the
-            // transition was recorded in the same synchronous operation).
-            if let Some(sig) = self.arena.get(id).and_then(|n| n.activation_signal.clone()) {
+        for (id, _recorded) in changes {
+            // Re-read the node at flush time; it still exists (the transition
+            // was recorded in the same synchronous operation).
+            let Some(node) = self.arena.get(id) else {
+                continue;
+            };
+            let Some(sig) = node.activation_signal.clone() else {
+                continue;
+            };
+            // Fire the node's **current** state, not the value recorded at the
+            // transition, and only when it differs from what observers last
+            // saw. `pending_activation_changes` is an append-only queue: a
+            // node parked and re-activated inside one batch records both
+            // edges, and replaying them in order hands observers a `false`
+            // that was never observable — the node is already Active by the
+            // time anyone is told anything.
+            //
+            // The in-tree modal path does exactly that on every open: build
+            // the content, `set_dormant` it, mount the scrim, `activate` it,
+            // then move focus in. Both edges land in one batch and flush
+            // *after* the focus dispatch, so the stale `false` arrives last
+            // and observers act on a state that has already been superseded.
+            // For a text editor that meant its dormancy handler wiped the
+            // `has_focus` it had just been granted, and the dialog opened with
+            // no caret; a `WebView` would have taken a real `set_visible(false)`
+            // OS call for a subview that never left the screen.
+            //
+            // Collapsing to the final state also makes the flush idempotent
+            // over duplicate ids: the first iteration syncs the signal, the
+            // rest find it already equal and skip. `Signal::set` notifies
+            // unconditionally, so the equality guard is what stops the
+            // redundant fanout.
+            let active = node.activation == crate::arena::ActivationState::Active;
+            if sig.get() != active {
                 sig.set(active);
             }
         }
@@ -3488,6 +3518,51 @@ mod activation_signal_tests {
         assert_eq!(log.get(), vec![false, true]);
 
         // Redundant relayout while active fires nothing new.
+        tree.layout(SizeProposal::exact(100.0, 100.0));
+        assert_eq!(log.get(), vec![false, true]);
+    }
+
+    /// **A node parked and re-woken before the flush never looks dormant.**
+    ///
+    /// `pending_activation_changes` is an append-only queue, so this records
+    /// two edges; replaying them in order would hand observers a `false` that
+    /// was already superseded — for a state signal that is a lie, not a
+    /// history. `present_in_tree_modal_request` takes exactly this route on
+    /// every dialog (build the content, park it, mount the scrim, wake it,
+    /// *then* move focus in), and the stale `false` landed after the focus
+    /// dispatch: a text editor's dormancy handler wiped the focus it had just
+    /// been granted and the dialog opened with no caret.
+    #[test]
+    fn a_park_and_wake_inside_one_batch_fires_nothing() {
+        let mut tree = WidgetTree::new();
+        let log = Signal::new(Vec::<bool>::new());
+        let probe = tree.add(ActivationProbe { log: log.clone() });
+        tree.layout(SizeProposal::exact(100.0, 100.0));
+        assert_eq!(log.get(), Vec::<bool>::new());
+
+        tree.set_dormant(probe);
+        tree.activate(probe);
+        tree.layout(SizeProposal::exact(100.0, 100.0));
+        assert_eq!(
+            log.get(),
+            Vec::<bool>::new(),
+            "a node that ends the batch where it started never observably \
+             changed — firing the intermediate `false` makes observers act on \
+             a state that was never visible",
+        );
+
+        // The converse still reports: a batch with a *net* transition fires
+        // once, with the state the node actually ended in.
+        tree.activate(probe);
+        tree.set_dormant(probe);
+        tree.layout(SizeProposal::exact(100.0, 100.0));
+        assert_eq!(
+            log.get(),
+            vec![false],
+            "a net Active→Dormant batch must still report, exactly once",
+        );
+
+        tree.activate(probe);
         tree.layout(SizeProposal::exact(100.0, 100.0));
         assert_eq!(log.get(), vec![false, true]);
     }

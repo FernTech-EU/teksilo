@@ -799,7 +799,6 @@ impl RichTextEditor {
     /// `Rc<RefCell<EditorState>>` that the arena-stored editor is
     /// mutating.
     #[cfg(test)]
-    #[doc(hidden)]
     pub(crate) fn state_handle(&self) -> SharedState {
         self.state.clone()
     }
@@ -3591,6 +3590,28 @@ impl Widget for RichTextEditor {
             let state = self.state.clone();
             ctx.effect(&activation, move |&active| {
                 if active {
+                    // **Re-activated** — re-arm the frame loop.
+                    //
+                    // The dormant branch below deliberately does not re-arm
+                    // `frame_request`, and the frame-tick effect is skipped
+                    // entirely while dormant, so nothing restarts the tick on the
+                    // way back: the editor paints once and then goes quiet. The
+                    // caret is what makes that visible — `on_focus` restarts the
+                    // blink, but only the tick pushes the cursor through to the
+                    // engine, so a re-activated editor that is then focused shows
+                    // **no caret at all** and reads as a broken surface.
+                    //
+                    // The in-tree modal path hits this on every open: it builds
+                    // the content, marks it dormant, mounts it, activates it and
+                    // *then* moves focus in (`present_in_tree_modal_request`). A
+                    // tab switch and a collapsed pane take the same route back.
+                    //
+                    // Cheap and self-limiting: one frame request, after which the
+                    // ordinary tick loop re-arms itself only while it has work.
+                    let st = state.borrow();
+                    if let Some(handle) = &st.frame_request {
+                        handle.set(true);
+                    }
                     return;
                 }
                 let mut st = state.borrow_mut();

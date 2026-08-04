@@ -405,6 +405,23 @@ impl Widget for CodeEditor {
             let state = self.state.clone();
             ctx.effect(&activation, move |&active| {
                 if active {
+                    // **Re-activated** — re-arm the frame loop. The dormant branch
+                    // below does not re-arm `frame_request` (by design: a parked
+                    // editor has nothing to paint) and the frame-tick effect is
+                    // skipped entirely while dormant, so nothing restarts the tick
+                    // on the way back. Only the tick pushes the cursor through to
+                    // the engine, so a re-activated editor that is then focused
+                    // draws **no caret at all**.
+                    //
+                    // The in-tree modal path takes this route on every open —
+                    // build, `set_dormant`, mount, `activate`, *then* focus (see
+                    // `present_in_tree_modal_request`) — as do a tab switch and a
+                    // collapsed pane. Same fix as `RichTextEditor`; this file backs
+                    // both `CodeEditor` and `PlainTextEditor`.
+                    let st = state.borrow();
+                    if let Some(handle) = &st.frame_request {
+                        handle.set(true);
+                    }
                     return;
                 }
                 let mut st = state.borrow_mut();
