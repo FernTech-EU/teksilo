@@ -323,9 +323,13 @@ impl MenuList {
 
     /// Add a menu item that is shown only while `visible` is `true`. When the
     /// gate is `false` the row collapses to zero height (no gap) and keyboard
-    /// navigation skips it — the conditionally-shown menu row. Used e.g. by a
-    /// `Toolbar`'s overflow menu, where each row is present only while its
-    /// inline twin is collapsed.
+    /// navigation skips it — arrows, `Home`/`End`, `Enter`, type-ahead, and
+    /// mnemonic activation all ignore it. Used e.g. by a `Toolbar`'s overflow
+    /// menu, where each row is present only while its inline twin is collapsed.
+    ///
+    /// Because a hidden row never claims its mnemonic letter, two gated rows
+    /// that are mutually exclusive may share one — the letter resolves to
+    /// whichever is visible when it is pressed.
     pub fn item_when(
         self,
         widget: impl Widget + 'static,
@@ -448,13 +452,21 @@ impl Widget for MenuList {
         // * `resolved_labels[i]` is the ASCII-lowercased stripped
         //   label of the item at item-array position `i`. Used by
         //   the type-ahead branch in the keyboard handler.
-        // * `mnemonic_table[c]` maps a lowercase mnemonic char to
-        //   item-array position. Used by the in-menu mnemonic
-        //   branch ("press the underlined letter to activate").
-        // Both are sized to `item_widget_ids.len()`; separators
+        // * `mnemonic_table[c]` maps a lowercase mnemonic char to every
+        //   item-array position claiming it, in declaration order. Used
+        //   by the in-menu mnemonic branch ("press the underlined letter
+        //   to activate"), which picks the first claimant that is
+        //   currently visible — so two `item_when`-gated rows that are
+        //   mutually exclusive may share one letter.
+        // * `unconditional[i]` is `true` when the item at `i` has no
+        //   visibility gate. Two unconditional rows sharing a mnemonic
+        //   can never disambiguate, which is the one statically-decidable
+        //   authoring bug — see the `debug_assert` below.
+        // All three are sized to `item_widget_ids.len()`; separators
         // contribute nothing.
         let mut resolved_labels: Vec<String> = Vec::new();
-        let mut mnemonic_table: HashMap<char, usize> = HashMap::new();
+        let mut unconditional: Vec<bool> = Vec::new();
+        let mut mnemonic_table: HashMap<char, Vec<usize>> = HashMap::new();
 
         // Safe-triangle shared state. Installed on every MenuItem in
         // this list so a submenu trigger can stamp the anchor and
@@ -513,16 +525,21 @@ impl Widget for MenuList {
                         pending_radio_pushes.push((item_idx, buf));
                     }
                     resolved_labels.push(item_label.unwrap_or_default());
+                    unconditional.push(visible.is_none());
                     if let Some(c) = item_mnemonic {
-                        // First match wins on collision; debug_assert
-                        // catches the bug.
-                        if let Some(prev) = mnemonic_table.insert(c, item_idx) {
-                            debug_assert!(
-                                false,
-                                "MenuList: duplicate item mnemonic {:?} (items {} and {})",
-                                c, prev, item_idx
-                            );
-                        }
+                        let claims = mnemonic_table.entry(c).or_default();
+                        // A collision only *has* to be a bug when both
+                        // rows are always on screen. Gated rows are
+                        // typically mutually exclusive (`item_when`), and
+                        // dispatch resolves those to whichever is visible
+                        // at the time — so don't cry wolf on them.
+                        debug_assert!(
+                            !unconditional[item_idx] || !claims.iter().any(|&p| unconditional[p]),
+                            "MenuList: duplicate item mnemonic {c:?} — item {item_idx} and an \
+                             earlier item among {claims:?} are both unconditionally visible, \
+                             so the letter is ambiguous"
+                        );
+                        claims.push(item_idx);
                     }
 
                     // Wrap in a highlight container driven by focused_index.
@@ -769,16 +786,23 @@ impl Widget for MenuList {
                             }
 
                             // 1) Mnemonic match — explicit accelerator,
-                            //    activates the item.
-                            if let Some(&idx) = mnemonic_table.get(&ch)
-                                && idx < item_ids.len()
-                            {
+                            //    activates the item. A hidden
+                            //    (`item_when`-gated) row never claims its
+                            //    letter, matching the visibility gate the
+                            //    arrow / Enter branches apply; the first
+                            //    currently-visible claimant wins. Falls
+                            //    through to type-ahead when every claimant
+                            //    is hidden.
+                            if let Some(idx) = mnemonic_table.get(&ch).and_then(|claims| {
+                                claims.iter().copied().find(|i| visible_indices.contains(i))
+                            }) {
                                 ctx.synthetic_click(item_ids[idx]);
                                 return EventResponse::Handled;
                             }
 
                             // 2) Type-ahead — incremental prefix match
-                            //    against the resolved labels.
+                            //    against the resolved labels of the
+                            //    currently-visible rows.
                             let now = Instant::now();
                             let mut buf = type_ahead_buffer.borrow_mut();
                             if let Some(prev) = type_ahead_last_input.get() {
@@ -789,12 +813,22 @@ impl Widget for MenuList {
                             buf.push(ch);
                             type_ahead_last_input.set(Some(now));
 
-                            let start = focused_index.get().unwrap_or(0);
-                            // Search wrapping from start+1, then start
-                            // itself, so a single repeated letter
-                            // cycles through matching items.
-                            for offset in 1..=item_count {
-                                let i = (start + offset) % item_count;
+                            if visible_indices.is_empty() {
+                                return EventResponse::Ignored;
+                            }
+                            let n = visible_indices.len();
+                            // Position of the focused row *within the
+                            // visible run*; an unfocused (or hidden-row)
+                            // focus anchors at the first visible row.
+                            let start = focused_index
+                                .get()
+                                .and_then(|c| visible_indices.iter().position(|&x| x == c))
+                                .unwrap_or(0);
+                            // Search wrapping from start+1 through start
+                            // itself, so a single repeated letter cycles
+                            // through matching items.
+                            for offset in 1..=n {
+                                let i = visible_indices[(start + offset) % n];
                                 if let Some(label) = resolved_labels.get(i)
                                     && label.starts_with(buf.as_str())
                                 {
@@ -802,13 +836,6 @@ impl Widget for MenuList {
                                     ctx.show_highlight_tooltip(item_ids[i]);
                                     return EventResponse::Handled;
                                 }
-                            }
-                            if let Some(label) = resolved_labels.get(start)
-                                && label.starts_with(buf.as_str())
-                            {
-                                focused_index.set(Some(start));
-                                ctx.show_highlight_tooltip(item_ids[start]);
-                                return EventResponse::Handled;
                             }
                             EventResponse::Ignored
                         }
@@ -1063,6 +1090,90 @@ mod tests {
         tree.focus(menu_id);
         tree.press_key(Key::S, Modifiers::SHIFT);
         assert_eq!(fired.get(), Some(0));
+    }
+
+    /// [`menu_with_activation_probe`] with a per-entry static visibility
+    /// gate. The type-ahead timeout is zeroed so each keystroke starts a
+    /// fresh prefix — these tests probe several letters in a row and
+    /// aren't about buffer accumulation.
+    fn menu_with_gated_probe(
+        tree: &mut WidgetTree,
+        entries: &[(&str, bool)],
+        fired: StdRc<StdCell<Option<usize>>>,
+    ) -> WidgetId {
+        let mut menu = MenuList::new().type_ahead_timeout(Duration::ZERO);
+        for (i, (label, visible)) in entries.iter().enumerate() {
+            let fired_for_this = fired.clone();
+            menu = menu.item_when(
+                MenuItem::new(lit!(*label)).on_activate_fn(move |_| fired_for_this.set(Some(i))),
+                *visible,
+            );
+        }
+        tree.add(menu)
+    }
+
+    #[test]
+    fn mnemonic_ignores_a_hidden_item() {
+        // A row collapsed by `item_when(.., false)` must not be reachable
+        // by its mnemonic — the same visibility gate the arrow / Home /
+        // End / Enter branches already apply.
+        let fired = StdRc::new(StdCell::new(None));
+        let mut tree = light_tree();
+        let menu_id = menu_with_gated_probe(
+            &mut tree,
+            &[("&Save", false), ("&Quit", true)],
+            fired.clone(),
+        );
+        tree.layout(SizeProposal::with_width(300.0));
+        tree.focus(menu_id);
+        tree.press_key(Key::S, Modifiers::NONE);
+        assert_eq!(fired.get(), None, "hidden 'Save' must not activate");
+        tree.press_key(Key::Q, Modifiers::NONE);
+        assert_eq!(fired.get(), Some(1), "visible 'Quit' still activates");
+    }
+
+    #[test]
+    fn mnemonic_resolves_to_the_visible_claimant() {
+        // Two mutually-exclusive rows may share a letter — the `item_when`
+        // pattern behind a Toolbar overflow menu's inline/collapsed twins.
+        // Whichever is visible when the letter is pressed wins.
+        for visible_idx in [0usize, 1] {
+            let fired = StdRc::new(StdCell::new(None));
+            let mut tree = light_tree();
+            let mut entries = [("&Stop", false), ("&Start", false)];
+            entries[visible_idx].1 = true;
+            let menu_id = menu_with_gated_probe(&mut tree, &entries, fired.clone());
+            tree.layout(SizeProposal::with_width(300.0));
+            tree.focus(menu_id);
+            tree.press_key(Key::S, Modifiers::NONE);
+            assert_eq!(
+                fired.get(),
+                Some(visible_idx),
+                "'s' should reach the visible claimant"
+            );
+        }
+    }
+
+    #[test]
+    fn type_ahead_ignores_a_hidden_item() {
+        let fired = StdRc::new(StdCell::new(None));
+        let mut tree = light_tree();
+        let menu_id = menu_with_gated_probe(
+            &mut tree,
+            &[("Save", false), ("Open", true), ("Quit", true)],
+            fired.clone(),
+        );
+        tree.layout(SizeProposal::with_width(300.0));
+        tree.focus(menu_id);
+        // "s" matches only the hidden row, so nothing takes focus and
+        // the following Enter has nothing to activate.
+        tree.press_key(Key::S, Modifiers::NONE);
+        tree.press_key(Key::Enter, Modifiers::NONE);
+        assert_eq!(fired.get(), None);
+        // A visible row is still reachable.
+        tree.press_key(Key::O, Modifiers::NONE);
+        tree.press_key(Key::Enter, Modifiers::NONE);
+        assert_eq!(fired.get(), Some(1));
     }
 
     #[test]
