@@ -493,6 +493,10 @@ pub(crate) struct EditorState {
     /// whole block on every pointer move would make a drag on a long scene
     /// stutter, for a preview an outline shows just as well.
     pub resize_preview: std::cell::Cell<Option<[f32; 4]>>,
+    /// Called with the paths of files dropped on the editor — see
+    /// [`super::RichTextEditor::on_files_dropped`].
+    pub on_files_dropped:
+        Option<std::rc::Rc<dyn Fn(&[std::path::PathBuf], &mut bastyde_core::widget::EventContext)>>,
     /// Called when a resize drag ends — see
     /// [`super::RichTextEditor::on_image_resized`].
     pub on_image_resized:
@@ -718,6 +722,7 @@ impl EditorState {
             image_resolver: None,
             selected_image: RefCell::new(None),
             resize_preview: std::cell::Cell::new(None),
+            on_files_dropped: None,
             on_image_resized: None,
             on_image_activated: None,
             select_all_level: 0,

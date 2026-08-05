@@ -541,6 +541,34 @@ pub(super) fn reposition_caret_for_context_menu(state: &SharedState, window_posi
 /// Hit-test a **window**-space point to a document char offset — the primitive
 /// behind [`EditorHandle::offset_at_point`](super::EditorHandle::offset_at_point).
 /// `None` when the point resolves to no text.
+/// Move the caret to the drop point under a hovering drag, in the coordinate
+/// space the widget's own drag handlers receive (widget-local).
+///
+/// A drag with no caret under it asks the writer to aim at nothing: they can see
+/// the pointer but not where the text will land, and the two are never the same
+/// place because a caret snaps to a character boundary. So the caret follows the
+/// drag, and dropping puts the payload exactly where the caret already is.
+///
+/// Returns `false` when the pointer is not over any text, so the caller can
+/// decline the drop rather than insert somewhere arbitrary.
+pub(super) fn move_caret_for_drag(state: &SharedState, local: Point) -> bool {
+    let hit = {
+        let st = state.borrow();
+        hit_test::hit_test_at(&st.engine, to_engine_local(state, &local), 0.0, 0.0)
+    };
+    let Some(hit) = hit else { return false };
+    {
+        let mut st = state.borrow_mut();
+        // Collapsed, not extended: a drop replaces nothing, and leaving an
+        // anchor behind would make the insertion look like it was about to
+        // overwrite the selection it came from.
+        st.cursor.set_position(hit.position, MoveMode::MoveAnchor);
+        st.cursor_affinity = hit.affinity;
+    }
+    sync_cursor_signals(state);
+    true
+}
+
 pub(super) fn offset_at_window_point(state: &SharedState, window_position: Point) -> Option<usize> {
     let local = engine_local_of_window(state, window_position);
     let st = state.borrow();

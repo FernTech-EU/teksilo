@@ -1829,6 +1829,23 @@ impl RichTextEditor {
         self
     }
 
+    /// Install a callback fired when files are dropped on the editor.
+    ///
+    /// The editor places the caret at the drop point and then hands the paths
+    /// over: what a dropped file *means* — a picture to embed, a link to write,
+    /// a document to include — is the host's policy, and a text editor that
+    /// guessed would be wrong for every host but one.
+    ///
+    /// Without this, file drops are declined, and the drag bubbles to whatever
+    /// ancestor claims it.
+    pub fn on_files_dropped(
+        self,
+        handler: impl Fn(&[std::path::PathBuf], &mut bastyde_core::widget::EventContext) + 'static,
+    ) -> Self {
+        self.state.borrow_mut().on_files_dropped = Some(std::rc::Rc::new(handler));
+        self
+    }
+
     /// Install a callback fired when the reader finishes dragging one of a
     /// selected image's corner grips.
     ///
@@ -1939,6 +1956,15 @@ pub struct ImageActivation {
     pub name: String,
     /// Character offset of the image within the document.
     pub offset: usize,
+}
+
+/// Whether this payload is one the editor can take.
+///
+/// Text and files only. An internal drag with a typed payload belongs to
+/// whichever widget understands that type — a binder row dropped on the prose
+/// should still open a document, not paste its debug representation.
+fn droppable(payload: &bastyde_core::DragPayload) -> bool {
+    !payload.files().is_empty() || payload.text().is_some_and(|t| !t.is_empty())
 }
 
 /// A resize the reader finished dragging.
@@ -3893,6 +3919,69 @@ impl Widget for RichTextEditor {
             handlers = handlers.ime_input(bastyde_core::ime::ImeContext::text());
         }
         handlers = handlers
+            // Text and files dropped onto the editor land at the caret, and the
+            // caret follows the drag so the writer can see where that is. An
+            // editor with no drop handling at all is not merely inert: the drag
+            // bubbles to whatever ancestor claims it, and the pane's own
+            // `DropTarget` paints a reject tint across the whole surface, which
+            // reads as the editor refusing the drop rather than never being
+            // offered it.
+            .on_drag_hover({
+                let state = self.state.clone();
+                let read_only = self.state.borrow().policy.is_read_only();
+                move |payload, pos, ctx| {
+                    if read_only || !droppable(payload) {
+                        // `NoFeedback` rather than a reject visual: the drag
+                        // must keep bubbling so an ancestor that does want this
+                        // payload — a binder row dropped on the editor pane —
+                        // still gets it.
+                        return bastyde_core::DropFeedback::NoFeedback;
+                    }
+                    if !self::mouse::move_caret_for_drag(&state, pos) {
+                        return bastyde_core::DropFeedback::NoFeedback;
+                    }
+                    ctx.request_frame();
+                    // The caret IS the feedback — a framework insertion line
+                    // would draw a second, differently-placed promise about
+                    // where the drop lands.
+                    bastyde_core::DropFeedback::Accept
+                }
+            })
+            .on_drop({
+                let state = self.state.clone();
+                let read_only = self.state.borrow().policy.is_read_only();
+                move |payload, pos, ctx| {
+                    if read_only || !droppable(&payload) {
+                        return false;
+                    }
+                    // Place the caret one last time: a drop can arrive without a
+                    // final hover at the same point (a fast release, or a
+                    // backend that only fills the payload at drop time).
+                    self::mouse::move_caret_for_drag(&state, pos);
+                    let files: Vec<std::path::PathBuf> = payload.files().to_vec();
+                    if !files.is_empty() {
+                        // Files mean nothing to a text editor on their own —
+                        // whether a path becomes a picture, a link, or an
+                        // include is the host's policy. Hand them over.
+                        let cb = state.borrow().on_files_dropped.clone();
+                        let Some(cb) = cb else { return false };
+                        cb(&files, ctx);
+                        ctx.request_frame();
+                        return true;
+                    }
+                    let Some(text) = payload.text() else {
+                        return false;
+                    };
+                    {
+                        let st = state.borrow();
+                        let _ = st.cursor.insert_text(text);
+                    }
+                    sync_cursor_signals(&state);
+                    state.borrow_mut().pending_text_changed = true;
+                    ctx.request_frame();
+                    true
+                }
+            })
             .focusable(true)
             .cursor(CursorIcon::Text)
             .on_focus({
