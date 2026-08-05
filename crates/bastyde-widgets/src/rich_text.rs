@@ -74,8 +74,8 @@ use bastyde_core::widget::{CursorIcon, LayoutContext, PaintContext, Widget, Widg
 use bastyde_core::widget_builder::HandlerSet;
 use bastyde_core::widget_id::WidgetId;
 use bastyde_text::text_document::{
-    Alignment, BlockFormat, CharVerticalAlignment, ListStyle, MoveMode, SelectionType,
-    ResourceType, TextDirection, TextDocument, TextFormat,
+    Alignment, BlockFormat, CharVerticalAlignment, ListStyle, MoveMode, ResourceType,
+    SelectionType, TextDirection, TextDocument, TextFormat,
 };
 use bastyde_text::{
     EditorTypographyDefaults, FontRegistrar, RichTextEngine, SharedTypesetter, WrapMode,
