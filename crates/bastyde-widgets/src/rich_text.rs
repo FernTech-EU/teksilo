@@ -3362,6 +3362,15 @@ impl Widget for RichTextEditorBody {
         // `&engine.with_render_frame(...)`, `&document`, and
         // `&mut image_cache` simultaneously.
         let state_ref: &mut EditorState = &mut st;
+        // Read before the split borrow below, which reborrows `state_ref`
+        // field by field.
+        let selection_range = {
+            let (s, e) = (
+                state_ref.cursor.selection_start(),
+                state_ref.cursor.selection_end(),
+            );
+            (s != e).then_some((s, e))
+        };
         let EditorState {
             ref mut engine,
             ref document,
@@ -3379,6 +3388,10 @@ impl Widget for RichTextEditorBody {
                     document,
                     image_cache,
                     image_resolver,
+                    selection: selection_range,
+                    // The same colour the typesetter drew underneath, resolved
+                    // above for `engine.set_selection_color`.
+                    selection_color: new_sel,
                     draw_caret: caret_on_now,
                 },
             );

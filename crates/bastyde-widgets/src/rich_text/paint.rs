@@ -42,6 +42,20 @@ pub struct PaintParams<'a> {
     /// see [`crate::rich_text::image_cache::ImageResolver`]. `None` on a host that supplies
     /// every image itself, which is every host that never pastes one in.
     pub image_resolver: Option<&'a crate::rich_text::image_cache::ImageResolver>,
+    /// The current selection as `[start, end)` document character offsets, or
+    /// `None` when there is none.
+    ///
+    /// The typesetter already emits a Selection rect spanning a selected image
+    /// — it walks the image's synthetic glyph like any other — but that rect is
+    /// painted in pass 1 and the image's own opaque draw in pass 3 covers it
+    /// completely, so a selected image looked exactly like an unselected one.
+    /// Given the range, `paint_images` can put the highlight back *over* the
+    /// picture, which is the only place it can be seen.
+    pub selection: Option<(usize, usize)>,
+    /// The resolved selection colour, matching what the typesetter drew
+    /// underneath — so an image reads as part of one continuous selection
+    /// rather than as a separately-styled object.
+    pub selection_color: [f32; 4],
     /// Whether to draw the caret this paint. The editor's frame loop
     /// sets this from `caret_visible && has_focus && caret_policy != Hidden`.
     pub draw_caret: bool,
@@ -55,6 +69,8 @@ pub fn paint_frame(canvas: &mut Canvas, params: PaintParams<'_>) {
         document,
         image_cache,
         image_resolver,
+        selection,
+        selection_color,
         draw_caret,
     } = params;
 
@@ -69,6 +85,8 @@ pub fn paint_frame(canvas: &mut Canvas, params: PaintParams<'_>) {
         document,
         image_cache,
         image_resolver,
+        selection,
+        selection_color,
         offset_x,
         offset_y,
     );
@@ -120,6 +138,8 @@ fn paint_images(
     document: &TextDocument,
     image_cache: &mut ImageCache,
     image_resolver: Option<&crate::rich_text::image_cache::ImageResolver>,
+    selection: Option<(usize, usize)>,
+    selection_color: [f32; 4],
     ox: f32,
     oy: f32,
 ) {
@@ -133,6 +153,27 @@ fn paint_images(
         }
         let rect = shifted_rect(img.screen, ox, oy);
         canvas.draw_image(rect, img.name.clone());
+
+        // The selection highlight the typesetter drew for this image is
+        // underneath the pixels just painted, so it is invisible. Put it back
+        // on top: a wash in the selection colour, plus an outline in the same
+        // colour at full strength — the wash alone is easy to miss over a busy
+        // or dark photograph, and an outline alone reads as a frame the writer
+        // added rather than as a selection.
+        //
+        // Matched by offset, not by name: a document may hold one picture in
+        // three places, and only one of them is selected.
+        let selected =
+            selection.is_some_and(|(start, end)| img.char_offset >= start && img.char_offset < end);
+        if selected {
+            let [r, g, b, a] = selection_color;
+            canvas.fill_rect(rect, Color::from_rgba(r, g, b, a));
+            canvas.stroke_rect(
+                rect,
+                Color::from_rgba(r, g, b, 1.0),
+                bastyde_canvas::StrokeStyle::solid(2.0),
+            );
+        }
     }
 }
 
@@ -159,12 +200,23 @@ mod image_paint_tests {
         ImageQuad {
             screen: [0.0, 0.0, 20.0, 20.0],
             name: name.to_string(),
+            char_offset: 0,
         }
     }
 
     fn run(doc: &TextDocument, cache: &mut ImageCache, quads: &[ImageQuad]) -> RenderFrame {
         let mut canvas = Canvas::new();
-        paint_images(&mut canvas, quads, doc, cache, None, 0.0, 0.0);
+        paint_images(
+            &mut canvas,
+            quads,
+            doc,
+            cache,
+            None,
+            None,
+            [0.0; 4],
+            0.0,
+            0.0,
+        );
         canvas.into_render_frame()
     }
 
@@ -176,8 +228,114 @@ mod image_paint_tests {
         resolver: &crate::rich_text::image_cache::ImageResolver,
     ) -> RenderFrame {
         let mut canvas = Canvas::new();
-        paint_images(&mut canvas, quads, doc, cache, Some(resolver), 0.0, 0.0);
+        paint_images(
+            &mut canvas,
+            quads,
+            doc,
+            cache,
+            Some(resolver),
+            None,
+            [0.0; 4],
+            0.0,
+            0.0,
+        );
         canvas.into_render_frame()
+    }
+
+    /// The selection rect the typesetter draws for an image is painted in
+    /// pass 1 and buried by the image's own opaque draw in pass 3, so a
+    /// selected image looked exactly like an unselected one.
+    #[test]
+    fn a_selected_image_is_marked_on_top_of_its_own_pixels() {
+        let doc = TextDocument::new();
+        doc.add_resource(ResourceType::Image, "a.png", "image/png", &red_png())
+            .unwrap();
+        let mut q = quad("a.png");
+        q.char_offset = 7;
+
+        let unselected = {
+            let mut canvas = Canvas::new();
+            paint_images(
+                &mut canvas,
+                &[q.clone()],
+                &doc,
+                &mut ImageCache::new(),
+                None,
+                None,
+                [0.0; 4],
+                0.0,
+                0.0,
+            );
+            canvas.into_render_frame()
+        };
+        let selected = {
+            let mut canvas = Canvas::new();
+            paint_images(
+                &mut canvas,
+                &[q.clone()],
+                &doc,
+                &mut ImageCache::new(),
+                None,
+                Some((7, 8)),
+                [0.2, 0.4, 0.9, 0.35],
+                0.0,
+                0.0,
+            );
+            canvas.into_render_frame()
+        };
+
+        assert_eq!(image_draws(&unselected), 1);
+        assert_eq!(image_draws(&selected), 1, "the image is still drawn");
+        assert!(
+            selected.draw_order.len() > unselected.draw_order.len(),
+            "a selected image must be marked: {} commands vs {}",
+            selected.draw_order.len(),
+            unselected.draw_order.len()
+        );
+    }
+
+    #[test]
+    fn only_the_selected_placement_of_a_repeated_image_is_marked() {
+        // The same picture three times, one of them selected. Matching on the
+        // name would light all three.
+        let doc = TextDocument::new();
+        doc.add_resource(ResourceType::Image, "a.png", "image/png", &red_png())
+            .unwrap();
+        let quads: Vec<ImageQuad> = [3usize, 11, 20]
+            .into_iter()
+            .map(|off| {
+                let mut q = quad("a.png");
+                q.char_offset = off;
+                q
+            })
+            .collect();
+
+        let count = |sel: Option<(usize, usize)>| {
+            let mut canvas = Canvas::new();
+            paint_images(
+                &mut canvas,
+                &quads,
+                &doc,
+                &mut ImageCache::new(),
+                None,
+                sel,
+                [0.2, 0.4, 0.9, 0.35],
+                0.0,
+                0.0,
+            );
+            canvas.into_render_frame().draw_order.len()
+        };
+
+        let none = count(None);
+        let one = count(Some((11, 12)));
+        let all = count(Some((0, 30)));
+        assert!(one > none, "the selected one must be marked");
+        assert!(all > one, "selecting all three must mark all three");
+        assert_eq!(
+            all - none,
+            (one - none) * 3,
+            "each selected image costs the same marking"
+        );
     }
 
     #[test]

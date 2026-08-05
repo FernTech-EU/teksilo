@@ -119,6 +119,25 @@ pub(super) fn handle_pointer_event(
                             ctx,
                         );
                     }
+                    // The same press bookkeeping an ordinary click does, minus
+                    // the caret placement — a click on a picture is still a
+                    // click, and the state it leaves behind has to say so.
+                    //
+                    // `drag_state` above all: without it a drag that *starts*
+                    // on a picture never becomes a selection (`PointerMove`
+                    // gates on `is_dragging`), so the only way to select an
+                    // image together with the words after it was to start the
+                    // drag somewhere else and come back over it.
+                    {
+                        let mut st = state.borrow_mut();
+                        st.drag_state = DragState::Selecting {
+                            auto_scroll_v_per_s: 0.0,
+                        };
+                        st.preferred_x = None;
+                        st.select_all_level = 0;
+                        st.select_all_anchor_cell = None;
+                        st.mouse_anchored = true;
+                    }
                     ctx.request_frame();
                     return EventResponse::Ignored;
                 }

@@ -335,6 +335,8 @@ impl Widget for CodeEditorBody {
                     image_cache,
                     // No inline images on this surface, so none can be missing.
                     image_resolver: None,
+                    selection: None,
+                    selection_color: [0.0; 4],
                     draw_caret: caret_on,
                 },
             );
