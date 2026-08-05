@@ -337,6 +337,8 @@ impl Widget for CodeEditorBody {
                     image_resolver: None,
                     selection: None,
                     selection_color: [0.0; 4],
+                    selected_image_out: None,
+                    resize_preview: None,
                     draw_caret: caret_on,
                 },
             );

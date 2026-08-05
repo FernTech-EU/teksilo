@@ -1829,6 +1829,27 @@ impl RichTextEditor {
         self
     }
 
+    /// Install a callback fired when the reader finishes dragging one of a
+    /// selected image's corner grips.
+    ///
+    /// The widget does not resize the picture itself. It cannot: an image's
+    /// display size lives in the host's own document format (an attribute, a
+    /// style, a column of a table), and only the host knows how to write it
+    /// there so it survives a save. So the drag reports a size and the host
+    /// decides what that means — the same division of labour as
+    /// [`on_image_activated`](Self::on_image_activated).
+    ///
+    /// Fired once, on release. During the drag the widget shows an outline at
+    /// the proposed size, which costs no relayout and keeps one gesture to one
+    /// entry on the host's undo stack.
+    pub fn on_image_resized(
+        self,
+        handler: impl Fn(&ImageResize, &mut bastyde_core::widget::EventContext) + 'static,
+    ) -> Self {
+        self.state.borrow_mut().on_image_resized = Some(std::rc::Rc::new(handler));
+        self
+    }
+
     /// Install a callback fired when the user Primary-clicks an inline
     /// image. The callback receives the activation (see
     /// [`ImageActivation`]) and the active `EventContext`.
@@ -1918,6 +1939,23 @@ pub struct ImageActivation {
     pub name: String,
     /// Character offset of the image within the document.
     pub offset: usize,
+}
+
+/// A resize the reader finished dragging.
+///
+/// Reported once, on release, rather than continuously: the document is the
+/// durable record and rewriting it on every pointer move would put a hundred
+/// entries on the undo stack for one gesture.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ImageResize {
+    /// The image's resource name.
+    pub name: String,
+    /// Character offset of its `U+FFFC` — the identity, since a document may
+    /// hold one picture in several places.
+    pub offset: usize,
+    /// The new display size in logical pixels, proportions preserved.
+    pub width: u32,
+    pub height: u32,
 }
 
 impl EditorHandle {
@@ -3376,9 +3414,12 @@ impl Widget for RichTextEditorBody {
             ref document,
             ref mut image_cache,
             ref image_resolver,
+            ref selected_image,
+            ref resize_preview,
             ..
         } = *state_ref;
         let image_resolver = image_resolver.as_ref();
+        let resize_preview_rect = resize_preview.get();
         let paint_closure = |frame: &bastyde_text::RenderFrame| {
             paint_frame(
                 canvas,
@@ -3392,6 +3433,11 @@ impl Widget for RichTextEditorBody {
                     // The same colour the typesetter drew underneath, resolved
                     // above for `engine.set_selection_color`.
                     selection_color: new_sel,
+                    // The paint pass is the one place that has both the image
+                    // rects and the selection, so it is what tells the pointer
+                    // handler where the grips are.
+                    selected_image_out: Some(selected_image),
+                    resize_preview: resize_preview_rect,
                     draw_caret: caret_on_now,
                 },
             );

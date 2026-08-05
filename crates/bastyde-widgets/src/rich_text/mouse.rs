@@ -45,6 +45,81 @@ fn to_engine_local(state: &SharedState, position: &Point) -> Point {
     )
 }
 
+/// Smallest side a resize may leave, in logical pixels.
+///
+/// A picture dragged to nothing cannot be grabbed again — its handles would
+/// have nowhere to sit — so the drag stops here rather than letting the writer
+/// lose the image behind an undo.
+const RESIZE_MIN_EDGE: f32 = 24.0;
+
+/// How far outside a grip's own square a press still counts.
+///
+/// The grip is drawn small so it does not cover a thumbnail; this is what makes
+/// it hittable without care. Generous on purpose — the cost of overshooting is
+/// a resize the writer did not want, which one Escape or Ctrl+Z undoes, while
+/// the cost of undershooting is a feature that feels broken.
+const RESIZE_HANDLE_SLOP: f32 = 5.0;
+
+/// The corner grip under `local`, if the selected image has one there.
+///
+/// Returns the image's name, its rect, its offset, and which corner was taken.
+fn grabbed_handle(
+    state: &SharedState,
+    local: Point,
+) -> Option<(String, [f32; 4], usize, (f32, f32))> {
+    let selected = state.borrow().selected_image.borrow().clone()?;
+    let corner = handle_at(selected.rect, local)?;
+    Some((selected.name, selected.rect, selected.offset, corner))
+}
+
+/// Which corner of `rect` a press at `local` grabs, if any.
+///
+/// Split out from [`grabbed_handle`] so the aiming rule — the half of this that
+/// decides whether the feature is usable — can be tested without a widget tree,
+/// a window, or a pointer device.
+fn handle_at(rect: [f32; 4], local: Point) -> Option<(f32, f32)> {
+    let [x, y, w, h] = rect;
+    let reach = super::paint::RESIZE_HANDLE_SIZE / 2.0 + RESIZE_HANDLE_SLOP;
+    super::paint::RESIZE_CORNERS.into_iter().find(|&(fx, fy)| {
+        let (cx, cy) = (x + w * fx, y + h * fy);
+        (local.x - cx).abs() <= reach && (local.y - cy).abs() <= reach
+    })
+}
+
+/// The rect a corner drag proposes, with the picture's proportions kept.
+///
+/// The corner opposite the one being dragged stays put, so the gesture reads
+/// the way it does everywhere else. Proportions are kept by following whichever
+/// axis the pointer moved *proportionally* further — taking width alone would
+/// ignore a drag that was mostly vertical, and averaging the two makes a
+/// diagonal drag lag behind the pointer on both.
+///
+/// The result is always positioned at the image's original top-left: the
+/// picture sits in a text flow, so the layout decides where it lands once the
+/// size changes. Anchoring the preview anywhere else would show the writer a
+/// position the reflow is about to contradict.
+fn proportional_resize(origin: [f32; 4], corner: (f32, f32), local: Point) -> [f32; 4] {
+    let [x, y, w, h] = origin;
+    if w <= 0.0 || h <= 0.0 {
+        return origin;
+    }
+    // The fixed corner is the diagonal opposite of the grabbed one.
+    let anchor_x = x + w * (1.0 - corner.0);
+    let anchor_y = y + h * (1.0 - corner.1);
+    let dragged_w = (local.x - anchor_x).abs();
+    let dragged_h = (local.y - anchor_y).abs();
+
+    let sx = dragged_w / w;
+    let sy = dragged_h / h;
+    let scale = if (sx - 1.0).abs() >= (sy - 1.0).abs() {
+        sx
+    } else {
+        sy
+    };
+    let scale = scale.max(RESIZE_MIN_EDGE / w.min(h));
+    [x, y, (w * scale).max(1.0), (h * scale).max(1.0)]
+}
+
 pub(super) fn handle_pointer_event(
     state: &SharedState,
     v_scrollbar_bounds: &Rc<Cell<Rect>>,
@@ -77,6 +152,27 @@ pub(super) fn handle_pointer_event(
             }
             let shift = modifiers.shift();
             let local = to_engine_local(state, position);
+            // A resize grip is checked before the hit-test, because a grip sits
+            // *outside* the picture: the engine reports `HitRegion::Image` only
+            // within the image's own rect, so by the time the hit-test has an
+            // answer the corner has already been missed.
+            if let Some((name, rect, offset, corner)) = grabbed_handle(state, local) {
+                let mut st = state.borrow_mut();
+                st.drag_state = DragState::ResizingImage {
+                    name,
+                    offset,
+                    origin: rect,
+                    corner,
+                };
+                st.resize_preview.set(Some(rect));
+                drop(st);
+                ctx.request_frame();
+                // `Ignored`, like every other press path here. Returning
+                // `Handled` consumes the event, and the gesture arena that
+                // consumed press never delivers the moves that follow — so the
+                // grip would latch and the drag would never arrive.
+                return EventResponse::Ignored;
+            }
             let hit = {
                 let st = state.borrow();
                 hit_test::hit_test_at(&st.engine, local, 0.0, 0.0)
@@ -192,11 +288,22 @@ pub(super) fn handle_pointer_event(
             // Drag-select extension. The `drag_state` field tells us
             // whether a primary button is still held; if it isn't,
             // we ignore the move.
-            let (is_dragging, viewport_height) = {
+            let (is_dragging, resizing, viewport_height) = {
                 let st = state.borrow();
                 let dragging = matches!(st.drag_state, DragState::Selecting { .. });
-                (dragging, st.viewport_height)
+                let resizing = match &st.drag_state {
+                    DragState::ResizingImage { origin, corner, .. } => Some((*origin, *corner)),
+                    _ => None,
+                };
+                (dragging, resizing, st.viewport_height)
             };
+            if let Some((origin, corner)) = resizing {
+                let local = to_engine_local(state, position);
+                let proposed = proportional_resize(origin, corner, local);
+                state.borrow().resize_preview.set(Some(proposed));
+                ctx.request_frame();
+                return EventResponse::Handled;
+            }
             if !is_dragging {
                 return EventResponse::Ignored;
             }
@@ -253,8 +360,38 @@ pub(super) fn handle_pointer_event(
             EventResponse::Handled
         }
         WidgetEvent::PointerUp { .. } => {
-            let mut st = state.borrow_mut();
-            st.drag_state = DragState::Idle;
+            // A resize is reported once, here — not on every move. The document
+            // is the durable record, and rewriting it per pointer move would put
+            // a hundred entries on the undo stack for one gesture.
+            let finished = {
+                let st = state.borrow();
+                match (&st.drag_state, st.resize_preview.get()) {
+                    (DragState::ResizingImage { name, offset, .. }, Some(rect)) => {
+                        Some((st.on_image_resized.clone(), name.clone(), *offset, rect))
+                    }
+                    _ => None,
+                }
+            };
+            {
+                let mut st = state.borrow_mut();
+                st.drag_state = DragState::Idle;
+                st.resize_preview.set(None);
+            }
+            if let Some((callback, name, offset, rect)) = finished {
+                if let Some(cb) = callback {
+                    cb(
+                        &super::ImageResize {
+                            name,
+                            offset,
+                            width: rect[2].round().max(1.0) as u32,
+                            height: rect[3].round().max(1.0) as u32,
+                        },
+                        ctx,
+                    );
+                }
+                ctx.request_frame();
+                return EventResponse::Handled;
+            }
             EventResponse::Ignored
         }
         _ => EventResponse::Ignored,
@@ -408,4 +545,147 @@ pub(super) fn offset_at_window_point(state: &SharedState, window_position: Point
     let local = engine_local_of_window(state, window_position);
     let st = state.borrow();
     hit_test::hit_test_at(&st.engine, local, 0.0, 0.0).map(|hit| hit.position)
+}
+
+#[cfg(test)]
+mod resize_tests {
+    use super::*;
+
+    /// A 200×100 picture at (50, 20) — deliberately not square, so a fix that
+    /// silently squares it up would show.
+    const IMG: [f32; 4] = [50.0, 20.0, 200.0, 100.0];
+    const BOTTOM_RIGHT: (f32, f32) = (1.0, 1.0);
+    const TOP_LEFT: (f32, f32) = (0.0, 0.0);
+
+    fn ratio(rect: [f32; 4]) -> f32 {
+        rect[2] / rect[3]
+    }
+
+    #[test]
+    fn dragging_a_corner_keeps_the_proportions() {
+        // Straight out along the diagonal, then a drag that is mostly
+        // horizontal, then one that is mostly vertical. All three must keep the
+        // 2:1 shape — that is the whole promise of the gesture.
+        for target in [
+            Point::new(450.0, 220.0),
+            Point::new(450.0, 130.0),
+            Point::new(260.0, 320.0),
+        ] {
+            let out = proportional_resize(IMG, BOTTOM_RIGHT, target);
+            assert!(
+                (ratio(out) - ratio(IMG)).abs() < 0.001,
+                "proportions drifted: {out:?} is {:.3}, wanted {:.3}",
+                ratio(out),
+                ratio(IMG)
+            );
+        }
+    }
+
+    #[test]
+    fn dragging_outward_grows_and_inward_shrinks() {
+        let bigger = proportional_resize(IMG, BOTTOM_RIGHT, Point::new(450.0, 220.0));
+        assert!(bigger[2] > IMG[2], "{bigger:?}");
+        let smaller = proportional_resize(IMG, BOTTOM_RIGHT, Point::new(150.0, 70.0));
+        assert!(smaller[2] < IMG[2], "{smaller:?}");
+    }
+
+    #[test]
+    fn the_opposite_corner_is_what_stays_put() {
+        // Grabbing the TOP-LEFT measures against the bottom-right, so dragging
+        // up and left must GROW the picture. A version that always measured
+        // from the top-left would shrink it here — the sign error that makes
+        // two of the four grips feel inverted.
+        let out = proportional_resize(IMG, TOP_LEFT, Point::new(0.0, 0.0));
+        assert!(
+            out[2] > IMG[2],
+            "dragging the top-left up and out must grow: {out:?}"
+        );
+    }
+
+    #[test]
+    fn a_resize_cannot_shrink_the_image_out_of_reach() {
+        // Dragged far past the anchor. A picture with no area has no grips, so
+        // it could never be resized back — the drag has to stop short.
+        let out = proportional_resize(IMG, BOTTOM_RIGHT, Point::new(51.0, 21.0));
+        assert!(out[2] >= RESIZE_MIN_EDGE, "{out:?}");
+        assert!(out[3] >= RESIZE_MIN_EDGE, "{out:?}");
+        assert!(
+            (ratio(out) - ratio(IMG)).abs() < 0.001,
+            "the floor must not distort it: {out:?}"
+        );
+    }
+
+    #[test]
+    fn the_preview_stays_at_the_images_own_place_in_the_text() {
+        // Whatever corner is dragged, the result is anchored at the original
+        // top-left: the picture sits in a text flow, so the reflow decides
+        // where it lands. Showing it anywhere else previews a position the
+        // relayout is about to contradict.
+        for corner in [TOP_LEFT, BOTTOM_RIGHT, (1.0, 0.0), (0.0, 1.0)] {
+            let out = proportional_resize(IMG, corner, Point::new(400.0, 300.0));
+            assert_eq!((out[0], out[1]), (IMG[0], IMG[1]), "{corner:?} moved it");
+        }
+    }
+
+    #[test]
+    fn a_degenerate_image_is_left_alone() {
+        let zero = [10.0, 10.0, 0.0, 0.0];
+        assert_eq!(
+            proportional_resize(zero, BOTTOM_RIGHT, Point::new(99.0, 99.0)),
+            zero
+        );
+    }
+
+    // ── grabbing a grip ─────────────────────────────────────────────────
+
+    #[test]
+    fn each_corner_is_grabbable_from_either_side_of_its_edge() {
+        // A grip straddles the corner, so it must answer both from inside the
+        // picture and from just outside it — the outside half is the reason the
+        // engine's own hit-test cannot do this job.
+        for (fx, fy) in super::super::paint::RESIZE_CORNERS {
+            let (cx, cy) = (IMG[0] + IMG[2] * fx, IMG[1] + IMG[3] * fy);
+            for (dx, dy) in [(0.0, 0.0), (-4.0, -4.0), (4.0, 4.0)] {
+                assert_eq!(
+                    handle_at(IMG, Point::new(cx + dx, cy + dy)),
+                    Some((fx, fy)),
+                    "corner {fx},{fy} missed at offset {dx},{dy}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_middle_of_the_picture_grabs_nothing() {
+        // Otherwise clicking a picture to select it would start a resize.
+        let centre = Point::new(IMG[0] + IMG[2] / 2.0, IMG[1] + IMG[3] / 2.0);
+        assert_eq!(handle_at(IMG, centre), None);
+    }
+
+    #[test]
+    fn a_press_well_clear_of_a_corner_grabs_nothing() {
+        // Twenty pixels out on both axes: prose beside the picture must stay
+        // ordinary prose.
+        assert_eq!(
+            handle_at(IMG, Point::new(IMG[0] - 20.0, IMG[1] - 20.0)),
+            None
+        );
+        assert_eq!(
+            handle_at(
+                IMG,
+                Point::new(IMG[0] + IMG[2] + 20.0, IMG[1] + IMG[3] + 20.0)
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn the_edges_between_corners_grab_nothing() {
+        // Corners only — this resize keeps proportions, so an edge grip would
+        // promise a stretch it will not perform.
+        let mid_top = Point::new(IMG[0] + IMG[2] / 2.0, IMG[1]);
+        let mid_left = Point::new(IMG[0], IMG[1] + IMG[3] / 2.0);
+        assert_eq!(handle_at(IMG, mid_top), None);
+        assert_eq!(handle_at(IMG, mid_left), None);
+    }
 }

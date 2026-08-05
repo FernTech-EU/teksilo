@@ -495,6 +495,58 @@ impl MenuModel {
         ok
     }
 
+    /// Insert a top-level menu at `index`, under a caller-supplied id.
+    ///
+    /// [`push_menu`](Self::push_menu) appends, which puts a menu after Help —
+    /// fine for something added once at startup, wrong for a menu that comes and
+    /// goes, since a writer looking for it needs it in the same place every
+    /// time. The id is the caller's for the same reason: a menu that will be
+    /// removed again has to be nameable before it exists.
+    ///
+    /// `index` is clamped, so a model that has since grown or shrunk cannot
+    /// panic a caller holding a stale position.
+    pub fn insert_menu_at(
+        &self,
+        index: usize,
+        id: MenuItemId,
+        title: impl Into<LocalizedString>,
+        build: impl FnOnce(MenuItems) -> MenuItems,
+    ) {
+        let children = build(MenuItems::new()).nodes;
+        {
+            let mut nodes = self.nodes.borrow_mut();
+            let at = index.min(nodes.len());
+            nodes.insert(
+                at,
+                MenuNode::Submenu {
+                    id,
+                    title: title.into(),
+                    children,
+                },
+            );
+        }
+        self.bump();
+    }
+
+    /// Whether a node with this id is anywhere in the tree.
+    ///
+    /// The companion to [`remove`](Self::remove) for callers that add and
+    /// remove the same node as state changes: without it, "is it already
+    /// there?" can only be answered by removing it and seeing what comes back,
+    /// which bumps the version and re-installs the native menu for nothing.
+    pub fn contains(&self, id: MenuItemId) -> bool {
+        fn find(nodes: &[MenuNode], id: MenuItemId) -> bool {
+            nodes.iter().any(|n| match n {
+                MenuNode::Item(entry) => entry.id == id,
+                MenuNode::Submenu {
+                    id: sid, children, ..
+                } => *sid == id || find(children, id),
+                _ => false,
+            })
+        }
+        find(&self.nodes.borrow(), id)
+    }
+
     /// Remove the item or submenu with the given id, anywhere in the tree.
     /// Returns `true` if a node was removed.
     pub fn remove(&self, id: MenuItemId) -> bool {

@@ -483,6 +483,20 @@ pub(crate) struct EditorState {
     /// Asked for an image's bytes when the document has no resource under that
     /// name — see [`super::RichTextEditor::on_image_missing`].
     pub image_resolver: Option<super::image_cache::ImageResolver>,
+    /// Where the selected image was last painted, so a press can tell whether it
+    /// landed on one of its handles. A `RefCell` because the paint pass writes
+    /// it while other fields of this struct are mutably borrowed beside it, and
+    /// the value is not `Copy` (it names the picture).
+    pub selected_image: RefCell<Option<SelectedImageRect>>,
+    /// The rect a resize drag is currently proposing, drawn as an outline. The
+    /// document is left alone until the pointer is released: relaying out the
+    /// whole block on every pointer move would make a drag on a long scene
+    /// stutter, for a preview an outline shows just as well.
+    pub resize_preview: std::cell::Cell<Option<[f32; 4]>>,
+    /// Called when a resize drag ends — see
+    /// [`super::RichTextEditor::on_image_resized`].
+    pub on_image_resized:
+        Option<std::rc::Rc<dyn Fn(&super::ImageResize, &mut bastyde_core::widget::EventContext)>>,
     /// Callback invoked on a Primary-click whose hit lands on a
     /// `HitRegion::Image`. Same Rc / borrow-release convention as
     /// [`on_link_activated`](Self::on_link_activated).
@@ -537,7 +551,9 @@ pub struct SyntheticElementRef {
 /// KeepAnchor)` handles both text and rectangular cell selection — the
 /// cell case falls out automatically from `TextCursor::selection_kind()`
 /// at [../text-document/crates/public_api/src/cursor.rs:1200].
-#[derive(Debug, Clone, Copy, PartialEq)]
+// No longer `Copy`: `ResizingImage` names the picture it is resizing, and the
+// release has to report that name. Every reader clones or matches by reference.
+#[derive(Debug, Clone, PartialEq)]
 pub enum DragState {
     Idle,
     Selecting {
@@ -545,6 +561,45 @@ pub enum DragState {
         /// auto-scroll ramp. Applied by the frame loop on every tick.
         auto_scroll_v_per_s: f32,
     },
+    /// Dragging a corner handle of the selected inline image.
+    ///
+    /// Deliberately not a variant of `Selecting`: the two share a pointer
+    /// gesture and nothing else. A resize never moves the caret, never
+    /// auto-scrolls, and ends by reporting a size rather than by leaving a
+    /// selection behind.
+    ResizingImage {
+        /// The image being resized, so the release can name it.
+        name: String,
+        /// Its `U+FFFC`'s document offset — the identity, since a document may
+        /// hold one picture in several places.
+        offset: usize,
+        /// The image's rect when the drag began, in engine-local coordinates.
+        /// Every frame's new size is derived from this rather than from the
+        /// previous frame's, so rounding cannot accumulate over a long drag.
+        origin: [f32; 4],
+        /// The corner that was grabbed, as `(x, y)` unit multipliers: `(0, 0)`
+        /// is top-left, `(1, 1)` bottom-right. The opposite corner is the one
+        /// that stays put while the pointer moves.
+        corner: (f32, f32),
+    },
+}
+
+/// The selected inline image's on-screen rect, recorded by the paint pass.
+///
+/// The pointer handler needs the picture's geometry to know whether a press
+/// landed on a resize handle — and a handle sits *outside* the image, so the
+/// engine's own hit-test cannot answer it (it reports `HitRegion::Image` only
+/// within the picture). The paint pass is the one place that already has both
+/// the rect and the selection, so it writes what it saw.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SelectedImageRect {
+    /// The image's resource name, so a resize can report which picture it was.
+    pub name: String,
+    /// `[x, y, width, height]` in engine-local coordinates — the same space
+    /// `to_engine_local` produces, so a pointer position compares directly.
+    pub rect: [f32; 4],
+    /// Document offset of the image's `U+FFFC`.
+    pub offset: usize,
 }
 
 impl EditorState {
@@ -661,6 +716,9 @@ impl EditorState {
             rich_clipboard_marker: None,
             on_link_activated: None,
             image_resolver: None,
+            selected_image: RefCell::new(None),
+            resize_preview: std::cell::Cell::new(None),
+            on_image_resized: None,
             on_image_activated: None,
             select_all_level: 0,
             select_all_anchor_cell: None,

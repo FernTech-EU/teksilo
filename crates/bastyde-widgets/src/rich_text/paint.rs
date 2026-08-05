@@ -16,7 +16,7 @@
 //!   3. Inline images (resolved via the image cache)
 //!   4. Foreground decorations (Cursor, Underline, Overline, Strikeout)
 
-use bastyde_canvas::{Canvas, GlyphQuad as CanvasGlyphQuad, Point, StrokeStyle};
+use bastyde_canvas::{Canvas, GlyphQuad as CanvasGlyphQuad, Point, Rect, StrokeStyle};
 use bastyde_text::text_document::TextDocument;
 use bastyde_text::{
     DecorationRect, ImageQuad, RenderFrame, TypesetterDecorationKind as DecorationKind,
@@ -56,6 +56,13 @@ pub struct PaintParams<'a> {
     /// underneath — so an image reads as part of one continuous selection
     /// rather than as a separately-styled object.
     pub selection_color: [f32; 4],
+    /// Where the paint pass records the selected image's rect, for the pointer
+    /// handler — see [`super::state::SelectedImageRect`]. Set to `None` first,
+    /// so an image that stops being selected stops being grabbable.
+    pub selected_image_out: Option<&'a std::cell::RefCell<Option<super::state::SelectedImageRect>>>,
+    /// The size a resize drag is currently proposing, drawn as an outline over
+    /// the picture's own place in the text.
+    pub resize_preview: Option<[f32; 4]>,
     /// Whether to draw the caret this paint. The editor's frame loop
     /// sets this from `caret_visible && has_focus && caret_policy != Hidden`.
     pub draw_caret: bool,
@@ -71,6 +78,8 @@ pub fn paint_frame(canvas: &mut Canvas, params: PaintParams<'_>) {
         image_resolver,
         selection,
         selection_color,
+        selected_image_out,
+        resize_preview,
         draw_caret,
     } = params;
 
@@ -87,6 +96,8 @@ pub fn paint_frame(canvas: &mut Canvas, params: PaintParams<'_>) {
         image_resolver,
         selection,
         selection_color,
+        selected_image_out,
+        resize_preview,
         offset_x,
         offset_y,
     );
@@ -151,6 +162,16 @@ const SELECTED_IMAGE_TINT_ALPHA: f32 = 0.28;
 /// would be lost.
 const SELECTED_IMAGE_BORDER_WIDTH: f32 = 2.0;
 
+/// Side of a corner grip, in logical pixels.
+///
+/// Big enough to hit without care on a touchpad, small enough not to cover a
+/// thumbnail. The pointer's grab area is larger still — see
+/// `RESIZE_HANDLE_SLOP` in `mouse.rs`.
+pub(super) const RESIZE_HANDLE_SIZE: f32 = 9.0;
+
+/// The four corners, as `(x, y)` multipliers of the image's rect.
+pub(super) const RESIZE_CORNERS: [(f32, f32); 4] = [(0.0, 0.0), (1.0, 0.0), (0.0, 1.0), (1.0, 1.0)];
+
 fn paint_images(
     canvas: &mut Canvas,
     images: &[ImageQuad],
@@ -159,9 +180,16 @@ fn paint_images(
     image_resolver: Option<&crate::rich_text::image_cache::ImageResolver>,
     selection: Option<(usize, usize)>,
     selection_color: [f32; 4],
+    selected_image_out: Option<&std::cell::RefCell<Option<super::state::SelectedImageRect>>>,
+    resize_preview: Option<[f32; 4]>,
     ox: f32,
     oy: f32,
 ) {
+    // Cleared up front: an image that has just stopped being selected must stop
+    // being grabbable, and the loop below only ever writes a *selected* one.
+    if let Some(out) = selected_image_out {
+        *out.borrow_mut() = None;
+    }
     for img in images {
         // Decode and upload the pixels before emitting the draw. A draw command
         // naming a texture the canvas was never given is silently dropped by
@@ -190,9 +218,57 @@ fn paint_images(
             canvas.stroke_rect(
                 rect,
                 Color::from_rgba(r, g, b, 1.0),
-                bastyde_canvas::StrokeStyle::solid(SELECTED_IMAGE_BORDER_WIDTH),
+                StrokeStyle::solid(SELECTED_IMAGE_BORDER_WIDTH),
             );
+            if let Some(out) = selected_image_out {
+                *out.borrow_mut() = Some(super::state::SelectedImageRect {
+                    name: img.name.clone(),
+                    rect: img.screen,
+                    offset: img.char_offset,
+                });
+            }
+            paint_resize_handles(canvas, rect, [r, g, b]);
         }
+    }
+
+    // The drag's proposed size, over the picture's own place in the text. Drawn
+    // after every image so it is never hidden by one, and as an outline only —
+    // the document is not touched until the pointer is released.
+    if let Some(preview) = resize_preview {
+        let [r, g, b, _] = selection_color;
+        canvas.stroke_rect(
+            shifted_rect(preview, ox, oy),
+            Color::from_rgba(r, g, b, 1.0),
+            StrokeStyle::solid(SELECTED_IMAGE_BORDER_WIDTH),
+        );
+    }
+}
+
+/// Four corner grips on a selected image.
+///
+/// Corners only, and not the edge midpoints a word processor also offers: this
+/// resize keeps the picture's proportions, so an edge grip would promise a
+/// stretch it will not perform. Four affordances that all do the same thing say
+/// that more honestly than eight where half behave unexpectedly.
+///
+/// Drawn as filled squares with a contrasting outline, so they stay visible on
+/// a picture of any colour — the same reason the selection border is opaque.
+fn paint_resize_handles(canvas: &mut Canvas, rect: Rect, [r, g, b]: [f32; 3]) {
+    for (fx, fy) in RESIZE_CORNERS {
+        let cx = rect.x + rect.width * fx;
+        let cy = rect.y + rect.height * fy;
+        let grip = Rect::new(
+            cx - RESIZE_HANDLE_SIZE / 2.0,
+            cy - RESIZE_HANDLE_SIZE / 2.0,
+            RESIZE_HANDLE_SIZE,
+            RESIZE_HANDLE_SIZE,
+        );
+        canvas.fill_rect(grip, Color::from_rgba(r, g, b, 1.0));
+        canvas.stroke_rect(
+            grip,
+            Color::from_rgba(1.0, 1.0, 1.0, 0.9),
+            StrokeStyle::solid(1.0),
+        );
     }
 }
 
@@ -233,6 +309,8 @@ mod image_paint_tests {
             None,
             None,
             [0.0; 4],
+            None,
+            None,
             0.0,
             0.0,
         );
@@ -255,6 +333,8 @@ mod image_paint_tests {
             Some(resolver),
             None,
             [0.0; 4],
+            None,
+            None,
             0.0,
             0.0,
         );
@@ -282,6 +362,8 @@ mod image_paint_tests {
                 None,
                 None,
                 [0.0; 4],
+                None,
+                None,
                 0.0,
                 0.0,
             );
@@ -297,6 +379,8 @@ mod image_paint_tests {
                 None,
                 Some((7, 8)),
                 [0.2, 0.4, 0.9, 0.35],
+                None,
+                None,
                 0.0,
                 0.0,
             );
@@ -335,6 +419,8 @@ mod image_paint_tests {
             Some((4, 5)),
             // Fully opaque, exactly as the theme supplies it.
             [0.66, 0.88, 0.91, 1.0],
+            None,
+            None,
             0.0,
             0.0,
         );
@@ -395,6 +481,8 @@ mod image_paint_tests {
                 None,
                 sel,
                 [0.2, 0.4, 0.9, 0.35],
+                None,
+                None,
                 0.0,
                 0.0,
             );
