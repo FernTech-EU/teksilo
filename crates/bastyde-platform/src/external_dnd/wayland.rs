@@ -9,12 +9,22 @@
 //! ([`Backend::from_foreign_display`]): libwayland multiplexes events to
 //! per-object event queues, so a dedicated dispatch thread reading our queue
 //! coexists with winit's event loop on the same connection. Because the
-//! connection is shared, the `wl_surface` object ids match winit's, so we can
-//! filter `enter` events to this window's surface.
+//! connection is shared, the `wl_surface` object ids match winit's, so an
+//! `enter` can be resolved back to the window it names.
 //!
-//! `wl_data_device` is per-seat (app-global), so each window's backend filters
-//! by its own surface; `motion` / `drop` / `leave` (which carry no surface) are
-//! gated on whether the most recent `enter` matched.
+//! `wl_data_device` is bound per **seat**, not per surface. A client with
+//! several windows therefore has a single drag stream, and the compositor
+//! delivers it on **one** of the devices the client has bound — not on "the
+//! one belonging to the window under the pointer", which is not a thing the
+//! protocol expresses. So a device must not answer only for its own surface:
+//! every window publishes its surface into a shared [`SharedDnd`] routing
+//! table, and whichever thread receives the `enter` posts to the window that
+//! table names. `motion` / `drop` / `leave` carry no surface and are gated on
+//! the route the last `enter` established.
+//!
+//! (Filtering by own surface instead is invisible in a single-window app —
+//! the only device is also the only window — and breaks every window but one
+//! as soon as a second exists.)
 //!
 //! On X11 (the display handle is Xlib/XCB, not Wayland) `attach` returns an
 //! inert guard — external OS drops are then a no-op and the `DropZone` Browse
@@ -24,10 +34,11 @@
 //! (`cfg(all(unix, not(target_os = "macos")))`); not built on the macOS
 //! development machine.
 
+use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::os::fd::{AsFd, FromRawFd, OwnedFd};
-use std::sync::Arc;
 use std::sync::mpsc::{Receiver, Sender, channel};
+use std::sync::{Arc, Mutex};
 
 use bastyde_canvas::Point;
 use bastyde_core::raw_handle::ParentHandle;
@@ -69,16 +80,90 @@ enum OutboundCommand {
 /// Preferred drop MIME types, in order. `text/uri-list` carries file paths.
 const PREFERRED_MIMES: &[&str] = &["text/uri-list", "text/plain;charset=utf-8", "text/plain"];
 
+/// Where to deliver the events of a drag hovering a given surface.
+#[derive(Clone)]
+struct Route {
+    window_id: BastydeWindowId,
+    poster: Arc<dyn AppEventPoster>,
+}
+
+/// Which dispatch thread is servicing the in-flight drag, and the `enter`
+/// serial that identifies it.
+#[derive(Clone, Copy)]
+struct Claim {
+    device: BastydeWindowId,
+    serial: u32,
+}
+
+/// App-global drag state shared by every window's dispatch thread.
+///
+/// `wl_data_device` is bound per **seat**, not per surface, so a client with
+/// several windows still gets a single drag stream — and the compositor is free
+/// to deliver it on any one of the devices the client has bound, whichever
+/// window is actually under the pointer. A device that only recognised its own
+/// surface would therefore discard every drag aimed at a sibling window, which
+/// is invisible to a single-window app and total breakage for a multi-window
+/// one. Routing is by surface instead: any device can deliver to any window.
+#[derive(Default)]
+struct SharedDnd {
+    /// Surface protocol id → the window that owns it. Keyed by protocol id
+    /// rather than `ObjectId` because ids reach us from sibling windows'
+    /// connection wrappers, and the numeric id is what is stable across them.
+    routes: Mutex<HashMap<u32, Route>>,
+    /// Set while a drag is being serviced, so a compositor that fans the same
+    /// `enter` out to every bound device can't have two threads deliver it —
+    /// and drop it twice.
+    claim: Mutex<Option<Claim>>,
+}
+
+impl SharedDnd {
+    /// Resolve the window owning `surface`, if it is one of ours.
+    fn route_for(&self, surface: &ObjectId) -> Option<Route> {
+        self.routes
+            .lock()
+            .ok()?
+            .get(&surface.protocol_id())
+            .cloned()
+    }
+
+    /// Try to become the thread that services the drag identified by `serial`.
+    /// The first caller wins; a repeat from the winner stays true.
+    fn claim_drag(&self, serial: u32, device: BastydeWindowId) -> bool {
+        let Ok(mut claim) = self.claim.lock() else {
+            return true;
+        };
+        match *claim {
+            Some(existing) if existing.serial == serial => existing.device == device,
+            _ => {
+                *claim = Some(Claim { device, serial });
+                true
+            }
+        }
+    }
+
+    /// Release the claim held by `device`, so the next drag is contestable.
+    fn release_claim(&self, device: BastydeWindowId) {
+        if let Ok(mut claim) = self.claim.lock()
+            && claim.is_some_and(|c| c.device == device)
+        {
+            *claim = None;
+        }
+    }
+}
+
 /// Dispatch-thread state.
 struct DndState {
     window_id: BastydeWindowId,
     poster: Arc<dyn AppEventPoster>,
     conn: Connection,
     qh: QueueHandle<DndState>,
-    /// winit's surface, to filter `enter` to this window.
-    target_surface: Option<ObjectId>,
-    /// True while a drag's most recent `enter` matched our surface.
-    active: bool,
+    /// Routing table + drag claim shared with every other window's thread.
+    shared: Arc<SharedDnd>,
+    /// Where this thread is delivering the in-flight drag — the window owning
+    /// the surface the last `enter` named, which is often *not* this thread's
+    /// own window. `None` when no drag is being serviced here, which is what
+    /// gates `motion` / `drop` / `leave` (they carry no surface of their own).
+    active_route: Option<Route>,
     /// The current drag's data offer + its advertised MIME types.
     current_offer: Option<WlDataOffer>,
     offer_mimes: Vec<String>,
@@ -109,11 +194,27 @@ struct DndState {
 }
 
 impl DndState {
+    /// Post to *this* thread's own window — outbound-drag outcomes, which
+    /// belong to the window that started the drag.
     fn post(&self, event: ExternalDragEvent) {
         self.poster.post_external(Box::new(ExternalDndEventPayload {
             window_id_owner: self.window_id,
             event,
         }));
+    }
+
+    /// Post to the window under the pointer, which any thread may be
+    /// servicing. No-op when no drag is being serviced here.
+    fn post_routed(&self, event: ExternalDragEvent) {
+        let Some(route) = &self.active_route else {
+            return;
+        };
+        route
+            .poster
+            .post_external(Box::new(ExternalDndEventPayload {
+                window_id_owner: route.window_id,
+                event,
+            }));
     }
 
     /// Drain pending outbound-drag commands from the guard and start a native
@@ -357,15 +458,21 @@ impl Dispatch<WlDataDevice, ()> for DndState {
                 y,
                 id,
             } => {
-                let matches = state
-                    .target_surface
-                    .as_ref()
-                    .map(|t| &surface.id() == t)
-                    .unwrap_or(true);
-                state.active = matches;
-                if !matches {
+                // Deliver to whichever of our windows owns the entered surface —
+                // not necessarily the one whose device received the event.
+                let route = state.shared.route_for(&surface.id());
+                let Some(route) = route else {
+                    // Not one of our surfaces (a foreign window, or one already
+                    // detached): leave it to whoever owns it.
+                    state.active_route = None;
+                    return;
+                };
+                if !state.shared.claim_drag(serial, state.window_id) {
+                    // Another thread is already servicing this drag.
+                    state.active_route = None;
                     return;
                 }
+                state.active_route = Some(route);
                 state.position = Point::new(x as f32, y as f32);
                 // Accept a MIME we can read AND negotiate a drag action — both
                 // are required or the compositor shows the "forbidden" cursor
@@ -380,7 +487,7 @@ impl Dispatch<WlDataDevice, ()> for DndState {
                 }
                 // Bytes aren't available until drop; advertise the offered MIME
                 // types so the drop target can decide accept/reject on hover.
-                state.post(ExternalDragEvent::Entered {
+                state.post_routed(ExternalDragEvent::Entered {
                     data: ExternalDropData {
                         formats: state.offer_mimes.clone(),
                         ..Default::default()
@@ -389,23 +496,22 @@ impl Dispatch<WlDataDevice, ()> for DndState {
                 });
             }
             DataDeviceEvent::Motion { x, y, .. } => {
-                if !state.active {
+                if state.active_route.is_none() {
                     return;
                 }
                 state.position = Point::new(x as f32, y as f32);
-                state.post(ExternalDragEvent::Moved {
+                state.post_routed(ExternalDragEvent::Moved {
                     position: state.position,
                 });
             }
             DataDeviceEvent::Leave => {
-                if state.active {
-                    state.post(ExternalDragEvent::Left);
-                }
-                state.active = false;
+                state.post_routed(ExternalDragEvent::Left);
+                state.active_route = None;
+                state.shared.release_claim(state.window_id);
                 state.current_offer = None;
             }
             DataDeviceEvent::Drop => {
-                if !state.active {
+                if state.active_route.is_none() {
                     return;
                 }
                 // Self-drag: this is an app-originated OS drag (we hold the
@@ -425,7 +531,7 @@ impl Dispatch<WlDataDevice, ()> for DndState {
                         .map(|offer| receive(&state.conn, offer, &state.offer_mimes))
                         .unwrap_or_default()
                 };
-                state.post(ExternalDragEvent::Dropped {
+                state.post_routed(ExternalDragEvent::Dropped {
                     data,
                     position: state.position,
                 });
@@ -436,7 +542,8 @@ impl Dispatch<WlDataDevice, ()> for DndState {
                     }
                     offer.destroy();
                 }
-                state.active = false;
+                state.active_route = None;
+                state.shared.release_claim(state.window_id);
             }
             // Clipboard selection — not our concern.
             DataDeviceEvent::Selection { .. } => {}
@@ -507,6 +614,26 @@ fn receive(conn: &Connection, offer: &WlDataOffer, mimes: &[String]) -> External
 /// there).
 pub struct WaylandDndGuard {
     cmd_tx: Option<Sender<OutboundCommand>>,
+    /// Shared routing table, so closing this window withdraws its surface.
+    shared: Arc<SharedDnd>,
+    /// Protocol id of the surface this window published, if any.
+    route_key: Option<u32>,
+    window_id: BastydeWindowId,
+}
+
+/// Withdraw the window's surface from the shared routing table. A stale entry
+/// would send a later drag to a window that no longer exists — and Wayland
+/// recycles protocol ids, so the id could even be re-issued to another
+/// window's surface.
+impl Drop for WaylandDndGuard {
+    fn drop(&mut self) {
+        if let Some(key) = self.route_key
+            && let Ok(mut routes) = self.shared.routes.lock()
+        {
+            routes.remove(&key);
+        }
+        self.shared.release_claim(self.window_id);
+    }
 }
 
 impl ExternalDndGuard for WaylandDndGuard {
@@ -526,12 +653,17 @@ impl ExternalDndGuard for WaylandDndGuard {
 }
 
 /// Wayland external-drag backend. See the module docs.
+///
+/// One per app, so every window's dispatch thread shares a single surface
+/// routing table.
 #[derive(Default)]
-pub struct WaylandExternalDndBackend;
+pub struct WaylandExternalDndBackend {
+    shared: Arc<SharedDnd>,
+}
 
 impl WaylandExternalDndBackend {
     pub fn new() -> Self {
-        Self
+        Self::default()
     }
 }
 
@@ -581,6 +713,21 @@ impl ExternalDndBackend for WaylandExternalDndBackend {
             .clone()
             .and_then(|id| WlSurface::from_id(&conn, id).ok());
 
+        // Publish this window's surface so *any* window's dispatch thread can
+        // deliver a drag that lands on it.
+        let route_key = target_surface.as_ref().map(ObjectId::protocol_id);
+        if let Some(key) = route_key
+            && let Ok(mut routes) = self.shared.routes.lock()
+        {
+            routes.insert(
+                key,
+                Route {
+                    window_id,
+                    poster: poster.clone(),
+                },
+            );
+        }
+
         let (cmd_tx, cmd_rx) = channel::<OutboundCommand>();
 
         let mut state = DndState {
@@ -588,8 +735,8 @@ impl ExternalDndBackend for WaylandExternalDndBackend {
             poster,
             conn,
             qh: qh.clone(),
-            target_surface,
-            active: false,
+            shared: self.shared.clone(),
+            active_route: None,
             current_offer: None,
             offer_mimes: Vec::new(),
             position: Point::new(0.0, 0.0),
@@ -629,6 +776,9 @@ impl ExternalDndBackend for WaylandExternalDndBackend {
 
         Box::new(WaylandDndGuard {
             cmd_tx: Some(cmd_tx),
+            shared: self.shared.clone(),
+            route_key,
+            window_id,
         })
     }
 }

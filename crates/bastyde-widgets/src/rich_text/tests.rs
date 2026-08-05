@@ -7385,3 +7385,53 @@ fn range_rect_is_none_before_layout() {
     let handle = editor.handle();
     assert!(handle.range_rect(0, 5).is_none());
 }
+
+// ---------------------------------------------------------------------------
+// External (OS) drag hover
+// ---------------------------------------------------------------------------
+
+/// An external drag must reach the editor's own `on_drag_hover` and move the
+/// caret under the pointer, so the writer can see where the drop will land.
+///
+/// The payload shape here is the one Wayland actually delivers on hover: the
+/// bytes are only readable at drop time (they arrive over a pipe), so `files`
+/// / `text` / `uris` are all empty and only the advertised MIME `formats` are
+/// populated. A target that validates on `files()`/`text()` sees an empty
+/// payload, returns `NoFeedback`, and the drag bubbles to an ancestor that
+/// paints a reject tint — which reads as "drops are forbidden everywhere",
+/// with a caret that never follows the drag.
+#[test]
+fn external_drag_hover_moves_caret_from_formats_only_payload() {
+    use bastyde_core::ExternalDropData;
+    use bastyde_core::window::NoopWindowOps;
+
+    let doc = TextDocument::new();
+    doc.set_plain_text("Hello world").unwrap();
+    let editor = RichTextEditor::editor(doc);
+    let handle = editor.handle();
+
+    let mut tree = WidgetTree::new();
+    let _ = tree.add(editor);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    let _ = tree.render();
+
+    handle.select_range(0, 0);
+    let before = handle.cursor_position();
+
+    let mut noop = NoopWindowOps;
+    tree.begin_external_drag(
+        Point::new(300.0, 8.0),
+        ExternalDropData {
+            formats: vec!["text/uri-list".to_string()],
+            ..Default::default()
+        },
+        &mut noop,
+    );
+
+    assert_ne!(
+        before,
+        handle.cursor_position(),
+        "the caret must follow an external drag whose payload carries only MIME \
+         formats (the Wayland hover shape)"
+    );
+}
