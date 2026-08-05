@@ -412,6 +412,95 @@ impl<T: 'static> Widget for TreeViewBodyPane<T> {
                     }
                 }
 
+                // AT-action driving. `TreeItemWrapper::accessibility`
+                // advertises `Click`, `ScrollIntoView` and — on a branch —
+                // `Expand` / `Collapse`; this is where they land. A screen
+                // reader's activate gesture and the automation bridge's
+                // `invoke_action` / `expand` / `collapse` both arrive as
+                // `WidgetEvent::AccessAction`.
+                //
+                // Not optional garnish: without it the only way to drive a row
+                // is a synthetic pointer click at its reported bounds, and for
+                // any row the virtualizer has parked outside the viewport those
+                // bounds are *content* coordinates that can sit below the
+                // window entirely — the click goes nowhere, or somewhere else.
+                {
+                    let sel_a11y = self.row_selection.clone();
+                    let source_a11y = self.source.clone();
+                    let anchor_a11y = self.source.anchor(i);
+                    let fi_a11y = self.focused_index.clone();
+                    let fi_anchor_a11y = self.focused_anchor.clone();
+                    let metrics_a11y = self.metrics.clone();
+                    let scroll_a11y = self.scroll_y.clone();
+                    let vh_a11y = self.viewport_height.clone();
+                    let activate_a11y = self.on_activate.clone();
+                    ctx.apply_handlers(
+                        child_id,
+                        HandlerSet::new().on_access_action(move |action, ctx| {
+                            use bastyde_core::accesskit::Action;
+                            use bastyde_core::event::EventResponse;
+                            // Rows above may have shifted since this handler was
+                            // built (an expand elsewhere, a model edit), so
+                            // resolve the row's CURRENT flat index rather than
+                            // trusting the captured one — same rule as the
+                            // pointer path above.
+                            let Some(row) = anchor_a11y.index() else {
+                                return EventResponse::Ignored;
+                            };
+                            match action {
+                                Action::Click => {
+                                    // `Click` is the node's DEFAULT action and
+                                    // an AT client has no double-click, so it
+                                    // both selects and activates regardless of
+                                    // what `activate_on` asks of a mouse.
+                                    if let Some(ref sel) = sel_a11y {
+                                        sel.select(row);
+                                    }
+                                    // Move the arrow-nav origin with it, exactly
+                                    // as a pointer click does, so a following
+                                    // ArrowDown steps from here.
+                                    fi_a11y.set(Some(row));
+                                    *fi_anchor_a11y.borrow_mut() = Some(source_a11y.anchor(row));
+                                    if let Some(ref cb) = activate_a11y {
+                                        cb(row, ctx);
+                                    }
+                                    EventResponse::Handled
+                                }
+                                Action::Expand | Action::Collapse => match source_a11y.meta(row) {
+                                    // Idempotent: asking a branch for the state
+                                    // it is already in succeeds. Asking a *leaf*
+                                    // does not — that is a caller error, and
+                                    // reporting it is the whole point of having
+                                    // the reply distinguish the two.
+                                    Some(m) if m.has_children => {
+                                        let want = action == Action::Expand;
+                                        if m.is_expanded != want {
+                                            source_a11y.set_expanded_at(row, want);
+                                        }
+                                        EventResponse::Handled
+                                    }
+                                    _ => EventResponse::Ignored,
+                                },
+                                Action::ScrollIntoView => {
+                                    let viewport = vh_a11y.get();
+                                    let scroll = scroll_a11y.get();
+                                    let new_scroll = {
+                                        let mut m = metrics_a11y.borrow_mut();
+                                        let total = m.total_height(source_a11y.visible_count());
+                                        let max = (total - viewport).max(0.0);
+                                        m.scroll_for_ensure_visible(row, scroll, viewport, max)
+                                    };
+                                    if (new_scroll - scroll).abs() > f32::EPSILON {
+                                        scroll_a11y.set(new_scroll);
+                                    }
+                                    EventResponse::Handled
+                                }
+                                _ => EventResponse::Ignored,
+                            }
+                        }),
+                    );
+                }
+
                 // Drag handler when reorderable OR exportable, gated by the
                 // source's transferable verdict (`drag`). Emits the public
                 // `RowDragData<T>`; the source recovers the key + validates at

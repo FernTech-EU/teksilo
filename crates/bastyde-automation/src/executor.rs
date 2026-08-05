@@ -466,8 +466,28 @@ fn dispatch_action_and_settle(
     if !node_present(&update, node) {
         return AutomationReply::err(codes::NOT_FOUND, format!("no node {node}"));
     }
-    tree.dispatch_access_action(accesskit::NodeId(node), action, data, ops);
-    finish_settle(tree, ops, settle)
+    let handled = tree.dispatch_access_action(accesskit::NodeId(node), action, data, ops);
+    // Settle regardless: an action that WAS handled must have its effects
+    // flushed before we reply, and one that wasn't costs a frame at most.
+    let reply = finish_settle(tree, ops, settle);
+    if handled || !reply.is_ok() {
+        return reply;
+    }
+    // The node is real but nothing acted on the action. Reporting success here
+    // is what made an unsupported action indistinguishable from a working one,
+    // so name the actions the node does advertise — that is almost always
+    // enough for the caller to fix the call.
+    let advertised = find_node(&update, node)
+        .map(|sn| sn.actions.join(", "))
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "none".to_string());
+    AutomationReply::err(
+        codes::UNHANDLED_ACTION,
+        format!(
+            "node {node} did not handle '{}'; it advertises: {advertised}",
+            action_name(action).unwrap_or("?")
+        ),
+    )
 }
 
 fn wait_for_condition(
@@ -609,6 +629,7 @@ fn semantic_node(
         toggled,
         expanded: node.is_expanded(),
         selected: node.is_selected(),
+        level: node.level(),
         disabled: node.is_disabled(),
         focused: id == focus,
         live,
@@ -877,6 +898,14 @@ const ADVERTISABLE_ACTIONS: &[(accesskit::Action, &str)] = &[
     (accesskit::Action::ScrollLeft, "scroll_left"),
     (accesskit::Action::ScrollRight, "scroll_right"),
 ];
+
+/// The snake_case name for an `accesskit::Action`, for error messages.
+fn action_name(action: accesskit::Action) -> Option<&'static str> {
+    ADVERTISABLE_ACTIONS
+        .iter()
+        .find(|(a, _)| *a == action)
+        .map(|(_, name)| *name)
+}
 
 /// Map an automation action name to an `accesskit::Action`. Accepts the
 /// snake_case names plus a few intuitive aliases.

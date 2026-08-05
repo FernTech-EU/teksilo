@@ -352,6 +352,61 @@ impl<T: 'static> Widget for ListBodyPane<T> {
                     ctx.apply_handlers(child_id, handlers);
                 }
 
+                // AT-action driving — the `Click` / `ScrollIntoView` pair
+                // `ListItemWrapper::accessibility` advertises. See
+                // `TreeViewBodyPane::build`'s equivalent block for why a
+                // synthetic pointer click at the row's bounds is not a
+                // substitute for a virtualized row.
+                {
+                    let sel_a11y = self.row_selection.clone();
+                    let anchor_a11y = self.source.anchor(i);
+                    let fi_a11y = self.focused_index.clone();
+                    let metrics_a11y = self.metrics.clone();
+                    let scroll_a11y = self.scroll_y.clone();
+                    let vh_a11y = self.viewport_height.clone();
+                    let len_a11y = self.source.len_fn.clone();
+                    let activate_a11y = self.on_activate.clone();
+                    ctx.apply_handlers(
+                        child_id,
+                        HandlerSet::new().on_access_action(move |action, ctx| {
+                            use bastyde_core::accesskit::Action;
+                            use bastyde_core::event::EventResponse;
+                            let Some(row) = anchor_a11y.index() else {
+                                return EventResponse::Ignored;
+                            };
+                            match action {
+                                Action::Click => {
+                                    // Default action: select AND activate — an
+                                    // AT client has no double-click to give.
+                                    if let Some(ref sel) = sel_a11y {
+                                        sel.select(row);
+                                    }
+                                    fi_a11y.set(Some(row));
+                                    if let Some(ref cb) = activate_a11y {
+                                        cb(row, ctx);
+                                    }
+                                    EventResponse::Handled
+                                }
+                                Action::ScrollIntoView => {
+                                    let viewport = vh_a11y.get();
+                                    let scroll = scroll_a11y.get();
+                                    let new_scroll = {
+                                        let mut m = metrics_a11y.borrow_mut();
+                                        let total = m.total_height((len_a11y)());
+                                        let max = (total - viewport).max(0.0);
+                                        m.scroll_for_ensure_visible(row, scroll, viewport, max)
+                                    };
+                                    if (new_scroll - scroll).abs() > f32::EPSILON {
+                                        scroll_a11y.set(new_scroll);
+                                    }
+                                    EventResponse::Handled
+                                }
+                                _ => EventResponse::Ignored,
+                            }
+                        }),
+                    );
+                }
+
                 // When reorderable OR exportable, attach an on_drag handler to
                 // start the drag. The preview is a fresh copy of the delegate's
                 // widget for the pressed item, wrapped in a sized+raised

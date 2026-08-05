@@ -142,7 +142,16 @@ impl WidgetTree {
     /// then [`widget_for_synthetic`](Self::widget_for_synthetic)), builds a
     /// [`crate::event::WidgetEvent::AccessAction`],
     /// and dispatches it through `ops` so actions that open windows /
-    /// dialogs work. Returns `true` when a live target widget was resolved.
+    /// dialogs work.
+    ///
+    /// Returns `true` when the action was **consumed** — a handler claimed it,
+    /// focus moved, or the context-menu fallback opened a menu — and `false`
+    /// when nothing acted on it, including when the target node resolves to no
+    /// live widget. Callers are expected to surface that: an action a node
+    /// never handles is a caller error, and reporting it as success (which is
+    /// what "a widget existed at the target" amounted to) leaves an automation
+    /// client chasing timing and coordinates for a UI that was never going to
+    /// move.
     ///
     /// This is the in-process equivalent of an OS screen reader invoking an
     /// action — the channel an [automation](crate::WidgetTree) harness uses
@@ -162,8 +171,9 @@ impl WidgetTree {
             target_node: node_id,
             data,
         };
+        self.access_action_handled = false;
         self.dispatch_event_with_ops(event, ops);
-        target.is_some()
+        self.access_action_handled
     }
 
     fn build_accessibility_tree(
@@ -225,6 +235,66 @@ impl WidgetTree {
             .filter(|id| self.arena.is_active(*id))
             .map(widget_id_to_node_id)
             .unwrap_or_else(root_node_id);
+
+        // ── Name-from-content for row nodes ───────────────────────────
+        // A virtualized row is two nodes: a thin structural wrapper
+        // (`ListItemWrapper` / `TreeItemWrapper`) carrying the role, level
+        // and selected/expanded state, and the app's delegate widget below
+        // it carrying the visible label. ARIA computes an `option`'s /
+        // `treeitem`'s name from its contents; AccessKit does not. Without
+        // this pass the platform adapters announce a nameless "tree item",
+        // and any client that matches a role AND a label — a screen-reader
+        // search, the automation bridge's `find_node` — can never match a
+        // row, because the two live on different nodes.
+        //
+        // Fill each nameless row node's name in from its first named
+        // descendant, in the order they read. The descendant keeps its own
+        // name (as in a browser's accessibility tree, where the text that
+        // contributes to a computed name stays in the tree).
+        {
+            use accesskit::Role;
+            use std::collections::HashMap;
+
+            // Row roles that take their name from content. A row inside a
+            // row (never emitted today, but cheap to be correct about) owns
+            // its own name and terminates the search.
+            fn names_from_content(role: Role) -> bool {
+                matches!(role, Role::TreeItem | Role::ListBoxOption)
+            }
+
+            let index: HashMap<accesskit::NodeId, usize> = nodes
+                .iter()
+                .enumerate()
+                .map(|(i, (nid, _))| (*nid, i))
+                .collect();
+
+            let mut hoisted: Vec<(usize, String)> = Vec::new();
+            for (i, (_, node)) in nodes.iter().enumerate() {
+                if !names_from_content(node.role()) || node.label().is_some() {
+                    continue;
+                }
+                // Depth-first, children in document order.
+                let mut stack: Vec<accesskit::NodeId> =
+                    node.children().iter().rev().copied().collect();
+                while let Some(nid) = stack.pop() {
+                    let Some(&j) = index.get(&nid) else { continue };
+                    let descendant = &nodes[j].1;
+                    if names_from_content(descendant.role()) {
+                        continue;
+                    }
+                    match descendant.label() {
+                        Some(label) if !label.trim().is_empty() => {
+                            hoisted.push((i, label.to_string()));
+                            break;
+                        }
+                        _ => stack.extend(descendant.children().iter().rev().copied()),
+                    }
+                }
+            }
+            for (i, label) in hoisted {
+                nodes[i].1.set_label(label);
+            }
+        }
 
         // ── Presentational-node pruning ───────────────────────────────
         // Layout primitives (HStack/VStack/ZStack/Center/Padding/Expand/…)

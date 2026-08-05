@@ -518,6 +518,9 @@ impl WidgetTree {
                             crate::focus::FocusOrigin::Programmatic,
                             &mut *ops,
                         );
+                        // Focus is serviced here rather than by the widget, so
+                        // "handled" means the focus actually landed.
+                        self.access_action_handled = self.focused == Some(id);
                     } else if *action == accesskit::Action::ShowContextMenu {
                         // A "show context menu" AT action — a screen reader's
                         // menu key, or an automation `right_click` /
@@ -531,14 +534,19 @@ impl WidgetTree {
                         // node's centre. Without this, the AT action was a silent
                         // no-op for every widget that wires its menu through the
                         // factory (i.e. all of them) — see `show_context_menu_for`.
-                        let handled =
-                            self.dispatch_to_widget_returning_handled(id, &event, &mut *ops);
-                        if !handled {
-                            let position = self.arena.bounds(id).center();
-                            self.show_context_menu_for(id, position, &mut *ops);
-                        }
+                        // Handled = the widget consumed it, or the factory
+                        // fallback actually opened a menu. A node with neither
+                        // reports unhandled rather than a silent success.
+                        self.access_action_handled =
+                            if self.dispatch_to_widget_returning_handled(id, &event, &mut *ops) {
+                                true
+                            } else {
+                                let position = self.arena.bounds(id).center();
+                                self.show_context_menu_for(id, position, &mut *ops)
+                            };
                     } else {
-                        self.dispatch_to_widget(id, &event, &mut *ops);
+                        self.access_action_handled =
+                            self.dispatch_to_widget_returning_handled(id, &event, &mut *ops);
                     }
                 }
             }

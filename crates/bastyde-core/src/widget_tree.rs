@@ -454,6 +454,18 @@ pub struct WidgetTree {
     /// to the set of currently-present live nodes, so a node that
     /// disappears and reappears with the same text re-announces.
     automation_last_text: std::collections::HashMap<accesskit::NodeId, String>,
+    /// Whether the `WidgetEvent::AccessAction` currently being dispatched was
+    /// consumed by a handler. Written by the dispatcher's `AccessAction` arm,
+    /// read (and reset) by [`Self::dispatch_access_action`], which is the only
+    /// caller that can answer "did anything happen?" to its own caller.
+    ///
+    /// A side channel because `dispatch_event_with_ops` returns `()` for every
+    /// event kind, and routing AT actions through the *same* path as everything
+    /// else is load-bearing (it is what lets an action open a window). The
+    /// alternative — reporting success whenever a live widget merely *existed*
+    /// at the target — is how an unhandled action came to look like a
+    /// successful one to every automation client.
+    access_action_handled: bool,
     /// The `WindowState` for this tree's hosting window. Populated
     /// by the app-level window manager when the tree is registered;
     /// `None` for standalone trees. Cloned into every `EventContext`
@@ -659,6 +671,7 @@ impl WidgetTree {
             automation_announcements: std::collections::VecDeque::new(),
             automation_announce_seq: 0,
             automation_last_text: std::collections::HashMap::new(),
+            access_action_handled: false,
             window_state: None,
         }
     }

@@ -48,6 +48,12 @@ pub struct SemanticNode {
     /// Selected state, when applicable.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub selected: Option<bool>,
+    /// Hierarchy depth for a tree row, 1-based (AccessKit's `level`), when the
+    /// node declares one. A client aiming a synthetic pointer at a row's
+    /// disclosure chevron cannot compute its x without this, because the
+    /// chevron sits one indent step per level in from the row's leading edge.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub level: Option<usize>,
     /// Whether the node is disabled.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub disabled: bool,
@@ -521,6 +527,10 @@ pub mod codes {
     pub const BAD_ARGUMENT: &str = "BAD_ARGUMENT";
     /// The action / role / key name was not recognised.
     pub const UNKNOWN_NAME: &str = "UNKNOWN_NAME";
+    /// The node exists but nothing acted on the action — it advertises no such
+    /// action, or its handler declined. Distinct from `NOT_FOUND` (no node at
+    /// all): the target was real, the UI just did not move.
+    pub const UNHANDLED_ACTION: &str = "UNHANDLED_ACTION";
     /// A `wait_for_condition` timed out.
     pub const WAIT_TIMEOUT: &str = "WAIT_TIMEOUT";
     /// A live settle exceeded its wall-clock budget.
