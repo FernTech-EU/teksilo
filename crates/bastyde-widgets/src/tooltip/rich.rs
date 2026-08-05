@@ -835,7 +835,10 @@ mod tests {
         tree.layout(SizeProposal::with_width(400.0));
 
         let baseline = tree.widget_count();
-        assert!(baseline > 1, "the cascade must actually pre-create children");
+        assert!(
+            baseline > 1,
+            "the cascade must actually pre-create children"
+        );
         for _ in 0..10 {
             tree.arena_mark_needs_rebuild_for_testing(id);
             tree.layout(SizeProposal::with_width(400.0));
@@ -856,5 +859,313 @@ mod tests {
         );
 
         _reset_tooltip_registry();
+    }
+
+    /// Host with two focusable-by-`tree.focus()` anchors, the first carrying a
+    /// rich tooltip. Used to drive the keyboard path end to end: focus
+    /// promotion, Tab-into-the-surface, Escape, and re-summoning.
+    #[derive(Debug)]
+    struct FocusTooltipHost {
+        anchor_id: Option<WidgetId>,
+        elsewhere_id: Option<WidgetId>,
+        ids_sink: Rc<std::cell::Cell<Option<(WidgetId, WidgetId, WidgetId)>>>,
+    }
+
+    impl bastyde_core::widget::Widget for FocusTooltipHost {
+        fn build(&mut self, ctx: &mut bastyde_core::build_context::BuildContext) -> Vec<WidgetId> {
+            let anchor = ctx.add(crate::primitives::TextWidget::new(lit!("anchor")));
+            let elsewhere = ctx.add(crate::primitives::TextWidget::new(lit!("elsewhere")));
+            let tip = crate::tooltip::attach::attach_rich_tooltip_content(
+                ctx,
+                anchor,
+                TooltipContent::new("focus-tip", lit!("Focus-promoted body")),
+                ctx.theme().motion.tooltip_delay,
+            );
+            self.anchor_id = Some(anchor);
+            self.elsewhere_id = Some(elsewhere);
+            self.ids_sink.set(Some((anchor, elsewhere, tip)));
+            vec![anchor, elsewhere]
+        }
+        fn layout_response(
+            &self,
+            proposal: bastyde_canvas::SizeProposal,
+            ctx: &bastyde_core::LayoutContext<'_>,
+        ) -> bastyde_core::LayoutResponse {
+            self.anchor_id
+                .and_then(|id| ctx.child_size(id, proposal))
+                .unwrap_or_else(|| bastyde_canvas::Size::new(0.0, 0.0))
+                .into()
+        }
+        fn children(&self) -> Vec<WidgetId> {
+            self.anchor_id
+                .into_iter()
+                .chain(self.elsewhere_id)
+                .collect()
+        }
+    }
+
+    /// `reduced_motion` is a real behavioural axis here, not a cosmetic one.
+    /// With the fade enabled, a dismissed overlay lingers while it fades and
+    /// `try_dismiss_top_on_escape` reports no content ids yet, so the entry
+    /// keeps its stale `overlay_id` and `tooltip_focus_enter` skips it for
+    /// unrelated reasons. That masks the re-summon bug for most users and
+    /// exposes it only for those who have asked for reduced motion — i.e.
+    /// exactly the audience most likely to be navigating by keyboard.
+    fn focus_tooltip_tree_with(
+        reduced_motion: bool,
+    ) -> (
+        bastyde_core::widget_tree::WidgetTree,
+        WidgetId,
+        WidgetId,
+        WidgetId,
+    ) {
+        use bastyde_canvas::MockTextBackend;
+        use bastyde_core::widget_tree::WidgetTree;
+        use std::cell::RefCell;
+
+        let mut tree =
+            WidgetTree::new().with_text_backend(Rc::new(RefCell::new(MockTextBackend::new())));
+        tree.set_accessibility_preferences(false, reduced_motion, 1.0);
+        let sink = Rc::new(std::cell::Cell::new(None));
+        tree.add(FocusTooltipHost {
+            anchor_id: None,
+            elsewhere_id: None,
+            ids_sink: sink.clone(),
+        });
+        tree.layout(SizeProposal::exact(400.0, 200.0));
+        let (anchor, elsewhere, tip) = sink.get().expect("host built");
+        (tree, anchor, elsewhere, tip)
+    }
+
+    /// Two real `Button`s, the first carrying a rich tooltip — the shape every
+    /// real call site has, and the one Tab traversal can be reasoned about in.
+    fn two_buttons_first_with_tooltip()
+    -> (bastyde_core::widget_tree::WidgetTree, WidgetId, WidgetId) {
+        use crate::button::Button;
+        use bastyde_canvas::MockTextBackend;
+        use bastyde_core::widget_tree::WidgetTree;
+        use std::cell::RefCell;
+
+        let mut tree =
+            WidgetTree::new().with_text_backend(Rc::new(RefCell::new(MockTextBackend::new())));
+        tree.set_accessibility_preferences(false, true, 1.0);
+        let first = tree.add(
+            Button::new(lit!("First")).rich_tooltip_content(TooltipContent::new(
+                "first-tip",
+                lit!("Body of the first button's tip"),
+            )),
+        );
+        let second = tree.add(Button::new(lit!("Second")));
+        tree.layout(SizeProposal::exact(400.0, 200.0));
+        (tree, first, second)
+    }
+
+    /// Focus *arms* the tip's delay; it does not show on arrival.
+    ///
+    /// The pointer has always required a pause before a tip appears. Showing
+    /// the instant focus arrived made a Tab sweep across a row of tooltipped
+    /// buttons strobe a tip at every stop.
+    #[test]
+    fn focus_arms_the_delay_rather_than_showing_the_tooltip_on_arrival() {
+        let (mut tree, first, _second) = two_buttons_first_with_tooltip();
+
+        tree.focus(first);
+
+        assert!(
+            tree.active_overlays().is_empty(),
+            "focus arriving must not pop a tip — it arms the same delay the \\
+             pointer arms"
+        );
+
+        tree.advance_time(tree.theme().motion.tooltip_delay + Duration::from_millis(50));
+
+        assert_eq!(
+            tree.active_overlays().len(),
+            1,
+            "and the tip appears once focus has come to rest for the delay"
+        );
+        assert!(
+            !tree.tooltip_is_sticky_within(first),
+            "resting long enough to show is still not long enough to promote"
+        );
+    }
+
+    /// Tabbing straight past a control never shows its tip at all.
+    #[test]
+    fn tabbing_through_without_resting_never_shows_a_tooltip() {
+        use bastyde_core::event::{Key, Modifiers};
+
+        let (mut tree, first, second) = two_buttons_first_with_tooltip();
+        tree.focus(first);
+
+        // Move on well before the delay ripens.
+        tree.advance_time(Duration::from_millis(80));
+        tree.press_key(Key::Tab, Modifiers::NONE);
+        assert_eq!(tree.focused(), Some(second));
+
+        // Let far more than the delay pass on the *new* control.
+        tree.advance_time(tree.theme().motion.tooltip_delay * 4);
+
+        assert!(
+            tree.active_overlays().is_empty(),
+            "a tip armed by focus that has already moved on must be disarmed, \\
+             not left to open a beat later over a control the user has left"
+        );
+    }
+
+    /// Tab from a control whose tip is merely *shown* continues past it.
+    ///
+    /// An unpromoted tip appeared because focus arrived, not because the user
+    /// asked to enter it, so it takes no Tab stop — the ARIA tooltip rule.
+    #[test]
+    fn tab_skips_an_unpromoted_tooltip_and_goes_to_the_next_control() {
+        use bastyde_core::event::{Key, Modifiers};
+
+        let (mut tree, first, second) = two_buttons_first_with_tooltip();
+        tree.focus(first);
+        tree.advance_time(tree.theme().motion.tooltip_delay + Duration::from_millis(50));
+        assert_eq!(tree.active_overlays().len(), 1);
+
+        tree.press_key(Key::Tab, Modifiers::NONE);
+
+        assert_eq!(
+            tree.focused(),
+            Some(second),
+            "an unpromoted tip is informational and must not capture Tab"
+        );
+    }
+
+    /// A promoted panel takes the Tab stop **directly after its anchor** —
+    /// not wherever arena insertion order happened to put its parentless root.
+    #[test]
+    fn a_promoted_tooltip_takes_the_tab_stop_right_after_its_anchor() {
+        use bastyde_core::event::{Key, Modifiers};
+
+        let (mut tree, first, second) = two_buttons_first_with_tooltip();
+        tree.focus(first);
+        tree.advance_time(tree.theme().motion.tooltip_delay + Duration::from_millis(50));
+        let tip = tree
+            .tooltip_content_within(first)
+            .expect("the button registered a tooltip");
+        tree.promote_tooltip_to_sticky(tip);
+
+        tree.press_key(Key::Tab, Modifiers::NONE);
+        let after_anchor = tree.focused().expect("Tab landed somewhere");
+        assert!(
+            after_anchor == tip || tree.is_descendant_of(after_anchor, tip),
+            "a promoted panel belongs immediately after the control it \
+             describes, the way a disclosure's panel follows its button"
+        );
+
+        tree.press_key(Key::Tab, Modifiers::NONE);
+        assert_eq!(
+            tree.focused(),
+            Some(second),
+            "and traversal continues to the next control once past it"
+        );
+    }
+
+    /// Escape must hand focus back to the anchor.
+    ///
+    /// The keyboard path (`tooltip_focus_enter`) opens its overlay with the
+    /// plain `show_overlay`, which records no focus-restore target — so the
+    /// Escape handler skipped its restore branch entirely, leaving focus
+    /// stranded on the tooltip content that had just gone dormant. The next
+    /// `revalidate_interaction_state` pass then drops it to `None`, so a user
+    /// who Tabbed into the surface to reach a link or control ended up with no
+    /// focus at all and had to Tab in from the top of the window again.
+    #[test]
+    fn escape_returns_focus_to_the_anchor_after_tabbing_into_a_focus_promoted_tooltip() {
+        use bastyde_core::event::{Key, Modifiers};
+
+        let (mut tree, anchor, _elsewhere, tip) = focus_tooltip_tree_with(true);
+
+        tree.focus(anchor);
+        tree.advance_time(tree.theme().motion.tooltip_delay + Duration::from_millis(50));
+        assert_eq!(
+            tree.active_overlays().len(),
+            1,
+            "focus coming to rest must surface the rich tooltip"
+        );
+        // Focus no longer promotes on arrival; the dwell does. Promote through
+        // the public API so the test does not depend on wall-clock timing.
+        tree.promote_tooltip_to_sticky(tip);
+
+        // Move into the surface — the step that makes the bug observable. With
+        // focus still on the anchor, `focus_with_origin_ops` early-returns on
+        // an already-focused id and nothing is lost.
+        tree.focus(tip);
+        assert_eq!(
+            tree.active_overlays().len(),
+            1,
+            "focus moving into the tooltip's own content must not dismiss it"
+        );
+
+        tree.press_key(Key::Escape, Modifiers::NONE);
+
+        assert!(
+            tree.active_overlays().is_empty(),
+            "Escape must dismiss the focus-promoted tooltip"
+        );
+        assert_eq!(
+            tree.focused(),
+            Some(anchor),
+            "Escape must return focus to the anchor, not strand it on the \
+             dismissed surface"
+        );
+    }
+
+    /// …and must not re-open the tooltip on that same keystroke.
+    ///
+    /// The restore runs the ordinary focus path, which ends in
+    /// `tooltip_focus_enter`; by then `dormant_dismissed_content` has cleared
+    /// the entry's `overlay_id`, so without the suppression flag the entry
+    /// looks eligible again and the tip the user just dismissed springs back.
+    #[test]
+    fn escape_does_not_immediately_re_summon_the_tooltip_it_dismissed() {
+        use bastyde_core::event::{Key, Modifiers};
+
+        let (mut tree, anchor, _elsewhere, tip) = focus_tooltip_tree_with(true);
+        tree.focus(anchor);
+        tree.advance_time(tree.theme().motion.tooltip_delay + Duration::from_millis(50));
+        tree.promote_tooltip_to_sticky(tip);
+        tree.focus(tip);
+        tree.press_key(Key::Escape, Modifiers::NONE);
+
+        assert!(
+            tree.active_overlays().is_empty(),
+            "the restored focus must not re-trigger the tooltip it just closed"
+        );
+    }
+
+    /// The suppression is served by leaving, not permanent: Tab away and back
+    /// and the tooltip returns. Otherwise one Escape would mute that anchor
+    /// for the rest of the session.
+    #[test]
+    fn a_dismissed_focus_tooltip_returns_after_focus_leaves_and_comes_back() {
+        use bastyde_core::event::{Key, Modifiers};
+
+        let (mut tree, anchor, elsewhere, tip) = focus_tooltip_tree_with(true);
+        tree.focus(anchor);
+        tree.advance_time(tree.theme().motion.tooltip_delay + Duration::from_millis(50));
+        tree.promote_tooltip_to_sticky(tip);
+        tree.focus(tip);
+        tree.press_key(Key::Escape, Modifiers::NONE);
+        assert!(tree.active_overlays().is_empty());
+
+        tree.focus(elsewhere);
+        tree.advance_time(tree.theme().motion.tooltip_delay + Duration::from_millis(50));
+        assert!(
+            tree.active_overlays().is_empty(),
+            "an unrelated widget must not surface the anchor's tooltip"
+        );
+
+        tree.focus(anchor);
+        tree.advance_time(tree.theme().motion.tooltip_delay + Duration::from_millis(50));
+        assert_eq!(
+            tree.active_overlays().len(),
+            1,
+            "returning to the anchor must summon its tooltip again"
+        );
     }
 }

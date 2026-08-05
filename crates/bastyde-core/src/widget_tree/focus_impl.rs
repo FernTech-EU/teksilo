@@ -186,7 +186,8 @@ impl WidgetTree {
                 && node.clips_children
             {
                 let viewport = node.bounds;
-                let align = std::mem::replace(&mut pending_align, crate::event::ScrollAlign::Minimal);
+                let align =
+                    std::mem::replace(&mut pending_align, crate::event::ScrollAlign::Minimal);
                 // A pin must re-assert itself every time, so it never consults
                 // whether the target already happens to be on screen.
                 let needs_scroll = matches!(align, crate::event::ScrollAlign::Fraction(_))
@@ -336,10 +337,23 @@ impl WidgetTree {
         } else {
             let roots = self.arena.roots();
             for root in roots {
+                // Tooltip surfaces are spliced in below, next to the anchor
+                // they belong to — never collected as bare roots. A tooltip's
+                // content is `ctx.add`-ed parentless, so collecting it here put
+                // it in the Tab cycle at whatever position it happened to be
+                // inserted at: `sort_scope_entries` orders by explicit
+                // `tab_index` only, and entries without one compare `Equal`,
+                // so a stable sort leaves insertion order to decide. That made
+                // a tooltip's slot in the cycle an emergent property of build
+                // order rather than of the control it describes.
+                if self.tooltip_content_root(root).is_some() {
+                    continue;
+                }
                 self.collect_scope_entries(root, &mut entries);
             }
         }
         sort_scope_entries(&mut entries);
+        self.splice_sticky_tooltips_after_anchors(&mut entries);
         let root_scope = ScopeNode {
             policy: crate::focus::TraversalScopePolicy::Cycle,
             entries,
@@ -351,6 +365,64 @@ impl WidgetTree {
         }
         // `Escaped` only reaches here for an empty tree (the root Cycle scope
         // wraps at its ends) — nothing to focus, so leave focus unchanged.
+    }
+
+    /// The tooltip entry whose content root is `id`, if any.
+    fn tooltip_content_root(&self, id: WidgetId) -> Option<usize> {
+        self.tooltips.iter().position(|e| e.content_id == id)
+    }
+
+    /// Place every **sticky** tooltip surface immediately after the entry
+    /// holding its anchor, and leave every non-sticky one out entirely.
+    ///
+    /// Two rules, one place:
+    ///
+    /// * An *unpromoted* tip is informational. It appeared because the pointer
+    ///   paused or focus arrived — not because the user asked to enter it — so
+    ///   it takes no Tab stop, matching the ARIA tooltip pattern (its text
+    ///   reaches assistive tech through the anchor's description instead).
+    /// * A *promoted* one was earned, by a 2 s dwell in either modality, and
+    ///   its whole point is that its content is reachable. It belongs directly
+    ///   after the control it describes, the way a disclosure's panel follows
+    ///   its button — never at some position decided by arena insertion order.
+    ///
+    /// Anchors nested inside a traversal scope are handled by locating the
+    /// top-level entry that *contains* the anchor, so the panel still lands
+    /// immediately after that whole group rather than being dropped.
+    fn splice_sticky_tooltips_after_anchors(&self, entries: &mut Vec<ScopeEntry>) {
+        let sticky: Vec<(WidgetId, WidgetId)> = self
+            .tooltips
+            .iter()
+            .filter(|e| e.is_sticky && e.overlay_id.is_some())
+            .map(|e| (e.anchor_id, e.content_id))
+            .collect();
+
+        for (anchor_id, content_id) in sticky {
+            let mut panel = Vec::new();
+            self.collect_scope_entries(content_id, &mut panel);
+            if panel.is_empty() {
+                continue;
+            }
+            sort_scope_entries(&mut panel);
+
+            // The anchor is often not itself the Tab stop: composing controls
+            // (`Button`) keep focus on their outer node and attach the tip to
+            // an inner body root, so resolve to the focusable that actually
+            // appears in the cycle before looking for its entry.
+            let stop = self.find_focusable_at_or_above(anchor_id).unwrap_or(anchor_id);
+            let at = entries
+                .iter()
+                .position(|entry| scope_entry_contains(entry, stop))
+                // An anchor with no Tab stop above it at all (a plain container
+                // that merely carries a tip) has no entry to follow; put the
+                // panel at the end rather than dropping it, so its content
+                // stays reachable.
+                .map_or(entries.len(), |i| i + 1);
+
+            for (offset, item) in panel.into_iter().enumerate() {
+                entries.insert(at + offset, item);
+            }
+        }
     }
 
     /// Whether `id` participates in Tab traversal, honoring a `tab_stop`

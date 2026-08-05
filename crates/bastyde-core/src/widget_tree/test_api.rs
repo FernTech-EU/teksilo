@@ -4,6 +4,32 @@
 use super::*;
 
 impl WidgetTree {
+    /// The content id of the tooltip anchored at `widget` or anywhere inside
+    /// it.
+    ///
+    /// The attach helpers keep the content id to themselves, so a test that
+    /// needs to drive a tooltip's own surface (promote it, focus into it) has
+    /// no other way to name it. Matching the whole subtree, not just the id,
+    /// is what makes this work for composing controls: `Button` keeps focus on
+    /// its outer node but attaches its tooltip to an inner body root.
+    pub fn tooltip_content_within(&self, widget: WidgetId) -> Option<WidgetId> {
+        self.tooltips
+            .iter()
+            .find(|e| self.is_descendant_of(e.anchor_id, widget))
+            .map(|e| e.content_id)
+    }
+
+    /// Whether that tooltip has been promoted.
+    ///
+    /// Promotion is the line between an informational tip and a panel the user
+    /// asked for: it decides the AT role, the dismiss behaviour, and whether
+    /// the surface takes a Tab stop.
+    pub fn tooltip_is_sticky_within(&self, widget: WidgetId) -> bool {
+        self.tooltips
+            .iter()
+            .any(|e| self.is_descendant_of(e.anchor_id, widget) && e.is_sticky)
+    }
+
     /// Simulate a click at the center of a widget.
     pub fn click(&mut self, id: WidgetId) {
         self.synthesise_tap(id);

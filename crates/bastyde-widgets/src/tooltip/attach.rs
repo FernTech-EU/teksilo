@@ -316,7 +316,7 @@ mod tests {
     }
 
     #[test]
-    fn rich_tooltip_auto_promotes_on_keyboard_focus() {
+    fn rich_tooltip_shows_on_keyboard_focus_once_focus_rests() {
         _reset_tooltip_registry();
         install_tooltip_registry(vec![TooltipContent::new(
             "focus-key",
@@ -329,13 +329,19 @@ mod tests {
 
         assert!(tree.active_overlays().is_empty());
 
-        // Simulate keyboard focus of the button — no hover, no delay.
+        // Keyboard focus, no hover. Focus arms the same delay the pointer
+        // arms — a tip that appeared on arrival strobed across a Tab sweep.
         tree.focus(btn);
+        assert!(
+            tree.active_overlays().is_empty(),
+            "focus arriving arms the delay; it does not show on arrival"
+        );
+        tree.advance_time(tree.theme().motion.tooltip_delay + Duration::from_millis(50));
 
         assert_eq!(
             tree.active_overlays().len(),
             1,
-            "rich tooltip should appear immediately when its anchor is keyboard-focused"
+            "rich tooltip appears once keyboard focus has rested for the delay"
         );
 
         _reset_tooltip_registry();
@@ -352,6 +358,7 @@ mod tests {
         tree.layout(SizeProposal::exact(400.0, 200.0));
 
         tree.focus(btn);
+        tree.advance_time(tree.theme().motion.tooltip_delay + Duration::from_millis(50));
         assert_eq!(tree.active_overlays().len(), 1);
 
         // Moving focus to an unrelated widget dismisses the
@@ -428,6 +435,7 @@ mod tests {
         tree.layout(SizeProposal::exact(400.0, 300.0));
 
         tree.focus(menu);
+        tree.advance_time(tree.theme().motion.tooltip_delay + Duration::from_millis(50));
         assert!(
             tree.active_overlays().is_empty(),
             "focusing the menu container must not fan out item tooltips (the wall)"
@@ -456,15 +464,16 @@ mod tests {
         tree.layout(SizeProposal::exact(400.0, 200.0));
 
         tree.focus(anchor);
+        tree.advance_time(Duration::from_millis(250));
         assert_eq!(
             tree.active_overlays().len(),
             1,
-            "self-anchored focus promotes exactly one overlay (no reflexive dup)"
+            "self-anchored focus shows exactly one overlay (no reflexive dup)"
         );
     }
 
     #[test]
-    fn single_button_rich_tooltip_still_promotes_on_focus() {
+    fn single_button_rich_tooltip_still_shows_on_focus() {
         // Regression guard for the composing-widget case: `Button` keeps focus
         // on its outer node but anchors the tooltip on an inner root (the sole
         // reverse match). It must still promote on focus after the fix.
@@ -475,6 +484,7 @@ mod tests {
         tree.layout(SizeProposal::exact(400.0, 200.0));
 
         tree.focus(btn);
+        tree.advance_time(tree.theme().motion.tooltip_delay + Duration::from_millis(50));
         assert_eq!(
             tree.active_overlays().len(),
             1,
@@ -507,6 +517,13 @@ mod tests {
         assert!(
             tree.active_overlays().is_empty(),
             "focusing a SegmentedControl must not fan out its segment tooltips"
+        );
+        // Ripen the delay too, so this proves the fan-out guard rather than
+        // merely that focus no longer shows a tip on arrival.
+        tree.advance_time(tree.theme().motion.tooltip_delay + Duration::from_millis(50));
+        assert!(
+            tree.active_overlays().is_empty(),
+            "…and still none once the delay has elapsed"
         );
         _reset_tooltip_registry();
     }

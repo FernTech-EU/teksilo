@@ -214,6 +214,8 @@ impl WidgetTree {
             shown_at_real: None,
             shown_at_sink,
             promoted_by_focus: false,
+            armed_by_focus: false,
+            suppressed_until_focus_leaves: false,
             placement,
         });
     }
@@ -420,7 +422,12 @@ impl WidgetTree {
                 continue;
             }
             let entry = &mut self.tooltips[index];
-            to_show.push((entry.anchor_id, entry.content_id, entry.placement));
+            to_show.push((
+                entry.anchor_id,
+                entry.content_id,
+                entry.placement,
+                entry.armed_by_focus,
+            ));
             entry.hover_start = None;
             entry.real_hover_start = None;
             entry.hover_origin = None;
@@ -438,20 +445,32 @@ impl WidgetTree {
         } else {
             Some(self.theme.motion.duration_fast)
         };
-        for (anchor_id, content_id, placement) in to_show {
+        for (anchor_id, content_id, placement, by_focus) in to_show {
             self.arena.activate(content_id);
+            // A tip the keyboard summoned has no pointer to leave, so the
+            // pointer-leave grace would never fire and it would hang on screen.
+            // It ends the way a keyboard user ends things: Escape, a click
+            // outside, or focus moving off the anchor.
+            let dismiss = if by_focus {
+                crate::overlay::DismissBehavior::EscapeOrClickOutside
+            } else {
+                crate::overlay::DismissBehavior::PointerLeave {
+                    delay: std::time::Duration::from_millis(100),
+                }
+            };
             let oid = self.show_overlay(crate::overlay::OverlayRequest {
                 content_id,
                 anchor: anchor_id,
                 placement: Self::tooltip_overlay_placement(placement),
-                dismiss: crate::overlay::DismissBehavior::PointerLeave {
-                    delay: std::time::Duration::from_millis(100),
-                },
+                dismiss,
                 layer: crate::overlay::OverlayLayer::InTree,
                 parent_overlay: None,
                 on_dismiss: None,
                 fade_duration,
             });
+            if by_focus && let Some(focused) = self.focused {
+                self.overlay_manager.set_top_focus_restore(focused);
+            }
             if let Some(entry) = self
                 .tooltips
                 .iter_mut()
@@ -460,6 +479,7 @@ impl WidgetTree {
                 entry.overlay_id = Some(oid);
                 entry.shown_at_sim = Some(sim_now);
                 entry.shown_at_real = Some(real_now);
+                entry.promoted_by_focus = by_focus;
                 if let Some(sink) = entry.shown_at_sink.as_ref() {
                     sink.set(Some(real_now));
                 }
@@ -836,12 +856,28 @@ impl WidgetTree {
         self.overlay_manager.find_by_content(widget_id).is_some()
     }
 
-    /// Called when a widget gains keyboard focus. For any *rich*
-    /// tooltip (one with `sticky_after` set) whose anchor contains
-    /// `widget_id`, show the tooltip immediately and promote it to
-    /// sticky. This gives keyboard and screen-reader users the same
-    /// access to rich-tooltip interactive content as pointer users,
-    /// who reach it via the 2 s hover dwell.
+    /// Called when a widget gains keyboard focus. For any *rich* tooltip (one
+    /// with `sticky_after` set) whose anchor contains `widget_id`, **arm** the
+    /// tooltip's ordinary show delay — it appears only if focus comes to rest,
+    /// and even then it is not promoted. Promotion is left to the dwell sweep,
+    /// on the same `sticky_after` clock and the same visible `DwellIndicator`
+    /// the pointer path uses.
+    ///
+    /// Both halves mirror the pointer deliberately. A tip that appeared the
+    /// instant focus arrived strobed across a row of tooltipped buttons as the
+    /// user Tabbed through, the same way a tip on pointer-*enter* (rather than
+    /// pointer-*pause*) would flicker across a toolbar.
+    ///
+    /// Focus arriving is not a statement of intent: Tab passes through
+    /// controls constantly, and a tip that promoted on arrival turned every
+    /// such pass into a persistent `Role::Dialog` that assistive tech
+    /// announces and that claims a slot in the Tab cycle. Sustained focus is
+    /// the keyboard's equivalent of a stationary pointer, so it earns
+    /// stickiness the same way and over the same window — which also leaves
+    /// the user a couple of seconds to move on if they did not want the
+    /// panel. Until then the surface stays an ephemeral `Role::Tooltip`,
+    /// reachable to screen readers through the anchor's own description, and
+    /// out of the Tab order (see `cycle_focus`).
     ///
     /// Plain tooltips (no `sticky_after`) are deliberately NOT
     /// auto-shown on focus — their text reaches assistive tech via
@@ -854,11 +890,11 @@ impl WidgetTree {
         //   • direct  — focus landed ON the anchor or somewhere inside it
         //     (an ordinary focusable control, a self-anchored focusable
         //     widget, and composites whose focus sinks into an inner field).
-        //     Always promote.
+        //     Always show.
         //   • reverse — the anchor sits strictly *inside* the focused widget.
         //     This exists for composing controls (e.g. `Button`) that keep
         //     focus on their outer node but anchor the tooltip on an inner
-        //     body root. Promote ONLY when the focused widget is a single
+        //     body root. Show ONLY when the focused widget is a single
         //     such control — never when it is a *container* that merely
         //     happens to be focusable and owns many tooltip-bearing
         //     descendants (an open `MenuList`, whose whole panel receives
@@ -875,7 +911,10 @@ impl WidgetTree {
         let mut direct: Vec<ToShow> = Vec::new();
         let mut reverse: Vec<ToShow> = Vec::new();
         for e in &self.tooltips {
-            if e.sticky_after.is_none() || e.overlay_id.is_some() {
+            if e.sticky_after.is_none()
+                || e.overlay_id.is_some()
+                || e.suppressed_until_focus_leaves
+            {
                 continue;
             }
             if self.is_descendant_of(widget_id, e.anchor_id) {
@@ -892,40 +931,27 @@ impl WidgetTree {
             to_show.extend(reverse);
         }
 
+        // Arm the same pending-delay timer the pointer path arms — do not show
+        // now. Focus arriving is not intent, and Tab moves fast: showing on
+        // arrival made a sweep across a row of tooltipped buttons strobe a tip
+        // at every stop. The pointer has always required a *pause* before a tip
+        // appears; the keyboard equivalent is focus coming to rest, so it waits
+        // out the same `delay` (and gets the same warm-reshow discount inside a
+        // session). `hover_origin` stays `None`: there is no pointer to apply
+        // the stationary-slop filter to.
         let sim_now = self.sim_clock;
         let real_now = std::time::Instant::now();
-        // Sticky tooltips share the standard tooltip fade.
-        let fade_duration = if self.prefers_reduced_motion {
-            None
-        } else {
-            Some(self.theme.motion.duration_fast)
-        };
-        for (anchor_id, content_id, placement) in to_show {
-            self.arena.activate(content_id);
-            let oid = self.show_overlay(crate::overlay::OverlayRequest {
-                content_id,
-                anchor: anchor_id,
-                placement: Self::tooltip_overlay_placement(placement),
-                dismiss: crate::overlay::DismissBehavior::EscapeOrClickOutside,
-                layer: crate::overlay::OverlayLayer::InTree,
-                parent_overlay: None,
-                on_dismiss: None,
-                fade_duration,
-            });
+        for (_anchor_id, content_id, _placement) in to_show {
             if let Some(entry) = self
                 .tooltips
                 .iter_mut()
                 .find(|e| e.content_id == content_id)
             {
-                entry.overlay_id = Some(oid);
-                entry.shown_at_sim = Some(sim_now);
-                entry.shown_at_real = Some(real_now);
-                entry.promoted_by_focus = true;
-                if let Some(sink) = entry.shown_at_sink.as_ref() {
-                    sink.set(Some(real_now));
-                }
+                entry.hover_start = Some(sim_now);
+                entry.real_hover_start = Some(real_now);
+                entry.hover_origin = None;
+                entry.armed_by_focus = true;
             }
-            self.promote_tooltip_to_sticky(content_id);
         }
     }
 
@@ -1061,6 +1087,39 @@ impl WidgetTree {
             let dismissed = self.overlay_manager.dismiss(oid);
             self.dormant_dismissed_content(&dismissed, &mut *ops);
         }
+
+        // Focus moved on before the delay ripened: disarm, or the tip would
+        // still open a beat later, over a control the user has already left.
+        for e in &mut self.tooltips {
+            if e.armed_by_focus && e.overlay_id.is_none() {
+                e.hover_start = None;
+                e.real_hover_start = None;
+                e.armed_by_focus = false;
+            }
+        }
+
+        // Focus has landed somewhere new: any entry it is now outside of has
+        // had its Escape-suppression served. Tabbing away and back must
+        // re-summon the tip, or one Escape would mute that anchor forever.
+        let served: Vec<usize> = self
+            .tooltips
+            .iter()
+            .enumerate()
+            .filter(|(_, e)| e.suppressed_until_focus_leaves)
+            .filter(|(_, e)| {
+                let still_inside = new_focus
+                    .map(|nf| {
+                        self.is_descendant_of(nf, e.anchor_id)
+                            || self.is_descendant_of(nf, e.content_id)
+                    })
+                    .unwrap_or(false);
+                !still_inside
+            })
+            .map(|(i, _)| i)
+            .collect();
+        for i in served {
+            self.tooltips[i].suppressed_until_focus_leaves = false;
+        }
     }
 
     /// Whether a pointer hover over `widget_id` should count as a hover
@@ -1131,6 +1190,7 @@ impl WidgetTree {
         self.tooltips[index].hover_start = Some(self.sim_clock);
         self.tooltips[index].real_hover_start = Some(std::time::Instant::now());
         self.tooltips[index].hover_origin = self.last_pointer_position;
+        self.tooltips[index].armed_by_focus = false;
         self.arena.mark_needs_paint(self.tooltips[index].anchor_id);
     }
 
@@ -1241,6 +1301,7 @@ impl WidgetTree {
             .filter(|(_, entry)| {
                 entry.overlay_id.is_none()
                     && entry.hover_start.is_some()
+                    && !entry.armed_by_focus
                     && self.tooltip_hover_targets_anchor(widget_id, entry.anchor_id)
             })
             .map(|(index, _)| index)
@@ -1624,6 +1685,13 @@ impl WidgetTree {
         let mut any_tooltip_dismissed = false;
         for &id in content_ids {
             if let Some(entry) = self.tooltips.iter_mut().find(|e| e.content_id == id) {
+                // A focus-promoted tip is dismissed while the focus that
+                // summoned it is still in scope, and the restore below hands
+                // that focus straight back to the anchor — which re-enters
+                // `tooltip_focus_enter` on an entry whose `overlay_id` this
+                // very line has just cleared. Mute it until focus genuinely
+                // leaves, or Escape would close and reopen in one keystroke.
+                entry.suppressed_until_focus_leaves = entry.promoted_by_focus;
                 entry.overlay_id = None;
                 entry.is_sticky = false;
                 entry.hover_start = None;
@@ -1632,6 +1700,7 @@ impl WidgetTree {
                 entry.shown_at_sim = None;
                 entry.shown_at_real = None;
                 entry.promoted_by_focus = false;
+                entry.armed_by_focus = false;
                 if let Some(sink) = entry.shown_at_sink.as_ref() {
                     sink.set(None);
                 }

@@ -535,6 +535,23 @@ struct TooltipEntry {
     /// Tabs through a form); pointer-dwelled stickies survive
     /// focus changes and only dismiss via Escape or click-outside.
     promoted_by_focus: bool,
+    /// Set while this entry's pending delay was started by keyboard focus
+    /// rather than by the pointer. Decides, at show time, that the surface
+    /// dismisses on `Escape`/click-outside rather than on pointer-leave (there
+    /// is no pointer in the story), and that it counts as focus-shown.
+    armed_by_focus: bool,
+    /// Set when the tip was dismissed while the focus that summoned it is
+    /// still inside its anchor — i.e. Escape on a focus-promoted tooltip.
+    ///
+    /// Escape restores focus to the anchor, and that restore runs the ordinary
+    /// focus path, which ends in `tooltip_focus_enter`. Without this flag the
+    /// tip the user just dismissed re-opens on the same keystroke, because
+    /// `dormant_dismissed_content` has already cleared `overlay_id` by then and
+    /// the entry looks eligible again. Cleared when focus genuinely leaves the
+    /// anchor (`tooltip_focus_leave_outside`), so Tabbing away and back
+    /// re-summons it normally. The hover path needs no equivalent: a stationary
+    /// pointer never re-fires `tooltip_pointer_enter`.
+    suppressed_until_focus_leaves: bool,
     /// Where the tooltip opens relative to its anchor. `Below` (default)
     /// for the common case; `Side` for anchors stacked vertically (menu
     /// items, a vertical tab strip, list/tree rows) so the tooltip does
