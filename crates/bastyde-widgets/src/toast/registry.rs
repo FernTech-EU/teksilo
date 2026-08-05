@@ -221,7 +221,10 @@ impl ToastRegistry {
     /// every later call (from that window's `ToastHost`, or from app
     /// code) returns the SAME signal, so binding to it once and
     /// mutating it later both work through this one accessor.
-    pub fn window_audience_signal(&self, window_id: BastydeWindowId) -> Signal<Option<ToastAudience>> {
+    pub fn window_audience_signal(
+        &self,
+        window_id: BastydeWindowId,
+    ) -> Signal<Option<ToastAudience>> {
         self.window_audiences
             .borrow_mut()
             .entry(window_id)
@@ -432,10 +435,9 @@ impl ToastRegistry {
                     // this same route bucket — a High/Urgent arrival
                     // for one audience must never bump an unrelated
                     // window's/audience's Normal entry out of its slot.
-                    let evict_idx = inner
-                        .live_entries
-                        .iter()
-                        .position(|e| e.route == resolved_route && matches!(e.priority, ToastPriority::Normal));
+                    let evict_idx = inner.live_entries.iter().position(|e| {
+                        e.route == resolved_route && matches!(e.priority, ToastPriority::Normal)
+                    });
                     if let Some(idx) = evict_idx {
                         let removed = inner.live_entries.remove(idx).unwrap();
                         if let Some(cb) = removed.on_dismiss.clone() {
@@ -1032,7 +1034,10 @@ mod tests {
         // the fact is safe too — get-or-create transparently
         // allocates a fresh one (documented behaviour, not a panic).
         let fresh = r.window_audience_signal(w);
-        assert!(fresh.get().is_none(), "a re-created signal starts fresh, not with the old audience");
+        assert!(
+            fresh.get().is_none(),
+            "a re-created signal starts fresh, not with the old audience"
+        );
     }
 
     /// An archive mirrors every enqueue, and its own version signal
@@ -1057,7 +1062,10 @@ mod tests {
         let (_h, _overflow) = r.enqueue(Toast::info(lit!("mirrored")));
 
         for (i, reg) in windows.iter().enumerate() {
-            assert!(reg.any_dirty(), "window {i}'s bell missed the mirrored push");
+            assert!(
+                reg.any_dirty(),
+                "window {i}'s bell missed the mirrored push"
+            );
         }
     }
 

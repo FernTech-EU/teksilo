@@ -1255,9 +1255,17 @@ mod tests {
         let derived = s.map(|v| v + 1);
         let seen = derived.generation();
         s.set(5);
-        assert_ne!(derived.generation(), seen, "the source's write shows through");
+        assert_ne!(
+            derived.generation(),
+            seen,
+            "the source's write shows through"
+        );
         let seen = derived.generation();
-        assert_eq!(derived.generation(), seen, "and settles with no further write");
+        assert_eq!(
+            derived.generation(),
+            seen,
+            "and settles with no further write"
+        );
     }
 
     #[test]

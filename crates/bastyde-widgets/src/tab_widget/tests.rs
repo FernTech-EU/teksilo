@@ -1553,7 +1553,10 @@ fn many_tabs(count: usize) -> (Vec<TabId>, ListModel<TabHandle>) {
     (ids, model)
 }
 
-fn overflowing_bar(model: ListModel<TabHandle>, selected: Signal<Option<TabId>>) -> TabBar<TabHandle> {
+fn overflowing_bar(
+    model: ListModel<TabHandle>,
+    selected: Signal<Option<TabId>>,
+) -> TabBar<TabHandle> {
     let delegate =
         TabDelegate::new(|_, h: &TabHandle| h.info.title.clone().unwrap_or_else(|| label("")));
     TabBar::horizontal(model, delegate, selected, |_, h: &TabHandle| h.id)
@@ -1687,10 +1690,7 @@ fn an_unrelated_rebuild_does_not_yank_the_strip_back() {
     // onto its horizontal axis, so a negative delta walks left.
     tree.pointer_move(Point::new(240.0, 20.0));
     tree.dispatch_event(WidgetEvent::Scroll {
-        delta: ScrollDelta::Pixels {
-            x: 0.0,
-            y: -5000.0,
-        },
+        delta: ScrollDelta::Pixels { x: 0.0, y: -5000.0 },
         modifiers: Modifiers::default(),
     });
     tree.layout(SizeProposal::exact(480.0, 60.0));

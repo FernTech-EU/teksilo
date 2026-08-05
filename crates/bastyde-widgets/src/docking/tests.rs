@@ -56,9 +56,8 @@ fn count_role(tree: &WidgetTree, id: WidgetId, role: Role) -> usize {
 /// removing them from the arena, so a plain `count_role` cannot see overflow at
 /// all — it would return the full item count regardless.
 fn count_role_laid_out(tree: &WidgetTree, id: WidgetId, role: Role) -> usize {
-    let here = usize::from(
-        tree.accessibility_node(id).role() == role && tree.bounds(id).height > 0.0,
-    );
+    let here =
+        usize::from(tree.accessibility_node(id).role() == role && tree.bounds(id).height > 0.0);
     here + tree
         .children(id)
         .iter()
@@ -1394,10 +1393,7 @@ fn dock_drag_lands_on(locked: bool) -> DockSide {
             && drop_point.y <= strip.y + strip.height,
         "the drop point must land inside the rail strip {strip:?}, got {drop_point:?}"
     );
-    t.drag(
-        Point::new(hb.x + hb.width / 2.0, hb.y + 6.0),
-        drop_point,
-    );
+    t.drag(Point::new(hb.x + hb.width / 2.0, hb.y + 6.0), drop_point);
     t.layout(SizeProposal::exact(1000.0, 800.0));
     model.dock_location(a).unwrap().side
 }
@@ -2469,7 +2465,6 @@ fn rail_actions_render_in_all_three_placements() {
     );
 }
 
-
 #[test]
 fn rail_action_toolbar_is_a_sibling_of_the_tab_list_not_a_child() {
     let (t, root, _m) = rail_with_actions();
@@ -2637,7 +2632,6 @@ fn rail_action_toggled_is_reflect_only() {
     assert!(t.accessibility_node(id).is_toggled());
 }
 
-
 #[test]
 fn actions_are_absent_in_strip_presentation() {
     use super::{DockActionPlacement as P, DockRail};
@@ -2740,7 +2734,6 @@ fn strip_slots_render_on_a_side_with_no_docks() {
         "trailing_slot renders even with zero docks"
     );
 }
-
 
 #[test]
 #[should_panic(expected = "duplicate DockActionId")]

@@ -777,7 +777,11 @@ impl AccessNodeBuilder {
     /// back into the collected child. A no-op if `child` was never pushed, which
     /// keeps a caller that emitted spans for a run it then skipped from panicking.
     pub fn push_detail_on_child(&mut self, child: NodeId, detail: NodeId) {
-        if let Some((_, node)) = self.children_collected.iter_mut().find(|(id, _)| *id == child) {
+        if let Some((_, node)) = self
+            .children_collected
+            .iter_mut()
+            .find(|(id, _)| *id == child)
+        {
             node.push_detail(detail);
         }
     }

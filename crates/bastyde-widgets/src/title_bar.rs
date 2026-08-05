@@ -33,12 +33,12 @@ use std::rc::Rc;
 use bastyde_canvas::{Canvas, Rect, Size, SizeProposal};
 use bastyde_core::accessibility::AccessNodeBuilder;
 use bastyde_core::color_prop::ColorProp;
+use bastyde_core::signal::Prop;
 use bastyde_core::widget::{
     EventContext, LayoutContext, PaintContext, PendingChild, Widget, WidgetPlacement,
     WidgetTreeView,
 };
 use bastyde_core::widget_id::WidgetId;
-use bastyde_core::signal::Prop;
 use bastyde_core::{HitRegions, PlatformTitleBarHost, Signal};
 use bastyde_tokens::{Color, CornerRadius};
 
@@ -769,8 +769,8 @@ mod tests {
     /// the slots.
     #[test]
     fn rebuilding_keeps_the_leading_and_trailing_slots() {
-        use crate::primitives::VStack;
         use crate::TextWidget;
+        use crate::primitives::VStack;
         use bastyde_i18n::lit;
 
         let host = Rc::new(TestHost::default());
@@ -806,7 +806,10 @@ mod tests {
 
         let (n, drag_fills, row_w) = shape(&tree);
         assert_eq!(n, 4, "leading + drag + trailing + controls");
-        assert!(drag_fills, "the drag region is a spacer and must have width");
+        assert!(
+            drag_fills,
+            "the drag region is a spacer and must have width"
+        );
         assert!((row_w - 900.0).abs() < 1.0, "row spans the bar: {row_w}");
 
         // Toggle the gate, twice, in both directions.
@@ -829,7 +832,10 @@ mod tests {
             "the leading/center/trailing slots must survive a gate flip — \
              `build` consumes them, so anything that rebuilds this bar empties it"
         );
-        assert!(drag_fills && (row_w - 900.0).abs() < 1.0, "slots still intact");
+        assert!(
+            drag_fills && (row_w - 900.0).abs() < 1.0,
+            "slots still intact"
+        );
     }
 
     #[test]

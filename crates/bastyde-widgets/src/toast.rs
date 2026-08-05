@@ -1514,7 +1514,11 @@ mod tests {
 
         tree.click(btn);
 
-        assert_eq!(registry.live_count(), 1, "the click must have enqueued a toast");
+        assert_eq!(
+            registry.live_count(),
+            1,
+            "the click must have enqueued a toast"
+        );
         let eid = registry.live_entry_ids()[0];
         registry
             .with_entry(eid, |e| {
@@ -1576,7 +1580,10 @@ mod tests {
         // A's bucket is now full (max_visible = 2). A third A toast
         // must be dropped exactly like the single-bucket overflow test.
         let (a3, _) = r.enqueue(Toast::info(lit!("a3")).target(audience_a));
-        assert!(!a3.is_alive(), "audience A's third toast overflows its own bucket");
+        assert!(
+            !a3.is_alive(),
+            "audience A's third toast overflows its own bucket"
+        );
         assert!(a1.is_alive() && a2.is_alive());
 
         // Audience B has its own, untouched pool of 2 slots.

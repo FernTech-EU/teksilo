@@ -641,7 +641,10 @@ mod tests {
 
         archive.push(entry_with_route("for a", ToastRoute::Audience(audience_a)));
         archive.push(entry_with_route("for b", ToastRoute::Audience(audience_b)));
-        archive.push(entry_with_route("for b again", ToastRoute::Audience(audience_b)));
+        archive.push(entry_with_route(
+            "for b again",
+            ToastRoute::Audience(audience_b),
+        ));
         archive.push(entry_with_route("everyone", ToastRoute::Broadcast));
         assert_eq!(
             archive.unread_count().get(),
@@ -654,9 +657,9 @@ mod tests {
         // proves window-scoping and audience-scoping are independent:
         // a window-scoped bell shows only Window(_) + Broadcast, never
         // an Audience(_) entry.
-        let tree_a = tree_with(NotificationCenterButton::new(archive.clone()).for_window(
-            BastydeWindowId::new(1),
-        ));
+        let tree_a = tree_with(
+            NotificationCenterButton::new(archive.clone()).for_window(BastydeWindowId::new(1)),
+        );
         assert!(
             tree_a.find_by_label("1").is_some(),
             "no entry is routed to Window(1); only the broadcast one should count"

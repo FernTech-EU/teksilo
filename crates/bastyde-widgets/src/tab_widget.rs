@@ -1320,8 +1320,11 @@ impl Widget for TabWidget {
         // further down: while the strip is hidden there is no bar widget to
         // carry the binding, so a hidden strip could never learn it should
         // come back.
-        self.bar_visibility
-            .register_if_bound(self_id, ctx.binding_registry(), BindingLevel::Rebuild);
+        self.bar_visibility.register_if_bound(
+            self_id,
+            ctx.binding_registry(),
+            BindingLevel::Rebuild,
+        );
 
         // Decide whether the tab strip is shown this build. Reactive
         // for `WhenMultiple`: a dynamic-model mutation rebuilds the

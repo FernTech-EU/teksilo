@@ -167,8 +167,8 @@ impl CaretHighlightSession {
                 self.last.set(None);
                 true
             }
-            (Some(before), Some(after)) if before.scope == after.scope
-                && before.content_locale == after.content_locale =>
+            (Some(before), Some(after))
+                if before.scope == after.scope && before.content_locale == after.content_locale =>
             {
                 // Format-only: repaint the same extent in the new colour.
                 match self.last.get() {
@@ -435,7 +435,8 @@ mod tests {
         s.refresh(16);
         assert_eq!(spans(&d, 0), [(14, 14)]);
 
-        d.set_plain_text("XXXX. One is first. Two is second.").unwrap();
+        d.set_plain_text("XXXX. One is first. Two is second.")
+            .unwrap();
         assert!(s.refresh(22), "the edit staled it");
         assert_eq!(spans(&d, 0), [(20, 14)], "the band followed its text");
     }

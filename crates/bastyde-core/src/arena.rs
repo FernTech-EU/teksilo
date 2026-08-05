@@ -1035,7 +1035,10 @@ impl WidgetArena {
                 .get(child)
                 .map(|n| {
                     n.self_dormant
-                        || n.visible_state.as_ref().map(|vs| !vs.get()).unwrap_or(false)
+                        || n.visible_state
+                            .as_ref()
+                            .map(|vs| !vs.get())
+                            .unwrap_or(false)
                 })
                 .unwrap_or(false);
             if asleep_on_its_own_account {

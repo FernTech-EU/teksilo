@@ -1482,10 +1482,15 @@ impl<T: 'static> Widget for TabBar<T> {
         // is re-resolved here against the new one.
         let selected_target = self.selected_id.get();
         if selected_target.is_some()
-            && (self.reveal.revealed.get() != selected_target || self.reveal.pending.get().is_some())
+            && (self.reveal.revealed.get() != selected_target
+                || self.reveal.pending.get().is_some())
         {
             self.reveal.revealed.set(selected_target);
-            match model_to_unpinned.get(self.selected.get()).copied().flatten() {
+            match model_to_unpinned
+                .get(self.selected.get())
+                .copied()
+                .flatten()
+            {
                 Some(position) => self.reveal.arm(position),
                 None => self.reveal.pending.set(None),
             }

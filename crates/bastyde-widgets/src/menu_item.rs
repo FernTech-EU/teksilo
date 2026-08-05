@@ -1935,14 +1935,13 @@ mod tests {
     /// a scene has focus.
     #[test]
     fn menu_item_cursor_stays_pointer_after_enabled_signal_flips_true() {
-        use bastyde_core::widget::CursorIcon;
         use bastyde_canvas::Point;
+        use bastyde_core::widget::CursorIcon;
 
         let enabled = Signal::new(false);
         let mut t = tree();
-        let list_id = t.add(
-            MenuList::new().item(MenuItem::new(lit!("Bold")).enabled(enabled.clone())),
-        );
+        let list_id =
+            t.add(MenuList::new().item(MenuItem::new(lit!("Bold")).enabled(enabled.clone())));
         layout(&mut t);
         let item_id = first_descendant_with_role(&t, list_id, Role::MenuItem);
         let bounds = t.bounds(item_id);

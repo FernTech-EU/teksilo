@@ -506,7 +506,10 @@ mod tests {
         let reg = BindingRegistry::new();
         let shared = Rc::new(Cell::new(0_u64));
         reg.register(make_binding(BindingLevel::RepaintOnly, shared.clone()));
-        reg.register(make_binding(BindingLevel::AccessibilityOnly, shared.clone()));
+        reg.register(make_binding(
+            BindingLevel::AccessibilityOnly,
+            shared.clone(),
+        ));
         shared.set(1);
 
         let (visual, a11y_dirty) = reg.flush_all_dirty();
@@ -542,7 +545,10 @@ mod tests {
             1,
             "and the second one fires too — the first flush consumed nothing"
         );
-        assert!(a.flush_dirty().is_empty(), "neither re-fires without a write");
+        assert!(
+            a.flush_dirty().is_empty(),
+            "neither re-fires without a write"
+        );
         assert!(b.flush_dirty().is_empty());
     }
 

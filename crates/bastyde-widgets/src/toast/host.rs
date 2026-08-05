@@ -818,7 +818,15 @@ mod tests {
     /// SPECIFIC window's real `EventContext`, the way
     /// `show_toast_default_targets_the_originating_window` does for a
     /// single window.
-    fn two_window_hosts() -> (WidgetTree, WidgetId, WidgetId, WidgetTree, WidgetId, WidgetId, ToastRegistry) {
+    fn two_window_hosts() -> (
+        WidgetTree,
+        WidgetId,
+        WidgetId,
+        WidgetTree,
+        WidgetId,
+        WidgetId,
+        ToastRegistry,
+    ) {
         two_window_hosts_with_opts(opts())
     }
 
@@ -827,7 +835,15 @@ mod tests {
     /// below, which needs a small `max_visible` to force overflow.
     fn two_window_hosts_with_opts(
         o: ToastInstallOptions,
-    ) -> (WidgetTree, WidgetId, WidgetId, WidgetTree, WidgetId, WidgetId, ToastRegistry) {
+    ) -> (
+        WidgetTree,
+        WidgetId,
+        WidgetId,
+        WidgetTree,
+        WidgetId,
+        WidgetId,
+        ToastRegistry,
+    ) {
         use crate::button::Button;
         use bastyde_core::window::state::WindowStateInit;
         use bastyde_core::window::{BastydeWindowId, WindowPlacement, WindowState};
@@ -839,9 +855,8 @@ mod tests {
 
         let mut app_state: HashMap<TypeId, Box<dyn Any>> = HashMap::new();
         app_state.insert(TypeId::of::<ToastRegistry>(), Box::new(registry.clone()));
-        let app_context = Rc::new(
-            bastyde_core::event_source::TreeAppContext::empty().with_app_state(app_state),
-        );
+        let app_context =
+            Rc::new(bastyde_core::event_source::TreeAppContext::empty().with_app_state(app_state));
 
         let build_window = |window_id: u64| {
             let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
@@ -937,7 +952,11 @@ mod tests {
         let (mut tree1, btn1, host1, mut tree2, _btn2, host2, registry) = two_window_hosts();
 
         tree1.click(btn1);
-        assert_eq!(registry.live_count(), 1, "the click must have enqueued a toast");
+        assert_eq!(
+            registry.live_count(),
+            1,
+            "the click must have enqueued a toast"
+        );
 
         // Non-recipient window reconciles first.
         tree2.layout(SizeProposal::exact(900.0, 600.0));

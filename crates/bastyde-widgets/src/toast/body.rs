@@ -172,10 +172,7 @@ impl Widget for CollapsibleBody {
                 .style(TextStyleRole::Body)
                 .color(TextRole::Secondary),
         );
-        ctx.visible_when(
-            clamped,
-            state.map(|s| *s != BodyState::Expanded.as_u8()),
-        );
+        ctx.visible_when(clamped, state.map(|s| *s != BodyState::Expanded.as_u8()));
         ctx.visible_when(full, state.map(|s| *s == BodyState::Expanded.as_u8()));
 
         // A `Link`, not a `Button`: this is a low-weight reveal inside a notification,
@@ -195,10 +192,7 @@ impl Widget for CollapsibleBody {
             Link::new(tr_widget!(toast_show_less()))
                 .on_activate_fn(move |_| collapse_state.set(BodyState::Collapsed.as_u8())),
         );
-        ctx.visible_when(
-            show_more,
-            state.map(|s| *s == BodyState::Collapsed.as_u8()),
-        );
+        ctx.visible_when(show_more, state.map(|s| *s == BodyState::Collapsed.as_u8()));
         ctx.visible_when(show_less, state.map(|s| *s == BodyState::Expanded.as_u8()));
 
         // Copy. A body long enough to be clamped is, in practice, an error chain — the
@@ -238,10 +232,7 @@ impl Widget for CollapsibleBody {
         );
         // The whole row rides on the clamp: a body short enough to be fully visible gains
         // no chrome at all, which is the overwhelming majority of toasts.
-        ctx.visible_when(
-            disclosure,
-            state.map(|s| *s != BodyState::Fits.as_u8()),
-        );
+        ctx.visible_when(disclosure, state.map(|s| *s != BodyState::Fits.as_u8()));
 
         let column = ctx.add(
             VStack::new()

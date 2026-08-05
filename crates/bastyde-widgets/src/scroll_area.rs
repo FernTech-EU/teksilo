@@ -2068,7 +2068,11 @@ mod tests {
         // range, so the pin is clamped short and the line stays at the bottom.
         let mut f = pin_fixture(300.0, 100.0, 0.0);
         f.pin(280.0, 20.0, 0.5);
-        assert_eq!(f.scroll_y.get(), 200.0, "clamped to the un-extended maximum");
+        assert_eq!(
+            f.scroll_y.get(),
+            200.0,
+            "clamped to the un-extended maximum"
+        );
     }
 
     #[test]

@@ -1501,9 +1501,7 @@ impl Widget for DockRailActionItem {
                             return EventResponse::Ignored;
                         }
                         let next = match key {
-                            Key::ArrowUp | Key::ArrowLeft => {
-                                (index + ids.len() - 1) % ids.len()
-                            }
+                            Key::ArrowUp | Key::ArrowLeft => (index + ids.len() - 1) % ids.len(),
                             Key::ArrowDown | Key::ArrowRight => (index + 1) % ids.len(),
                             Key::Home => 0,
                             Key::End => ids.len() - 1,
@@ -2447,16 +2445,17 @@ mod tests {
 
     #[test]
     fn capacity_shows_everything_when_it_all_fits() {
-        let c = RailCapacity {
-            total: 4,
-            ..cap()
-        };
+        let c = RailCapacity { total: 4, ..cap() };
         assert_eq!(shown_capacity(c), 4, "no overflow ⇒ every item shows");
     }
 
     #[test]
     fn capacity_clips_without_a_trigger_and_reserves_one_slot_with_one() {
-        assert_eq!(shown_capacity(cap()), 6, "no trigger ⇒ the surplus is clipped");
+        assert_eq!(
+            shown_capacity(cap()),
+            6,
+            "no trigger ⇒ the surplus is clipped"
+        );
         assert_eq!(
             shown_capacity(RailCapacity {
                 has_overflow_trigger: true,

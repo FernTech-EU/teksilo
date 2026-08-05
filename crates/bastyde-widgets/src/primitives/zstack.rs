@@ -157,8 +157,7 @@ impl Widget for ZStack {
             }
             // Height only. Skipped entirely when the parent left the width open, since
             // the proposal would then be identical to the unspecified one above.
-            if query_twice
-                && let Some(r) = ctx.child_layout_response(child_id, bounded_for_height)
+            if query_twice && let Some(r) = ctx.child_layout_response(child_id, bounded_for_height)
             {
                 max_h = max_h.max(r.size.height);
                 any_queried = true;

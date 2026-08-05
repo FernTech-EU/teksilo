@@ -852,9 +852,7 @@ mod tests {
 
         assert!(!open_signal.get(), "starts closed");
 
-        let fire_btn = tree
-            .first_focusable_descendant(fire_id)
-            .unwrap_or(fire_id);
+        let fire_btn = tree.first_focusable_descendant(fire_id).unwrap_or(fire_id);
         tree.focus(fire_btn);
         tree.dispatch_event(WidgetEvent::KeyDown {
             key: Key::Enter,
@@ -891,9 +889,7 @@ mod tests {
         tree.add(VStack::new().add_child(pb_id).add_child(fire_id));
         tree.layout(SizeProposal::exact(300.0, 160.0));
 
-        let fire_btn = tree
-            .first_focusable_descendant(fire_id)
-            .unwrap_or(fire_id);
+        let fire_btn = tree.first_focusable_descendant(fire_id).unwrap_or(fire_id);
         tree.focus(fire_btn);
         let fire = |tree: &mut WidgetTree| {
             tree.focus(fire_btn);

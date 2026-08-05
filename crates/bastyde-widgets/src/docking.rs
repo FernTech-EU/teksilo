@@ -32,9 +32,7 @@ mod state;
 #[cfg(test)]
 mod tests;
 
-pub use activity_bar::{
-    DockAction, DockActionId, DockActionPlacement, DockRail, DockRailSlot,
-};
+pub use activity_bar::{DockAction, DockActionId, DockActionPlacement, DockRail, DockRailSlot};
 pub use geometry::{CornerOwners, DockCorner, DockSide, DockingRects, SideLayout, SideRects};
 pub use model::{
     DockIconFactory, DockLoc, DockOpenLocation, DockOpenMode, DockPolicy, DockRailItemSize,
