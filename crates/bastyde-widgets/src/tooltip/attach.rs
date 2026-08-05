@@ -212,6 +212,38 @@ pub fn attach_composite_tooltip_boxed(
 }
 
 /// [`attach_composite_tooltip_boxed`] with an explicit [`TooltipPlacement`].
+/// Attach an already-built [`CompositeTooltipWidget`], honouring its own
+/// [`sticky`](CompositeTooltipWidget::sticky) setting.
+///
+/// The general primitive the other composite helpers lower to. Reach for it
+/// when the body is read-only and should not offer dwell promotion, or when
+/// the surface needs an accessible label — both of which are settings on the
+/// widget, and neither of which a helper taking a bare `Box<dyn Widget>` can
+/// express.
+pub fn attach_composite_tooltip_widget_with_placement(
+    ctx: &mut BuildContext,
+    anchor_id: WidgetId,
+    tooltip: CompositeTooltipWidget,
+    delay: Duration,
+    placement: TooltipPlacement,
+) -> WidgetId {
+    // A surface with no promotion registers no dwell window. That is what makes
+    // it behave like a plain tooltip: pointer-leave retires it, focus does not
+    // surface it, and it never becomes a `Dialog`.
+    let sticky_after = tooltip.sticky_enabled().then_some(DWELL_PROMOTION);
+    let sink = tooltip.shown_at_sink();
+    let tooltip_id = ctx.add(tooltip);
+    ctx.attach_tooltip_with_sticky_sink_placement(
+        anchor_id,
+        tooltip_id,
+        delay,
+        sticky_after,
+        sink,
+        placement,
+    );
+    tooltip_id
+}
+
 pub fn attach_composite_tooltip_boxed_with_placement(
     ctx: &mut BuildContext,
     anchor_id: WidgetId,
@@ -219,18 +251,13 @@ pub fn attach_composite_tooltip_boxed_with_placement(
     delay: Duration,
     placement: TooltipPlacement,
 ) -> WidgetId {
-    let tooltip = CompositeTooltipWidget::new().content_boxed(content);
-    let sink = tooltip.shown_at_sink();
-    let tooltip_id = ctx.add(tooltip);
-    ctx.attach_tooltip_with_sticky_sink_placement(
+    attach_composite_tooltip_widget_with_placement(
+        ctx,
         anchor_id,
-        tooltip_id,
+        CompositeTooltipWidget::new().content_boxed(content),
         delay,
-        Some(DWELL_PROMOTION),
-        sink,
         placement,
-    );
-    tooltip_id
+    )
 }
 
 #[cfg(test)]

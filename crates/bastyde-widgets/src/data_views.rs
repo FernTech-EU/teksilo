@@ -188,6 +188,178 @@ pub(crate) fn flat_insertion_target(insertion: usize, len: usize) -> Option<(usi
 
 /// The default skeleton for a `Loading` row — a muted inset bar. The row's
 /// placement sizes it to the row's height and width.
+/// One row's tooltip, already resolved from its item and awaiting a
+/// `BuildContext` to attach it with.
+pub(crate) enum ResolvedRowTooltip {
+    Plain(bastyde_i18n::LocalizedString),
+    Rich(crate::tooltip::RichTooltipSource),
+    Composite(Box<dyn Widget>),
+}
+
+/// Per-row tooltip resolvers, shared by every data view that builds rows from
+/// a delegate.
+///
+/// A data view's rows are not authored by the app as widgets it can hang a
+/// `.tooltip(...)` on — they come out of a delegate, and the view owns the
+/// resulting `WidgetId`. So the view takes the *resolvers* instead and does the
+/// attaching itself, against the row it just built. Same shape as
+/// [`TabDelegate`](crate::tab_widget::TabDelegate)'s per-tab tooltip callbacks,
+/// and the same last-setter-wins matrix as the per-widget setters: each `set_*`
+/// clears the other two, so a row can never mature two tips at once.
+///
+/// Placement is [`Side`](crate::tooltip::TooltipPlacement::Side) for every
+/// view here — rows stack vertically, and a `Below` tip would cover the next
+/// row, which is the one the user is most likely reading next.
+///
+/// Cost: the body is resolved and built for each **realized** row, i.e. the
+/// virtualization window (visible + buffer), not the whole model — and again
+/// whenever those rows rebuild. Keep resolvers cheap; defer anything expensive
+/// (a backend read, a subtree walk) to the body's own first paint, which only
+/// happens if the tip is actually shown.
+pub(crate) struct RowTooltips<T: 'static> {
+    plain: Option<Rc<dyn Fn(usize, &T) -> Option<bastyde_i18n::LocalizedString>>>,
+    rich: Option<Rc<dyn Fn(usize, &T) -> Option<crate::tooltip::RichTooltipSource>>>,
+    composite: Option<Rc<dyn Fn(usize, &T) -> Option<Box<dyn Widget>>>>,
+    /// Whether a composite row tip offers dwell-to-sticky promotion.
+    composite_sticky: bool,
+}
+
+impl<T: 'static> Default for RowTooltips<T> {
+    fn default() -> Self {
+        Self {
+            plain: None,
+            rich: None,
+            composite: None,
+            composite_sticky: true,
+        }
+    }
+}
+
+impl<T: 'static> Clone for RowTooltips<T> {
+    fn clone(&self) -> Self {
+        Self {
+            plain: self.plain.clone(),
+            rich: self.rich.clone(),
+            composite: self.composite.clone(),
+            composite_sticky: self.composite_sticky,
+        }
+    }
+}
+
+impl<T: 'static> std::fmt::Debug for RowTooltips<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RowTooltips")
+            .field("plain", &self.plain.is_some())
+            .field("rich", &self.rich.is_some())
+            .field("composite", &self.composite.is_some())
+            .finish()
+    }
+}
+
+impl<T: 'static> RowTooltips<T> {
+    /// Whether any resolver is set — lets a view skip the per-row work.
+    pub(crate) fn is_set(&self) -> bool {
+        self.plain.is_some() || self.rich.is_some() || self.composite.is_some()
+    }
+
+    pub(crate) fn set_plain(
+        &mut self,
+        f: impl Fn(usize, &T) -> Option<bastyde_i18n::LocalizedString> + 'static,
+    ) {
+        *self = Self {
+            plain: Some(Rc::new(f)),
+            rich: None,
+            composite: None,
+            composite_sticky: self.composite_sticky,
+        };
+    }
+
+    pub(crate) fn set_rich(
+        &mut self,
+        f: impl Fn(usize, &T) -> Option<crate::tooltip::RichTooltipSource> + 'static,
+    ) {
+        *self = Self {
+            plain: None,
+            rich: Some(Rc::new(f)),
+            composite: None,
+            composite_sticky: self.composite_sticky,
+        };
+    }
+
+    pub(crate) fn set_composite(
+        &mut self,
+        f: impl Fn(usize, &T) -> Option<Box<dyn Widget>> + 'static,
+    ) {
+        *self = Self {
+            plain: None,
+            rich: None,
+            composite: Some(Rc::new(f)),
+            composite_sticky: self.composite_sticky,
+        };
+    }
+
+    /// Whether a composite row tip offers dwell promotion. Off suits a
+    /// read-only card: nothing to reach into, so nothing to pin.
+    pub(crate) fn set_composite_sticky(&mut self, on: bool) {
+        self.composite_sticky = on;
+    }
+
+    /// Resolve this row's tooltip, if any.
+    ///
+    /// Split from [`attach_resolved`](Self::attach_resolved) because a view can
+    /// only reach the item from inside the same borrow that builds the row
+    /// widget, while attaching needs the `BuildContext` and the resulting
+    /// `WidgetId` — which only exist after that borrow ends.
+    pub(crate) fn resolve(&self, index: usize, item: &T) -> Option<ResolvedRowTooltip> {
+        if let Some(f) = &self.composite {
+            f(index, item).map(ResolvedRowTooltip::Composite)
+        } else if let Some(f) = &self.rich {
+            f(index, item).map(ResolvedRowTooltip::Rich)
+        } else if let Some(f) = &self.plain {
+            f(index, item).map(ResolvedRowTooltip::Plain)
+        } else {
+            None
+        }
+    }
+
+    /// Attach a resolved tooltip to the row widget the view just built.
+    pub(crate) fn attach_resolved(
+        &self,
+        ctx: &mut bastyde_core::build_context::BuildContext,
+        row_id: bastyde_core::widget_id::WidgetId,
+        resolved: ResolvedRowTooltip,
+    ) {
+        // Rows stack vertically, so a `Below` tip would cover the next row —
+        // the one the user is most likely reading next.
+        let placement = crate::tooltip::TooltipPlacement::Side;
+        match resolved {
+            ResolvedRowTooltip::Composite(body) => {
+                let delay = ctx.theme().motion.tooltip_delay_heavy;
+                crate::tooltip::attach_composite_tooltip_widget_with_placement(
+                    ctx,
+                    row_id,
+                    crate::tooltip::CompositeTooltipWidget::new()
+                        .content_boxed(body)
+                        .sticky(self.composite_sticky),
+                    delay,
+                    placement,
+                );
+            }
+            ResolvedRowTooltip::Rich(source) => {
+                let delay = ctx.theme().motion.tooltip_delay;
+                crate::tooltip::attach_rich_tooltip_source_with_placement(
+                    ctx, row_id, source, delay, placement,
+                );
+            }
+            ResolvedRowTooltip::Plain(text) => {
+                let tip = ctx.add(crate::tooltip::TooltipWidget::new(text));
+                let delay = ctx.theme().motion.tooltip_delay;
+                ctx.attach_tooltip_with_placement(row_id, tip, delay, placement);
+            }
+        }
+    }
+}
+
 pub(crate) fn default_placeholder() -> Box<dyn Widget> {
     use crate::primitives::{Padding, RectWidget};
     Box::new(

@@ -70,9 +70,7 @@ use bastyde_data::{DataChange, DropPosition, DropResponse, ListModel};
 
 use crate::common::row_metrics::{HeightSource, RowMetrics, SharedRowMetrics};
 use crate::common::scroll::OverscrollBehavior;
-use crate::data_views::{
-    DragTransferMode, RowDragData, ViewId, ViewKind, flat_insertion_target,
-};
+use crate::data_views::{DragTransferMode, RowDragData, ViewId, ViewKind, flat_insertion_target};
 use crate::list_source::ListSource;
 use crate::scroll_area::ScrollBarMode;
 use crate::scroll_bar::{ScrollBar, ScrollBarOrientation, ScrollBarVisual};
@@ -92,6 +90,9 @@ const SCROLLBAR_THICKNESS: f32 = 12.0;
 pub struct ListView<T: 'static> {
     source: ListSource<T>,
     delegate: Rc<dyn Fn(usize, &T, bool) -> Box<dyn Widget>>,
+    /// Per-row tooltip resolvers. Shared with `TreeView`; see
+    /// [`RowTooltips`](crate::data_views::RowTooltips).
+    row_tooltips: crate::data_views::RowTooltips<T>,
     item_height: f32,
     spacing: f32,
     /// Height-mode selection (uniform / exact callback / auto-measure).
@@ -309,6 +310,7 @@ impl<T: 'static> ListView<T> {
             export: crate::data_views::RowExport::default(),
             source,
             delegate: Rc::new(delegate),
+            row_tooltips: Default::default(),
             item_height: DEFAULT_ITEM_HEIGHT,
             spacing: 0.0,
             height_source: HeightSource::Uniform,
@@ -567,6 +569,61 @@ impl<T: 'static> ListView<T> {
     /// Windows type-select). `label(&item)` yields the searchable text for
     /// a row; matching is ASCII-case-insensitive. A pause longer than the
     /// [`type_ahead_timeout`](Self::type_ahead_timeout) starts a fresh term.
+    /// Whether a composite row tooltip offers dwell-to-sticky promotion.
+    /// Default `true`.
+    ///
+    /// Turn it off for a read-only row card: with nothing to reach into there
+    /// is nothing to pin, so the countdown indicator would promise an
+    /// interaction that does not exist and the surface would outlive the
+    /// pointer for no reason.
+    pub fn row_tooltip_sticky(mut self, on: bool) -> Self {
+        self.row_tooltips.set_composite_sticky(on);
+        self
+    }
+
+    /// Per-row plain tooltip: one line of text for the row under the pointer.
+    ///
+    /// The resolver receives the row's flat index and its item; returning
+    /// `None` leaves that row without a tip. Mutually exclusive with
+    /// [`row_rich_tooltip`](Self::row_rich_tooltip) and
+    /// [`row_composite_tooltip`](Self::row_composite_tooltip) — last setter
+    /// wins, matching the per-widget tooltip matrix.
+    ///
+    /// Opens to the row's trailing side, never below it: rows stack
+    /// vertically, so a tip below would cover the next row.
+    pub fn row_tooltip(
+        mut self,
+        f: impl Fn(usize, &T) -> Option<bastyde_i18n::LocalizedString> + 'static,
+    ) -> Self {
+        self.row_tooltips.set_plain(f);
+        self
+    }
+
+    /// Per-row rich tooltip — a registry key or inline
+    /// [`TooltipContent`](crate::tooltip::TooltipContent). See
+    /// [`row_tooltip`](Self::row_tooltip) for the shared semantics.
+    pub fn row_rich_tooltip(
+        mut self,
+        f: impl Fn(usize, &T) -> Option<crate::tooltip::RichTooltipSource> + 'static,
+    ) -> Self {
+        self.row_tooltips.set_rich(f);
+        self
+    }
+
+    /// Per-row composite tooltip — an arbitrary widget tree describing the row.
+    ///
+    /// The body is built for every **realized** row (the virtualization window)
+    /// and rebuilt with it, so keep the resolver cheap and defer anything
+    /// costly to the body's own first paint, which only runs if the tip is
+    /// actually shown. See [`row_tooltip`](Self::row_tooltip) for the rest.
+    pub fn row_composite_tooltip(
+        mut self,
+        f: impl Fn(usize, &T) -> Option<Box<dyn Widget>> + 'static,
+    ) -> Self {
+        self.row_tooltips.set_composite(f);
+        self
+    }
+
     pub fn type_ahead_label(mut self, label: impl Fn(&T) -> String + 'static) -> Self {
         self.type_ahead_label = Some(Rc::new(label));
         self
@@ -1326,6 +1383,7 @@ impl<T: 'static> Widget for ListView<T> {
         let pane = body_pane::ListBodyPane::<T> {
             source: self.source.clone(),
             delegate: self.delegate.clone(),
+            row_tooltips: self.row_tooltips.clone(),
             metrics: self.metrics.clone(),
             row_selection: self.row_selection.clone(),
             focused_index: self.focused_index.clone(),
@@ -1370,7 +1428,6 @@ impl<T: 'static> Widget for ListView<T> {
 
         self.child_ids()
     }
-
 
     fn layout_response(
         &self,
@@ -1959,7 +2016,10 @@ mod tests {
         // The pane is mounted even with no data (it is the stable sibling the
         // scrollbar needs), and realizes no rows.
         assert_eq!(tree.children(lv_id).len(), 2, "body pane + scrollbar");
-        assert!(row_ids(&tree, lv_id).is_empty(), "no rows for an empty model");
+        assert!(
+            row_ids(&tree, lv_id).is_empty(),
+            "no rows for an empty model"
+        );
     }
 
     #[test]
@@ -3782,6 +3842,50 @@ mod tests {
             is_export.get(),
             Some(false),
             "reorder-only payload is not an export"
+        );
+    }
+
+    /// The same per-row tooltip API as `TreeView`, on the sibling view.
+    ///
+    /// Both views build their rows from a delegate the app cannot reach, so
+    /// both resolve and attach the tip themselves through the shared
+    /// `RowTooltips`. Porting the API is only half of it — the behaviour has
+    /// to match, which is what this pins.
+    #[test]
+    fn row_composite_tooltip_opens_for_the_hovered_row() {
+        use crate::primitives::TextWidget;
+        use bastyde_i18n::lit;
+        use std::time::Duration;
+
+        let model = ListModel::from_vec(vec![
+            "Alpha".to_string(),
+            "Beta".to_string(),
+            "Gamma".to_string(),
+        ]);
+        let mut tree = WidgetTree::new().with_text_backend(std::rc::Rc::new(
+            std::cell::RefCell::new(bastyde_canvas::MockTextBackend::new()),
+        ));
+        let lv =
+            tree.add(
+                ListView::new(model, |_i, _it, _s| Box::new(FixedLeaf(180.0, 20.0)))
+                    .item_height(20.0)
+                    .row_composite_tooltip(|_i, item: &String| {
+                        Some(Box::new(TextWidget::new(lit!(format!("about {item}"))))
+                            as Box<dyn Widget>)
+                    }),
+            );
+        tree.layout(SizeProposal::exact(400.0, 200.0));
+        assert!(tree.active_overlays().is_empty());
+
+        // Hover row 1 (20 dp rows → centre at y = 30).
+        let bounds = tree.bounds(lv);
+        tree.pointer_move(bastyde_canvas::Point::new(bounds.x + 40.0, bounds.y + 30.0));
+        tree.advance_time(Duration::from_millis(750));
+
+        assert_eq!(tree.active_overlays().len(), 1);
+        assert!(
+            tree.find_by_label("about Beta").is_some(),
+            "the tip must carry the hovered row's own content"
         );
     }
 

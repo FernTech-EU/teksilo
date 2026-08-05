@@ -45,8 +45,8 @@ pub mod rich;
 
 pub use attach::{
     RichTooltipSource, attach_composite_tooltip, attach_composite_tooltip_boxed,
-    attach_composite_tooltip_boxed_with_placement, attach_rich_tooltip,
-    attach_rich_tooltip_content, attach_rich_tooltip_content_with_placement,
+    attach_composite_tooltip_boxed_with_placement, attach_composite_tooltip_widget_with_placement,
+    attach_rich_tooltip, attach_rich_tooltip_content, attach_rich_tooltip_content_with_placement,
     attach_rich_tooltip_source, attach_rich_tooltip_source_with_placement,
     attach_rich_tooltip_with_placement,
 };

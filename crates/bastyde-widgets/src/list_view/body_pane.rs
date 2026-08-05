@@ -58,6 +58,7 @@ pub(crate) struct ListBodyPane<T: 'static> {
     /// to thread nine separate closures through.
     pub(crate) source: ListSource<T>,
     pub(crate) delegate: Rc<dyn Fn(usize, &T, bool) -> Box<dyn Widget>>,
+    pub(crate) row_tooltips: crate::data_views::RowTooltips<T>,
 
     /// Row geometry shared with the `ListView` root (one handle, two holders
     /// — the root drives scrollbar totals, paint and keyboard, the pane
@@ -232,11 +233,26 @@ impl<T: 'static> Widget for ListBodyPane<T> {
             // A `Loading` row (data not yet resident) renders a placeholder
             // skeleton instead of being skipped, so the scrollbar and layout
             // stay stable while the window loads.
-            let row_widget =
-                (self.source.with_item_fn)(i, &|item| (self.delegate)(i, item, selected))
-                    .or_else(|| ((row_state_fn)(i) == RowState::Loading).then(default_placeholder));
+            // Resolve the row's tooltip inside the same borrow that builds the
+            // row: it is the only place the item is reachable, and attaching
+            // needs a `WidgetId` that does not exist until afterwards.
+            let pending_tip: std::cell::RefCell<Option<crate::data_views::ResolvedRowTooltip>> =
+                std::cell::RefCell::new(None);
+            let tips = &self.row_tooltips;
+            let row_widget = (self.source.with_item_fn)(i, &|item| {
+                if tips.is_set() {
+                    *pending_tip.borrow_mut() = tips.resolve(i, item);
+                }
+                (self.delegate)(i, item, selected)
+            })
+            .or_else(|| ((row_state_fn)(i) == RowState::Loading).then(default_placeholder));
             if let Some(widget) = row_widget {
                 let inner_id = ctx.add_boxed(widget);
+                // The app cannot reach this widget to hang a tooltip on it —
+                // the view built it — so the view attaches the resolved tip.
+                if let Some(tip) = pending_tip.into_inner() {
+                    self.row_tooltips.attach_resolved(ctx, inner_id, tip);
+                }
                 let child_id = ctx.add(crate::list_item_a11y::ListItemWrapper::new(
                     inner_id, selected,
                 ));
@@ -457,7 +473,8 @@ impl<T: 'static> Widget for ListBodyPane<T> {
             let mut measured = Vec::with_capacity(item_count);
             for (idx, child) in children.iter().enumerate() {
                 if idx < item_count
-                    && let Some(size) = ctx.child_size(child.id, SizeProposal::with_width(bounds.width))
+                    && let Some(size) =
+                        ctx.child_size(child.id, SizeProposal::with_width(bounds.width))
                 {
                     let (model_index, _) = self.item_entries[idx];
                     measured.push((model_index, size.height));

@@ -158,6 +158,7 @@ impl<T: 'static> TreeView<T> {
             row_selection: None,
             focused_index: Rc::new(Cell::new(None)),
             focused_anchor: Rc::new(RefCell::new(None)),
+            row_tooltips: Default::default(),
             type_ahead_label: None,
             type_ahead_timeout: crate::common::type_ahead::DEFAULT_TYPE_AHEAD_TIMEOUT,
             type_ahead: crate::common::type_ahead::TypeAheadState::new(),
@@ -438,6 +439,62 @@ impl<T: 'static> TreeView<T> {
     /// `label(&item)` yields the searchable text; matching is
     /// ASCII-case-insensitive. A pause longer than the
     /// [`type_ahead_timeout`](Self::type_ahead_timeout) starts a fresh term.
+    /// Whether a composite row tooltip offers dwell-to-sticky promotion.
+    /// Default `true`.
+    ///
+    /// Turn it off for a read-only row card: with nothing to reach into there
+    /// is nothing to pin, so the countdown indicator would promise an
+    /// interaction that does not exist and the surface would outlive the
+    /// pointer for no reason.
+    pub fn row_tooltip_sticky(mut self, on: bool) -> Self {
+        self.row_tooltips.set_composite_sticky(on);
+        self
+    }
+
+    /// Per-row plain tooltip: one line of text for the row under the pointer.
+    ///
+    /// The resolver receives the row's flat index and its item; returning
+    /// `None` leaves that row without a tip. Mutually exclusive with
+    /// [`row_rich_tooltip`](Self::row_rich_tooltip) and
+    /// [`row_composite_tooltip`](Self::row_composite_tooltip) — last setter
+    /// wins, matching the per-widget tooltip matrix.
+    ///
+    /// Opens to the row's trailing side, never below it: rows stack
+    /// vertically, so a tip below would cover the next row.
+    pub fn row_tooltip(
+        mut self,
+        f: impl Fn(usize, &T) -> Option<bastyde_i18n::LocalizedString> + 'static,
+    ) -> Self {
+        self.row_tooltips.set_plain(f);
+        self
+    }
+
+    /// Per-row rich tooltip — a registry key or inline
+    /// [`TooltipContent`](crate::tooltip::TooltipContent), both of which
+    /// convert into [`RichTooltipSource`](crate::tooltip::RichTooltipSource).
+    /// See [`row_tooltip`](Self::row_tooltip) for the shared semantics.
+    pub fn row_rich_tooltip(
+        mut self,
+        f: impl Fn(usize, &T) -> Option<crate::tooltip::RichTooltipSource> + 'static,
+    ) -> Self {
+        self.row_tooltips.set_rich(f);
+        self
+    }
+
+    /// Per-row composite tooltip — an arbitrary widget tree describing the row.
+    ///
+    /// The body is built for every **realized** row (the virtualization window)
+    /// and rebuilt with it, so keep the resolver cheap and defer anything
+    /// costly to the body's own first paint, which only runs if the tip is
+    /// actually shown. See [`row_tooltip`](Self::row_tooltip) for the rest.
+    pub fn row_composite_tooltip(
+        mut self,
+        f: impl Fn(usize, &T) -> Option<Box<dyn bastyde_core::widget::Widget>> + 'static,
+    ) -> Self {
+        self.row_tooltips.set_composite(f);
+        self
+    }
+
     pub fn type_ahead_label(mut self, label: impl Fn(&T) -> String + 'static) -> Self {
         self.type_ahead_label = Some(Rc::new(label));
         self

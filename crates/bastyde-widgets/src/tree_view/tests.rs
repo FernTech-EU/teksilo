@@ -243,7 +243,10 @@ fn empty_tree() {
     // The body pane is mounted even with no data (it is the stable sibling
     // the scrollbar needs) and realizes no rows.
     assert_eq!(wtree.children(tv_id).len(), 2, "body pane + scrollbar");
-    assert!(row_ids(&wtree, tv_id).is_empty(), "no rows for an empty tree");
+    assert!(
+        row_ids(&wtree, tv_id).is_empty(),
+        "no rows for an empty tree"
+    );
 }
 
 #[test]
@@ -567,6 +570,134 @@ fn space_toggles_enter_activates() {
 
     wtree.press_key(Key::Enter, Modifiers::NONE);
     assert_eq!(activated.get(), Some(1), "Enter activates");
+}
+
+/// A per-row composite tooltip opens against the row under the pointer, and
+/// carries that row's own content.
+///
+/// The app never sees the row widget — the view builds it from the delegate —
+/// so the view resolves the tooltip from the item and attaches it itself.
+#[test]
+fn row_composite_tooltip_opens_for_the_hovered_row() {
+    use crate::primitives::TextWidget;
+    use bastyde_i18n::lit;
+    use std::time::Duration;
+
+    let tree = TreeModel::new();
+    for i in 0..5 {
+        tree.insert_root(i, format!("Node {i}"));
+    }
+    let mut wtree = WidgetTree::new().with_text_backend(Rc::new(std::cell::RefCell::new(
+        bastyde_canvas::MockTextBackend::new(),
+    )));
+    let tv = wtree.add(
+        TreeView::new(tree, |_i, _e, _s| Box::new(FixedLeaf(120.0, 20.0)))
+            .item_height(20.0)
+            .row_composite_tooltip(|_i, item: &String| {
+                Some(Box::new(TextWidget::new(lit!(format!("about {item}")))) as Box<dyn Widget>)
+            }),
+    );
+    wtree.layout(SizeProposal::exact(400.0, 200.0));
+    assert!(wtree.active_overlays().is_empty());
+
+    // Hover row 2 (rows are 20 dp tall, so its centre sits at y = 50).
+    let bounds = wtree.bounds(tv);
+    wtree.pointer_move(bastyde_canvas::Point::new(bounds.x + 40.0, bounds.y + 50.0));
+    assert!(
+        wtree.active_overlays().is_empty(),
+        "a composite row tip waits out the heavy delay, like any other"
+    );
+
+    wtree.advance_time(Duration::from_millis(700) + Duration::from_millis(50));
+    assert_eq!(
+        wtree.active_overlays().len(),
+        1,
+        "the hovered row's tooltip opens once the pointer has paused"
+    );
+    assert!(
+        wtree.find_by_label("about Node 2").is_some(),
+        "and it carries the hovered row's own content, not another row's"
+    );
+}
+
+/// The same thing with a **real** `StandardTreeItem` row, not a dummy leaf.
+///
+/// A real row reacts to hover (background, focus ring), and if that reaction
+/// rebuilds the row rather than merely repainting it, every pointer move mints
+/// a fresh anchor and a fresh tooltip entry whose delay starts from zero — so
+/// the tip can never ripen and never appears. A dummy leaf has no hover
+/// behaviour at all, which is precisely why it cannot catch that.
+#[test]
+fn row_composite_tooltip_opens_on_a_real_standard_tree_item() {
+    use crate::primitives::TextWidget;
+    use crate::standard_item::StandardTreeItem;
+    use bastyde_i18n::lit;
+    use std::time::Duration;
+
+    let tree = TreeModel::new();
+    for i in 0..5 {
+        tree.insert_root(i, format!("Node {i}"));
+    }
+    let mut wtree = WidgetTree::new().with_text_backend(Rc::new(std::cell::RefCell::new(
+        bastyde_canvas::MockTextBackend::new(),
+    )));
+    let tv = wtree.add(
+        TreeView::new(tree, |item: &String, entry, selected| {
+            Box::new(
+                StandardTreeItem::new(lit!(item.clone()))
+                    .depth(entry.depth)
+                    .selected(selected),
+            )
+        })
+        .item_height(20.0)
+        .row_composite_tooltip(|_i, item: &String| {
+            Some(Box::new(TextWidget::new(lit!(format!("about {item}")))) as Box<dyn Widget>)
+        }),
+    );
+    wtree.layout(SizeProposal::exact(400.0, 200.0));
+
+    let bounds = wtree.bounds(tv);
+    let at = bastyde_canvas::Point::new(bounds.x + 40.0, bounds.y + 50.0);
+    wtree.pointer_move(at);
+    // Nudge inside the stationary slop, the way a real hand does.
+    wtree.pointer_move(bastyde_canvas::Point::new(at.x + 1.0, at.y));
+    wtree.advance_time(Duration::from_millis(750));
+
+    assert_eq!(
+        wtree.active_overlays().len(),
+        1,
+        "a real row's hover reaction must not keep restarting the tooltip delay"
+    );
+}
+
+/// A resolver returning `None` leaves that row without a tip — the row-by-row
+/// equivalent of not calling a setter at all.
+#[test]
+fn a_row_whose_resolver_returns_none_has_no_tooltip() {
+    use std::time::Duration;
+
+    let tree = TreeModel::new();
+    for i in 0..5 {
+        tree.insert_root(i, format!("Node {i}"));
+    }
+    let mut wtree = WidgetTree::new().with_text_backend(Rc::new(std::cell::RefCell::new(
+        bastyde_canvas::MockTextBackend::new(),
+    )));
+    let tv = wtree.add(
+        TreeView::new(tree, |_i, _e, _s| Box::new(FixedLeaf(120.0, 20.0)))
+            .item_height(20.0)
+            .row_composite_tooltip(|_i, _item: &String| None),
+    );
+    wtree.layout(SizeProposal::exact(400.0, 200.0));
+
+    let bounds = wtree.bounds(tv);
+    wtree.pointer_move(bastyde_canvas::Point::new(bounds.x + 40.0, bounds.y + 50.0));
+    wtree.advance_time(Duration::from_millis(900));
+
+    assert!(
+        wtree.active_overlays().is_empty(),
+        "no resolver result means no tooltip on that row"
+    );
 }
 
 #[test]

@@ -753,6 +753,7 @@ impl<T: 'static> Widget for TreeView<T> {
         let pane = super::body_pane::TreeViewBodyPane::<T> {
             source: self.source.clone(),
             row_delegate: self.row_delegate.clone(),
+            row_tooltips: self.row_tooltips.clone(),
             metrics: self.metrics.clone(),
             row_selection: self.row_selection.clone(),
             focused_index: self.focused_index.clone(),

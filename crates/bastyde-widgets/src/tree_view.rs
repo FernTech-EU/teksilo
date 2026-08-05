@@ -170,6 +170,11 @@ pub struct TreeView<T: 'static> {
 
     /// Type-ahead ("type to jump") label extractor — opt-in via
     /// [`type_ahead_label`](Self::type_ahead_label).
+    /// Per-row tooltip resolvers. The view attaches these itself, against the
+    /// row widget the delegate produced — an app cannot reach that widget to
+    /// hang a `.tooltip(...)` on it. Shared with `ListView`; see
+    /// [`RowTooltips`](crate::data_views::RowTooltips).
+    row_tooltips: crate::data_views::RowTooltips<T>,
     type_ahead_label: Option<Rc<dyn Fn(&T) -> String>>,
     /// Reset window for the type-ahead search term.
     type_ahead_timeout: Duration,

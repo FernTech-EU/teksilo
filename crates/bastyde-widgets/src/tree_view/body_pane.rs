@@ -46,6 +46,7 @@ pub(crate) struct TreeViewBodyPane<T: 'static> {
     /// The erased, index-keyed tree source — the same handle the root holds.
     pub(crate) source: Rc<TreeSource<T>>,
     pub(crate) row_delegate: Rc<RowDelegate<T>>,
+    pub(crate) row_tooltips: crate::data_views::RowTooltips<T>,
 
     /// Row geometry shared with the `TreeView` root (one handle, two holders
     /// — the root drives scrollbar totals, paint and keyboard, the pane
@@ -220,15 +221,31 @@ impl<T: 'static> Widget for TreeViewBodyPane<T> {
             // skeleton instead of being skipped, so the scrollbar and layout
             // stay stable while the window loads. A placeholder reports no
             // metadata, so the expand/drag wiring below is gated off.
+            // Resolve the row's tooltip inside the same borrow that builds the
+            // row: it is the only place the item is reachable, and attaching
+            // needs a `WidgetId` that does not exist until afterwards.
+            let pending_tip: RefCell<Option<crate::data_views::ResolvedRowTooltip>> =
+                RefCell::new(None);
+            let tips = &self.row_tooltips;
             let row_widget = self
                 .source
-                .with_row(i, &|item, m| (self.row_delegate)(i, item, m, selected))
+                .with_row(i, &|item, m| {
+                    if tips.is_set() {
+                        *pending_tip.borrow_mut() = tips.resolve(i, item);
+                    }
+                    (self.row_delegate)(i, item, m, selected)
+                })
                 .or_else(|| {
                     ((row_state_fn)(i) == RowState::Loading)
                         .then(crate::data_views::default_placeholder)
                 });
             if let Some(widget) = row_widget {
                 let inner_id = ctx.add_boxed(widget);
+                // The app cannot reach this widget to hang a tooltip on it —
+                // the view built it — so the view attaches the resolved tip.
+                if let Some(tip) = pending_tip.into_inner() {
+                    self.row_tooltips.attach_resolved(ctx, inner_id, tip);
+                }
                 let (level, position_1based, total_siblings, expanded_opt) =
                     if let Some(ref m) = meta {
                         let exp = if m.has_children {

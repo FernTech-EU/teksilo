@@ -37,7 +37,7 @@ use bastyde_core::widget_id::WidgetId;
 use bastyde_i18n::LocalizedString;
 use bastyde_tokens::{CornerRadius, TextRole};
 
-use crate::primitives::{Grid, Padding, Spacer, TrackSize, VStack};
+use crate::primitives::{Grid, Padding, Spacer, TrackSize};
 use crate::scroll_area::{ScrollArea, ScrollBarPolicy};
 use crate::tooltip::dwell_indicator::DwellIndicator;
 // Step granularity is shared with `RichTooltipWidget`'s indicator (0..=4) —
@@ -49,7 +49,10 @@ use crate::tooltip::rich::{DWELL_STEP_DURATION, DWELL_STEPS};
 pub struct CompositeTooltipWidget {
     body: Option<Box<dyn Widget>>,
     body_id: Option<WidgetId>,
-    root_child_id: Option<WidgetId>,
+    /// The padded scroll viewport holding the body, and the footer row that
+    /// carries the dwell indicator — placed by hand, see `place_children`.
+    padded_id: Option<WidgetId>,
+    footer_id: Option<WidgetId>,
     /// The `ScrollArea` wrapping the body. Kept only so `layout_response` can discount its
     /// placeholder intrinsic height — see there.
     scrolled_id: Option<WidgetId>,
@@ -58,6 +61,15 @@ pub struct CompositeTooltipWidget {
     max_height_override: Option<f32>,
     dwell_step: Signal<u32>,
     sticky: Signal<bool>,
+    /// Whether this surface offers dwell-to-sticky promotion at all.
+    ///
+    /// A composite tooltip is just as useful as a *read-only* surface — a fact
+    /// sheet, a row's card — where there is nothing to reach into and nothing
+    /// to pin. There the dwell machinery is all cost: a countdown indicator
+    /// promising an interaction that does not exist, a surface that outlives
+    /// the pointer, and a `Role::Dialog` for assistive tech to announce.
+    /// Turning it off makes the tier behave like a richer plain tooltip.
+    sticky_enabled: bool,
     shown_at_sink: Rc<Cell<Option<Instant>>>,
 }
 
@@ -74,6 +86,7 @@ impl std::fmt::Debug for CompositeTooltipWidget {
             .field("access_label", &self.access_label)
             .field("max_width_override", &self.max_width_override)
             .field("max_height_override", &self.max_height_override)
+            .field("sticky_enabled", &self.sticky_enabled)
             .finish()
     }
 }
@@ -83,13 +96,17 @@ impl CompositeTooltipWidget {
         Self {
             body: None,
             body_id: None,
-            root_child_id: None,
+            padded_id: None,
+            footer_id: None,
             scrolled_id: None,
             access_label: None,
             max_width_override: None,
             max_height_override: None,
             dwell_step: Signal::new(0),
             sticky: Signal::new(false),
+            // Kept on by default: it is what the tier has always done, and a
+            // body with something to reach into is the case that needs it.
+            sticky_enabled: true,
             shown_at_sink: Rc::new(Cell::new(None)),
         }
     }
@@ -117,6 +134,36 @@ impl CompositeTooltipWidget {
     }
 
     /// Override the per-theme `composite_tooltip.max_width`.
+    /// Whether the surface offers dwell-to-sticky promotion. Default `true`.
+    ///
+    /// Turn it **off** for a read-only body — a fact sheet, a data-view row's
+    /// card. Three things follow, all of them the point:
+    ///
+    /// * no [`DwellIndicator`] is built, so nothing counts down towards an
+    ///   interaction that does not exist (and the footer disappears with it,
+    ///   letting the surface hug its content);
+    /// * the entry is registered with no `sticky_after`, so the tip never
+    ///   promotes, never outlives the pointer, and stays a `Role::Tooltip`
+    ///   rather than becoming a `Dialog` for assistive tech to announce;
+    /// * and, following the plain tier, it is not surfaced by keyboard focus —
+    ///   its text reaches assistive tech through the anchor's own description
+    ///   instead, which is the W3C-recommended route for supplementary hints.
+    ///
+    /// Callers reaching the tier through a widget's `.composite_tooltip(...)`
+    /// setter get the sticky default; opt out by building the widget yourself
+    /// and attaching it with
+    /// [`attach_composite_tooltip_widget_with_placement`](crate::tooltip::attach_composite_tooltip_widget_with_placement).
+    pub fn sticky(mut self, on: bool) -> Self {
+        self.sticky_enabled = on;
+        self
+    }
+
+    /// Whether dwell-to-sticky promotion is enabled — what an attach helper
+    /// consults to decide the entry's `sticky_after`.
+    pub fn sticky_enabled(&self) -> bool {
+        self.sticky_enabled
+    }
+
     pub fn max_width(mut self, w: f32) -> Self {
         self.max_width_override = Some(w);
         self
@@ -156,6 +203,10 @@ impl CompositeTooltipWidget {
         }
     }
 }
+
+/// Gap between the body viewport and the dwell-indicator footer — what the
+/// `VStack` spacing used to supply before the column was placed by hand.
+const FOOTER_GAP: f32 = 6.0;
 
 impl Widget for CompositeTooltipWidget {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
@@ -209,33 +260,42 @@ impl Widget for CompositeTooltipWidget {
             .child_id(scrolled),
         );
 
-        let indicator = ctx.add(DwellIndicator::new(
-            self.dwell_step.clone(),
-            self.sticky.clone(),
-            TextRole::TooltipText,
-        ));
+        // No promotion, no countdown: a read-only surface builds no footer at
+        // all, so it hugs its content instead of reserving a row for an
+        // indicator that would promise an interaction it does not offer.
+        let footer = self.sticky_enabled.then(|| {
+            let indicator = ctx.add(DwellIndicator::new(
+                self.dwell_step.clone(),
+                self.sticky.clone(),
+                TextRole::TooltipText,
+            ));
+            // Footer: 1fr Spacer + Auto indicator — keeps the dwell pin
+            // visually anchored at the bottom-right of the surface, the
+            // same convention rich tooltips use at the top-right of their
+            // inner Grid.
+            let footer_spacer = ctx.add(Spacer::new());
+            ctx.add(
+                Grid::new()
+                    .columns(vec![TrackSize::Fractional(1.0), TrackSize::Auto])
+                    .rows(vec![TrackSize::Auto])
+                    .column_gap(8.0)
+                    .add_child(footer_spacer)
+                    .add_child(indicator),
+            )
+        });
 
-        // Footer: 1fr Spacer + Auto indicator — keeps the dwell pin
-        // visually anchored at the bottom-right of the surface, the
-        // same convention rich tooltips use at the top-right of their
-        // inner Grid.
-        let footer_spacer = ctx.add(Spacer::new());
-        let footer = ctx.add(
-            Grid::new()
-                .columns(vec![TrackSize::Fractional(1.0), TrackSize::Auto])
-                .rows(vec![TrackSize::Auto])
-                .column_gap(8.0)
-                .add_child(footer_spacer)
-                .add_child(indicator),
-        );
-
-        let root = ctx.add(
-            VStack::new()
-                .spacing(6.0)
-                .add_child(padded)
-                .add_child(footer),
-        );
-        self.root_child_id = Some(root);
+        // Placed by `place_children`, not stacked by a `VStack`.
+        //
+        // A `ScrollArea`'s intrinsic height is a fixed placeholder — a viewport
+        // exists to be smaller than what it holds, so it cannot answer "how
+        // tall is my content". `layout_response` below already discounts that
+        // placeholder to report an honest height, but a `VStack` doing its own
+        // vertical distribution never saw the correction: it laid the column
+        // out at placeholder height and the footer — the dwell indicator —
+        // ended up painted below the bubble, on whatever happened to be behind
+        // the tooltip. Owning the placement is what keeps the two in step.
+        self.padded_id = Some(padded);
+        self.footer_id = footer;
 
         // Focusable so Tab can enter the surface once promoted.
         let handlers = HandlerSet::new().focusable(true);
@@ -248,7 +308,7 @@ impl Widget for CompositeTooltipWidget {
             bastyde_core::binding::BindingLevel::AccessibilityOnly,
         );
 
-        vec![root]
+        self.padded_id.into_iter().chain(self.footer_id).collect()
     }
 
     fn layout_response(
@@ -279,26 +339,34 @@ impl Widget for CompositeTooltipWidget {
             width: None,
             height: None,
         };
-        let Some(natural) = self
-            .root_child_id
-            .and_then(|id| ctx.child_size(id, unbounded))
-        else {
+        let Some(padded) = self.padded_id else {
             return Size::new(0.0, 0.0).into();
         };
+        let footer_natural = self
+            .footer_id
+            .and_then(|id| ctx.child_size(id, unbounded))
+            .unwrap_or_else(|| Size::new(0.0, 0.0));
+        let Some(padded_natural) = ctx.child_size(padded, unbounded) else {
+            return Size::new(0.0, 0.0).into();
+        };
+        let natural = Size::new(
+            padded_natural.width.max(footer_natural.width),
+            padded_natural.height + FOOTER_GAP + footer_natural.height,
+        );
         let avail_w = proposal.width.unwrap_or(f32::INFINITY).min(max_w);
         let w = natural.width.min(avail_w);
-        let h = self
-            .root_child_id
-            .and_then(|id| {
-                ctx.child_size(
-                    id,
-                    SizeProposal {
-                        width: Some(w),
-                        height: None,
-                    },
-                )
-            })
+        let at_w = SizeProposal {
+            width: Some(w),
+            height: None,
+        };
+        let footer_h = self
+            .footer_id
+            .and_then(|id| ctx.child_size(id, at_w))
             .map(|s| s.height)
+            .unwrap_or(footer_natural.height);
+        let h = ctx
+            .child_size(padded, at_w)
+            .map(|s| s.height + FOOTER_GAP + footer_h)
             .unwrap_or(natural.height);
 
         // Height needs one more correction. A `ScrollArea` is a viewport: asked for its
@@ -338,7 +406,9 @@ impl Widget for CompositeTooltipWidget {
         canvas.fill_rounded_rect(bounds, radius, ctx.theme.colors.tooltip_bg);
         // paint() is the visibility hook — only invoked while the
         // tooltip is active. Drives the dwell-to-sticky timer.
-        self.tick_dwell();
+        if self.sticky_enabled {
+            self.tick_dwell();
+        }
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
@@ -364,7 +434,42 @@ impl Widget for CompositeTooltipWidget {
     }
 
     fn children(&self) -> Vec<WidgetId> {
-        self.root_child_id.map(|id| vec![id]).unwrap_or_default()
+        self.padded_id.into_iter().chain(self.footer_id).collect()
+    }
+
+    /// Place the body viewport and the dwell-indicator footer by hand.
+    ///
+    /// The footer takes its natural height at the bottom; the viewport takes
+    /// everything above it. That is the whole fix: the viewport is *given* a
+    /// height rather than asked for one, so it can no longer claim its
+    /// placeholder and push the indicator out of the bubble. Content taller
+    /// than what is left simply scrolls, which is what the `ScrollArea` is for.
+    fn place_children(
+        &self,
+        bounds: Rect,
+        _proposal: SizeProposal,
+        children: &mut [bastyde_core::widget::WidgetPlacement],
+        ctx: &LayoutContext,
+    ) {
+        let at_w = SizeProposal {
+            width: Some(bounds.width),
+            height: None,
+        };
+        let footer_h = self
+            .footer_id
+            .and_then(|id| ctx.child_size(id, at_w))
+            .map(|s| s.height)
+            .unwrap_or(0.0);
+        let body_h = (bounds.height - footer_h - FOOTER_GAP).max(0.0);
+        for (i, child) in children.iter_mut().enumerate() {
+            if i == 0 {
+                child.origin = bastyde_canvas::Point::new(bounds.x, bounds.y);
+                child.size = Size::new(bounds.width, body_h);
+            } else {
+                child.origin = bastyde_canvas::Point::new(bounds.x, bounds.y + body_h + FOOTER_GAP);
+                child.size = Size::new(bounds.width, footer_h);
+            }
+        }
     }
 
     /// Reconcile children across rebuilds rather than tearing them down.
@@ -406,6 +511,7 @@ mod tests {
     struct ComposeTooltipHost {
         anchor_id: Option<WidgetId>,
         tooltip_id_sink: Rc<Cell<Option<WidgetId>>>,
+        sticky: bool,
     }
 
     impl ComposeTooltipHost {
@@ -413,6 +519,14 @@ mod tests {
             Self {
                 anchor_id: None,
                 tooltip_id_sink,
+                sticky: true,
+            }
+        }
+        fn new_non_sticky(tooltip_id_sink: Rc<Cell<Option<WidgetId>>>) -> Self {
+            Self {
+                anchor_id: None,
+                tooltip_id_sink,
+                sticky: false,
             }
         }
     }
@@ -425,7 +539,15 @@ mod tests {
                 .child(TextWidget::new(lit!("Header")))
                 .child(TextWidget::new(lit!("Body")));
             let delay = ctx.theme().motion.tooltip_delay_heavy;
-            let tip = attach_composite_tooltip(ctx, anchor, body, delay);
+            let tip = crate::tooltip::attach_composite_tooltip_widget_with_placement(
+                ctx,
+                anchor,
+                CompositeTooltipWidget::new()
+                    .content(body)
+                    .sticky(self.sticky),
+                delay,
+                crate::tooltip::TooltipPlacement::Below,
+            );
             self.tooltip_id_sink.set(Some(tip));
             vec![anchor]
         }
@@ -552,6 +674,116 @@ mod tests {
         assert!(
             w.preserves_children_on_rebuild(),
             "composite must preserve children so the reused body id stays valid across rebuild"
+        );
+    }
+
+    /// A non-sticky composite never promotes, however long the pointer rests.
+    ///
+    /// That is the whole contract of the read-only tier: it retires with the
+    /// pointer like a plain tooltip, rather than becoming a panel that outlives
+    /// it and reads to assistive tech as a `Dialog`.
+    #[test]
+    fn a_non_sticky_composite_tooltip_never_promotes() {
+        let mut tree = tree_with_backend();
+        let tooltip_id_sink = Rc::new(Cell::new(None));
+        let host = tree.add(ComposeTooltipHost::new_non_sticky(tooltip_id_sink.clone()));
+        tree.layout(SizeProposal::exact(400.0, 200.0));
+
+        tree.pointer_move(tree.bounds(host).center());
+        tree.advance_time(Duration::from_millis(750));
+        assert_eq!(
+            tree.active_overlays().len(),
+            1,
+            "it still shows on hover — only the promotion is gone"
+        );
+
+        // Well past the dwell window the sticky tier would have promoted at.
+        tree.advance_time(crate::tooltip::rich::DWELL_PROMOTION * 3);
+        tree.pointer_move(bastyde_canvas::Point::new(-100.0, -100.0));
+        tree.advance_time(Duration::from_millis(300));
+        assert!(
+            tree.active_overlays().is_empty(),
+            "a non-sticky surface must retire with the pointer, not survive it"
+        );
+    }
+
+    /// …and builds no dwell indicator, so it hugs its content.
+    #[test]
+    fn a_non_sticky_composite_tooltip_is_shorter_than_a_sticky_one() {
+        let measure = |sticky: bool| {
+            let mut tree = WidgetTree::new()
+                .with_theme(bastyde_core::presets::intui::light())
+                .with_text_backend(Rc::new(RefCell::new(MockTextBackend::new())));
+            tree.add_boxed(Box::new(
+                CompositeTooltipWidget::new()
+                    .content(TextWidget::new(lit!("Hi")))
+                    .sticky(sticky),
+            ));
+            tree.layout(SizeProposal::exact(1200.0, 900.0));
+            tree.measure_root_intrinsic(SizeProposal {
+                width: Some(1200.0),
+                height: Some(900.0),
+            })
+            .expect("a size")
+            .height
+        };
+        let sticky = measure(true);
+        let plain = measure(false);
+        assert!(
+            plain < sticky,
+            "without the indicator the surface should hug tighter \
+             (non-sticky {plain}, sticky {sticky})"
+        );
+    }
+
+    /// Every painted descendant must sit inside the surface that paints the
+    /// tooltip's background.
+    ///
+    /// The dwell indicator is the last child of the root `VStack`, so anything
+    /// that makes the surface report a height shorter than the column actually
+    /// needs pushes the indicator out the bottom — painted on the window, over
+    /// whatever is behind, with no tooltip under it.
+    #[test]
+    fn the_dwell_indicator_sits_inside_the_tooltip_surface() {
+        let mut tree = WidgetTree::new()
+            .with_theme(bastyde_core::presets::intui::light())
+            .with_text_backend(Rc::new(RefCell::new(MockTextBackend::new())));
+        let tip = tree.add_boxed(Box::new(
+            CompositeTooltipWidget::new().content(TextWidget::new(lit!("Hi"))),
+        ));
+        // Lay out at the tooltip's own intrinsic size, the way the overlay
+        // manager places it — not at a generous proposal, which would place the
+        // root at the proposal and hide the discrepancy.
+        let want = tree
+            .measure_root_intrinsic(SizeProposal {
+                width: Some(1200.0),
+                height: Some(900.0),
+            })
+            .expect("the tooltip reports a size");
+        tree.layout(SizeProposal::exact(want.width, want.height));
+
+        let surface = tree.bounds(tip);
+        // Walk to the deepest descendants and check each stays within.
+        let mut stack = tree.children(tip);
+        let mut worst: Option<(f32, f32)> = None;
+        while let Some(id) = stack.pop() {
+            let b = tree.bounds(id);
+            if b.height > 0.0 && b.y + b.height > surface.y + surface.height + 0.5 {
+                let overflow = (b.y + b.height) - (surface.y + surface.height);
+                if worst.is_none_or(|(w, _)| overflow > w) {
+                    worst = Some((overflow, b.y + b.height));
+                }
+            }
+            stack.extend(tree.children(id));
+        }
+        assert!(
+            worst.is_none(),
+            "a descendant spills {:.1}dp below the tooltip surface \
+             (surface ends at {:.1}, child at {:.1}) — the dwell indicator is \
+             painted outside the bubble",
+            worst.unwrap().0,
+            surface.y + surface.height,
+            worst.unwrap().1,
         );
     }
 
