@@ -100,6 +100,7 @@ use crate::button::{Button, ButtonVariant};
 use crate::checkbox::Checkbox;
 use crate::dialog::ModalContainer;
 use crate::primitives::{Expand, HStack, Spacer, TextWidget, VStack};
+use crate::scroll_area::ScrollArea;
 use crate::severity_badge::{SeverityBadge, SeverityIconKind};
 
 // ── Severity ────────────────────────────────────────────────────────
@@ -399,6 +400,15 @@ pub struct MessageBoxResult {
 }
 
 const SEVERITY_ICON_SIZE: f32 = 48.0;
+
+/// How tall the expanded "Show details" pane is allowed to grow before it scrolls.
+///
+/// `detailed_text` is where callers put the things that have no length bound — a stack
+/// trace, an OS error dump, a list of every affected row — so without a cap the accordion
+/// simply grew the dialog until it ran off the bottom of the screen, taking the buttons
+/// with it. Tall enough for a dozen lines of `small` text, short enough that the dialog
+/// still fits a laptop display beneath a header and a button row.
+const DETAILS_MAX_HEIGHT: f32 = 220.0;
 
 const DEFAULT_INTENT_NAME: &str = "messagebox.accept_default";
 const ESCAPE_INTENT_NAME: &str = "messagebox.escape";
@@ -762,8 +772,16 @@ impl Widget for MessageBox {
             let body = TextWidget::new(text)
                 .style(theme.typography.small.clone())
                 .color(theme.colors.text_secondary);
+            // Capped and scrollable rather than free-growing: see `DETAILS_MAX_HEIGHT`.
+            // `preferred_height` caps the height only when the parent proposes an
+            // unconstrained one — which a hugging dialog does — while leaving the width to
+            // follow the content, so short details still size to themselves and never
+            // acquire a scroll bar they do not need.
+            let scroller = ScrollArea::new()
+                .child(body)
+                .preferred_height(DETAILS_MAX_HEIGHT);
             let accordion: Box<dyn Widget> =
-                Box::new(Accordion::new(label, expanded).content(body));
+                Box::new(Accordion::new(label, expanded).content(scroller));
             accordion
         });
 
@@ -1164,6 +1182,50 @@ mod tests {
         assert_eq!(StandardButton::Discard.role(), ButtonRole::Destructive);
         assert_eq!(StandardButton::Help.role(), ButtonRole::Action);
         assert_eq!(StandardButton::Ignore.role(), ButtonRole::Action);
+    }
+
+    /// A long `detailed_text` expands, stays reachable, and lays out without blowing up.
+    ///
+    /// The pane is where callers put the things with no length bound — a stack trace, an OS
+    /// error dump, a list of every affected row — and it used to be a bare `TextWidget` in
+    /// the accordion, so expanding it grew the dialog until the button row went off the
+    /// bottom of the screen. It is capped and scrollable now (`DETAILS_MAX_HEIGHT`).
+    ///
+    /// This pins the reachable half: a hundred lines of detail still build, expand and
+    /// re-lay out with the buttons intact. The *height* cap itself is not asserted here —
+    /// `WidgetTree` exposes no laid-out geometry to widget tests, so there is nothing to
+    /// measure against; that half is the `ScrollArea::preferred_height` contract, which
+    /// `scroll_area` owns and tests.
+    #[test]
+    fn a_long_details_pane_expands_and_keeps_the_dialog_intact() {
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        let long: String = (1..=100)
+            .map(|i| format!("line {i} of a very long detail dump\n"))
+            .collect();
+        let mb = MessageBox::critical(lit!("Could not open file"))
+            .text(lit!("It went wrong."))
+            .detailed_text(lit!(long))
+            .buttons(MessageBoxButtons::Ok);
+        let _content = present_and_lay_out(&mut tree, mb);
+
+        let toggle = tree
+            .find_by_label(&bastyde_i18n::tr_widget!(messagebox_show_details()).resolve_now())
+            .expect("the Show details toggle");
+        tree.dispatch_event(WidgetEvent::AccessAction {
+            action: bastyde_core::accesskit::Action::Click,
+            target: Some(toggle),
+            target_node: bastyde_core::accessibility::root_node_id(),
+            data: None,
+        });
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+
+        // The dialog is still whole: its title and its button both survived the expansion.
+        assert!(tree.find_by_label("Could not open file").is_some());
+        assert!(
+            tree.find_by_label(&StandardButton::Ok.default_label().resolve_now())
+                .is_some(),
+            "the button row must survive an expanded details pane"
+        );
     }
 
     #[test]

@@ -916,9 +916,14 @@ impl RichTextEditor {
 
     /// Insert an inline image by logical resource name. `width` and
     /// `height` are in logical pixels.
-    pub fn insert_image(&self, name: &str, width: u32, height: u32) {
+    ///
+    /// `alt` is the image's accessible description and its export representation. It is
+    /// passed straight through rather than defaulted here: the caller is the only layer
+    /// that knows what the picture shows, and an empty string chosen on its behalf would
+    /// be an accessibility decision made silently by a widget wrapper.
+    pub fn insert_image(&self, name: &str, alt: &str, width: u32, height: u32) {
         let st = self.state.borrow();
-        let _ = st.cursor.insert_image(name, width, height);
+        let _ = st.cursor.insert_image(name, alt, width, height);
         drop(st);
         sync_cursor_signals(&self.state);
     }
