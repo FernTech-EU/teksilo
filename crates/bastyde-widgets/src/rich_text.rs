@@ -75,7 +75,7 @@ use bastyde_core::widget_builder::HandlerSet;
 use bastyde_core::widget_id::WidgetId;
 use bastyde_text::text_document::{
     Alignment, BlockFormat, CharVerticalAlignment, ListStyle, MoveMode, SelectionType,
-    TextDirection, TextDocument, TextFormat,
+    ResourceType, TextDirection, TextDocument, TextFormat,
 };
 use bastyde_text::{
     EditorTypographyDefaults, FontRegistrar, RichTextEngine, SharedTypesetter, WrapMode,
@@ -1974,6 +1974,33 @@ impl EditorHandle {
             let _ = st.cursor.insert_text(text);
         }
         sync_cursor_signals(&self.state);
+    }
+
+    /// Register an image's bytes on this editor's document, under `name`.
+    ///
+    /// An inline image stores only a name; the paint pass resolves it to pixels
+    /// through the document's resource table. So an image inserted without this
+    /// lays out and stays blank — and the name is also what a *reload* resolves
+    /// against, which is why a host restoring a document has to register its
+    /// images before the first paint rather than at insertion time only.
+    ///
+    /// On the handle rather than only on the widget because commands operate on
+    /// whichever editor has focus, including ones a list or card grid built that
+    /// the host never mounted itself.
+    pub fn add_image_resource(&self, name: &str, mime_type: &str, bytes: &[u8]) -> bool {
+        let st = self.state.borrow();
+        st.document
+            .add_resource(ResourceType::Image, name, mime_type, bytes)
+            .is_ok()
+    }
+
+    /// Whether this editor's document already has an image under `name`.
+    ///
+    /// Registering the same name twice appends a second resource row, so a host
+    /// re-registering on every paint would grow the document without bound.
+    pub fn has_image_resource(&self, name: &str) -> bool {
+        let st = self.state.borrow();
+        st.document.resource(name).ok().flatten().is_some()
     }
 
     /// Insert a fragment parsed from djot at the caret, replacing any selection.
