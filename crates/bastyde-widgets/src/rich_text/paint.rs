@@ -132,6 +132,25 @@ fn paint_glyphs(canvas: &mut Canvas, glyphs: &[GlyphQuad], ox: f32, oy: f32) {
     }
 }
 
+/// How strongly a selected image is tinted.
+///
+/// The selection colour's *own* alpha is deliberately not used. Behind text it
+/// is opaque and can afford to be — the glyphs paint on top of it, so the
+/// colour is a background. Over an image the same rect is a foreground, and at
+/// full strength it replaces the picture with a solid block of colour. A
+/// selected photograph has to stay a recognisable photograph.
+///
+/// Low enough to read as a wash rather than a filter, and carried by the border
+/// below, which is what actually makes the selection unmistakable.
+const SELECTED_IMAGE_TINT_ALPHA: f32 = 0.28;
+
+/// Border width for a selected image, in logical pixels.
+///
+/// The half of the marking that does the work: it sits outside the picture's
+/// own content, so it stays legible over a busy or dark image where any tint
+/// would be lost.
+const SELECTED_IMAGE_BORDER_WIDTH: f32 = 2.0;
+
 fn paint_images(
     canvas: &mut Canvas,
     images: &[ImageQuad],
@@ -166,12 +185,12 @@ fn paint_images(
         let selected =
             selection.is_some_and(|(start, end)| img.char_offset >= start && img.char_offset < end);
         if selected {
-            let [r, g, b, a] = selection_color;
-            canvas.fill_rect(rect, Color::from_rgba(r, g, b, a));
+            let [r, g, b, _] = selection_color;
+            canvas.fill_rect(rect, Color::from_rgba(r, g, b, SELECTED_IMAGE_TINT_ALPHA));
             canvas.stroke_rect(
                 rect,
                 Color::from_rgba(r, g, b, 1.0),
-                bastyde_canvas::StrokeStyle::solid(2.0),
+                bastyde_canvas::StrokeStyle::solid(SELECTED_IMAGE_BORDER_WIDTH),
             );
         }
     }
@@ -292,6 +311,62 @@ mod image_paint_tests {
             selected.draw_order.len(),
             unselected.draw_order.len()
         );
+    }
+
+    /// The theme's selection colour is **opaque** (`editor_selection_bg` is a
+    /// six-digit hex). Behind text that is correct — glyphs paint on top of it.
+    /// Painted over an image at the same strength it replaces the picture with
+    /// a solid block of colour, which is what this pins against.
+    #[test]
+    fn a_selected_image_is_tinted_not_covered() {
+        let doc = TextDocument::new();
+        doc.add_resource(ResourceType::Image, "a.png", "image/png", &red_png())
+            .unwrap();
+        let mut q = quad("a.png");
+        q.char_offset = 4;
+
+        let mut canvas = Canvas::new();
+        paint_images(
+            &mut canvas,
+            &[q],
+            &doc,
+            &mut ImageCache::new(),
+            None,
+            Some((4, 5)),
+            // Fully opaque, exactly as the theme supplies it.
+            [0.66, 0.88, 0.91, 1.0],
+            0.0,
+            0.0,
+        );
+        let frame = canvas.into_render_frame();
+
+        // The tint is the rect covering the whole quad; the border is four
+        // thin edges of the same colour, and it is opaque on purpose.
+        let quad_area = 20.0 * 20.0;
+        let fills: Vec<[f32; 4]> = frame
+            .decorations
+            .iter()
+            .filter(|d| (d.rect[2] * d.rect[3] - quad_area).abs() < 1.0)
+            .map(|d| d.color)
+            .collect();
+        assert_eq!(fills.len(), 1, "expected exactly one tint over the image");
+        assert!(
+            fills[0][3] < 0.5,
+            "the tint must leave the picture visible, got alpha {}",
+            fills[0][3]
+        );
+        // …and the border is still full strength, which is what makes the
+        // selection unmistakable over a busy or dark picture.
+        assert!(
+            frame
+                .decorations
+                .iter()
+                .any(|d| (d.color[3] - 1.0).abs() < 0.01),
+            "the border was lost"
+        );
+        // The hue is still the selection's, so the image reads as part of one
+        // continuous selection rather than as a separately-styled object.
+        assert!((fills[0][0] - 0.66).abs() < 0.01, "{:?}", fills[0]);
     }
 
     #[test]
