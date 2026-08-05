@@ -3362,10 +3362,19 @@ impl Widget for RichTextEditorBody {
         // The caret is suppressed in an inactive window for every policy — the
         // authoritative final gate, covering the one frame between a
         // window-active flip and the build-time effect running.
-        let caret_on_now = match st.policy.caret_policy {
-            CaretPolicy::Hidden => false,
-            CaretPolicy::StaticVisible => st.has_focus && st.window_active,
-            CaretPolicy::Blinking => st.caret_visible.get() && st.has_focus && st.window_active,
+        let caret_on_now = if st.drop_caret && st.policy.caret_policy != CaretPolicy::Hidden {
+            // A drag is overhead: show where it would land. Focus is still
+            // wherever the drag started — often another editor entirely — so
+            // the focus gate below would hide precisely the caret the writer
+            // is aiming with. Steady, not blinking, and never in a read-only
+            // editor (`Hidden`), which takes no drop anyway.
+            st.window_active
+        } else {
+            match st.policy.caret_policy {
+                CaretPolicy::Hidden => false,
+                CaretPolicy::StaticVisible => st.has_focus && st.window_active,
+                CaretPolicy::Blinking => st.caret_visible.get() && st.has_focus && st.window_active,
+            }
         };
         let cursor_display = bastyde_text::CursorDisplay {
             position: st.cursor.position(),
@@ -3982,6 +3991,7 @@ impl Widget for RichTextEditor {
                         return bastyde_core::DropFeedback::NoFeedback;
                     }
                     if !self::mouse::move_caret_for_drag(&state, pos) {
+                        self::mouse::clear_drop_caret(&state);
                         return bastyde_core::DropFeedback::NoFeedback;
                     }
                     ctx.request_frame();
@@ -3991,10 +4001,21 @@ impl Widget for RichTextEditor {
                     bastyde_core::DropFeedback::Accept
                 }
             })
+            // The drag moved off this editor (or was cancelled over it): stop
+            // promising a landing place. Without this the drop caret is left
+            // burnt into an editor the drag has already left.
+            .on_drag_leave({
+                let state = self.state.clone();
+                move |ctx| {
+                    self::mouse::clear_drop_caret(&state);
+                    ctx.request_frame();
+                }
+            })
             .on_drop({
                 let state = self.state.clone();
                 let read_only = self.state.borrow().policy.is_read_only();
                 move |payload, pos, ctx| {
+                    self::mouse::clear_drop_caret(&state);
                     if read_only || !droppable(&payload) {
                         return false;
                     }
@@ -4013,6 +4034,14 @@ impl Widget for RichTextEditor {
                         if moved {
                             sync_cursor_signals(&state);
                             state.borrow_mut().pending_text_changed = true;
+                            // Take the caret with the text. Focus is still in
+                            // the editor the drag *started* in, so without this
+                            // the writer is left looking at text they just
+                            // placed here while typing into somewhere else.
+                            let self_id = state.borrow().self_id;
+                            if let Some(id) = self_id {
+                                ctx.request_focus(id);
+                            }
                             ctx.request_frame();
                         }
                         return moved;

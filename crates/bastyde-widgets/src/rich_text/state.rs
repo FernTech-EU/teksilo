@@ -246,6 +246,18 @@ pub(crate) struct EditorState {
     // Focus — mirrored from `on_focus` so paint can gate the caret.
     pub has_focus: bool,
 
+    /// A drag is hovering this editor, and the caret is showing where it would
+    /// land.
+    ///
+    /// The ordinary caret is gated on focus, which a drag never gives the
+    /// editor it is hovering — the focus stays wherever the drag began, often
+    /// in a different editor entirely. So the one caret the writer actually
+    /// needs to see, the one promising where the text will land, is exactly the
+    /// one the focus gate hides. This overrides it for as long as the drag is
+    /// overhead, and it does not blink: a drop target that flashes on and off
+    /// reads as uncertainty about whether it will accept.
+    pub drop_caret: bool,
+
     /// When `true` (**the default**), moving the caret reveals it inside any
     /// *enclosing* scroll area (via `EventContext::ensure_visible`) — the
     /// standard editor "caret stays on screen while you type / navigate"
@@ -700,6 +712,7 @@ impl EditorState {
             last_code_block_bg: None,
             last_code_block_fg: None,
             has_focus: false,
+            drop_caret: false,
             follow_caret_in_page: true,
             window_active: true,
             focus_signal: Signal::new(false),

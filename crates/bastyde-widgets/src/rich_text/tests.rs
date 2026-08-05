@@ -7577,3 +7577,33 @@ fn press_inside_the_selection_then_release_collapses_it() {
         super::state::DragState::Idle
     ));
 }
+
+/// The caret that shows where a drag will land must appear in an editor that
+/// does **not** have focus — the focus stays wherever the drag began, so gating
+/// this caret on focus hides the one the writer is aiming with.
+#[test]
+fn drop_caret_shows_without_focus() {
+    let (state, handle, _tree) = drag_fixture("Hello world, and a good long line of prose.");
+    assert!(
+        !state.borrow().has_focus,
+        "fixture precondition: the editor is unfocused"
+    );
+
+    let rect = handle.range_rect(6, 11).expect("geometry for a word");
+    let landed = super::mouse::move_caret_for_drag(
+        &state,
+        Point::new(rect.x + rect.width / 2.0, rect.y + rect.height / 2.0),
+    );
+
+    assert!(landed, "the drag is over text");
+    assert!(
+        state.borrow().drop_caret,
+        "an unfocused editor under a drag must still show where the drop lands"
+    );
+
+    super::mouse::clear_drop_caret(&state);
+    assert!(
+        !state.borrow().drop_caret,
+        "and stop showing it once the drag leaves, rather than burning it in"
+    );
+}

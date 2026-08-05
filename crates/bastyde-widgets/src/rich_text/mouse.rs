@@ -722,9 +722,16 @@ pub(super) fn move_caret_for_drag(state: &SharedState, local: Point) -> bool {
         // overwrite the selection it came from.
         st.cursor.set_position(hit.position, MoveMode::MoveAnchor);
         st.cursor_affinity = hit.affinity;
+        // Show it even though the drag holds no focus here — see `drop_caret`.
+        st.drop_caret = true;
     }
     sync_cursor_signals(state);
     true
+}
+
+/// Stop showing the drop caret — the drag left, was cancelled, or has landed.
+pub(super) fn clear_drop_caret(state: &SharedState) {
+    state.borrow_mut().drop_caret = false;
 }
 
 pub(super) fn offset_at_window_point(state: &SharedState, window_position: Point) -> Option<usize> {
