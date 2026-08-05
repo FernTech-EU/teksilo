@@ -210,6 +210,12 @@ impl SplitButton {
     /// `IconLocation::Leading`). Unlike the per-row `MenuItem::icon`s, this glyph
     /// is fixed regardless of which item is the current default — use it for a
     /// stable action affordance (e.g. a "＋" add glyph).
+    ///
+    /// The icon's tint follows the main-region label (the variant/interaction
+    /// cascade, or [`text_role`](Self::text_role) when overridden), so any
+    /// colour set on the passed `IconWidget` is replaced — same contract as
+    /// `Button`. Its size is left alone, so `.icon_size(..)` on the caller's
+    /// widget is honoured.
     pub fn icon(mut self, icon: IconWidget) -> Self {
         self.icon = Some(icon);
         self
@@ -557,7 +563,7 @@ impl Widget for SplitButton {
             .unwrap_or_else(|| text_role.clone().into());
         let mut label_widget = TextWidget::new(lit!(""))
             .text(main_label_text)
-            .color(label_color)
+            .color(label_color.clone())
             .single_line()
             .a11y_hidden();
         if let Some(style) = &self.label_style {
@@ -568,8 +574,14 @@ impl Widget for SplitButton {
         // Optional leading icon in the main region: `[icon, gap, label]` inside
         // the padding (mirrors Button's `IconLocation::Leading`). When no icon is
         // set, the label goes straight into the padding — node count unchanged.
+        //
+        // The glyph is tinted with the *label's* colour, exactly as
+        // `Button::make_icon` does — an untinted icon keeps `IconWidget`'s
+        // default `TextRole::Primary`, which silently matches on a light theme
+        // (`text_primary` and `text_on_accent` are both black) and then paints
+        // near-white on the accent fill in dark mode.
         let main_inner_id = if let Some(icon) = self.icon.take() {
-            let icon_id = ctx.add(icon);
+            let icon_id = ctx.add(icon.color(label_color.clone()));
             ctx.add(
                 HStack::new()
                     .spacing(SPLIT_BUTTON_ICON_LABEL_GAP)
@@ -1073,6 +1085,69 @@ mod tests {
             tree.active_overlays().len(),
             1,
             "ArrowDown must open the dropdown menu overlay"
+        );
+    }
+
+    /// How many path leaves in the rendered frame paint at `expected`. The
+    /// leading icon and the chevron are the glyphs a SplitButton draws; the
+    /// label is a text run, so it never shows up here.
+    fn paths_colored(frame: &bastyde_canvas::RenderFrame, expected: [f32; 4]) -> usize {
+        frame.paths.iter().filter(|p| p.color == expected).count()
+    }
+
+    /// Regression: the main region's leading icon must be tinted with the
+    /// label's colour, not left on `IconWidget`'s default `TextRole::Primary`.
+    ///
+    /// This only shows up on a dark theme. In `intui::light` `text_primary`
+    /// and `text_on_accent` are *both* `#000000`, so an untinted glyph looks
+    /// correct by coincidence; in `intui::dark` `text_primary` is `#DFE1E5`
+    /// against a black `text_on_accent`, so the untinted "＋" painted white on
+    /// the accent fill while the label beside it stayed black.
+    #[test]
+    fn filled_leading_icon_is_tinted_like_the_label_in_dark_mode() {
+        let theme = bastyde_core::presets::intui::dark();
+        let mut tree = WidgetTree::new().with_theme(theme.clone());
+        tree.add(
+            SplitButton::new_static()
+                .variant(ButtonVariant::Filled)
+                .icon(IconWidget::checkmark(14.0))
+                .item(MenuItem::new(lit!("Scene"))),
+        );
+        tree.layout(SizeProposal::exact(300.0, 60.0));
+        let frame = tree.render();
+
+        assert_eq!(
+            paths_colored(&frame, theme.colors.text_on_accent.to_array()),
+            2,
+            "both the leading icon and the chevron must paint at text_on_accent"
+        );
+        assert_eq!(
+            paths_colored(&frame, theme.colors.text_primary.to_array()),
+            0,
+            "no glyph may fall back to IconWidget's default text_primary on an accent fill"
+        );
+    }
+
+    /// The tint follows `text_role(..)` when the caller overrides it — the
+    /// icon and the label stay in lockstep rather than the icon falling back
+    /// to the variant cascade.
+    #[test]
+    fn leading_icon_follows_the_text_role_override() {
+        let theme = bastyde_core::presets::intui::dark();
+        let mut tree = WidgetTree::new().with_theme(theme.clone());
+        tree.add(
+            SplitButton::new_static()
+                .variant(ButtonVariant::Filled)
+                .text_role(bastyde_tokens::TextRole::Error)
+                .icon(IconWidget::checkmark(14.0))
+                .item(MenuItem::new(lit!("Delete"))),
+        );
+        tree.layout(SizeProposal::exact(300.0, 60.0));
+
+        assert_eq!(
+            paths_colored(&tree.render(), theme.colors.text_error.to_array()),
+            2,
+            "text_role(..) must retint the leading icon, not just the label"
         );
     }
 }
