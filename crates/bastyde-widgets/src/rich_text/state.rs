@@ -565,6 +565,18 @@ pub enum DragState {
         /// auto-scroll ramp. Applied by the frame loop on every tick.
         auto_scroll_v_per_s: f32,
     },
+    /// A press landed inside the existing selection.
+    ///
+    /// Whether that press is a click (which collapses the selection onto it)
+    /// or the beginning of a drag of the selected text cannot be known until
+    /// the pointer either moves past the threshold or is released — so the
+    /// selection is left standing until it says which. Collapsing eagerly on
+    /// press is what makes a selection impossible to pick up: the text is gone
+    /// from the selection before the drag can carry it.
+    PendingTextDrag {
+        /// Press position in widget coordinates, for the movement threshold.
+        origin: [f32; 2],
+    },
     /// Dragging a corner handle of the selected inline image.
     ///
     /// Deliberately not a variant of `Selecting`: the two share a pointer

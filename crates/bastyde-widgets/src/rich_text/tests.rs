@@ -7435,3 +7435,145 @@ fn external_drag_hover_moves_caret_from_formats_only_payload() {
          formats (the Wayland hover shape)"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Dragging a selection out of the editor
+// ---------------------------------------------------------------------------
+
+/// Build an editor holding `text`, return it with its state and handle.
+fn drag_fixture(text: &str) -> (super::state::SharedState, super::EditorHandle, WidgetTree) {
+    let doc = TextDocument::new();
+    doc.set_plain_text(text).unwrap();
+    let editor = RichTextEditor::editor(doc);
+    let handle = editor.handle();
+    let state = editor.state.clone();
+
+    let mut tree = WidgetTree::new();
+    let _ = tree.add(editor);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    let _ = tree.render();
+    (state, handle, tree)
+}
+
+/// Capture `range` as a drag payload, then park the caret at `drop_at`.
+fn drag_of(
+    state: &super::state::SharedState,
+    handle: &super::EditorHandle,
+    range: (usize, usize),
+    drop_at: usize,
+) -> super::EditorTextDrag {
+    handle.select_range(range.0, range.1);
+    let fragment = state.borrow().cursor.selection();
+    let text = fragment.to_plain_text().to_string();
+    handle.select_range(drop_at, drop_at);
+    super::EditorTextDrag {
+        source: bastyde_core::WidgetId::default(),
+        range,
+        fragment,
+        text,
+    }
+}
+
+/// Dropped back into the editor it came from, dragged text *moves*: the original
+/// goes away. The drop offset was measured before the removal, so it has to be
+/// re-based by the removed length or the text lands that many characters right.
+#[test]
+fn text_dropped_into_its_own_editor_moves() {
+    let (state, handle, _tree) = drag_fixture("Hello world");
+    let drag = drag_of(&state, &handle, (0, 5), 11);
+
+    assert!(super::mouse::apply_text_drop(&state, &drag, true));
+    assert_eq!(
+        handle.to_plain_text(),
+        " worldHello",
+        "the original must be removed and the drop re-based past it"
+    );
+}
+
+/// Dropped into a *different* editor it is a copy — carrying a phrase into a
+/// second document must not empty it out of the first.
+#[test]
+fn text_dropped_into_another_editor_copies() {
+    let (state, handle, _tree) = drag_fixture("Hello world");
+    let drag = drag_of(&state, &handle, (0, 5), 11);
+
+    assert!(super::mouse::apply_text_drop(&state, &drag, false));
+    assert_eq!(
+        handle.to_plain_text(),
+        "Hello worldHello",
+        "a cross-editor drop copies, leaving the source text standing"
+    );
+}
+
+/// Dropping a selection back inside itself is a no-op, not a self-destruct:
+/// removing the range would delete the very text being carried.
+#[test]
+fn text_dropped_inside_itself_changes_nothing() {
+    let (state, handle, _tree) = drag_fixture("Hello world");
+    let drag = drag_of(&state, &handle, (0, 5), 3);
+
+    assert!(super::mouse::apply_text_drop(&state, &drag, true));
+    assert_eq!(handle.to_plain_text(), "Hello world");
+}
+
+/// A drop *before* the dragged range needs no re-basing — the removal happens
+/// entirely after it.
+#[test]
+fn text_dropped_before_its_own_range_lands_at_the_caret() {
+    let (state, handle, _tree) = drag_fixture("Hello world");
+    let drag = drag_of(&state, &handle, (6, 11), 0);
+
+    assert!(super::mouse::apply_text_drop(&state, &drag, true));
+    assert_eq!(handle.to_plain_text(), "worldHello ");
+}
+
+/// Pressing inside a selection must not collapse it. The press cannot yet know
+/// whether it is a click or the start of a drag of that text, and collapsing
+/// eagerly is what makes a selection impossible to pick up — the text is gone
+/// from the selection before the drag could carry it.
+#[test]
+fn press_inside_the_selection_keeps_it() {
+    let (state, handle, mut tree) = drag_fixture("Hello world, and a good long line of prose.");
+    handle.select_range(0, 20);
+
+    let rect = handle.range_rect(4, 6).expect("geometry for the selection");
+    synth_pointer_down(
+        &mut tree,
+        rect.x + rect.width / 2.0,
+        rect.y + rect.height / 2.0,
+    );
+
+    assert!(
+        state.borrow().cursor.has_selection(),
+        "a press inside the selection must leave it standing"
+    );
+    assert!(
+        matches!(
+            state.borrow().drag_state,
+            super::state::DragState::PendingTextDrag { .. }
+        ),
+        "and arm a possible drag of it"
+    );
+}
+
+/// Releasing without travelling resolves the same press the other way: it was
+/// an ordinary click, so the selection collapses onto it after all.
+#[test]
+fn press_inside_the_selection_then_release_collapses_it() {
+    let (state, handle, mut tree) = drag_fixture("Hello world, and a good long line of prose.");
+    handle.select_range(0, 20);
+
+    let rect = handle.range_rect(4, 6).expect("geometry for the selection");
+    let (x, y) = (rect.x + rect.width / 2.0, rect.y + rect.height / 2.0);
+    synth_pointer_down(&mut tree, x, y);
+    synth_pointer_up(&mut tree, x, y);
+
+    assert!(
+        !state.borrow().cursor.has_selection(),
+        "a click that never travelled must collapse the selection"
+    );
+    assert!(matches!(
+        state.borrow().drag_state,
+        super::state::DragState::Idle
+    ));
+}

@@ -1958,11 +1958,36 @@ pub struct ImageActivation {
     pub offset: usize,
 }
 
+/// Rich text being dragged out of an editor.
+///
+/// The typed fast path for editor-to-editor drags: it carries the
+/// `DocumentFragment` itself, so formatting, tables and inline images survive a
+/// move the way they survive a copy/paste — where the `text/plain` MIME
+/// alternative the drag also advertises (for other applications) could only
+/// carry the words.
+///
+/// `source` and `range` are what let the drop tell a *move* from a *copy*:
+/// dropped back into the editor it came from, the original has to be removed,
+/// and only the source editor can say which range that was.
+#[derive(Debug, Clone)]
+pub struct EditorTextDrag {
+    /// The editor the text was picked up from.
+    pub source: bastyde_core::WidgetId,
+    /// The dragged range in that editor, as document offsets.
+    pub range: (usize, usize),
+    /// The dragged content, with its formatting.
+    pub fragment: bastyde_text::text_document::DocumentFragment,
+    /// The same content as plain text — the drop's fallback, and the bytes
+    /// handed to another application when the drag leaves the window.
+    pub text: String,
+}
+
 /// Whether this payload is one the editor can take.
 ///
-/// Text and files only. An internal drag with a typed payload belongs to
-/// whichever widget understands that type — a binder row dropped on the prose
-/// should still open a document, not paste its debug representation.
+/// Text, files, and an [`EditorTextDrag`] from any editor. Any other typed
+/// payload belongs to whichever widget understands that type — a binder row
+/// dropped on the prose should still open a document, not paste its debug
+/// representation.
 ///
 /// **Optimistic while the drag is still in the air.** On Wayland the concrete
 /// `files` / `text` arrive only at drop; during hover the payload carries just
@@ -1973,6 +1998,9 @@ pub struct ImageActivation {
 /// happens at drop, where there is finally something to check. This is the same
 /// rule `DropTarget::accept_external_files` / `accept_external_text` apply.
 fn droppable(payload: &bastyde_core::DragPayload) -> bool {
+    if payload.get_typed::<EditorTextDrag>().is_some() {
+        return true;
+    }
     if !payload.files().is_empty() || payload.text().is_some_and(|t| !t.is_empty()) {
         return true;
     }
@@ -3974,6 +4002,21 @@ impl Widget for RichTextEditor {
                     // final hover at the same point (a fast release, or a
                     // backend that only fills the payload at drop time).
                     self::mouse::move_caret_for_drag(&state, pos);
+                    // Text dragged out of an editor. Dropped back into the one
+                    // it came from it is a *move* — the original goes away —
+                    // and dropped into any other editor it is a copy, which is
+                    // what a writer means by carrying a phrase to a second
+                    // document rather than emptying it out of the first.
+                    if let Some(drag) = payload.get_typed::<EditorTextDrag>() {
+                        let same_editor = state.borrow().self_id == Some(drag.source);
+                        let moved = self::mouse::apply_text_drop(&state, drag, same_editor);
+                        if moved {
+                            sync_cursor_signals(&state);
+                            state.borrow_mut().pending_text_changed = true;
+                            ctx.request_frame();
+                        }
+                        return moved;
+                    }
                     let files: Vec<std::path::PathBuf> = payload.files().to_vec();
                     if !files.is_empty() {
                         // Files mean nothing to a text editor on their own —

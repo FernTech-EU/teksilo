@@ -120,6 +120,109 @@ fn proportional_resize(origin: [f32; 4], corner: (f32, f32), local: Point) -> [f
     [x, y, (w * scale).max(1.0), (h * scale).max(1.0)]
 }
 
+/// How far the pointer must travel from a press inside the selection before it
+/// counts as dragging that text rather than as a click that happened to wobble.
+const TEXT_DRAG_THRESHOLD: f32 = 4.0;
+
+/// Whether `offset` falls inside the current selection.
+///
+/// The end boundary is excluded so a click at the very edge of a selection
+/// still collapses it — otherwise the only way out of a selection ending at the
+/// caret would be to click somewhere else entirely.
+fn selection_contains(state: &SharedState, offset: usize) -> bool {
+    let st = state.borrow();
+    if !st.cursor.has_selection() {
+        return false;
+    }
+    let (a, b) = (st.cursor.anchor(), st.cursor.position());
+    let (lo, hi) = if a <= b { (a, b) } else { (b, a) };
+    (lo..hi).contains(&offset)
+}
+
+/// Begin dragging the current selection.
+///
+/// The payload carries the `DocumentFragment` for editors (formatting intact)
+/// *and* a `text/plain` MIME alternative, which is what lets the same gesture
+/// continue into another application: the framework escalates an in-app drag to
+/// a native OS drag at the window boundary when the payload has MIME data, so
+/// dragging prose into a text editor costs nothing extra here.
+fn start_text_drag(state: &SharedState, ctx: &mut EventContext) {
+    let payload = {
+        let st = state.borrow();
+        let Some(source) = st.self_id else {
+            return;
+        };
+        if !st.cursor.has_selection() {
+            return;
+        }
+        let (a, b) = (st.cursor.anchor(), st.cursor.position());
+        let range = if a <= b { (a, b) } else { (b, a) };
+        let fragment = st.cursor.selection();
+        let text = fragment.to_plain_text().to_string();
+        if text.is_empty() {
+            return;
+        }
+        bastyde_core::DragPayload::typed(super::EditorTextDrag {
+            source,
+            range,
+            fragment,
+            text: text.clone(),
+        })
+        .with_mime("text/plain", text.into_bytes())
+    };
+    let source = state.borrow().self_id;
+    if let Some(source) = source {
+        ctx.start_drag(source, payload);
+    }
+    state.borrow_mut().drag_state = DragState::Idle;
+    ctx.request_frame();
+}
+
+/// Insert dragged editor text at the caret, removing the original when the drop
+/// landed in the editor it came from.
+///
+/// Returns whether anything was accepted.
+pub(super) fn apply_text_drop(
+    state: &SharedState,
+    drag: &super::EditorTextDrag,
+    same_editor: bool,
+) -> bool {
+    let (lo, hi) = drag.range;
+    let drop_at = state.borrow().cursor.position();
+
+    if !same_editor {
+        let st = state.borrow();
+        let _ = st.cursor.insert_fragment(&drag.fragment);
+        return true;
+    }
+
+    // Dropped inside the very text being dragged: there is no move to make, and
+    // deleting the range would destroy the selection the writer was carrying.
+    // Accept it so the drag ends here rather than bubbling to a parent that
+    // would act on it.
+    if (lo..=hi).contains(&drop_at) {
+        return true;
+    }
+
+    // Remove the original first, then insert. Deleting shifts everything after
+    // the range left by its length, so a drop *after* the range has to be
+    // re-based or the text lands that many characters too far right.
+    {
+        let st = state.borrow();
+        st.cursor.set_position(lo, MoveMode::MoveAnchor);
+        st.cursor.set_position(hi, MoveMode::KeepAnchor);
+        let _ = st.cursor.remove_selected_text();
+        let target = if drop_at > hi {
+            drop_at - (hi - lo)
+        } else {
+            drop_at
+        };
+        st.cursor.set_position(target, MoveMode::MoveAnchor);
+        let _ = st.cursor.insert_fragment(&drag.fragment);
+    }
+    true
+}
+
 pub(super) fn handle_pointer_event(
     state: &SharedState,
     v_scrollbar_bounds: &Rc<Cell<Rect>>,
@@ -239,6 +342,20 @@ pub(super) fn handle_pointer_event(
                 }
                 _ => {}
             }
+            // A press *inside* the selection may be the writer picking that
+            // text up to drag it elsewhere, so the selection has to survive
+            // until the pointer says whether it was a drag or a plain click
+            // (`PointerMove` and `PointerUp` below each resolve one way).
+            // Shift+click is always an extend and never a drag.
+            if !shift && selection_contains(state, hit.position) {
+                let mut st = state.borrow_mut();
+                st.drag_state = DragState::PendingTextDrag {
+                    origin: [position.x, position.y],
+                };
+                st.mouse_anchored = true;
+                drop(st);
+                return EventResponse::Ignored;
+            }
             // Place the cursor. Shift+click extends the selection
             // from the existing anchor; plain click collapses it.
             {
@@ -297,6 +414,23 @@ pub(super) fn handle_pointer_event(
                 };
                 (dragging, resizing, st.viewport_height)
             };
+            // A press inside the selection that has now travelled far enough:
+            // hand the selected text to the framework as a drag. From here the
+            // drag belongs to the drag system — this widget's own pointer
+            // machine goes back to Idle rather than also trying to select.
+            let pending = match &state.borrow().drag_state {
+                DragState::PendingTextDrag { origin } => Some(*origin),
+                _ => None,
+            };
+            if let Some(origin) = pending {
+                let dx = position.x - origin[0];
+                let dy = position.y - origin[1];
+                if dx * dx + dy * dy < TEXT_DRAG_THRESHOLD * TEXT_DRAG_THRESHOLD {
+                    return EventResponse::Handled;
+                }
+                start_text_drag(state, ctx);
+                return EventResponse::Handled;
+            }
             if let Some((origin, corner)) = resizing {
                 let local = to_engine_local(state, position);
                 let proposed = proportional_resize(origin, corner, local);
@@ -359,7 +493,31 @@ pub(super) fn handle_pointer_event(
             ctx.request_frame();
             EventResponse::Handled
         }
-        WidgetEvent::PointerUp { .. } => {
+        WidgetEvent::PointerUp { position, .. } => {
+            // A press inside the selection that never travelled: it was an
+            // ordinary click after all, so honour it now — collapse the
+            // selection onto it, which is exactly what the press deferred.
+            if matches!(state.borrow().drag_state, DragState::PendingTextDrag { .. }) {
+                let local = to_engine_local(state, position);
+                let hit = {
+                    let st = state.borrow();
+                    hit_test::hit_test_at(&st.engine, local, 0.0, 0.0)
+                };
+                {
+                    let mut st = state.borrow_mut();
+                    st.drag_state = DragState::Idle;
+                    if let Some(hit) = hit {
+                        st.cursor.set_position(hit.position, MoveMode::MoveAnchor);
+                        st.cursor_affinity = hit.affinity;
+                        st.preferred_x = None;
+                        st.select_all_level = 0;
+                        st.select_all_anchor_cell = None;
+                    }
+                }
+                sync_cursor_signals(state);
+                ctx.request_frame();
+                return EventResponse::Ignored;
+            }
             // A resize is reported once, here — not on every move. The document
             // is the durable record, and rewriting it per pointer move would put
             // a hundred entries on the undo stack for one gesture.
