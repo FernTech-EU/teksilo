@@ -483,8 +483,9 @@ pub(crate) struct EditorState {
     /// Callback invoked on a Primary-click whose hit lands on a
     /// `HitRegion::Image`. Same Rc / borrow-release convention as
     /// [`on_link_activated`](Self::on_link_activated).
-    pub on_image_activated:
-        Option<std::rc::Rc<dyn Fn(&str, &mut bastyde_core::widget::EventContext)>>,
+    pub on_image_activated: Option<
+        std::rc::Rc<dyn Fn(&super::ImageActivation, &mut bastyde_core::widget::EventContext)>,
+    >,
 
     /// `(table_id, row, column, rows, columns)` remembered from the
     /// Ctrl+A ladder's level-1 call. After `select(BlockUnderCursor)`
@@ -991,7 +992,10 @@ mod recolor_range_tests {
     /// block-scoped recolor would never run.
     #[test]
     fn the_first_change_of_a_frame_adopts_its_own_extent() {
-        assert_eq!(accumulate_recolor_range(false, None, 40, 12), Some((40, 12)));
+        assert_eq!(
+            accumulate_recolor_range(false, None, 40, 12),
+            Some((40, 12))
+        );
     }
 
     #[test]

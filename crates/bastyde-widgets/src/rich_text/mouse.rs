@@ -106,7 +106,18 @@ pub(super) fn handle_pointer_event(
                 bastyde_text::HitRegion::Image { name } => {
                     let callback = state.borrow().on_image_activated.clone();
                     if let Some(cb) = callback {
-                        cb(name.as_str(), ctx);
+                        // The caret is deliberately left where it was, as for a
+                        // link. The offset is handed over instead, so a host that
+                        // wants the image selected can say so itself — and one
+                        // that only wants to open a viewer is not left having to
+                        // put the caret back.
+                        cb(
+                            &super::ImageActivation {
+                                name: name.clone(),
+                                offset: hit.position,
+                            },
+                            ctx,
+                        );
                     }
                     ctx.request_frame();
                     return EventResponse::Ignored;

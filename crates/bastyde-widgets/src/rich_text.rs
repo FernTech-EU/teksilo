@@ -1805,11 +1805,11 @@ impl RichTextEditor {
     }
 
     /// Install a callback fired when the user Primary-clicks an inline
-    /// image. The callback receives the image's resource name and the
-    /// active `EventContext`.
+    /// image. The callback receives the activation (see
+    /// [`ImageActivation`]) and the active `EventContext`.
     pub fn on_image_activated(
         self,
-        handler: impl Fn(&str, &mut bastyde_core::widget::EventContext) + 'static,
+        handler: impl Fn(&ImageActivation, &mut bastyde_core::widget::EventContext) + 'static,
     ) -> Self {
         self.state.borrow_mut().on_image_activated = Some(std::rc::Rc::new(handler));
         self
@@ -1880,6 +1880,21 @@ impl std::fmt::Debug for EditorHandle {
     }
 }
 
+/// An inline image the user clicked.
+///
+/// Carries the offset as well as the name because a document may hold the same
+/// picture more than once — a name alone cannot say *which* one was clicked, so
+/// a host acting on the click (selecting it, editing its size, replacing it)
+/// would be guessing. The offset addresses the image's single `U+FFFC`, so
+/// `select_range(offset, offset + 1)` selects exactly it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ImageActivation {
+    /// The image's resource name — the `src` the document stores.
+    pub name: String,
+    /// Character offset of the image within the document.
+    pub offset: usize,
+}
+
 impl EditorHandle {
     // --- Search / find-banner support (B3, handle mirror) ------------------
     //
@@ -1902,6 +1917,24 @@ impl EditorHandle {
     /// propagating a `Result` here would push that decision onto every call site.
     pub fn to_djot(&self) -> String {
         self.state.borrow().document.to_djot().unwrap_or_default()
+    }
+
+    /// This editor's content as the *addressable* plain text — the view whose
+    /// character offsets are the document's own.
+    ///
+    /// The counterpart to [`to_djot`](Self::to_djot) for a caller that has an
+    /// offset (a caret, a selection, a click) and needs to know what is there.
+    /// An inline image appears as its `U+FFFC`, so offsets into this string are
+    /// offsets into the document, character for character — which the `.txt`
+    /// export's view deliberately is not.
+    ///
+    /// Empty string on error, for the same reason `to_djot` returns one.
+    pub fn to_plain_text(&self) -> String {
+        self.state
+            .borrow()
+            .document
+            .to_plain_text()
+            .unwrap_or_default()
     }
 
     /// Whether this editor holds no text at all.
@@ -1992,6 +2025,22 @@ impl EditorHandle {
         st.document
             .add_resource(ResourceType::Image, name, mime_type, bytes)
             .is_ok()
+    }
+
+    /// The natural pixel size of a registered image, decoded from its bytes.
+    ///
+    /// What the file actually is, not what the document asks it to be shown at
+    /// — so a host offering "reset to the original size" restores the picture's
+    /// own dimensions rather than a number remembered from when it was inserted,
+    /// which is wrong the moment the file behind the name is replaced.
+    ///
+    /// Decodes on call. That is deliberate: this answers an explicit, rare
+    /// request, and caching it would mean holding a second copy of every image
+    /// in the document for a question almost nobody asks.
+    pub fn image_resource_size(&self, name: &str) -> Option<(u32, u32)> {
+        let bytes = self.state.borrow().document.resource(name).ok()??;
+        let icon = bastyde_canvas::RasterIcon::decode(&bytes).ok()?;
+        Some((icon.width(), icon.height()))
     }
 
     /// Whether this editor's document already has an image under `name`.
