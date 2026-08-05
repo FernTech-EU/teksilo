@@ -1963,8 +1963,24 @@ pub struct ImageActivation {
 /// Text and files only. An internal drag with a typed payload belongs to
 /// whichever widget understands that type — a binder row dropped on the prose
 /// should still open a document, not paste its debug representation.
+///
+/// **Optimistic while the drag is still in the air.** On Wayland the concrete
+/// `files` / `text` arrive only at drop; during hover the payload carries just
+/// the *advertised* formats. Judging by content alone therefore refuses every
+/// external drag for its whole flight — the drop is forbidden everywhere right
+/// up to the release that would have filled it in. So an advertised
+/// `text/uri-list` or text format counts as acceptance, and the real check
+/// happens at drop, where there is finally something to check. This is the same
+/// rule `DropTarget::accept_external_files` / `accept_external_text` apply.
 fn droppable(payload: &bastyde_core::DragPayload) -> bool {
-    !payload.files().is_empty() || payload.text().is_some_and(|t| !t.is_empty())
+    if !payload.files().is_empty() || payload.text().is_some_and(|t| !t.is_empty()) {
+        return true;
+    }
+    payload.formats().iter().any(|f| {
+        f.starts_with("text/uri-list")
+            || f.starts_with("text/plain")
+            || matches!(f.as_str(), "UTF8_STRING" | "STRING" | "TEXT")
+    })
 }
 
 /// A resize the reader finished dragging.
@@ -3969,7 +3985,9 @@ impl Widget for RichTextEditor {
                         ctx.request_frame();
                         return true;
                     }
-                    let Some(text) = payload.text() else {
+                    // Advertised but delivered nothing: decline, so the drag
+                    // bubbles rather than being silently eaten.
+                    let Some(text) = payload.text().filter(|t| !t.is_empty()) else {
                         return false;
                     };
                     {
