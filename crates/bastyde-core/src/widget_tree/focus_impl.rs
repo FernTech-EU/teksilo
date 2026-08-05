@@ -409,7 +409,9 @@ impl WidgetTree {
             // (`Button`) keep focus on their outer node and attach the tip to
             // an inner body root, so resolve to the focusable that actually
             // appears in the cycle before looking for its entry.
-            let stop = self.find_focusable_at_or_above(anchor_id).unwrap_or(anchor_id);
+            let stop = self
+                .find_focusable_at_or_above(anchor_id)
+                .unwrap_or(anchor_id);
             let at = entries
                 .iter()
                 .position(|entry| scope_entry_contains(entry, stop))

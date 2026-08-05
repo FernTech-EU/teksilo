@@ -911,9 +911,7 @@ impl WidgetTree {
         let mut direct: Vec<ToShow> = Vec::new();
         let mut reverse: Vec<ToShow> = Vec::new();
         for e in &self.tooltips {
-            if e.sticky_after.is_none()
-                || e.overlay_id.is_some()
-                || e.suppressed_until_focus_leaves
+            if e.sticky_after.is_none() || e.overlay_id.is_some() || e.suppressed_until_focus_leaves
             {
                 continue;
             }
