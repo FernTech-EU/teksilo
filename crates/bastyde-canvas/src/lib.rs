@@ -17,12 +17,12 @@ mod xml;
 
 pub use animated::AnimatedIcon;
 pub use canvas::Canvas;
+pub use exif::Orientation;
 pub use geometry::{EdgeInsets, Point, Rect, Size, SizeProposal, Transform2D, Vec2};
 pub use paint::{
     FillRule, GradientStop, ImageHandle, LineCap, LineJoin, Paint, StrokeSpace, StrokeStyle,
 };
 pub use path::{Path, PathCommand};
-pub use exif::Orientation;
 pub use raster::{ImageDecodeError, ImageFormat, RasterIcon};
 pub use render_frame::{
     AnimParams, AnimatedQuadClass, AnimatedQuadDraw, BlendMode, CosmeticLine, DecorationKind,

@@ -195,7 +195,11 @@ mod tests {
         let out = resample_area(&src, 2, 1, 1, 1);
         let mid = linear_to_srgb_byte(0.5);
         assert_eq!(out[0], mid);
-        assert!(out[0] > 180, "linear-light average should be ~188, got {}", out[0]);
+        assert!(
+            out[0] > 180,
+            "linear-light average should be ~188, got {}",
+            out[0]
+        );
     }
 
     #[test]
@@ -238,7 +242,10 @@ mod tests {
     fn degenerate_inputs_return_empty_rather_than_panicking() {
         assert!(resample_area(&[], 0, 0, 4, 4).is_empty());
         assert!(resample_area(&[1, 2, 3, 4], 1, 1, 0, 4).is_empty());
-        assert!(resample_area(&[1, 2], 4, 4, 2, 2).is_empty(), "short buffer");
+        assert!(
+            resample_area(&[1, 2], 4, 4, 2, 2).is_empty(),
+            "short buffer"
+        );
     }
 
     #[test]
@@ -258,7 +265,11 @@ mod tests {
         assert_eq!(fit_within(4000, 3000, 2000), Some((2000, 1500)));
         assert_eq!(fit_within(3000, 4000, 2000), Some((1500, 2000)));
         assert_eq!(fit_within(100, 100, 2000), None, "already fits");
-        assert_eq!(fit_within(4000, 1, 100), Some((100, 1)), "short side clamps to 1");
+        assert_eq!(
+            fit_within(4000, 1, 100),
+            Some((100, 1)),
+            "short side clamps to 1"
+        );
         assert_eq!(fit_within(0, 10, 100), None);
     }
 }

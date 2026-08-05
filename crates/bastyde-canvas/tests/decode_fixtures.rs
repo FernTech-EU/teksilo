@@ -29,7 +29,10 @@ fn assert_rgba_contract(icon: &RasterIcon, what: &str) {
 
 #[test]
 fn sniffing_identifies_every_supported_format() {
-    assert_eq!(ImageFormat::sniff(&fixture("rgba8.png")), Some(ImageFormat::Png));
+    assert_eq!(
+        ImageFormat::sniff(&fixture("rgba8.png")),
+        Some(ImageFormat::Png)
+    );
     assert_eq!(
         ImageFormat::sniff(&fixture("baseline.jpg")),
         Some(ImageFormat::Jpeg)
@@ -156,8 +159,16 @@ fn exif_rotation_is_applied_at_decode_time() {
     };
     let (tr, tg, _) = at(10, 5);
     let (br, bg, _) = at(10, 34);
-    assert!(tr > 150 && tg < 110, "top should be red, got {:?}", at(10, 5));
-    assert!(bg > 150 && br < 110, "bottom should be green, got {:?}", at(10, 34));
+    assert!(
+        tr > 150 && tg < 110,
+        "top should be red, got {:?}",
+        at(10, 5)
+    );
+    assert!(
+        bg > 150 && br < 110,
+        "bottom should be green, got {:?}",
+        at(10, 34)
+    );
 }
 
 #[test]

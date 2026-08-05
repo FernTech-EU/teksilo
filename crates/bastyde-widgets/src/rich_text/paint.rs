@@ -206,8 +206,13 @@ mod image_paint_tests {
     #[test]
     fn undecodable_bytes_are_negatively_cached() {
         let doc = TextDocument::new();
-        doc.add_resource(ResourceType::Image, "broken.png", "image/png", b"not an image")
-            .unwrap();
+        doc.add_resource(
+            ResourceType::Image,
+            "broken.png",
+            "image/png",
+            b"not an image",
+        )
+        .unwrap();
         let mut cache = ImageCache::new();
 
         let frame = run(&doc, &mut cache, &[quad("broken.png")]);

@@ -230,7 +230,10 @@ mod tests {
 
     #[test]
     fn reads_big_endian_orientation_without_preamble() {
-        assert_eq!(orientation_from_exif(&exif_be_bare(8)), Orientation::Rotate270);
+        assert_eq!(
+            orientation_from_exif(&exif_be_bare(8)),
+            Orientation::Rotate270
+        );
     }
 
     #[test]
