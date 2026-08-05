@@ -1409,6 +1409,8 @@ impl Widget for TextInputField {
                         origin: Point::new(bounds.x - scroll_x, bounds.y),
                         document,
                         image_cache,
+                        // No inline images on this surface, so none can be missing.
+                        image_resolver: None,
                         draw_caret: caret_on,
                     },
                 );

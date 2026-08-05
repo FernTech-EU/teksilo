@@ -1804,6 +1804,31 @@ impl RichTextEditor {
         self
     }
 
+    /// Supply an image's bytes on demand, when the document has no resource
+    /// under that name.
+    ///
+    /// An inline image references its pixels by name, and those pixels live on
+    /// the *document*. So a name that arrives without them — which is exactly
+    /// what pasting an image into a second editor is, since the interchange
+    /// format carries the reference and not the bytes — lays out at its full
+    /// size and paints nothing.
+    ///
+    /// Rather than make every host re-scan its document after every edit for
+    /// names that have appeared, the editor asks for what it is missing, once,
+    /// at the moment it needs it. The bytes are written onto the document, so
+    /// the answer is permanent and every later reader (a save, an export, a
+    /// second view of the same document) sees them too.
+    ///
+    /// One hook serves paste, drag-and-drop, and an undo that re-inserts a
+    /// deleted image, without any of them knowing it exists.
+    pub fn on_image_missing(
+        self,
+        resolve: impl Fn(&str) -> Option<(String, Vec<u8>)> + 'static,
+    ) -> Self {
+        self.state.borrow_mut().image_resolver = Some(std::rc::Rc::new(resolve));
+        self
+    }
+
     /// Install a callback fired when the user Primary-clicks an inline
     /// image. The callback receives the activation (see
     /// [`ImageActivation`]) and the active `EventContext`.
@@ -3341,8 +3366,10 @@ impl Widget for RichTextEditorBody {
             ref mut engine,
             ref document,
             ref mut image_cache,
+            ref image_resolver,
             ..
         } = *state_ref;
+        let image_resolver = image_resolver.as_ref();
         let paint_closure = |frame: &bastyde_text::RenderFrame| {
             paint_frame(
                 canvas,
@@ -3351,6 +3378,7 @@ impl Widget for RichTextEditorBody {
                     origin: Point::new(bounds.x, bounds.y),
                     document,
                     image_cache,
+                    image_resolver,
                     draw_caret: caret_on_now,
                 },
             );

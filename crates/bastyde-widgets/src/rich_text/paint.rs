@@ -38,6 +38,10 @@ pub struct PaintParams<'a> {
     pub origin: Point,
     pub document: &'a TextDocument,
     pub image_cache: &'a mut ImageCache,
+    /// Asked for an image's bytes when the document has none under that name —
+    /// see [`crate::rich_text::image_cache::ImageResolver`]. `None` on a host that supplies
+    /// every image itself, which is every host that never pastes one in.
+    pub image_resolver: Option<&'a crate::rich_text::image_cache::ImageResolver>,
     /// Whether to draw the caret this paint. The editor's frame loop
     /// sets this from `caret_visible && has_focus && caret_policy != Hidden`.
     pub draw_caret: bool,
@@ -50,6 +54,7 @@ pub fn paint_frame(canvas: &mut Canvas, params: PaintParams<'_>) {
         origin,
         document,
         image_cache,
+        image_resolver,
         draw_caret,
     } = params;
 
@@ -63,6 +68,7 @@ pub fn paint_frame(canvas: &mut Canvas, params: PaintParams<'_>) {
         &frame.images,
         document,
         image_cache,
+        image_resolver,
         offset_x,
         offset_y,
     );
@@ -113,6 +119,7 @@ fn paint_images(
     images: &[ImageQuad],
     document: &TextDocument,
     image_cache: &mut ImageCache,
+    image_resolver: Option<&crate::rich_text::image_cache::ImageResolver>,
     ox: f32,
     oy: f32,
 ) {
@@ -121,7 +128,7 @@ fn paint_images(
         // naming a texture the canvas was never given is silently dropped by
         // the renderer, so skipping this registration makes an inline image
         // occupy its full layout box and paint nothing at all.
-        if !image_cache.ensure_registered(canvas, document, &img.name) {
+        if !image_cache.ensure_registered(canvas, document, &img.name, image_resolver) {
             continue;
         }
         let rect = shifted_rect(img.screen, ox, oy);
@@ -157,8 +164,95 @@ mod image_paint_tests {
 
     fn run(doc: &TextDocument, cache: &mut ImageCache, quads: &[ImageQuad]) -> RenderFrame {
         let mut canvas = Canvas::new();
-        paint_images(&mut canvas, quads, doc, cache, 0.0, 0.0);
+        paint_images(&mut canvas, quads, doc, cache, None, 0.0, 0.0);
         canvas.into_render_frame()
+    }
+
+    /// The same, with a host standing by to supply what the document lacks.
+    fn run_with_resolver(
+        doc: &TextDocument,
+        cache: &mut ImageCache,
+        quads: &[ImageQuad],
+        resolver: &crate::rich_text::image_cache::ImageResolver,
+    ) -> RenderFrame {
+        let mut canvas = Canvas::new();
+        paint_images(&mut canvas, quads, doc, cache, Some(resolver), 0.0, 0.0);
+        canvas.into_render_frame()
+    }
+
+    #[test]
+    fn a_name_the_document_does_not_know_is_asked_for_once() {
+        // Pasting an image into a second editor brings the reference and not the
+        // pixels — the interchange format carries names. Without a way to ask,
+        // the picture lays out at full size and paints nothing.
+        let doc = TextDocument::new();
+        let asked = std::rc::Rc::new(std::cell::Cell::new(0usize));
+        let counter = asked.clone();
+        let resolver: crate::rich_text::image_cache::ImageResolver =
+            std::rc::Rc::new(move |name: &str| {
+                counter.set(counter.get() + 1);
+                (name == "pasted.png").then(|| ("image/png".to_string(), red_png()))
+            });
+
+        let mut cache = ImageCache::new();
+        let frame = run_with_resolver(&doc, &mut cache, &[quad("pasted.png")], &resolver);
+        assert_eq!(image_draws(&frame), 1, "the supplied image must be drawn");
+        assert_eq!(asked.get(), 1);
+
+        // And the answer is kept on the document, not just in this cache — a
+        // save, an export, or a second view of the same document all read the
+        // resource table.
+        assert!(
+            doc.resource("pasted.png").ok().flatten().is_some(),
+            "the bytes were not written back to the document"
+        );
+
+        // Painting again must not ask a second time.
+        let frame = run_with_resolver(&doc, &mut cache, &[quad("pasted.png")], &resolver);
+        assert_eq!(image_draws(&frame), 1);
+        assert_eq!(asked.get(), 1, "the resolver was consulted on every paint");
+    }
+
+    #[test]
+    fn a_host_that_cannot_supply_it_either_is_not_asked_again() {
+        let doc = TextDocument::new();
+        let asked = std::rc::Rc::new(std::cell::Cell::new(0usize));
+        let counter = asked.clone();
+        let resolver: crate::rich_text::image_cache::ImageResolver =
+            std::rc::Rc::new(move |_: &str| {
+                counter.set(counter.get() + 1);
+                None
+            });
+
+        let mut cache = ImageCache::new();
+        for _ in 0..3 {
+            let frame = run_with_resolver(&doc, &mut cache, &[quad("gone.png")], &resolver);
+            assert_eq!(image_draws(&frame), 0);
+        }
+        assert_eq!(
+            asked.get(),
+            1,
+            "a missing image must not cost a lookup on every frame"
+        );
+    }
+
+    #[test]
+    fn a_resource_the_document_already_has_never_reaches_the_host() {
+        let doc = TextDocument::new();
+        doc.add_resource(ResourceType::Image, "own.png", "image/png", &red_png())
+            .unwrap();
+        let asked = std::rc::Rc::new(std::cell::Cell::new(0usize));
+        let counter = asked.clone();
+        let resolver: crate::rich_text::image_cache::ImageResolver =
+            std::rc::Rc::new(move |_: &str| {
+                counter.set(counter.get() + 1);
+                None
+            });
+
+        let mut cache = ImageCache::new();
+        let frame = run_with_resolver(&doc, &mut cache, &[quad("own.png")], &resolver);
+        assert_eq!(image_draws(&frame), 1);
+        assert_eq!(asked.get(), 0, "the document's own resource was bypassed");
     }
 
     fn image_draws(frame: &RenderFrame) -> usize {

@@ -251,9 +251,7 @@ impl Widget for CodeEditorBody {
         // Logical font scale: a11y × per-editor `font_size_scale`. Changes
         // glyph advances, so it forces a relayout, not just a re-render.
         let target_scale = st.effective_font_scale(ctx.text_scale);
-        if st.last_font_scale.is_nan()
-            || (st.last_font_scale - target_scale).abs() > f32::EPSILON
-        {
+        if st.last_font_scale.is_nan() || (st.last_font_scale - target_scale).abs() > f32::EPSILON {
             st.last_font_scale = target_scale;
             st.engine.set_font_scale(target_scale);
             st.needs_full_layout = true;
@@ -335,6 +333,8 @@ impl Widget for CodeEditorBody {
                     origin: Point::new(bounds.x, bounds.y),
                     document,
                     image_cache,
+                    // No inline images on this surface, so none can be missing.
+                    image_resolver: None,
                     draw_caret: caret_on,
                 },
             );

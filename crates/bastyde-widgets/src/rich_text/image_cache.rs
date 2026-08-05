@@ -26,9 +26,24 @@
 //! the document's bytes untouched.
 
 use std::collections::HashMap;
+use std::rc::Rc;
 
 use bastyde_canvas::RasterIcon;
-use bastyde_text::text_document::TextDocument;
+use bastyde_text::text_document::{ResourceType, TextDocument};
+
+/// Asked for an image's bytes when the document has no resource under that name.
+///
+/// Returns `(mime_type, bytes)`, or `None` if the host cannot supply it either.
+///
+/// A document's images are its own resources, so a name that arrives *without*
+/// them resolves to nothing — which is what a paste into a second editor is: the
+/// interchange format carries the reference, not the pixels. Rather than have
+/// every host scan for newly-arrived names after every edit, the cache asks for
+/// what it is missing, once, at the moment it needs it. The answer is written
+/// into the document, so paste, drag-and-drop, and an undo that re-inserts a
+/// deleted image are all served by the same hook without any of them knowing
+/// about it.
+pub type ImageResolver = Rc<dyn Fn(&str) -> Option<(String, Vec<u8>)>>;
 
 /// Longest edge, in pixels, of any image uploaded to the GPU for on-screen use.
 ///
@@ -68,16 +83,31 @@ impl ImageCache {
 
     /// Resolve, decode and cache the image stored under `name`.
     ///
-    /// Returns `None` if the document has no such resource or the bytes are not
-    /// a supported image; subsequent calls with the same name hit the negative
-    /// cache instead of retrying a decode that already failed. A broken image
-    /// must not cost a decode attempt on every frame.
-    fn resolve(&mut self, document: &TextDocument, name: &str) -> Option<&mut Entry> {
+    /// Returns `None` if the document has no such resource, the host's
+    /// `resolver` cannot supply one either, or the bytes are not a supported
+    /// image; subsequent calls with the same name hit the negative cache instead
+    /// of retrying a decode that already failed. A broken image must not cost a
+    /// decode attempt on every frame.
+    fn resolve(
+        &mut self,
+        document: &TextDocument,
+        name: &str,
+        resolver: Option<&ImageResolver>,
+    ) -> Option<&mut Entry> {
         if !self.entries.contains_key(name) {
-            let decoded = document
-                .resource(name)
-                .ok()
-                .flatten()
+            let mut bytes = document.resource(name).ok().flatten();
+            // Nothing under that name: ask the host, and keep what it gives us
+            // *on the document*, so the answer is permanent rather than living
+            // only in this widget's cache. A second editor on the same document,
+            // a save, and an export all read the resource table.
+            if bytes.is_none()
+                && let Some(resolve) = resolver
+                && let Some((mime, supplied)) = resolve(name)
+            {
+                let _ = document.add_resource(ResourceType::Image, name, &mime, &supplied);
+                bytes = Some(supplied);
+            }
+            let decoded = bytes
                 .and_then(|bytes| RasterIcon::decode(&bytes).ok())
                 .map(|icon| {
                     // Cap only what the GPU sees; the document keeps the original.
@@ -101,8 +131,9 @@ impl ImageCache {
         canvas: &mut bastyde_canvas::Canvas,
         document: &TextDocument,
         name: &str,
+        resolver: Option<&ImageResolver>,
     ) -> bool {
-        let Some(entry) = self.resolve(document, name) else {
+        let Some(entry) = self.resolve(document, name, resolver) else {
             return false;
         };
         // `registered` tracks this cache's own uploads; `has_pending_image`

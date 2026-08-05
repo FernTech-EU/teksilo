@@ -480,6 +480,9 @@ pub(crate) struct EditorState {
     /// back into the widget's API.
     pub on_link_activated:
         Option<std::rc::Rc<dyn Fn(&str, &mut bastyde_core::widget::EventContext)>>,
+    /// Asked for an image's bytes when the document has no resource under that
+    /// name — see [`super::RichTextEditor::on_image_missing`].
+    pub image_resolver: Option<super::image_cache::ImageResolver>,
     /// Callback invoked on a Primary-click whose hit lands on a
     /// `HitRegion::Image`. Same Rc / borrow-release convention as
     /// [`on_link_activated`](Self::on_link_activated).
@@ -657,6 +660,7 @@ impl EditorState {
             rich_clipboard_plain: None,
             rich_clipboard_marker: None,
             on_link_activated: None,
+            image_resolver: None,
             on_image_activated: None,
             select_all_level: 0,
             select_all_anchor_cell: None,

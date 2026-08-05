@@ -672,6 +672,8 @@ impl Widget for LogViewBody {
                     origin: Point::new(bounds.x, bounds.y),
                     document,
                     image_cache,
+                    // No inline images on this surface, so none can be missing.
+                    image_resolver: None,
                     draw_caret: false,
                 },
             );
