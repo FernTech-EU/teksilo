@@ -3743,6 +3743,95 @@ impl Widget for RichTextEditorBody {
                                 anchor_pair = Some((node_id, char_idx));
                             }
                         }
+
+                        // Inline objects: one document character each, rendered
+                        // as something a reader sees but cannot read out of the
+                        // text — an image, or a footnote's marker.
+                        //
+                        // Announced as a single-character text run whose value
+                        // is that description. `character_lengths` is one entry
+                        // spanning the whole string on purpose: the object *is*
+                        // one character of the document, however many letters
+                        // stand in for it, and telling AccessKit otherwise would
+                        // put every caret offset after it out by the difference.
+                        //
+                        // Images were reaching no assistive technology at all
+                        // until now — their `alt` was carried the whole way
+                        // through the pipeline and then dropped here, at the
+                        // last step, because this loop only ever matched `Text`.
+                        let object_run = match frag {
+                            FragmentContent::Image {
+                                alt,
+                                offset,
+                                element_id,
+                                format,
+                                ..
+                            } => Some((alt.clone(), *offset, *element_id, format)),
+                            FragmentContent::FootnoteReference {
+                                marker,
+                                offset,
+                                element_id,
+                                format,
+                                ..
+                            } => Some((marker.clone(), *offset, *element_id, format)),
+                            FragmentContent::Text { .. } => None,
+                        };
+
+                        if let Some((value, offset, element_id, format)) = object_run {
+                            let attrs = bastyde_core::accessibility::TextRunAttributes {
+                                font_weight: format.font_weight.map(|w| w as u16),
+                                bold: format.font_bold.unwrap_or(false),
+                                italic: format.font_italic.unwrap_or(false),
+                                underline: format.font_underline.unwrap_or(false),
+                                strikethrough: format.font_strikeout.unwrap_or(false),
+                            };
+                            // An empty description would announce nothing at
+                            // all, which is indistinguishable from a rendering
+                            // fault. A single space is at least a spoken pause.
+                            let value = if value.is_empty() {
+                                " ".to_string()
+                            } else {
+                                value
+                            };
+                            let geom =
+                                st.engine
+                                    .character_geometry(block.block_id, offset, offset + 1);
+                            let node_id = builder.push_text_run_child(
+                                para_id,
+                                element_id,
+                                offset,
+                                value.clone(),
+                                vec![value.len().min(u8::MAX as usize) as u8],
+                                None,
+                                if geom.is_empty() {
+                                    None
+                                } else {
+                                    Some(geom.iter().map(|g| g.position).collect())
+                                },
+                                if geom.is_empty() {
+                                    None
+                                } else {
+                                    Some(geom.iter().map(|g| g.width).collect())
+                                },
+                                attrs,
+                            );
+
+                            let absolute_start = block.position + offset;
+                            syn_map.insert(
+                                node_id,
+                                SyntheticElementRef {
+                                    element_id,
+                                    absolute_start,
+                                    text: value,
+                                },
+                            );
+                            if user_pos >= absolute_start && user_pos <= absolute_start + 1 {
+                                caret_pair = Some((node_id, user_pos - absolute_start));
+                            }
+                            if user_anchor >= absolute_start && user_anchor <= absolute_start + 1 {
+                                anchor_pair = Some((node_id, user_anchor - absolute_start));
+                            }
+                        }
                     }
                 }
             }
