@@ -93,3 +93,6 @@ slotmap = "1"
 # `tempfile` directories and TOML serialization.
 tempfile = { workspace = true }
 toml = { workspace = true }
+# `rich_text::paint` tests encode a tiny PNG so the inline-image pass has a
+# real, decodable resource to resolve rather than a hand-written byte blob.
+png = { workspace = true }

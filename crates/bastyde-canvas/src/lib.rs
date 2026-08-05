@@ -4,11 +4,13 @@
 pub mod animated;
 pub mod canvas;
 pub mod ellipsis;
+pub mod exif;
 pub mod geometry;
 pub mod paint;
 pub mod path;
 pub mod raster;
 pub mod render_frame;
+pub mod resample;
 pub mod svg;
 pub mod text_backend;
 mod xml;
@@ -20,7 +22,8 @@ pub use paint::{
     FillRule, GradientStop, ImageHandle, LineCap, LineJoin, Paint, StrokeSpace, StrokeStyle,
 };
 pub use path::{Path, PathCommand};
-pub use raster::{ImageDecodeError, RasterIcon};
+pub use exif::Orientation;
+pub use raster::{ImageDecodeError, ImageFormat, RasterIcon};
 pub use render_frame::{
     AnimParams, AnimatedQuadClass, AnimatedQuadDraw, BlendMode, CosmeticLine, DecorationKind,
     DecorationRect, DrawCommand, GlyphQuad, ImageQuad, PaintData, PathEntry, PendingImage,

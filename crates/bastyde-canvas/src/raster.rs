@@ -1,7 +1,19 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
-//! Raster icon decoding: PNG and static WebP → RGBA pixel data.
+//! Raster decoding: PNG, JPEG and static WebP → RGBA pixel data.
+//!
+//! Three formats, one output contract: straight-alpha (non-premultiplied) RGBA8,
+//! row-major, `width * height * 4` bytes. Callers downstream — the texture
+//! atlas, the mip builder, the alpha-mask path — all assume that shape, so each
+//! decoder normalises into it rather than exposing its format's native layout.
+//!
+//! [`RasterIcon::decode`] sniffs the format from the leading magic bytes and
+//! dispatches. Prefer it over the per-format entry points for anything the user
+//! supplied: a file's extension is a claim, not evidence, and a `.png` that is
+//! really a JPEG is common enough to be worth being immune to.
+
+use crate::exif::{apply_orientation, orientation_from_exif};
 
 /// Error type for image decoding failures.
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
@@ -12,6 +24,56 @@ pub enum ImageDecodeError {
     /// The image has zero dimensions.
     #[error("image has zero dimensions")]
     EmptyImage,
+    /// The leading bytes match no format this crate can decode.
+    #[error("unsupported image format (supported: PNG, JPEG, WebP)")]
+    UnsupportedFormat,
+}
+
+/// A raster format this crate can decode, as identified from magic bytes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ImageFormat {
+    /// PNG, including palette and 16-bit variants.
+    Png,
+    /// Baseline or progressive JPEG.
+    Jpeg,
+    /// Static WebP. Animated WebP is [`crate::AnimatedIcon`]'s job.
+    Webp,
+}
+
+impl ImageFormat {
+    /// The IANA media type, for callers that must record or transmit one.
+    pub fn mime_type(self) -> &'static str {
+        match self {
+            Self::Png => "image/png",
+            Self::Jpeg => "image/jpeg",
+            Self::Webp => "image/webp",
+        }
+    }
+
+    /// The conventional lowercase file extension, without a dot.
+    pub fn extension(self) -> &'static str {
+        match self {
+            Self::Png => "png",
+            Self::Jpeg => "jpg",
+            Self::Webp => "webp",
+        }
+    }
+
+    /// Identify the format from leading magic bytes, ignoring any filename.
+    pub fn sniff(data: &[u8]) -> Option<Self> {
+        if data.starts_with(&[0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a]) {
+            return Some(Self::Png);
+        }
+        // Every JPEG variant opens with SOI (FFD8) followed by a marker.
+        if data.starts_with(&[0xff, 0xd8, 0xff]) {
+            return Some(Self::Jpeg);
+        }
+        // RIFF container whose form type is WEBP: bytes 0..4 and 8..12.
+        if data.len() >= 12 && data.starts_with(b"RIFF") && &data[8..12] == b"WEBP" {
+            return Some(Self::Webp);
+        }
+        None
+    }
 }
 
 /// A decoded raster icon: RGBA pixel data at a fixed size.
@@ -23,9 +85,33 @@ pub struct RasterIcon {
 }
 
 impl RasterIcon {
+    /// Decode an image, identifying the format from its magic bytes.
+    ///
+    /// This is the entry point for user-supplied data. It never consults a
+    /// filename: extensions are frequently wrong, and a mislabelled file should
+    /// open rather than fail. An unrecognised format yields
+    /// [`ImageDecodeError::UnsupportedFormat`], whose message names what *is*
+    /// supported so the error can be shown to a user unchanged.
+    pub fn decode(data: &[u8]) -> Result<Self, ImageDecodeError> {
+        match ImageFormat::sniff(data).ok_or(ImageDecodeError::UnsupportedFormat)? {
+            ImageFormat::Png => Self::decode_png(data),
+            ImageFormat::Jpeg => Self::decode_jpeg(data),
+            ImageFormat::Webp => Self::decode_webp(data),
+        }
+    }
+
     /// Decode a PNG image from raw bytes.
+    ///
+    /// Palette, grayscale, `tRNS`-keyed and 16-bit PNGs are all normalised to
+    /// 8-bit colour before the channel expansion below, so the match on
+    /// `color_type` only ever sees the four direct forms.
     pub fn decode_png(data: &[u8]) -> Result<Self, ImageDecodeError> {
-        let decoder = png::Decoder::new(std::io::Cursor::new(data));
+        let mut decoder = png::Decoder::new(std::io::Cursor::new(data));
+        // Palette PNGs are extremely common (every screenshot tool and every
+        // "save for web" path emits them) and 16-bit ones are not rare either.
+        // Without this the former was rejected outright and the latter decoded
+        // as if it were 8-bit, silently halving the image and shredding it.
+        decoder.set_transformations(png::Transformations::normalize_to_color8());
         let mut reader = decoder
             .read_info()
             .map_err(|e| ImageDecodeError::InvalidData(e.to_string()))?;
@@ -69,14 +155,70 @@ impl RasterIcon {
                 }
                 rgba
             }
+            // `normalize_to_color8` expands the palette before we get here, so
+            // this arm is unreachable in practice; treat it as malformed rather
+            // than panicking if a future png release changes that.
             png::ColorType::Indexed => {
                 return Err(ImageDecodeError::InvalidData(
-                    "indexed/palette PNG not supported; re-export as RGBA".into(),
+                    "palette PNG was not expanded by the decoder".into(),
                 ));
             }
         };
         Ok(Self {
             pixels: rgba,
+            width,
+            height,
+        })
+    }
+
+    /// Decode a JPEG image from raw bytes, honouring its EXIF orientation.
+    ///
+    /// JPEG has no alpha channel, so every pixel comes back fully opaque. The
+    /// orientation tag *is* applied here rather than being reported to the
+    /// caller: a decoded buffer that still needs an out-of-band rotation is a
+    /// trap, since every consumer would have to remember to ask.
+    pub fn decode_jpeg(data: &[u8]) -> Result<Self, ImageDecodeError> {
+        use zune_core::bytestream::ZCursor;
+        use zune_core::colorspace::ColorSpace;
+        use zune_core::options::DecoderOptions;
+
+        let options = DecoderOptions::default().jpeg_set_out_colorspace(ColorSpace::RGBA);
+        let mut decoder = zune_jpeg::JpegDecoder::new_with_options(ZCursor::new(data), options);
+        let mut pixels = decoder
+            .decode()
+            .map_err(|e| ImageDecodeError::InvalidData(e.to_string()))?;
+        // JPEG has no alpha channel, so the fourth byte is ours to define and
+        // must be fully opaque. This is not belt-and-braces: for a 4-component
+        // (CMYK/YCCK) JPEG — what Adobe and most print workflows emit — the
+        // decoder's RGBA path leaves a colour channel sitting in the alpha
+        // slot, and the photo composites semi-transparently over the page.
+        for px in pixels.chunks_exact_mut(4) {
+            px[3] = 255;
+        }
+        let info = decoder
+            .info()
+            .ok_or_else(|| ImageDecodeError::InvalidData("JPEG headers not decoded".into()))?;
+
+        let width = u32::from(info.width);
+        let height = u32::from(info.height);
+        if width == 0 || height == 0 {
+            return Err(ImageDecodeError::EmptyImage);
+        }
+        if pixels.len() < (width as usize) * (height as usize) * 4 {
+            return Err(ImageDecodeError::InvalidData(
+                "JPEG decoded to fewer pixels than its declared size".into(),
+            ));
+        }
+
+        let orientation = info
+            .exif_data
+            .as_deref()
+            .map(orientation_from_exif)
+            .unwrap_or_default();
+        let (pixels, width, height) = apply_orientation(pixels, width, height, orientation);
+
+        Ok(Self {
+            pixels,
             width,
             height,
         })
@@ -141,6 +283,41 @@ impl RasterIcon {
             width: self.width,
             height: self.height,
         }
+    }
+
+    /// Scale down so neither side exceeds `max_edge`, preserving aspect ratio.
+    ///
+    /// Returns `None` when the image already fits, so a caller can keep the
+    /// original buffer without copying it. Upscaling is never performed: this
+    /// exists to bound work and memory, and enlarging would do the opposite.
+    ///
+    /// The reduction runs as repeated halving down to within 2× of the target,
+    /// then one area-average step to the exact size. Halving first is a large
+    /// constant-factor win on big photographs — each pass reads a quarter of
+    /// the pixels of the one before — and the final area step is what allows an
+    /// arbitrary, non-power-of-two result.
+    pub fn downsample_to_max(&self, max_edge: u32) -> Option<Self> {
+        let (target_w, target_h) = crate::resample::fit_within(self.width, self.height, max_edge)?;
+
+        let mut pixels = self.pixels.clone();
+        let mut w = self.width;
+        let mut h = self.height;
+        // Halve while the next halving would still not undershoot the target.
+        while w / 2 >= target_w && h / 2 >= target_h && w > 1 && h > 1 {
+            let (nw, nh, next) = crate::resample::downsample_half(&pixels, w, h);
+            pixels = next;
+            w = nw;
+            h = nh;
+        }
+        if (w, h) != (target_w, target_h) {
+            pixels = crate::resample::resample_area(&pixels, w, h, target_w, target_h);
+        }
+
+        Some(Self {
+            pixels,
+            width: target_w,
+            height: target_h,
+        })
     }
 
     /// Create from pre-decoded RGBA pixel data.

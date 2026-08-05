@@ -117,13 +117,174 @@ fn paint_images(
     oy: f32,
 ) {
     for img in images {
-        // Prime the cache so the renderer can later resolve the resource
-        // name to bytes. On failure, silently skip.
-        if image_cache.get_or_load(document, &img.name).is_none() {
+        // Decode and upload the pixels before emitting the draw. A draw command
+        // naming a texture the canvas was never given is silently dropped by
+        // the renderer, so skipping this registration makes an inline image
+        // occupy its full layout box and paint nothing at all.
+        if !image_cache.ensure_registered(canvas, document, &img.name) {
             continue;
         }
         let rect = shifted_rect(img.screen, ox, oy);
         canvas.draw_image(rect, img.name.clone());
+    }
+}
+
+#[cfg(test)]
+mod image_paint_tests {
+    use super::*;
+    use bastyde_canvas::{DrawCommand, RenderFrame};
+    use bastyde_text::text_document::{ResourceType, TextDocument};
+
+    /// A 2×2 opaque-red PNG, encoded here so the test owns its own input.
+    fn red_png() -> Vec<u8> {
+        let mut buf = Vec::new();
+        {
+            let mut enc = png::Encoder::new(&mut buf, 2, 2);
+            enc.set_color(png::ColorType::Rgba);
+            enc.set_depth(png::BitDepth::Eight);
+            let mut w = enc.write_header().unwrap();
+            w.write_image_data(&[255, 0, 0, 255].repeat(4)).unwrap();
+        }
+        buf
+    }
+
+    fn quad(name: &str) -> ImageQuad {
+        ImageQuad {
+            screen: [0.0, 0.0, 20.0, 20.0],
+            name: name.to_string(),
+        }
+    }
+
+    fn run(doc: &TextDocument, cache: &mut ImageCache, quads: &[ImageQuad]) -> RenderFrame {
+        let mut canvas = Canvas::new();
+        paint_images(&mut canvas, quads, doc, cache, 0.0, 0.0);
+        canvas.into_render_frame()
+    }
+
+    fn image_draws(frame: &RenderFrame) -> usize {
+        frame
+            .draw_order
+            .iter()
+            .filter(|c| matches!(c, DrawCommand::Image(_)))
+            .count()
+    }
+
+    /// The regression this whole pass exists for. Emitting a draw command
+    /// without first registering the pixels produces a frame the renderer
+    /// silently discards: the image reserves its layout box and paints nothing.
+    #[test]
+    fn a_resolvable_image_is_registered_and_drawn() {
+        let doc = TextDocument::new();
+        doc.add_resource(ResourceType::Image, "photo.png", "image/png", &red_png())
+            .unwrap();
+        let mut cache = ImageCache::new();
+
+        let frame = run(&doc, &mut cache, &[quad("photo.png")]);
+
+        assert_eq!(frame.pending_images.len(), 1, "pixels must be uploaded");
+        assert_eq!(frame.pending_images[0].name, "photo.png");
+        assert_eq!(image_draws(&frame), 1, "and a draw must be emitted");
+        assert_eq!(cache.size_of("photo.png"), Some((2, 2)));
+    }
+
+    /// A name with no resource behind it must emit neither, or the frame
+    /// carries a draw pointing at a texture that will never exist.
+    #[test]
+    fn an_unresolvable_image_emits_nothing() {
+        let doc = TextDocument::new();
+        let mut cache = ImageCache::new();
+
+        let frame = run(&doc, &mut cache, &[quad("missing.png")]);
+
+        assert!(frame.pending_images.is_empty());
+        assert_eq!(image_draws(&frame), 0);
+        assert_eq!(cache.len(), 1, "the failure is cached, not retried");
+    }
+
+    /// Bytes that are not a decodable image fail the same way as a missing
+    /// resource — not by panicking somewhere inside the decoder.
+    #[test]
+    fn undecodable_bytes_are_negatively_cached() {
+        let doc = TextDocument::new();
+        doc.add_resource(ResourceType::Image, "broken.png", "image/png", b"not an image")
+            .unwrap();
+        let mut cache = ImageCache::new();
+
+        let frame = run(&doc, &mut cache, &[quad("broken.png")]);
+
+        assert!(frame.pending_images.is_empty());
+        assert_eq!(image_draws(&frame), 0);
+    }
+
+    /// Repainting must not re-upload: the second frame draws from the texture
+    /// registered by the first.
+    #[test]
+    fn a_second_paint_draws_without_re_uploading() {
+        let doc = TextDocument::new();
+        doc.add_resource(ResourceType::Image, "photo.png", "image/png", &red_png())
+            .unwrap();
+        let mut cache = ImageCache::new();
+
+        let first = run(&doc, &mut cache, &[quad("photo.png")]);
+        let second = run(&doc, &mut cache, &[quad("photo.png")]);
+
+        assert_eq!(first.pending_images.len(), 1);
+        assert!(
+            second.pending_images.is_empty(),
+            "already-registered pixels must not be uploaded again"
+        );
+        assert_eq!(image_draws(&second), 1, "but it must still draw");
+    }
+
+    /// Two references to one image in a single frame upload once and draw twice.
+    #[test]
+    fn one_upload_serves_repeated_references() {
+        let doc = TextDocument::new();
+        doc.add_resource(ResourceType::Image, "photo.png", "image/png", &red_png())
+            .unwrap();
+        let mut cache = ImageCache::new();
+
+        let frame = run(&doc, &mut cache, &[quad("photo.png"), quad("photo.png")]);
+
+        assert_eq!(frame.pending_images.len(), 1);
+        assert_eq!(image_draws(&frame), 2);
+    }
+
+    /// After the renderer loses its textures the decode is kept but the upload
+    /// is redone — decoding again would be far more expensive.
+    #[test]
+    fn invalidating_registrations_re_uploads_without_re_decoding() {
+        let doc = TextDocument::new();
+        doc.add_resource(ResourceType::Image, "photo.png", "image/png", &red_png())
+            .unwrap();
+        let mut cache = ImageCache::new();
+
+        run(&doc, &mut cache, &[quad("photo.png")]);
+        cache.invalidate_registrations();
+        let frame = run(&doc, &mut cache, &[quad("photo.png")]);
+
+        assert_eq!(frame.pending_images.len(), 1, "re-uploaded");
+        assert_eq!(cache.len(), 1, "still only one decoded entry");
+    }
+
+    /// Eviction reports what it dropped so the caller can free GPU textures;
+    /// without it a long editing session grows both tables without bound.
+    #[test]
+    fn retain_only_drops_and_reports_dead_entries() {
+        let doc = TextDocument::new();
+        for name in ["a.png", "b.png"] {
+            doc.add_resource(ResourceType::Image, name, "image/png", &red_png())
+                .unwrap();
+        }
+        let mut cache = ImageCache::new();
+        run(&doc, &mut cache, &[quad("a.png"), quad("b.png")]);
+        assert_eq!(cache.len(), 2);
+
+        let dropped = cache.retain_only(["a.png"]);
+
+        assert_eq!(dropped, vec!["b.png".to_string()]);
+        assert_eq!(cache.len(), 1);
+        assert!(cache.size_of("b.png").is_none());
     }
 }
 

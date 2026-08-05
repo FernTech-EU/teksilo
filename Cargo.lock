@@ -1045,6 +1045,8 @@ dependencies = [
  "quick-xml 0.41.0",
  "serde",
  "thiserror 2.0.19",
+ "zune-core",
+ "zune-jpeg",
 ]
 
 [[package]]
@@ -1409,6 +1411,7 @@ dependencies = [
  "bastyde-tokens",
  "jiff",
  "open",
+ "png",
  "proptest",
  "serde",
  "serde_json",
@@ -11186,6 +11189,7 @@ name = "text-document-common"
 version = "1.8.0"
 dependencies = [
  "anyhow",
+ "base64",
  "chrono",
  "ego-tree",
  "flume",
@@ -11281,6 +11285,7 @@ dependencies = [
  "chrono",
  "docx-rs",
  "epub-builder",
+ "image",
  "parking_lot",
  "regex",
  "serde",

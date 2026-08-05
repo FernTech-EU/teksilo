@@ -93,6 +93,10 @@ open = "5.3"
 quick-xml = "0.41.0"
 png = "0.18"
 image-webp = "0.2"
+# JPEG decode for user-supplied images. Already in the tree via `image`/`resvg`/
+# `tiff`, so naming it directly costs no additional crate.
+zune-jpeg = "0.5"
+zune-core = "0.5"
 inventory = "0.3"
 bytemuck = { version = "1", features = ["derive"] }
 # Date/time. Used by Calendar / DateEdit / TimeEdit / DateTimeEdit. `jiff`

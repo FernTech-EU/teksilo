@@ -36,37 +36,10 @@
 //! [`super::image_manager::ImageManager::register_image`] uploads what it
 //! returns.
 
-use std::sync::OnceLock;
-
-/// Decode one sRGB byte to linear (IEC 61966-2-1), memoizing all 256 answers —
-/// a full chain decodes every texel of every level, so the `powf` would
-/// otherwise run millions of times for a large image.
-fn srgb_to_linear(byte: u8) -> f32 {
-    static TABLE: OnceLock<[f32; 256]> = OnceLock::new();
-    let table = TABLE.get_or_init(|| {
-        std::array::from_fn(|i| {
-            let c = i as f32 / 255.0;
-            if c <= 0.040_45 {
-                c / 12.92
-            } else {
-                ((c + 0.055) / 1.055).powf(2.4)
-            }
-        })
-    });
-    table[byte as usize]
-}
-
-/// Re-encode a linear value back to an sRGB byte — the inverse of
-/// [`srgb_to_linear`].
-fn linear_to_srgb_byte(linear: f32) -> u8 {
-    let c = linear.clamp(0.0, 1.0);
-    let encoded = if c <= 0.003_130_8 {
-        c * 12.92
-    } else {
-        1.055 * c.powf(1.0 / 2.4) - 0.055
-    };
-    (encoded * 255.0 + 0.5).clamp(0.0, 255.0) as u8
-}
+// The two corrections above are subtle enough that a second copy of them would
+// eventually drift from this one, so the kernel lives in `bastyde-canvas` and
+// is shared with image decoding's downscale path.
+use bastyde_canvas::resample::downsample_half;
 
 /// Build every mip level below level 0 for an RGBA8 image, halving until 1×1.
 ///
@@ -99,51 +72,6 @@ pub(crate) fn build_mip_chain(pixels: &[u8], width: u32, height: u32) -> Vec<(u3
     }
 
     levels
-}
-
-/// Halve an RGBA8 image with a 2×2 box filter in linear, premultiplied space.
-fn downsample_half(src: &[u8], src_w: u32, src_h: u32) -> (u32, u32, Vec<u8>) {
-    let dst_w = (src_w / 2).max(1);
-    let dst_h = (src_h / 2).max(1);
-    let mut dst = vec![0u8; dst_w as usize * dst_h as usize * 4];
-
-    for y in 0..dst_h {
-        for x in 0..dst_w {
-            // The 2×2 source box, clamped so an odd final row/column is read
-            // twice instead of running past the edge.
-            let x0 = (x * 2).min(src_w - 1);
-            let x1 = (x * 2 + 1).min(src_w - 1);
-            let y0 = (y * 2).min(src_h - 1);
-            let y1 = (y * 2 + 1).min(src_h - 1);
-
-            let mut r = 0.0f32;
-            let mut g = 0.0f32;
-            let mut b = 0.0f32;
-            let mut a = 0.0f32;
-            for (sy, sx) in [(y0, x0), (y0, x1), (y1, x0), (y1, x1)] {
-                let i = ((sy as usize * src_w as usize) + sx as usize) * 4;
-                // Alpha is linear already; color is weighted by it, so a
-                // transparent texel contributes no color at all.
-                let sa = src[i + 3] as f32 / 255.0;
-                r += srgb_to_linear(src[i]) * sa;
-                g += srgb_to_linear(src[i + 1]) * sa;
-                b += srgb_to_linear(src[i + 2]) * sa;
-                a += sa;
-            }
-
-            let o = ((y as usize * dst_w as usize) + x as usize) * 4;
-            // Un-premultiply by the *summed* alpha (not by 4): the color average
-            // is over the texels that actually carried color.
-            if a > 0.0 {
-                dst[o] = linear_to_srgb_byte(r / a);
-                dst[o + 1] = linear_to_srgb_byte(g / a);
-                dst[o + 2] = linear_to_srgb_byte(b / a);
-            }
-            dst[o + 3] = ((a / 4.0) * 255.0 + 0.5).clamp(0.0, 255.0) as u8;
-        }
-    }
-
-    (dst_w, dst_h, dst)
 }
 
 #[cfg(test)]
