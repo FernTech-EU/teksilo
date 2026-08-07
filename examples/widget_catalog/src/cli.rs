@@ -8,7 +8,7 @@
 //! Usage:
 //!
 //! ```text
-//! cargo run -p widget-catalog -- [--tab NAME|INDEX] [--cycle [MS] | --cycle-ms MS] [--mode classic|bati]
+//! cargo run -p widget-catalog -- [--tab NAME|INDEX] [--cycle [MS] | --cycle-ms MS] [--mode classic|teksu]
 //! ```
 
 use std::time::Duration;
@@ -19,8 +19,8 @@ pub struct CliOptions {
     pub initial_tab: usize,
     /// If `Some`, auto-advance the selected tab on this interval.
     pub cycle: Option<Duration>,
-    /// `false` → start in classic builder view; `true` → start in `bati!` view.
-    pub bati_mode: bool,
+    /// `false` → start in classic builder view; `true` → start in `teksu!` view.
+    pub teksi_mode: bool,
     /// Force the startup theme, overriding the persisted selection. One of
     /// `intui-light` / `intui-dark` / `material3-light` / `material3-dark`
     /// (aliases `m3-light` / `m3-dark`). `None` → restore the saved theme.
@@ -85,13 +85,13 @@ pub fn parse(tab_names: &[&str]) -> CliOptions {
             }
             "--mode" => {
                 let Some(value) = iter.next() else {
-                    eprintln!("--mode expects `classic` or `bati`");
+                    eprintln!("--mode expects `classic` or `teksu`");
                     continue;
                 };
                 match value.as_str() {
-                    "classic" => opts.bati_mode = false,
-                    "bati" => opts.bati_mode = true,
-                    other => eprintln!("--mode: expected `classic` or `bati`, got `{other}`"),
+                    "classic" => opts.teksi_mode = false,
+                    "teksu" => opts.teksi_mode = true,
+                    other => eprintln!("--mode: expected `classic` or `teksu`, got `{other}`"),
                 }
             }
             "--theme" => {
@@ -126,7 +126,7 @@ fn resolve_tab(value: &str, tab_names: &[&str]) -> Option<usize> {
 
 fn print_help(tab_names: &[&str]) {
     println!(
-        "Bastyde Widget Catalog — every public widget, classic vs bati! side-by-side.\n\
+        "Teksilo Widget Catalog — every public widget, classic vs teksu! side-by-side.\n\
          \n\
          USAGE:\n  \
            widget-catalog [OPTIONS]\n\
@@ -137,7 +137,7 @@ fn print_help(tab_names: &[&str]) {
                                 (default 100). Stops on user interaction.\n  \
            --cycle-ms <MS>      Like --cycle, but MS is mandatory. Script-friendly\n  \
                                 (no silent fall-back to the default interval).\n  \
-           --mode <classic|bati>  Initial view mode (default `classic`).\n  \
+           --mode <classic|teksu>  Initial view mode (default `classic`).\n  \
            --theme <NAME>       Force the startup theme, overriding the saved one.\n  \
                                 intui-light | intui-dark | material3-light | material3-dark\n  \
                                 (aliases m3-light / m3-dark).\n  \

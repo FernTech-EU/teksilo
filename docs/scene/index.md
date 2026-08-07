@@ -3,7 +3,7 @@
 
 # Scene
 
-Every public type in `bastyde-scene`, grouped by category. Each page links to its full rustdoc API reference.
+Every public type in `teksilo-scene`, grouped by category. Each page links to its full rustdoc API reference.
 
 ## Items
 

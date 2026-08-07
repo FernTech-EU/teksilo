@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
-//! Demonstrates `bastyde_telemetry_codegen::include_telemetry_schema!`:
+//! Demonstrates `teksilo_telemetry_codegen::include_telemetry_schema!`:
 //! the macro reads `telemetry/events.yaml` at compile time and expands
 //! to typed `emit_*` functions and enum types.
 
@@ -13,10 +13,10 @@
 //   pub fn emit_lifecycle_app_started(…)
 //   pub fn emit_lifecycle_app_exited(…)
 //   pub fn emit_widget_census(…)
-bastyde_telemetry_codegen::include_telemetry_schema!("telemetry/events.yaml");
+teksilo_telemetry_codegen::include_telemetry_schema!("telemetry/events.yaml");
 
 fn main() {
-    let stub = bastyde_telemetry::StubReporter::anonymous();
+    let stub = teksilo_telemetry::StubReporter::anonymous();
     let session = "demo-session";
 
     emit_lifecycle_app_started(

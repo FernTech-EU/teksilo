@@ -42,7 +42,7 @@ popover anchored below the field for graphical date selection.
 # Example
 
 ```ignore
-use bastyde::widgets::{DateEdit, common::datetime::Date};
+use teksilo::widgets::{DateEdit, common::datetime::Date};
 
 let date = ctx.signal(Some(Date::constant(2026, 5, 2)));
 ctx.add(
@@ -59,7 +59,7 @@ ctx.add(
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/date_edit/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/date_edit/index.html)
 
 ## `pub enum WidthPolicy`
 
@@ -108,7 +108,7 @@ pub struct DateEdit { /* fields */ }
 
 Construct a date editor bound to a nullable date signal.
 
-#### `pub fn style(mut self, style: impl bastyde_core::styles::DateEditStyle) -> Self`
+#### `pub fn style(mut self, style: impl teksilo_core::styles::DateEditStyle) -> Self`
 
 Per-call style override for the date-edit chrome.
 

@@ -34,9 +34,9 @@ default, prefer the heavyweight tier (`Scene::add_widget`).
 ## Custom item example
 
 ```ignore
-use bastyde_scene::{SceneItem, SceneItemPaintContext};
-use bastyde_canvas::{Canvas, Point, Rect};
-use bastyde_tokens::Color;
+use teksilo_scene::{SceneItem, SceneItemPaintContext};
+use teksilo_canvas::{Canvas, Point, Rect};
+use teksilo_tokens::Color;
 
 #[derive(Debug)]
 struct DotItem { bounds: Rect }
@@ -56,7 +56,7 @@ impl SceneItem for DotItem {
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_scene/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_scene/index.html)
 
 ## `pub struct ItemId`
 

@@ -10,5 +10,5 @@ authors.workspace = true
 publish = false
 
 [dependencies]
-bastyde = { workspace = true, features = ["automation"] }
+teksilo = { workspace = true, features = ["automation"] }
 jiff = { workspace = true }

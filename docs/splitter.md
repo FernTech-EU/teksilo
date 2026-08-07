@@ -8,11 +8,11 @@ dividers — the Qt `QSplitter` model. It replaces the old two-pane
 `SplitView` (no backward compatibility) and is the building block for the
 future `DockingLayout`.
 
-- Widget: [crates/bastyde-widgets/src/splitter.rs](../crates/bastyde-widgets/src/splitter.rs)
-- Model: [crates/bastyde-widgets/src/splitter/model.rs](../crates/bastyde-widgets/src/splitter/model.rs)
-- Sizing engine: [crates/bastyde-widgets/src/splitter/distribute.rs](../crates/bastyde-widgets/src/splitter/distribute.rs)
-- Handle: [crates/bastyde-widgets/src/splitter/handle.rs](../crates/bastyde-widgets/src/splitter/handle.rs)
-- Tier-3 style: [crates/bastyde-core/src/styles/splitter_style.rs](../crates/bastyde-core/src/styles/splitter_style.rs) + [recipe](../crates/bastyde-widgets/src/styles/recipe_splitter_style.rs)
+- Widget: [crates/teksilo-widgets/src/splitter.rs](../crates/teksilo-widgets/src/splitter.rs)
+- Model: [crates/teksilo-widgets/src/splitter/model.rs](../crates/teksilo-widgets/src/splitter/model.rs)
+- Sizing engine: [crates/teksilo-widgets/src/splitter/distribute.rs](../crates/teksilo-widgets/src/splitter/distribute.rs)
+- Handle: [crates/teksilo-widgets/src/splitter/handle.rs](../crates/teksilo-widgets/src/splitter/handle.rs)
+- Tier-3 style: [crates/teksilo-core/src/styles/splitter_style.rs](../crates/teksilo-core/src/styles/splitter_style.rs) + [recipe](../crates/teksilo-widgets/src/styles/recipe_splitter_style.rs)
 - Demo: `cargo run -p splitter`
 
 ## Model + widget
@@ -24,7 +24,7 @@ to the model's `version` signal at `BindingLevel::Relayout` — so any
 external change reflows the panes with **no rebuild**.
 
 ```rust
-use bastyde_widgets::{Splitter, SplitterModel, PaneDescriptor, Orientation};
+use teksilo_widgets::{Splitter, SplitterModel, PaneDescriptor, Orientation};
 
 let model = SplitterModel::from_panes(vec![
     PaneDescriptor::new().size(220.0).min_size(160.0).stretch(0.0).collapsible(true), // sidebar
@@ -38,7 +38,7 @@ Splitter::new(model.clone())
 ```
 
 `Splitter` builder: `new(model)`, `.pane(impl Widget)` / `.pane_id(WidgetId)`
-(repeated; count must match `model.pane_count()`), `.child(...)` (a `bati!`
+(repeated; count must match `model.pane_count()`), `.child(...)` (a `teksu!`
 alias for `.pane`), `.pane_label(i, impl Into<Prop<String>>)`,
 `.style(impl SplitterStyle)`, `.enabled(bool)`.
 
@@ -51,7 +51,7 @@ overflow can't bleed into a gutter or sibling.
 
 Pixel sizes are the source of truth (Qt). Each layout pass projects the
 model's stored sizes onto the current bounds via the pure
-[`distribute`](../crates/bastyde-widgets/src/splitter/distribute.rs)
+[`distribute`](../crates/teksilo-widgets/src/splitter/distribute.rs)
 function; **a container resize never writes back**, so drag positions
 survive resizes. Stored sizes change only on drag, programmatic mutation,
 or structural insert/remove.
@@ -178,7 +178,7 @@ let state: SplitterState = model.export_state();   // serde + Versioned
 let ok: bool             = model.import_state(&state); // false if pane count differs
 ```
 
-`SplitterState` implements `bastyde_settings::Versioned`, so it drops into
+`SplitterState` implements `teksilo_settings::Versioned`, so it drops into
 the framework's persistence layer. **Don't use one `SettingsFile` per
 splitter** — compose every splitter's state into one app/workspace struct
 and persist that as a single file:
@@ -221,4 +221,4 @@ Install per-call (`.style(...)`) or theme-wide
 ## Not implemented (intentional)
 
 Non-opaque / rubber-band deferred resize (Qt `setOpaqueResize(false)`):
-Bastyde resizes live, the modern default.
+Teksilo resizes live, the modern default.

@@ -11,7 +11,7 @@
 //! highlighter here works purely on a block's plain text and reports
 //! **character** offsets (not bytes).
 
-use bastyde::text_document::{
+use teksilo::text_document::{
     Color, HighlightContext, HighlightFormat, SyntaxHighlighter, UnderlineStyle,
 };
 
@@ -136,7 +136,7 @@ fn fg(color: Color) -> HighlightFormat {
 mod tests {
     use super::*;
 
-    fn spans(hl: &dyn SyntaxHighlighter, text: &str) -> Vec<bastyde::text_document::HighlightSpan> {
+    fn spans(hl: &dyn SyntaxHighlighter, text: &str) -> Vec<teksilo::text_document::HighlightSpan> {
         let mut ctx = HighlightContext::new(0, -1, None);
         hl.highlight_block(text, &mut ctx);
         let (spans, _, _) = ctx.into_parts();

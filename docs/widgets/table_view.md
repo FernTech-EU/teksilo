@@ -7,7 +7,7 @@
 
 Built atop the `ListModel<T>` /
 `ListDataSource` data layer in
-`bastyde-data` and the `bastyde-tokens` `TableStyle`. Mirrors Qt's
+`teksilo-data` and the `teksilo-tokens` `TableStyle`. Mirrors Qt's
 `QTableView`, SwiftUI's `Table`, and JavaFX's `TableView`.
 The core skeleton: single body pane, row-virtualized with alternating
 backgrounds, grid lines, `Role::Table > Role::Row > Role::Cell`
@@ -19,9 +19,9 @@ auto-measured (`auto_row_height` — rows grow to their tallest cell,
 height-for-width). See docs/table-view.md "Row heights".
 
 ```ignore
-use bastyde_data::ListModel;
-use bastyde_widgets::table_view::{Column, ColumnWidth, TableView};
-use bastyde_i18n::lit;
+use teksilo_data::ListModel;
+use teksilo_widgets::table_view::{Column, ColumnWidth, TableView};
+use teksilo_i18n::lit;
 
 struct Person { name: String, age: u32 }
 
@@ -30,15 +30,15 @@ let _table = TableView::new(model)
     .add_column(Column::new("name", ColumnWidth::Flex(1.0))
         .label(lit!("Name"))
         .cell(|p: &Person, _cx| Box::new(
-            bastyde_widgets::primitives::TextWidget::new(
-                bastyde_i18n::lit!(p.name.clone())
+            teksilo_widgets::primitives::TextWidget::new(
+                teksilo_i18n::lit!(p.name.clone())
             )
         )))
     .add_column(Column::new("age", ColumnWidth::Fixed(60.0))
         .label(lit!("Age"))
         .cell(|p: &Person, _cx| Box::new(
-            bastyde_widgets::primitives::TextWidget::new(
-                bastyde_i18n::lit!(p.age.to_string())
+            teksilo_widgets::primitives::TextWidget::new(
+                teksilo_i18n::lit!(p.age.to_string())
             )
         )))
     .alternating_rows(true)
@@ -51,7 +51,7 @@ let _table = TableView::new(model)
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/table_view/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/table_view/index.html)
 
 ## `pub struct TableView`
 
@@ -193,12 +193,12 @@ Control how Tab / Shift+Tab navigate between cells. See
 
 Set which user action opens a cell editor. See `EditTrigger`.
 
-#### `pub fn on_cell_edit_request( mut self, f: impl Fn(usize, &str, &mut bastyde_core::widget::EventContext) + 'static, ) -> Self`
+#### `pub fn on_cell_edit_request( mut self, f: impl Fn(usize, &str, &mut teksilo_core::widget::EventContext) + 'static, ) -> Self`
 
 Hook fired by the keyboard handler when an edit trigger fires
 on the focused cell. Receives `(row_index, col_id, ctx)`.
 
-#### `pub fn on_row_activate( mut self, f: impl Fn(usize, &mut bastyde_core::widget::EventContext) + 'static, ) -> Self`
+#### `pub fn on_row_activate( mut self, f: impl Fn(usize, &mut teksilo_core::widget::EventContext) + 'static, ) -> Self`
 
 Hook fired when the user presses Enter on the focused row.
 
@@ -252,7 +252,7 @@ app-specific `application/x-…`). Implies `exportable`
 (defaulting to `DragTransferMode::Move` if not already set). Requires
 `T: Clone`.
 
-#### `pub fn on_rows_transferred_out( mut self, f: impl Fn(&[usize], &mut bastyde_core::widget::EventContext) + 'static, ) -> Self`
+#### `pub fn on_rows_transferred_out( mut self, f: impl Fn(&[usize], &mut teksilo_core::widget::EventContext) + 'static, ) -> Self`
 
 Override how rows moved out to a foreign target are removed from this
 view. Receives the dragged rows' indices (descending-safe) and the live
@@ -269,7 +269,7 @@ items and the insertion index. (Same-view reorder is
 `reorderable`; a custom `ListDataSource` can still
 accept foreign drops through its `can_accept`/`accept_drop` instead.)
 
-#### `pub fn on_rows_received( mut self, f: impl Fn(Vec<T>, usize, &mut bastyde_core::widget::EventContext) + 'static, ) -> Self`
+#### `pub fn on_rows_received( mut self, f: impl Fn(Vec<T>, usize, &mut teksilo_core::widget::EventContext) + 'static, ) -> Self`
 
 Handler for rows accepted via `accept_foreign_rows`:
 `(items, insertion_index, ctx)`. Insert them into your model at the

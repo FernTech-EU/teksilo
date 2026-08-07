@@ -48,7 +48,7 @@ ctx.add(
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/hex_color_input/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/hex_color_input/index.html)
 
 ## `pub struct HexColorInput`
 
@@ -118,13 +118,13 @@ edited. Forwarded to the inner `TextInput`.
 
 Set a minimum intrinsic width for the field in logical pixels.
 
-#### `pub fn on_value_changed( mut self, f: impl Fn(Option<Color>, &mut bastyde_core::widget::EventContext) + 'static, ) -> Self`
+#### `pub fn on_value_changed( mut self, f: impl Fn(Option<Color>, &mut teksilo_core::widget::EventContext) + 'static, ) -> Self`
 
 Called after a successful commit with the new color value (`None` on a
 nullable binding when the field is cleared). Not called when the previous
 and new values are identical.
 
-#### `pub fn on_invalid( mut self, f: impl Fn(&str, &mut bastyde_core::widget::EventContext) + 'static, ) -> Self`
+#### `pub fn on_invalid( mut self, f: impl Fn(&str, &mut teksilo_core::widget::EventContext) + 'static, ) -> Self`
 
 Called after a commit attempt when the input is invalid, with the raw
 typed string. The field is left as-is so the user can correct the value.

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
-//! `scene-showcase` — comprehensive demo of every `bastyde-scene` capability.
+//! `scene-showcase` — comprehensive demo of every `teksilo-scene` capability.
 //!
 //! One pannable / zoomable scene divided into eight labelled sections.
 //! Pan with two-finger trackpad / mouse wheel; zoom with Ctrl+wheel or
@@ -51,15 +51,15 @@
 
 use std::time::Duration;
 
-use bastyde::canvas::{Canvas, Path, Point, Rect, StrokeStyle};
-use bastyde::core::binding::BindingLevel;
-use bastyde::prelude::*;
-use bastyde::tokens::{Alignment, Easing};
-use bastyde::widgets::{
+use teksilo::canvas::{Canvas, Path, Point, Rect, StrokeStyle};
+use teksilo::core::binding::BindingLevel;
+use teksilo::prelude::*;
+use teksilo::tokens::{Alignment, Easing};
+use teksilo::widgets::{
     Button, ComboBox, Expand, HStack, Padding, Panel, ScrollArea, Spacer, TextWidget, Toolbar,
     VStack, ZStack,
 };
-use bastyde_scene::{
+use teksilo_scene::{
     A11yGroup, A11yNode, DragMode, GroupItem, ItemId, PanAxes, PathItem, RectItem, Scene,
     SceneItem, SceneItemPaintContext, SceneMinimap, SceneModel, SceneSelectionMode, SceneView,
     ScrollBarMode, ScrollBarPolicy, TextAlign, TextItem, register_animated_item_signal,
@@ -204,7 +204,7 @@ fn add_scene_header(scene: &mut Scene) {
 
     scene.add_item(
         TextItem::new(
-            lit!("bastyde-scene showcase — eight labelled sections, all visible at zoom 1.0"),
+            lit!("teksilo-scene showcase — eight labelled sections, all visible at zoom 1.0"),
             Rect::new(SCENE_PAD, SCENE_PAD, usable_w, 30.0),
         )
         .color(ink()),
@@ -885,8 +885,8 @@ fn build_showcase_view() -> (SceneView, ItemId) {
             let mut x = x0;
             while x <= x_end {
                 canvas.draw_line(
-                    bastyde::canvas::Point::new(x, region.y),
-                    bastyde::canvas::Point::new(x, y_end),
+                    teksilo::canvas::Point::new(x, region.y),
+                    teksilo::canvas::Point::new(x, y_end),
                     color,
                     StrokeStyle::hairline(1.0),
                 );
@@ -895,8 +895,8 @@ fn build_showcase_view() -> (SceneView, ItemId) {
             let mut y = y0;
             while y <= y_end {
                 canvas.draw_line(
-                    bastyde::canvas::Point::new(region.x, y),
-                    bastyde::canvas::Point::new(x_end, y),
+                    teksilo::canvas::Point::new(region.x, y),
+                    teksilo::canvas::Point::new(x_end, y),
                     color,
                     StrokeStyle::hairline(1.0),
                 );
@@ -984,7 +984,7 @@ fn build_toolbar(drag_mode: Signal<DragMode>, scene: SceneModel, swatch_id: Item
                 }),
             )
             .child(Spacer::new())
-            .child(bastyde::widgets::ThemeSwitcher::new()),
+            .child(teksilo::widgets::ThemeSwitcher::new()),
     )
 }
 
@@ -1025,7 +1025,7 @@ fn build_root() -> impl Widget + 'static {
     VStack::new()
         .spacing(8.0)
         .child(build_toolbar(drag_mode, scene_model, swatch_id))
-        .child(TextWidget::new(lit!("bastyde-scene showcase")).style(TextStyleRole::BodyBold))
+        .child(TextWidget::new(lit!("teksilo-scene showcase")).style(TextStyleRole::BodyBold))
         .child(status)
         .child(
             // Overlay the minimap on the viewport's bottom-trailing corner.
@@ -1039,13 +1039,13 @@ fn build_root() -> impl Widget + 'static {
 }
 
 fn main() {
-    BastydeAppBuilder::new()
+    TeksiloAppBuilder::new()
         .install_automation_bridge_in_debug()
         .install_inspector_in_debug()
-        .theme(bastyde::presets::intui::light())
+        .theme(teksilo::presets::intui::light())
         .initial_window(
             WindowConfig::new()
-                .title("Bastyde — bastyde-scene showcase")
+                .title("Teksilo — teksilo-scene showcase")
                 .size(1500, 950)
                 .root(|tree, _state| tree.add(build_root())),
         )
@@ -1055,11 +1055,11 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bastyde::core::WidgetTree;
+    use teksilo::core::WidgetTree;
 
     #[test]
     fn showcase_root_lays_out_without_panicking() {
-        let mut tree = WidgetTree::new().with_theme(bastyde::presets::intui::light());
+        let mut tree = WidgetTree::new().with_theme(teksilo::presets::intui::light());
         let _root = tree.add(build_root());
         tree.layout(SizeProposal::exact(1500.0, 950.0));
     }
@@ -1068,7 +1068,7 @@ mod tests {
     fn outer_scene_has_two_heavyweight_children() {
         // 1 ScrollArea (§4, wraps 3 cards as ScrollArea descendants)
         // + 1 inner SceneView (§7) = 2 direct heavyweight children.
-        let mut tree = WidgetTree::new().with_theme(bastyde::presets::intui::light());
+        let mut tree = WidgetTree::new().with_theme(teksilo::presets::intui::light());
         let (view, _swatch_id) = build_showcase_view();
         let view_id = tree.add(view);
         tree.layout(SizeProposal::exact(1500.0, 950.0));
@@ -1090,7 +1090,7 @@ mod tests {
         // The showcase starts at initial_zoom(1.4), so the 1490×780 scene
         // overflows a typical scene-area viewport — both AsNeeded bars should
         // be placed with real (non-zero) bounds at the viewport edges.
-        let mut tree = WidgetTree::new().with_theme(bastyde::presets::intui::light());
+        let mut tree = WidgetTree::new().with_theme(teksilo::presets::intui::light());
         let (view, _swatch_id) = build_showcase_view();
         let scrollable = view
             .with_scroll_bars()

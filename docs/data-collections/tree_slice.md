@@ -23,7 +23,7 @@ built-in source for `TreeView` / `TreeTableView`.
 ## Example
 
 ```rust
-# use bastyde_data::{TreeModel, TreeSlice};
+# use teksilo_data::{TreeModel, TreeSlice};
 let tree = TreeModel::new();
 let root = tree.insert_root(0, "root");
 let child = tree.insert_child(root, 0, "child");
@@ -46,7 +46,7 @@ assert_eq!(slice1.visible_count(), 3); // child2 also visible in the expanded sl
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_data/tree_slice/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_data/tree_slice/index.html)
 
 ## `pub struct TreeSlice`
 

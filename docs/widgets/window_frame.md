@@ -9,7 +9,7 @@ corner cells along the four edges of a single content widget.
 `WindowFrame` is the canonical way to wrap a `TitleBar` + body for an
 undecorated Wayland window. The content child fills the entire window
 bounds — there is *no* visible padding — and the resize strips +
-corners sit on top of the content along the edges. bastyde-core's
+corners sit on top of the content along the edges. teksilo-core's
 `hit_test_recursive` walks children in reverse insertion order, so
 the strips and corners (added after content) get first crack at any
 click that lands within `thickness` pixels of an edge; clicks
@@ -39,7 +39,7 @@ window boundary.
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/title_bar/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/title_bar/index.html)
 
 ## `pub struct WindowFrame`
 

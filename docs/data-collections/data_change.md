@@ -20,7 +20,7 @@ index through an `ItemsMoved` operation — used by `crate::CheckedModel` and
 `crate::SelectionModel` to keep index-based state in sync after reorders.
 
 ```rust
-# use bastyde_data::data_change::{DataChange, map_index_after_move};
+# use teksilo_data::data_change::{DataChange, map_index_after_move};
 // An insertion at row 2 shifts index 5 to 6.
 let change = DataChange::ItemsInserted { range: 2..3 };
 // map_index_after_move: move row 0 to position 2 (post-removal index).
@@ -30,7 +30,7 @@ assert_eq!(new_idx, 2);
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_data/data_change/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_data/data_change/index.html)
 
 ## `pub enum DataChange`
 

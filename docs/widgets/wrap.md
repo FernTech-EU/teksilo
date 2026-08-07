@@ -17,8 +17,8 @@ whose items vary in width and should reflow as the container resizes.  For
 a fixed grid use `crate::primitives::Grid` instead.
 
 ```rust
-# use bastyde_widgets::primitives::{Wrap, TextWidget};
-# use bastyde_i18n::lit;
+# use teksilo_widgets::primitives::{Wrap, TextWidget};
+# use teksilo_i18n::lit;
 let _chips = Wrap::new()
     .spacing(8.0)
     .line_spacing(6.0)
@@ -33,7 +33,7 @@ let _chips = Wrap::new()
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/primitives/wrap/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/primitives/wrap/index.html)
 
 ## `pub struct Wrap`
 

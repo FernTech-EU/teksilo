@@ -2,12 +2,12 @@
 # SPDX-License-Identifier: MPL-2.0
 # SPDX-FileCopyrightText: 2026 FernTech
 
-"""Drive the live `chart-demo` through the bastyde automation MCP bridge and
+"""Drive the live `chart-demo` through the teksilo automation MCP bridge and
 assert the chart features actually work in a running app.
 
 This is an end-to-end smoke that no headless unit test can give you: it starts
 the *unmodified* demo, reads the bridge socket + token the app prints on
-startup, connects `bastyde-automation-mcp --connect`, and then drives the real
+startup, connects `teksilo-automation-mcp --connect`, and then drives the real
 widget tree over MCP, asserting against the live AccessKit tree.
 
 What it verifies
@@ -24,7 +24,7 @@ What it verifies
 
 Usage
 -----
-    cargo build -p chart-demo -p bastyde-automation-mcp
+    cargo build -p chart-demo -p teksilo-automation-mcp
     python3 scripts/automation_chart_demo.py [--shot out.png] [--release]
 
 Exits 0 on success, 1 on a failed assertion, 2 if the binaries are missing.
@@ -82,7 +82,7 @@ class Driver:
         while time.time() < deadline:
             txt = Path(self.log).read_text()
             s = re.search(r"bridge socket = (\S+)", txt)
-            t = re.search(r"BASTYDE_AUTOMATION_TOKEN=(\S+)", txt)
+            t = re.search(r"TEKSILO_AUTOMATION_TOKEN=(\S+)", txt)
             if s and t:
                 sock, tok = s.group(1), t.group(1)
                 break
@@ -235,11 +235,11 @@ def main() -> int:
     args = ap.parse_args()
 
     bd = build_dir(args.release)
-    chart, mcp_bin = bd / "chart-demo", bd / "bastyde-automation-mcp"
+    chart, mcp_bin = bd / "chart-demo", bd / "teksilo-automation-mcp"
     missing = [str(p) for p in (chart, mcp_bin) if not p.exists()]
     if missing:
         print("missing binaries:\n  " + "\n  ".join(missing))
-        print("\nbuild them first:\n  cargo build -p chart-demo -p bastyde-automation-mcp")
+        print("\nbuild them first:\n  cargo build -p chart-demo -p teksilo-automation-mcp")
         return 2
 
     d = Driver(chart, mcp_bin)

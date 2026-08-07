@@ -28,7 +28,7 @@ directly when the source is external, huge, or requires lazy window-based loadin
 the view calls `request_window` each build pass and `fetch_more` near the end.
 
 ```rust
-# use bastyde_data::{ListModel, ListDataSource};
+# use teksilo_data::{ListModel, ListDataSource};
 // ListModel<T> implements ListDataSource — pass it directly to any flat view.
 let model = ListModel::from_vec(vec!["alpha", "beta", "gamma"]);
 // Access via the ListDataSource interface:
@@ -40,4 +40,4 @@ assert_eq!(_first, Some("alpha"));
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_data/list_data_source/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_data/list_data_source/index.html)

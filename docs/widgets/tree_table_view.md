@@ -51,8 +51,8 @@ ArrowLeft / ArrowRight on the tree column collapse / expand.
 
 ```ignore
 // Column delegates capture closures — use ignore.
-use bastyde_widgets::TreeTableView;
-use bastyde_data::TreeModel;
+use teksilo_widgets::TreeTableView;
+use teksilo_data::TreeModel;
 # struct File { name: String }
 # let model: TreeModel<File> = TreeModel::new();
 let _view = TreeTableView::new(model).row_height(28.0);
@@ -64,7 +64,7 @@ let _view = TreeTableView::new(model).row_height(28.0);
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/tree_table_view/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/tree_table_view/index.html)
 
 ## `pub struct TreeTableView`
 
@@ -104,7 +104,7 @@ source owns both the cycle guard and the commit. Note that
 `TreeDataSlice::drag` defaults to `NoDrag`: an
 external source must opt its rows in before anything can be dragged.
 
-#### `pub fn from_source_keyed<S: TreeDataSource<Item = T> + 'static>( source: S, keyed: KeyedSelectionModel<S::Key>, ) -> Self where S::Key: bastyde_data::ItemKey,`
+#### `pub fn from_source_keyed<S: TreeDataSource<Item = T> + 'static>( source: S, keyed: KeyedSelectionModel<S::Key>, ) -> Self where S::Key: teksilo_data::ItemKey,`
 
 Like `from_source` but with **keyed** selection:
 the `KeyedSelectionModel<S::Key>` tracks rows by source identity, so it
@@ -471,7 +471,7 @@ Cell currently being edited as `(row, display_column_index)`, or `None`.
 Access the underlying `SortFilterTreeModel` (for programmatic sort /
 filter / expand outside of the builder API).
 `None` when the view was built from an external
-`bastyde_data::TreeDataSource` via
+`teksilo_data::TreeDataSource` via
 `from_source` — there is no `TreeModel`-backed
 projection to hand back in that case.
 

@@ -6,10 +6,10 @@
 //! Cannibalized from the `rich-text-editor` / `rich-text-viewer`
 //! examples. Backed by the external `text-document` model.
 
-use bastyde::prelude::*;
-use bastyde::text_document::TextDocument;
-use bastyde::widgets::rich_text::RichTextEditor;
-use bastyde::widgets::{Divider, FontPicker, MaxSize, TextWidget, VStack};
+use teksilo::prelude::*;
+use teksilo::text_document::TextDocument;
+use teksilo::widgets::rich_text::RichTextEditor;
+use teksilo::widgets::{Divider, FontPicker, MaxSize, TextWidget, VStack};
 
 use crate::shared::{Signals, section, tab_header};
 
@@ -49,9 +49,9 @@ It supports selection, mouse-wheel scrolling, and keyboard navigation
 
 | Widget    | Tier     | Crate            |
 | --------- | -------- | ---------------- |
-| Button    | control  | bastyde-widgets  |
-| BarChart  | chart    | bastyde-charts   |
-| SceneView | viewport | bastyde-scene    |
+| Button    | control  | teksilo-widgets  |
+| BarChart  | chart    | teksilo-charts   |
+| SceneView | viewport | teksilo-scene    |
 "#;
 
 const EDITOR_SAMPLE: &str = r#"Type here — **bold**, *italic*, and `code` all work.
@@ -133,14 +133,14 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     )
 }
 
-pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
+pub fn teksu(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     // RichTextEditor is built from a `TextDocument` constructor arg —
     // pre-build each and splice via `#{ id }`.
     let editor_id = ctx.add(editor_widget());
     let viewer_id = ctx.add(viewer_widget());
     let font_id = ctx.add(font_picker_widget());
 
-    bati!(ctx => VStack {
+    teksu!(ctx => VStack {
             spacing: 20.0
             VStack {
                 spacing: 4.0

@@ -14,21 +14,21 @@ It is a thin specialization of `SpinBox` that displays a percent
 **applies it app-wide** — so the developer only has to place the widget.
 
 Bind it to the persisted factor signal, typically the settings-backed
-`bastyde_settings::TEXT_SCALE_KEY`:
+`teksilo_settings::TEXT_SCALE_KEY`:
 
 ```ignore
-use bastyde::prelude::*;
-use bastyde::widgets::TextScaleControl;
+use teksilo::prelude::*;
+use teksilo::widgets::TextScaleControl;
 
 // inside build():
-let scale = ctx.settings().signal_for(&bastyde_settings::TEXT_SCALE_KEY);
+let scale = ctx.settings().signal_for(&teksilo_settings::TEXT_SCALE_KEY);
 ctx.add(TextScaleControl::new(scale).label(tr!(text_size())));
 ```
 
 Writing the bound signal triggers the `SettingsStore`'s debounced auto-save
 (persistence), and the widget's `on_value_changed` calls
 `EventContext::set_text_scale`
-(immediate app-wide application). At startup `bastyde-app` reads the saved
+(immediate app-wide application). At startup `teksilo-app` reads the saved
 key and seeds every window, so the chosen size is restored automatically.
 
 ## Builder methods at a glance
@@ -37,7 +37,7 @@ key and seeds every window, so the chosen size is restored automatically.
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/text_scale_control/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/text_scale_control/index.html)
 
 ## `pub struct TextScaleControl`
 
@@ -57,7 +57,7 @@ pub struct TextScaleControl { /* fields */ }
 
 Construct bound to `factor_signal` (a scale factor where `1.0` = 100 %).
 
-Pass `ctx.settings().signal_for(&bastyde_settings::TEXT_SCALE_KEY)` to get
+Pass `ctx.settings().signal_for(&teksilo_settings::TEXT_SCALE_KEY)` to get
 automatic persistence; any `Signal<f32>` works for ad-hoc / preview use.
 
 #### `pub fn label(mut self, label: impl Into<LocalizedString>) -> Self`

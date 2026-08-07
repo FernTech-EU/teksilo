@@ -30,7 +30,7 @@ synchronously, or call `MruList::flush_now` explicitly.
 ```ignore
 use std::path::PathBuf;
 use std::time::Duration;
-use bastyde_settings::{AppPaths, Keyed, MruEntry, MruList};
+use teksilo_settings::{AppPaths, Keyed, MruEntry, MruList};
 use serde::{Serialize, Deserialize};
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -74,7 +74,7 @@ assert_eq!(recents.model().len(), 1);
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_settings/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_settings/index.html)
 
 ## `pub struct MruList`
 

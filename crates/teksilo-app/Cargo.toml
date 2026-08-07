@@ -1,0 +1,91 @@
+# SPDX-License-Identifier: MPL-2.0
+# SPDX-FileCopyrightText: 2026 FernTech
+
+[package]
+name = "teksilo-app"
+edition = "2024"
+version.workspace = true
+license-file.workspace = true
+publish.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[features]
+default = ["text"]
+text = ["dep:teksilo-text"]
+# Enables system clipboard access by forwarding to teksilo-platform and
+# auto-installing a `ClipboardHandle` into the app_state registry
+# during `TeksiloAppBuilder::run`. Widgets pick it up via
+# `EventContext::app_state::<ClipboardHandle>()`.
+clipboard = ["teksilo-platform/clipboard"]
+# Activates the FileDialog trait surface. Apps that ship a custom or
+# mock backend enable this. The window-close hook in `WindowManager`
+# uses it to purge pending callbacks owned by the closing window.
+file-dialog = ["teksilo-platform/file-dialog"]
+# Adds the `rfd`-backed implementation plus
+# `TeksiloAppBuilder::install_file_dialog` which auto-registers an
+# `RfdAsyncBackend`. Implies `file-dialog`.
+rfd-backend = ["file-dialog", "teksilo-platform/rfd-backend"]
+# Telemetry support. Gates the `.telemetry(bundle)` builder method,
+# the `install_telemetry` wiring, and the `dep:teksilo-telemetry`
+# dependency. Also forwards to `teksilo-widgets/telemetry` so the
+# `PrivacySettings` widget surface light up together. Off by default
+# — apps that don't ship analytics pay nothing.
+telemetry = ["dep:teksilo-telemetry", "dep:uuid", "teksilo-widgets/telemetry"]
+# WebView routing. Lets the app event loop downcast a `WebViewEventPayload`
+# in the `AppEvent::External` arm and route it to the originating window's
+# `WebViewRegistry::deliver`, and purge per-window registrations on close.
+# Pulls in `teksilo-webview` for the payload + registry types. Off by
+# default; the umbrella `teksilo/web-view` feature turns it on.
+web-view = ["dep:teksilo-webview"]
+# Debug-only in-process automation bridge. Lets `teksilo-automation-mcp
+# --connect <sock>` drive a *live* running app over a Unix-domain socket.
+# The active machinery (socket / token / bridge thread) is additionally gated
+# on `debug_assertions`, so a release build with this feature on never opens a
+# socket and `install_automation_bridge_in_debug()` is a no-op. NOTE: the
+# guarantee is *behavioral* — the `teksilo-automation` toolkit (executor +
+# serde_json) is still linked, dead-code-eliminated only under fat LTO (the
+# `release` default); a non-LTO profile such as `profiling` retains those
+# symbols even though no bridge runs. Pulls in the GUI-free toolkit plus the
+# wire-encoding deps.
+automation = [
+    "dep:teksilo-automation",
+    "dep:base64",
+    "dep:png",
+    "dep:serde_json",
+    "dep:uuid",
+]
+
+[dependencies]
+teksilo-core = { workspace = true }
+teksilo-canvas = { workspace = true }
+teksilo-tokens = { workspace = true }
+teksilo-i18n = { workspace = true }
+teksilo-render = { workspace = true }
+# `native-menu` is always on: `install_native_menu()` and the native-menu
+# payload router reference `teksilo_platform::native_menu` directly. The objc2
+# backing is macOS-target-only, so non-macOS builds pay nothing.
+teksilo-platform = { workspace = true, features = ["native-menu"] }
+# teksilo-widgets is needed for the tooltip registry type surface
+# (`TeksiloAppBuilder::register_tooltips` takes `Vec<TooltipContent>`).
+# Registration wiring only — no widget constructors used here.
+teksilo-widgets = { workspace = true }
+teksilo-settings = { workspace = true }
+teksilo-webview = { workspace = true, optional = true }
+teksilo-telemetry = { workspace = true, optional = true }
+teksilo-text = { workspace = true, optional = true }
+# GUI-free automation toolkit + wire-encoding deps for the debug-only
+# `automation` bridge. All optional, off by default.
+teksilo-automation = { workspace = true, optional = true }
+base64 = { version = "0.22", optional = true }
+png = { workspace = true, optional = true }
+serde_json = { workspace = true, optional = true }
+winit = { workspace = true }
+pollster = { workspace = true }
+# Used by the telemetry session-id generator AND the automation bridge's
+# per-process token; pulled in with the `telemetry` or `automation` feature.
+uuid = { workspace = true, optional = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+serde = { workspace = true }

@@ -1,0 +1,19 @@
+# SPDX-License-Identifier: MPL-2.0
+# SPDX-FileCopyrightText: 2026 FernTech
+
+[package]
+name = "telemetry-teksilo"
+edition = "2024"
+version.workspace = true
+license-file.workspace = true
+authors.workspace = true
+publish = false
+
+[dependencies]
+teksilo = { workspace = true, features = [
+    "automation","telemetry"] }
+teksilo-analytics-native = { workspace = true }
+teksilo-settings = { workspace = true }
+teksilo-telemetry = { workspace = true }
+teksilo-core = { workspace = true }
+uuid = { workspace = true }

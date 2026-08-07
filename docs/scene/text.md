@@ -38,10 +38,10 @@ focus, selection, and full accessibility, embed a `RichTextEditor` or
 ## Example
 
 ```ignore
-use bastyde_scene::{SceneModel, TextItem, TextAlign};
-use bastyde_canvas::{Point, Rect};
-use bastyde_tokens::Color;
-use bastyde_i18n::lit;
+use teksilo_scene::{SceneModel, TextItem, TextAlign};
+use teksilo_canvas::{Point, Rect};
+use teksilo_tokens::Color;
+use teksilo_i18n::lit;
 
 let model = SceneModel::new();
 
@@ -59,7 +59,7 @@ model.add_item(item, Point::new(40.0, 40.0));
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_scene/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_scene/index.html)
 
 ## `pub enum TextAlign`
 

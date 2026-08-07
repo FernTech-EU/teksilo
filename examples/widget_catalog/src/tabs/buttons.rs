@@ -4,8 +4,8 @@
 //! Buttons tab — Button (×3 variants × states), IconButton, CommandLinkButton,
 //! PopoverButton, PopoverIconButton, SplitButton.
 
-use bastyde::prelude::*;
-use bastyde::widgets::{
+use teksilo::prelude::*;
+use teksilo::widgets::{
     Button, ButtonVariant, CommandLinkButton, Divider, IconButton, IconButtonSize, IconLocation,
     IconWidget, MaxSize, MenuItem, PopoverButton, PopoverIconButton, SplitButton, TextWidget,
     VStack, Wrap,
@@ -186,10 +186,10 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     )
 }
 
-pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
-    // Pre-register multi-arg / chained construction that bati! property
+pub fn teksu(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
+    // Pre-register multi-arg / chained construction that teksu! property
     // syntax can't express directly. Each gets its own WidgetId so the
-    // bati! body can splice via `#{ id }`.
+    // teksu! body can splice via `#{ id }`.
     let icon_btn_confirm = ctx.add(
         Button::new(tr!(btn_confirm_label()))
             .icon(IconWidget::checkmark(16.0), IconLocation::Leading)
@@ -213,7 +213,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
             .content(TextWidget::new(tr!(btn_popover_icon_body())).style(TextStyleRole::Small)),
     );
 
-    bati!(ctx => VStack {
+    teksu!(ctx => VStack {
             spacing: 20.0
             VStack {
                 spacing: 4.0

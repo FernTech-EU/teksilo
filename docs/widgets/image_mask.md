@@ -18,7 +18,7 @@ by `Avatar`. Other widgets that want a non-rectangular image silhouette
 can call `apply_alpha_mask` and `center_crop_square` directly.
 
 ```rust
-# use bastyde_widgets::primitives::image_mask::{ImageMaskShape, apply_alpha_mask};
+# use teksilo_widgets::primitives::image_mask::{ImageMaskShape, apply_alpha_mask};
 let mut pixels = vec![255u8; 32 * 32 * 4]; // opaque white 32×32
 apply_alpha_mask(&mut pixels, 32, 32, ImageMaskShape::Circle);
 // Corner pixels are now transparent; the center is still opaque.
@@ -28,7 +28,7 @@ assert_eq!(pixels[(16 * 32 + 16) * 4 + 3], 255); // center alpha
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/primitives/image_mask/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/primitives/image_mask/index.html)
 
 ## `pub enum ImageMaskShape`
 

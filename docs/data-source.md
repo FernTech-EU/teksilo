@@ -6,7 +6,7 @@
 The four data views — `ListView`, `TreeView`, `TableView`, `TreeTableView` —
 do **not** own a private store they mutate. They read from, and *command*, a
 **data source**: a trait the application implements (or reuses a built-in impl
-of) that owns the truth. This is Bastyde's answer to Qt's `QAbstractItemModel`
+of) that owns the truth. This is Teksilo's answer to Qt's `QAbstractItemModel`
 capability protocol — `flags` / `canDropMimeData` / `dropMimeData` for drag-and-
 drop, `canFetchMore` / `fetchMore` for lazy loading — but expressed as
 **defaulted methods on concrete-`T` source traits**, not a type-erased
@@ -14,12 +14,12 @@ drop, `canFetchMore` / `fetchMore` for lazy loading — but expressed as
 answers "may this drop happen?" and "apply it"; the view only renders the
 verdict and routes the commit.
 
-There are two traits, both in `bastyde-data`:
+There are two traits, both in `teksilo-data`:
 
 | Trait | Shape | Built-in impls |
 | --- | --- | --- |
-| [`ListDataSource`](../crates/bastyde-data/src/list_data_source.rs) | flat list | `ListModel<T>`, `SortFilterListModel<T>` |
-| [`TreeDataSource`](../crates/bastyde-data/src/tree_data_source.rs) | per-view flattened tree | `TreeSlice<T>`, `SortFilterTreeModel<T>` |
+| [`ListDataSource`](../crates/teksilo-data/src/list_data_source.rs) | flat list | `ListModel<T>`, `SortFilterListModel<T>` |
+| [`TreeDataSource`](../crates/teksilo-data/src/tree_data_source.rs) | per-view flattened tree | `TreeSlice<T>`, `SortFilterTreeModel<T>` |
 
 Neither is object-safe (associated types + generic `with_item`/`with_entry`),
 so a view consumes it generically via `from_source(...)` and erases it into an
@@ -134,7 +134,7 @@ via the builder; `TreeTableView` fuses a `TreeDataSource` with columns. See
 
 The source owns DnD. The view never paints an "always valid" insertion line; it
 asks the source on every hover and refuses a rejected drop. The vocabulary
-([`dnd_types`](../crates/bastyde-data/src/dnd_types.rs)) is shared by all four
+([`dnd_types`](../crates/teksilo-data/src/dnd_types.rs)) is shared by all four
 data views (and adapted by `TabBar`):
 
 ```rust
@@ -187,7 +187,7 @@ TreeTableView gained it in the redesign).
 
 **Tree reorder helpers.** Custom `TreeDataSource` impls building on a
 `TreeModel` can reuse
-[`tree_apply_reorder`](../crates/bastyde-data/src/tree_data_source.rs) (applies a
+[`tree_apply_reorder`](../crates/teksilo-data/src/tree_data_source.rs) (applies a
 `(source, target, position)` move with the remove-then-insert index adjustment)
 and `tree_is_desc_or_self` (the cycle guard — you cannot drop a node into its
 own subtree). The built-in `TreeSlice` / `SortFilterTreeModel` `accept_drop`
@@ -289,7 +289,7 @@ what removes the need for a mirror model.
   capabilities (drag routing + `fetch_more` + placeholders).
 - [drag-and-drop.md](drag-and-drop.md) — the framework DnD pipeline the source
   protocol routes through, `DropTarget`/`DropZone`, and drop-target bubbling.
-- Source: [list_data_source.rs](../crates/bastyde-data/src/list_data_source.rs),
-  [tree_data_source.rs](../crates/bastyde-data/src/tree_data_source.rs),
-  [dnd_types.rs](../crates/bastyde-data/src/dnd_types.rs),
-  [keyed_selection_model.rs](../crates/bastyde-data/src/keyed_selection_model.rs).
+- Source: [list_data_source.rs](../crates/teksilo-data/src/list_data_source.rs),
+  [tree_data_source.rs](../crates/teksilo-data/src/tree_data_source.rs),
+  [dnd_types.rs](../crates/teksilo-data/src/dnd_types.rs),
+  [keyed_selection_model.rs](../crates/teksilo-data/src/keyed_selection_model.rs).

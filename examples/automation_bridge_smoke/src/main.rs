@@ -14,30 +14,30 @@
 //! Run (needs a display for the window):
 //! `cargo run --example automation_bridge_smoke --features automation`
 
-use bastyde::automation::dto::{AutomationOp, AutomationReply, AutomationRequest, SettleSpec};
-use bastyde::prelude::*;
-use bastyde::widgets::{Button, VStack};
+use teksilo::automation::dto::{AutomationOp, AutomationReply, AutomationRequest, SettleSpec};
+use teksilo::prelude::*;
+use teksilo::widgets::{Button, VStack};
 
 fn main() {
     // Pin the token so the in-process client knows it without scraping stderr.
     // Respect a token already set in the environment (so `--serve` can be
     // driven by an external `--connect` client with a known token).
-    let token = std::env::var("BASTYDE_AUTOMATION_TOKEN").unwrap_or_else(|_| {
-        let t = "bastyde-automation-smoke-token".to_string();
+    let token = std::env::var("TEKSILO_AUTOMATION_TOKEN").unwrap_or_else(|_| {
+        let t = "teksilo-automation-smoke-token".to_string();
         // SAFETY: set before any threads read the environment (single-threaded here).
         unsafe {
-            std::env::set_var("BASTYDE_AUTOMATION_TOKEN", &t);
+            std::env::set_var("TEKSILO_AUTOMATION_TOKEN", &t);
         }
         t
     });
     let token = token.as_str();
     // Matches the bridge's per-process `0700` dir layout (see
-    // `bastyde_app::automation_bridge`): `<XDG_RUNTIME_DIR>/bastyde-automation-<pid>/sock`.
+    // `teksilo_app::automation_bridge`): `<XDG_RUNTIME_DIR>/teksilo-automation-<pid>/sock`.
     let dir = std::env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| "/tmp".to_string());
-    let sock = format!("{dir}/bastyde-automation-{}/sock", std::process::id());
+    let sock = format!("{dir}/teksilo-automation-{}/sock", std::process::id());
 
     // `--serve` keeps the app (and its bridge) running so an external
-    // `bastyde-automation-mcp --connect <sock>` can drive it interactively.
+    // `teksilo-automation-mcp --connect <sock>` can drive it interactively.
     // Without it, an in-process client runs the smoke sequence and exits.
     let serve = std::env::args().any(|a| a == "--serve");
     if !serve {
@@ -55,7 +55,7 @@ fn main() {
         });
     }
 
-    BastydeAppBuilder::new()
+    TeksiloAppBuilder::new()
         .theme(intui::light())
         .install_automation_bridge_in_debug()
         .initial_window(

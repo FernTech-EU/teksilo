@@ -16,5 +16,5 @@ path = "src/main.rs"
 [dependencies]
 # `file-dialog` is on by default (RfdAsyncBackend) — explicit here to
 # document the dependency for the FilePickerField demo.
-bastyde = { workspace = true, features = [
+teksilo = { workspace = true, features = [
     "automation","file-dialog"] }

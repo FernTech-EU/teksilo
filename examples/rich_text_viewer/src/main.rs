@@ -11,16 +11,16 @@
 //! layout, paint, and `on_change` event plumbing end to end without
 //! depending on a file on disk.
 
-use bastyde::prelude::*;
-use bastyde::text_document::TextDocument;
-use bastyde::widgets::rich_text::RichTextEditor;
-use bastyde::widgets::{Expand, HStack, Spacer, Toolbar};
+use teksilo::prelude::*;
+use teksilo::text_document::TextDocument;
+use teksilo::widgets::rich_text::RichTextEditor;
+use teksilo::widgets::{Expand, HStack, Spacer, Toolbar};
 
-const SAMPLE: &str = r#"# Bastyde Rich Text Viewer
+const SAMPLE: &str = r#"# Teksilo Rich Text Viewer
 
 This window holds a single `RichTextEditor::read_only` bound to a
 `TextDocument` loaded from an embedded markdown string. It is the
-live target of Milestone 8a of §27.10 of the Bastyde architecture.
+live target of Milestone 8a of §27.10 of the Teksilo architecture.
 
 ## What works today
 
@@ -29,7 +29,7 @@ live target of Milestone 8a of §27.10 of the Bastyde architecture.
   screen coords back down, so nearest-neighbor atlas sampling still
   produces pixel-perfect text on HiDPI).
 - The editor shares the application's `SharedTypesetter`, so its
-  glyphs land in the same atlas bastyde-render uploads to the GPU.
+  glyphs land in the same atlas teksilo-render uploads to the GPU.
 - Mouse wheel scrolling.
 - Click to place the caret, Shift+click to extend the selection.
 - Arrow keys for character navigation, Ctrl+Arrow for word jumps,
@@ -76,7 +76,7 @@ fn dark_mode_toolbar() -> impl Widget {
     Toolbar::new().child(
         HStack::new()
             .child(Spacer::new())
-            .child(bastyde::widgets::ThemeSwitcher::new()),
+            .child(teksilo::widgets::ThemeSwitcher::new()),
     )
 }
 
@@ -85,17 +85,17 @@ fn main() {
     doc.set_markdown(SAMPLE)
         .expect("failed to parse embedded markdown");
 
-    BastydeAppBuilder::new()
+    TeksiloAppBuilder::new()
         .install_automation_bridge_in_debug()
         .install_inspector_in_debug()
-        .theme(bastyde::presets::intui::light())
+        .theme(teksilo::presets::intui::light())
         .initial_window(
             WindowConfig::new()
-                .title("Bastyde — Rich Text Viewer")
+                .title("Teksilo — Rich Text Viewer")
                 .size(720, 540)
                 .root(move |tree, _state| {
                     tree.add(
-                        bastyde::widgets::VStack::new()
+                        teksilo::widgets::VStack::new()
                             .child(dark_mode_toolbar())
                             .child(Expand::new().child(RichTextEditor::read_only(doc.clone()))),
                     )

@@ -4,13 +4,13 @@
 # Animation
 
 **Companion to:** [architecture.md](architecture.md)
-**Scope:** Signal-driven animation in Bastyde — `Signal<f32>::animate_to`, the scheduler behind it, and the design rules for deciding when (and when not) to animate.
+**Scope:** Signal-driven animation in Teksilo — `Signal<f32>::animate_to`, the scheduler behind it, and the design rules for deciding when (and when not) to animate.
 
 ---
 
 ## 1. Why animation exists in a mostly-instant framework
 
-Bastyde's motion vocabulary is borrowed from JetBrains's Int UI design language: hover and press are **instant**, and animation is reserved for a narrow set of floating transitions — a dialog appearing, a snackbar sliding in, an accordion expanding, a toggle thumb moving. A serious desktop application that a user drives for hours gets tiring fast if every state change fades or slides; interaction feedback needs to be crisp. Decorative animation is explicitly discouraged.
+Teksilo's motion vocabulary is borrowed from JetBrains's Int UI design language: hover and press are **instant**, and animation is reserved for a narrow set of floating transitions — a dialog appearing, a snackbar sliding in, an accordion expanding, a toggle thumb moving. A serious desktop application that a user drives for hours gets tiring fast if every state change fades or slides; interaction feedback needs to be crisp. Decorative animation is explicitly discouraged.
 
 What's left is the minimum set of places where motion helps a user track a change:
 
@@ -36,7 +36,7 @@ A signal created with `Signal::new(0.0_f32)` does **not** support animation — 
 
 ## 3. Easing and durations live in tokens
 
-Easing curves and standard durations are design tokens, not ad-hoc magic numbers. They live in [crates/bastyde-tokens/src/motion.rs](../crates/bastyde-tokens/src/motion.rs):
+Easing curves and standard durations are design tokens, not ad-hoc magic numbers. They live in [crates/teksilo-tokens/src/motion.rs](../crates/teksilo-tokens/src/motion.rs):
 
 ```rust
 pub enum Easing {
@@ -66,15 +66,15 @@ The `Easing::apply(t)` method takes a linear parameter `t ∈ [0, 1]` and return
 
 `AnimationScheduler` is the **signal-tween** scheduler — one of three
 visibility-aware motion subsystems on `WidgetTree`. The other two are
-[`AnimatedQuadRegistry`](../crates/bastyde-core/src/animated_quad.rs)
+[`AnimatedQuadRegistry`](../crates/teksilo-core/src/animated_quad.rs)
 (shader-driven quad uniforms — `Spinner`, `ProgressBar::indeterminate`,
 animated `IconWidget`; see
 [idle-and-animation.md](idle-and-animation.md#three-animation-paths-signal-vs-shader-vs-per-frame-effect))
 and
-[`FrameTickScheduler`](../crates/bastyde-core/src/frame_tick_scheduler.rs)
+[`FrameTickScheduler`](../crates/teksilo-core/src/frame_tick_scheduler.rs)
 (per-frame-effect closures — `Pulse`, `Cycle`; see §5.6 below). All
 three share the
-[`motion_visibility`](../crates/bastyde-core/src/motion_visibility.rs)
+[`motion_visibility`](../crates/teksilo-core/src/motion_visibility.rs)
 helpers so the visibility gate is one canonical primitive.
 
 Widget code never constructs `AnimationScheduler` directly. Its job is
@@ -101,11 +101,11 @@ fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
 
 The signal it returns supports `animate_to`, is registered with the scheduler, and has its owner recorded as `ctx.self_id()`. When the widget is rebuilt (or destroyed), the scheduler cancels all animations on signals owned by that widget — no orphan tickers.
 
-If a widget constructs its `Signal<f32>` outside `build()` (a handful of widgets do, to share the signal with callers), it can call `ctx.register_animated_signal(&signal)` inside `build()` to associate the signal with the current widget for cancellation purposes. See [ScrollArea](../crates/bastyde-widgets/src/scroll_area.rs) and [TreeView](../crates/bastyde-widgets/src/tree_view.rs) for examples.
+If a widget constructs its `Signal<f32>` outside `build()` (a handful of widgets do, to share the signal with callers), it can call `ctx.register_animated_signal(&signal)` inside `build()` to associate the signal with the current widget for cancellation purposes. See [ScrollArea](../crates/teksilo-widgets/src/scroll_area.rs) and [TreeView](../crates/teksilo-widgets/src/tree_view.rs) for examples.
 
 ### 4.2 `animate_looping` for indeterminate work
 
-For animations that should run until explicitly cancelled — spinners, marquee tickers, indeterminate progress bars — `Signal::animate_looping(target, period, easing, frame_interval)` sets the signal to its start value each time it reaches the target and loops indefinitely. This is the path used by [ProgressBar](../crates/bastyde-widgets/src/progress_bar.rs) in indeterminate mode:
+For animations that should run until explicitly cancelled — spinners, marquee tickers, indeterminate progress bars — `Signal::animate_looping(target, period, easing, frame_interval)` sets the signal to its start value each time it reaches the target and loops indefinitely. This is the path used by [ProgressBar](../crates/teksilo-widgets/src/progress_bar.rs) in indeterminate mode:
 
 ```rust
 self.indeterminate_pos = ctx.animated_signal(0.0);
@@ -136,13 +136,13 @@ ctx.animate().sweep().linear().to(&sweep_pos, 1.0);
 
 Duration presets (`fast()` / `normal()` / `slow()` / `collapse()` / `sweep()` / `instant()`) all read from the live theme's `MotionTokens` — no hardcoded `Duration::from_millis(...)` literals at the call site. Easing presets (`standard()` / `linear()` / `ease_in_out()` / etc.) similarly pull `easing_standard` from tokens. `looping()` flips on sub-perceptual ε = 1/255 and a 60 Hz frame interval (16.667 ms) — the safe defaults for paint-bound loops, matching the most common display refresh rate so a continuous loop advances once per vsync; `frame_interval(d)` overrides for slower loops (e.g. 66 ms = 15 Hz for a wide sweep where the eye can't resolve faster motion). `to(&signal, target)` always tweens; `to_or_snap(&signal, target)` snaps without tween when `prefers_reduced_motion` is true.
 
-`AnimationSpec` is a thin façade — it constructs an `AnimationRequest` and calls `Signal<f32>::try_animate_with_options`. The lower-level `animate_to` / `animate_looping` paths remain public; reach for them only when you need control the spec doesn't expose (custom epsilon for non-pixel signals, `max_duration` for indefinite loops with a bounded budget). Source: [crates/bastyde-core/src/animation_builder.rs](../crates/bastyde-core/src/animation_builder.rs).
+`AnimationSpec` is a thin façade — it constructs an `AnimationRequest` and calls `Signal<f32>::try_animate_with_options`. The lower-level `animate_to` / `animate_looping` paths remain public; reach for them only when you need control the spec doesn't expose (custom epsilon for non-pixel signals, `max_duration` for indefinite loops with a bounded budget). Source: [crates/teksilo-core/src/animation_builder.rs](../crates/teksilo-core/src/animation_builder.rs).
 
 ## 5. Worked examples from the widget tree
 
 ### 5.1 Toggle thumb — the canonical transform transition
 
-[crates/bastyde-widgets/src/toggle.rs](../crates/bastyde-widgets/src/toggle.rs):
+[crates/teksilo-widgets/src/toggle.rs](../crates/teksilo-widgets/src/toggle.rs):
 
 ```rust
 fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
@@ -167,34 +167,34 @@ fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
 
 ### 5.2 Accordion / Collapse — animating a layout dimension
 
-[Accordion](../crates/bastyde-widgets/src/accordion.rs) wraps its content in a [`Collapse`](../crates/bastyde-widgets/src/animations/collapse.rs) widget — the reusable primitive for the "animate child between hidden and natural height" pattern. `Collapse` drives an internal `Signal<f32>` from 0..1 with `ctx.animate().collapse().standard().to_or_snap(...)`, and its `layout_response` reports `natural * progress` while `place_children` always lays the child out at its full natural size. The framework's clip pass crops the overflow during the tween. Effect: the visible height interpolates over the full duration without the child being squashed (which would re-wrap text and produce flicker).
+[Accordion](../crates/teksilo-widgets/src/accordion.rs) wraps its content in a [`Collapse`](../crates/teksilo-widgets/src/animations/collapse.rs) widget — the reusable primitive for the "animate child between hidden and natural height" pattern. `Collapse` drives an internal `Signal<f32>` from 0..1 with `ctx.animate().collapse().standard().to_or_snap(...)`, and its `layout_response` reports `natural * progress` while `place_children` always lays the child out at its full natural size. The framework's clip pass crops the overflow during the tween. Effect: the visible height interpolates over the full duration without the child being squashed (which would re-wrap text and produce flicker).
 
 Animating a layout-participating dimension is more expensive than animating a paint-only value — the binding level is `Relayout`, not `RepaintOnly`, so the tree dirtys the accordion's ancestor's layout on each tick. Use sparingly. Paint-only targets (offsets, scales, opacities — see §5.6) are cheaper.
 
 ### 5.3 Snackbar slide-in
 
-[crates/bastyde-widgets/src/snackbar.rs](../crates/bastyde-widgets/src/snackbar.rs) uses `animate_to` on a slide-offset signal that the paint phase applies as a `y` translation. The snackbar is placed via `OverlayPlacement::BottomCenter` and the animation slides the overlay in from below. At auto-dismiss time, the same signal animates back to its offscreen position before the overlay is removed.
+[crates/teksilo-widgets/src/snackbar.rs](../crates/teksilo-widgets/src/snackbar.rs) uses `animate_to` on a slide-offset signal that the paint phase applies as a `y` translation. The snackbar is placed via `OverlayPlacement::BottomCenter` and the animation slides the overlay in from below. At auto-dismiss time, the same signal animates back to its offscreen position before the overlay is removed.
 
 ### 5.4 Smooth programmatic scroll
 
-When ScrollArea receives a `ScrollIntoView` request (for example after tab-focusing a child that is offscreen), it calls `scroll_y.animate_to(target_offset, ...)` instead of `scroll_y.set(target_offset)`. The user sees the viewport slide to the new position rather than jumping. See [scroll_area.rs](../crates/bastyde-widgets/src/scroll_area.rs).
+When ScrollArea receives a `ScrollIntoView` request (for example after tab-focusing a child that is offscreen), it calls `scroll_y.animate_to(target_offset, ...)` instead of `scroll_y.set(target_offset)`. The user sees the viewport slide to the new position rather than jumping. See [scroll_area.rs](../crates/teksilo-widgets/src/scroll_area.rs).
 
 ### 5.5 Icon widget — sprite-sheet frame animation
 
-[icon_widget.rs](../crates/bastyde-widgets/src/primitives/icon_widget.rs) animates a frame-index signal looping over the frame count for animated WebP icons. Frame interval comes from the asset, not from `MotionTokens` — this is a content-driven animation, not a UI transition.
+[icon_widget.rs](../crates/teksilo-widgets/src/primitives/icon_widget.rs) animates a frame-index signal looping over the frame count for animated WebP icons. Frame interval comes from the asset, not from `MotionTokens` — this is a content-driven animation, not a UI transition.
 
 ### 5.6 Wrap-and-go animation widgets
 
-Animation wrappers live under [`crates/bastyde-widgets/src/animations/`](../crates/bastyde-widgets/src/animations/) and are re-exported flat from `bastyde::widgets`. They package the common animation patterns so callers don't re-implement them:
+Animation wrappers live under [`crates/teksilo-widgets/src/animations/`](../crates/teksilo-widgets/src/animations/) and are re-exported flat from `teksilo::widgets`. They package the common animation patterns so callers don't re-implement them:
 
-- **[`Fade`](../crates/bastyde-widgets/src/animations/fade.rs)** wraps a child and tweens an internal opacity signal between 0 and 1 driven by a `Signal<bool>`. Layout-transparent: the child reports its full natural size at all opacity values. Built on `BuildContext::set_opacity`, a node-level opacity scope (parallel to `clips_children`) emitted by the rendering walker as `SetOpacity` / `RestoreOpacity` draw commands wrapping the subtree. Sub-perceptual opacities (`< 1/512`) are short-circuited — no draw passes.
-- **[`Collapse`](../crates/bastyde-widgets/src/animations/collapse.rs)** — see §5.2. The accordion-pattern primitive.
-- **[`Scale`](../crates/bastyde-widgets/src/animations/scale.rs)** wraps a child and animates a uniform 2D scale on its entire subtree, driven by a `Prop<bool>`. Built on `BuildContext::set_transform` (see §5.7) — the renderer composes the scale matrix onto its transform stack so the wrapped subtree's text and shapes visually shrink together. Two modes: **visual-only** (default, `reflow=false`) — the slot stays at the child's natural size, only the visual content scales around the chosen origin (use for overlay enter/exit, "boop" feedback); **reflow** (`.reflow(true)`) — the wrapper's reported size shrinks with progress so siblings reflow as the wrapped content disappears (use for "card removal", pair with `ScaleOrigin::TopLeading` so the visual stays anchored at the slot's top-left as it collapses). Distinct from `Collapse`: `Collapse` shrinks one axis and "wipes" content via clipping (text inside stays full-size); `Scale` shrinks uniformly and text/icons visually get smaller.
-- **[`Rotate`](../crates/bastyde-widgets/src/animations/rotate.rs)** wraps a child and applies a 2D rotation (radians) to its subtree via `set_transform`. Layout-stable. No internal animation — the caller owns the angle signal and pairs it with `Signal::animate_to` for animated rotations. Use for animated chevrons (replacing the old "flip-two-static-icons" trick), spinning loaders not covered by `Spinner`, dial controls.
-- **[`Blur`](../crates/bastyde-widgets/src/animations/blur.rs)** wraps a child and applies a Gaussian-equivalent blur to the entire subtree, driven by a `Prop<f32>` radius (logical pixels). Built on `BuildContext::set_blur` (see §5.7) — the renderer redirects the subtree's draws into an intermediate texture, runs a dual-Kawase chain at the requested radius, and composites the blurred result back at the widget's bounds. Layout-transparent: the child reports its full natural size at all radii. Sub-perceptual radii (`< 0.5`) are short-circuited at the walker — no offscreen pass, no allocation. Use for modal backdrops, click-to-reveal sensitive content (numerics / characters obscured by the blur), out-of-focus emphasis, animated frosted glass on modal show. Pair with an `animated_signal` and `animate_to` for animated enable/disable. See §5.8 for the offscreen-pass cost model.
-- **[`Spinner`](../crates/bastyde-widgets/src/spinner.rs)** — circular-arc loading indicator backed by `AnimatedQuadKind::SpinnerArc`, the shader-driven path (see [idle-and-animation.md §"Three animation paths — signal vs shader vs per-frame-effect"](idle-and-animation.md#three-animation-paths--signal-vs-shader-vs-per-frame-effect)). One `queue.write_buffer` of `AnimParams` + one `draw_indexed` per frame; `paint()` does not run while spinning. Edges are anti-aliased via `fwidth` smoothstep ramps in the fragment shader. Honours `prefers-reduced-motion` with a static three-quarter arc fallback.
+- **[`Fade`](../crates/teksilo-widgets/src/animations/fade.rs)** wraps a child and tweens an internal opacity signal between 0 and 1 driven by a `Signal<bool>`. Layout-transparent: the child reports its full natural size at all opacity values. Built on `BuildContext::set_opacity`, a node-level opacity scope (parallel to `clips_children`) emitted by the rendering walker as `SetOpacity` / `RestoreOpacity` draw commands wrapping the subtree. Sub-perceptual opacities (`< 1/512`) are short-circuited — no draw passes.
+- **[`Collapse`](../crates/teksilo-widgets/src/animations/collapse.rs)** — see §5.2. The accordion-pattern primitive.
+- **[`Scale`](../crates/teksilo-widgets/src/animations/scale.rs)** wraps a child and animates a uniform 2D scale on its entire subtree, driven by a `Prop<bool>`. Built on `BuildContext::set_transform` (see §5.7) — the renderer composes the scale matrix onto its transform stack so the wrapped subtree's text and shapes visually shrink together. Two modes: **visual-only** (default, `reflow=false`) — the slot stays at the child's natural size, only the visual content scales around the chosen origin (use for overlay enter/exit, "boop" feedback); **reflow** (`.reflow(true)`) — the wrapper's reported size shrinks with progress so siblings reflow as the wrapped content disappears (use for "card removal", pair with `ScaleOrigin::TopLeading` so the visual stays anchored at the slot's top-left as it collapses). Distinct from `Collapse`: `Collapse` shrinks one axis and "wipes" content via clipping (text inside stays full-size); `Scale` shrinks uniformly and text/icons visually get smaller.
+- **[`Rotate`](../crates/teksilo-widgets/src/animations/rotate.rs)** wraps a child and applies a 2D rotation (radians) to its subtree via `set_transform`. Layout-stable. No internal animation — the caller owns the angle signal and pairs it with `Signal::animate_to` for animated rotations. Use for animated chevrons (replacing the old "flip-two-static-icons" trick), spinning loaders not covered by `Spinner`, dial controls.
+- **[`Blur`](../crates/teksilo-widgets/src/animations/blur.rs)** wraps a child and applies a Gaussian-equivalent blur to the entire subtree, driven by a `Prop<f32>` radius (logical pixels). Built on `BuildContext::set_blur` (see §5.7) — the renderer redirects the subtree's draws into an intermediate texture, runs a dual-Kawase chain at the requested radius, and composites the blurred result back at the widget's bounds. Layout-transparent: the child reports its full natural size at all radii. Sub-perceptual radii (`< 0.5`) are short-circuited at the walker — no offscreen pass, no allocation. Use for modal backdrops, click-to-reveal sensitive content (numerics / characters obscured by the blur), out-of-focus emphasis, animated frosted glass on modal show. Pair with an `animated_signal` and `animate_to` for animated enable/disable. See §5.8 for the offscreen-pass cost model.
+- **[`Spinner`](../crates/teksilo-widgets/src/spinner.rs)** — circular-arc loading indicator backed by `AnimatedQuadKind::SpinnerArc`, the shader-driven path (see [idle-and-animation.md §"Three animation paths — signal vs shader vs per-frame-effect"](idle-and-animation.md#three-animation-paths--signal-vs-shader-vs-per-frame-effect)). One `queue.write_buffer` of `AnimParams` + one `draw_indexed` per frame; `paint()` does not run while spinning. Edges are anti-aliased via `fwidth` smoothstep ramps in the fragment shader. Honours `prefers-reduced-motion` with a static three-quarter arc fallback.
 
-**[`Pulse`](../crates/bastyde-widgets/src/animations/pulse.rs)** and **[`Cycle`](../crates/bastyde-widgets/src/animations/cycle.rs)** drive their continuous motion through the **per-frame-effect path** rather than `AnimationScheduler` (which only knows linear tweens) or `AnimatedQuadRegistry` (which is paint-time GPU plumbing). They register a closure on `ctx.frame_tick()` for the tick action and a `ctx.subscribe_frame_tick()` RAII guard for visibility-aware chain management — the framework re-arms the frame chain after every render iff at least one subscriber's owner widget was painted in that frame, so a `Pulse` parked inside a non-selected `Switcher` branch contributes zero idle frames and resumes phase-continuous on the next show. The chain bootstrap (request_frame on subscription) and resume (post-render arm after the visible_when-driven repaint) are both handled by the framework. Widget code in the new shape:
+**[`Pulse`](../crates/teksilo-widgets/src/animations/pulse.rs)** and **[`Cycle`](../crates/teksilo-widgets/src/animations/cycle.rs)** drive their continuous motion through the **per-frame-effect path** rather than `AnimationScheduler` (which only knows linear tweens) or `AnimatedQuadRegistry` (which is paint-time GPU plumbing). They register a closure on `ctx.frame_tick()` for the tick action and a `ctx.subscribe_frame_tick()` RAII guard for visibility-aware chain management — the framework re-arms the frame chain after every render iff at least one subscriber's owner widget was painted in that frame, so a `Pulse` parked inside a non-selected `Switcher` branch contributes zero idle frames and resumes phase-continuous on the next show. The chain bootstrap (request_frame on subscription) and resume (post-render arm after the visible_when-driven repaint) are both handled by the framework. Widget code in the new shape:
 
 ```rust
 pub struct Pulse {
@@ -243,7 +243,7 @@ The renderer is single-pass by default: every `DrawCommand` flows into one `wgpu
 
 Each blur scope = `N + N + 1` small render passes per frame for typical UI radii (R = 8–24 → N = 3–5). Cheap individually, but every blur scope opens a new pass on the encoder and breaks batch coalescing on the surrounding draws — don't sprinkle `Blur` widgets through a list view. Stable layouts (modal backdrops, sensitive-content panels, frosted side panels) are the natural fit.
 
-The reference for this offscreen-render pattern is [`png_export.rs`](../crates/bastyde-preview-ui/src/png_export.rs), which has been creating intermediate `RENDER_ATTACHMENT | COPY_SRC` textures and routing the renderer at them since the widget previewer shipped — the blur engine generalises that pattern into a recursive sub-pass.
+The reference for this offscreen-render pattern is [`png_export.rs`](../crates/teksilo-preview-ui/src/png_export.rs), which has been creating intermediate `RENDER_ATTACHMENT | COPY_SRC` textures and routing the renderer at them since the widget previewer shipped — the blur engine generalises that pattern into a recursive sub-pass.
 
 For overlays, **`OverlayRequest::with_fade(duration)`** is the recommended path for tooltip / popover / snackbar fade-in / fade-out. The framework wires opacity internally — caller specifies just the duration:
 
@@ -271,7 +271,7 @@ Animation via `animate_to` is for a value that crosses time smoothly. It is **no
 
 ## 7. Testing animations deterministically
 
-The `WidgetTree::advance_time(duration)` method on the [test_api](../crates/bastyde-core/src/widget_tree/test_api.rs) advances the tree's simulated clock and runs the scheduler with the new `now`. This makes animation tests deterministic without needing real wall time:
+The `WidgetTree::advance_time(duration)` method on the [test_api](../crates/teksilo-core/src/widget_tree/test_api.rs) advances the tree's simulated clock and runs the scheduler with the new `now`. This makes animation tests deterministic without needing real wall time:
 
 ```rust
 let mut tree = WidgetTree::new();
@@ -309,6 +309,6 @@ Headless tests that never call `render()` have `paint_epoch == 0`; the scheduler
 
 - [reactive-theme.md](reactive-theme.md) — reactive theming for the "it's not really animation, it's just reactive color" path (hover, press, focus).
 - [architecture.md §20 Threading](architecture.md) — where the per-frame tick fits in the event loop.
-- [crates/bastyde-core/src/animation.rs](../crates/bastyde-core/src/animation.rs) — scheduler source.
-- [crates/bastyde-core/src/signal.rs](../crates/bastyde-core/src/signal.rs) (`Signal<f32>::animate_to` et al).
-- [crates/bastyde-tokens/src/motion.rs](../crates/bastyde-tokens/src/motion.rs) — `Easing` and `MotionTokens`.
+- [crates/teksilo-core/src/animation.rs](../crates/teksilo-core/src/animation.rs) — scheduler source.
+- [crates/teksilo-core/src/signal.rs](../crates/teksilo-core/src/signal.rs) (`Signal<f32>::animate_to` et al).
+- [crates/teksilo-tokens/src/motion.rs](../crates/teksilo-tokens/src/motion.rs) — `Easing` and `MotionTokens`.

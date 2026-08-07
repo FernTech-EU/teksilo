@@ -1,0 +1,30 @@
+# SPDX-License-Identifier: MPL-2.0
+# SPDX-FileCopyrightText: 2026 FernTech
+
+[package]
+name = "teksilo-automation"
+edition = "2024"
+version.workspace = true
+license-file.workspace = true
+publish.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "GUI-free runtime-introspection & automation toolkit for Teksilo apps (semantic tree + AT-action driving over serde DTOs)."
+
+[dependencies]
+# Core-only peer (mirrors `teksilo-data`): depends on `teksilo-core` for the
+# `WidgetTree` / `WindowOps` / event surface and re-exports `accesskit` via
+# `teksilo_core::accesskit`. `teksilo-canvas` supplies the geometry types
+# (`Point`/`Rect`/`SizeProposal`) the executor drives the tree with. No GUI,
+# render, platform, or app crate — no async runtime.
+teksilo-core = { workspace = true }
+teksilo-canvas = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+# Conformance: validate every produced `TreeUpdate` with the real AccessKit
+# consumer, exactly as teksilo-core's own AT tests do. Kept a dev-dep here
+# (never promoted to a normal dep) so the consumer never enters the release
+# graph.
+accesskit_consumer = { workspace = true }

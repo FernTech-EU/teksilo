@@ -27,8 +27,8 @@ the persisted key and place it in a settings window — it both persists the val
 and applies it app-wide on edit. No other wiring.
 
 ```rust
-use bastyde::prelude::*;            // re-exports TEXT_SCALE_KEY
-use bastyde::widgets::TextScaleControl;
+use teksilo::prelude::*;            // re-exports TEXT_SCALE_KEY
+use teksilo::widgets::TextScaleControl;
 
 // inside build():
 let scale = ctx.settings().signal_for(&TEXT_SCALE_KEY);
@@ -37,7 +37,7 @@ ctx.add(TextScaleControl::new(scale).label(tr!(text_size())));
 
 Requirements: the app must install settings (`.application(...)` /
 `.app_paths(...)` + `.settings(SettingsBundle::new())`). With settings present,
-`bastyde-app` reads `accessibility.text_scale` at startup and seeds every
+`teksilo-app` reads `accessibility.text_scale` at startup and seeds every
 window; apps without settings simply stay at `1.0`.
 
 ### Apply / read it programmatically
@@ -124,7 +124,7 @@ A few surfaces don't follow the scale automatically, by design:
 | `IconWidget` | **off** (fixed-footprint glyphs) | `.follow_text_scale(true)` |
 | Severity badges (`Banner`/`Toast`/`MessageBox`/`NotificationLog`) | **on** | (built in — enabled on the badge's icons) |
 | `RichTextEditor` | **on** | `.follow_text_scale(false)` to opt out (e.g. a WYSIWYG editor whose font sizes are document content) |
-| `bastyde-scene` `TextItem` | **off** (the scene has its own pan/zoom) | `.follow_text_scale(true)` |
+| `teksilo-scene` `TextItem` | **off** (the scene has its own pan/zoom) | `.follow_text_scale(true)` |
 | `Calendar` | **on** (rebuilds with scaled cell/header constants) | — |
 
 `IconWidget::follow_text_scale(true)` multiplies the reported size by
@@ -134,19 +134,19 @@ A few surfaces don't follow the scale automatically, by design:
 
 ## Reference
 
-- Persisted key: `bastyde_settings::TEXT_SCALE_KEY`
+- Persisted key: `teksilo_settings::TEXT_SCALE_KEY`
   (`"accessibility.text_scale"`, default `1.0`).
-- Widget: [`TextScaleControl`](../crates/bastyde-widgets/src/text_scale_control.rs).
+- Widget: [`TextScaleControl`](../crates/teksilo-widgets/src/text_scale_control.rs).
 - Core: `WidgetTree::{set_user_text_scale, effective_text_scale, text_scale_signal}`
-  ([widget_tree.rs](../crates/bastyde-core/src/widget_tree.rs)); `text_scale` on
-  [`LayoutContext`](../crates/bastyde-core/src/widget/layout_context.rs) /
-  [`PaintContext`](../crates/bastyde-core/src/widget/paint_context.rs);
+  ([widget_tree.rs](../crates/teksilo-core/src/widget_tree.rs)); `text_scale` on
+  [`LayoutContext`](../crates/teksilo-core/src/widget/layout_context.rs) /
+  [`PaintContext`](../crates/teksilo-core/src/widget/paint_context.rs);
   `EventContext::set_text_scale`.
 - App fan-out + startup seed: `WindowManager::{set_text_scale,
   set_initial_text_scale, drain_pending_text_scale_requests}`
-  ([window_manager.rs](../crates/bastyde-app/src/window_manager.rs)).
+  ([window_manager.rs](../crates/teksilo-app/src/window_manager.rs)).
 - Engine font scale: `RichTextEngine::set_font_scale`
-  ([bastyde-text](../crates/bastyde-text/src/rich_text_engine.rs)) →
+  ([teksilo-text](../crates/teksilo-text/src/rich_text_engine.rs)) →
   `DocumentFlow::set_font_scale` (text-typeset).
 - Demo: `cargo run -p widget-catalog` — the `TextScaleControl` in the title bar
   next to the language buttons grows the whole catalog live.

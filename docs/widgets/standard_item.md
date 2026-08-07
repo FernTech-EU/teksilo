@@ -23,8 +23,8 @@ rebuild.
 ## Canonical TreeView wiring
 
 ```ignore
-use bastyde::data::{TreeCheckedModel, TreeModel};
-use bastyde::widgets::{StandardTreeItem, TreeView};
+use teksilo::data::{TreeCheckedModel, TreeModel};
+use teksilo::widgets::{StandardTreeItem, TreeView};
 
 let tree: TreeModel<Item> = ...;
 let checks = TreeCheckedModel::new(tree.clone());
@@ -74,7 +74,7 @@ the wrapper.
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/standard_item/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/standard_item/index.html)
 
 ## `pub struct StandardListItem`
 
@@ -93,7 +93,7 @@ pub struct StandardListItem { /* fields */ }
 
 Create a list item with the given primary label.
 
-#### `pub fn style(mut self, style: impl bastyde_core::styles::StandardItemStyle) -> Self`
+#### `pub fn style(mut self, style: impl teksilo_core::styles::StandardItemStyle) -> Self`
 
 Per-call style override. Replaces the theme-wide default
 `StandardItemStyle` for just this row instance.
@@ -168,23 +168,23 @@ Set the selection state, statically or reactively via a bound
 Set the enabled state, statically or reactively via a bound
 `Signal<bool>` / `Prop<bool>`.
 
-#### `pub fn label_style( mut self, style: impl Into<bastyde_core::color_prop::TextStyleProp>, ) -> Self`
+#### `pub fn label_style( mut self, style: impl Into<teksilo_core::color_prop::TextStyleProp>, ) -> Self`
 
 Override the label's text style (font, size, weight). Accepts a
 `TextStyleRole`, a `TextStyle`, or a `Signal` of either. Default is
 `TextStyleRole::Body`.
 
-#### `pub fn subtitle_style( mut self, style: impl Into<bastyde_core::color_prop::TextStyleProp>, ) -> Self`
+#### `pub fn subtitle_style( mut self, style: impl Into<teksilo_core::color_prop::TextStyleProp>, ) -> Self`
 
 Override the subtitle's text style. Default is `TextStyleRole::Small`.
 
-#### `pub fn label_color(mut self, color: impl Into<bastyde_core::color_prop::ColorProp>) -> Self`
+#### `pub fn label_color(mut self, color: impl Into<teksilo_core::color_prop::ColorProp>) -> Self`
 
 Override the label's text color. Accepts `Color`, a role, or a
 `Signal` of either. Default (unset) is enabled-derived
 (`Primary` / `Disabled`); setting this replaces that cascade.
 
-#### `pub fn subtitle_color(mut self, color: impl Into<bastyde_core::color_prop::ColorProp>) -> Self`
+#### `pub fn subtitle_color(mut self, color: impl Into<teksilo_core::color_prop::ColorProp>) -> Self`
 
 Override the subtitle's text color. Default (unset) is
 `TextRole::Secondary`.
@@ -339,24 +339,24 @@ Set the enabled state, statically or reactively via a bound
 `Signal<bool>` / `Prop<bool>`. Forwarded to the inner
 `StandardListItem`.
 
-#### `pub fn label_style( mut self, style: impl Into<bastyde_core::color_prop::TextStyleProp>, ) -> Self`
+#### `pub fn label_style( mut self, style: impl Into<teksilo_core::color_prop::TextStyleProp>, ) -> Self`
 
 Override the label's text style. Forwarded to the inner
 `StandardListItem` — see its
 `label_style`.
 
-#### `pub fn subtitle_style( mut self, style: impl Into<bastyde_core::color_prop::TextStyleProp>, ) -> Self`
+#### `pub fn subtitle_style( mut self, style: impl Into<teksilo_core::color_prop::TextStyleProp>, ) -> Self`
 
 Override the subtitle's text style. Forwarded to the inner
 `StandardListItem` — see its
 `subtitle_style`.
 
-#### `pub fn label_color(mut self, color: impl Into<bastyde_core::color_prop::ColorProp>) -> Self`
+#### `pub fn label_color(mut self, color: impl Into<teksilo_core::color_prop::ColorProp>) -> Self`
 
 Override the label's text color. Forwarded to the inner
 `StandardListItem` — see its `label_color(...)`.
 
-#### `pub fn subtitle_color(mut self, color: impl Into<bastyde_core::color_prop::ColorProp>) -> Self`
+#### `pub fn subtitle_color(mut self, color: impl Into<teksilo_core::color_prop::ColorProp>) -> Self`
 
 Override the subtitle's text color. Forwarded to the inner
 `StandardListItem` — see its `subtitle_color(...)`.
@@ -373,7 +373,7 @@ Truncate the subtitle instead of wrapping it. Forwarded to the inner
 `StandardListItem` — see its
 `subtitle_overflow`.
 
-#### `pub fn style(mut self, style: impl bastyde_core::styles::StandardItemStyle) -> Self`
+#### `pub fn style(mut self, style: impl teksilo_core::styles::StandardItemStyle) -> Self`
 
 Per-call style override for the row chrome. Forwarded to the
 inner `StandardListItem` — see its `style(...)` for the
@@ -425,7 +425,7 @@ Set the expanded state, statically or reactively via a bound
 Convenience for the TreeView delegate path:
 `.from_entry(entry)` sets depth + has_children + is_expanded.
 
-#### `pub fn on_toggle( mut self, f: impl Fn(&mut bastyde_core::widget::EventContext) + 'static, ) -> Self`
+#### `pub fn on_toggle( mut self, f: impl Fn(&mut teksilo_core::widget::EventContext) + 'static, ) -> Self`
 
 Click handler for the chevron. Wired only when `has_children`
 is true. Typical use: `.on_toggle(ctx.toggle_callback())` from
@@ -436,7 +436,7 @@ dispatch an intent (e.g. lazy-load children on expand), open
 a dialog, or otherwise route the toggle through the framework
 before mutating model state.
 
-#### `pub fn on_toggle_rc(mut self, f: Rc<dyn Fn(&mut bastyde_core::widget::EventContext)>) -> Self`
+#### `pub fn on_toggle_rc(mut self, f: Rc<dyn Fn(&mut teksilo_core::widget::EventContext)>) -> Self`
 
 Variant accepting an already-`Rc`'d callback. Useful when the
 same callback is shared across multiple call sites without an

@@ -20,7 +20,7 @@ configured via builder methods, and presented with
 `ctx.show_toast(toast)` (see
 `toast::ext::EventContextToastExt`)
 or `toast.present(ctx)`. A `ToastHost`
-installed via `BastydeAppBuilder.install_toast(opts)` from the `bastyde`
+installed via `TeksiloAppBuilder.install_toast(opts)` from the `teksilo`
 umbrella accepts the request, picks a free slot from its pool, and
 mounts a `ToastSurface` at the
 configured viewport corner using the
@@ -42,7 +42,7 @@ ctx.show_toast(
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/toast/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/toast/index.html)
 
 ## `pub const DEFAULT_TOAST_AUTO_DISMISS`
 
@@ -349,7 +349,7 @@ drives `NotificationLog`.
 Default `true`. Set `false` for noise-suppressing
 transient notifications like quick "Copied!" feedback.
 
-#### `pub fn style(mut self, style: impl bastyde_core::styles::ToastStyle) -> Self`
+#### `pub fn style(mut self, style: impl teksilo_core::styles::ToastStyle) -> Self`
 
 Override the visual chrome for this toast instance. Takes precedence over the
 theme-wide `style_slots.toast` slot and the built-in `RecipeToastStyle` default.

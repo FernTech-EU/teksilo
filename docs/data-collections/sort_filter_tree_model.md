@@ -44,7 +44,7 @@ nodes. Apps that want identity-based selection should observe
 bump.
 
 ```rust
-# use bastyde_data::{TreeModel, SortFilterTreeModel, SortDirection, TreeFilterMode};
+# use teksilo_data::{TreeModel, SortFilterTreeModel, SortDirection, TreeFilterMode};
 let tree: TreeModel<&'static str> = TreeModel::new();
 let src  = tree.insert_root(0, "src");
 let docs = tree.insert_root(1, "docs");
@@ -78,7 +78,7 @@ assert_eq!(proxy.visible_count(), 3); // src + main.rs + docs
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_data/sort_filter_tree_model/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_data/sort_filter_tree_model/index.html)
 
 ## `pub enum TreeFilterMode`
 

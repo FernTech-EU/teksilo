@@ -5,7 +5,7 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>Bastyde WebView demo</title>
+    <title>Teksilo WebView demo</title>
     <style>
       body {
         font-family: system-ui, sans-serif;
@@ -32,7 +32,7 @@
     </style>
   </head>
   <body>
-    <h1>Bastyde WebView</h1>
+    <h1>Teksilo WebView</h1>
 
     <!-- The counter increments on a timer. Tab away in the host app and back:
          on return it continues from where it was — proof the native subview
@@ -43,7 +43,7 @@
     <!-- JS → Rust: posts a message the host appends to its log pane. -->
     <button onclick="sendHello()">Send message to Rust</button>
 
-    <!-- Rust → JS: the host dispatches a 'bastyde-message' event we display. -->
+    <!-- Rust → JS: the host dispatches a 'teksilo-message' event we display. -->
     <div id="log"></div>
 
     <script>
@@ -61,7 +61,7 @@
         }
       }
 
-      window.addEventListener("bastyde-message", (e) => {
+      window.addEventListener("teksilo-message", (e) => {
         const log = document.getElementById("log");
         log.textContent += "From Rust: " + JSON.stringify(e.data) + "\n";
       });

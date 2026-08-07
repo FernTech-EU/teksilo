@@ -15,7 +15,7 @@ it happens to touch the same key itself. `SettingsWatcher` is what
 makes it look again, automatically, the moment a peer's write lands
 on disk.
 
-## Shape, mirrored from `bastyde-i18n`'s `FtlFileWatcher`
+## Shape, mirrored from `teksilo-i18n`'s `FtlFileWatcher`
 
 `SettingsWatcher` owns a `notify::RecommendedWatcher` background
 thread and a type-erased sink `Arc<dyn Fn(PathBuf) + Send + Sync>`.
@@ -53,13 +53,13 @@ a service that no longer exists.
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_settings/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_settings/index.html)
 
 ## `pub type SettingsReloadSink`
 
 Sink type invoked on the notify worker thread whenever a watched
 settings directory reports a create/modify event. Implementations
-must be thread-safe; `bastyde-app`'s implementation posts the path
+must be thread-safe; `teksilo-app`'s implementation posts the path
 through the winit `EventLoopProxy` as `AppEvent::SettingsReload`,
 which hops back onto the UI thread where the (single-threaded,
 `Rc`-based) `SettingsRegistry` actually lives.
@@ -71,14 +71,14 @@ pub type SettingsReloadSink = Arc<dyn Fn(PathBuf) + Send + Sync + 'static>;
 ## `pub struct SettingsWatcher`
 
 Active directory watcher over one or more settings directories. One
-per `BastydeAppBuilder::run` invocation (when a settings bundle with
+per `TeksiloAppBuilder::run` invocation (when a settings bundle with
 watching enabled is configured).
 
 Owns the `notify::RecommendedWatcher` background thread for its whole
 lifetime; dropping the `SettingsWatcher` stops the watcher and cleans
 up. Kept alive by the caller for as long as live reload is wanted —
-`bastyde-app` stores it on its window-loop handler, exactly like
-`bastyde-i18n`'s `FtlFileWatcher`.
+`teksilo-app` stores it on its window-loop handler, exactly like
+`teksilo-i18n`'s `FtlFileWatcher`.
 
 ```rust
 pub struct SettingsWatcher { /* fields */ }
@@ -128,7 +128,7 @@ Register `reloadable` under its canonical path and return it back
 unchanged, so a caller can register and retain in one expression:
 
 ```
-use bastyde_settings::{SettingsRegistry, SettingsFile, Migrator, Versioned};
+use teksilo_settings::{SettingsRegistry, SettingsFile, Migrator, Versioned};
 use serde::{Serialize, Deserialize};
 use std::rc::Rc;
 

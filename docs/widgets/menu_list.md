@@ -31,9 +31,9 @@ hover-switch while the cursor travels diagonally toward the submenu.
 list auto-group via `push_to_radio_group` so AT announces "2 of 3".
 
 ```rust
-# use bastyde_widgets::{MenuList, MenuItem};
-# use bastyde_i18n::lit;
-# use bastyde_core::Intent;
+# use teksilo_widgets::{MenuList, MenuItem};
+# use teksilo_i18n::lit;
+# use teksilo_core::Intent;
 let _w = MenuList::new()
     .item(MenuItem::new(lit!("Cut")).on_activate_fn(|ctx| ctx.send_intent(Intent::new("app.cut"))))
     .item(MenuItem::new(lit!("Copy")).on_activate_fn(|ctx| ctx.send_intent(Intent::new("app.copy"))))
@@ -47,7 +47,7 @@ let _w = MenuList::new()
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/menu_list/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/menu_list/index.html)
 
 ## `pub struct MenuSeparator`
 
@@ -91,7 +91,7 @@ for the available edges.
 
 Add a menu item (typically a `MenuItem`).
 
-#### `pub fn item_when( self, widget: impl Widget + 'static, visible: impl Into<bastyde_core::signal::Prop<bool>>, ) -> Self`
+#### `pub fn item_when( self, widget: impl Widget + 'static, visible: impl Into<teksilo_core::signal::Prop<bool>>, ) -> Self`
 
 Add a menu item that is shown only while `visible` is `true`. When the
 gate is `false` the row collapses to zero height (no gap) and keyboard
@@ -99,7 +99,7 @@ navigation skips it — the conditionally-shown menu row. Used e.g. by a
 `Toolbar`'s overflow menu, where each row is present only while its
 inline twin is collapsed.
 
-#### `pub fn item_boxed_when( mut self, widget: Box<dyn Widget>, visible: impl Into<bastyde_core::signal::Prop<bool>>, ) -> Self`
+#### `pub fn item_boxed_when( mut self, widget: Box<dyn Widget>, visible: impl Into<teksilo_core::signal::Prop<bool>>, ) -> Self`
 
 `item_when` for an already-boxed widget — used when
 the row type is decided at runtime (e.g. a menu row that is either a

@@ -26,7 +26,7 @@ For claiming *all* remaining stack space and then centering within it, use
 `Expand` wrapping `Center` instead.
 
 ```rust
-# use bastyde_widgets::primitives::{Center, RectWidget};
+# use teksilo_widgets::primitives::{Center, RectWidget};
 // Center a rect in the full slot provided by its parent
 let _centered = Center::new().child(RectWidget::new());
 ```
@@ -37,7 +37,7 @@ let _centered = Center::new().child(RectWidget::new());
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/primitives/center/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/primitives/center/index.html)
 
 ## `pub struct Center`
 

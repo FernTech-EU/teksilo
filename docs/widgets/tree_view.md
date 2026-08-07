@@ -21,10 +21,10 @@ exact per-flat-index callback (`item_height_fn`), and auto-measured
 ## Example
 
 ```rust
-# use bastyde_widgets::TreeView;
-# use bastyde_widgets::primitives::{HStack, Padding, TextWidget};
-# use bastyde_data::TreeModel;
-# use bastyde_i18n::lit;
+# use teksilo_widgets::TreeView;
+# use teksilo_widgets::primitives::{HStack, Padding, TextWidget};
+# use teksilo_data::TreeModel;
+# use teksilo_i18n::lit;
 # struct Item { title: String }
 # let tree_model: TreeModel<Item> = TreeModel::new();
 let _w = TreeView::new(tree_model, |item, entry, _selected| {
@@ -42,7 +42,7 @@ let _w = TreeView::new(tree_model, |item, entry, _selected| {
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/tree_view/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/tree_view/index.html)
 
 ## `pub struct TreeRowContext`
 
@@ -60,7 +60,7 @@ pub struct TreeRowContext<'a, T: 'static> { /* fields */ }
 
 ### Methods
 
-#### `pub fn toggle_callback(&self) -> std::rc::Rc<dyn Fn(&mut bastyde_core::widget::EventContext)>`
+#### `pub fn toggle_callback(&self) -> std::rc::Rc<dyn Fn(&mut teksilo_core::widget::EventContext)>`
 
 Toggle callback for this row's chevron. Wires in one line:
 `.on_toggle_rc(ctx.toggle_callback())`.
@@ -70,7 +70,7 @@ Toggle callback for this row's chevron. Wires in one line:
 Cloned handle to the slice — call `.toggle_expand(node)`,
 `.expand(node)`, `.collapse(node)` directly.
 
-#### `pub fn node_id(&self) -> bastyde_data::NodeId`
+#### `pub fn node_id(&self) -> teksilo_data::NodeId`
 
 The `NodeId` of this row in the backing `TreeModel`.
 

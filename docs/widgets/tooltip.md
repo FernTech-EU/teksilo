@@ -27,15 +27,15 @@ Three tiers, increasing in expressive power:
   the body keep their own tooltip setters and cascade normally.
 
 All three tiers share the same overlay machinery, hover/focus
-tracking, and dwell-promotion timer in `bastyde-core`. The per-widget
+tracking, and dwell-promotion timer in `teksilo-core`. The per-widget
 setters (`.tooltip` / `.rich_tooltip` / `.composite_tooltip`) are
 mutually exclusive (last-one-wins): each setter clears the others.
 
 ## Example — plain tooltip
 
 ```rust
-# use bastyde_widgets::tooltip::TooltipWidget;
-# use bastyde_i18n::lit;
+# use teksilo_widgets::tooltip::TooltipWidget;
+# use teksilo_i18n::lit;
 let _tip = TooltipWidget::new(lit!("Save the current file"));
 ```
 
@@ -45,7 +45,7 @@ let _tip = TooltipWidget::new(lit!("Save the current file"));
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/tooltip/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/tooltip/index.html)
 
 ## `pub struct TooltipWidget`
 
@@ -80,7 +80,7 @@ show. Callers wanting locale reactivity should resolve their
 `LocalizedString` against the active locale when setting the
 signal.
 
-#### `pub fn style(mut self, style: impl bastyde_core::styles::TooltipStyle) -> Self`
+#### `pub fn style(mut self, style: impl teksilo_core::styles::TooltipStyle) -> Self`
 
 Per-call style override. Replaces the theme-wide default
 `TooltipStyle` for just this TooltipWidget instance.

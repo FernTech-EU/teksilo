@@ -22,9 +22,9 @@ signal). When wrapped in `RadioGroup`, each button emits
 positional membership.
 
 ```rust
-# use bastyde_widgets::RadioButton;
-# use bastyde_core::signal::Signal;
-# use bastyde_i18n::lit;
+# use teksilo_widgets::RadioButton;
+# use teksilo_core::signal::Signal;
+# use teksilo_i18n::lit;
 let selected = Signal::new(0_usize);
 let _r0 = RadioButton::new(0, selected.clone()).label(lit!("Light"));
 let _r1 = RadioButton::new(1, selected.clone()).label(lit!("Dark"));
@@ -37,7 +37,7 @@ let _r2 = RadioButton::new(2, selected.clone()).label(lit!("System"));
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/radio_button/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/radio_button/index.html)
 
 ## `pub struct RadioButton`
 
@@ -74,7 +74,7 @@ at build time.
 Pick the design-language variant. Default `Circle`. The active
 `RadioStyle` impl decides what the variant means visually.
 
-#### `pub fn style(mut self, style: impl bastyde_core::styles::RadioStyle) -> Self`
+#### `pub fn style(mut self, style: impl teksilo_core::styles::RadioStyle) -> Self`
 
 Per-call style override. Replaces the theme-wide default
 `RadioStyle` for just this RadioButton instance.
@@ -92,7 +92,7 @@ registry. See `Button::rich_tooltip`.
 
 Attach a rich tooltip driven by inline `TooltipContent`.
 
-#### `pub fn composite_tooltip( mut self, content: impl bastyde_core::widget::Widget + 'static, ) -> Self`
+#### `pub fn composite_tooltip( mut self, content: impl teksilo_core::widget::Widget + 'static, ) -> Self`
 
 Attach a composite tooltip — third tier, hosting an arbitrary
 widget tree. See `Button::composite_tooltip`.

@@ -2,10 +2,10 @@
 # SPDX-FileCopyrightText: 2026 FernTech
 
 # Arabic runtime translation. The language tag `ar-SA` triggers the
-# RTL layout direction via `bastyde_i18n::rtl_from_locale`.
+# RTL layout direction via `teksilo_i18n::rtl_from_locale`.
 
 window-title = عرض التدويل
--brand  = Bastyde
+-brand  = Teksilo
 heading = معرض التدويل في { -brand }
 greeting = مرحبا { $name }!
 body-paragraph = اختر لغة من القائمة أدناه. يؤدي التبديل إلى العربية إلى عكس اتجاه التخطيط — يتم تبديل البداية والنهاية، ويعكس الصف السفلي أطفاله بشكل واضح. الإنجليزية والفرنسية من اليسار إلى اليمين، لذا يحتفظ الصف بنفس الترتيب بينهما.

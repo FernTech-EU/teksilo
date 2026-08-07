@@ -15,9 +15,9 @@
 //! - Nested HStack-in-VStack arrangements
 //! - Composite widget rebuild on theme change
 
-use bastyde::prelude::*;
-use bastyde::tokens::{FontWeight, TextStyle};
-use bastyde::widgets::{HStack, Padding, Panel, Spacer, TextWidget, VStack};
+use teksilo::prelude::*;
+use teksilo::tokens::{FontWeight, TextStyle};
+use teksilo::widgets::{HStack, Padding, Panel, Spacer, TextWidget, VStack};
 
 // ---------------------------------------------------------------------------
 // Application commands
@@ -58,7 +58,7 @@ impl Widget for RootContent {
                                     .color(TextRole::Primary),
                             )
                             .child(Spacer::new())
-                            .child(bastyde::widgets::ThemeSwitcher::new()),
+                            .child(teksilo::widgets::ThemeSwitcher::new()),
                     )
                     // Typography showcase
                     .child(
@@ -158,7 +158,7 @@ impl Widget for RootContent {
 
 /// Helper — returns a widget value, not a WidgetId.
 /// Works with the inline child() pattern.
-fn build_color_box(color: impl Into<bastyde::core::ColorProp>, label: &str) -> Panel {
+fn build_color_box(color: impl Into<teksilo::core::ColorProp>, label: &str) -> Panel {
     Panel::new()
         .background(color)
         .corner_radius(6.0)
@@ -181,13 +181,13 @@ fn build_color_box(color: impl Into<bastyde::core::ColorProp>, label: &str) -> P
 // ---------------------------------------------------------------------------
 
 fn main() {
-    BastydeAppBuilder::new()
+    TeksiloAppBuilder::new()
         .install_automation_bridge_in_debug()
         .install_inspector_in_debug()
-        .theme(bastyde::presets::intui::light())
+        .theme(teksilo::presets::intui::light())
         .initial_window(
             WindowConfig::new()
-                .title("Bastyde — Text & Layout")
+                .title("Teksilo — Text & Layout")
                 .size(600, 500)
                 .root(|tree, _state| tree.add(RootContent::new())),
         )
@@ -200,9 +200,9 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use bastyde::core::WidgetTree;
-    use bastyde::prelude::*;
-    use bastyde::widgets::{HStack, Spacer, TextWidget, VStack};
+    use teksilo::core::WidgetTree;
+    use teksilo::prelude::*;
+    use teksilo::widgets::{HStack, Spacer, TextWidget, VStack};
 
     #[derive(Debug)]
     struct FixedLeaf(f32, f32);
@@ -229,7 +229,7 @@ mod tests {
 
     #[test]
     fn text_widget_measures_correctly_without_backend() {
-        let theme = bastyde::presets::intui::light();
+        let theme = teksilo::presets::intui::light();
         let w = TextWidget::new(lit!("Hello World")).style(theme.typography.body.clone());
         let ctx = LayoutContext::for_testing(&theme);
         let size = w.layout_response(SizeProposal::unspecified(), &ctx).size;
@@ -239,8 +239,8 @@ mod tests {
 
     #[test]
     fn theme_swap_changes_color_tokens() {
-        let light = bastyde::presets::intui::light();
-        let dark = bastyde::presets::intui::dark();
+        let light = teksilo::presets::intui::light();
+        let dark = teksilo::presets::intui::dark();
         assert_ne!(
             light.colors.surface_main.to_array(),
             dark.colors.surface_main.to_array()
@@ -273,13 +273,13 @@ mod tests {
     fn composite_rebuild_on_theme_change() {
         use super::RootContent;
 
-        let mut tree = WidgetTree::new().with_theme(bastyde::presets::intui::light());
+        let mut tree = WidgetTree::new().with_theme(teksilo::presets::intui::light());
         let _root = tree.add(RootContent::new());
         tree.layout(SizeProposal::exact(600.0, 500.0));
         let frame_light = tree.render();
 
         // Switch to dark theme — triggers composite rebuild
-        tree.set_theme(bastyde::presets::intui::dark());
+        tree.set_theme(teksilo::presets::intui::dark());
         tree.layout(SizeProposal::exact(600.0, 500.0));
         let frame_dark = tree.render();
 

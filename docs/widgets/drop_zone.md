@@ -22,7 +22,7 @@ DropZone::new(tr!("drop_images_here"))
 
 External drops are delivered through the framework's normal drag pipeline
 (`on_drag_hover` / `on_drag_leave` / `on_drop`) once
-[`install_external_dnd`](https://docs.rs/bastyde-app) is wired and a backend
+[`install_external_dnd`](https://docs.rs/teksilo-app) is wired and a backend
 is available; on platforms with no backend (e.g. X11) the Browse button
 keeps the zone fully usable.
 
@@ -47,7 +47,7 @@ announcements plus the Browse fallback are the supported pattern.
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/drop_zone/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/drop_zone/index.html)
 
 ## `pub struct DropZone`
 

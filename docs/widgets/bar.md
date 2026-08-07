@@ -30,16 +30,16 @@ give each one an accessible name via
 so screen readers can distinguish them (ARIA APG recommendation).
 
 ```ignore
-use bastyde_widgets::tab_widget::{TabBar, TabDelegate, TabId};
-use bastyde_data::ListModel;
-use bastyde_core::signal::Signal;
+use teksilo_widgets::tab_widget::{TabBar, TabDelegate, TabId};
+use teksilo_data::ListModel;
+use teksilo_core::signal::Signal;
 
 #[derive(Clone)]
 struct Tab { id: TabId, title: String }
 
 let model: ListModel<Tab> = ListModel::new();
 let selected: Signal<Option<TabId>> = Signal::new(None);
-let delegate = TabDelegate::new(|_i, t: &Tab| bastyde_i18n::lit!(t.title.clone()));
+let delegate = TabDelegate::new(|_i, t: &Tab| teksilo_i18n::lit!(t.title.clone()));
 let _bar = TabBar::horizontal(model, delegate, selected, |_i, t| t.id)
     .reorderable(true)
     .tab_dividers();
@@ -51,7 +51,7 @@ let _bar = TabBar::horizontal(model, delegate, selected, |_i, t| t.id)
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/tab_widget/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/tab_widget/index.html)
 
 ## `pub const DEFAULT_MIN_TAB_WIDTH`
 
@@ -226,7 +226,7 @@ the row. Default: `DEFAULT_TAB_SPACING`.
 Width (in dp) of an icon-only pinned tab.
 Default: `DEFAULT_PINNED_TAB_WIDTH`.
 
-#### `pub fn tab_background(mut self, color: impl Into<bastyde_core::color_prop::ColorProp>) -> Self`
+#### `pub fn tab_background(mut self, color: impl Into<teksilo_core::color_prop::ColorProp>) -> Self`
 
 All-states shorthand for the per-tab background — every tab
 (selected, idle, hovered) paints this unless a per-state override
@@ -235,22 +235,22 @@ below is set. Accepts any `Color`, `SurfaceRole`, or `Signal<Color>`
 Default `None` = transparent. To tint the bar's backdrop instead,
 use `bar_background`.
 
-#### `pub fn selected_tab_background( mut self, color: impl Into<bastyde_core::color_prop::ColorProp>, ) -> Self`
+#### `pub fn selected_tab_background( mut self, color: impl Into<teksilo_core::color_prop::ColorProp>, ) -> Self`
 
 Background for the **selected** tab. Falls back to
 `tab_background`, then transparent.
 
-#### `pub fn hover_tab_background( mut self, color: impl Into<bastyde_core::color_prop::ColorProp>, ) -> Self`
+#### `pub fn hover_tab_background( mut self, color: impl Into<teksilo_core::color_prop::ColorProp>, ) -> Self`
 
 Background for the **hovered** (non-selected) tab. Falls back to
 `tab_background`, then transparent.
 
-#### `pub fn idle_tab_background( mut self, color: impl Into<bastyde_core::color_prop::ColorProp>, ) -> Self`
+#### `pub fn idle_tab_background( mut self, color: impl Into<teksilo_core::color_prop::ColorProp>, ) -> Self`
 
 Background for **idle** tabs (not selected, not hovered). Falls back
 to `tab_background`, then transparent.
 
-#### `pub fn bar_background(mut self, color: impl Into<bastyde_core::color_prop::ColorProp>) -> Self`
+#### `pub fn bar_background(mut self, color: impl Into<teksilo_core::color_prop::ColorProp>) -> Self`
 
 Set the backdrop fill spanning the whole bar strip (behind the
 headers, slots, and scroll arrows). Independent of the per-tab
@@ -262,13 +262,13 @@ Default `None` = transparent.
 Draw a 1 dp divider between consecutive tabs (scrollable and pinned
 strips). Off by default. See `tab_divider_color`.
 
-#### `pub fn tab_divider_color( mut self, color: impl Into<bastyde_core::color_prop::ColorProp>, ) -> Self`
+#### `pub fn tab_divider_color( mut self, color: impl Into<teksilo_core::color_prop::ColorProp>, ) -> Self`
 
 Like `tab_dividers`, but with an explicit
 colour. Accepts any `Color`, `BorderRole`,
 or `Signal<Color>`. Implies `tab_dividers()`.
 
-#### `pub fn active_indicator( mut self, position: bastyde_core::styles::TabIndicatorPosition, ) -> Self`
+#### `pub fn active_indicator( mut self, position: teksilo_core::styles::TabIndicatorPosition, ) -> Self`
 
 Choose which edge the active-tab highlight indicator hugs. Default
 `TabIndicatorPosition::OuterEdge`
@@ -292,7 +292,7 @@ on **idle** tabs (not selected, not disabled). Default:
 `TextRole::Secondary`. Disabled tabs always read as
 `TextRole::Disabled` regardless of this setting.
 
-#### `pub fn style(mut self, style: impl bastyde_core::styles::TabStyle) -> Self`
+#### `pub fn style(mut self, style: impl teksilo_core::styles::TabStyle) -> Self`
 
 Override the active `TabStyle`
 for every header in this bar. The widget keeps responsibility
@@ -452,7 +452,7 @@ and mints whatever it needs (e.g. opens a tab).
 Independent of `accept_external_tabs`:
 a bar can accept foreign tabs, non-tab payloads, both, or
 neither. OS drops additionally require the app to have called
-`BastydeAppBuilder::install_external_dnd()`.
+`TeksiloAppBuilder::install_external_dnd()`.
 
 Note: the hover indicator is *optimistic* — it shows for any
 non-tab payload while this handler is installed; `f`'s return

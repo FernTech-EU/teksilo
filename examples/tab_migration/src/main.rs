@@ -33,10 +33,10 @@
 //!
 //! Run with: `cargo run -p tab-migration`.
 
-use bastyde::core::widget::WidgetPlacement;
-use bastyde::data::ListModel;
-use bastyde::prelude::*;
-use bastyde::widgets::{
+use teksilo::core::widget::WidgetPlacement;
+use teksilo::data::ListModel;
+use teksilo::prelude::*;
+use teksilo::widgets::{
     Button, ButtonVariant, Card, Divider, Expand, HStack, Panel, TabHandle, TabId, TabInfo,
     TabWidget, TextWidget, VStack,
 };
@@ -212,10 +212,10 @@ impl Widget for Root {
 }
 
 fn main() {
-    BastydeAppBuilder::new()
+    TeksiloAppBuilder::new()
         .install_automation_bridge_in_debug()
         .install_inspector_in_debug()
-        .theme(bastyde::presets::intui::light())
+        .theme(teksilo::presets::intui::light())
         .initial_window(
             WindowConfig::new()
                 .title("Tab Migration — drag tabs between groups")

@@ -1,0 +1,232 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
+//! FixedSize — a layout modifier that pins a child to its natural size,
+//! optionally overriding one or both dimensions with a reactive value.
+//!
+//! Without bindings, `FixedSize` ignores the parent's size proposal and
+//! always reports the child's intrinsic size. This is useful for widgets
+//! that must not be stretched or compressed by their containing stack —
+//! icons, chips, or thumbnails that must stay at their designed size
+//! regardless of the surrounding layout.
+//!
+//! With [`width`](FixedSize::width) or
+//! [`height`](FixedSize::height), the corresponding dimension is
+//! locked to a reactive `Signal<f32>` value; the signal change triggers a
+//! relayout automatically. Unbound dimensions still fall back to the child's
+//! natural size.
+//!
+//! ```rust
+//! # use teksilo_widgets::primitives::{FixedSize, RectWidget};
+//! # use teksilo_core::signal::Signal;
+//! let sidebar_width = Signal::new(240.0_f32);
+//! // Pin the sidebar width to a reactive signal
+//! let _sidebar = FixedSize::new()
+//!     .width(sidebar_width)
+//!     .child(RectWidget::new());
+//! ```
+
+use teksilo_canvas::{Rect, Size, SizeProposal};
+use teksilo_core::signal::Prop;
+use teksilo_core::widget::{LayoutContext, PaintContext, PendingChild, Widget, WidgetPlacement};
+use teksilo_core::widget_id::WidgetId;
+
+/// Layout modifier that prevents a widget from expanding beyond its natural size,
+/// or constrains it to specific reactive dimensions.
+///
+/// Without bindings, reports the child's natural size (ignoring parent proposal).
+/// With `width`/`height`, constrains to the bound values.
+#[derive(Debug)]
+pub struct FixedSize {
+    child_id: Option<WidgetId>,
+    pending_child: Option<PendingChild>,
+    width: Option<Prop<f32>>,
+    height: Option<Prop<f32>>,
+}
+
+impl FixedSize {
+    /// Create a `FixedSize` with no child and no dimension bindings; the child's
+    /// natural size will be used for both axes.
+    pub fn new() -> Self {
+        Self {
+            child_id: None,
+            pending_child: None,
+            width: None,
+            height: None,
+        }
+    }
+
+    /// Set child by pre-registered ID.
+    pub fn child_id(mut self, id: WidgetId) -> Self {
+        self.pending_child = Some(PendingChild::Id(id));
+        self
+    }
+
+    /// Set an inline child widget (deferred insertion).
+    pub fn child(mut self, widget: impl Widget + 'static) -> Self {
+        self.pending_child = Some(PendingChild::Deferred(Box::new(widget)));
+        self
+    }
+
+    /// Bind width to a reactive state. When the state changes, relayout is triggered.
+    pub fn width(mut self, state: impl Into<Prop<f32>>) -> Self {
+        self.width = Some(state.into());
+        self
+    }
+
+    /// Bind height to a reactive state. When the state changes, relayout is triggered.
+    pub fn height(mut self, state: impl Into<Prop<f32>>) -> Self {
+        self.height = Some(state.into());
+        self
+    }
+}
+
+impl Default for FixedSize {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Widget for FixedSize {
+    fn build(&mut self, ctx: &mut teksilo_core::build_context::BuildContext) -> Vec<WidgetId> {
+        if let Some(pending) = self.pending_child.take() {
+            self.child_id = Some(match pending {
+                PendingChild::Id(id) => id,
+                PendingChild::Deferred(w) => ctx.add_boxed(w),
+            });
+        }
+        // Register reactive bindings
+        let self_id = ctx.self_id();
+        let registry = ctx.binding_registry();
+        if let Some(ref w) = self.width {
+            w.register_if_bound(
+                self_id,
+                registry,
+                teksilo_core::binding::BindingLevel::Relayout,
+            );
+        }
+        if let Some(ref h) = self.height {
+            h.register_if_bound(
+                self_id,
+                registry,
+                teksilo_core::binding::BindingLevel::Relayout,
+            );
+        }
+        self.child_id.into_iter().collect()
+    }
+
+    fn layout_response(
+        &self,
+        _proposal: SizeProposal,
+        ctx: &LayoutContext,
+    ) -> teksilo_core::widget::LayoutResponse {
+        // Forward the bound width/height to the child as its size proposal so
+        // wrap-aware children (TextWidget in TextOverflow::Wrap, ScrollArea,
+        // etc.) can compute their intrinsic cross-axis size against the same
+        // constraint we will place them into. Unbound dimensions stay
+        // unspecified so the child falls back to its own natural size.
+        let bound_width = self.width.as_ref().map(|r| r.get());
+        let bound_height = self.height.as_ref().map(|r| r.get());
+        let child_proposal = SizeProposal {
+            width: bound_width,
+            height: bound_height,
+        };
+        let child_size = self
+            .child_id
+            .and_then(|id| ctx.child_size(id, child_proposal))
+            .unwrap_or(Size::ZERO);
+
+        let w = bound_width.unwrap_or(child_size.width);
+        let h = bound_height.unwrap_or(child_size.height);
+        Size::new(w, h).into()
+    }
+
+    fn place_children(
+        &self,
+        bounds: Rect,
+        _proposal: SizeProposal,
+        children: &mut [WidgetPlacement],
+        _ctx: &LayoutContext,
+    ) {
+        for child in children.iter_mut() {
+            child.origin = bounds.origin();
+            child.size = bounds.size();
+        }
+    }
+
+    fn paint(&self, _bounds: Rect, _canvas: &mut teksilo_canvas::Canvas, _ctx: &PaintContext) {}
+
+    fn children(&self) -> Vec<WidgetId> {
+        self.child_id.into_iter().collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use teksilo_core::signal::Signal;
+    use teksilo_core::widget_tree::WidgetTree;
+
+    #[derive(Debug)]
+    struct FixedLeaf(f32, f32);
+    impl Widget for FixedLeaf {
+        fn layout_response(
+            &self,
+            _proposal: SizeProposal,
+            _ctx: &LayoutContext,
+        ) -> teksilo_core::widget::LayoutResponse {
+            Size::new(self.0, self.1).into()
+        }
+    }
+
+    #[test]
+    fn reports_child_natural_size() {
+        let mut tree = WidgetTree::new();
+        let child = tree.add(FixedLeaf(40.0, 20.0));
+        let fixed = tree.add(FixedSize::new().child_id(child));
+        tree.layout(SizeProposal::unspecified());
+
+        let fb = tree.bounds(fixed);
+        assert!((fb.width - 40.0).abs() < 0.01);
+        assert!((fb.height - 20.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn ignores_parent_proposal() {
+        let mut tree = WidgetTree::new();
+        let child = tree.add(FixedLeaf(40.0, 20.0));
+        let fixed = tree.add(FixedSize::new().child_id(child));
+        tree.layout(SizeProposal::unspecified());
+
+        let fb = tree.bounds(fixed);
+        assert!((fb.width - 40.0).abs() < 0.01);
+        assert!((fb.height - 20.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn width_constrains_size() {
+        let width = Signal::new(150.0_f32);
+        let mut tree = WidgetTree::new();
+        let child = tree.add(FixedLeaf(40.0, 20.0));
+        let fixed = tree.add(FixedSize::new().width(width.clone()).child_id(child));
+        tree.layout(SizeProposal::unspecified());
+
+        let fb = tree.bounds(fixed);
+        assert!((fb.width - 150.0).abs() < 0.01); // bound width
+        assert!((fb.height - 20.0).abs() < 0.01); // child's natural height
+    }
+
+    #[test]
+    fn width_triggers_relayout_on_change() {
+        let width = Signal::new(200.0_f32);
+        let mut tree = WidgetTree::new();
+        let child = tree.add(FixedLeaf(40.0, 20.0));
+        let fixed = tree.add(FixedSize::new().width(width.clone()).child_id(child));
+        tree.layout(SizeProposal::unspecified());
+        assert!((tree.bounds(fixed).width - 200.0).abs() < 0.01);
+
+        width.set(100.0);
+        tree.layout(SizeProposal::unspecified());
+        assert!((tree.bounds(fixed).width - 100.0).abs() < 0.01);
+    }
+}

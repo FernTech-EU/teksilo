@@ -53,7 +53,7 @@ is used to from booking sites, calendar apps, and form builders.
 
 ```ignore
 // Requires ctx.signal() — shown as ignore per convention.
-use bastyde_widgets::date_time_edit::{DateTimeEdit, SecondsMode};
+use teksilo_widgets::date_time_edit::{DateTimeEdit, SecondsMode};
 
 let datetime = ctx.signal(None);
 let _w = DateTimeEdit::new(datetime.clone())
@@ -67,7 +67,7 @@ let _w = DateTimeEdit::new(datetime.clone())
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/date_time_edit/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/date_time_edit/index.html)
 
 ## `pub struct DateTimeEdit`
 
@@ -84,7 +84,7 @@ pub struct DateTimeEdit { /* fields */ }
 
 Create a datetime picker backed by the optional `value` signal.
 
-#### `pub fn style(mut self, style: impl bastyde_core::styles::DateEditStyle) -> Self`
+#### `pub fn style(mut self, style: impl teksilo_core::styles::DateEditStyle) -> Self`
 
 Per-call DateEditStyle override (shared with DateEdit family).
 

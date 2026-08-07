@@ -25,12 +25,12 @@
 - [Internationalization](i18n.md)
 - [Grid view](grid-view.md)
 
-# bati! DSL & formatting
+# teksu! DSL & formatting
 
-- [bati! macro reference](bati-macro-reference.md)
-- [bati! language spec](bati-language-spec-v3.md)
-- [bastyde-fmt](bastyde-fmt.md)
-- [bastyde-fmt in VS Code](bastyde-fmt-vscode.md)
+- [teksu! macro reference](teksu-macro-reference.md)
+- [teksu! language spec](teksu-language-spec-v3.md)
+- [teksilo-fmt](teksilo-fmt.md)
+- [teksilo-fmt in VS Code](teksilo-fmt-vscode.md)
 
 # Input, navigation, chrome
 
@@ -66,8 +66,8 @@
 - [Tab widget](tab-widget.md)
 - [Font picker](font-picker.md)
 - [Charts](charts.md)
-- [Scene viewport](bastyde-scene.md)
-- [Scene accessibility](bastyde-scene-a11y.md)
+- [Scene viewport](teksilo-scene.md)
+- [Scene accessibility](teksilo-scene-a11y.md)
 
 # Visuals & resources
 

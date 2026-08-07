@@ -22,9 +22,9 @@ via `set_expanded`. The popover surface carries `Role::Dialog` named
 after the trigger label.
 
 ```rust
-# use bastyde_widgets::popover::Popover;
-# use bastyde_widgets::primitives::TextWidget;
-# use bastyde_i18n::lit;
+# use teksilo_widgets::popover::Popover;
+# use teksilo_widgets::primitives::TextWidget;
+# use teksilo_i18n::lit;
 let _w = Popover::new(lit!("Choose…"))
     .content(TextWidget::new(lit!("Pick an option")));
 ```
@@ -35,7 +35,7 @@ let _w = Popover::new(lit!("Choose…"))
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/popover/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/popover/index.html)
 
 ## `pub struct Popover`
 
@@ -52,7 +52,7 @@ pub struct Popover { /* fields */ }
 Construct a popover with the given trigger-button label. Supply content via
 `.content(...)` before mounting.
 
-#### `pub fn surface_variant(mut self, variant: bastyde_core::styles::PopoverVariant) -> Self`
+#### `pub fn surface_variant(mut self, variant: teksilo_core::styles::PopoverVariant) -> Self`
 
 Pick the popover surface's design-language variant. Default
 `Default`. The active `PopoverStyle` decides what each variant
@@ -60,7 +60,7 @@ means (the IntUI default ships one chrome shape across all
 variants and lets the inner content distinguish them; custom
 styles can branch on the variant for distinct surfaces).
 
-#### `pub fn style(mut self, style: impl bastyde_core::styles::PopoverStyle) -> Self`
+#### `pub fn style(mut self, style: impl teksilo_core::styles::PopoverStyle) -> Self`
 
 Per-call style override for the popover surface chrome.
 Replaces the theme-wide default `PopoverStyle` for just this

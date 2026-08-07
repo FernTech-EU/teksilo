@@ -24,7 +24,7 @@ reconcile independently on every mutation.
   then `post_paint` draws the `Over` lightweight items + marquee /
   foreground / debug overlays. `z` orders within each tier; the
   Under/Over band (`Scene::set_layer`)
-  chooses the side. See `docs/bastyde-scene.md` §"Z-order and paint bands".
+  chooses the side. See `docs/teksilo-scene.md` §"Z-order and paint bands".
 - **View transform.** Pan / zoom / rotation are four animated
   `Signal<f32>`s on `SceneView`, composed into a derived
   `Signal<Transform2D>` bound via `BuildContext::set_content_transform`
@@ -60,9 +60,9 @@ reconcile independently on every mutation.
 ## Example
 
 ```rust
-# use bastyde_scene::{Scene, SceneModel, SceneView, SceneSelectionMode, RectItem};
-# use bastyde_canvas::{Point, Rect};
-# use bastyde_tokens::Color;
+# use teksilo_scene::{Scene, SceneModel, SceneView, SceneSelectionMode, RectItem};
+# use teksilo_canvas::{Point, Rect};
+# use teksilo_tokens::Color;
 // Build a shared model and add a lightweight rect item.
 let model = SceneModel::new();
 let local_bounds = Rect::new(0.0, 0.0, 120.0, 80.0);
@@ -90,7 +90,7 @@ assert!(model.local_pos(item_id).is_some());
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_scene/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_scene/index.html)
 
 ## `pub struct DebugOverlay`
 
@@ -162,7 +162,7 @@ like any other widget; gestures and camera animations are wired automatically
 during `build`.
 
 See the `module-level documentation` for the full composition model
-and `docs/bastyde-scene.md` for an end-to-end guide.
+and `docs/teksilo-scene.md` for an end-to-end guide.
 
 ```rust
 pub struct SceneView { /* fields */ }

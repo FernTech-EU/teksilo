@@ -22,11 +22,11 @@ Per link target, relative to the file it appears in:
   * a rustdoc path (`crate::X`, `Self::y`, `self`, bare `TreeView`)   -> inline code
 
 It is idempotent (rewritten links no longer match) and mirrors qleany's CI `sed`
-link-fixup, generalized for Bastyde's source and rustdoc links.
+link-fixup, generalized for Teksilo's source and rustdoc links.
 
 Usage:
     python3 tools/fix_book_links.py docs
-    python3 tools/fix_book_links.py docs --repo-url https://github.com/ferntech-eu/bastyde --branch main
+    python3 tools/fix_book_links.py docs --repo-url https://github.com/ferntech-eu/teksilo --branch main
     python3 tools/fix_book_links.py --test
 """
 
@@ -41,7 +41,7 @@ from pathlib import Path
 SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parent
 
-DEFAULT_REPO_URL = "https://github.com/ferntech-eu/bastyde"
+DEFAULT_REPO_URL = "https://github.com/ferntech-eu/teksilo"
 DEFAULT_BRANCH = "main"
 
 _INLINE_RE = re.compile(r'\[([^\]]+)\]\(([^)\s]+)(\s+"[^"]*")?\)')
@@ -162,13 +162,13 @@ def _self_test() -> int:
         return fix_text(s, r, b, src)
 
     # source link (one ../) -> GitHub blob URL, anchor preserved
-    out = fx("see [button.rs](../crates/bastyde-widgets/src/button.rs#L42)")
-    assert out == f"see [button.rs]({r}/blob/{b}/crates/bastyde-widgets/src/button.rs#L42)", out
+    out = fx("see [button.rs](../crates/teksilo-widgets/src/button.rs#L42)")
+    assert out == f"see [button.rs]({r}/blob/{b}/crates/teksilo-widgets/src/button.rs#L42)", out
     # the same with a RELATIVE src_path (how fix_dirs calls it) must also resolve
     rel = fix_text(
-        "[x](../crates/bastyde-widgets/src/button.rs)", r, b, Path("docs/architecture.md")
+        "[x](../crates/teksilo-widgets/src/button.rs)", r, b, Path("docs/architecture.md")
     )
-    assert rel == f"[x]({r}/blob/{b}/crates/bastyde-widgets/src/button.rs)", rel
+    assert rel == f"[x]({r}/blob/{b}/crates/teksilo-widgets/src/button.rs)", rel
     # the in-book rustdoc reference is left alone
     assert fx("[API](../api/x/index.html)") == "[API](../api/x/index.html)"
     # an existing chapter (.md present in docs/) is kept
@@ -184,8 +184,8 @@ def _self_test() -> int:
     ri = fx("see [`Ref`] now.\n\n[`Ref`]: crate::Ref")
     assert "[`Ref`]:" not in ri and "see `Ref` now." in ri, ri
     # reference-style source def -> GitHub URL (body shortcut still resolves)
-    rd = fx("see [`T`].\n\n[`T`]: ../crates/bastyde-widgets/src/toolbar.rs")
-    assert f"[`T`]: {r}/blob/{b}/crates/bastyde-widgets/src/toolbar.rs" in rd, rd
+    rd = fx("see [`T`].\n\n[`T`]: ../crates/teksilo-widgets/src/toolbar.rs")
+    assert f"[`T`]: {r}/blob/{b}/crates/teksilo-widgets/src/toolbar.rs" in rd, rd
     # idempotent
     assert fx(out) == out, "not idempotent"
     print("fix_book_links self-tests passed.", file=sys.stderr)

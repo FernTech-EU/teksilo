@@ -42,7 +42,7 @@ SegmentedControl::new(selected)
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/segmented_control/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/segmented_control/index.html)
 
 ## `pub struct Segment`
 
@@ -143,11 +143,11 @@ Set the enabled state, statically or reactively. Forwarded to
 the arena at build time via
 `ctx.enabled_when(segmented_control_id, self.enabled.clone())`.
 
-#### `pub fn style(mut self, style: impl bastyde_core::styles::SegmentedControlStyle) -> Self`
+#### `pub fn style(mut self, style: impl teksilo_core::styles::SegmentedControlStyle) -> Self`
 
 Per-call override for the segmented-control chrome.
 
-#### `pub fn text_style(mut self, style: impl Into<bastyde_core::color_prop::TextStyleProp>) -> Self`
+#### `pub fn text_style(mut self, style: impl Into<teksilo_core::color_prop::TextStyleProp>) -> Self`
 
 Override every segment's label text style (font, size, weight).
 Accepts a `TextStyleRole`, a `TextStyle`, or a `Signal` of either.

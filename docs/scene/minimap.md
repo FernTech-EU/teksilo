@@ -10,9 +10,9 @@ highlighting the currently visible viewport rectangle.
 ## Use
 
 ```
-use bastyde_scene::{Scene, SceneView, SceneMinimap};
-use bastyde_canvas::Rect;
-# use bastyde_widgets::VStack;
+use teksilo_scene::{Scene, SceneView, SceneMinimap};
+use teksilo_canvas::Rect;
+# use teksilo_widgets::VStack;
 
 let mut scene = Scene::new();
 /* …populate scene… */
@@ -60,7 +60,7 @@ plumbing.
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_scene/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_scene/index.html)
 
 ## `pub struct SceneMinimap`
 

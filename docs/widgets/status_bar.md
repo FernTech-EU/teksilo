@@ -15,9 +15,9 @@ the screen reader. Visual chrome (background, border, corner radius) is
 delegated to an inner `Panel`.
 
 ```rust
-# use bastyde_widgets::StatusBar;
-# use bastyde_widgets::primitives::TextWidget;
-# use bastyde_i18n::lit;
+# use teksilo_widgets::StatusBar;
+# use teksilo_widgets::primitives::TextWidget;
+# use teksilo_i18n::lit;
 let _bar = StatusBar::new()
     .child(TextWidget::new(lit!("Ln 1, Col 1")))
     .announce_changes(false);
@@ -29,7 +29,7 @@ let _bar = StatusBar::new()
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/status_bar/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/status_bar/index.html)
 
 ## `pub const STATUS_BAR_HEIGHT`
 

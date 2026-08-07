@@ -25,9 +25,9 @@ when you have a `TreeModel<T>` and want per-view expand state.
 ## Example
 
 ```ignore
-use bastyde_data::{TreeDataSource, FlatEntry, NodeId};
-use bastyde_data::dnd_types::{DragEligibility, DropQuery, DropResponse, DropCommit, RowState};
-use bastyde_core::signal::Signal;
+use teksilo_data::{TreeDataSource, FlatEntry, NodeId};
+use teksilo_data::dnd_types::{DragEligibility, DropQuery, DropResponse, DropCommit, RowState};
+use teksilo_core::signal::Signal;
 
 struct MySource { version: Signal<u64> }
 
@@ -49,7 +49,7 @@ impl TreeDataSource for MySource {
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_data/tree_data_source/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_data/tree_data_source/index.html)
 
 ## `pub struct FlatEntry`
 

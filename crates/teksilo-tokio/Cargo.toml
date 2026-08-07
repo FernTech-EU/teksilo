@@ -1,0 +1,21 @@
+# SPDX-License-Identifier: MPL-2.0
+# SPDX-FileCopyrightText: 2026 FernTech
+
+[package]
+name = "teksilo-tokio"
+edition = "2024"
+version.workspace = true
+license-file.workspace = true
+publish.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Tokio reactor integration for Teksilo's main-thread async executor (teksilo-async)."
+
+[dependencies]
+teksilo-core = { workspace = true }
+teksilo-app = { workspace = true }
+teksilo-async = { workspace = true }
+# Kept local — the runtime choice must not leak to other teksilo crates
+# (same policy as tokio in teksilo-analytics-native). `enable_all` needs the
+# time + net drivers so apps can `.await` timers and sockets (reqwest, …).
+tokio = { version = "1", features = ["rt-multi-thread", "time", "net", "sync"] }

@@ -16,9 +16,9 @@ dismiss-callback shape match `DateEdit`
 so behavior across the disclosure family stays consistent.
 
 ```rust
-# use bastyde_widgets::{Button, ButtonVariant, IconButton, MenuList, MenuItem, PopoverButton, PopoverIconButton};
-# use bastyde_widgets::primitives::TextWidget;
-# use bastyde_i18n::lit;
+# use teksilo_widgets::{Button, ButtonVariant, IconButton, MenuList, MenuItem, PopoverButton, PopoverIconButton};
+# use teksilo_widgets::primitives::TextWidget;
+# use teksilo_i18n::lit;
 // Text trigger (HasPopup::Dialog by default, no caret):
 let _w = PopoverButton::new(Button::new(lit!("Choose…")).variant(ButtonVariant::Plain))
     .content(TextWidget::new(lit!("Pick")));
@@ -51,7 +51,7 @@ everything else is shared by the generic.
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/popover_widget/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/popover_widget/index.html)
 
 ## `pub struct PopoverWidget`
 
@@ -158,7 +158,7 @@ to empty (the wrapped content usually carries its own role and
 name). No effect under `bare` or for the Menu
 variant (which is presentational).
 
-#### `pub fn tooltip(mut self, text: impl Into<bastyde_i18n::LocalizedString>) -> Self`
+#### `pub fn tooltip(mut self, text: impl Into<teksilo_i18n::LocalizedString>) -> Self`
 
 Show a plain single-line tooltip on the trigger after a hover delay.
 Mutually exclusive with `rich_tooltip`,

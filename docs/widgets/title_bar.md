@@ -11,7 +11,7 @@ maximize / close). The platform plumbing — beginning a window drag,
 returning the right `WM_NCHITTEST` codes on Windows, repositioning the
 macOS traffic lights — lives behind the
 `PlatformTitleBarHost` trait in
-`bastyde-platform`. The widget itself is platform-agnostic.
+`teksilo-platform`. The widget itself is platform-agnostic.
 
 Construct a `TitleBar` from inside the root-builder closure, fetching
 the host from the widget tree:
@@ -35,7 +35,7 @@ the host from the widget tree:
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/title_bar/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/title_bar/index.html)
 
 ## `pub type CloseAction`
 

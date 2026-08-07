@@ -4,7 +4,7 @@
 # SceneListAdapter
 
 `SceneListAdapter` — keep lightweight scene items in sync with a
-`bastyde_data` list model or data source.
+`teksilo_data` list model or data source.
 
 A scene's lightweight tier (`SceneItem`) has no arena-backed identity
 and no built-in notion of "one item per row of some data collection" —
@@ -18,7 +18,7 @@ item per row, then reconciles them whenever the source changes.
 arena node. Build one from a handler or `build()`, keep it alive for as
 long as you want the items tracked (typically stashed in the owning
 widget), and it does its work purely through `SceneModel` mutations and
-a `bastyde_data` change observer.
+a `teksilo_data` change observer.
 
 ## Delegate contract
 
@@ -83,10 +83,10 @@ and the mutator ever aliased the same `RefCell`. Mirrors `ListView`'s
 ## Example
 
 ```ignore
-use bastyde_data::ListModel;
-use bastyde_scene::{RectItem, SceneListAdapter, SceneModel};
-use bastyde_canvas::Rect;
-use bastyde_tokens::Color;
+use teksilo_data::ListModel;
+use teksilo_scene::{RectItem, SceneListAdapter, SceneModel};
+use teksilo_canvas::Rect;
+use teksilo_tokens::Color;
 
 struct Card { x: f32, y: f32, color: Color }
 
@@ -114,12 +114,12 @@ assert_eq!(adapter.len(), 3);
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_scene/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_scene/index.html)
 
 ## `pub struct SceneListAdapter`
 
 Keeps a set of lightweight `SceneItem`s in sync with a
-`bastyde_data::ListModel<T>` / `ListDataSource<Item = T>`.
+`teksilo_data::ListModel<T>` / `ListDataSource<Item = T>`.
 
 Not a `Widget` — a plain handle you construct once (typically from a
 composing widget's `build()` or app setup code) and keep alive for as

@@ -23,12 +23,12 @@
 
 use std::rc::Rc;
 
-use bastyde::core::styles::{ButtonStyle, ButtonStyleConfig, CardVariant};
-use bastyde::core::{BuildContext, WidgetId};
-use bastyde::prelude::*;
-use bastyde::tokens::{Color, CornerRadius, SurfaceRole, TextRole, TextStyleRole};
-use bastyde::widgets::primitives::{HStack, Padding, RectWidget, TextWidget, VStack, ZStack};
-use bastyde::widgets::{Button, ButtonVariant, Card, Toggle};
+use teksilo::core::styles::{ButtonStyle, ButtonStyleConfig, CardVariant};
+use teksilo::core::{BuildContext, WidgetId};
+use teksilo::prelude::*;
+use teksilo::tokens::{Color, CornerRadius, SurfaceRole, TextRole, TextStyleRole};
+use teksilo::widgets::primitives::{HStack, Padding, RectWidget, TextWidget, VStack, ZStack};
+use teksilo::widgets::{Button, ButtonVariant, Card, Toggle};
 
 // ── Custom ButtonStyle #1: a soft glow + pill shape ─────────────────────────
 struct GlowButton;
@@ -94,13 +94,13 @@ fn main() {
     let mut theme = intui::light();
     theme.style_slots.button = Some(Rc::new(GlowButton));
 
-    BastydeAppBuilder::new()
+    TeksiloAppBuilder::new()
         .install_automation_bridge_in_debug()
         .theme(theme)
         .install_inspector_in_debug()
         .initial_window(
             WindowConfig::new()
-                .title("Bastyde — Styling System Demo")
+                .title("Teksilo — Styling System Demo")
                 .size(900, 500)
                 .root(|tree, _state| tree.add(Demo)),
         )
@@ -181,8 +181,8 @@ impl Widget for Demo {
     fn layout_response(
         &self,
         proposal: SizeProposal,
-        _ctx: &bastyde::core::widget::LayoutContext,
-    ) -> bastyde::core::widget::LayoutResponse {
+        _ctx: &teksilo::core::widget::LayoutContext,
+    ) -> teksilo::core::widget::LayoutResponse {
         proposal.resolve(0.0, 0.0).into()
     }
 }

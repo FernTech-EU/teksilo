@@ -65,7 +65,7 @@ axis-aligned formula above.
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_scene/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_scene/index.html)
 
 ## `pub struct SceneScrollView`
 
@@ -75,7 +75,7 @@ Construct directly from a configured view, or via the
 `SceneView::with_scroll_bars` convenience method:
 
 ```rust
-# use bastyde_scene::{Scene, SceneView, SceneScrollView, ScrollBarMode};
+# use teksilo_scene::{Scene, SceneView, SceneScrollView, ScrollBarMode};
 let scrollable = SceneView::new(Scene::new())
     .with_scroll_bars()
     .scroll_bar_mode(ScrollBarMode::Overlay);

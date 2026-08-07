@@ -51,7 +51,7 @@ to from booking sites and analytics dashboards.
 
 ```ignore
 // Requires ctx.signal() — shown as ignore per convention.
-use bastyde_widgets::date_range_edit::DateRangeEdit;
+use teksilo_widgets::date_range_edit::DateRangeEdit;
 use jiff::civil::Weekday;
 
 let range = ctx.signal(None);
@@ -66,7 +66,7 @@ let _w = DateRangeEdit::new(range.clone())
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/date_range_edit/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/date_range_edit/index.html)
 
 ## `pub struct DateRangeEdit`
 
@@ -83,7 +83,7 @@ pub struct DateRangeEdit { /* fields */ }
 
 Create a date-range picker bound to `value`.
 
-#### `pub fn style(mut self, style: impl bastyde_core::styles::DateEditStyle) -> Self`
+#### `pub fn style(mut self, style: impl teksilo_core::styles::DateEditStyle) -> Self`
 
 Per-call DateEditStyle override (shared with DateEdit family).
 

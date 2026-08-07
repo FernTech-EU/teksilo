@@ -1,0 +1,20 @@
+# SPDX-License-Identifier: MPL-2.0
+# SPDX-FileCopyrightText: 2026 FernTech
+
+[package]
+name = "teksilo-macros"
+edition = "2024"
+version.workspace = true
+license-file.workspace = true
+publish.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[lib]
+proc-macro = true
+
+[dependencies]
+teksilo-parse = { workspace = true }
+proc-macro2 = "1"
+quote = "1"
+syn = { version = "3", features = ["full", "extra-traits"] }

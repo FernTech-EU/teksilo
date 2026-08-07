@@ -23,8 +23,8 @@
 //!    than the window. Nothing can shrink, so it overflows — press **F12**
 //!    and you'll see yellow/black hazard stripes on the overflowing edge.
 
-use bastyde::prelude::*;
-use bastyde::widgets::{
+use teksilo::prelude::*;
+use teksilo::widgets::{
     Card, Center, ComboBox, FixedSize, HStack, IconButton, IconWidget, Padding, RectWidget,
     Shrinkable, TextWidget, Toolbar, ToolbarAction, ToolbarItem, VStack,
 };
@@ -155,10 +155,10 @@ fn residual_overflow_row() -> impl Widget + 'static {
 }
 
 fn main() {
-    BastydeAppBuilder::new()
+    TeksiloAppBuilder::new()
         .install_automation_bridge_in_debug()
         .install_inspector_in_debug()
-        .theme(bastyde::presets::intui::light())
+        .theme(teksilo::presets::intui::light())
         .initial_window(
             WindowConfig::new()
                 .title("Over-constraint handling")

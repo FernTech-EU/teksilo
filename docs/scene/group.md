@@ -22,10 +22,10 @@ Use `GroupItem` when you need to:
 ## Example
 
 ```ignore
-use bastyde_scene::{Scene, GroupItem};
-use bastyde_canvas::{Point, Rect};
-use bastyde_tokens::Color;
-use bastyde_i18n::lit;
+use teksilo_scene::{Scene, GroupItem};
+use teksilo_canvas::{Point, Rect};
+use teksilo_tokens::Color;
+use teksilo_i18n::lit;
 
 let mut scene = Scene::new();
 // A visible "Act 1" box with a rounded border.
@@ -43,7 +43,7 @@ let _id = scene.add_item(group, Point::new(20.0, 20.0));
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_scene/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_scene/index.html)
 
 ## `pub struct GroupItem`
 

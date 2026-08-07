@@ -25,9 +25,9 @@ currently-mounted page and stretches each placed page to its own bounds —
 all pages share the same slot, so the container size never jumps on a switch.
 
 ```rust
-# use bastyde_widgets::primitives::{Switcher, TextWidget};
-# use bastyde_core::signal::Signal;
-# use bastyde_i18n::lit;
+# use teksilo_widgets::primitives::{Switcher, TextWidget};
+# use teksilo_core::signal::Signal;
+# use teksilo_i18n::lit;
 let page = Signal::new(0_usize);
 let _w = Switcher::new(page.clone())
     .child(TextWidget::new(lit!("Step 1")))   // built at startup (index 0 is default)
@@ -41,7 +41,7 @@ let _w = Switcher::new(page.clone())
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/primitives/switcher/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/primitives/switcher/index.html)
 
 ## `pub struct Switcher`
 
@@ -62,9 +62,9 @@ bounds (top-leading, RTL-aware). Hidden pages keep their subtree
 laid out but invisible via per-page `visible_when` bindings.
 
 ```rust
-# use bastyde_widgets::primitives::{Switcher, TextWidget};
-# use bastyde_core::signal::Signal;
-# use bastyde_i18n::lit;
+# use teksilo_widgets::primitives::{Switcher, TextWidget};
+# use teksilo_core::signal::Signal;
+# use teksilo_i18n::lit;
 let page = Signal::new(0_usize);
 let _w = Switcher::new(page.clone())
     .child(TextWidget::new(lit!("Page 0")))   // built at startup

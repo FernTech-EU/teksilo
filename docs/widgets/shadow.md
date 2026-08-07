@@ -31,7 +31,7 @@ halo would visually cut the surface off from its anchor. Pass an
 
 ```ignore
 // Typical usage inside a custom widget's paint() method:
-use bastyde_widgets::shadow::{paint_layered_shadow, DENSITY_SURFACE};
+use teksilo_widgets::shadow::{paint_layered_shadow, DENSITY_SURFACE};
 paint_layered_shadow(
     canvas, bounds, radius,
     &ctx.theme.shape.shadow_sm,
@@ -43,7 +43,7 @@ paint_layered_shadow(
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/shadow/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/shadow/index.html)
 
 ## `pub const DENSITY_TOOLTIP`
 
@@ -108,7 +108,7 @@ commands.
 
 ```ignore
 // In a widget's paint() method:
-use bastyde_widgets::shadow::{paint_layered_shadow, AttachedSide, DENSITY_SURFACE};
+use teksilo_widgets::shadow::{paint_layered_shadow, AttachedSide, DENSITY_SURFACE};
 paint_layered_shadow(
     canvas, bounds, radius,
     &ctx.theme.shape.shadow_sm, &ctx.theme.shape.shadow_inner_sm,

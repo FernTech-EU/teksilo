@@ -30,10 +30,10 @@ For a "slide + fade" effect (notification snackbar), wrap the
 child in `Fade` before passing it to `Slide`:
 
 ```rust
-# use bastyde_widgets::animations::{Slide, Fade, SlideEdge};
-# use bastyde_widgets::primitives::TextWidget;
-# use bastyde_core::signal::Signal;
-# use bastyde_i18n::lit;
+# use teksilo_widgets::animations::{Slide, Fade, SlideEdge};
+# use teksilo_widgets::primitives::TextWidget;
+# use teksilo_core::signal::Signal;
+# use teksilo_i18n::lit;
 # let visible = Signal::new(false);
 # let snackbar_content = TextWidget::new(lit!("Changes saved"));
 let _w = Slide::new(visible.clone())
@@ -52,7 +52,7 @@ or out of position instead of tweening.
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/animations/slide/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/animations/slide/index.html)
 
 ## `pub enum SlideEdge`
 

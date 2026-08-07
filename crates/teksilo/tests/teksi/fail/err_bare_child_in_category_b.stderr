@@ -1,0 +1,5 @@
+error: `Card` is a Category B widget with named slots — use `content: <widget>` instead of a bare child element
+  --> tests/teksu/fail/err_bare_child_in_category_b.rs:41:13
+   |
+41 |             TextWidget("hi")
+   |             ^^^^^^^^^^

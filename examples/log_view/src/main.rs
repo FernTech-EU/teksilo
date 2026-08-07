@@ -28,10 +28,10 @@
 use std::cell::Cell;
 use std::rc::Rc;
 
-use bastyde::core::WidgetPlacement;
-use bastyde::prelude::*;
-use bastyde::tokens::Color;
-use bastyde::widgets::{
+use teksilo::core::WidgetPlacement;
+use teksilo::prelude::*;
+use teksilo::tokens::Color;
+use teksilo::widgets::{
     Button, ButtonVariant, Expand, HStack, LogView, LogViewHandle, TextWidget, ThemeSwitcher,
     Toolbar,
 };
@@ -260,7 +260,7 @@ impl Widget for LogDemo {
         &self,
         proposal: SizeProposal,
         _ctx: &LayoutContext,
-    ) -> bastyde::core::widget::LayoutResponse {
+    ) -> teksilo::core::widget::LayoutResponse {
         Size::new(
             proposal.width.unwrap_or(900.0),
             proposal.height.unwrap_or(600.0),
@@ -300,12 +300,12 @@ impl Widget for LogDemo {
 }
 
 fn main() {
-    BastydeAppBuilder::new()
+    TeksiloAppBuilder::new()
         .install_inspector_in_debug()
-        .theme(bastyde::presets::intui::dark())
+        .theme(teksilo::presets::intui::dark())
         .initial_window(
             WindowConfig::new()
-                .title("Bastyde \u{2014} LogView (streaming)")
+                .title("Teksilo \u{2014} LogView (streaming)")
                 .size(960, 640)
                 .root(|tree, _state| tree.add(LogDemo::new())),
         )

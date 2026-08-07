@@ -14,8 +14,8 @@ imposing a cross-axis floor. `min_length` sets a hard
 minimum so the gap never collapses below a fixed amount under tight layout.
 
 ```rust
-# use bastyde_widgets::primitives::{HStack, Spacer, TextWidget};
-# use bastyde_i18n::lit;
+# use teksilo_widgets::primitives::{HStack, Spacer, TextWidget};
+# use teksilo_i18n::lit;
 // Title hugs the leading edge, badge is pushed to the trailing edge.
 let _row = HStack::new()
     .child(TextWidget::new(lit!("Title")))
@@ -29,7 +29,7 @@ let _row = HStack::new()
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/primitives/spacer/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/primitives/spacer/index.html)
 
 ## `pub struct Spacer`
 

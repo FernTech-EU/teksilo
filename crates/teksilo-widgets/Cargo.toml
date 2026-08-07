@@ -1,0 +1,98 @@
+# SPDX-License-Identifier: MPL-2.0
+# SPDX-FileCopyrightText: 2026 FernTech
+
+[package]
+name = "teksilo-widgets"
+edition = "2024"
+version.workspace = true
+license-file.workspace = true
+publish.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[features]
+# Preview catalog impls — opt-in `WidgetCatalog` implementations
+# alongside each widget, registered with the `inventory` crate so the
+# `teksilo-preview-ui` previewer GUI discovers them at link time. Off by
+# default — pulls in no runtime cost and adds no symbols when not
+# enabled. Standard production builds and headless tests ignore it.
+preview = ["dep:teksilo-preview"]
+# Telemetry support. Gates the `PrivacySettings` widget (the only
+# widget that binds to `teksilo-telemetry` types) and its `serde_json`
+# dep. Off by default — apps that don't ship analytics pay nothing.
+telemetry = ["dep:teksilo-telemetry", "dep:serde_json"]
+
+[dependencies]
+teksilo-core = { workspace = true }
+teksilo-data = { workspace = true }
+# `notification::archive` uses `PersistedListModel` for the persistent
+# notification log; pulls in nothing extra for in-memory-only apps.
+teksilo-settings = { workspace = true }
+teksilo-tokens = { workspace = true }
+teksilo-canvas = { workspace = true }
+teksilo-i18n = { workspace = true }
+# Serialization of `NotificationEntry` for the persistent archive
+# (writes through PersistedListModel's TOML file). The derive feature
+# is on at the workspace level.
+serde = { workspace = true }
+# `PrivacySettings` widget binds to `OpenedTelemetry` and `ConsentStore`.
+# Gated behind the `telemetry` feature — apps that don't ship analytics
+# pay nothing. Without the feature, the widget and its re-export are
+# absent from the public surface.
+teksilo-telemetry = { workspace = true, optional = true }
+# JSON rendering for the privacy widget's "Get my data" viewer. Only
+# pulled in with the `telemetry` feature.
+serde_json = { workspace = true, optional = true }
+# `PrivacySettings` widget reaches native file dialogs through
+# `teksilo_platform::file_dialog::EventContextFileDialogExt`. The
+# `file-dialog` feature on teksilo-platform brings in just the trait
+# surface — no rfd, no async-std. The real `RfdAsyncBackend` is opt-in
+# via `teksilo-app/rfd-backend` (chained from `teksilo/file-dialog`).
+# `native-menu` brings in the `NativeMenuHandle`/`NativeMenuSnapshot` surface so
+# `MenuBar::from_model(..).native_on_macos(..)` can mirror a `MenuModel` into the
+# OS menu bar (real NSMenu on macOS, a no-op backend elsewhere). The objc2 deps
+# behind it are macOS-target-only, so non-macOS builds pay nothing.
+teksilo-platform = { workspace = true, features = ["file-dialog", "native-menu"] }
+teksilo-preview = { workspace = true, optional = true }
+# `open` powers rich-tooltip links that point at real URLs
+# (http, https, mailto, file paths, …). Small, pure-Rust, no deps
+# on GUI toolkits — just spawns the OS default handler.
+open = { workspace = true }
+# Date/time backing for Calendar / DateEdit / TimeEdit / DateTimeEdit. The
+# four widgets re-export the relevant types through `common::datetime` so
+# the rest of the codebase never names `jiff` directly. The `serde`
+# feature is needed by `notification::NotificationEntry` so the
+# persistent archive can round-trip `jiff::Timestamp` through TOML.
+jiff = { workspace = true, features = ["serde"] }
+thiserror = { workspace = true }
+# text-typeset + text-document come through teksilo-text's re-exports
+# (`teksilo_text::text_document`, `teksilo_text::RichTextEngine`, …).
+# Widgets never name either crate directly, keeping teksilo-widgets's
+# dependency surface minimal. Mandatory: the text-input / rich-text
+# widget stack is load-bearing for every text field in the framework.
+#
+# Declared directly (not `workspace = true`) so we can set
+# `default-features = false` — Cargo rejects overriding
+# `default-features` on a workspace-inherited dep. This keeps the Noto
+# fallback-font bundles (teksilo-text's `default` set) OFF at the widget
+# level, so font selection stays an app-level decision driven through
+# the umbrella's `fonts-*` features. The base Inter font is always
+# embedded by teksilo-text regardless.
+teksilo-text = { path = "../teksilo-text", version = "0.6.2", default-features = false }
+
+[dev-dependencies]
+# Test-only: property-based testing (see the `proptest` entry in the
+# workspace manifest for why proptest rather than cargo-fuzz).
+proptest = { workspace = true }
+accesskit_consumer = { workspace = true }
+# `menu_bar` unit tests fabricate `WidgetId`s without a real arena for
+# pure-function dispatcher coverage. Mirrors the convention used in
+# `teksilo-core::signal` / `teksilo-core::overlay` tests.
+slotmap = "1"
+# `notification::archive` tests round-trip `NotificationEntry` through
+# `tempfile` directories and TOML serialization.
+tempfile = { workspace = true }
+toml = { workspace = true }
+# `rich_text::paint` tests encode a tiny PNG so the inline-image pass has a
+# real, decodable resource to resolve rather than a hand-written byte blob.
+png = { workspace = true }

@@ -3,30 +3,30 @@
 
 # Native (OS) Menu Bar
 
-Bastyde can mirror a menu into the platform's **native** menu surface — the
+Teksilo can mirror a menu into the platform's **native** menu surface — the
 global menu bar at the top of the screen on macOS (`NSApplication.mainMenu`). A
 serious desktop app is expected to present its menus this way on macOS; an
 in-window strip alone reads as non-native.
 
 The design is a **single declarative model** consumed by two renderers:
 
-- the in-window [`MenuBar`](../crates/bastyde-widgets/src/menu_bar.rs) widget, and
-- a platform [`NativeMenuBackend`](../crates/bastyde-platform/src/native_menu.rs)
+- the in-window [`MenuBar`](../crates/teksilo-widgets/src/menu_bar.rs) widget, and
+- a platform [`NativeMenuBackend`](../crates/teksilo-platform/src/native_menu.rs)
   (real `NSMenu` on macOS; a no-op everywhere else).
 
 ```
 MenuModel  ──┬─►  MenuBar::from_model(..)              (in-window dropdowns)
  (widgets)   └─►  NativeMenuSnapshot ─► NSMenu          (macOS global bar)
-                  (plain data, crosses into bastyde-platform)
+                  (plain data, crosses into teksilo-platform)
 ```
 
 ## Quick start
 
 ```rust
-use bastyde::widgets::{MenuBar, MenuModel, MenuEntry, NativeMenuMode};
+use teksilo::widgets::{MenuBar, MenuModel, MenuEntry, NativeMenuMode};
 
 // 1. Install the native-menu service on the app.
-BastydeAppBuilder::new()
+TeksiloAppBuilder::new()
     .install_native_menu()
     .initial_window(WindowConfig::new().root(|tree, _| tree.add(Root::new())))
     .run();
@@ -54,7 +54,7 @@ Demo: `cargo run -p native-menu`.
 
 ## The model
 
-`MenuModel` (in `bastyde-widgets`) is a cloneable handle (`Rc` inside) holding a
+`MenuModel` (in `teksilo-widgets`) is a cloneable handle (`Rc` inside) holding a
 tree of `MenuNode`s with a `version: Signal<u64>`:
 
 - `MenuModel::menu(title, |m| …)` — a top-level menu.
@@ -76,7 +76,7 @@ tree of `MenuNode`s with a `version: Signal<u64>`:
 | `.radio(value, Signal<usize>)` | radio item within a group |
 
 Each `MenuEntry` is assigned a process-unique
-[`MenuItemId`](../crates/bastyde-core/src/menu_item_id.rs) — the token the native
+[`MenuItemId`](../crates/teksilo-core/src/menu_item_id.rs) — the token the native
 backend round-trips on activation.
 
 ## `NativeMenuMode` (the macOS flag)
@@ -166,14 +166,14 @@ directly** — the keystroke never reaches the widget tree, so there is no
 double-fire with the in-app shortcut dispatcher.
 
 Modifier mapping follows the cross-platform convention (as in Qt's `Qt::CTRL`):
-the primary accelerator modifier — `Ctrl` *or* `Super` in a Bastyde shortcut —
+the primary accelerator modifier — `Ctrl` *or* `Super` in a Teksilo shortcut —
 maps to ⌘ on macOS. So `KeyStroke::ctrl(Key::S)` shows as ⌘S. `Alt`→⌥, `Shift`→⇧.
 
 ## Multi-window
 
 There is one global menu bar on macOS; it follows the **focused** window. Each
 window installs its own snapshot (`NativeMenuHandle::set_window_menu`), and
-`bastyde-app` calls `activate_window` on `WindowEvent::Focused` so the focused
+`teksilo-app` calls `activate_window` on `WindowEvent::Focused` so the focused
 window's menu becomes `mainMenu`. The menu + its activation map are dropped when
 the window closes.
 
@@ -185,7 +185,7 @@ every other widget — the platform layer never hardcodes English. Declare them
 with localized strings:
 
 ```rust
-use bastyde::widgets::StandardMenu;
+use teksilo::widgets::StandardMenu;
 
 MenuModel::new()
     .standard_menu(StandardMenu::app()
@@ -211,15 +211,15 @@ MenuModel::new()
 
 | layer | type | crate |
 | --- | --- | --- |
-| id token | `MenuItemId` | `bastyde-core` |
-| rich model | `MenuModel` / `MenuEntry` / `MenuItemState` | `bastyde-widgets` |
-| model → native bridge | `menu::native::install` (+ reactive observers) | `bastyde-widgets` |
-| boundary data | `NativeMenuSnapshot` / `NativeMenuNode` / `MenuItemDelta` | `bastyde-platform` |
-| trait + handle | `NativeMenuBackend` / `NativeMenuHandle` | `bastyde-platform` |
-| macOS impl | `NSMenu` builder + `BastydeMenuTarget` | `bastyde-platform/native_menu/macos.rs` |
-| app wiring | `install_native_menu`, payload router, focus arbitration | `bastyde-app` |
+| id token | `MenuItemId` | `teksilo-core` |
+| rich model | `MenuModel` / `MenuEntry` / `MenuItemState` | `teksilo-widgets` |
+| model → native bridge | `menu::native::install` (+ reactive observers) | `teksilo-widgets` |
+| boundary data | `NativeMenuSnapshot` / `NativeMenuNode` / `MenuItemDelta` | `teksilo-platform` |
+| trait + handle | `NativeMenuBackend` / `NativeMenuHandle` | `teksilo-platform` |
+| macOS impl | `NSMenu` builder + `TeksiloMenuTarget` | `teksilo-platform/native_menu/macos.rs` |
+| app wiring | `install_native_menu`, payload router, focus arbitration | `teksilo-app` |
 
-The platform boundary type is plain, already-resolved data — `bastyde-platform`
+The platform boundary type is plain, already-resolved data — `teksilo-platform`
 never sees the widgets model. The macOS item callback posts a
 `NativeMenuEventPayload` through `AppEventPoster::post_external`, routed back into
 the originating window's tree exactly like the file-dialog / external-DnD paths.

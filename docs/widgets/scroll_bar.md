@@ -23,8 +23,8 @@ advertised on the parent `ScrollView` node, not on the bar, so screen readers
 navigate the content region directly without stopping on the thumb.
 
 ```rust
-# use bastyde_widgets::scroll_bar::{ScrollBar, ScrollBarOrientation, ScrollBarVariant};
-# use bastyde_core::signal::Signal;
+# use teksilo_widgets::scroll_bar::{ScrollBar, ScrollBarOrientation, ScrollBarVariant};
+# use teksilo_core::signal::Signal;
 let position = Signal::new(0.0_f32);
 let max_scroll = Signal::new(500.0_f32);
 let viewport_ratio = Signal::new(0.4_f32);
@@ -44,7 +44,7 @@ let _bar = ScrollBar::new(
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/scroll_bar/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/scroll_bar/index.html)
 
 ## `pub struct ScrollBar`
 

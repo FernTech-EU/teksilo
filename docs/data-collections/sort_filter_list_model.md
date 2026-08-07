@@ -50,8 +50,8 @@ identity-based selection should observe their model directly and rewrite
 the selection from source identifiers on each rebuild.
 
 ```rust
-# use bastyde_data::{ListModel, SortFilterListModel, SortDirection};
-# use bastyde_data::ListDataSource; // brings `len()` into scope
+# use teksilo_data::{ListModel, SortFilterListModel, SortDirection};
+# use teksilo_data::ListDataSource; // brings `len()` into scope
 #[derive(Clone, Debug)]
 struct Person { name: String, age: u32 }
 
@@ -80,7 +80,7 @@ assert_eq!(proxy.len(), 2); // Alice, Carol
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_data/sort_filter_list_model/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_data/sort_filter_list_model/index.html)
 
 ## `pub enum SortDirection`
 

@@ -13,7 +13,7 @@ chrome (background, padding, layout) is delegated to the active
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/toast/surface/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/toast/surface/index.html)
 
 ## `pub struct ToastSurfaceData`
 

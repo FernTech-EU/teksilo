@@ -34,10 +34,10 @@ PageDown, Space (select/toggle), Enter (activate), Ctrl+A (select all),
 Shift+Arrow (range), type-ahead (opt-in via `type_ahead_label`).
 
 ```rust
-# use bastyde_widgets::ListView;
-# use bastyde_widgets::primitives::TextWidget;
-# use bastyde_data::{ListModel, SelectionMode, SelectionModel};
-# use bastyde_i18n::lit;
+# use teksilo_widgets::ListView;
+# use teksilo_widgets::primitives::TextWidget;
+# use teksilo_data::{ListModel, SelectionMode, SelectionModel};
+# use teksilo_i18n::lit;
 # struct Item { name: String }
 # let model: ListModel<Item> = ListModel::from_vec(vec![Item { name: "Alpha".into() }]);
 # let sel = SelectionModel::new(SelectionMode::Single);
@@ -54,7 +54,7 @@ let _w = ListView::new(model, |_i, item, _selected| {
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/list_view/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/list_view/index.html)
 
 ## `pub struct ListView`
 
@@ -75,14 +75,14 @@ Create a new ListView backed by a `ListModel<T>`.
 The `delegate` closure receives `(index, &item, selected)` and returns
 a boxed widget for that item.
 
-#### `pub fn from_source<S: bastyde_data::ListDataSource<Item = T>>( source: S, delegate: impl Fn(usize, &T, bool) -> Box<dyn Widget> + 'static, ) -> Self`
+#### `pub fn from_source<S: teksilo_data::ListDataSource<Item = T>>( source: S, delegate: impl Fn(usize, &T, bool) -> Box<dyn Widget> + 'static, ) -> Self`
 
 Create a ListView backed by a custom `ListDataSource`.
 
 Use this for large or external datasets that cannot fit in memory.
 The source must implement `ListDataSource<Item = T>`.
 
-#### `pub fn from_source_keyed<S: bastyde_data::ListDataSource<Item = T>>( source: S, keyed: KeyedSelectionModel<S::Key>, delegate: impl Fn(usize, &T, bool) -> Box<dyn Widget> + 'static, ) -> Self where S::Key: ItemKey,`
+#### `pub fn from_source_keyed<S: teksilo_data::ListDataSource<Item = T>>( source: S, keyed: KeyedSelectionModel<S::Key>, delegate: impl Fn(usize, &T, bool) -> Box<dyn Widget> + 'static, ) -> Self where S::Key: ItemKey,`
 
 Create a ListView backed by a custom `ListDataSource` with **keyed**
 selection. The `KeyedSelectionModel<S::Key>` tracks selection by source
@@ -201,7 +201,7 @@ app-specific `application/x-…`). Implies `exportable`
 (defaulting to `DragTransferMode::Move` if not already set). Requires
 `T: Clone`.
 
-#### `pub fn on_rows_transferred_out( mut self, f: impl Fn(&[usize], &mut bastyde_core::widget::EventContext) + 'static, ) -> Self`
+#### `pub fn on_rows_transferred_out( mut self, f: impl Fn(&[usize], &mut teksilo_core::widget::EventContext) + 'static, ) -> Self`
 
 Override how rows moved out to a foreign target are removed from this
 view. Receives the dragged rows' indices (descending-safe) and the live
@@ -218,13 +218,13 @@ items and the insertion index. (Same-view reorder is
 `reorderable`; a custom `ListDataSource` can still
 accept foreign drops through its `can_accept`/`accept_drop` instead.)
 
-#### `pub fn on_rows_received( mut self, f: impl Fn(Vec<T>, usize, &mut bastyde_core::widget::EventContext) + 'static, ) -> Self`
+#### `pub fn on_rows_received( mut self, f: impl Fn(Vec<T>, usize, &mut teksilo_core::widget::EventContext) + 'static, ) -> Self`
 
 Handler for rows accepted via `accept_foreign_rows`:
 `(items, insertion_index, ctx)`. Insert them into your model at the
 index.
 
-#### `pub fn on_activate( mut self, f: impl Fn(usize, &mut bastyde_core::widget::EventContext) + 'static, ) -> Self`
+#### `pub fn on_activate( mut self, f: impl Fn(usize, &mut teksilo_core::widget::EventContext) + 'static, ) -> Self`
 
 Set the row-**activation** handler — invoked with the flat row index and
 the live `EventContext` on a click

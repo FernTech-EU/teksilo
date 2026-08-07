@@ -9,21 +9,21 @@ extend-exclude = [
   # Localized message bundles — translations, not English.
   "*.ftl",
   # Binary font files (the filenames encode OpenType axis tags like `wdth`).
-  "crates/bastyde-text/fonts/",
+  "crates/teksilo-text/fonts/",
   # Rich-text editor demo: deliberate misspellings power the spell-check showcase.
   "examples/rich_text_editor/src/highlighters.rs",
   "examples/rich_text_editor/src/highlight_controls.rs",
   "examples/rich_text_editor/src/main.rs",
   # Language spec documents an intentional `Buton` typo to illustrate an error.
-  "docs/bati-language-spec-v3.md",
+  "docs/teksu-language-spec-v3.md",
 ]
 
 [default.extend-words]
 # Project / domain vocabulary
-bati = "bati"
-Bati = "Bati"
-bastyde = "bastyde"
-Bastyde = "Bastyde"
+teksu = "teksu"
+Teksu = "Teksu"
+teksilo = "teksilo"
+Teksilo = "Teksilo"
 
 # Valid English variants typos doesn't recognize as alternates
 clonable = "clonable"

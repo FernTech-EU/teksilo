@@ -27,7 +27,7 @@ repaint dirties. The default for every `SceneItem` is
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_scene/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_scene/index.html)
 
 ## `pub enum CacheMode`
 

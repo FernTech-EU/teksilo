@@ -9,19 +9,19 @@
 > real engine but is not yet frame-driven, so it does not paint a page. See
 > [Servo backend: requirements & status](#servo-backend-requirements--status).
 
-`WebView` embeds HTML / web content in a Bastyde window — for documentation
+`WebView` embeds HTML / web content in a Teksilo window — for documentation
 panes, license dialogs, OAuth flows, Markdown previews, help centers,
 dashboards, or any HTML/SPA-driven surface. It lives in its own crate,
-`bastyde-webview`, behind the umbrella `web-view` feature.
+`teksilo-webview`, behind the umbrella `web-view` feature.
 
-Source: [crates/bastyde-webview/](../crates/bastyde-webview/). Demo:
+Source: [crates/teksilo-webview/](../crates/teksilo-webview/). Demo:
 `cargo run -p web-view-demo`.
 
 ```rust
-use bastyde::prelude::*;            // brings BastydeAppBuilderWebViewExt into scope
-use bastyde::web_view::WebView;
+use teksilo::prelude::*;            // brings TeksiloAppBuilderWebViewExt into scope
+use teksilo::web_view::WebView;
 
-BastydeAppBuilder::new()
+TeksiloAppBuilder::new()
     .theme(intui::light())
     .install_web_view_default()     // installs the engine (wry by default)
     .initial_window(WindowConfig::new().title("Docs").size(1000, 720).root(|tree, _| {
@@ -40,12 +40,12 @@ BastydeAppBuilder::new()
 
 Every realistic engine — WKWebView (macOS), WebView2 (Windows), WebKitGTK
 (Linux/X11), Servo — owns its own rendering and lives as a **native OS subview
-on top of** Bastyde's wgpu surface. `WebView` accepts that and mirrors the
+on top of** Teksilo's wgpu surface. `WebView` accepts that and mirrors the
 established platform-backend pattern ([`FileDialogBackend`](file-dialog),
 `ExternalDndBackend`): a swappable [`WebViewBackend`] creates an engine-specific
 [`WebViewHandle`]; a per-app [`WebViewRegistry`] (in `app_state`) routes
 JS→Rust / lifecycle events back into the widget tree. The engine is pluggable;
-the widget feels native to Bastyde.
+the widget feels native to Teksilo.
 
 Two architectural consequences fall out of "the engine is a native subview":
 
@@ -54,13 +54,13 @@ Two architectural consequences fall out of "the engine is a native subview":
 
 ## Engines and feature flags
 
-`bastyde-webview` is engine-agnostic; the engine is chosen by cargo feature on
-the umbrella `bastyde` crate. **wry is the default engine.**
+`teksilo-webview` is engine-agnostic; the engine is chosen by cargo feature on
+the umbrella `teksilo` crate. **wry is the default engine.**
 
 | Feature | Engine(s) compiled | `install_web_view_default()` installs |
 | --- | --- | --- |
 | `web-view` | wry | `WryBackend` (macOS / Windows / Linux-X11) |
-| `web-view-servo` (implies `web-view`) | wry **+** Servo | `ServoBackend` under a Wayland session, `WryBackend` everywhere else (runtime, via [`is_wayland`](../crates/bastyde-webview/src/lib.rs)) |
+| `web-view-servo` (implies `web-view`) | wry **+** Servo | `ServoBackend` under a Wayland session, `WryBackend` everywhere else (runtime, via [`is_wayland`](../crates/teksilo-webview/src/lib.rs)) |
 | `web-view-headless` | none | `NoopWebViewBackend` (renders nothing) |
 
 - **wry by default.** Enabling `web-view` gives a working webview with no extra
@@ -75,7 +75,7 @@ the umbrella `bastyde` crate. **wry is the default engine.**
   Use for headless tests, or apps that install their own backend with
   `install_web_view(custom_backend)`.
 - **A true Servo-only target** (Linux-only / no-GTK) bypasses the umbrella:
-  depend on `bastyde-webview` directly with `features = ["servo-backend"]` and
+  depend on `teksilo-webview` directly with `features = ["servo-backend"]` and
   pass `ServoBackend::new()` to `install_web_view(...)`.
 
 Pinned versions: `wry = 0.55.1`, `servo = 0.2.0`.
@@ -100,13 +100,13 @@ window. A winit app must therefore, on Linux:
 
 1. **Init GTK** — handled automatically; `WryBackend::open` calls `gtk::init()`.
 2. **Pump the GLib loop each turn** — winit doesn't, so the page never paints
-   otherwise. Call [`bastyde_webview::pump_gtk_events`] from
-   `BastydeAppBuilder::on_loop_tick`, holding the poll source high while a
+   otherwise. Call [`teksilo_webview::pump_gtk_events`] from
+   `TeksiloAppBuilder::on_loop_tick`, holding the poll source high while a
    `WebView` is alive:
    ```rust
    let poll = std::rc::Rc::new(std::cell::Cell::new(true));
-   BastydeAppBuilder::new()
-       .on_loop_tick(poll.clone(), || { bastyde::web_view::pump_gtk_events(); false })
+   TeksiloAppBuilder::new()
+       .on_loop_tick(poll.clone(), || { teksilo::web_view::pump_gtk_events(); false })
        // …
    ```
    (`pump_gtk_events` is a no-op off Linux / without the wry engine, so the call
@@ -128,7 +128,7 @@ Servo (`servo = 0.2.0`) is the intended **native Wayland** engine — pure Rust,
 no GTK reparenting problem. It is **work in progress**: the backend compiles and
 constructs a real Servo webview, but it is **not yet frame-driven**, so it does
 not paint a page. Building `--features servo` and running on Wayland selects it
-(via [`is_wayland`](../crates/bastyde-webview/src/lib.rs)) and you get the
+(via [`is_wayland`](../crates/teksilo-webview/src/lib.rs)) and you get the
 loading wash plus a "constructed but not yet frame-driven" console message — not
 web content. For now, use wry + XWayland on Linux.
 
@@ -152,7 +152,7 @@ system packages for your distro. The first build also downloads and compiles the
 
 **What remains (Phase 4).** To make Servo actually render:
 
-1. Wire an `EventLoopWaker` to bastyde-app's winit proxy so Servo gets pumped.
+1. Wire an `EventLoopWaker` to teksilo-app's winit proxy so Servo gets pumped.
 2. Call `servo.spin_event_loop()` + `webview.paint()` +
    `rendering_context.present()` from the render loop.
 3. Composite Servo's surface as a **positioned region** rather than the whole
@@ -165,7 +165,7 @@ like wry's `with_ipc_handler`).
 
 ## Installing the subsystem
 
-`BastydeAppBuilderWebViewExt` (re-exported through `bastyde::prelude`) adds two
+`TeksiloAppBuilderWebViewExt` (re-exported through `teksilo::prelude`) adds two
 builder methods:
 
 - `install_web_view_default()` — installs the feature-selected engine (table
@@ -212,7 +212,7 @@ keystroke navigates — drive navigation from a "Go" button / Enter handler that
 sets the signal instead.)
 
 **Observers, not vetoes.** `on_navigation` and `on_download_*` are notification
-callbacks. Bastyde delivers backend events on a later event-loop tick (posted,
+callbacks. Teksilo delivers backend events on a later event-loop tick (posted,
 not delivered inline), so a synchronous decision can't be returned to the
 engine: a navigation cannot be *cancelled* from `on_navigation`
 (`NavigationInfo::can_cancel` is always `false` today), and a download's
@@ -220,7 +220,7 @@ destination path cannot be redirected from `on_download_started`. Use them for
 URL-bar sync, logging, progress UI, and toasts.
 
 **Lifecycle.** `build()` creates the style-driven overlay (loading/error chrome)
-and captures the host `BastydeWindowId`; the native engine subview is opened
+and captures the host `TeksiloWindowId`; the native engine subview is opened
 from a **post-mount [`EventContext`]** (`BuildContext::run_after_mount`) because
 that is the only place the OS parent window handle, `app_state`, and the event
 poster are all reachable together. Bounds track via `place_children`;
@@ -228,13 +228,13 @@ visibility via the activation bridge (below); teardown is RAII — dropping the
 [`WebViewHandle`] tears down the native subview.
 
 **Styling.** The overlay chrome is a Tier-3 [`WebViewStyle`]
-(`bastyde_core::styles`); the default `RecipeWebViewStyle` paints a state-tinted
+(`teksilo_core::styles`); the default `RecipeWebViewStyle` paints a state-tinted
 wash (loading / error / transparent-when-ready). Override per-call with
 `.style(...)` or theme-wide via `theme.style_slots.web_view`.
 
 **Accessibility.** The widget emits a single `Role::WebView` node named from the
 title binding; the page's own AT tree is published to the OS by the engine, so
-Bastyde does not duplicate it.
+Teksilo does not duplicate it.
 
 ## The dormancy / visibility bridge
 
@@ -243,7 +243,7 @@ automatically — but worth understanding.
 
 Every ordinary widget composites through the wgpu pass, so "not painted"
 *means* "not on screen." A `WebView`'s engine subview lives **outside** that
-pass, so when a [`Switcher`](../crates/bastyde-widgets/src/primitives/switcher.rs)
+pass, so when a [`Switcher`](../crates/teksilo-widgets/src/primitives/switcher.rs)
 / `TabWidget` / `visible_when` gate parks the widget **dormant**, the framework
 merely stops painting it — the native surface keeps floating over the output,
 showing stale content over whatever is now visible.
@@ -262,14 +262,14 @@ native map) reuses `activation_signal` the same way.
 
 - **JS → Rust:** the page calls `window.ipc.postMessage("…")`; it surfaces as
   `on_message(|msg, ctx| …)`. (wry built-in; on Servo this is best-effort.)
-- **Rust → JS:** `webview.post_message("…")` dispatches a `bastyde-message`
+- **Rust → JS:** `webview.post_message("…")` dispatches a `teksilo-message`
   `MessageEvent`; the page listens with
-  `addEventListener('bastyde-message', e => …)`. `e.data` is the opaque string
+  `addEventListener('teksilo-message', e => …)`. `e.data` is the opaque string
   you sent (the app layer decides JSON / MsgPack / plain text).
 
 ## Z-order with overlays
 
-Native subviews sit **above** the wgpu surface, so Bastyde overlays (tooltips,
+Native subviews sit **above** the wgpu surface, so Teksilo overlays (tooltips,
 popovers, dropdowns) drawn by the `OverlayManager` render *under* a `WebView`
 where they overlap. For overlays that must cover a `WebView`, open them as a
 popup OS window via `ctx.open_window(...)` (the approach Electron uses for
@@ -277,7 +277,7 @@ context menus over webviews).
 
 ## Multi-window & lifetime
 
-- A `WebView` is bound to the `BastydeWindowId` it was mounted in.
+- A `WebView` is bound to the `TeksiloWindowId` it was mounted in.
 - `WindowManager::close_window` purges the window's `WebViewRegistry`
   registrations, so a late backend event can't fire into a torn-down tree.
 - Moving a `WebView` between windows is not supported in v1 (matches
@@ -288,7 +288,7 @@ context menus over webviews).
 `MemoryWebViewBackend` records every backend op (`open` / `set_bounds` /
 `set_visible` / `load_url` / …) into a shared `MemoryWebViewRecords`, with no
 GPU / window / engine. The headless suite
-([tests/basic_lifecycle.rs](../crates/bastyde-webview/tests/basic_lifecycle.rs))
+([tests/basic_lifecycle.rs](../crates/teksilo-webview/tests/basic_lifecycle.rs))
 covers open/teardown, bounds tracking, the headline dormancy assertion — a
 `WebView` parked in a real `Switcher` issues `set_visible(false)` on tab-away
 and `set_visible(true)` on tab-back — plus two-way `url_signal` navigation,
@@ -312,10 +312,10 @@ one-liner) and pump post-mount opens with `tree.run_mount_actions(&mut NoopWindo
 - **Memory** of an open WebView with heavy content is non-trivial (~50–150 MB
   for WebView2 / WKWebView); a `WebView` is not a cheap widget.
 
-[`WebViewBackend`]: ../crates/bastyde-webview/src/backend.rs
-[`WebViewHandle`]: ../crates/bastyde-webview/src/backend.rs
-[`WebViewRegistry`]: ../crates/bastyde-webview/src/backend.rs
-[`MemoryWebViewBackend`]: ../crates/bastyde-webview/src/backend.rs
-[`WebViewStyle`]: ../crates/bastyde-core/src/styles/web_view_style.rs
-[`EventContext`]: ../crates/bastyde-core/src/widget/event_context.rs
-[`Switcher`]: ../crates/bastyde-widgets/src/primitives/switcher.rs
+[`WebViewBackend`]: ../crates/teksilo-webview/src/backend.rs
+[`WebViewHandle`]: ../crates/teksilo-webview/src/backend.rs
+[`WebViewRegistry`]: ../crates/teksilo-webview/src/backend.rs
+[`MemoryWebViewBackend`]: ../crates/teksilo-webview/src/backend.rs
+[`WebViewStyle`]: ../crates/teksilo-core/src/styles/web_view_style.rs
+[`EventContext`]: ../crates/teksilo-core/src/widget/event_context.rs
+[`Switcher`]: ../crates/teksilo-widgets/src/primitives/switcher.rs

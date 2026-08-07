@@ -18,10 +18,10 @@ overflow — `ColumnFlow` reports its true content height (the tallest
 column), so the scroll extent is correct.
 
 ```rust
-# use bastyde_widgets::primitives::column_flow::ColumnFlow;
-# use bastyde_widgets::primitives::TextWidget;
-# use bastyde_widgets::scroll_area::ScrollArea;
-# use bastyde_i18n::lit;
+# use teksilo_widgets::primitives::column_flow::ColumnFlow;
+# use teksilo_widgets::primitives::TextWidget;
+# use teksilo_widgets::scroll_area::ScrollArea;
+# use teksilo_i18n::lit;
 let _view = ScrollArea::new().child(
     ColumnFlow::new()
         .min_column_width(240.0)
@@ -68,7 +68,7 @@ this as a CSS multicol port.
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/primitives/column_flow/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/primitives/column_flow/index.html)
 
 ## `pub struct ColumnFlow`
 

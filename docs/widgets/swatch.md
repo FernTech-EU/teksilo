@@ -21,8 +21,8 @@ voice output both have a human-readable form. Selected swatches
 append a localized "selected" suffix to their announced name.
 
 ```rust
-# use bastyde_widgets::color_picker::ColorSwatch;
-# use bastyde_tokens::Color;
+# use teksilo_widgets::color_picker::ColorSwatch;
+# use teksilo_tokens::Color;
 let _swatch = ColorSwatch::new(Color::new(0.21, 0.52, 0.89, 1.0))
     .size(24.0)
     .corner_radius(4.0);
@@ -34,7 +34,7 @@ let _swatch = ColorSwatch::new(Color::new(0.21, 0.52, 0.89, 1.0))
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/color_picker/swatch/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/color_picker/swatch/index.html)
 
 ## `pub struct ColorSwatch`
 
@@ -52,7 +52,7 @@ pub struct ColorSwatch { /* fields */ }
 
 ### Methods
 
-#### `pub fn new(color: impl Into<bastyde_core::signal::Prop<Color>>) -> Self`
+#### `pub fn new(color: impl Into<teksilo_core::signal::Prop<Color>>) -> Self`
 
 Create a swatch displaying `color`. Accepts a static `Color` or a
 `Signal<Color>` (via `impl Into<Prop<Color>>`); a reactive value
@@ -78,7 +78,7 @@ the theme's `recipe_color_picker_style::SWATCH_SIZE`.
 Set the corner radius of the swatch cell in logical pixels.
 Defaults to `recipe_color_picker_style::SWATCH_CORNER_RADIUS`.
 
-#### `pub fn enabled(mut self, enabled: impl Into<bastyde_core::signal::Prop<bool>>) -> Self`
+#### `pub fn enabled(mut self, enabled: impl Into<teksilo_core::signal::Prop<bool>>) -> Self`
 
 Set the enabled state, statically or reactively. Forwarded to the
 arena at build time.

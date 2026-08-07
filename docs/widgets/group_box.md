@@ -30,9 +30,9 @@ string. When checkable and unchecked, `set_disabled()` is set on the
 group node so assistive technology announces the cluster as unavailable.
 
 ```rust
-# use bastyde_widgets::GroupBox;
-# use bastyde_widgets::primitives::TextWidget;
-# use bastyde_i18n::lit;
+# use teksilo_widgets::GroupBox;
+# use teksilo_widgets::primitives::TextWidget;
+# use teksilo_i18n::lit;
 let _w = GroupBox::new(lit!("Indentation"))
     .child(TextWidget::new(lit!("Tab width: 4")));
 ```
@@ -43,7 +43,7 @@ let _w = GroupBox::new(lit!("Indentation"))
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/group_box/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/group_box/index.html)
 
 ## `pub const GROUP_BOX_CONTENT_INDENT`
 

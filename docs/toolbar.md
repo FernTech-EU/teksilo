@@ -3,7 +3,7 @@
 
 # Toolbar Reference
 
-`bastyde_widgets::toolbar` ships [`Toolbar`](../crates/bastyde-widgets/src/toolbar.rs)
+`teksilo_widgets::toolbar` ships [`Toolbar`](../crates/teksilo-widgets/src/toolbar.rs)
 — a command bar with **automatic overflow**: excess commands collapse into a
 trailing chevron (`⌄`) that opens a drop-down menu, mirroring Qt's `QToolBar`
 extension button, macOS `NSToolbar`'s overflow menu, and WinUI `CommandBar`.
@@ -28,8 +28,8 @@ End-to-end demo: `cargo run -p over-constraint` (section 1). Source:
 ## Quickstart
 
 ```rust
-use bastyde::prelude::*;
-use bastyde::widgets::{Toolbar, ToolbarAction};
+use teksilo::prelude::*;
+use teksilo::widgets::{Toolbar, ToolbarAction};
 
 Toolbar::new()
     .action(
@@ -163,7 +163,7 @@ items to the trailing edge (NSToolbar `flexibleSpace`).
 
 Every layout pass, the toolbar measures each item's **intrinsic size** — even
 the currently-collapsed ones, via
-[`LayoutContext::measure_intrinsic`](../crates/bastyde-core/src/widget/layout_context.rs)
+[`LayoutContext::measure_intrinsic`](../crates/teksilo-core/src/widget/layout_context.rs)
 — so a collapsed command reappears at exactly the right width as the bar grows
 (no stale-width glitch). It then runs a greedy priority algorithm:
 
@@ -185,7 +185,7 @@ command is currently collapsed — useful for adaptive UI (WinUI
 ## The overflow menu
 
 The chevron's drop-down is a real
-[`MenuList`](../crates/bastyde-widgets/src/menu_list.rs), not a bare list, so it:
+[`MenuList`](../crates/teksilo-widgets/src/menu_list.rs), not a bare list, so it:
 
 - **sizes compactly** to the currently-collapsed rows (size-to-content, standard
   menu chrome — no fixed width/height);
@@ -196,7 +196,7 @@ The chevron's drop-down is a real
   widgets** (from `overflow_widget`).
 
 It is driven by
-[`MenuList::item_when`](../crates/bastyde-widgets/src/menu_list.rs) — a
+[`MenuList::item_when`](../crates/teksilo-widgets/src/menu_list.rs) — a
 conditionally-visible menu row that collapses to zero height (no gap) and is
 skipped by keyboard navigation while hidden. That is the general primitive any
 app can use for a menu whose rows come and go.
@@ -251,7 +251,7 @@ Pull the full, current signatures with:
 python3 tools/extract_widget_api.py Toolbar
 ```
 
-Key types ([crates/bastyde-widgets/src/toolbar.rs](../crates/bastyde-widgets/src/toolbar.rs)):
+Key types ([crates/teksilo-widgets/src/toolbar.rs](../crates/teksilo-widgets/src/toolbar.rs)):
 
 - [`Toolbar`] — `new`, `item`, `action`, `child`, `add_child`, `orientation`,
   `display_mode`, `spacing`, `label`, `is_overflowing`.
@@ -264,7 +264,7 @@ Key types ([crates/bastyde-widgets/src/toolbar.rs](../crates/bastyde-widgets/src
 - `ToolbarDisplayMode` { `IconAndText`, `IconOnly`, `TextOnly` },
   `ToolbarOrientation` { `Horizontal`, `Vertical` }.
 
-[`Toolbar`]: ../crates/bastyde-widgets/src/toolbar.rs
-[`ToolbarAction`]: ../crates/bastyde-widgets/src/toolbar.rs
-[`ToolbarItem`]: ../crates/bastyde-widgets/src/toolbar.rs
-[`ToolbarOverflow`]: ../crates/bastyde-widgets/src/toolbar.rs
+[`Toolbar`]: ../crates/teksilo-widgets/src/toolbar.rs
+[`ToolbarAction`]: ../crates/teksilo-widgets/src/toolbar.rs
+[`ToolbarItem`]: ../crates/teksilo-widgets/src/toolbar.rs
+[`ToolbarOverflow`]: ../crates/teksilo-widgets/src/toolbar.rs

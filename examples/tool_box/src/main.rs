@@ -6,9 +6,9 @@
 //!
 //! Run with: `cargo run -p tool-box`
 
-use bastyde::core::widget::WidgetPlacement;
-use bastyde::prelude::*;
-use bastyde::widgets::{
+use teksilo::core::widget::WidgetPlacement;
+use teksilo::prelude::*;
+use teksilo::widgets::{
     Badge, Card, Expand, HStack, IconWidget, Panel, Spacer, TextWidget, ToolBox, ToolBoxItem,
     Toolbar, VStack,
 };
@@ -17,7 +17,7 @@ fn dark_mode_toolbar() -> impl Widget {
     Toolbar::new().child(
         HStack::new()
             .child(Spacer::new())
-            .child(bastyde::widgets::ThemeSwitcher::new()),
+            .child(teksilo::widgets::ThemeSwitcher::new()),
     )
 }
 
@@ -159,10 +159,10 @@ impl Widget for Root {
 }
 
 fn main() {
-    BastydeAppBuilder::new()
+    TeksiloAppBuilder::new()
         .install_automation_bridge_in_debug()
         .install_inspector_in_debug()
-        .theme(bastyde::presets::intui::light())
+        .theme(teksilo::presets::intui::light())
         .initial_window(
             WindowConfig::new()
                 .title("ToolBox")

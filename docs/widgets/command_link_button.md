@@ -25,7 +25,7 @@ CommandLinkButton::new(tr!(create_new_project()))
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/command_link_button/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/command_link_button/index.html)
 
 ## `pub const COMMAND_LINK_BUTTON_ICON_SIZE`
 
@@ -100,22 +100,22 @@ the arena at build time.
 Closure invoked on activation. Use `ctx.send_intent(...)` to
 route through the Action / Intent system.
 
-#### `pub fn title_style( mut self, style: impl Into<bastyde_core::color_prop::TextStyleProp>, ) -> Self`
+#### `pub fn title_style( mut self, style: impl Into<teksilo_core::color_prop::TextStyleProp>, ) -> Self`
 
 Override the title's text style (font, size, weight). Accepts a
 `TextStyleRole`, a `TextStyle`, or a `Signal` of either. Default
 (unset) is `TextStyleRole::BodyBold`.
 
-#### `pub fn description_style( mut self, style: impl Into<bastyde_core::color_prop::TextStyleProp>, ) -> Self`
+#### `pub fn description_style( mut self, style: impl Into<teksilo_core::color_prop::TextStyleProp>, ) -> Self`
 
 Override the description's text style. Default is `TextStyleRole::Body`.
 
-#### `pub fn title_color(mut self, color: impl Into<bastyde_core::color_prop::ColorProp>) -> Self`
+#### `pub fn title_color(mut self, color: impl Into<teksilo_core::color_prop::ColorProp>) -> Self`
 
 Override the title's text color. Accepts `Color`, a role, or a
 `Signal` of either. Default (unset) is `TextRole::Primary`.
 
-#### `pub fn description_color( mut self, color: impl Into<bastyde_core::color_prop::ColorProp>, ) -> Self`
+#### `pub fn description_color( mut self, color: impl Into<teksilo_core::color_prop::ColorProp>, ) -> Self`
 
 Override the description's text color. Default is `TextRole::Secondary`.
 

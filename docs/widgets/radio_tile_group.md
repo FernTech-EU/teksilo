@@ -38,7 +38,7 @@ RadioTileGroup::new(selected)
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/radio_tile_group/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/radio_tile_group/index.html)
 
 ## `pub enum TileLayout`
 
@@ -109,7 +109,7 @@ other layouts.
 Set the enabled state for the whole group, statically or
 reactively.
 
-#### `pub fn style(mut self, style: impl bastyde_core::styles::RadioTileStyle) -> Self`
+#### `pub fn style(mut self, style: impl teksilo_core::styles::RadioTileStyle) -> Self`
 
 Forward a `RadioTileStyle` to every tile that doesn't set its own
 `.style(...)`.

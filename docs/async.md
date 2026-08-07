@@ -3,21 +3,21 @@
 
 # Async Runtime Reference
 
-**Scope:** the optional, opt-in `bastyde-async` crate (plus the `bastyde-tokio`
-/ `bastyde-async-std` reactor adapters) — a **main-thread async executor** for
+**Scope:** the optional, opt-in `teksilo-async` crate (plus the `teksilo-tokio`
+/ `teksilo-async-std` reactor adapters) — a **main-thread async executor** for
 *imperative* async inside UI handlers.
 
 Mental model in one line:
 
 ```text
-BastydeAppBuilder::install_async()  →  ctx.spawn_local(async move { … })  →  Signal::set(result)
+TeksiloAppBuilder::install_async()  →  ctx.spawn_local(async move { … })  →  Signal::set(result)
 ```
 
-Bastyde keeps the view layer synchronous: **async is the backend's concern.**
+Teksilo keeps the view layer synchronous: **async is the backend's concern.**
 This crate is the escape hatch for the cases where a *handler* wants to write
 linear `async` / `.await` — sequencing or branching several awaits in one place
 — instead of restructuring into callbacks. It is **off by default**; nothing in
-`bastyde-core` or `bastyde-app` gains an async dependency unless you opt in.
+`teksilo-core` or `teksilo-app` gains an async dependency unless you opt in.
 
 ## When to use it (and when not to)
 
@@ -26,37 +26,37 @@ linear `async` / `.await` — sequencing or branching several awaits in one plac
 | Background work → push a result into the reactive UI | The **data path**: `ctx.subscribe_event(...)` + `Signal::set` (no executor). See [architecture.md](architecture.md) §9.4. |
 | A handler that does `let a = f().await; let b = g(a).await; sig.set(b);` | `ctx.spawn_local(...)` (this crate). |
 | Offload one blocking call and await its result | `spawn_blocking(...)` (this crate). |
-| `.await` a native `tokio` / `async-std` future (timer, socket, `reqwest`) | `bastyde-tokio` / `bastyde-async-std`. |
+| `.await` a native `tokio` / `async-std` future (timer, socket, `reqwest`) | `teksilo-tokio` / `teksilo-async-std`. |
 
 For the common "kick off work, update the UI when it lands" case the reactive
 data path is simpler and needs no executor — reach for `spawn_local` only when
-the *imperative* shape genuinely reads better. (Bastyde apps backed by a data
+the *imperative* shape genuinely reads better. (Teksilo apps backed by a data
 layer such as Qleany generally keep async in that layer entirely.)
 
 ## The three crates
 
 | Crate | Adds | Depends on |
 | --- | --- | --- |
-| `bastyde-async` | the executor, `spawn_local` / `spawn_local_with`, `spawn_blocking`, `install_async()` | `bastyde-app`, `bastyde-core` (+ `async-channel`, `thiserror`) |
-| `bastyde-tokio` | `install_async_tokio()` + `TokioHandle`; awaits native Tokio futures | `bastyde-async` + `tokio` |
-| `bastyde-async-std` | `install_async_async_std()`; awaits native async-std futures | `bastyde-async` + `async-std` |
+| `teksilo-async` | the executor, `spawn_local` / `spawn_local_with`, `spawn_blocking`, `install_async()` | `teksilo-app`, `teksilo-core` (+ `async-channel`, `thiserror`) |
+| `teksilo-tokio` | `install_async_tokio()` + `TokioHandle`; awaits native Tokio futures | `teksilo-async` + `tokio` |
+| `teksilo-async-std` | `install_async_async_std()`; awaits native async-std futures | `teksilo-async` + `async-std` |
 
-`bastyde-async` alone is **runtime-free**: `spawn_blocking` offloads to a plain
+`teksilo-async` alone is **runtime-free**: `spawn_blocking` offloads to a plain
 `std::thread`, so you can run blocking work and await its result with no async
 runtime at all. The adapter crates only add the ability to `.await` native
 ecosystem futures directly.
 
-Through the umbrella `bastyde` crate these are the `async`, `tokio`, and
+Through the umbrella `teksilo` crate these are the `async`, `tokio`, and
 `async-std` features (the latter two imply `async`). The spawn surface is in
 the prelude when enabled.
 
 ## Quick start
 
 ```rust
-use bastyde::prelude::*;            // brings the spawn extension traits when `async` is on
+use teksilo::prelude::*;            // brings the spawn extension traits when `async` is on
 
 fn main() {
-    BastydeAppBuilder::new()
+    TeksiloAppBuilder::new()
         .theme(intui::light())
         .install_async()            // ← register the executor
         .initial_window(/* … */)
@@ -119,7 +119,7 @@ added later as a separate, additive API if a real need appears.)
 ## `spawn_blocking`
 
 ```rust
-let result = bastyde_async::spawn_blocking(move || expensive_sync_call()).await;
+let result = teksilo_async::spawn_blocking(move || expensive_sync_call()).await;
 // result: Result<T, BlockingError>
 ```
 
@@ -133,13 +133,13 @@ in the closure is **caught** on the worker and surfaced as
 ## Threading & the loop hook (zero idle cost)
 
 The executor is driven once per event-loop turn by an **async-agnostic** hook
-in `bastyde-app`:
+in `teksilo-app`:
 
 ```rust
-BastydeAppBuilder::on_loop_tick(poll_source: Rc<Cell<bool>>, tick: impl FnMut() -> bool)
+TeksiloAppBuilder::on_loop_tick(poll_source: Rc<Cell<bool>>, tick: impl FnMut() -> bool)
 ```
 
-`bastyde-app` only ever sees `FnMut` + `Rc<Cell<bool>>` — it has no async
+`teksilo-app` only ever sees `FnMut` + `Rc<Cell<bool>>` — it has no async
 dependency. Each turn (`about_to_wait`) the hook polls the executor; a `true`
 return triggers a repaint of the open windows (a task may have mutated a
 `Signal`). While idle the loop sleeps in `ControlFlow::Wait` (zero CPU) until a
@@ -156,14 +156,14 @@ tick), and `.detach()` lets it run independently.
 
 ## Reactor notes: tokio vs async-std
 
-- **`bastyde-tokio`** owns a multi-thread `tokio::runtime::Runtime` (reactor +
+- **`teksilo-tokio`** owns a multi-thread `tokio::runtime::Runtime` (reactor +
   timer driver on background threads). `install_async_tokio()` wraps each tick
   in `runtime.enter()`, so a Tokio leaf future polled on the UI thread
   registers with that background driver *and* registers the executor's `Waker`
   as its wake target. When the timer/socket is ready, the background driver
   wakes the executor and the loop ticks again. `TokioHandle` (in app-state)
   exposes `.spawn()` for `Send` tasks and `.handle()`.
-- **`bastyde-async-std`** needs no per-tick guard — async-std's reactor is
+- **`teksilo-async-std`** needs no per-tick guard — async-std's reactor is
   global and auto-starting, so `install_async_async_std()` is just
   `install_async()` plus the async-std dependency.
 
@@ -203,13 +203,13 @@ Both deliver their effects on the UI thread and both update the UI through
 
 | Concern | File |
 | --- | --- |
-| Executor, `AsyncRuntimeHandle`, `TaskHandle`, cross-thread waker | [crates/bastyde-async/src/executor.rs](../crates/bastyde-async/src/executor.rs) |
-| `spawn_blocking` | [crates/bastyde-async/src/blocking.rs](../crates/bastyde-async/src/blocking.rs) |
-| `EventContextAsyncExt` (`spawn_local` / `spawn_local_with`) | [crates/bastyde-async/src/ext.rs](../crates/bastyde-async/src/ext.rs) |
-| `install_async()` | [crates/bastyde-async/src/install.rs](../crates/bastyde-async/src/install.rs) |
-| Completion router (registry + `Send` payload) | [crates/bastyde-core/src/async_completion.rs](../crates/bastyde-core/src/async_completion.rs) |
-| Neutral loop hook (`on_loop_tick`, poll source) | [crates/bastyde-app/src/app.rs](../crates/bastyde-app/src/app.rs) |
-| Completion routing + window-close purge | [crates/bastyde-app/src/app.rs](../crates/bastyde-app/src/app.rs), [window_manager.rs](../crates/bastyde-app/src/window_manager.rs) |
-| Tokio adapter | [crates/bastyde-tokio/src/lib.rs](../crates/bastyde-tokio/src/lib.rs) |
-| async-std adapter | [crates/bastyde-async-std/src/lib.rs](../crates/bastyde-async-std/src/lib.rs) |
+| Executor, `AsyncRuntimeHandle`, `TaskHandle`, cross-thread waker | [crates/teksilo-async/src/executor.rs](../crates/teksilo-async/src/executor.rs) |
+| `spawn_blocking` | [crates/teksilo-async/src/blocking.rs](../crates/teksilo-async/src/blocking.rs) |
+| `EventContextAsyncExt` (`spawn_local` / `spawn_local_with`) | [crates/teksilo-async/src/ext.rs](../crates/teksilo-async/src/ext.rs) |
+| `install_async()` | [crates/teksilo-async/src/install.rs](../crates/teksilo-async/src/install.rs) |
+| Completion router (registry + `Send` payload) | [crates/teksilo-core/src/async_completion.rs](../crates/teksilo-core/src/async_completion.rs) |
+| Neutral loop hook (`on_loop_tick`, poll source) | [crates/teksilo-app/src/app.rs](../crates/teksilo-app/src/app.rs) |
+| Completion routing + window-close purge | [crates/teksilo-app/src/app.rs](../crates/teksilo-app/src/app.rs), [window_manager.rs](../crates/teksilo-app/src/window_manager.rs) |
+| Tokio adapter | [crates/teksilo-tokio/src/lib.rs](../crates/teksilo-tokio/src/lib.rs) |
+| async-std adapter | [crates/teksilo-async-std/src/lib.rs](../crates/teksilo-async-std/src/lib.rs) |
 | Demo | [examples/async_demo/src/main.rs](../examples/async_demo/src/main.rs) |

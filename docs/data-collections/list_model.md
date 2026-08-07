@@ -32,7 +32,7 @@ Observers registered via `ListModel::observe_changes` receive a
 it unregisters the callback immediately.
 
 ```rust
-# use bastyde_data::ListModel;
+# use teksilo_data::ListModel;
 let model: ListModel<&str> = ListModel::new();
 model.push("alpha");
 model.push("beta");
@@ -51,7 +51,7 @@ assert_eq!(model.len(), 2);
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_data/list_model/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_data/list_model/index.html)
 
 ## `pub struct ListModel`
 

@@ -17,9 +17,9 @@
 //!    embeds an internal `TabWidget`. One sample includes a rare
 //!    `Button` to prove keyboard-focus reachability post-promotion.
 
-use bastyde::prelude::*;
-use bastyde::widgets::tooltip::TooltipContent;
-use bastyde::widgets::{
+use teksilo::prelude::*;
+use teksilo::widgets::tooltip::TooltipContent;
+use teksilo::widgets::{
     Button, Expand, HStack, MenuItem, MenuList, Padding, Panel, ProgressBar, Spacer, TabInfo,
     TabWidget, TextWidget, VStack,
 };
@@ -146,7 +146,7 @@ fn province_composite_body() -> impl Widget {
 /// Build the body of a tabbed composite tooltip — proves `TabWidget`
 /// works inside a tooltip surface.
 fn tabbed_composite_body() -> impl Widget {
-    let selected: Signal<Option<bastyde::widgets::tab_widget::TabId>> = Signal::new(None);
+    let selected: Signal<Option<teksilo::widgets::tab_widget::TabId>> = Signal::new(None);
     let body = TabWidget::new(selected)
         .static_tab(
             TabInfo::new().title(lit!("Stats")),
@@ -217,7 +217,7 @@ fn composite_column() -> impl Widget {
 /// * a **vertical** `TabWidget` whose tabs carry rich tooltips — hovering a
 ///   tab opens its tooltip beside it, not over the tab below (Part B).
 fn menu_and_vtabs_column() -> impl Widget {
-    let selected: Signal<Option<bastyde::widgets::tab_widget::TabId>> = Signal::new(None);
+    let selected: Signal<Option<teksilo::widgets::tab_widget::TabId>> = Signal::new(None);
     let vtabs = TabWidget::new(selected)
         .vertical()
         .static_tab(
@@ -277,7 +277,7 @@ fn root() -> impl Widget {
     VStack::new()
         .spacing(12.0)
         .child(Padding::uniform(12.0).child(
-            TextWidget::new(lit!("Bastyde — Tooltips Showcase")).style(TextStyleRole::BodyBold),
+            TextWidget::new(lit!("Teksilo — Tooltips Showcase")).style(TextStyleRole::BodyBold),
         ))
         .child(
             Expand::new().child(
@@ -292,13 +292,13 @@ fn root() -> impl Widget {
 }
 
 fn main() {
-    BastydeAppBuilder::new()
+    TeksiloAppBuilder::new()
         .install_automation_bridge_in_debug()
-        .theme(bastyde::presets::intui::dark())
+        .theme(teksilo::presets::intui::dark())
         .register_tooltips(build_tooltip_registry())
         .initial_window(
             WindowConfig::new()
-                .title("Bastyde — Tooltips Showcase")
+                .title("Teksilo — Tooltips Showcase")
                 .size(1200, 720)
                 .root(|tree, _state| tree.add(root())),
         )

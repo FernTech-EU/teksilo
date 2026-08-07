@@ -17,16 +17,16 @@
 //! - **Folders** `TreeView` — drag a row onto another's top third to drop
 //!   *before*, middle third to drop *into* (reparent), bottom third *after*.
 //!
-//! The drag payload is the public [`RowDragData<T>`](bastyde::widgets::RowDragData);
+//! The drag payload is the public [`RowDragData<T>`](teksilo::widgets::RowDragData);
 //! `.export_external` also advertises `text/plain`, so a song can be dropped on
 //! another application.
 //!
 //! Run with: `cargo run -p drag-and-drop`
 
-use bastyde::core::WidgetPlacement;
-use bastyde::data::{ListModel, SelectionMode, SelectionModel, TreeModel};
-use bastyde::prelude::*;
-use bastyde::widgets::{
+use teksilo::core::WidgetPlacement;
+use teksilo::data::{ListModel, SelectionMode, SelectionModel, TreeModel};
+use teksilo::prelude::*;
+use teksilo::widgets::{
     Divider, DragTransferMode, DropRegion, DropTarget, DropTargetVariant, Expand, FixedSize,
     HStack, ListView, Padding, Panel, RowDragData, Spacer, StandardListItem, StandardTreeItem,
     TextWidget, Toolbar, TreeView, VStack,
@@ -36,18 +36,18 @@ fn dark_mode_toolbar() -> impl Widget {
     Toolbar::new().child(
         HStack::new()
             .child(Spacer::new())
-            .child(bastyde::widgets::ThemeSwitcher::new()),
+            .child(teksilo::widgets::ThemeSwitcher::new()),
     )
 }
 
 fn main() {
-    BastydeAppBuilder::new()
+    TeksiloAppBuilder::new()
         .install_automation_bridge_in_debug()
         .install_inspector_in_debug()
-        .theme(bastyde::presets::intui::light())
+        .theme(teksilo::presets::intui::light())
         .initial_window(
             WindowConfig::new()
-                .title("Bastyde — Drag and Drop")
+                .title("Teksilo — Drag and Drop")
                 .size(960, 640)
                 .root(|tree, _state| {
                     let songs = ListModel::from_vec(
@@ -84,7 +84,7 @@ fn build_folder_tree() -> TreeModel<String> {
     tree.insert_child(documents, 0, "notes.md".to_string());
     tree.insert_child(documents, 1, "taxes.pdf".to_string());
     let projects = tree.insert_child(documents, 2, "Projects".to_string());
-    tree.insert_child(projects, 0, "bastyde".to_string());
+    tree.insert_child(projects, 0, "teksilo".to_string());
     tree.insert_child(projects, 1, "skribisto".to_string());
 
     let downloads = tree.insert_root(1, "Downloads".to_string());
@@ -401,7 +401,7 @@ impl Root {
 }
 
 impl Widget for Root {
-    fn build(&mut self, ctx: &mut bastyde::core::BuildContext) -> Vec<WidgetId> {
+    fn build(&mut self, ctx: &mut teksilo::core::BuildContext) -> Vec<WidgetId> {
         let theme = ctx.theme().clone();
         let root = ctx.add(
             Panel::new().child(
@@ -421,7 +421,7 @@ impl Widget for Root {
     fn layout_response(
         &self,
         proposal: SizeProposal,
-        ctx: &bastyde::core::LayoutContext,
+        ctx: &teksilo::core::LayoutContext,
     ) -> LayoutResponse {
         self.root_child_id
             .and_then(|id| ctx.child_size(id, proposal))
@@ -434,7 +434,7 @@ impl Widget for Root {
         bounds: Rect,
         _proposal: SizeProposal,
         children: &mut [WidgetPlacement],
-        _ctx: &bastyde::core::LayoutContext,
+        _ctx: &teksilo::core::LayoutContext,
     ) {
         for child in children.iter_mut() {
             child.origin = bounds.origin();

@@ -1,0 +1,21 @@
+# SPDX-License-Identifier: MPL-2.0
+# SPDX-FileCopyrightText: 2026 FernTech
+
+[package]
+name = "cargo-teksilo-telemetry-lint"
+edition = "2024"
+version.workspace = true
+license-file.workspace = true
+publish.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Schema-drift linter for teksilo-telemetry event manifests"
+
+[[bin]]
+name = "cargo-teksilo-telemetry-lint"
+path = "src/main.rs"
+
+[dependencies]
+serde = { workspace = true }
+serde_yaml = "0.9"
+serde_json = { workspace = true }

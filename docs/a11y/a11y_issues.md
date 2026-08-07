@@ -3,7 +3,7 @@
 
 # Known accessibility limitations
 
-This file records accessibility gaps that Bastyde **cannot** close from within
+This file records accessibility gaps that Teksilo **cannot** close from within
 its own code because they depend on an external component. Everything
 achievable inside the framework is implemented; the items below are the
 residual, documented for anyone assembling a conformance statement (EN 301 549
@@ -12,9 +12,9 @@ ACR, US Section 508 VPAT, RGAA déclaration de conformité).
 ## WCAG 1.3.5 Identify Input Purpose — full autofill tokens (AccessKit-blocked)
 
 **Status: partially met. The remainder is blocked upstream in AccessKit; no
-Bastyde-side action is possible or planned.**
+Teksilo-side action is possible or planned.**
 
-Bastyde exposes a field's semantic purpose to assistive technology via
+Teksilo exposes a field's semantic purpose to assistive technology via
 `TextInputField::input_purpose(..)` / `TextInput::input_purpose(..)`
 (`InputPurpose::{Normal, Email, Phone, Url, Number, Search}`), which sets the
 matching specialised AccessKit role (`Role::EmailInput`, `PhoneNumberInput`,
@@ -28,12 +28,12 @@ rest — so the platform / an autofill agent can pre-fill known user data.
 **AccessKit 0.24.1 has no node property that carries these tokens** (its
 `AutoComplete { Inline, List, Both }` enum is the unrelated `aria-autocomplete`
 popup-behaviour hint, not the field-purpose token). This is an AccessKit /
-underlying platform-API limitation, not a Bastyde omission: there is nothing in
+underlying platform-API limitation, not a Teksilo omission: there is nothing in
 the accessibility protocol to write the token into.
 
 Consequence for conformance: an app can satisfy the *role/kind* half of 1.3.5
 today; the *autofill-token* half is unavailable on this toolkit until AccessKit
-grows such a field. Note the specialised input roles Bastyde does set are
+grows such a field. Note the specialised input roles Teksilo does set are
 2.1-only concepts and are outside US Section 508's WCAG-2.0 scope.
 
 ## Selection contrast (resolved)
@@ -59,7 +59,7 @@ software exposes **no such injection mechanism**, so — per W3C **WCAG2ICT**,
 which EN 301 549 defers to for applying WCAG to non-web software — the criterion
 **does not apply** where the software provides no text-spacing-override facility.
 
-Bastyde already ships the primary readability adjustment as a first-class
+Teksilo already ships the primary readability adjustment as a first-class
 control — the global **text scale** (`TextScaleControl`, 80–200 %, applied
 app-wide through `effective_theme`) — and its reflow/shrink layout prevents
 clipping or overlap when text enlarges. An *independent* line/letter-spacing

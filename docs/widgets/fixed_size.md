@@ -19,8 +19,8 @@ relayout automatically. Unbound dimensions still fall back to the child's
 natural size.
 
 ```rust
-# use bastyde_widgets::primitives::{FixedSize, RectWidget};
-# use bastyde_core::signal::Signal;
+# use teksilo_widgets::primitives::{FixedSize, RectWidget};
+# use teksilo_core::signal::Signal;
 let sidebar_width = Signal::new(240.0_f32);
 // Pin the sidebar width to a reactive signal
 let _sidebar = FixedSize::new()
@@ -34,7 +34,7 @@ let _sidebar = FixedSize::new()
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/primitives/fixed_size/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/primitives/fixed_size/index.html)
 
 ## `pub struct FixedSize`
 

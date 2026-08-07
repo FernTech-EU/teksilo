@@ -15,8 +15,8 @@
 //! status line below — confirming the event loop kept ticking while
 //! the OS dialog was up. Run with: `cargo run -p file-dialogs`.
 
-use bastyde::prelude::*;
-use bastyde::widgets::{
+use teksilo::prelude::*;
+use teksilo::widgets::{
     Button, ButtonVariant, Expand, HStack, Panel, Spacer, Spinner, Switcher, TextWidget, Toolbar,
     VStack,
 };
@@ -25,19 +25,19 @@ fn dark_mode_toolbar() -> impl Widget {
     Toolbar::new().child(
         HStack::new()
             .child(Spacer::new())
-            .child(bastyde::widgets::ThemeSwitcher::new()),
+            .child(teksilo::widgets::ThemeSwitcher::new()),
     )
 }
 
 fn main() {
-    BastydeAppBuilder::new()
+    TeksiloAppBuilder::new()
         .install_automation_bridge_in_debug()
-        .theme(bastyde::presets::intui::light())
+        .theme(teksilo::presets::intui::light())
         .install_inspector_in_debug()
         .install_file_dialog()
         .initial_window(
             WindowConfig::new()
-                .title("Bastyde — Native File Dialogs")
+                .title("Teksilo — Native File Dialogs")
                 .size(720, 420)
                 .root(|tree, _state| {
                     tree.add(
@@ -157,7 +157,7 @@ impl Widget for FileDialogShowcase {
                     FileDialogResult::Saved(Some(p)) => {
                         // Write a tiny placeholder so the user sees
                         // a real file appear at the chosen path.
-                        match std::fs::write(&p, b"Hello from Bastyde's file-dialog demo.\n") {
+                        match std::fs::write(&p, b"Hello from Teksilo's file-dialog demo.\n") {
                             Ok(()) => format!("Saved to: {}", p.display()),
                             Err(e) => format!("Save failed: {e}"),
                         }
@@ -189,7 +189,7 @@ impl Widget for FileDialogShowcase {
             .style(TextStyleRole::Small);
 
         // Spinner pulses while a dialog is in flight, proving the
-        // Bastyde event loop keeps ticking. A Switcher driven by
+        // Teksilo event loop keeps ticking. A Switcher driven by
         // `spinning` swaps an empty placeholder for the live spinner.
         let switch = self.spinning.map(|b| if *b { 1_usize } else { 0_usize });
         let spinner = Switcher::new(switch)

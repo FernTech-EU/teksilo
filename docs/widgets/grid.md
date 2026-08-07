@@ -20,7 +20,7 @@ provides no width constraint (intrinsic-measurement pass), preventing
 wrap-aware children from reporting inflated heights.
 
 ```rust
-# use bastyde_widgets::primitives::{Grid, TrackSize, RectWidget};
+# use teksilo_widgets::primitives::{Grid, TrackSize, RectWidget};
 // Two equal columns with a fixed 40 dp row, separated by an 8 dp gap
 let _grid = Grid::new()
     .columns(vec![TrackSize::Fractional(1.0), TrackSize::Fractional(1.0)])
@@ -36,7 +36,7 @@ let _grid = Grid::new()
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/primitives/grid/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/primitives/grid/index.html)
 
 ## `pub enum TrackSize`
 

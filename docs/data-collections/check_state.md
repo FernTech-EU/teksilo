@@ -7,14 +7,14 @@
 
 Represents the three visual states of a checkbox: unchecked, checked, and
 indeterminate (partial — some but not all descendants are checked). Lives in
-`bastyde-data` rather than `bastyde-widgets` so that `crate::TreeCheckedModel`
+`teksilo-data` rather than `teksilo-widgets` so that `crate::TreeCheckedModel`
 can produce `Signal<CheckState>` values without inverting the dependency graph.
 
 `From<bool>` converts a plain two-state boolean (e.g. from a filter predicate)
 into `Unchecked` or `Checked`, making it easy to bridge non-tristate sources.
 
 ```rust
-# use bastyde_data::CheckState;
+# use teksilo_data::CheckState;
 let state = CheckState::Indeterminate;
 assert!(state.is_filled());
 assert_eq!(state.next_tristate(), CheckState::Unchecked);
@@ -27,7 +27,7 @@ assert_eq!(CheckState::from(true), CheckState::Checked);
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_data/check_state/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_data/check_state/index.html)
 
 ## `pub enum CheckState`
 

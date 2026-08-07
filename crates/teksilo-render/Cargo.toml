@@ -1,0 +1,21 @@
+# SPDX-License-Identifier: MPL-2.0
+# SPDX-FileCopyrightText: 2026 FernTech
+
+[package]
+name = "teksilo-render"
+edition = "2024"
+version.workspace = true
+license-file.workspace = true
+publish.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+teksilo-canvas = { workspace = true }
+wgpu = { workspace = true }
+tiny-skia = { workspace = true }
+bytemuck = { workspace = true }
+
+[dev-dependencies]
+teksilo-tokens = { workspace = true }
+pollster = { workspace = true }

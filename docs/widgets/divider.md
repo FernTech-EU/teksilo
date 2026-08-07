@@ -18,7 +18,7 @@ The widget emits `Role::Splitter`, which matches the ARIA separator pattern
 and signals a structural boundary to screen readers.
 
 ```rust
-# use bastyde_widgets::primitives::Divider;
+# use teksilo_widgets::primitives::Divider;
 // Horizontal rule between two content sections
 let _rule = Divider::new();
 
@@ -32,7 +32,7 @@ let _vbar = Divider::vertical();
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/primitives/divider/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/primitives/divider/index.html)
 
 ## `pub struct Divider`
 

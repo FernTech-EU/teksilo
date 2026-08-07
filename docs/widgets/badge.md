@@ -24,9 +24,9 @@ Announces as `Role::Label` with its resolved text as the AT name.
 The inner `TextWidget` is hidden from AT to avoid double-announcement.
 
 ```rust
-# use bastyde_widgets::Badge;
-# use bastyde_i18n::lit;
-# use bastyde_tokens::Color;
+# use teksilo_widgets::Badge;
+# use teksilo_i18n::lit;
+# use teksilo_tokens::Color;
 let _badge = Badge::new(lit!("NEW"))
     .background(Color::new(0.2, 0.6, 1.0, 1.0));
 ```
@@ -37,7 +37,7 @@ let _badge = Badge::new(lit!("NEW"))
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/badge/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/badge/index.html)
 
 ## `pub struct Badge`
 
@@ -53,7 +53,7 @@ pub struct Badge { /* fields */ }
 
 Construct a badge with the given label text.
 
-#### `pub fn style(mut self, style: impl bastyde_core::styles::BadgeStyle) -> Self`
+#### `pub fn style(mut self, style: impl teksilo_core::styles::BadgeStyle) -> Self`
 
 Per-call style override for the badge pill chrome. Replaces the
 theme-wide default `BadgeStyle` for just this instance.
@@ -69,7 +69,7 @@ or a `Signal<Color>`. Default (unset) is `SurfaceRole::AccentSubtle`.
 Override the badge text color. Accepts `Color`, a role, or a signal.
 Default (unset) is the theme's `status_info_fg`.
 
-#### `pub fn text_style(mut self, style: impl Into<bastyde_core::color_prop::TextStyleProp>) -> Self`
+#### `pub fn text_style(mut self, style: impl Into<teksilo_core::color_prop::TextStyleProp>) -> Self`
 
 Override the label's text style (font, size, weight). Accepts a
 `TextStyleRole`, a `TextStyle`, or a `Signal` of either. Default

@@ -20,7 +20,7 @@ defaults; setters layer additional flags on top.
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_scene/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_scene/index.html)
 
 ## `pub struct ItemFlags`
 

@@ -3,8 +3,8 @@
 
 //! Settings tab — ShortcutSettings + live PrivacySettings (telemetry consent UI).
 
-use bastyde::prelude::*;
-use bastyde::widgets::{
+use teksilo::prelude::*;
+use teksilo::widgets::{
     Divider, Expand, LanguageSwitcher, Panel, PrivacySettings, ShortcutSettings, TextScaleControl,
     TextWidget, ThemeSwitcher, VStack,
 };
@@ -27,7 +27,7 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     // live).
     let scale = ctx
         .settings()
-        .signal_for(&bastyde::settings::TEXT_SCALE_KEY);
+        .signal_for(&teksilo::settings::TEXT_SCALE_KEY);
     let theme_switcher = section(
         ctx,
         lit!("ThemeSwitcher"),
@@ -112,12 +112,12 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     )
 }
 
-pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
-    // bati! cannot express the parameterless `Expand::respect_intrinsic()`
+pub fn teksu(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
+    // teksu! cannot express the parameterless `Expand::respect_intrinsic()`
     // builder method as a property — pre-build in Rust, drop the id in.
     let scale = ctx
         .settings()
-        .signal_for(&bastyde::settings::TEXT_SCALE_KEY);
+        .signal_for(&teksilo::settings::TEXT_SCALE_KEY);
     let theme_switcher_body_id = ctx.add(ThemeSwitcher::new());
     let text_scale_body_id = ctx.add(TextScaleControl::new(scale).label(lit!("Text size")));
     let language_switcher_body_id = ctx.add(LanguageSwitcher::new());
@@ -132,7 +132,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
             .child(PrivacySettings::new()),
     );
 
-    bati!(ctx => VStack {
+    teksu!(ctx => VStack {
             spacing: 20.0
             VStack {
                 spacing: 4.0

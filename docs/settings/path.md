@@ -21,7 +21,7 @@ individual files within it are addressed by name via
 `data_file`.
 
 ```ignore
-use bastyde_settings::AppPaths;
+use teksilo_settings::AppPaths;
 
 // Production: returns None when no home directory is detectable.
 if let Some(paths) = AppPaths::new("eu", "FernTech", "MyApp") {
@@ -41,7 +41,7 @@ assert_eq!(paths.config_file("settings"), tmp.path().join("settings.toml"));
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_settings/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_settings/index.html)
 
 ## `pub struct AppPaths`
 

@@ -24,11 +24,11 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use bastyde::core::widget::WidgetPlacement;
-use bastyde::prelude::*;
-use bastyde::text_document::{Color, FindOptions, HighlightFormat, SessionId, TextDocument};
-use bastyde::widgets::rich_text::FindSession;
-use bastyde::widgets::{Checkbox, Divider, MinSize, SearchField, TextWidget, Toolbar};
+use teksilo::core::widget::WidgetPlacement;
+use teksilo::prelude::*;
+use teksilo::text_document::{Color, FindOptions, HighlightFormat, SessionId, TextDocument};
+use teksilo::widgets::rich_text::FindSession;
+use teksilo::widgets::{Checkbox, Divider, MinSize, SearchField, TextWidget, Toolbar};
 
 use crate::highlighters::{KeywordHighlighter, SpellCheckHighlighter};
 
@@ -259,8 +259,8 @@ impl Widget for HighlightControls {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bastyde::core::widget_tree::WidgetTree;
-    use bastyde::text_document::{
+    use teksilo::core::widget_tree::WidgetTree;
+    use teksilo::text_document::{
         FlowElement, FlowElementSnapshot, FragmentContent, UnderlineStyle,
     };
 
@@ -272,7 +272,7 @@ mod tests {
     }
 
     /// Every paint span across every block of the document, under the all-sessions view.
-    fn all_paint_spans(doc: &TextDocument) -> Vec<bastyde::text_document::PaintHighlightSpan> {
+    fn all_paint_spans(doc: &TextDocument) -> Vec<teksilo::text_document::PaintHighlightSpan> {
         doc.snapshot_flow()
             .elements
             .into_iter()

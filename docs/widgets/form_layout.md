@@ -20,8 +20,8 @@ emits `Role::Form` so screen-reader users can navigate directly to the
 form. Without a name it demotes to a presentational `GenericContainer`.
 
 ```rust
-# use bastyde_widgets::primitives::{FormLayout, TextWidget, RectWidget};
-# use bastyde_i18n::lit;
+# use teksilo_widgets::primitives::{FormLayout, TextWidget, RectWidget};
+# use teksilo_i18n::lit;
 let _form = FormLayout::new()
     .label_gap(8.0)
     .row_spacing(6.0)
@@ -35,7 +35,7 @@ let _form = FormLayout::new()
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/primitives/form_layout/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/primitives/form_layout/index.html)
 
 ## `pub struct FormLayout`
 

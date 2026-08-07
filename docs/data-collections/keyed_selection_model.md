@@ -27,8 +27,8 @@ evictions. Use `SelectionModel` when rows are
 identified by their current visible index (simple in-memory lists).
 
 ```rust
-# use bastyde_data::KeyedSelectionModel;
-# use bastyde_data::SelectionMode;
+# use teksilo_data::KeyedSelectionModel;
+# use teksilo_data::SelectionMode;
 let sel: KeyedSelectionModel<u64> = KeyedSelectionModel::new(SelectionMode::Multi);
 sel.select(10);
 sel.toggle(20);
@@ -46,7 +46,7 @@ assert_eq!(sel.count(), 0);
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_data/keyed_selection_model/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_data/keyed_selection_model/index.html)
 
 ## `pub struct KeyedSelectionModel`
 

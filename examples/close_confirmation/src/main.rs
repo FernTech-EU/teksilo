@@ -31,8 +31,8 @@
 //!
 //! Run with `cargo run -p close-confirmation`.
 
-use bastyde::prelude::*;
-use bastyde::widgets::{
+use teksilo::prelude::*;
+use teksilo::widgets::{
     Button, ButtonVariant, Checkbox, EventContextMessageBoxExt, MessageBox, MessageBoxButtons,
     Padding, StandardButton, TextWidget, VStack,
 };
@@ -44,7 +44,7 @@ fn main() {
     // pattern — both sides see the same value.
     let dirty = Signal::new(true);
 
-    BastydeAppBuilder::new()
+    TeksiloAppBuilder::new()
         .install_automation_bridge_in_debug()
         .theme(intui::light())
         .initial_window(main_window(dirty))

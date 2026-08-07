@@ -59,7 +59,7 @@ ctx.add(
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/primitives/text_input_field/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/primitives/text_input_field/index.html)
 
 ## `pub enum InputPurpose`
 
@@ -70,7 +70,7 @@ This is the in-framework-achievable part of SC 1.3.5: a screen reader
 announces "email, edit text" instead of a generic "edit text". The FULL
 HTML `autocomplete`-token vocabulary (`given-name`, `postal-code`,
 `cc-number`, …) that drives OS/browser autofill has **no representation in
-AccessKit 0.24** and therefore cannot be exposed from Bastyde — see
+AccessKit 0.24** and therefore cannot be exposed from Teksilo — see
 `docs/a11y/a11y_issues.md`. Password entry is configured via
 `TextInputField::secure`, not here.
 

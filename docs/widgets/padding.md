@@ -26,8 +26,8 @@ Use `Padding::uniform` when all four sides are equal, and
 `Padding::symmetric` when horizontal and vertical insets differ.
 
 ```rust
-# use bastyde_widgets::primitives::{Padding, TextWidget};
-# use bastyde_i18n::lit;
+# use teksilo_widgets::primitives::{Padding, TextWidget};
+# use teksilo_i18n::lit;
 // 12 dp padding on every side:
 let _w = Padding::uniform(12.0)
     .child(TextWidget::new(lit!("Hello")));
@@ -39,7 +39,7 @@ let _w = Padding::uniform(12.0)
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/primitives/padding/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/primitives/padding/index.html)
 
 ## `pub struct Padding`
 

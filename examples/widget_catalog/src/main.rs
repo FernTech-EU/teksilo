@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
-//! Bastyde Widget Catalog — every public widget, classic vs `bati!` side-by-side.
+//! Teksilo Widget Catalog — every public widget, classic vs `teksu!` side-by-side.
 //!
 //! Run with: `cargo run -p widget-catalog`
 //!
@@ -18,17 +18,17 @@ use std::cell::Cell;
 use std::rc::Rc;
 use std::time::Duration;
 
-use bastyde::core::PlatformTitleBarHost;
-use bastyde::core::event::{Key, Modifiers};
-use bastyde::core::shortcut::{KeyStroke, Shortcut};
-use bastyde::core::widget::WidgetPlacement;
-use bastyde::prelude::*;
-use bastyde::widgets::{
+use teksilo::core::PlatformTitleBarHost;
+use teksilo::core::event::{Key, Modifiers};
+use teksilo::core::shortcut::{KeyStroke, Shortcut};
+use teksilo::core::widget::WidgetPlacement;
+use teksilo::prelude::*;
+use teksilo::widgets::{
     Button, ButtonVariant, Expand, HStack, MaxSize, MenuBar, MenuItem, MenuList, Padding,
     ScrollArea, Spacer, StatusBar, Switcher, TabId, TabInfo, TabWidget, TextScaleControl,
     TextWidget, TitleBar, Toggle, VStack, WindowFrame, keystroke_format::format_keystroke,
 };
-use bastyde_telemetry::{StubReporter, TelemetryBundle, TelemetryMode};
+use teksilo_telemetry::{StubReporter, TelemetryBundle, TelemetryMode};
 
 mod cli;
 mod shared;
@@ -69,16 +69,16 @@ fn main() {
         ])
         .auto_detect_os_locale(false)
         .fallback_locale("en-US".parse().expect("en-US is a valid BCP-47 tag"))
-        .framework_locales(bastyde::widgets::framework_locales());
+        .framework_locales(teksilo::widgets::framework_locales());
 
-    BastydeAppBuilder::new()
+    TeksiloAppBuilder::new()
         // Paths + settings must be set BEFORE the persistent-archive
         // toast install and before `.telemetry(...)` (both read them).
         .application("eu", "FernTech", "widget-catalog")
         .settings(SettingsBundle::new())
         .install_inspector_in_debug()
         // Debug-only automation bridge: drive this catalog from
-        // `bastyde-automation-mcp --connect <sock> --token <uuid>` (the socket
+        // `teksilo-automation-mcp --connect <sock> --token <uuid>` (the socket
         // path + token are printed to stderr at startup). No-op in release.
         .install_automation_bridge_in_debug()
         .install_file_dialog()
@@ -103,13 +103,13 @@ fn main() {
                 .theme
                 .as_deref()
                 .and_then(theme_from_name)
-                .unwrap_or_else(bastyde::presets::intui::light),
+                .unwrap_or_else(teksilo::presets::intui::light),
         )
         .i18n(i18n)
         .install_native_menu()
         .initial_window(
             WindowConfig::new()
-                .title("Bastyde — Widget Catalog")
+                .title("Teksilo — Widget Catalog")
                 .size(1400, 900)
                 .min_size(600, 600)
                 .decorations(DecorationsMode::CustomChrome)
@@ -124,7 +124,7 @@ fn main() {
                         // every tab's Switcher and the currently-active
                         // TabId. Lives at the window root so the title
                         // bar can read/write the same signals.
-                        let show_bati: Signal<bool> = Signal::new(opts.bati_mode);
+                        let show_teksi: Signal<bool> = Signal::new(opts.teksi_mode);
                         let selected_tab: Signal<Option<TabId>> =
                             Signal::new(Some(tab_ids[opts.initial_tab]));
 
@@ -152,7 +152,7 @@ fn main() {
                         let catalog = tree.add(WidgetCatalog::new(
                             opts.clone(),
                             tab_ids.clone(),
-                            show_bati.clone(),
+                            show_teksi.clone(),
                             selected_tab.clone(),
                         ));
                         let catalog_filled =
@@ -295,15 +295,15 @@ fn build_title_bar(
     // is built, so a live IntUI ↔ Material 3 family switch keeps the current
     // shapes — start with `--theme material3-dark` to see a preset's true
     // chrome. The composite tooltip below spells this out for the user.
-    let theme_switcher = bastyde::widgets::ThemeSwitcher::new()
+    let theme_switcher = teksilo::widgets::ThemeSwitcher::new()
         .themes([
-            (lit!("IntUI Light"), bastyde::presets::intui::light()),
-            (lit!("IntUI Dark"), bastyde::presets::intui::dark()),
+            (lit!("IntUI Light"), teksilo::presets::intui::light()),
+            (lit!("IntUI Dark"), teksilo::presets::intui::dark()),
             (
                 lit!("Material 3 Light"),
-                bastyde::prelude::material3::light(),
+                teksilo::prelude::material3::light(),
             ),
-            (lit!("Material 3 Dark"), bastyde::prelude::material3::dark()),
+            (lit!("Material 3 Dark"), teksilo::prelude::material3::dark()),
         ])
         .composite_tooltip(theme_switch_caveat());
 
@@ -371,7 +371,7 @@ impl Widget for TextScaleSlot {
 /// Invisible slot that persists the active theme to settings and restores it
 /// on the next launch — so a user who picks Dark (or System) via the
 /// `ThemeSwitcher` finds it preserved across runs. The selection is keyed by
-/// the theme's stable [`bastyde::core::ThemeId`]: `"intui.light"` /
+/// the theme's stable [`teksilo::core::ThemeId`]: `"intui.light"` /
 /// `"intui.dark"` for fixed themes, `"system"` for follow-OS. Mirrors
 /// `TextScaleSlot` (which does the same for the text-scale preference); the
 /// binding lives in `build()` where `ctx.settings()` is reachable.
@@ -385,9 +385,9 @@ struct ThemePersistenceSlot {
 const THEME_PREF_KEY: &str = "ui.theme";
 
 /// Resolve a `--theme NAME` value to a concrete `Theme`.
-fn theme_from_name(name: &str) -> Option<bastyde::core::Theme> {
-    use bastyde::prelude::material3;
-    use bastyde::presets::intui;
+fn theme_from_name(name: &str) -> Option<teksilo::core::Theme> {
+    use teksilo::prelude::material3;
+    use teksilo::presets::intui;
     match name {
         "intui-light" => Some(intui::light()),
         "intui-dark" => Some(intui::dark()),
@@ -424,10 +424,10 @@ impl Widget for ThemePersistenceSlot {
         if !self.skip_restore && !saved.is_empty() {
             ctx.run_after_mount(move |ectx| match saved.as_str() {
                 "system" => ectx.follow_system_theme(),
-                "intui.dark" => ectx.set_theme(bastyde::presets::intui::dark()),
-                "intui.light" => ectx.set_theme(bastyde::presets::intui::light()),
-                "material3.dark" => ectx.set_theme(bastyde::prelude::material3::dark()),
-                "material3.light" => ectx.set_theme(bastyde::prelude::material3::light()),
+                "intui.dark" => ectx.set_theme(teksilo::presets::intui::dark()),
+                "intui.light" => ectx.set_theme(teksilo::presets::intui::light()),
+                "material3.dark" => ectx.set_theme(teksilo::prelude::material3::dark()),
+                "material3.light" => ectx.set_theme(teksilo::prelude::material3::light()),
                 // Unknown / custom id: keep the builder default.
                 _ => {}
             });
@@ -454,9 +454,9 @@ impl Widget for ThemePersistenceSlot {
 /// character input on macOS keyboards).
 fn build_menu_bar() -> impl Widget + 'static {
     MenuBar::new()
-        .collapse_policy(bastyde::widgets::CollapsePolicy::Always)
-        .hamburger_size(bastyde::widgets::IconButtonSize::Large)
-        .native_on_macos(bastyde::widgets::NativeMenuMode::Suppress)
+        .collapse_policy(teksilo::widgets::CollapsePolicy::Always)
+        .hamburger_size(teksilo::widgets::IconButtonSize::Large)
+        .native_on_macos(teksilo::widgets::NativeMenuMode::Suppress)
         .menu(tr!(app_menu_file()), || {
             Box::new(
                 MenuList::new().item(
@@ -471,13 +471,13 @@ fn build_menu_bar() -> impl Widget + 'static {
                 MenuList::new()
                     .item(
                         MenuItem::new(tr!(app_menu_documentation())).on_activate_fn(|_| {
-                            println!("Documentation: https://github.com/FernTech/bastyde");
+                            println!("Documentation: https://github.com/FernTech/teksilo");
                         }),
                     )
                     .separator()
                     .item(MenuItem::new(tr!(app_menu_about())).on_activate_fn(|_| {
                         println!(
-                            "Bastyde Widget Catalog — every public widget, classic vs bati! \
+                            "Teksilo Widget Catalog — every public widget, classic vs teksu! \
                              side-by-side.\nLicense: MPL2.0  •  Copyright (c) 2026 FernTech"
                         );
                     })),
@@ -493,7 +493,7 @@ fn build_menu_bar() -> impl Widget + 'static {
 struct WidgetCatalog {
     options: cli::CliOptions,
     tab_ids: Rc<Vec<TabId>>,
-    show_bati: Signal<bool>,
+    show_teksi: Signal<bool>,
     selected_tab: Signal<Option<TabId>>,
     root_child_id: Option<WidgetId>,
 }
@@ -502,13 +502,13 @@ impl WidgetCatalog {
     fn new(
         options: cli::CliOptions,
         tab_ids: Rc<Vec<TabId>>,
-        show_bati: Signal<bool>,
+        show_teksi: Signal<bool>,
         selected_tab: Signal<Option<TabId>>,
     ) -> Self {
         Self {
             options,
             tab_ids,
-            show_bati,
+            show_teksi,
             selected_tab,
             root_child_id: None,
         }
@@ -519,9 +519,9 @@ impl Widget for WidgetCatalog {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let sigs = Signals::new(ctx);
 
-        // `view_mode: Signal<usize>` — derived from `show_bati` so that
+        // `view_mode: Signal<usize>` — derived from `show_teksi` so that
         // every tab's Switcher binds to the same source.
-        let view_mode = self.show_bati.map(|b| if *b { 1 } else { 0 });
+        let view_mode = self.show_teksi.map(|b| if *b { 1 } else { 0 });
 
         // ── --cycle: auto-advance the tab on a timer ─────────────────
         if let Some(period) = self.options.cycle {
@@ -619,7 +619,7 @@ impl Widget for WidgetCatalog {
 
 impl WidgetCatalog {
     fn build_mode_toggle(&self) -> impl Widget + 'static {
-        Toggle::new(self.show_bati.clone()).label(tr!(mode_label()))
+        Toggle::new(self.show_teksi.clone()).label(tr!(mode_label()))
     }
 
     fn install_cycle(&self, ctx: &mut BuildContext, period: Duration) {
@@ -655,7 +655,7 @@ impl WidgetCatalog {
 }
 
 // ---------------------------------------------------------------------------
-// TabContent — the per-tab widget that hosts the classic/bati Switcher.
+// TabContent — the per-tab widget that hosts the classic/teksu Switcher.
 // ---------------------------------------------------------------------------
 
 #[derive(Debug)]
@@ -680,12 +680,12 @@ impl TabContent {
 impl Widget for TabContent {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let classic_id = (self.entry.classic)(ctx, &self.sigs);
-        let bati_id = (self.entry.bati)(ctx, &self.sigs);
+        let teksi_id = (self.entry.teksu)(ctx, &self.sigs);
 
         let switcher = ctx.add(
             Switcher::new(self.view_mode.clone())
                 .child_id(classic_id)
-                .child_id(bati_id),
+                .child_id(teksi_id),
         );
         let padded = ctx.add(Padding::uniform(20.0).child_id(switcher));
         let scrolled = ctx.add(ScrollArea::from_id(padded));

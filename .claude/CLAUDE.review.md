@@ -1,4 +1,4 @@
-# Bastyde: Code Review Reference
+# Teksilo: Code Review Reference
 
 > This is a trimmed variant of the project's full `CLAUDE.md`, built for code review.
 >
@@ -28,8 +28,8 @@
 ```bash
 cargo build                          # Build all crates
 cargo test                           # Run all tests (headless, no GPU/display needed)
-cargo test -p bastyde-core           # Test a single crate
-cargo test -p bastyde-widgets        # Includes layout integration tests
+cargo test -p teksilo-core           # Test a single crate
+cargo test -p teksilo-widgets        # Includes layout integration tests
 cargo doc --no-deps --open           # Generate docs
 cargo run -p <example>               # Run a demo (see examples/ for the list)
 cargo run -p <example> --release     # Release mode
@@ -56,7 +56,7 @@ python3 tools/extract_widget_api.py Button -f json -o out.json
 python3 tools/bench_examples.py                            # Benchmarks + report
 ```
 
-`tools/extract_widget_api.py` parses widget sources in `crates/bastyde-widgets/src/` and emits
+`tools/extract_widget_api.py` parses widget sources in `crates/teksilo-widgets/src/` and emits
 the `//!` module header, public `struct`/`enum`/`type`/`const` declarations with `///` docs, and
 `pub fn` builder methods from inherent `impl` blocks. It skips `impl Widget for Foo` plumbing and
 `pub(crate)` items. Accepts type names or module names.
@@ -90,37 +90,37 @@ One-line role per crate. Verify actual responsibilities and dependency edges aga
 files and `use` graphs; the descriptions below are the stated intent, not a guarantee.
 
 ```
-bastyde-tokens          Pure data: Theme, Color, TextStyle, SpacingTokens, alignment
-bastyde-canvas          Canvas API, RenderFrame, Path, Paint, geometry, TextBackend trait
-bastyde-core            Widget traits, arena, layout, events, focus, state, gestures, overlays
-bastyde-data            Reactive data models (ListModel/TreeModel/etc.); depends on bastyde-core
+teksilo-tokens          Pure data: Theme, Color, TextStyle, SpacingTokens, alignment
+teksilo-canvas          Canvas API, RenderFrame, Path, Paint, geometry, TextBackend trait
+teksilo-core            Widget traits, arena, layout, events, focus, state, gestures, overlays
+teksilo-data            Reactive data models (ListModel/TreeModel/etc.); depends on teksilo-core
                         only for Signal<T> + ObserverHandle; GUI-free
-bastyde-settings        Persistent reactive prefs: SettingsStore, SettingsFile<T>,
+teksilo-settings        Persistent reactive prefs: SettingsStore, SettingsFile<T>,
                         Persisted{List,Tree}Model, MruList<T>, WindowStateService
-bastyde-telemetry       Product-analytics primitives built on bastyde-settings
-bastyde-analytics-*     Telemetry adapters: plausible, bastyde (gRPC), otlp
-bastyde-telemetry-codegen   Proc-macro generating typed emit_* fns from a YAML manifest
-cargo-bastyde-telemetry-lint   CLI schema-drift linter
-bastyde-widgets         Widgets + layout primitives
-bastyde-charts          BarChart, LineChart, PieChart; no dep on bastyde-widgets
-bastyde-scene           Pannable/zoomable scene viewport; depends on bastyde-widgets
-bastyde-text            TextBackend impl via text-typeset (external path dep)
-bastyde-i18n            Fluent-rs runtime + locale-aware formatters (ICU4X-backed)
-bastyde-i18n-macros     tr! / tr_widget! / tr_signal! proc macros
-bastyde-macros          bati! DSL proc macro
-bastyde-render          wgpu renderer: rect/SDF/quad pipelines, atlas upload, path atlas
-bastyde-platform        winit + AccessKit adapter; clipboard, OS theme, file dialogs,
+teksilo-telemetry       Product-analytics primitives built on teksilo-settings
+teksilo-analytics-*     Telemetry adapters: plausible, teksilo (gRPC), otlp
+teksilo-telemetry-codegen   Proc-macro generating typed emit_* fns from a YAML manifest
+cargo-teksilo-telemetry-lint   CLI schema-drift linter
+teksilo-widgets         Widgets + layout primitives
+teksilo-charts          BarChart, LineChart, PieChart; no dep on teksilo-widgets
+teksilo-scene           Pannable/zoomable scene viewport; depends on teksilo-widgets
+teksilo-text            TextBackend impl via text-typeset (external path dep)
+teksilo-i18n            Fluent-rs runtime + locale-aware formatters (ICU4X-backed)
+teksilo-i18n-macros     tr! / tr_widget! / tr_signal! proc macros
+teksilo-macros          teksu! DSL proc macro
+teksilo-render          wgpu renderer: rect/SDF/quad pipelines, atlas upload, path atlas
+teksilo-platform        winit + AccessKit adapter; clipboard, OS theme, file dialogs,
                         external DnD, native menu bar
-bastyde-app             BastydeAppBuilder, WindowManager, event loop
-bastyde-async           Optional main-thread async executor (off by default)
-bastyde-tokio           Tokio reactor adapter for bastyde-async
-bastyde-async-std       async-std reactor adapter for bastyde-async
-bastyde-webview         Embeddable WebView widget (native OS subview over the wgpu pass)
-bastyde                 Umbrella crate: re-exports + feature flags
-bastyde-resources       Resource handling and embedding
-bastyde-preview         Previewer infrastructure (WidgetCatalog trait, CatalogEntry); no GUI dep
-bastyde-preview-ui      Reusable 3-pane previewer GUI
-bastyde-widgets-previewer   Bundle binary for the stock catalog
+teksilo-app             TeksiloAppBuilder, WindowManager, event loop
+teksilo-async           Optional main-thread async executor (off by default)
+teksilo-tokio           Tokio reactor adapter for teksilo-async
+teksilo-async-std       async-std reactor adapter for teksilo-async
+teksilo-webview         Embeddable WebView widget (native OS subview over the wgpu pass)
+teksilo                 Umbrella crate: re-exports + feature flags
+teksilo-resources       Resource handling and embedding
+teksilo-preview         Previewer infrastructure (WidgetCatalog trait, CatalogEntry); no GUI dep
+teksilo-preview-ui      Reusable 3-pane previewer GUI
+teksilo-widgets-previewer   Bundle binary for the stock catalog
 ```
 
 Stated dependency flow (verify):
@@ -172,15 +172,15 @@ axis at each child's final main size, then places. All in logical pixels. `Leadi
 ### Theming entry points (factual)
 
 `ThemeAppearance::{Light, Dark}` is a required field. Presets `presets::intui::{light, dark}` ship
-in `bastyde-core`. There is no `Theme::default()`. Per-widget style traits live in
-`bastyde-core/src/styles/`; default `Recipe*Style` impls in `bastyde-widgets/src/styles/`. Apps
+in `teksilo-core`. There is no `Theme::default()`. Per-widget style traits live in
+`teksilo-core/src/styles/`; default `Recipe*Style` impls in `teksilo-widgets/src/styles/`. Apps
 install styles per-call (`.style(...)`) or theme-wide (`theme.style_slots.<widget> = ...`).
 
 ### App entry point
 
 ```rust
 fn main() {
-    BastydeAppBuilder::new()
+    TeksiloAppBuilder::new()
         .theme(intui::light())
         .initial_window(
             WindowConfig::new().title("My App").size(800, 600)
@@ -191,7 +191,7 @@ fn main() {
 ```
 
 Every window is described by a `WindowConfig`. There is no `.window_title` / `.window_size` /
-`.root` directly on `BastydeAppBuilder`. Secondary windows open via
+`.root` directly on `TeksiloAppBuilder`. Secondary windows open via
 `ctx.open_window(WindowConfig::new()...)`. Persistence chains `.app_paths(...)` /
 `.application(...)` and `.settings(...)` before `.initial_window(...)`.
 
@@ -228,61 +228,61 @@ skip scrutiny.
   and bare-Alt continue to work. Confirm the cfg gates and that no equivalent path is lost.
 - **X11 window decorations:** custom title bar is supported on Wayland/macOS/Windows; X11 falls
   back to native decorations.
-- **Async executor:** `bastyde-async` is opt-in and off by default; `bastyde-app` stays
+- **Async executor:** `teksilo-async` is opt-in and off by default; `teksilo-app` stays
   runtime-free (the `on_loop_tick` hook + `AsyncCompletionHandle` types are async-agnostic). Check
   there is no implicit tokio/async-std dependency in the core path.
-- **Data layer is GUI-free:** `bastyde-data` depends on `bastyde-core` only for `Signal<T>` +
-  `ObserverHandle`. Confirm no `bastyde-widgets` leakage.
+- **Data layer is GUI-free:** `teksilo-data` depends on `teksilo-core` only for `Signal<T>` +
+  `ObserverHandle`. Confirm no `teksilo-widgets` leakage.
 
 ---
 
 ## Navigation: Key Files
 
 Core:
-- Widget trait: `crates/bastyde-core/src/widget.rs`
-- Signal/Prop: `crates/bastyde-core/src/signal.rs`
-- BuildContext: `crates/bastyde-core/src/build_context.rs`
-- Event handlers / types: `crates/bastyde-core/src/event_handlers.rs`, `event.rs`
-- WidgetBuilder: `crates/bastyde-core/src/widget_builder.rs`
-- Arena: `crates/bastyde-core/src/arena.rs`
-- Widget tree orchestrator: `crates/bastyde-core/src/widget_tree.rs`
-- State: `crates/bastyde-core/src/state.rs`
-- Accessibility: `crates/bastyde-core/src/accessibility.rs`
-- Animation: `crates/bastyde-core/src/animation.rs`, `animated_quad.rs`, `frame_tick_scheduler.rs`, `motion_visibility.rs`
-- Theme/styling: `crates/bastyde-core/src/styles/` (+ preset `presets/intui.rs`); default impls `crates/bastyde-widgets/src/styles/`
-- Actions/Intents/Shortcuts: `crates/bastyde-core/src/{action,intent,shortcut}.rs`; `IntentKind` derive in `crates/bastyde-macros/src/intent_kind.rs`
-- Drag-and-drop core: `crates/bastyde-core/src/drag_payload.rs`, `drag_state.rs`, `widget_tree/drag_drop_impl.rs`
+- Widget trait: `crates/teksilo-core/src/widget.rs`
+- Signal/Prop: `crates/teksilo-core/src/signal.rs`
+- BuildContext: `crates/teksilo-core/src/build_context.rs`
+- Event handlers / types: `crates/teksilo-core/src/event_handlers.rs`, `event.rs`
+- WidgetBuilder: `crates/teksilo-core/src/widget_builder.rs`
+- Arena: `crates/teksilo-core/src/arena.rs`
+- Widget tree orchestrator: `crates/teksilo-core/src/widget_tree.rs`
+- State: `crates/teksilo-core/src/state.rs`
+- Accessibility: `crates/teksilo-core/src/accessibility.rs`
+- Animation: `crates/teksilo-core/src/animation.rs`, `animated_quad.rs`, `frame_tick_scheduler.rs`, `motion_visibility.rs`
+- Theme/styling: `crates/teksilo-core/src/styles/` (+ preset `presets/intui.rs`); default impls `crates/teksilo-widgets/src/styles/`
+- Actions/Intents/Shortcuts: `crates/teksilo-core/src/{action,intent,shortcut}.rs`; `IntentKind` derive in `crates/teksilo-macros/src/intent_kind.rs`
+- Drag-and-drop core: `crates/teksilo-core/src/drag_payload.rs`, `drag_state.rs`, `widget_tree/drag_drop_impl.rs`
 
 Widgets / primitives:
-- Reference widget (Button): `crates/bastyde-widgets/src/button.rs`
-- Layout primitives: `crates/bastyde-widgets/src/primitives/`
-- Data models: `crates/bastyde-data/src/` (`list_model.rs`, `tree_model.rs`, `tree_slice.rs`, `selection_model.rs`, `sort_filter_*.rs`, `checked_model.rs`, `tree_checked_model.rs`, `check_state.rs`)
-- Standard row items: `crates/bastyde-widgets/src/standard_item.rs`
-- TableView: `crates/bastyde-widgets/src/table_view.rs` + `table_view/`
-- TreeTableView: `crates/bastyde-widgets/src/tree_table_view.rs`
-- GridView: `crates/bastyde-widgets/src/` (grid view + `primitives/`)
-- Toast/notifications: `crates/bastyde-widgets/src/toast.rs` + `toast/`, `notification.rs` + `notification/`
-- Menus (native + in-window): `crates/bastyde-widgets/src/menu.rs` + `menu/`, `menu_bar.rs`
-- Text input: `crates/bastyde-widgets/src/text_input.rs`, `primitives/text_input_field.rs`
-- Rich text: `crates/bastyde-widgets/src/rich_text/`
+- Reference widget (Button): `crates/teksilo-widgets/src/button.rs`
+- Layout primitives: `crates/teksilo-widgets/src/primitives/`
+- Data models: `crates/teksilo-data/src/` (`list_model.rs`, `tree_model.rs`, `tree_slice.rs`, `selection_model.rs`, `sort_filter_*.rs`, `checked_model.rs`, `tree_checked_model.rs`, `check_state.rs`)
+- Standard row items: `crates/teksilo-widgets/src/standard_item.rs`
+- TableView: `crates/teksilo-widgets/src/table_view.rs` + `table_view/`
+- TreeTableView: `crates/teksilo-widgets/src/tree_table_view.rs`
+- GridView: `crates/teksilo-widgets/src/` (grid view + `primitives/`)
+- Toast/notifications: `crates/teksilo-widgets/src/toast.rs` + `toast/`, `notification.rs` + `notification/`
+- Menus (native + in-window): `crates/teksilo-widgets/src/menu.rs` + `menu/`, `menu_bar.rs`
+- Text input: `crates/teksilo-widgets/src/text_input.rs`, `primitives/text_input_field.rs`
+- Rich text: `crates/teksilo-widgets/src/rich_text/`
 
 Platform / app / render:
-- Renderer: `crates/bastyde-render/src/renderer.rs`
-- Canvas API: `crates/bastyde-canvas/src/canvas.rs`
-- App builder: `crates/bastyde-app/src/app.rs`
-- File dialogs: `crates/bastyde-platform/src/file_dialog.rs`
-- External (OS) DnD: `crates/bastyde-platform/src/external_dnd.rs` + `external_dnd/macos.rs`
-- Native menu backend: `crates/bastyde-platform/src/native_menu.rs` + `native_menu/macos.rs`
-- Clipboard / OS theme: `crates/bastyde-platform/src/clipboard.rs`, `os_theme.rs`
-- Title bar hosts: `crates/bastyde-platform/src/title_bar_host/` (wayland/x11/windows/macos)
-- WebView: `crates/bastyde-webview/src/`
-- Scene viewport: `crates/bastyde-scene/src/`
+- Renderer: `crates/teksilo-render/src/renderer.rs`
+- Canvas API: `crates/teksilo-canvas/src/canvas.rs`
+- App builder: `crates/teksilo-app/src/app.rs`
+- File dialogs: `crates/teksilo-platform/src/file_dialog.rs`
+- External (OS) DnD: `crates/teksilo-platform/src/external_dnd.rs` + `external_dnd/macos.rs`
+- Native menu backend: `crates/teksilo-platform/src/native_menu.rs` + `native_menu/macos.rs`
+- Clipboard / OS theme: `crates/teksilo-platform/src/clipboard.rs`, `os_theme.rs`
+- Title bar hosts: `crates/teksilo-platform/src/title_bar_host/` (wayland/x11/windows/macos)
+- WebView: `crates/teksilo-webview/src/`
+- Scene viewport: `crates/teksilo-scene/src/`
 
 Macros / i18n / previewer:
-- bati! DSL macro: `crates/bastyde-macros/src/`; trybuild fixtures in `crates/bastyde/tests/bastyde/pass/`
-- i18n runtime + formatting: `crates/bastyde-i18n/src/` (`manager.rs`, `localized_string.rs`, `format.rs`)
-- i18n macros: `crates/bastyde-i18n-macros/src/lib.rs`
-- Previewer: `crates/bastyde-preview/src/`, `crates/bastyde-preview-ui/src/`, `crates/bastyde-widgets-previewer/src/main.rs`
+- teksu! DSL macro: `crates/teksilo-macros/src/`; trybuild fixtures in `crates/teksilo/tests/teksilo/pass/`
+- i18n runtime + formatting: `crates/teksilo-i18n/src/` (`manager.rs`, `localized_string.rs`, `format.rs`)
+- i18n macros: `crates/teksilo-i18n-macros/src/lib.rs`
+- Previewer: `crates/teksilo-preview/src/`, `crates/teksilo-preview-ui/src/`, `crates/teksilo-widgets-previewer/src/main.rs`
 - Workspace config: `Cargo.toml`
 
 ---

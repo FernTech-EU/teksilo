@@ -19,10 +19,10 @@ analytics pay nothing.
 1. **Plain-language Art. 13 notice** — controller, processor name,
    purposes, lawful basis, retention, recipients, withdrawal right.
    All strings flow through `tr_widget!` against keys defined in
-   `crates/bastyde-widgets/locales/en-US.ftl`
+   `crates/teksilo-widgets/locales/en-US.ftl`
    and `fr-FR.ftl` under the
    `privacy-*` namespace. Apps install the framework bundle via
-   `I18nConfig::framework_locales(bastyde_widgets::framework_locales())`.
+   `I18nConfig::framework_locales(teksilo_widgets::framework_locales())`.
 2. **Per-scope toggles** — one per
    `ConsentScope` field, intersected
    with `reporter.supported_scopes()` so toggles for
@@ -59,7 +59,7 @@ let panel = PrivacySettings::new()
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/privacy_settings/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/privacy_settings/index.html)
 
 ## `pub struct PrivacySettings`
 

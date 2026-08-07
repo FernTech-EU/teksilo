@@ -3,9 +3,9 @@
 
 //! Inputs tab — Checkbox, RadioButton, Toggle, Slider, SegmentedControl, ComboBox.
 
-use bastyde::prelude::*;
-use bastyde::tokens::Orientation;
-use bastyde::widgets::{
+use teksilo::prelude::*;
+use teksilo::tokens::Orientation;
+use teksilo::widgets::{
     Checkbox, ComboBox, Divider, FixedSize, IconWidget, RadioButton, RadioTile, RadioTileGroup,
     SegmentedControl, Slider, TextWidget, TileLayout, Toggle, VStack,
 };
@@ -197,9 +197,9 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
     )
 }
 
-pub fn bati(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
+pub fn teksu(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
     // SegmentedControl + ComboBox have multi-arg constructors that
-    // bati! ctor syntax can't express on its own — pre-register them.
+    // teksu! ctor syntax can't express on its own — pre-register them.
     let segmented_widget = ctx.add(
         SegmentedControl::new(sigs.segment_selected.clone()).segments([
             tr!(inp_segment_first()),
@@ -207,7 +207,7 @@ pub fn bati(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
             tr!(inp_segment_third()),
         ]),
     );
-    // RadioTileGroup's `.tile(...)` chain can't be expressed in bati! ctor
+    // RadioTileGroup's `.tile(...)` chain can't be expressed in teksu! ctor
     // syntax — pre-register it and reference by id.
     let radio_tile_widget = ctx.add(
         VStack::new()
@@ -275,7 +275,7 @@ pub fn bati(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
     let slider_step = sigs.slider_stepped.clone();
     let slider_v_val = sigs.slider_v_value.clone();
 
-    bati!(ctx => VStack {
+    teksu!(ctx => VStack {
             spacing: 20.0
             VStack {
                 spacing: 4.0

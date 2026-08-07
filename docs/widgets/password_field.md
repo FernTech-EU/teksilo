@@ -38,7 +38,7 @@ PasswordField::new(password.clone())
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/password_field/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/password_field/index.html)
 
 ## `pub enum RevealMode`
 
@@ -102,11 +102,11 @@ and paste).
 Commit-time validator (Enter / blur). Drives the inline
 validation strip and `aria-invalid`.
 
-#### `pub fn on_submit_fn( mut self, f: impl Fn(&mut bastyde_core::widget::EventContext) + 'static, ) -> Self`
+#### `pub fn on_submit_fn( mut self, f: impl Fn(&mut teksilo_core::widget::EventContext) + 'static, ) -> Self`
 
 Fired on Enter (focus stays put).
 
-#### `pub fn on_blur_fn( mut self, f: impl Fn(&mut bastyde_core::widget::EventContext) + 'static, ) -> Self`
+#### `pub fn on_blur_fn( mut self, f: impl Fn(&mut teksilo_core::widget::EventContext) + 'static, ) -> Self`
 
 Fired once per focus-loss.
 

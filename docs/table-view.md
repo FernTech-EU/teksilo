@@ -3,11 +3,11 @@
 
 # TableView and TreeTableView
 
-Two production-grade tabular widgets for Bastyde: a flat
-[`TableView<T>`](../crates/bastyde-widgets/src/table_view.rs) over any
+Two production-grade tabular widgets for Teksilo: a flat
+[`TableView<T>`](../crates/teksilo-widgets/src/table_view.rs) over any
 `ListDataSource<Item = T>` and a hierarchical
-[`TreeTableView<T>`](../crates/bastyde-widgets/src/tree_table_view.rs) over a
-[`SortFilterTreeModel<T>`](../crates/bastyde-data/src/sort_filter_tree_model.rs).
+[`TreeTableView<T>`](../crates/teksilo-widgets/src/tree_table_view.rs) over a
+[`SortFilterTreeModel<T>`](../crates/teksilo-data/src/sort_filter_tree_model.rs).
 They share the same column model, header strip, drag/resize/reorder,
 filter popover, keyboard map, and accessibility wrappers; only the body
 pane differs.
@@ -20,9 +20,9 @@ contracts you can rely on.
 ## At a glance
 
 ```rust
-use bastyde::data::{SelectionMode, SelectionModel, SortDirection, SortFilterListModel};
-use bastyde::prelude::*;
-use bastyde::widgets::{
+use teksilo::data::{SelectionMode, SelectionModel, SortDirection, SortFilterListModel};
+use teksilo::prelude::*;
+use teksilo::widgets::{
     Column, ColumnWidth, GridLines, TableAlignment as Alignment,
     TableSelectionMode, TableView, TextWidget,
 };
@@ -129,7 +129,7 @@ automatically:
 no floor above `0.0`, and spacing defaults to `0.0` — a zero-height row is an
 ordinary, supported configuration (a filtered-to-nothing group header, a
 collapsed detail row), not a corner case to route around. The shared
-[`PrefixSumOffsets`](../crates/bastyde-widgets/src/common/row_offsets.rs)
+[`PrefixSumOffsets`](../crates/teksilo-widgets/src/common/row_offsets.rs)
 table underlies both the exact and auto-measure modes and its `row_at(y)` is
 the single place that resolves a pixel coordinate to a row index — it's what
 both a click and a drag-drop hover call, so it is also the raw drop-target
@@ -202,16 +202,16 @@ rebuild when only the focus ring moves, etc.).
 
 | Signal                                                                  | Type                                          | Mutated by                                                | Persistence key |
 |-------------------------------------------------------------------------|-----------------------------------------------|-----------------------------------------------------------|-----------------|
-| [`sort_signal`](../crates/bastyde-widgets/src/table_view.rs)               | `Signal<Option<(String, SortDirection)>>`     | header click cycle, `set_sort`, `clear_sort`              | `table.sort`    |
-| [`filters_signal`](../crates/bastyde-widgets/src/table_view.rs)            | `Signal<HashMap<String, String>>`             | filter popover, `set_filter`, `clear_filters`             | `table.filters` |
-| [`column_widths_signal`](../crates/bastyde-widgets/src/table_view.rs)      | `Signal<HashMap<String, f32>>`                | header drag-resize, `set_column_width`                    | `table.widths`  |
-| [`column_order_signal`](../crates/bastyde-widgets/src/table_view.rs)       | `Signal<Vec<String>>`                         | header drag-reorder, `set_column_order`                   | `table.order`   |
-| [`column_pinning_signal`](../crates/bastyde-widgets/src/table_view.rs)     | `Signal<HashMap<String, PinnedSide>>`         | drag across pane boundary, `set_column_pinning`           | `table.pinning` |
-| [`focused_cell_signal`](../crates/bastyde-widgets/src/table_view.rs)       | `Signal<Option<(usize, usize)>>`              | keyboard nav, `set_focused_cell`, `clear_focused_cell`    | (transient)     |
+| [`sort_signal`](../crates/teksilo-widgets/src/table_view.rs)               | `Signal<Option<(String, SortDirection)>>`     | header click cycle, `set_sort`, `clear_sort`              | `table.sort`    |
+| [`filters_signal`](../crates/teksilo-widgets/src/table_view.rs)            | `Signal<HashMap<String, String>>`             | filter popover, `set_filter`, `clear_filters`             | `table.filters` |
+| [`column_widths_signal`](../crates/teksilo-widgets/src/table_view.rs)      | `Signal<HashMap<String, f32>>`                | header drag-resize, `set_column_width`                    | `table.widths`  |
+| [`column_order_signal`](../crates/teksilo-widgets/src/table_view.rs)       | `Signal<Vec<String>>`                         | header drag-reorder, `set_column_order`                   | `table.order`   |
+| [`column_pinning_signal`](../crates/teksilo-widgets/src/table_view.rs)     | `Signal<HashMap<String, PinnedSide>>`         | drag across pane boundary, `set_column_pinning`           | `table.pinning` |
+| [`focused_cell_signal`](../crates/teksilo-widgets/src/table_view.rs)       | `Signal<Option<(usize, usize)>>`              | keyboard nav, `set_focused_cell`, `clear_focused_cell`    | (transient)     |
 
 ### Persistence
 
-Use [`bastyde-settings`](settings.md) to round-trip the layout. A typical
+Use [`teksilo-settings`](settings.md) to round-trip the layout. A typical
 shape:
 
 ```rust
@@ -259,7 +259,7 @@ The proxy:
   via the `observe_changes` chain, so `MultiRow` selection survives data
   mutations.
 
-For trees, [`SortFilterTreeModel<T>`](../crates/bastyde-data/src/sort_filter_tree_model.rs)
+For trees, [`SortFilterTreeModel<T>`](../crates/teksilo-data/src/sort_filter_tree_model.rs)
 plays the same role, plus a `TreeFilterMode` switch:
 
 | Mode                | Behaviour                                                                                       |
@@ -303,7 +303,7 @@ column to sort on.
 
 When `Column::filterable(true)`, the header cell paints a small funnel
 glyph at the trailing end (just before the resize zone). Tapping it
-opens a [`Popover`](../crates/bastyde-widgets/src/popover.rs) anchored to
+opens a [`Popover`](../crates/teksilo-widgets/src/popover.rs) anchored to
 the glyph; the popover content is a one-line text editor + a `Clear`
 button that mutate the `filters_signal[col_id]` slot in place.
 
@@ -339,8 +339,8 @@ the header label still cycles the sort as before.
 | Mode                 | Backing model                                       | Notes                                                           |
 |----------------------|-----------------------------------------------------|-----------------------------------------------------------------|
 | `None`               | —                                                   | clicks just move focus                                          |
-| `SingleRow`          | `bastyde_data::SelectionModel`                         | replaces; modifier keys ignored                                 |
-| `MultiRow` (default) | `bastyde_data::SelectionModel` with `SelectionMode::Multi` | Ctrl-click toggles, Shift-click extends, Shift+Arrow extends |
+| `SingleRow`          | `teksilo_data::SelectionModel`                         | replaces; modifier keys ignored                                 |
+| `MultiRow` (default) | `teksilo_data::SelectionModel` with `SelectionMode::Multi` | Ctrl-click toggles, Shift-click extends, Shift+Arrow extends |
 | `SingleCell`         | `CellSelectionModel`                                | Excel-style; one `(row,col)` at a time                          |
 | `MultiCell`          | `CellSelectionModel`                                | rectangular extension via Shift+Arrow / Shift+Click             |
 
@@ -418,7 +418,7 @@ clear behaviour).
 | ArrowRight on tree column   | expand the row when collapsed and has children (TreeTableView)                            |
 
 The same handler powers both widgets via the
-[`RowNavigator`](../crates/bastyde-widgets/src/table_view/row_navigator.rs)
+[`RowNavigator`](../crates/teksilo-widgets/src/table_view/row_navigator.rs)
 trait — `FlatNavigator` for `TableView`, `TreeNavigator` for
 `TreeTableView`.
 
@@ -529,7 +529,7 @@ PgDn handler uses.
 
 Static numbers (`ROW_HEIGHT`, `HEADER_HEIGHT`, `RESIZE_HANDLE_WIDTH`,
 `GRID_LINE_THICKNESS`, `TREE_INDENT_PER_LEVEL`, …) are `pub const`s in
-[`recipe_table_style`](../crates/bastyde-widgets/src/styles/recipe_table_style.rs)
+[`recipe_table_style`](../crates/teksilo-widgets/src/styles/recipe_table_style.rs)
 They are snapshot at build time, like every other widget.
 
 ---

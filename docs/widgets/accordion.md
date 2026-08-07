@@ -24,9 +24,9 @@ also handled. The focus ring appears only on keyboard focus (not on pointer
 clicks), matching the IntUI convention.
 
 ```rust
-# use bastyde_widgets::accordion::Accordion;
-# use bastyde_core::signal::Signal;
-# use bastyde_i18n::lit;
+# use teksilo_widgets::accordion::Accordion;
+# use teksilo_core::signal::Signal;
+# use teksilo_i18n::lit;
 let expanded = Signal::new(false);
 let _accordion = Accordion::new(lit!("Advanced settings"), expanded);
 ```
@@ -37,7 +37,7 @@ let _accordion = Accordion::new(lit!("Advanced settings"), expanded);
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/accordion/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/accordion/index.html)
 
 ## `pub const ACCORDION_HEADER_HEIGHT`
 

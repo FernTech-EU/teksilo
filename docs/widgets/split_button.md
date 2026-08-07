@@ -20,9 +20,9 @@ for the dropdown rows — the caller passes real `MenuItem` values via
 all come for free.
 
 ```rust
-# use bastyde_widgets::{SplitButton, MenuItem, ButtonVariant};
-# use bastyde_i18n::lit;
-# use bastyde_core::Intent;
+# use teksilo_widgets::{SplitButton, MenuItem, ButtonVariant};
+# use teksilo_i18n::lit;
+# use teksilo_core::Intent;
 let _w = SplitButton::new()
     .item(MenuItem::new(lit!("Run")).on_activate_fn(|ctx| ctx.send_intent(Intent::new("app.run"))))
     .item(MenuItem::new(lit!("Run Tests")).on_activate_fn(|ctx| ctx.send_intent(Intent::new("app.run-tests"))))
@@ -37,7 +37,7 @@ let _w = SplitButton::new()
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/split_button/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/split_button/index.html)
 
 ## `pub const SPLIT_BUTTON_HEIGHT`
 
@@ -165,14 +165,14 @@ Override the Tier-3 frame chrome for this instance. Takes precedence
 over `theme.style_slots.split_button` and the built-in
 `RecipeSplitButtonStyle`.
 
-#### `pub fn text_style(mut self, style: impl Into<bastyde_core::color_prop::TextStyleProp>) -> Self`
+#### `pub fn text_style(mut self, style: impl Into<teksilo_core::color_prop::TextStyleProp>) -> Self`
 
 Override the main-region label text style (font, size, weight).
 Accepts a `TextStyleRole`, a `TextStyle`, or a `Signal` of either.
 Default (unset) is the inner `TextWidget` default — e.g. pass
 `TextStyleRole::BodyBold` for a bold default action.
 
-#### `pub fn text_role(mut self, color: impl Into<bastyde_core::color_prop::ColorProp>) -> Self`
+#### `pub fn text_role(mut self, color: impl Into<teksilo_core::color_prop::ColorProp>) -> Self`
 
 Override the main-region label text color. Accepts `Color`, a role,
 or a `Signal` of either. Default (unset) is the variant/interaction
@@ -201,7 +201,7 @@ Attach a rich tooltip to the main region.
 
 Attach a rich tooltip to the main region driven by inline `TooltipContent`.
 
-#### `pub fn composite_tooltip( mut self, content: impl bastyde_core::widget::Widget + 'static, ) -> Self`
+#### `pub fn composite_tooltip( mut self, content: impl teksilo_core::widget::Widget + 'static, ) -> Self`
 
 Attach a composite tooltip to the main region.
 
@@ -219,6 +219,6 @@ Attach a rich tooltip to the chevron region.
 
 Attach a rich tooltip to the chevron region driven by inline `TooltipContent`.
 
-#### `pub fn chevron_composite_tooltip( mut self, content: impl bastyde_core::widget::Widget + 'static, ) -> Self`
+#### `pub fn chevron_composite_tooltip( mut self, content: impl teksilo_core::widget::Widget + 'static, ) -> Self`
 
 Attach a composite tooltip to the chevron region.

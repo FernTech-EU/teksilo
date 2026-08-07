@@ -52,7 +52,7 @@ slice.set_all_expanded(filtered);   // reveal while searching, restore after
 ## Example
 
 ```
-use bastyde_data::{TreeRowFilter, TreeRow, TreeFilterMode};
+use teksilo_data::{TreeRowFilter, TreeRow, TreeFilterMode};
 
 let rows = vec![
     TreeRow::new(1u64, "Book One", 0),
@@ -76,7 +76,7 @@ assert_eq!(out.iter().map(|r| r.item).collect::<Vec<_>>(), vec!["Book One", "The
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_data/tree_row_filter/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_data/tree_row_filter/index.html)
 
 ## `pub struct TreeRowFilter`
 

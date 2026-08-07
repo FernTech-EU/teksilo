@@ -21,8 +21,8 @@ and limit fields. Advertises `ScrollUp` / `ScrollDown` / `ScrollLeft` /
 (NVDA, JAWS, VoiceOver) know which directions are reachable.
 
 ```rust
-# use bastyde_widgets::scroll_area::{ScrollArea, ScrollBarMode};
-# use bastyde_widgets::primitives::MinSize;
+# use teksilo_widgets::scroll_area::{ScrollArea, ScrollBarMode};
+# use teksilo_widgets::primitives::MinSize;
 let _w = ScrollArea::new()
     .child(MinSize::new(0.0, 2000.0))
     .scroll_bar_style(ScrollBarMode::Permanent)
@@ -35,7 +35,7 @@ let _w = ScrollArea::new()
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/scroll_area/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/scroll_area/index.html)
 
 ## `pub enum ScrollBarMode`
 

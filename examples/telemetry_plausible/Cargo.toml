@@ -10,9 +10,9 @@ authors.workspace = true
 publish = false
 
 [dependencies]
-bastyde = { workspace = true, features = [
+teksilo = { workspace = true, features = [
     "automation","telemetry"] }
-bastyde-analytics-plausible = { workspace = true }
-bastyde-settings = { workspace = true }
-bastyde-telemetry = { workspace = true }
-bastyde-core = { workspace = true }
+teksilo-analytics-plausible = { workspace = true }
+teksilo-settings = { workspace = true }
+teksilo-telemetry = { workspace = true }
+teksilo-core = { workspace = true }

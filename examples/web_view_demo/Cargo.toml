@@ -13,16 +13,16 @@ publish = false
 name = "web-view-demo"
 path = "src/main.rs"
 
-# The demo depends on `bastyde/web-view`, which is wry by default — so a plain
+# The demo depends on `teksilo/web-view`, which is wry by default — so a plain
 # `cargo run -p web-view-demo` renders via wry (macOS / Windows / Linux-X11).
 # Add the Wayland fallback with:
 #   cargo run -p web-view-demo --features servo   # wry + Servo; Servo on Wayland
 [features]
 default = []
-# `servo` is additive — `bastyde/web-view-servo` implies `web-view` (wry), so
+# `servo` is additive — `teksilo/web-view-servo` implies `web-view` (wry), so
 # this ships both engines and the runtime picks Servo only under Wayland.
-servo = ["bastyde/web-view-servo"]
+servo = ["teksilo/web-view-servo"]
 
 [dependencies]
-bastyde = { workspace = true, features = [
+teksilo = { workspace = true, features = [
     "automation","web-view"] }

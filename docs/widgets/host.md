@@ -5,8 +5,8 @@
 
 `ToastHost` — invisible sibling widget that owns the toast queue.
 
-Installed by `install_toast(opts)` in the `bastyde` umbrella. The
-umbrella's `BastydeAppBuilderToastExt::install_toast` registers a
+Installed by `install_toast(opts)` in the `teksilo` umbrella. The
+umbrella's `TeksiloAppBuilderToastExt::install_toast` registers a
 `DefaultPostRoot` closure that wraps
 every window's root with a `ZStack` of `[user_root, ToastHost]`.
 The host renders its toast surfaces as direct children, positioned
@@ -27,12 +27,12 @@ is bumped, the host rebuilds, the surface widgets are destroyed.
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/toast/host/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/toast/host/index.html)
 
 ## `pub struct ToastInstallOptions`
 
 Configuration for the installed `ToastHost`. Passed to
-`install_toast` in the `bastyde` umbrella crate.
+`install_toast` in the `teksilo` umbrella crate.
 
 ```rust
 pub struct ToastInstallOptions { /* fields */ }
@@ -42,7 +42,7 @@ pub struct ToastInstallOptions { /* fields */ }
 
 Invisible sibling widget that owns the toast queue. Installed once
 per window by the `install_toast` extension trait via a
-`DefaultPostRoot` closure (see `bastyde::toast_install`).
+`DefaultPostRoot` closure (see `teksilo::toast_install`).
 
 Renders its toast surfaces as direct children positioned at the
 configured corner. Use `ZStack::new().child(user_root).child(host)`

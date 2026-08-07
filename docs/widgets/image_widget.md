@@ -40,9 +40,9 @@ box is exactly 32×32 and the artwork is letterboxed inside it
 (`Contain`, the default).
 
 ```rust
-# use bastyde_canvas::RasterIcon;
-# use bastyde_widgets::primitives::image_widget::{ImageWidget, ImageFit};
-# use bastyde_widgets::primitives::image_mask::ImageMaskShape;
+# use teksilo_canvas::RasterIcon;
+# use teksilo_widgets::primitives::image_widget::{ImageWidget, ImageFit};
+# use teksilo_widgets::primitives::image_mask::ImageMaskShape;
 // A 64×64 image shown at natural size with no masking.
 let icon = RasterIcon::from_raw(vec![255; 64 * 64 * 4], 64, 64);
 let _logo = ImageWidget::new(&icon).size(32.0, 32.0);
@@ -61,7 +61,7 @@ let _avatar = ImageWidget::new(&icon)
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/primitives/image_widget/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/primitives/image_widget/index.html)
 
 ## `pub enum ImageFit`
 

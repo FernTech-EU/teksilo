@@ -18,8 +18,8 @@ for animated or data-driven constraints.
 For the inverse operation (ensuring a minimum size) see `MinSize`.
 
 ```rust
-# use bastyde_widgets::primitives::{MaxSize, TextWidget};
-# use bastyde_i18n::lit;
+# use teksilo_widgets::primitives::{MaxSize, TextWidget};
+# use teksilo_i18n::lit;
 // Cap a text widget to 240 logical pixels wide.
 let _w = MaxSize::width(240.0)
     .child(TextWidget::new(lit!("This text will not exceed 240 dp.")));
@@ -31,7 +31,7 @@ let _w = MaxSize::width(240.0)
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/primitives/max_size/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/primitives/max_size/index.html)
 
 ## `pub struct MaxSize`
 

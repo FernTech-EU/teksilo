@@ -9,11 +9,11 @@ and `TableView`. It is bound to a `ListModel<T>` / `ListDataSource`, realizes
 only the tiles currently visible (plus a buffer), reflows on resize, and is
 fully keyboard-navigable and accessible.
 
-Source: [crates/bastyde-widgets/src/grid_view.rs](../crates/bastyde-widgets/src/grid_view.rs)
+Source: [crates/teksilo-widgets/src/grid_view.rs](../crates/teksilo-widgets/src/grid_view.rs)
 (+ `grid_view/` submodules). Demo: `cargo run -p grid-view`.
 
 ```rust
-use bastyde::widgets::{GridView, GridSizing, grouping_sections};
+use teksilo::widgets::{GridView, GridSizing, grouping_sections};
 
 GridView::new(model, |tc| {
     Box::new(card_for(tc.item, tc.is_selected))
@@ -204,7 +204,7 @@ contents.
 
 ## Tests
 
-Headless (no GPU): [crates/bastyde-widgets/src/grid_view/tests.rs](../crates/bastyde-widgets/src/grid_view/tests.rs)
+Headless (no GPU): [crates/teksilo-widgets/src/grid_view/tests.rs](../crates/teksilo-widgets/src/grid_view/tests.rs)
 plus unit tests in `layout/offsets.rs` and `layout/strategy.rs`. Coverage:
 virtualization window, column derivation, tile placement (uniform / variable /
 waterfall / sectioned), prefix-sum + anchoring, selection, 2D keyboard,

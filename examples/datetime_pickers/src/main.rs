@@ -12,19 +12,19 @@
 //! - `TimeEdit` in 24h and 12h modes, with seconds toggle.
 //! - `DateTimeEdit` (composite).
 
-use bastyde::core::WidgetPlacement;
-use bastyde::prelude::*;
-use bastyde::widgets::{
+use jiff::civil::{Date, DateTime, Time};
+use teksilo::core::WidgetPlacement;
+use teksilo::prelude::*;
+use teksilo::widgets::{
     Calendar, DateEdit, DateRange, DateRangeEdit, DateTimeEdit, Expand, GroupHeader, HStack,
     Padding, Panel, SecondsMode, Spacer, TextWidget, TimeEdit, TimeFormat, Toolbar, VStack,
 };
-use jiff::civil::{Date, DateTime, Time};
 
 fn dark_mode_toolbar() -> impl Widget {
     Toolbar::new().child(
         HStack::new()
             .child(Spacer::new())
-            .child(bastyde::widgets::ThemeSwitcher::new()),
+            .child(teksilo::widgets::ThemeSwitcher::new()),
     )
 }
 
@@ -291,7 +291,7 @@ fn main() {
     // `calendar-month-long-may`). Without this registration the
     // resolver falls back to the key itself — visible in the UI as
     // the literal key string.
-    let i18n_config = bastyde::i18n::I18nConfig::new()
+    let i18n_config = teksilo::i18n::I18nConfig::new()
         .source_locale("en-US".parse().expect("en-US is a valid BCP-47 tag"))
         .supported_locales([
             "en-US".parse().expect("en-US is a valid BCP-47 tag"),
@@ -299,16 +299,16 @@ fn main() {
         ])
         .auto_detect_os_locale(true)
         .fallback_locale("en-US".parse().expect("en-US is a valid BCP-47 tag"))
-        .framework_locales(bastyde::widgets::framework_locales());
+        .framework_locales(teksilo::widgets::framework_locales());
 
-    BastydeAppBuilder::new()
+    TeksiloAppBuilder::new()
         .install_automation_bridge_in_debug()
         .install_inspector_in_debug()
-        .theme(bastyde::presets::intui::light())
+        .theme(teksilo::presets::intui::light())
         .i18n(i18n_config)
         .initial_window(
             WindowConfig::new()
-                .title("Bastyde — Date / Time pickers")
+                .title("Teksilo — Date / Time pickers")
                 .size(960, 720)
                 .root(|tree, _state| {
                     tree.add(

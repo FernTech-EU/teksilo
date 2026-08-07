@@ -27,12 +27,12 @@
 
 use std::sync::Arc;
 
-use bastyde::core::WidgetPlacement;
-use bastyde::prelude::*;
-use bastyde::text_document::{
+use teksilo::core::WidgetPlacement;
+use teksilo::prelude::*;
+use teksilo::text_document::{
     Color, HighlightContext, HighlightFormat, SyntaxHighlighter, TextDocument,
 };
-use bastyde::widgets::{
+use teksilo::widgets::{
     COMMON_BRACKETS, CodeEditor, CodeEditorHandle, CompletionContext, CompletionItem,
     CompletionKind, Expand, HStack, TextWidget, ThemeSwitcher, Toolbar,
 };
@@ -73,7 +73,7 @@ const KEYWORDS: &[&str] = &[
     "Button",
 ];
 
-const SAMPLE: &str = "// A little Bastyde widget. Edit me!
+const SAMPLE: &str = "// A little Teksilo widget. Edit me!
 // Ctrl+/ comments a line, Tab indents, Ctrl+D adds a caret.
 struct Counter {
     count: Signal<i32>,
@@ -240,7 +240,7 @@ impl Widget for EditorDemo {
         &self,
         proposal: SizeProposal,
         _ctx: &LayoutContext,
-    ) -> bastyde::core::widget::LayoutResponse {
+    ) -> teksilo::core::widget::LayoutResponse {
         Size::new(
             proposal.width.unwrap_or(900.0),
             proposal.height.unwrap_or(600.0),
@@ -280,12 +280,12 @@ impl Widget for EditorDemo {
 }
 
 fn main() {
-    BastydeAppBuilder::new()
+    TeksiloAppBuilder::new()
         .install_inspector_in_debug()
-        .theme(bastyde::presets::intui::dark())
+        .theme(teksilo::presets::intui::dark())
         .initial_window(
             WindowConfig::new()
-                .title("Bastyde \u{2014} CodeEditor")
+                .title("Teksilo \u{2014} CodeEditor")
                 .size(900, 640)
                 .root(|tree, _state| tree.add(EditorDemo::new())),
         )

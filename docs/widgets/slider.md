@@ -21,8 +21,8 @@ change. The focus ring follows the `:focus-visible` heuristic —
 visible after keyboard interaction, invisible after a pointer tap.
 
 ```rust
-# use bastyde_core::signal::Signal;
-# use bastyde_widgets::Slider;
+# use teksilo_core::signal::Signal;
+# use teksilo_widgets::Slider;
 let volume = Signal::new(0.5_f32);
 let _w = Slider::new(volume, 0.0, 1.0).step(0.05);
 ```
@@ -33,7 +33,7 @@ let _w = Slider::new(volume, 0.0, 1.0).step(0.05);
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/slider/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/slider/index.html)
 
 ## `pub struct Slider`
 

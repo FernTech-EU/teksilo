@@ -2,11 +2,11 @@
 // SPDX-FileCopyrightText: 2026 FernTech
 
 //! Layout primitives tab — every container/spacing primitive in
-//! `bastyde_widgets::primitives`.
+//! `teksilo_widgets::primitives`.
 
-use bastyde::i18n::tr_signal;
-use bastyde::prelude::*;
-use bastyde::widgets::{
+use teksilo::i18n::tr_signal;
+use teksilo::prelude::*;
+use teksilo::widgets::{
     AspectRatio, Badge, Button, Center, ColumnFlow, Divider, Expand, FixedSize, FormLayout, Grid,
     HStack, MasonryLayout, MaxSize, MinSize, Padding, Panel, RectWidget, Spacer, Switcher,
     TextWidget, TrackSize, VStack, Wrap, ZStack,
@@ -316,12 +316,12 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
     )
 }
 
-pub fn bati(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
-    // FormLayout's `.line(label, field)` is a 2-arg method — no bati!
+pub fn teksu(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
+    // FormLayout's `.line(label, field)` is a 2-arg method — no teksu!
     // property form for it; pre-register. MasonryLayout, Grid, Wrap
     // express fine inline. Switcher's children are `.child(impl Widget)`
-    // which bati! handles, but switcher takes a Signal in the
-    // constructor — that fits bati! ctor syntax.
+    // which teksu! handles, but switcher takes a Signal in the
+    // constructor — that fits teksu! ctor syntax.
     let form_widget = ctx.add(
         FormLayout::new()
             .row_spacing(6.0)
@@ -337,7 +337,7 @@ pub fn bati(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
     let switcher_idx = sigs.tool_box_selected.clone();
     let switcher_idx_for_btn = switcher_idx.clone();
 
-    bati!(ctx => VStack {
+    teksu!(ctx => VStack {
             spacing: 20.0
             VStack {
                 spacing: 4.0

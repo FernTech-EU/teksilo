@@ -3,11 +3,11 @@
 
 # TabWidget and TabBar
 
-Two cooperating widgets for tabbed content in Bastyde: a header-only
-[`TabBar<T>`](../crates/bastyde-widgets/src/tab_widget/bar.rs) driven by any
-[`ListDataSource<Item = T>`](../crates/bastyde-data/src/list_data_source.rs)
-and a [`TabDelegate<T>`](../crates/bastyde-widgets/src/tab_widget/delegate.rs),
-and an all-in-one [`TabWidget`](../crates/bastyde-widgets/src/tab_widget.rs)
+Two cooperating widgets for tabbed content in Teksilo: a header-only
+[`TabBar<T>`](../crates/teksilo-widgets/src/tab_widget/bar.rs) driven by any
+[`ListDataSource<Item = T>`](../crates/teksilo-data/src/list_data_source.rs)
+and a [`TabDelegate<T>`](../crates/teksilo-widgets/src/tab_widget/delegate.rs),
+and an all-in-one [`TabWidget`](../crates/teksilo-widgets/src/tab_widget.rs)
 that pairs a `TabBar` with a `Switcher` of content panes — sharing one
 `Signal<Option<TabId>>` selection.
 
@@ -25,9 +25,9 @@ can rely on.
 ## At a glance
 
 ```rust
-use bastyde::data::ListModel;
-use bastyde::prelude::*;
-use bastyde::widgets::{
+use teksilo::data::ListModel;
+use teksilo::prelude::*;
+use teksilo::widgets::{
     TabBarOrientation, TabDisplayMode, TabHandle, TabId, TabInfo, TabSizing, TabWidget,
     TextWidget, VStack,
 };
@@ -73,7 +73,7 @@ extracts presentation from your items and an `id_of` closure that produces
 the stable `TabId` for each item:
 
 ```rust
-use bastyde::widgets::{TabBar, TabDelegate};
+use teksilo::widgets::{TabBar, TabDelegate};
 
 // Example with a custom item type.
 struct DocItem { id: TabId, title: String, closable: bool, pinned: bool }
@@ -96,18 +96,18 @@ let bar = TabBar::horizontal(
 
 A tab's runtime identity is split across three types, each with one job:
 
-- [`TabId`](../crates/bastyde-widgets/src/tab_widget/id.rs) — stable identity.
+- [`TabId`](../crates/teksilo-widgets/src/tab_widget/id.rs) — stable identity.
   A `NonZeroU64` wrapper. Allocate fresh ids with `TabId::fresh()` (a
   monotonic counter), or wrap an external key with
   `TabId::from_raw(NonZeroU64)` when the identity comes from app-side
   storage (document UUID, file-path hash, …) — fresh ids would re-allocate
   every restart and break session-restore round-trips.
-- [`TabInfo`](../crates/bastyde-widgets/src/tab_widget/info.rs) — presentation
+- [`TabInfo`](../crates/teksilo-widgets/src/tab_widget/info.rs) — presentation
   metadata: `title`, `icon`, `tooltip`, `closable`, `pinned`, `enabled`.
   Title and tooltip are `LocalizedString` (accept `tr!(...)`); the icon is
   a factory closure (no `IconWidget: Clone` requirement) called each
   build, so it picks up theme/state changes naturally.
-- [`TabHandle`](../crates/bastyde-widgets/src/tab_widget/handle.rs) — the
+- [`TabHandle`](../crates/teksilo-widgets/src/tab_widget/handle.rs) — the
   thing that lives in the data source. Carries `id`, `info`, a `kind`
   discriminator, and an `Rc<dyn Any>` payload. Heavy state (the document,
   the image, the page) lives on `payload` — **not** on the content
@@ -136,7 +136,7 @@ preserved.
 |---------------------------------------------------|--------------------------------------------|-----------------------------------------------------------------------------|
 | `static_tab(info, content)`                       | `impl Widget + 'static`                    | One-shot ownership; consumed on first build.                                |
 | `static_tab_factory(info, fn(&TabHandle) -> Box)` | factory closure                            | Called once on first build.                                                 |
-| `static_tab_id(info, WidgetId)`                   | pre-registered `WidgetId`                  | For the `bati!` DSL — wraps the id in an alias on first build.              |
+| `static_tab_id(info, WidgetId)`                   | pre-registered `WidgetId`                  | For the `teksu!` DSL — wraps the id in an alias on first build.              |
 | `static_tab_with_id(id, info, content)`           | `impl Widget + 'static` + caller-chosen id | Use when external code (deep links, session restore) flips selection by id. |
 | `static_tab_factory_with_id(id, info, factory)`   | factory closure + caller-chosen id         | Factory variant of the above.                                               |
 
@@ -235,7 +235,7 @@ The split is data flow, not features. `TabBar` owns:
 - the unified ordering (static-then-dynamic) over the bar's index space
 - callback translation: bar speaks indices, app callbacks speak `TabId`
 
-Either widget works in the `bati!` DSL; both publish their selection
+Either widget works in the `teksu!` DSL; both publish their selection
 through `Signal<Option<TabId>>`.
 
 ---
@@ -271,7 +271,7 @@ closed tab was at the end.
 
 ## Orientation — reactive
 
-[`TabBarOrientation`](../crates/bastyde-widgets/src/tab_widget/delegate.rs)
+[`TabBarOrientation`](../crates/teksilo-widgets/src/tab_widget/delegate.rs)
 is `Horizontal` (default) or `Vertical`. On `TabWidget`:
 
 ```rust
@@ -299,7 +299,7 @@ wrapper does for you.
 
 Vertical bars use **upright** text (single-line, ellipsis-truncated),
 not rotated glyphs. Rotated text breaks hit-testing and focus-ring
-math, and Bastyde's `text-typeset` integration doesn't yet support
+math, and Teksilo's `text-typeset` integration doesn't yet support
 per-glyph layout rotation. This matches VS Code's activity-bar style.
 
 ---
@@ -599,7 +599,7 @@ TabWidget::new(sel)
   payload intact for inspection).
 - OS drops reuse the same `on_drop` path, so installing the handler makes
   the bar an OS-drop target automatically — the app must still call
-  `BastydeAppBuilder::install_external_dnd()` for the OS pipeline.
+  `TeksiloAppBuilder::install_external_dnd()` for the OS pipeline.
 - Independent of `accept_external_tabs`: a bar can do tab-migration,
   file-opening, both, or neither.
 - The hover insertion-line is **optimistic** (shown for any non-tab
@@ -689,7 +689,7 @@ bar:
 ```
 
 Both accept `impl Widget + 'static`. `_id` variants take a
-pre-registered `WidgetId` for the `bati!` DSL. The slot widget is
+pre-registered `WidgetId` for the `teksu!` DSL. The slot widget is
 registered once on first build and **memoized** — subsequent rebuilds
 reuse the same id, so a slot's internal state (button hover, tooltip
 visibility, focus) survives bar rebuilds.
@@ -772,7 +772,7 @@ The highlight that marks the selected tab defaults to the **outer** edge
 vertical bar — with:
 
 ```rust
-use bastyde::widgets::TabIndicatorPosition;
+use teksilo::widgets::TabIndicatorPosition;
 
 .active_indicator(TabIndicatorPosition::InnerEdge)   // below the text (horizontal)
 ```
@@ -877,7 +877,7 @@ the default cascade reads with insufficient contrast. Disabled tabs
 always render at `TextRole::Disabled`.
 
 Static numbers are `pub const`s in
-[`recipe_tab_style`](../crates/bastyde-widgets/src/styles/recipe_tab_style.rs):
+[`recipe_tab_style`](../crates/teksilo-widgets/src/styles/recipe_tab_style.rs):
 
 - `TAB_EDITOR_HEIGHT` (default 50 dp) — height of horizontal bar tabs.
 - `TAB_TOOL_WINDOW_HEIGHT` (default 28 dp) — reserved for future

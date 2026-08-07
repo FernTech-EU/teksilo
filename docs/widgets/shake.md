@@ -37,7 +37,7 @@ error text) when error state must be communicated.
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/animations/shake/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/animations/shake/index.html)
 
 ## `pub struct Shake`
 

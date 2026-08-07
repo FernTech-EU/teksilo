@@ -3,7 +3,7 @@
 
 # Settings & Persisted State Reference
 
-Bastyde's persistence layer (`bastyde-settings`) is **reactive end-to-end**:
+Teksilo's persistence layer (`teksilo-settings`) is **reactive end-to-end**:
 disk values live as `Signal<T>`s and `ListModel<T>`s, mutating either
 the in-memory handle or the underlying file flows to the other side
 automatically. There is no separate "config object" you remember to
@@ -33,9 +33,9 @@ Three persistence shapes share one storage backbone:
 
 | Shape | Type | Use for |
 |---|---|---|
-| Dynamic K/V | [`SettingsStore`](../crates/bastyde-settings/src/store.rs) → `Signal<T>` | Scalar prefs (font size, theme name, bools, arrays of scalars) |
-| Typed file | [`SettingsFile<T>`](../crates/bastyde-settings/src/file.rs) | App-shaped structs with their own schema + migrations |
-| Reactive collection | [`PersistedListModel<T>`](../crates/bastyde-settings/src/collection/list.rs) | Recents, palettes, saved searches — anything that drives a `Repeater` / `ListView` |
+| Dynamic K/V | [`SettingsStore`](../crates/teksilo-settings/src/store.rs) → `Signal<T>` | Scalar prefs (font size, theme name, bools, arrays of scalars) |
+| Typed file | [`SettingsFile<T>`](../crates/teksilo-settings/src/file.rs) | App-shaped structs with their own schema + migrations |
+| Reactive collection | [`PersistedListModel<T>`](../crates/teksilo-settings/src/collection/list.rs) | Recents, palettes, saved searches — anything that drives a `Repeater` / `ListView` |
 
 There used to be a fourth shape, `PersistedTreeModel<T>`, for nested
 hierarchies. It had zero consumers anywhere in this workspace or in
@@ -60,22 +60,22 @@ End-to-end example:
 ## Canonical app shape
 
 ```rust
-use bastyde::prelude::*;
-use bastyde::app::BastydeAppBuilder;
-use bastyde::settings::{AppPaths, MruList, SettingsBundle};
+use teksilo::prelude::*;
+use teksilo::app::TeksiloAppBuilder;
+use teksilo::settings::{AppPaths, MruList, SettingsBundle};
 
 fn main() {
-    let paths = AppPaths::new("eu", "FernTech", "Bastyde")
+    let paths = AppPaths::new("eu", "FernTech", "Teksilo")
         .expect("could not resolve OS config directory");
 
     // App-typed MRU list — the framework knows nothing about projects.
     let recents: MruList<RecentProject> =
         MruList::open(&paths, "recent_projects", 10).unwrap();
 
-    BastydeAppBuilder::new()
+    TeksiloAppBuilder::new()
         .theme(intui::light())
         .app_paths(paths)                                // explicit
-        // or .application("eu", "FernTech", "Bastyde") // shortcut
+        // or .application("eu", "FernTech", "Teksilo") // shortcut
         .settings(
             SettingsBundle::new()
                 .with_window_state(true),                // opt-in
@@ -88,7 +88,7 @@ fn main() {
         .initial_window(
             WindowConfig::new()
                 .id("main")                              // <- enables auto save/restore
-                .title("Bastyde")
+                .title("Teksilo")
                 .size(1200, 800)
                 .min_size(640, 400)
                 .root(|tree, _state| tree.add(AppRoot::new())),
@@ -171,15 +171,15 @@ impl AppPaths {
 ```
 
 `new(...)` returns `Option` because OS path resolution can fail
-(sandboxed CI, missing `HOME`). `BastydeAppBuilder::application(...)`
+(sandboxed CI, missing `HOME`). `TeksiloAppBuilder::application(...)`
 panics with a clear message in that case; production apps that want
 to fall back to a portable directory use the `Option` directly:
 
 ```rust
-let paths = AppPaths::new("eu", "FernTech", "Bastyde")
+let paths = AppPaths::new("eu", "FernTech", "Teksilo")
     .or_else(|| {
         let cwd = std::env::current_dir().ok()?;
-        Some(AppPaths::for_testing(&cwd.join(".bastyde-state")))
+        Some(AppPaths::for_testing(&cwd.join(".teksilo-state")))
     })
     .expect("no usable directory");
 ```
@@ -211,7 +211,7 @@ let opened: OpenedSettings = bundle.open(&paths)?;
 `OpenedSettings` is a cheap-to-clone handle bundle. Each contained
 service is `Rc<>`-shaped internally; cloning produces a second handle
 to the same in-memory state and the same shared I/O thread queue.
-`BastydeAppBuilder::run` keeps one `OpenedSettings` on the stack while
+`TeksiloAppBuilder::run` keeps one `OpenedSettings` on the stack while
 clones of each service live in the `app_state` registry — when the
 registry is dropped at exit, the `Drop` impls flush every pending
 payload synchronously.
@@ -318,7 +318,7 @@ below for a real instance of exactly that happening today.
 | Right for | frequent small writes (a `Signal::set`, a recents `add`) | rare whole-struct writes |
 
 Both go through the same `<path>.lock` sidecar (via `fs2`, cross-platform
-`flock`/`LockFileEx`) — see `crates/bastyde-settings/src/lock.rs` — so a
+`flock`/`LockFileEx`) — see `crates/teksilo-settings/src/lock.rs` — so a
 `SettingsStore` write and a `SettingsFile<T>` write to two different paths
 never contend, and two handles (in this process or a peer's) to the *same*
 path always serialize correctly regardless of which mechanism opened them.
@@ -488,7 +488,7 @@ described in "Cross-process safety, by default" above — there is no
 debounce window to coalesce a burst of calls, unlike `SettingsStore` /
 `PersistedListModel<T>`. That's the right trade-off for how this type is
 *meant* to be called (a handful of writes across a window's lifetime), but
-`bastyde-app`'s `window_persist` module currently wires `record` to fire on
+`teksilo-app`'s `window_persist` module currently wires `record` to fire on
 *every* `Signal` change of a window's size/position/placement — which on
 X11/Windows/macOS means once per reported frame during a live drag or
 resize (Wayland mostly spares position, per the caveat below, but size
@@ -510,7 +510,7 @@ reasons. Concretely:
 
 - `winit::Window::set_outer_position(...)` silently no-ops on
   Wayland; `outer_position()` returns `Err(NotSupportedError)`.
-- The position observer in [`window_persist.rs`](../crates/bastyde-app/src/window_persist.rs)
+- The position observer in [`window_persist.rs`](../crates/teksilo-app/src/window_persist.rs)
   almost never fires on Wayland because the compositor doesn't
   notify apps of their position.
 - `WindowState.position` keeps whatever value we initialized it with.
@@ -520,7 +520,7 @@ The framework persists `(x, y)` regardless because the saved value is
 session. On Wayland itself, compositors with per-app placement
 memory (KWin's window rules, sway's `for_window`, GNOME's heuristic
 stickiness) match windows by their Wayland `app_id` (typically
-derived from the binary name by winit), not by anything bastyde-app
+derived from the binary name by winit), not by anything teksilo-app
 wires from `WindowConfig::id(...)` — that string is purely an
 internal lookup key for `find_window` and the persistence service.
 The result for users is fine on Wayland: the compositor remembers
@@ -533,7 +533,7 @@ coordinates apply.
 `PerWindowState` originally stored a single `maximized: bool`. v2
 replaces it with the full `WindowPlacement` enum so Fullscreen
 round-trips properly. The migrator
-([`window_state.rs`](../crates/bastyde-settings/src/window_state.rs))
+([`window_state.rs`](../crates/teksilo-settings/src/window_state.rs))
 converts each entry's `maximized: true` to `placement = "Maximized"`,
 otherwise `"Floating"`. Files are upgraded transparently on first
 read; the new shape is written back on the next `record`/`forget`.
@@ -550,7 +550,7 @@ eviction, and cross-process-safe persistence via `PersistedListModel<T>`.
 
 ```rust
 use std::path::{Path, PathBuf};
-use bastyde::settings::{Keyed, MruEntry, MruList};
+use teksilo::settings::{Keyed, MruEntry, MruList};
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -689,7 +689,7 @@ cheapest first:
 ### `SettingsWatcher` and `SettingsRegistry`
 
 `SettingsWatcher` owns a `notify::RecommendedWatcher` background thread,
-mirrored from `bastyde-i18n`'s `FtlFileWatcher`. It watches **directories**
+mirrored from `teksilo-i18n`'s `FtlFileWatcher`. It watches **directories**
 (`AppPaths::config_dir()` / `data_dir()`), not individual files: every
 atomic writer in this crate (and any well-behaved peer) writes a temp file
 and renames it over the target, which would invalidate an inode-level
@@ -700,7 +700,7 @@ sidecar, a `.tmp` write-in-progress, an unrelated file a peer dropped in
 the same directory) is a harmless no-op.
 
 ```rust
-use bastyde_settings::{SettingsRegistry, SettingsFile, Migrator, Versioned};
+use teksilo_settings::{SettingsRegistry, SettingsFile, Migrator, Versioned};
 use serde::{Serialize, Deserialize};
 use std::rc::Rc;
 
@@ -724,7 +724,7 @@ let handle = registry.register(Rc::new(file.clone()));
 drop(handle); // dropping it deregisters: no leak, no dangling call.
 ```
 
-`BastydeAppBuilder` wires this up automatically the moment `.settings(...)`
+`TeksiloAppBuilder` wires this up automatically the moment `.settings(...)`
 is configured (windowed apps only — `run()`, not `build_headless()`,
 since there's a real event loop to post the reload event through): every
 service `SettingsBundle::open` opens is pre-registered into
@@ -755,7 +755,7 @@ single-row moves only for entries that are actually out of place (an
 append-only or remove-only reload emits zero moves), value updates
 (`T: PartialEq`) for entries whose key survived but whose content changed,
 and coalesced insertions for brand-new keys. `ListModel::reconcile_by_key`
-(in `bastyde-data`) is the general-purpose primitive this reduces to; a
+(in `teksilo-data`) is the general-purpose primitive this reduces to; a
 `ListView`'s row selection and focused-index tracking already consume
 exactly this kind of event stream (`ItemsInserted` / `ItemsRemoved` /
 `ItemsMoved` / `ItemUpdated`) correctly, because those events are also
@@ -806,7 +806,7 @@ value itself is no longer available to compare against.
 A single extension trait on `BuildContext` and `EventContext`.
 
 ```rust
-use bastyde::settings::SettingsExt;
+use teksilo::settings::SettingsExt;
 
 // Inside any handler / build method:
 let store = ctx.settings();                     // panics if not registered
@@ -826,7 +826,7 @@ the call to register it; `try_*` variants return `Option`.
 **Window-geometry persistence is not an extension method.** When a
 `WindowStateService` is registered, every `WindowConfig` carrying an
 `id(...)` is automatically restored on creation and recorded on every
-change by `bastyde-app`'s window manager. No `ctx.persist_window_state(...)`
+change by `teksilo-app`'s window manager. No `ctx.persist_window_state(...)`
 call needed.
 
 ---
@@ -838,7 +838,7 @@ trait). Migrations operate on raw `toml::Value` *before* deserialize,
 so a v1 file that no longer matches the v2 type can still be upgraded:
 
 ```rust
-use bastyde_settings::{Migrator, Versioned};
+use teksilo_settings::{Migrator, Versioned};
 
 #[derive(Serialize, Deserialize, Default)]
 struct Recents {
@@ -913,7 +913,7 @@ on and hold internally; the surface an external caller actually gets is
 just enough to inspect or force-flush a service that wraps one:
 
 ```rust
-use bastyde::settings::DebouncedWriter;
+use teksilo::settings::DebouncedWriter;
 use std::time::Duration;
 
 let w = DebouncedWriter::new(path.clone(), Duration::from_millis(500));
@@ -972,23 +972,23 @@ without this process having to touch anything itself.
 | Add a v2 schema migration | Bump `CURRENT_VERSION`, register a `Migrator::new().step(1, ...)` transformation, plumb the migrator into `SettingsFile::load`. |
 | Force a flush before a child process | `opened.flush_all()` (or per-service `flush_now()`). |
 | Test settings code without touching `~/.config` | `AppPaths::for_testing(tempdir.path())` and `Duration::ZERO` for the debounce. |
-| React to a peer's write outside a running `BastydeAppBuilder` app (e.g. a headless tool) | Call `Reloadable::reload_from_disk(&handle)` (or the cheaper `reload_if_stale()` on `SettingsFile<T>`) on your own schedule — there's no watcher without a running event loop. |
+| React to a peer's write outside a running `TeksiloAppBuilder` app (e.g. a headless tool) | Call `Reloadable::reload_from_disk(&handle)` (or the cheaper `reload_if_stale()` on `SettingsFile<T>`) on your own schedule — there's no watcher without a running event loop. |
 | Register an ad hoc persisted type for live reload | `ctx.app_state::<SettingsRegistry>().register(Rc::new(my_handle.clone()) as Rc<dyn Reloadable>)`, keep the returned `Rc` alive. |
 
 ---
 
 ## Reference
 
-- Source: [`crates/bastyde-settings/src/`](../crates/bastyde-settings/src/)
-- Window persist integration: [`crates/bastyde-app/src/window_persist.rs`](../crates/bastyde-app/src/window_persist.rs)
-- Live-reload wiring: [`crates/bastyde-app/src/app.rs`](../crates/bastyde-app/src/app.rs) (search `settings_watch`)
+- Source: [`crates/teksilo-settings/src/`](../crates/teksilo-settings/src/)
+- Window persist integration: [`crates/teksilo-app/src/window_persist.rs`](../crates/teksilo-app/src/window_persist.rs)
+- Live-reload wiring: [`crates/teksilo-app/src/app.rs`](../crates/teksilo-app/src/app.rs) (search `settings_watch`)
 - End-to-end demo: [`examples/recent_projects/src/main.rs`](../examples/recent_projects/src/main.rs)
 - Related architecture topics: [`docs/multi-window.md`](multi-window.md), [`docs/data-models.md`](data-models.md), [`docs/reactive-theme.md`](reactive-theme.md)
 
 ### Out of scope — intentional
 
 - **Encryption.** Plaintext TOML. Secrets go through a future
-  `bastyde-secrets` crate against the OS keychain.
+  `teksilo-secrets` crate against the OS keychain.
 - **Cloud sync.** No.
 - **Large persisted collections (> ~1k items).** Use SQLite via
   `rusqlite`; the persistence bridges intentionally re-serialize

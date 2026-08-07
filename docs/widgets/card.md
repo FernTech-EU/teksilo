@@ -28,10 +28,10 @@ Announces as `Role::Group`. The slots' own accessibility nodes are
 included in the subtree; the card itself carries no additional AT name.
 
 ```rust
-# use bastyde_widgets::Card;
-# use bastyde_core::styles::CardVariant;
-# use bastyde_widgets::primitives::TextWidget;
-# use bastyde_i18n::lit;
+# use teksilo_widgets::Card;
+# use teksilo_core::styles::CardVariant;
+# use teksilo_widgets::primitives::TextWidget;
+# use teksilo_i18n::lit;
 let _card = Card::new()
     .variant(CardVariant::Elevated)
     .content(TextWidget::new(lit!("Hello, card!")));
@@ -43,7 +43,7 @@ let _card = Card::new()
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/card/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/card/index.html)
 
 ## `pub struct Card`
 
@@ -86,7 +86,7 @@ Set the footer slot to a pre-registered `WidgetId`.
 #### `pub fn shadow(mut self, shadow: Shadow) -> Self`
 
 Override the drop shadow. Accepts a `Shadow` token (see
-`bastyde_tokens::Shadow`). The default shadow comes from the active
+`teksilo_tokens::Shadow`). The default shadow comes from the active
 `CardStyle` for the chosen `CardVariant`.
 
 #### `pub fn background(mut self, color: impl Into<ColorProp>) -> Self`
@@ -113,7 +113,7 @@ default maps Plain → no shadow + surface_main, Elevated →
 shadow_md + surface_main, Outlined → border + surface_main,
 Filled → shadow_md + surface_raised).
 
-#### `pub fn style(mut self, style: impl bastyde_core::styles::CardStyle) -> Self`
+#### `pub fn style(mut self, style: impl teksilo_core::styles::CardStyle) -> Self`
 
 Per-call style override. Replaces the theme-wide default
 `CardStyle` for just this Card instance.

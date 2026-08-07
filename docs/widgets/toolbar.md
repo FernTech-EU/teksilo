@@ -56,8 +56,8 @@ action is announced twice. Toggle actions carry `Toggled`.
 
 ```ignore
 // on_activate requires an EventContext — use ignore.
-use bastyde_widgets::toolbar::{Toolbar, ToolbarAction, ToolbarItem};
-use bastyde_i18n::lit;
+use teksilo_widgets::toolbar::{Toolbar, ToolbarAction, ToolbarItem};
+use teksilo_i18n::lit;
 let _bar = Toolbar::new()
     .action(ToolbarAction::new(lit!("Save"), save_icon).on_activate(|ctx| { /* ... */ }))
     .action(ToolbarAction::new(lit!("Undo"), undo_icon).priority(-1))
@@ -70,7 +70,7 @@ let _bar = Toolbar::new()
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/toolbar/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/toolbar/index.html)
 
 ## `pub const TOOLBAR_HEIGHT_DEFAULT`
 

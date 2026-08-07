@@ -38,7 +38,7 @@ Splitter::new(model.clone())
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/splitter/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/splitter/index.html)
 
 ## `pub struct Splitter`
 
@@ -69,7 +69,7 @@ Append a pre-registered content pane by id.
 
 #### `pub fn child(self, widget: impl Widget + 'static) -> Self`
 
-`bati!` ergonomic alias for `pane`: a bare child in a
+`teksu!` ergonomic alias for `pane`: a bare child in a
 `Splitter { ... }` block lowers to `.child(...)`.
 
 #### `pub fn pane_label(mut self, index: usize, label: impl Into<Prop<String>>) -> Self`

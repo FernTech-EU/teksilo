@@ -26,7 +26,7 @@ let archive: Rc<NotificationArchiveModel> = ctx.app_state().unwrap();
 let bell = NotificationCenterButton::new(archive)
     .on_action_invoked(|_entry, action, ctx| {
         if let Some(name) = &action.intent_name {
-            ctx.send_intent(bastyde_core::Intent::new(name));
+            ctx.send_intent(teksilo_core::Intent::new(name));
         }
     });
 ```
@@ -37,7 +37,7 @@ let bell = NotificationCenterButton::new(archive)
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/notification/center_button/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/notification/center_button/index.html)
 
 ## `pub struct NotificationCenterButton`
 

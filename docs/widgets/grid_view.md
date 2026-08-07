@@ -33,7 +33,7 @@ GridView::new(model, |tc| {
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/grid_view/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/grid_view/index.html)
 
 ## `pub struct TileContext`
 
@@ -64,7 +64,7 @@ pub struct GridView<T: 'static> { /* fields */ }
 Create a grid backed by a `ListModel<T>`. The `delegate` builds the
 widget for each tile from a `TileContext`.
 
-#### `pub fn from_source<S: bastyde_data::ListDataSource<Item = T>>( source: S, delegate: impl Fn(&TileContext<'_, T>) -> Box<dyn Widget> + 'static, ) -> Self`
+#### `pub fn from_source<S: teksilo_data::ListDataSource<Item = T>>( source: S, delegate: impl Fn(&TileContext<'_, T>) -> Box<dyn Widget> + 'static, ) -> Self`
 
 Create a grid backed by any `ListDataSource` (large / external data).
 
@@ -274,7 +274,7 @@ app-specific `application/x-…`). Implies `exportable`
 (defaulting to `DragTransferMode::Move` if not already set). Requires
 `T: Clone`.
 
-#### `pub fn on_rows_transferred_out( mut self, f: impl Fn(&[usize], &mut bastyde_core::widget::EventContext) + 'static, ) -> Self`
+#### `pub fn on_rows_transferred_out( mut self, f: impl Fn(&[usize], &mut teksilo_core::widget::EventContext) + 'static, ) -> Self`
 
 Override how rows moved out to a foreign target are removed from this
 view. Receives the dragged rows' indices (descending-safe) and the live
@@ -291,18 +291,18 @@ items and the insertion index. (Same-view reorder is
 `reorderable`; a custom `ListDataSource` can still
 accept foreign drops through its `can_accept`/`accept_drop` instead.)
 
-#### `pub fn on_rows_received( mut self, f: impl Fn(Vec<T>, usize, &mut bastyde_core::widget::EventContext) + 'static, ) -> Self`
+#### `pub fn on_rows_received( mut self, f: impl Fn(Vec<T>, usize, &mut teksilo_core::widget::EventContext) + 'static, ) -> Self`
 
 Handler for rows accepted via `accept_foreign_rows`:
 `(items, insertion_index, ctx)`. Insert them into your model at the
 index.
 
-#### `pub fn on_item_drop( mut self, f: impl Fn( bastyde_core::drag_payload::DragPayload, usize, &mut bastyde_core::widget::EventContext, ) -> bool + 'static, ) -> Self`
+#### `pub fn on_item_drop( mut self, f: impl Fn( teksilo_core::drag_payload::DragPayload, usize, &mut teksilo_core::widget::EventContext, ) -> bool + 'static, ) -> Self`
 
 Accept external drops at a flat insertion index. Returns `true` when
 the drop is accepted.
 
-#### `pub fn on_tile_activate( mut self, f: impl Fn(usize, &mut bastyde_core::widget::EventContext) + 'static, ) -> Self`
+#### `pub fn on_tile_activate( mut self, f: impl Fn(usize, &mut teksilo_core::widget::EventContext) + 'static, ) -> Self`
 
 Called when a tile is activated (a click per `activate_on`,
 or Enter on the focused tile) — the "open / default action", distinct
@@ -314,7 +314,7 @@ Choose single- vs double-click tile activation (default
 `ActivateOn::DoubleClick`). Enter activates in either
 mode.
 
-#### `pub fn tile_context_menu( mut self, f: impl Fn(usize, Point, &mut bastyde_core::widget::EventContext) -> Option<Box<dyn Widget>> + 'static, ) -> Self`
+#### `pub fn tile_context_menu( mut self, f: impl Fn(usize, Point, &mut teksilo_core::widget::EventContext) -> Option<Box<dyn Widget>> + 'static, ) -> Self`
 
 Per-tile context-menu factory: `(index, pointer_position, ctx)` →
 optional menu widget.

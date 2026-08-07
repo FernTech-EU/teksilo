@@ -26,24 +26,24 @@
 //! Run with: `cargo run -p file-drop`. (External OS drops are live on macOS /
 //! Windows / Wayland; on X11 the Browse button is the path.)
 
-use bastyde::core::drag_payload::{DragPayload, DropOutcome};
-use bastyde::core::gesture::DragPhase;
-use bastyde::core::widget_id::WidgetId;
-use bastyde::prelude::*;
-use bastyde::widgets::{
+use teksilo::core::drag_payload::{DragPayload, DropOutcome};
+use teksilo::core::gesture::DragPhase;
+use teksilo::core::widget_id::WidgetId;
+use teksilo::prelude::*;
+use teksilo::widgets::{
     DropTarget, DropTargetVariant, DropZone, Expand, HStack, Padding, Panel, TextWidget, VStack,
 };
 
 fn main() {
-    BastydeAppBuilder::new()
+    TeksiloAppBuilder::new()
         .install_automation_bridge_in_debug()
-        .theme(bastyde::presets::intui::light())
+        .theme(teksilo::presets::intui::light())
         .install_inspector_in_debug()
         .install_external_dnd()
         .install_file_dialog()
         .initial_window(
             WindowConfig::new()
-                .title("Bastyde — External Drag & Drop")
+                .title("Teksilo — External Drag & Drop")
                 .size(900, 600)
                 .root(|tree, _state| {
                     // Shared log of accepted drops, newest first.
@@ -120,11 +120,11 @@ fn main() {
                         let id_for_drag = id.clone();
                         let log = log.clone();
                         let row = Panel::new()
-                            .child(Padding::uniform(10.0).child(TextWidget::new(lit!("⠿  Drag this text out →  (\"Hello from Bastyde\")"),
+                            .child(Padding::uniform(10.0).child(TextWidget::new(lit!("⠿  Drag this text out →  (\"Hello from Teksilo\")"),
                             )))
                             .on_drag(move |phase, ctx| {
                                 if let DragPhase::Started { .. } = phase {
-                                    let text = "Hello from Bastyde";
+                                    let text = "Hello from Teksilo";
                                     let payload = DragPayload::typed(text.to_string())
                                         .with_mime("text/plain", text.as_bytes().to_vec());
                                     ctx.start_drag(id_for_drag.get(), payload);

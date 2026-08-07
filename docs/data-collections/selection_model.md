@@ -29,7 +29,7 @@ stable app-defined key (e.g. a `NodeId` or a UUID) and selection must
 survive sort/filter rebuilds or window slides that renumber visible indices.
 
 ```rust
-# use bastyde_data::{SelectionModel, SelectionMode};
+# use teksilo_data::{SelectionModel, SelectionMode};
 let sel = SelectionModel::new(SelectionMode::Multi);
 sel.select(2);         // clear-and-select index 2, anchor = 2
 sel.toggle(5);         // add index 5 (Ctrl+click behaviour)
@@ -46,7 +46,7 @@ assert_eq!(sel.count(), 0);
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_data/selection_model/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_data/selection_model/index.html)
 
 ## `pub enum SelectionMode`
 

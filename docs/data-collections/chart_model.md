@@ -28,7 +28,7 @@ For a bounded "last N points" streaming view use
 `ChartSelection`.
 
 ```rust
-# use bastyde_data::{ChartModel, ChartSeries, ChartDatum};
+# use teksilo_data::{ChartModel, ChartSeries, ChartDatum};
 let model = ChartModel::from_series_vec(vec![
     ChartSeries::new("Revenue").data(vec![
         ChartDatum::new("Q1".to_string(), 10.0),
@@ -49,7 +49,7 @@ assert_eq!(model.point_count(s), 3);
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_data/chart_model/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_data/chart_model/index.html)
 
 ## `pub struct ChartDatum`
 

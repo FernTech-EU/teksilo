@@ -22,11 +22,11 @@
 //! - **Per-intent Action handlers** that extract the typed payload
 //!   from the runtime intent and use it.
 
-use bastyde::IntentKind;
-use bastyde::core::Action;
-use bastyde::core::shortcut::{KeyStroke, Shortcut};
-use bastyde::prelude::*;
-use bastyde::widgets::{
+use teksilo::IntentKind;
+use teksilo::core::Action;
+use teksilo::core::shortcut::{KeyStroke, Shortcut};
+use teksilo::prelude::*;
+use teksilo::widgets::{
     Button, ButtonVariant, Expand, HStack, MenuBar, MenuItem, MenuList, Padding, Panel,
     ShortcutSettings, Spacer, TextWidget, Toolbar, VStack, tooltip::TooltipContent,
 };
@@ -35,7 +35,7 @@ fn dark_mode_toolbar() -> impl Widget {
     Toolbar::new().child(
         HStack::new()
             .child(Spacer::new())
-            .child(bastyde::widgets::ThemeSwitcher::new()),
+            .child(teksilo::widgets::ThemeSwitcher::new()),
     )
 }
 
@@ -408,13 +408,13 @@ impl Widget for Root {
 }
 
 fn main() {
-    BastydeAppBuilder::new()
+    TeksiloAppBuilder::new()
         .install_automation_bridge_in_debug()
         .install_inspector_in_debug()
-        .theme(bastyde::presets::intui::light())
+        .theme(teksilo::presets::intui::light())
         .initial_window(
             WindowConfig::new()
-                .title("Bastyde — Shortcuts Demo")
+                .title("Teksilo — Shortcuts Demo")
                 .size(1100, 720)
                 .root(|tree, _state| {
                     tree.add(
@@ -434,7 +434,7 @@ fn main() {
 #[cfg(test)]
 mod intent_kind_shapes {
     use super::*;
-    use bastyde::core::Intent;
+    use teksilo::core::Intent;
 
     #[derive(Debug, PartialEq)]
     struct CreateItemDto {
@@ -530,9 +530,9 @@ mod intent_kind_shapes {
 #[cfg(test)]
 mod dispatch_tests {
     use super::*;
-    use bastyde::core::WidgetTree;
     use std::cell::RefCell;
     use std::rc::Rc;
+    use teksilo::core::WidgetTree;
 
     /// Register `Root` and capture each `AppIntent` the actions see.
     fn setup() -> (WidgetTree, Rc<RefCell<Vec<String>>>) {
@@ -544,7 +544,7 @@ mod dispatch_tests {
         // the Root so our log-actions live on the outer root widget.
         let log: Rc<RefCell<Vec<String>>> = Rc::new(RefCell::new(Vec::new()));
 
-        let mut tree = WidgetTree::new().with_theme(bastyde::presets::intui::light());
+        let mut tree = WidgetTree::new().with_theme(teksilo::presets::intui::light());
         // Add Root (installs its own Actions on the Root node).
         let _ = tree.add(Root::new());
         tree.layout(SizeProposal::exact(1100.0, 720.0));

@@ -1,0 +1,28 @@
+# SPDX-License-Identifier: MPL-2.0
+# SPDX-FileCopyrightText: 2026 FernTech
+
+[package]
+name = "teksilo-charts"
+edition = "2024"
+version.workspace = true
+license-file.workspace = true
+publish.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[features]
+preview = ["dep:teksilo-preview"]
+
+[dependencies]
+teksilo-core = { workspace = true }
+teksilo-data = { workspace = true }
+teksilo-tokens = { workspace = true }
+teksilo-canvas = { workspace = true }
+teksilo-i18n = { workspace = true }
+teksilo-preview = { workspace = true, optional = true }
+
+[dev-dependencies]
+# Used only by tests for the donut center-slot integration (TextWidget
+# placement). Not part of the runtime dep graph — keeps the public
+# layering (charts at the same tier as widgets).
+teksilo-widgets = { workspace = true }

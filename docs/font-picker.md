@@ -10,8 +10,8 @@ installed font family, previews each one, and binds the choice to a
 `TextStyle.family` / `RichTextEditor::set_font_family`.
 
 ```rust
-use bastyde::prelude::*;
-use bastyde::widgets::FontPicker;
+use teksilo::prelude::*;
+use teksilo::widgets::FontPicker;
 
 let family: Signal<Option<String>> = Signal::new(None);
 VStack::new()
@@ -22,7 +22,7 @@ VStack::new()
     );
 ```
 
-Source: [crates/bastyde-widgets/src/font_picker.rs](../crates/bastyde-widgets/src/font_picker.rs).
+Source: [crates/teksilo-widgets/src/font_picker.rs](../crates/teksilo-widgets/src/font_picker.rs).
 Demo: `cargo run -p font-picker`. Also on the widget catalog's **Rich text** tab
 (`cargo run -p widget-catalog`).
 
@@ -113,7 +113,7 @@ uses only font metadata, no bytes.
 
 `WritingSystem` mirrors Qt's `QFontDatabase::WritingSystem` set (Latin, Greek,
 Cyrillic, …, Simplified/Traditional Chinese, Japanese, Korean, Vietnamese,
-Symbol, Ogham, Runic, N'Ko). It is re-exported at `bastyde::text::WritingSystem`.
+Symbol, Ogham, Runic, N'Ko). It is re-exported at `teksilo::text::WritingSystem`.
 
 ## Accessibility
 
@@ -133,7 +133,7 @@ The `.families(...)` / `.families_with_meta(...)` overrides make the picker
 fully testable headlessly (no font backend): the latter injects synthetic
 monospaced + writing-system metadata so the spacing and writing-system filter
 predicates are exercised deterministically. See the tests in
-[font_picker.rs](../crates/bastyde-widgets/src/font_picker.rs).
+[font_picker.rs](../crates/teksilo-widgets/src/font_picker.rs).
 
 ## Scope
 
@@ -156,5 +156,5 @@ crate (both cheap plumbing over data the font stack already had):
   OS/2 via a new `ttf-parser` dependency (already present transitively through
   fontdb, so no newly-compiled crate).
 
-Both are re-exported through `bastyde-text` and reachable from a widget's
+Both are re-exported through `teksilo-text` and reachable from a widget's
 `build()` via `ctx.app_state::<SharedTypesetter>()`.

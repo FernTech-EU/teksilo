@@ -44,7 +44,7 @@ corrupts it silently.
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/code_editor/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/code_editor/index.html)
 
 ## `pub struct CodeEditorHandle`
 
@@ -63,31 +63,31 @@ pub struct CodeEditorHandle { /* fields */ }
 
 The caret's document position.
 
-#### `pub fn cursor_position_signal(&self) -> bastyde_core::Signal<usize>`
+#### `pub fn cursor_position_signal(&self) -> teksilo_core::Signal<usize>`
 
 The primary caret's document position — a character offset into the whole
 document, not a line or column — as a reactive signal. Bind it in a status
 bar to show a caret position that tracks every caret move, not only edits.
 
-#### `pub fn caret_count(&self) -> bastyde_core::Signal<usize>`
+#### `pub fn caret_count(&self) -> teksilo_core::Signal<usize>`
 
 Live caret count — `1` unless multi-caret editing is active.
 
-#### `pub fn bracket_match(&self) -> bastyde_core::Signal<Option<(usize, usize)>>`
+#### `pub fn bracket_match(&self) -> teksilo_core::Signal<Option<(usize, usize)>>`
 
 The bracket next to the caret and its match, as document positions, or
 `None`. Populated only when the editor was configured with
 `match_brackets` and bracket pairs; a status surface can bind it, or an
 app can read it to drive its own overlay.
 
-#### `pub fn has_selection(&self) -> bastyde_core::Signal<bool>`
+#### `pub fn has_selection(&self) -> teksilo_core::Signal<bool>`
 
-#### `pub fn can_undo(&self) -> bastyde_core::Signal<bool>`
+#### `pub fn can_undo(&self) -> teksilo_core::Signal<bool>`
 
-#### `pub fn can_redo(&self) -> bastyde_core::Signal<bool>`
+#### `pub fn can_redo(&self) -> teksilo_core::Signal<bool>`
 
-#### `pub fn document_version(&self) -> bastyde_core::Signal<u64>`
+#### `pub fn document_version(&self) -> teksilo_core::Signal<u64>`
 
 Bumps on every content or format change.
 
-#### `pub fn scroll_y(&self) -> bastyde_core::Signal<f32>`
+#### `pub fn scroll_y(&self) -> teksilo_core::Signal<f32>`

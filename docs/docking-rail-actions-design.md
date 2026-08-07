@@ -20,17 +20,17 @@
 
 ## 1. What already exists (correcting the mental model)
 
-- **`DockRail` already has `top_slot()`/`bottom_slot()`** — `Rc<dyn Fn() -> Box<dyn Widget>>` factories, rebuilt every rail rebuild, placed above the items / after a trailing `Spacer`. [`docking/activity_bar.rs:127-128,149-150,187-203`](crates/bastyde-widgets/src/docking/activity_bar.rs)
-- **`TabWidget` already has `bar_leading_slot()`/`bar_trailing_slot()`** — a *different* mechanism: a memoize-once `BarSlot` taking a built `impl Widget + 'static`, not a factory. [`tab_widget.rs:911-935`](crates/bastyde-widgets/src/tab_widget.rs)
-- **`docking/panel.rs` already consumes `bar_trailing_slot` internally**, for the "hidden activities" hamburger shown only when every activity on a Strip side is hidden. [`panel.rs:524-535`](crates/bastyde-widgets/src/docking/panel.rs)
-- **There is no app-facing way to add a slot to a Strip-presentation tab bar today.** `DockSidePanel` never sets `.orientation(...)`, so the Strip bar is horizontal for *every* `DockSide` including Top/Bottom — "leading/trailing" for that bar is a reading-order axis, unrelated to the Rail's vertical top/bottom axis. [`panel.rs:369-372,438-535`; `tab_widget.rs:361`](crates/bastyde-widgets/src/docking/panel.rs)
-- **`DockActivityBar` is vertical-only, end to end** — item column is a `VStack`, overflow capacity is computed from `bounds.height`, `rail_insertion` is y-only, the drop indicator draws a horizontal line, a11y hardcodes `Orientation::Vertical`, Labeled mode uses a 90°-rotated label, tooltips are hardcoded `TooltipPlacement::Side` with an explicit comment explaining why a `Below` tooltip would drop onto the next stacked item. [`activity_bar.rs:236-612,1146-1179`](crates/bastyde-widgets/src/docking/activity_bar.rs)
-- **For Top/Bottom sides, the (always-vertical) rail is a column pinned to the leading cross-edge**, excluded from `band_depth()`, and a hidden Top/Bottom band **collapses completely — rail included** ("a vertical rail can't stand alone in a zero-depth band"); the app must supply its own external reopen button. This is an admitted, tested design scar (`hidden_top_with_rail_fully_collapses`). [`geometry.rs:13-26,194-219,759-776`](crates/bastyde-widgets/src/docking/geometry.rs)
-- **`DockRail` is per-view builder config on `DockingLayout`, not on `DockingModel`.** It's declared fresh per `DockingLayout::new(model)` call site, the same way `.dock(DockWidget)` is — and dock/rail metadata registration on the model happens **immediately, synchronously, inside the builder chain**, specifically so the app can call `model.import_state(dto)` afterward with all ids already known. [`docking.rs:79-128,156-164,159-164`](crates/bastyde-widgets/src/docking.rs)
-- **`DockingModel::register_meta` — the actual metadata-registration mutator — is `pub(crate)`.** App code never calls a model-level `register_*` method directly; it only reaches metadata through the `DockingLayout` builder. [`model.rs:527-531`](crates/bastyde-widgets/src/docking/model.rs)
-- **Bastyde already has a live, unfixed ARIA "required owned elements" violation.** `DockActivityBar::accessibility()` sets `Role::TabList` on the rail's *whole* root; `top_slot`/`bottom_slot` widgets and the overflow-trigger `IconButton` are ordinary children of that same `VStack`, so they are already non-`Role::Tab` descendants of a `role=tablist` today, before any of this design ships. [`activity_bar.rs:394-433,601-611`](crates/bastyde-widgets/src/docking/activity_bar.rs)
-- **`Role::GenericContainer` is already this codebase's idiom for a presentational, unnamed grouping wrapper** — used by `DockingLayout`'s own root, `menu_bar.rs`, and `splitter.rs`. `accessibility_impl.rs`'s pruning pass only removes such a wrapper when it carries **no** semantic property at all (no name, no orientation) — there's a standing regression test guarding exactly this (`plain_button_is_a_leaf_no_group_node`). [`docking.rs:474`; `menu_bar.rs:917`; `splitter.rs:555`; `bastyde-core/src/widget_tree/accessibility_impl.rs:683-702`; `button.rs:1404-1426`]
-- **Skribisto has zero live call sites for `DockRail::top_slot/bottom_slot`** (grep-confirmed) — its only slot consumer is `TabWidget::bar_trailing_slot`, for the editor pane's own split/close button. [`crates/bastyde_ui/src/app.rs:122`]
+- **`DockRail` already has `top_slot()`/`bottom_slot()`** — `Rc<dyn Fn() -> Box<dyn Widget>>` factories, rebuilt every rail rebuild, placed above the items / after a trailing `Spacer`. [`docking/activity_bar.rs:127-128,149-150,187-203`](crates/teksilo-widgets/src/docking/activity_bar.rs)
+- **`TabWidget` already has `bar_leading_slot()`/`bar_trailing_slot()`** — a *different* mechanism: a memoize-once `BarSlot` taking a built `impl Widget + 'static`, not a factory. [`tab_widget.rs:911-935`](crates/teksilo-widgets/src/tab_widget.rs)
+- **`docking/panel.rs` already consumes `bar_trailing_slot` internally**, for the "hidden activities" hamburger shown only when every activity on a Strip side is hidden. [`panel.rs:524-535`](crates/teksilo-widgets/src/docking/panel.rs)
+- **There is no app-facing way to add a slot to a Strip-presentation tab bar today.** `DockSidePanel` never sets `.orientation(...)`, so the Strip bar is horizontal for *every* `DockSide` including Top/Bottom — "leading/trailing" for that bar is a reading-order axis, unrelated to the Rail's vertical top/bottom axis. [`panel.rs:369-372,438-535`; `tab_widget.rs:361`](crates/teksilo-widgets/src/docking/panel.rs)
+- **`DockActivityBar` is vertical-only, end to end** — item column is a `VStack`, overflow capacity is computed from `bounds.height`, `rail_insertion` is y-only, the drop indicator draws a horizontal line, a11y hardcodes `Orientation::Vertical`, Labeled mode uses a 90°-rotated label, tooltips are hardcoded `TooltipPlacement::Side` with an explicit comment explaining why a `Below` tooltip would drop onto the next stacked item. [`activity_bar.rs:236-612,1146-1179`](crates/teksilo-widgets/src/docking/activity_bar.rs)
+- **For Top/Bottom sides, the (always-vertical) rail is a column pinned to the leading cross-edge**, excluded from `band_depth()`, and a hidden Top/Bottom band **collapses completely — rail included** ("a vertical rail can't stand alone in a zero-depth band"); the app must supply its own external reopen button. This is an admitted, tested design scar (`hidden_top_with_rail_fully_collapses`). [`geometry.rs:13-26,194-219,759-776`](crates/teksilo-widgets/src/docking/geometry.rs)
+- **`DockRail` is per-view builder config on `DockingLayout`, not on `DockingModel`.** It's declared fresh per `DockingLayout::new(model)` call site, the same way `.dock(DockWidget)` is — and dock/rail metadata registration on the model happens **immediately, synchronously, inside the builder chain**, specifically so the app can call `model.import_state(dto)` afterward with all ids already known. [`docking.rs:79-128,156-164,159-164`](crates/teksilo-widgets/src/docking.rs)
+- **`DockingModel::register_meta` — the actual metadata-registration mutator — is `pub(crate)`.** App code never calls a model-level `register_*` method directly; it only reaches metadata through the `DockingLayout` builder. [`model.rs:527-531`](crates/teksilo-widgets/src/docking/model.rs)
+- **Teksilo already has a live, unfixed ARIA "required owned elements" violation.** `DockActivityBar::accessibility()` sets `Role::TabList` on the rail's *whole* root; `top_slot`/`bottom_slot` widgets and the overflow-trigger `IconButton` are ordinary children of that same `VStack`, so they are already non-`Role::Tab` descendants of a `role=tablist` today, before any of this design ships. [`activity_bar.rs:394-433,601-611`](crates/teksilo-widgets/src/docking/activity_bar.rs)
+- **`Role::GenericContainer` is already this codebase's idiom for a presentational, unnamed grouping wrapper** — used by `DockingLayout`'s own root, `menu_bar.rs`, and `splitter.rs`. `accessibility_impl.rs`'s pruning pass only removes such a wrapper when it carries **no** semantic property at all (no name, no orientation) — there's a standing regression test guarding exactly this (`plain_button_is_a_leaf_no_group_node`). [`docking.rs:474`; `menu_bar.rs:917`; `splitter.rs:555`; `teksilo-core/src/widget_tree/accessibility_impl.rs:683-702`; `button.rs:1404-1426`]
+- **Skribisto has zero live call sites for `DockRail::top_slot/bottom_slot`** (grep-confirmed) — its only slot consumer is `TabWidget::bar_trailing_slot`, for the editor pane's own split/close button. [`crates/teksilo_ui/src/app.rs:122`]
 - **Skribisto's dockless-action need is real but already solved outside the docking system**: `SpellcheckToggleButton`, `ExportSplitButton`, `ProjectSwitcherButton` are hand-built in the window's `TitleBar` (`shell/windows.rs:612-660`), specifically because they are **window-global**, not tied to any `DockSide` — none of them has a coherent side to attach to.
 
 ---
@@ -157,7 +157,7 @@ A side configured with `.leading_slot(...)`/`.trailing_slot(...)` but currently 
 ### 4.1 Why not a `DockTab` variant (settled, unchanged)
 
 `import_state`'s pane-survival guard (`if !panes.is_empty()`,
-[`model.rs`](crates/bastyde-widgets/src/docking/model.rs)) would treat an action's permanently-empty
+[`model.rs`](crates/teksilo-widgets/src/docking/model.rs)) would treat an action's permanently-empty
 `panes` as indistinguishable from a fully-pruned dead tab — modelling actions as zero-pane
 `DockTab`s would **silently delete every action on the first app restart**. ~10 call sites also
 assume `tab.panes.first()` is meaningful (silent panic/blank-panel risk, not a compile error).
@@ -305,7 +305,7 @@ its own independent roving-tabindex model.
   `roving: Signal<usize>` mirroring `Toolbar`'s pattern — **not** `DockRailItem`'s model-level
   `selected: Signal<usize>`, since an action group has no "currently selected" concept.
 - `DockActivityBar`'s root drops `Role::TabList` for `Role::GenericContainer` — the crate's idiom
-  ([`docking.rs:474`](crates/bastyde-widgets/src/docking.rs), `menu_bar.rs:917`, `splitter.rs:555`).
+  ([`docking.rs:474`](crates/teksilo-widgets/src/docking.rs), `menu_bar.rs:917`, `splitter.rs:555`).
   **Hard requirement:** the wrapper must carry **no** semantic property at all — no `set_name`, no
   `set_orientation` — or `accessibility_impl.rs`'s pruning pass will not prune it and a screen
   reader announces *"Leading activity bar, group"* then *"Leading activity bar, tab list"*. The
@@ -313,7 +313,7 @@ its own independent roving-tabindex model.
 - The overflow-trigger `IconButton` (a third stray non-tab child today) moves out as its own sibling.
 
 **A rejected shortcut, settled — do not re-litigate.** `Widget::accessibility_children() -> Option<Vec<WidgetId>>`
-**does exist** ([`bastyde-core/src/widget.rs:439`](crates/bastyde-core/src/widget.rs), honoured at
+**does exist** ([`teksilo-core/src/widget.rs:439`](crates/teksilo-core/src/widget.rs), honoured at
 `widget_tree/accessibility_impl.rs:413`) and its doc says it can "reorder (**or restrict**)" AT
 children — so it looks like a one-line fix: keep `Role::TabList` on the root, return only the item
 ids. **It is the wrong fix.** Restricting is not re-parenting: the slots and the overflow trigger
@@ -468,7 +468,7 @@ Recorded so the reasoning isn't re-derived later:
 Revision 1 floated a narrower alternative (OQ5): keep the existing *vertical* rail alive at zero
 band depth for Top/Bottom by relaxing `rail_only()`'s `region.height > 0.0` guard. **Cyril accepted
 this ("ok, fix"). It is unsound and must not be built.** Closer reading of
-[`geometry.rs:434-467`](crates/bastyde-widgets/src/docking/geometry.rs) shows why:
+[`geometry.rs:434-467`](crates/teksilo-widgets/src/docking/geometry.rs) shows why:
 
 ```rust
 let rail = Rect::new(rail_x, region.y, rail_w, region.height);
@@ -489,18 +489,18 @@ Leading/Trailing is a width with a free height, and for a Top/Bottom vertical ra
 
 Revision 1 also claimed the scar "is not currently hit by any app in this codebase." Also false:
 
-- [`project_shell.rs:205-206`](crates/bastyde_ui/src/app/project_shell.rs) puts `DockSide::Bottom` in
+- [`project_shell.rs:205-206`](crates/teksilo_ui/src/app/project_shell.rs) puts `DockSide::Bottom` in
   Rail presentation at 36 dp, `Compact`.
-- [`project_shell.rs:311`](crates/bastyde_ui/src/app/project_shell.rs) then calls
+- [`project_shell.rs:311`](crates/teksilo_ui/src/app/project_shell.rs) then calls
   `set_side_visible_immediate(DockSide::Bottom, false)` — **the band ships hidden by default**, so
   the rail is invisible in Skribisto's own default state.
 - Skribisto pays for it with two hand-wired workarounds: the
-  [`view.rs:63`](crates/bastyde_ui/src/app/commands/view.rs) toggle command and the
-  [`project_menus.rs:387`](crates/bastyde_ui/src/shell/project_menus.rs) menu item bound to
+  [`view.rs:63`](crates/teksilo_ui/src/app/commands/view.rs) toggle command and the
+  [`project_menus.rs:387`](crates/teksilo_ui/src/shell/project_menus.rs) menu item bound to
   `side_visible_signal(DockSide::Bottom)`. That menu item *is* the "external button"
   `geometry.rs` tells apps to supply.
 
-(`DockSide::Top` remains unreferenced in `bastyde_ui` — that part of the original claim stands.)
+(`DockSide::Top` remains unreferenced in `teksilo_ui` — that part of the original claim stands.)
 
 ### 5.3 Verdict
 
@@ -523,7 +523,7 @@ Scope notes for when it is taken up, so the next pass starts warm:
 - `RotatedLabel` should be **dropped**, not rotated the other way: it exists because a vertical rail
   has a fixed narrow cross-axis and text runs against the flow. On a horizontal rail the flow axis
   already matches text, so Labeled mode is just icon-above-caption.
-- `TooltipPlacement::Side` must become `Below`/`Above` — `bastyde-core`'s existing two-variant enum
+- `TooltipPlacement::Side` must become `Below`/`Above` — `teksilo-core`'s existing two-variant enum
   already covers it with edge-flip, so no new variant is needed.
 - The one genuinely open design question is whether a horizontal Top/Bottom rail makes
   `TabPresentation::Strip` redundant for those sides, or whether they stay complementary.
@@ -570,7 +570,7 @@ layout, not just the new field. Nothing to do today; do not let a later contribu
    structurally separate from real activity tabs rather than splicing it in as fake tabs.
 3. **VS Code's fixed bottom cluster** (Accounts / Manage-gear) is never draggable and never
    individually hideable, and migrates to the title bar on reorientation. Cyril's "do not hide
-   `DockAction`" decision lands bastyde **exactly** on this precedent rather than beside it —
+   `DockAction`" decision lands teksilo **exactly** on this precedent rather than beside it —
    Revision 1's optional-hidability stance was the one part of the design with no precedent in any
    surveyed system, and it is now gone.
 4. **IntelliJ's tool-window stripes** — every stripe icon in the docs is a tool-window toggle; the

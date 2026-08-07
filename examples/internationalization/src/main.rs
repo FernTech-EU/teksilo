@@ -5,7 +5,7 @@
 //!
 //! Run with: `cargo run -p internationalization`
 //!
-//! This example wires up the full Bastyde i18n stack end-to-end:
+//! This example wires up the full Teksilo i18n stack end-to-end:
 //!
 //! - Three locales compiled in via `I18nConfig::compile_in`: English
 //!   (source language), French, and Arabic.
@@ -30,12 +30,12 @@
 //! future optimization can skip the rebuild once the widget binding
 //! story is stable.
 
-use bastyde::core::widget::WidgetPlacement;
-use bastyde::i18n::{
-    BastydeDateTime, BastydeDateTimeFormatter, DateStyle, NumberFormatter, tr_signal,
+use teksilo::core::widget::WidgetPlacement;
+use teksilo::i18n::{
+    DateStyle, NumberFormatter, TeksiloDateTime, TeksiloDateTimeFormatter, tr_signal,
 };
-use bastyde::prelude::*;
-use bastyde::widgets::{
+use teksilo::prelude::*;
+use teksilo::widgets::{
     Button, ButtonVariant, Expand, HStack, LanguageSwitcher, Panel, ScrollArea, Spacer, TextWidget,
     Toolbar, VStack,
 };
@@ -44,7 +44,7 @@ fn dark_mode_toolbar() -> impl Widget {
     Toolbar::new().child(
         HStack::new()
             .child(Spacer::new())
-            .child(bastyde::widgets::ThemeSwitcher::new()),
+            .child(teksilo::widgets::ThemeSwitcher::new()),
     )
 }
 
@@ -96,7 +96,7 @@ impl Widget for Root {
         // keys are validated at compile time (renaming the key in
         // `en-US.ftl` would then produce a compile error instead of a
         // silent runtime placeholder).
-        let direction_signal = bastyde::i18n::current_direction();
+        let direction_signal = teksilo::i18n::current_direction();
         let direction_label = ctx.signal(direction_note_label_for(direction_signal.as_ref()));
         if let Some(sig) = direction_signal.as_ref() {
             let target = direction_label.clone();
@@ -195,7 +195,7 @@ impl Widget for Root {
 
         // ====== Locale-aware formatting showcase ======
         //
-        // Demonstrates the four `bastyde-i18n` formatting paths against a
+        // Demonstrates the four `teksilo-i18n` formatting paths against a
         // single `Signal<f64> price` + `Signal<i64> count`:
         //
         //   1. Bundle-side `NUMBER()` / `DATETIME()` inside `.ftl` —
@@ -209,7 +209,7 @@ impl Widget for Root {
         //      currency, percent) bound directly to `Signal<f64>`,
         //      reactive to **both** value changes and locale flips.
         //
-        //   3. Signal-side `BastydeDateTimeFormatter` — bound to a
+        //   3. Signal-side `TeksiloDateTimeFormatter` — bound to a
         //      `Signal<jiff::civil::DateTime>`. Same reactivity model.
         //
         //   4. `tr_signal!` — translated message with `Signal<T>` args
@@ -230,7 +230,7 @@ impl Widget for Root {
                 .color(TextRole::Primary),
         );
         let bundle_date = ctx.add(
-            TextWidget::new(tr!(bundle_date_row(ts = BastydeDateTime::from(self.today))))
+            TextWidget::new(tr!(bundle_date_row(ts = TeksiloDateTime::from(self.today))))
                 .style(TextStyleRole::Body)
                 .color(TextRole::Primary),
         );
@@ -251,7 +251,7 @@ impl Widget for Root {
             .percent()
             .fraction_digits(0, 1)
             .format(ratio);
-        let date_value = BastydeDateTimeFormatter::new()
+        let date_value = TeksiloDateTimeFormatter::new()
             .date_style(DateStyle::Long)
             .format(self.today);
 
@@ -414,7 +414,7 @@ fn formatting_row(ctx: &mut BuildContext, label: &'static str, value: Signal<Str
 /// same active locale — translators choose the natural currency for
 /// their market.
 fn per_locale_currency(_ctx: &mut BuildContext) -> &'static str {
-    let lang = bastyde::i18n::current_locale()
+    let lang = teksilo::i18n::current_locale()
         .map(|s| s.get().to_string())
         .unwrap_or_else(|| "en-US".to_string());
     if lang.starts_with("fr") {
@@ -430,21 +430,21 @@ fn per_locale_currency(_ctx: &mut BuildContext) -> &'static str {
 /// Uses `tr!(...)` so the keys are validated at compile time against
 /// `locales/en-US.ftl` — a rename or typo would produce a compile
 /// error instead of a silent runtime placeholder.
-fn direction_note_label(direction: bastyde::i18n::LayoutDirection) -> String {
+fn direction_note_label(direction: teksilo::i18n::LayoutDirection) -> String {
     match direction {
-        bastyde::i18n::LayoutDirection::LeftToRight => tr!(direction_note_ltr()).resolve_now(),
-        bastyde::i18n::LayoutDirection::RightToLeft => tr!(direction_note_rtl()).resolve_now(),
+        teksilo::i18n::LayoutDirection::LeftToRight => tr!(direction_note_ltr()).resolve_now(),
+        teksilo::i18n::LayoutDirection::RightToLeft => tr!(direction_note_rtl()).resolve_now(),
     }
 }
 
 /// Initial direction label, used to seed the reactive `Signal<String>`
 /// before the first `set_locale` fires an effect. Matches what the
 /// `ctx.effect(...)` body will compute on its next run.
-fn direction_note_label_for(direction: Option<&Signal<bastyde::i18n::LayoutDirection>>) -> String {
+fn direction_note_label_for(direction: Option<&Signal<teksilo::i18n::LayoutDirection>>) -> String {
     direction
         .map(|s| s.get())
         .map(direction_note_label)
-        .unwrap_or_else(|| direction_note_label(bastyde::i18n::LayoutDirection::LeftToRight))
+        .unwrap_or_else(|| direction_note_label(teksilo::i18n::LayoutDirection::LeftToRight))
 }
 
 // ---------------------------------------------------------------------------
@@ -511,28 +511,28 @@ fn main() {
         ])
         .auto_detect_os_locale(false)
         .fallback_locale("en-US".parse().expect("en-US is a valid BCP-47 tag"))
-        .framework_locales(bastyde::widgets::framework_locales());
+        .framework_locales(teksilo::widgets::framework_locales());
 
     // Apply any `--translation-dev LOCALE=PATH` overrides. Missing
     // files at startup are logged by the watcher and skipped — the
     // compile-in bundle stays in place for that locale.
     for (loc, path) in parse_translation_dev_flags() {
         println!(
-            "bastyde-i18n: hot-reloading `{}` from `{}`",
+            "teksilo-i18n: hot-reloading `{}` from `{}`",
             loc,
             path.display()
         );
         config = config.runtime_override(loc, path);
     }
 
-    BastydeAppBuilder::new()
+    TeksiloAppBuilder::new()
         .install_automation_bridge_in_debug()
         .install_inspector_in_debug()
-        .theme(bastyde::presets::intui::light())
+        .theme(teksilo::presets::intui::light())
         .i18n(config)
         .initial_window(
             WindowConfig::new()
-                .title("Bastyde — Internationalization Demo")
+                .title("Teksilo — Internationalization Demo")
                 .size(720, 520)
                 .root(|tree, _state| {
                     tree.add(

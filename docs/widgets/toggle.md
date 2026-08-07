@@ -22,9 +22,9 @@ screen readers will announce "switch" with no context if it is absent.
 ## Example
 
 ```rust
-# use bastyde_widgets::Toggle;
-# use bastyde_core::signal::Signal;
-# use bastyde_i18n::lit;
+# use teksilo_widgets::Toggle;
+# use teksilo_core::signal::Signal;
+# use teksilo_i18n::lit;
 let dark_mode = Signal::new(false);
 let _w = Toggle::new(dark_mode)
     .label(lit!("Dark mode"));
@@ -36,7 +36,7 @@ let _w = Toggle::new(dark_mode)
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/toggle/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/toggle/index.html)
 
 ## `pub struct Toggle`
 

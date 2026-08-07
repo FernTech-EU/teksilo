@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MPL-2.0
 # SPDX-FileCopyrightText: 2026 FernTech
 
-"""Build all Bastyde examples, run each briefly, and report binary size,
+"""Build all Teksilo examples, run each briefly, and report binary size,
 memory footprint, and idle CPU/GPU usage.
 
 Usage:
@@ -386,7 +386,7 @@ def render_report(
     finished: datetime.datetime,
 ) -> str:
     lines: list[str] = []
-    lines.append("# Bastyde examples — runtime benchmark")
+    lines.append("# Teksilo examples — runtime benchmark")
     lines.append("")
     lines.append(f"- **Date:** {started.strftime('%Y-%m-%d %H:%M:%S')}")
     lines.append(f"- **Duration:** {(finished - started).total_seconds():.1f}s")

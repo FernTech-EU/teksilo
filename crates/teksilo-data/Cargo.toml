@@ -1,0 +1,26 @@
+# SPDX-License-Identifier: MPL-2.0
+# SPDX-FileCopyrightText: 2026 FernTech
+
+[package]
+name = "teksilo-data"
+edition = "2024"
+version.workspace = true
+license-file.workspace = true
+publish.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+teksilo-core = { workspace = true }
+slotmap = "1"
+
+[dev-dependencies]
+# Test-only: property-based testing (see the `proptest` entry in the
+# workspace manifest for why proptest rather than cargo-fuzz).
+proptest = { workspace = true }
+# Test-only: constructing a concrete `teksilo_tokens::Color` to exercise
+# `ChartModel::set_series_color` needs the tokens crate directly (`ColorProp`
+# itself, re-exported from `teksilo-core`, has no zero-argument constructor).
+# Not a production dependency — teksilo-data's own code only ever takes
+# `impl Into<ColorProp>` and never names `Color`.
+teksilo-tokens = { workspace = true }

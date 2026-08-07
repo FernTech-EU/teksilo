@@ -31,8 +31,8 @@ explicit override. The trigger button advertises `HasPopup::Dialog` and
 `set_expanded` tracks whether the modal is currently open.
 
 ```ignore
-use bastyde_widgets::dialog::{Dialog, DialogContent};
-use bastyde_i18n::lit;
+use teksilo_widgets::dialog::{Dialog, DialogContent};
+use teksilo_i18n::lit;
 
 let _d = Dialog::new(lit!("Open settings"))
     .content(|| {
@@ -48,7 +48,7 @@ let _d = Dialog::new(lit!("Open settings"))
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/dialog/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/dialog/index.html)
 
 ## `pub struct ModalContainer`
 
@@ -76,7 +76,7 @@ Override the content padding (logical pixels) from the theme default.
 
 Override the minimum panel width (logical pixels) from the theme default.
 
-#### `pub fn style(mut self, style: impl bastyde_core::styles::DialogStyle) -> Self`
+#### `pub fn style(mut self, style: impl teksilo_core::styles::DialogStyle) -> Self`
 
 Per-call style override for the modal panel chrome. Replaces the
 theme-wide default `DialogStyle` for just this container.
@@ -91,7 +91,7 @@ visible title string.
 
 Full-viewport dimming scrim painted behind a `ModalContainer`.
 
-Mounted by the modal-presentation pipeline (bastyde-app) as a separate
+Mounted by the modal-presentation pipeline (teksilo-app) as a separate
 `OverlayPlacement::FullViewport` overlay pushed BEFORE the centered
 modal overlay so it z-orders below the panel. The chrome itself is
 delegated to the active `DialogStyle::make_scrim`; clicking the
@@ -116,7 +116,7 @@ pub struct ModalScrim { /* fields */ }
 Build a new scrim; wire it with `Self::dismiss_target` and
 `Self::click_to_dismiss` after construction.
 
-#### `pub fn style(mut self, style: impl bastyde_core::styles::DialogStyle) -> Self`
+#### `pub fn style(mut self, style: impl teksilo_core::styles::DialogStyle) -> Self`
 
 Per-call style override for the scrim chrome. Replaces the
 theme-wide default `DialogStyle` for just this scrim.
@@ -125,7 +125,7 @@ theme-wide default `DialogStyle` for just this scrim.
 
 Handle to the modal-overlay id the scrim dismisses on click.
 The framework fills this AFTER the modal is pushed (see the
-in-tree modal pipeline in `bastyde-app`).
+in-tree modal pipeline in `teksilo-app`).
 
 #### `pub fn click_to_dismiss(mut self, enabled: bool) -> Self`
 

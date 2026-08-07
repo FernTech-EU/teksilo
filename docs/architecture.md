@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: MPL-2.0 -->
 <!-- SPDX-FileCopyrightText: 2026 FernTech -->
 
-# Bastyde Architecture Document
+# Teksilo Architecture Document
 
 **Version:** 0.3 — slim refresh
 **Date:** May 6, 2026
@@ -38,30 +38,30 @@
 > - Multi-window: [`multi-window.md`](multi-window.md)
 > - Custom title bar: [`title-bar.md`](title-bar.md)
 > - Tooltips and overlays: [`tooltips.md`](tooltips.md)
-> - `bati!` DSL: [`bati-macro-reference.md`](bati-macro-reference.md), [`bati-language-spec-v3.md`](bati-language-spec-v3.md)
+> - `teksu!` DSL: [`teksu-macro-reference.md`](teksu-macro-reference.md), [`teksu-language-spec-v3.md`](teksu-language-spec-v3.md)
 > - Inspector: [`inspector.md`](inspector.md)
-> - Widget catalog snapshot: [`bastyde-milestones.md`](bastyde-milestones.md), `tools/extract_widget_api.py --all`
-> - Per-widget reference docs: [`table-view.md`](table-view.md), [`tab-widget.md`](tab-widget.md), [`charts.md`](charts.md), [`bastyde-scene.md`](bastyde-scene.md)
+> - Widget catalog snapshot: [`teksilo-milestones.md`](teksilo-milestones.md), `tools/extract_widget_api.py --all`
+> - Per-widget reference docs: [`table-view.md`](table-view.md), [`tab-widget.md`](tab-widget.md), [`charts.md`](charts.md), [`teksilo-scene.md`](teksilo-scene.md)
 
 ---
 
 ## 1. Vision and Positioning
 
-Bastyde is a pure-Rust GUI framework for serious desktop applications — the kind of software where a user sits down for hours at a time and reaches for the keyboard first. A writing tool for novelists, an IDE, a dispatch console, a course manager for a taxi company's driver training. Bastyde is infrastructure for professional desktop software that needs native look and feel, full keyboard and screen-reader accessibility, and a rich text surface built from the ground up.
+Teksilo is a pure-Rust GUI framework for serious desktop applications — the kind of software where a user sits down for hours at a time and reaches for the keyboard first. A writing tool for novelists, an IDE, a dispatch console, a course manager for a taxi company's driver training. Teksilo is infrastructure for professional desktop software that needs native look and feel, full keyboard and screen-reader accessibility, and a rich text surface built from the ground up.
 
-Bastyde's thesis rests on three pillars. First, accessibility is a structural requirement, not an afterthought — AccessKit is integrated at the trait level, not bolted on. Second, rich text is a first-class concern — the text-document and text-typeset crates provide a complete document model and typesetting engine covering shaping, bidi, line-breaking, and atlas rasterization. Third, the framework is designed to be consumed by applications with structured architecture (Clean Architecture, MVVM), providing a typed Shortcut / Intent / Action pipeline and reactive data-model crate (`bastyde-data`) rather than leaving application structure as an exercise for the developer.
+Teksilo's thesis rests on three pillars. First, accessibility is a structural requirement, not an afterthought — AccessKit is integrated at the trait level, not bolted on. Second, rich text is a first-class concern — the text-document and text-typeset crates provide a complete document model and typesetting engine covering shaping, bidi, line-breaking, and atlas rasterization. Third, the framework is designed to be consumed by applications with structured architecture (Clean Architecture, MVVM), providing a typed Shortcut / Intent / Action pipeline and reactive data-model crate (`teksilo-data`) rather than leaving application structure as an exercise for the developer.
 
 ### 1.1 Relationship to structured application architectures
 
-Bastyde is the outermost layer of an application — the "Frameworks & UI" ring in Clean Architecture's concentric circles. It has no dependency on any particular application framework. A Qleany-structured application is one supported integration path and was the stress test that shaped several of Bastyde's architectural choices (typed intents for command flow, view-models over raw entities, data sources for paged external collections), but nothing in Bastyde *requires* Qleany.
+Teksilo is the outermost layer of an application — the "Frameworks & UI" ring in Clean Architecture's concentric circles. It has no dependency on any particular application framework. A Qleany-structured application is one supported integration path and was the stress test that shaped several of Teksilo's architectural choices (typed intents for command flow, view-models over raw entities, data sources for paged external collections), but nothing in Teksilo *requires* Qleany.
 
-The integration surface is the typed intent system (Bastyde widgets emit application-defined intent variants that ancestor `Action`s consume — see [`shortcut-intent-action.md`](shortcut-intent-action.md)) and the reactive data models in `bastyde-data` (application-written view-models hold entity collections as `ListModel<EntityVM>` / `TreeModel<EntityVM>` that widgets bind to — see [`data-models.md`](data-models.md)).
+The integration surface is the typed intent system (Teksilo widgets emit application-defined intent variants that ancestor `Action`s consume — see [`shortcut-intent-action.md`](shortcut-intent-action.md)) and the reactive data models in `teksilo-data` (application-written view-models hold entity collections as `ListModel<EntityVM>` / `TreeModel<EntityVM>` that widgets bind to — see [`data-models.md`](data-models.md)).
 
-Bastyde splits internally into focused crates (see §25) each with a single concern, rather than imposing a Clean-Architecture split on its own internals. Layout, rendering, and event dispatch have fundamentally different performance characteristics from transactional domain operations; the useful seams fall in different places.
+Teksilo splits internally into focused crates (see §25) each with a single concern, rather than imposing a Clean-Architecture split on its own internals. Layout, rendering, and event dispatch have fundamentally different performance characteristics from transactional domain operations; the useful seams fall in different places.
 
 ### 1.2 Reuse Strategy
 
-Bastyde builds on established crates rather than reinventing solved problems. **winit** for windowing and HiDPI; **wgpu** for GPU rendering; **text-document + text-typeset** for the rich text model and typesetting (harfrust shaping, swash rasterization, etagere atlas, unicode-linebreak, unicode-bidi); **AccessKit** for cross-platform a11y; **fluent-rs** for i18n; **tiny-skia** for Tier 3 path rasterization.
+Teksilo builds on established crates rather than reinventing solved problems. **winit** for windowing and HiDPI; **wgpu** for GPU rendering; **text-document + text-typeset** for the rich text model and typesetting (harfrust shaping, swash rasterization, etagere atlas, unicode-linebreak, unicode-bidi); **AccessKit** for cross-platform a11y; **fluent-rs** for i18n; **tiny-skia** for Tier 3 path rasterization.
 
 ---
 
@@ -129,7 +129,7 @@ After `focus_with_origin` sets focus to a widget, the framework walks up the anc
 
 ### 3.6 The ScrollBar Widget
 
-The scroll bar is a standalone Level 2 widget in `bastyde-widgets`, not a rendering detail inside ScrollArea. A standalone widget participates in the framework's hit testing, event dispatch, focus, and accessibility systems. Its thumb is a region within its bounds that the framework's existing pointer routing handles. Its accessibility node declares `Role::ScrollBar` with `set_numeric_value`, `set_min_numeric_value`, `set_max_numeric_value`, and `Action::SetValue`.
+The scroll bar is a standalone Level 2 widget in `teksilo-widgets`, not a rendering detail inside ScrollArea. A standalone widget participates in the framework's hit testing, event dispatch, focus, and accessibility systems. Its thumb is a region within its bounds that the framework's existing pointer routing handles. Its accessibility node declares `Role::ScrollBar` with `set_numeric_value`, `set_min_numeric_value`, `set_max_numeric_value`, and `Action::SetValue`.
 
 The ScrollBar stores the current scroll position and the content-to-viewport ratio (both provided by the ScrollArea via shared `Signal<f32>`). It computes thumb position and size from these values. It handles `PointerDown` on the thumb (start drag), `PointerMove` during drag (update position), `PointerUp` (end drag), and `PointerDown` on the track (page-scroll toward click position). It supports both vertical and horizontal orientations.
 
@@ -147,7 +147,7 @@ The mode is selected via `ScrollArea::new(content).scroll_bar_style(ScrollBarSty
 
 ### 3.8 The Scroll Area Widget
 
-The ScrollArea is a Level 2 (`Widget` trait) widget in `bastyde-widgets`. It is the viewport container — it owns the clipping behavior, the layout negotiation with unbounded proposals, and the content offset placement described in Sections 3.1–3.5.
+The ScrollArea is a Level 2 (`Widget` trait) widget in `teksilo-widgets`. It is the viewport container — it owns the clipping behavior, the layout negotiation with unbounded proposals, and the content offset placement described in Sections 3.1–3.5.
 
 The scroll offset for each axis is stored as a `Signal<f32>` (not a raw `Vec2`), because the ScrollBar widget needs to read and write the position through the reactive binding system. When the ScrollBar's thumb is dragged, it sets the shared `Signal<f32>`. The ScrollArea's binding on that state triggers a relayout, which re-runs `place_children` with the updated offset. When the user scrolls via mouse wheel or trackpad (`WidgetEvent::Scroll`), the ScrollArea updates the `Signal<f32>` directly, and the ScrollBar's thumb position updates via the same binding path.
 
@@ -173,7 +173,7 @@ For lists, AccessKit provides `Role::List` with `Role::ListItem` for static list
 
 ## 4. Widget State Ownership
 
-Bastyde uses a retained widget tree with arena-backed flat storage, following the approach proven by Masonry's TreeArena.
+Teksilo uses a retained widget tree with arena-backed flat storage, following the approach proven by Masonry's TreeArena.
 
 All widgets live in a flat `SlotMap`-like arena. Parent-child relationships are stored as ID references within the arena. The tree structure is explicit (unlike a pure ECS where relationships are implicit), but the flat storage avoids Rust's borrow-checker challenges with recursive mutable tree traversal.
 
@@ -183,11 +183,11 @@ The framework processes the tree through well-defined passes (event, layout, acc
 
 ## 5. Widget Extensibility
 
-The unified `Widget` trait has a single `build(&mut self, ctx)` for composition, a single `paint()` for own-visuals, and both are optional with sensible defaults. Leaf widgets implement `layout_response` + `paint`; container widgets implement `layout_response` + `place_children` + `children`; composing widgets implement `build` + `layout_response` (delegating to the child); hybrid widgets (Card, ScrollArea) implement `build` + `paint`. Reference: CLAUDE.md "Unified Widget Trait" and [`crates/bastyde-widgets/src/button.rs`](../crates/bastyde-widgets/src/button.rs).
+The unified `Widget` trait has a single `build(&mut self, ctx)` for composition, a single `paint()` for own-visuals, and both are optional with sensible defaults. Leaf widgets implement `layout_response` + `paint`; container widgets implement `layout_response` + `place_children` + `children`; composing widgets implement `build` + `layout_response` (delegating to the child); hybrid widgets (Card, ScrollArea) implement `build` + `paint`. Reference: CLAUDE.md "Unified Widget Trait" and [`crates/teksilo-widgets/src/button.rs`](../crates/teksilo-widgets/src/button.rs).
 
 ### 5.1 The Slot System
 
-Standard widgets ship with named extension points — slots — at structural boundaries where extension is anticipated. A slot is an optional placeholder that takes zero space when empty and accommodates arbitrary widget content when filled. Slots are part of a widget's public API contract; standard composites in bastyde-widgets ship with `leading_slot`, `trailing_slot`, `header_slot`, `footer_slot` at positions where extension is commonly needed.
+Standard widgets ship with named extension points — slots — at structural boundaries where extension is anticipated. A slot is an optional placeholder that takes zero space when empty and accommodates arbitrary widget content when filled. Slots are part of a widget's public API contract; standard composites in teksilo-widgets ship with `leading_slot`, `trailing_slot`, `header_slot`, `footer_slot` at positions where extension is commonly needed.
 
 ```rust
 TabWidget::new()
@@ -203,9 +203,9 @@ TabWidget::new()
 
 ## 6. UI Construction Patterns
 
-The framework provides three child-addition methods on container builders — `add_child(WidgetId)` for pre-registered children, `child(impl IntoWidgetTree)` for inline insertion, and `children(iter)` / `child_opt(Option<_>)` for iterator and conditional shapes — plus the `Repeater` for dynamic non-virtualized collections driven by `ListModel<T>` change notifications. Composites use the static `child()` chain when content structure is fixed for the lifetime of the widget; `visible_when(Signal<bool>)` toggles individual subtrees between active and dormant without reconstruction; the `Repeater` handles small collections that change during interaction; `ListView` virtualizes large collections. The `bati!` DSL desugars to these same builder calls.
+The framework provides three child-addition methods on container builders — `add_child(WidgetId)` for pre-registered children, `child(impl IntoWidgetTree)` for inline insertion, and `children(iter)` / `child_opt(Option<_>)` for iterator and conditional shapes — plus the `Repeater` for dynamic non-virtualized collections driven by `ListModel<T>` change notifications. Composites use the static `child()` chain when content structure is fixed for the lifetime of the widget; `visible_when(Signal<bool>)` toggles individual subtrees between active and dormant without reconstruction; the `Repeater` handles small collections that change during interaction; `ListView` virtualizes large collections. The `teksu!` DSL desugars to these same builder calls.
 
-References: CLAUDE.md "Widget Construction Patterns", [`bati-macro-reference.md`](bati-macro-reference.md), [`data-models.md`](data-models.md) (Repeater vs ListView).
+References: CLAUDE.md "Widget Construction Patterns", [`teksu-macro-reference.md`](teksu-macro-reference.md), [`data-models.md`](data-models.md) (Repeater vs ListView).
 
 ---
 
@@ -213,7 +213,7 @@ References: CLAUDE.md "Widget Construction Patterns", [`bati-macro-reference.md`
 
 `Signal<T>` is the only reactive primitive. `Signal::new(x)` is mutable; `signal.map(f)` is read-only and derived; multi-source combinators (`a.zip(&b)`, `a.and(&b)` / `a.or(&b)` / `s.not()`) compose, and `selector.flat_map(|t| inner_signal(t))` switches the result to follow a dynamically-selected inner signal (reactive "switchLatest", O(1) binding). `Prop<T>` is the widget-property wrapper accepting either a static `T` or a signal-bound value. `ObserverHandle` provides RAII cleanup; `WeakSignal<T>` breaks reference cycles. Builders accept `impl Into<Prop<T>>` for properties and `impl Into<ColorProp>` / `impl Into<TextStyleProp>` for theme-aware colors and typography.
 
-The division of labor: simple property reactivity is **declarative** (the widget declares a binding, the framework reacts); structural changes (switching tabs, adding/removing children, activating/dormant-ing subtrees) are **imperative**, requested from a handler via `EventContext` (`ctx.set_dormant`, `ctx.activate`, `ctx.destroy`, and `ctx.with_widget_mut::<W>(id, level, |w| …)` for a typed by-id mutation of any mounted widget that opts into `Widget::as_any_mut` — e.g. reaching `SceneView::scene_mut()`). These are deferred and applied after the handler returns, when the framework holds `&mut` arena access. This split is what lets Bastyde avoid both full view diffing and ad-hoc observer soup.
+The division of labor: simple property reactivity is **declarative** (the widget declares a binding, the framework reacts); structural changes (switching tabs, adding/removing children, activating/dormant-ing subtrees) are **imperative**, requested from a handler via `EventContext` (`ctx.set_dormant`, `ctx.activate`, `ctx.destroy`, and `ctx.with_widget_mut::<W>(id, level, |w| …)` for a typed by-id mutation of any mounted widget that opts into `Widget::as_any_mut` — e.g. reaching `SceneView::scene_mut()`). These are deferred and applied after the handler returns, when the framework holds `&mut` arena access. This split is what lets Teksilo avoid both full view diffing and ad-hoc observer soup.
 
 References: CLAUDE.md "Signals & Reactivity", [`reactive-theme.md`](reactive-theme.md), [`events-and-gestures.md`](events-and-gestures.md) (deferred operations).
 
@@ -270,7 +270,7 @@ Full reference: [`shortcut-intent-action.md`](shortcut-intent-action.md). The th
 
 ## 12. Internationalization
 
-Full reference: [`i18n.md`](i18n.md). Fluent-rs runtime (`I18nManager`, `LocalizedString`, locale resolution, `.ftl` file watcher, fallback chains, `LayoutDirection` signal); compile-time-validating macros `tr!` / `tr_widget!` / `tr_signal!` / `tr_signal_widget!` that read `.ftl` files at expansion and validate every call against the parsed key map; locale-aware formatters (`NumberFormatter`, `BastydeDateTimeFormatter`, `BastydeDateTime`) backed by ICU4X (icu_decimal / icu_datetime / icu_calendar) with a custom `DATETIME()` Fluent function and bundle `set_formatter` callback so `{ NUMBER(...) }` / `{ DATETIME(...) }` inside `.ftl` messages render correctly across locales. Framework-string registration for `bastyde-widgets` is **explicit**: applications call `.framework_locales(bastyde_widgets::framework_locales())` on the `I18nConfig` builder chain.
+Full reference: [`i18n.md`](i18n.md). Fluent-rs runtime (`I18nManager`, `LocalizedString`, locale resolution, `.ftl` file watcher, fallback chains, `LayoutDirection` signal); compile-time-validating macros `tr!` / `tr_widget!` / `tr_signal!` / `tr_signal_widget!` that read `.ftl` files at expansion and validate every call against the parsed key map; locale-aware formatters (`NumberFormatter`, `TeksiloDateTimeFormatter`, `TeksiloDateTime`) backed by ICU4X (icu_decimal / icu_datetime / icu_calendar) with a custom `DATETIME()` Fluent function and bundle `set_formatter` callback so `{ NUMBER(...) }` / `{ DATETIME(...) }` inside `.ftl` messages render correctly across locales. Framework-string registration for `teksilo-widgets` is **explicit**: applications call `.framework_locales(teksilo_widgets::framework_locales())` on the `I18nConfig` builder chain.
 
 ---
 
@@ -286,15 +286,15 @@ Engine internals: `OverlayManager` per `WidgetTree`. Two rendering layers — `O
 
 ## 14. Drag and Drop
 
-Full reference: [`drag-and-drop.md`](drag-and-drop.md). Three scenarios (intra-widget reorder, inter-widget transfer, external/OS drops) share one machinery: typed `DragPayload`, source/target traits, hit testing under the cursor, drop-zone preview overlay, edge auto-scroll during hover, spring-load on dwell, full keyboard equivalence (`Cut` / `Copy` / `Paste` actions on a focused list/tree). **Inbound** external drops (files / text / URLs dragged from the OS into a window) are implemented via the `ExternalDndBackend` per-OS backends (macOS `NSDraggingDestination` verified; Windows OLE, Wayland `wl_data_device`, X11 XDND via an `XdndProxy` helper window) and reuse the same machinery — see [`drag-and-drop.md` §11](drag-and-drop.md) and the `DropZone` widget. **Outbound** drags (Bastyde window → another app) are implemented on every desktop target (macOS `NSDraggingSource` + Wayland `wl_data_source` verified; Windows OLE `IDropSource`; X11 XDND source) — a MIME-carrying `start_drag` auto-escalates at the window boundary, with typed re-entry enabling cross-window DnD. See [`drag-and-drop.md` §11.5](drag-and-drop.md).
+Full reference: [`drag-and-drop.md`](drag-and-drop.md). Three scenarios (intra-widget reorder, inter-widget transfer, external/OS drops) share one machinery: typed `DragPayload`, source/target traits, hit testing under the cursor, drop-zone preview overlay, edge auto-scroll during hover, spring-load on dwell, full keyboard equivalence (`Cut` / `Copy` / `Paste` actions on a focused list/tree). **Inbound** external drops (files / text / URLs dragged from the OS into a window) are implemented via the `ExternalDndBackend` per-OS backends (macOS `NSDraggingDestination` verified; Windows OLE, Wayland `wl_data_device`, X11 XDND via an `XdndProxy` helper window) and reuse the same machinery — see [`drag-and-drop.md` §11](drag-and-drop.md) and the `DropZone` widget. **Outbound** drags (Teksilo window → another app) are implemented on every desktop target (macOS `NSDraggingSource` + Wayland `wl_data_source` verified; Windows OLE `IDropSource`; X11 XDND source) — a MIME-carrying `start_drag` auto-escalates at the window boundary, with typed re-entry enabling cross-window DnD. See [`drag-and-drop.md` §11.5](drag-and-drop.md).
 
 ---
 
 ## 15. Data Model
 
-Full reference: [`data-models.md`](data-models.md). The `bastyde-data` crate sits between the widget tree and application view-models, providing `ListModel<T>`, `TreeModel<T>` + `TreeSlice<T>`, `SelectionModel`, and the `ListDataSource` trait for paged/external collections. `SortFilterListModel<T>` and `SortFilterTreeModel<T>` are projection wrappers that sort and filter without copying the source. `DataChange` / `TreeChange` notifications drive `Repeater`, `ListView`, `TreeView`, `TableView`, `TreeTableView` updates.
+Full reference: [`data-models.md`](data-models.md). The `teksilo-data` crate sits between the widget tree and application view-models, providing `ListModel<T>`, `TreeModel<T>` + `TreeSlice<T>`, `SelectionModel`, and the `ListDataSource` trait for paged/external collections. `SortFilterListModel<T>` and `SortFilterTreeModel<T>` are projection wrappers that sort and filter without copying the source. `DataChange` / `TreeChange` notifications drive `Repeater`, `ListView`, `TreeView`, `TableView`, `TreeTableView` updates.
 
-The crate is separate from `bastyde-core` because collections are a higher layer than the widget tree — view-models live in the application, hold these models as fields, and bind widgets to them. Qleany integration (generated `EntityListModel` / `EntityTreeModel` typed against entity DTOs) is one supported path; nothing in `bastyde-data` requires it.
+The crate is separate from `teksilo-core` because collections are a higher layer than the widget tree — view-models live in the application, hold these models as fields, and bind widgets to them. Qleany integration (generated `EntityListModel` / `EntityTreeModel` typed against entity DTOs) is one supported path; nothing in `teksilo-data` requires it.
 
 ---
 
@@ -336,7 +336,7 @@ The Canvas delegates text rendering to the shared `Typesetter` instance from tex
 
 ### 16.5 Paint Types
 
-Beyond solid colors, the Canvas supports `Paint` types: `LinearGradient`, `RadialGradient`, `ConicGradient`, and `Image`. Gradients are rendered in the SDF fragment shader (Tier 2). Widgets carry a fill as a `PaintProp` (a flat `ColorProp` or a gradient, in `bastyde-core`); `RectWidget` resolves it to a `Paint` at paint time (gradient endpoints are rect-local, computed from the widget's size). Anything `Into<ColorProp>` is also `Into<PaintProp>` as a solid, so the common case is unchanged.
+Beyond solid colors, the Canvas supports `Paint` types: `LinearGradient`, `RadialGradient`, `ConicGradient`, and `Image`. Gradients are rendered in the SDF fragment shader (Tier 2). Widgets carry a fill as a `PaintProp` (a flat `ColorProp` or a gradient, in `teksilo-core`); `RectWidget` resolves it to a `Paint` at paint time (gradient endpoints are rect-local, computed from the widget's size). Anything `Into<ColorProp>` is also `Into<PaintProp>` as a solid, so the common case is unchanged.
 
 ---
 
@@ -358,11 +358,11 @@ A frame is produced only when something has changed. Between frames, the applica
 
 ### 17.2 RenderFrame
 
-The `RenderFrame` is the boundary between platform-independent logic (bastyde-core, bastyde-canvas) and GPU-specific code (bastyde-render). It contains five drawable types: `GlyphQuad` (textured from glyph atlas), `ImageQuad` (textured from image), `DecorationRect` (untextured colored rectangle), `ShapeQuad` (SDF-rendered shape), and `RasterizedQuad` (textured from shape atlas). A `draw_order` array records painter's order (back-to-front) for correct occlusion across all drawable types.
+The `RenderFrame` is the boundary between platform-independent logic (teksilo-core, teksilo-canvas) and GPU-specific code (teksilo-render). It contains five drawable types: `GlyphQuad` (textured from glyph atlas), `ImageQuad` (textured from image), `DecorationRect` (untextured colored rectangle), `ShapeQuad` (SDF-rendered shape), and `RasterizedQuad` (textured from shape atlas). A `draw_order` array records painter's order (back-to-front) for correct occlusion across all drawable types.
 
 ### 17.3 GPU Pipeline
 
-Three shader pipelines in bastyde-render: the **quad pipeline** (textured quads for glyphs, images, rasterized paths), the **rect pipeline** (untextured colored quads for decorations), and the **SDF pipeline** (signed distance field shapes with optional gradient fills). A typical frame produces five to six draw calls total.
+Three shader pipelines in teksilo-render: the **quad pipeline** (textured quads for glyphs, images, rasterized paths), the **rect pipeline** (untextured colored quads for decorations), and the **SDF pipeline** (signed distance field shapes with optional gradient fills). A typical frame produces five to six draw calls total.
 
 ### 17.4 Atlas Management
 
@@ -373,7 +373,7 @@ Three atlas textures serve different purposes. The **glyph atlas** is owned by t
 Glyph quads bake **atlas pixel coordinates** at paint time, and the framework retains painted output at several layers (per-widget `cached_paint` / `cached_post_paint`, the assembled `cached_frame`, the scene per-item cache). LRU eviction can therefore invalidate quads that are still being replayed — the contract that keeps this sound has three legs:
 
 1. **Keep-alive.** Every replay of a retained frame calls `TextBackend::touch_layout` for each of the frame's `layout_keys` (per-widget cache hits, post-paint cache hits, and the full-frame early-out in `rendering_impl.rs`), refreshing the glyphs' LRU timestamps so on-screen glyphs never age out.
-2. **Eviction reporting.** `TextFontService::eviction_epoch` is the single source of truth: it is bumped by *every* eviction path — the `atlas_snapshot` scan, the scan at the start of every rich-text `render()` (`build_render_frame`), and the wholesale reset on scale-factor change. `TypesetterBridge::atlas_info` compares it against a last-seen value and reports `glyphs_evicted`; the app-level recovery in `bastyde-app` then clears the bridge caches and calls `invalidate_all_paints` on **every** window (the bridge and atlas are shared process-wide), requesting redraws. Caches living outside the widget arena (the scene `ItemCoordinateCache`) instead self-gate on `TextBackend::glyph_epoch` at paint time.
+2. **Eviction reporting.** `TextFontService::eviction_epoch` is the single source of truth: it is bumped by *every* eviction path — the `atlas_snapshot` scan, the scan at the start of every rich-text `render()` (`build_render_frame`), and the wholesale reset on scale-factor change. `TypesetterBridge::atlas_info` compares it against a last-seen value and reports `glyphs_evicted`; the app-level recovery in `teksilo-app` then clears the bridge caches and calls `invalidate_all_paints` on **every** window (the bridge and atlas are shared process-wide), requesting redraws. Caches living outside the widget arena (the scene `ItemCoordinateCache`) instead self-gate on `TextBackend::glyph_epoch` at paint time.
 3. **Versioned uploads.** Each window's renderer owns its own GPU atlas texture. `atlas_info(seen_version)` carries a monotonic content `version`; a window uploads (and receives pixels) only when its recorded `atlas_uploaded_version` lags. This replaces consume-once dirty semantics, so several windows all converge on the same atlas content instead of the first caller consuming the upload for everyone.
 
 **Debug-build corruption catcher.** In debug builds, every evicted atlas rectangle is poison-filled magenta (text-typeset), so any stale-UV sampling is visually unmistakable; and every retained-frame replay validates its layouts via `TextBackend::debug_validate_layout` — a glyph whose live atlas rect no longer matches the baked quads aborts with a diagnostic (`RectMismatch`), and a layout the backend no longer knows logs a loud warning (`StaleKey`). Release builds compile all of this out.
@@ -390,7 +390,7 @@ Layout works in logical pixels. Rendering works in physical pixels. The conversi
 
 `SizeProposal`, widget dimensions, spacing, padding, and font sizes are all logical. The Canvas also works in logical coordinates — `canvas.fill_circle(center, 10.0, color)` draws a circle with a 10-logical-pixel radius regardless of display density.
 
-The scale factor is applied in two places: text-typeset rasterizes glyphs at physical pixel size (logical × scale factor), and bastyde-render multiplies screen coordinates by the scale factor when building vertex buffers.
+The scale factor is applied in two places: text-typeset rasterizes glyphs at physical pixel size (logical × scale factor), and teksilo-render multiplies screen coordinates by the scale factor when building vertex buffers.
 
 When the scale factor changes (window dragged to a different monitor), the glyph and shape atlases are invalidated and a full relayout is triggered.
 
@@ -400,7 +400,7 @@ When the scale factor changes (window dragged to a different monitor), the glyph
 
 Full references: [`styling-system.md`](styling-system.md) (the four-tier ladder — tokens → variants → recipes → style protocols) and [`reactive-theme.md`](reactive-theme.md) (the `Signal<Theme>` reactive layer).
 
-`Theme` lives in `bastyde-core::styles` (not `bastyde-tokens`) so the per-widget style trait protocols and the typed `Rc<dyn FooStyle>` slot bag can sit on the same struct. It carries a required `appearance: ThemeAppearance` ({Light, Dark} — drives shadow density, OS-theme matching, asset selection), five token groups (`ColorTokens`, `LayoutTokens`, `TypographyTokens`, `ShapeTokens`, `MotionTokens`), `ComponentStyles` (dimension data for the not-yet-themable widgets), `ComponentStyleSlots` (typed style-trait overrides), and a `ThemeExtensions` registry. There is no `Theme::default()` / `Theme::*_default()` — apps pick a preset explicitly (`bastyde_core::presets::intui::{light, dark}`).
+`Theme` lives in `teksilo-core::styles` (not `teksilo-tokens`) so the per-widget style trait protocols and the typed `Rc<dyn FooStyle>` slot bag can sit on the same struct. It carries a required `appearance: ThemeAppearance` ({Light, Dark} — drives shadow density, OS-theme matching, asset selection), five token groups (`ColorTokens`, `LayoutTokens`, `TypographyTokens`, `ShapeTokens`, `MotionTokens`), `ComponentStyles` (dimension data for the not-yet-themable widgets), `ComponentStyleSlots` (typed style-trait overrides), and a `ThemeExtensions` registry. There is no `Theme::default()` / `Theme::*_default()` — apps pick a preset explicitly (`teksilo_core::presets::intui::{light, dark}`).
 
 Every themable widget composes its chrome through a Tier-3 style trait (`ButtonStyle`, `ToggleStyle`, …) rather than self-painting: the widget builds its parts, hands a `*StyleConfig` to the active style, and uses the returned `WidgetId` as its root child. The style is resolved per-call (`.style(...)`) → theme-wide (`theme.style_slots.<widget>`) → `Recipe*Style` default. `Signal<Theme>` reactivity — `set_theme` updates the signal and dirty-marks every node, no rebuild; focus, scroll, text-input cursor, expanded sections all survive a switch. Role-based widget surface (`TextRole`, `SurfaceRole`, `BorderRole`, `TextStyleRole`) plus `ColorProp` / `TextStyleProp` wrappers; widgets resolve roles against the current theme at paint/layout time. Subtree theme overrides via `set_theme_override(id, |theme| …)`. Themes derive `Serialize` + `Deserialize` for user-loadable theme files (the `style_slots` and `extensions` fields are `#[serde(skip)]`).
 
@@ -412,7 +412,7 @@ Every themable widget composes its chrome through a Tier-3 style trait (`ButtonS
 
 All five phases of the frame lifecycle run sequentially on the main thread. The widget tree, state arena, overlay manager, Canvas, and all contexts are non-`Send` types — the compiler prevents accidental access from background threads.
 
-This matches Qleany's synchronous model. A Qleany controller call from a Bastyde command handler executes synchronously. No `async`/`await`, no tokio, no runtime.
+This matches Qleany's synchronous model. A Qleany controller call from a Teksilo command handler executes synchronously. No `async`/`await`, no tokio, no runtime.
 
 ### 20.2 Background Work
 
@@ -428,7 +428,7 @@ The winit event loop uses `ControlFlow::Wait` — it sleeps when no events are p
 
 ### 20.5 Animation
 
-Bastyde does not ship a separate animation subsystem. Animation is a thin layer over `Signal<f32>`: `signal.animate_to(target, duration, easing)` asks the tree's `AnimationScheduler` to smoothly interpolate the value over time, and any widget bound to the signal re-paints on each tick as the value slides. The scheduler integrates with the frame lifecycle (pause when the window is occluded, rebase on resume, skip offscreen ticks, cancel animations on widget rebuild/destroy), so widgets never own animation lifetime manually.
+Teksilo does not ship a separate animation subsystem. Animation is a thin layer over `Signal<f32>`: `signal.animate_to(target, duration, easing)` asks the tree's `AnimationScheduler` to smoothly interpolate the value over time, and any widget bound to the signal re-paints on each tick as the value slides. The scheduler integrates with the frame lifecycle (pause when the window is occluded, rebase on resume, skip offscreen ticks, cancel animations on widget rebuild/destroy), so widgets never own animation lifetime manually.
 
 The design intent is narrow: motion is reserved for a small set of floating transitions — dialog appearance, snackbar slide-in, accordion expansion, toggle thumb motion, indeterminate progress, smooth programmatic scroll. Hover, press, and focus state changes are explicitly *instant* in Int UI's vocabulary; they are expressed as `Signal<Role>` mapped from an interaction signal and resolved per-frame through the theme, not through the animation scheduler. Looping animations respect `ctx.prefers_reduced_motion()`.
 
@@ -440,7 +440,7 @@ Full rationale, API, worked examples, and testing patterns: [`animation.md`](ani
 
 Full reference: [`accessibility-overrides.md`](accessibility-overrides.md). AccessKit is integrated at the `Widget` trait level — every widget's `accessibility(builder)` declares role, name, state, and available actions. AT actions flow through the same dispatch as pointer/keyboard input via `WidgetEvent::AccessAction`. Builder-level `.access_*` modifiers (`access_label`, `access_description`, `access_hidden`, `access_role`, `access_disabled`, `access_controls` / `described_by` / `labelled_by`, `access_live`, `access_shortcut_id` / `access_shortcut_literal`, `access_action` / `access_remove_action` / `access_custom_action`, `access_exclude_subtree` / `access_merge_subtree`, `access_customize`) let app authors augment, replace, or annotate any widget's accessibility info from the outside.
 
-Dormant subtrees produce no AccessKit nodes (screen readers only see active content). Overlay content generates correct AccessKit tree structures — tab lists have `Role::TabList` and `Role::Tab` nodes, menus have `Role::Menu` and `Role::MenuItem` nodes, tooltips are linked to their anchor widget via `DescribedBy`. Scene-content a11y customization (off-screen modes, logical groups) lives in [`bastyde-scene-a11y.md`](bastyde-scene-a11y.md).
+Dormant subtrees produce no AccessKit nodes (screen readers only see active content). Overlay content generates correct AccessKit tree structures — tab lists have `Role::TabList` and `Role::Tab` nodes, menus have `Role::Menu` and `Role::MenuItem` nodes, tooltips are linked to their anchor widget via `DescribedBy`. Scene-content a11y customization (off-screen modes, logical groups) lives in [`teksilo-scene-a11y.md`](teksilo-scene-a11y.md).
 
 ---
 
@@ -462,7 +462,7 @@ Full reference: [`settings.md`](settings.md). In-memory is the source of truth �
 
 ### 24.1 Headless by Design
 
-The widget tree runs without a window, without GPU, and without winit. All five phases (minus GPU submission) execute in pure Rust with no platform dependencies. Tests use bastyde-core's `WidgetTree` directly:
+The widget tree runs without a window, without GPU, and without winit. All five phases (minus GPU submission) execute in pure Rust with no platform dependencies. Tests use teksilo-core's `WidgetTree` directly:
 
 ```rust
 #[test]
@@ -508,50 +508,50 @@ Full per-crate descriptions live in CLAUDE.md "Crate Architecture". The dependen
 ### 25.1 Dependency Graph
 
 ```text
-bastyde-tokens
+teksilo-tokens
     ↑
-bastyde-canvas ← tiny-skia
+teksilo-canvas ← tiny-skia
     ↑           ↑
-bastyde-core    bastyde-text ← text-typeset
+teksilo-core    teksilo-text ← text-typeset
     ↑ ← accesskit
     │
-    ├── bastyde-data
+    ├── teksilo-data
     │       ↑
-    │   bastyde-settings ← serde, toml, directories, tempfile
+    │   teksilo-settings ← serde, toml, directories, tempfile
     │       ↑
-    │   bastyde-telemetry ← uuid
+    │   teksilo-telemetry ← uuid
     │
-    ├── bastyde-widgets
-    │   └── bastyde-text ← text-document, text-typeset
+    ├── teksilo-widgets
+    │   └── teksilo-text ← text-document, text-typeset
     │
-    │   bastyde-i18n ← fluent-rs, icu_decimal, icu_datetime, icu_calendar
+    │   teksilo-i18n ← fluent-rs, icu_decimal, icu_datetime, icu_calendar
     │
-bastyde-render ← wgpu
+teksilo-render ← wgpu
     ↑
-bastyde-platform ← winit, accesskit-winit
+teksilo-platform ← winit, accesskit-winit
     ↑
-bastyde-app (wires bastyde-text into Canvas, bastyde-widgets, bastyde-i18n,
-          bastyde-settings — auto-restores/saves window geometry,
-          optionally bastyde-text)
+teksilo-app (wires teksilo-text into Canvas, teksilo-widgets, teksilo-i18n,
+          teksilo-settings — auto-restores/saves window geometry,
+          optionally teksilo-text)
     ↑
-bastyde (umbrella, re-exports)
+teksilo (umbrella, re-exports)
 ```
 
-`bastyde-text` depends only on `bastyde-canvas` (for the `TextBackend` trait) and `text-typeset`. It does not depend on `bastyde-core`, `text-document`, or any platform crate. The `TextBackend` trait is defined in `bastyde-canvas` so that the Canvas can call text rendering methods without knowing which backend implementation is active.
+`teksilo-text` depends only on `teksilo-canvas` (for the `TextBackend` trait) and `text-typeset`. It does not depend on `teksilo-core`, `text-document`, or any platform crate. The `TextBackend` trait is defined in `teksilo-canvas` so that the Canvas can call text rendering methods without knowing which backend implementation is active.
 
-The RichTextEditor widget (in `bastyde-widgets`) depends directly on `text-document` and `text-typeset`. The application owns the `TextDocument` instance and passes it to the widget — Bastyde never owns or wraps the document model. The application depends on `text-document` directly for model access (highlighter, cursors, import/export). Cargo deduplicates the shared dependency automatically.
+The RichTextEditor widget (in `teksilo-widgets`) depends directly on `text-document` and `text-typeset`. The application owns the `TextDocument` instance and passes it to the widget — Teksilo never owns or wraps the document model. The application depends on `text-document` directly for model access (highlighter, cursors, import/export). Cargo deduplicates the shared dependency automatically.
 
-Platform-specific code (winit, wgpu, accesskit-winit) is confined to `bastyde-render` and `bastyde-platform`. Everything above them is platform-independent and headlessly testable.
+Platform-specific code (winit, wgpu, accesskit-winit) is confined to `teksilo-render` and `teksilo-platform`. Everything above them is platform-independent and headlessly testable.
 
-### 25.2 The bastyde Umbrella
+### 25.2 The teksilo Umbrella
 
-The standard application developer depends on a single crate: `bastyde`. It re-exports the public API and controls feature flags. `text`, `i18n`, and `rich-text` are default features (opt-out, not opt-in), because the kinds of applications Bastyde targets — writing tools, editors, IDEs, content managers, long-running desktop apps — routinely need text rendering, translations, and rich text editing. `TextInput` itself derives from the rich-text widget, so anything with an editable text field pulls in `rich-text` anyway. Sub-crates remain independently publishable for advanced users (custom widget authors, custom renderer implementors).
+The standard application developer depends on a single crate: `teksilo`. It re-exports the public API and controls feature flags. `text`, `i18n`, and `rich-text` are default features (opt-out, not opt-in), because the kinds of applications Teksilo targets — writing tools, editors, IDEs, content managers, long-running desktop apps — routinely need text rendering, translations, and rich text editing. `TextInput` itself derives from the rich-text widget, so anything with an editable text field pulls in `rich-text` anyway. Sub-crates remain independently publishable for advanced users (custom widget authors, custom renderer implementors).
 
 ---
 
 ## 26. Button — Reference Widget Design
 
-The button serves as the reference implementation exercising most architectural features: composition of primitives, interaction state as a `Signal<InteractionState>`, role-based color resolution per visual state, attached handler activation from multiple input paths, AccessKit role and actions. A new widget author implementing their first custom widget should read [`crates/bastyde-widgets/src/button.rs`](../crates/bastyde-widgets/src/button.rs) — it's the authoritative exemplar, and concrete code is more useful than prose at this point. See also [`reactive-theme.md`](reactive-theme.md) for the `Signal<Role>` pattern Button uses for its visual states.
+The button serves as the reference implementation exercising most architectural features: composition of primitives, interaction state as a `Signal<InteractionState>`, role-based color resolution per visual state, attached handler activation from multiple input paths, AccessKit role and actions. A new widget author implementing their first custom widget should read [`crates/teksilo-widgets/src/button.rs`](../crates/teksilo-widgets/src/button.rs) — it's the authoritative exemplar, and concrete code is more useful than prose at this point. See also [`reactive-theme.md`](reactive-theme.md) for the `Signal<Role>` pattern Button uses for its visual states.
 
 What Button exercises:
 
@@ -566,17 +566,17 @@ What Button exercises:
 
 ### 27.1 vs. QPalette → Design Tokens
 
-QPalette covers color roles across three interaction groups. Bastyde's design token system extends that scope to spacing, typography, and shape, uses typed Rust structs, and supports subtree overrides through environment propagation.
+QPalette covers color roles across three interaction groups. Teksilo's design token system extends that scope to spacing, typography, and shape, uses typed Rust structs, and supports subtree overrides through environment propagation.
 
 ### 27.2 vs. QAbstractItemModel → `ListModel<T>` and `TreeModel<T>`
 
-Qt's `QAbstractItemModel` uses a role-based, type-erased data access protocol (`QVariant`). Bastyde's `ListModel<T>` and `TreeModel<T>` are concrete generic types: the delegate closure receives `&T` directly, with compile-time type safety. The `ListDataSource` trait provides an escape hatch for large/external datasets, also with an associated `Item` type.
+Qt's `QAbstractItemModel` uses a role-based, type-erased data access protocol (`QVariant`). Teksilo's `ListModel<T>` and `TreeModel<T>` are concrete generic types: the delegate closure receives `&T` directly, with compile-time type safety. The `ListDataSource` trait provides an escape hatch for large/external datasets, also with an associated `Item` type.
 
 ### 27.3 vs. Existing Rust GUI Frameworks
 
-Bastyde's focus areas are accessibility (AccessKit at the trait level, tested by every test), text rendering (text-document + text-typeset), and widget extensibility (unified Widget trait with slots). Its layout and event design are comparable to Xilem/Masonry. It is currently weaker on rendering sophistication (quad-based vs. Vello's GPU compute renderer) and much younger than established frameworks.
+Teksilo's focus areas are accessibility (AccessKit at the trait level, tested by every test), text rendering (text-document + text-typeset), and widget extensibility (unified Widget trait with slots). Its layout and event design are comparable to Xilem/Masonry. It is currently weaker on rendering sophistication (quad-based vs. Vello's GPU compute renderer) and much younger than established frameworks.
 
-The primary reference point for Bastyde's feature scope is Qt Widgets — the framework most commonly used for the kind of professional desktop applications Bastyde targets.
+The primary reference point for Teksilo's feature scope is Qt Widgets — the framework most commonly used for the kind of professional desktop applications Teksilo targets.
 
 ---
 
@@ -584,9 +584,9 @@ The primary reference point for Bastyde's feature scope is Qt Widgets — the fr
 
 The current widget inventory is no longer maintained as prose in this document — it drifted faster than it could be edited. The authoritative sources are:
 
-- **`tools/extract_widget_api.py --all`** — emits the public surface (struct, builder methods, enums, module doc) of every widget in `bastyde-widgets`. Run `python3 tools/extract_widget_api.py --list` to see the full file list, or pass widget names to extract just those.
-- **[`bastyde-milestones.md`](bastyde-milestones.md)** — the "Current State: What Exists" section enumerates every widget currently shipped, grouped by category, and tracks remaining milestone work.
-- **CLAUDE.md** — the "Implementation Status" block and the per-widget reference docs ([`table-view.md`](table-view.md), [`tab-widget.md`](tab-widget.md), [`charts.md`](charts.md), [`tooltips.md`](tooltips.md), [`bastyde-scene.md`](bastyde-scene.md)) cover the widgets with the deepest API surface.
+- **`tools/extract_widget_api.py --all`** — emits the public surface (struct, builder methods, enums, module doc) of every widget in `teksilo-widgets`. Run `python3 tools/extract_widget_api.py --list` to see the full file list, or pass widget names to extract just those.
+- **[`teksilo-milestones.md`](teksilo-milestones.md)** — the "Current State: What Exists" section enumerates every widget currently shipped, grouped by category, and tracks remaining milestone work.
+- **CLAUDE.md** — the "Implementation Status" block and the per-widget reference docs ([`table-view.md`](table-view.md), [`tab-widget.md`](tab-widget.md), [`charts.md`](charts.md), [`tooltips.md`](tooltips.md), [`teksilo-scene.md`](teksilo-scene.md)) cover the widgets with the deepest API surface.
 
 For a one-shot dump suitable for downstream tooling: `python3 tools/extract_widget_api.py --all -f json -o widgets.json`.
 
@@ -594,19 +594,19 @@ For a one-shot dump suitable for downstream tooling: `python3 tools/extract_widg
 
 ## 29. V2 Widget Authoring Model
 
-The unified `Widget` trait, `Signal<T>` reactivity, attached handlers, `BuildContext::signal` / `effect` / `animated_signal` / `app_state` / `subscribe_event`, the four widget shapes (leaf / container / composing / hybrid), and the `take_widget` / `restore_widget` arena extraction pattern that makes `build(&mut self)` borrow-safe — all documented in CLAUDE.md "Unified Widget Trait" plus the focused docs ([`events-and-gestures.md`](events-and-gestures.md), [`reactive-theme.md`](reactive-theme.md), [`animation.md`](animation.md)). The V2 model is what the entire widget library is written against; reading [`crates/bastyde-widgets/src/button.rs`](../crates/bastyde-widgets/src/button.rs) is the fastest way to see all of it together in one ~200-line widget.
+The unified `Widget` trait, `Signal<T>` reactivity, attached handlers, `BuildContext::signal` / `effect` / `animated_signal` / `app_state` / `subscribe_event`, the four widget shapes (leaf / container / composing / hybrid), and the `take_widget` / `restore_widget` arena extraction pattern that makes `build(&mut self)` borrow-safe — all documented in CLAUDE.md "Unified Widget Trait" plus the focused docs ([`events-and-gestures.md`](events-and-gestures.md), [`reactive-theme.md`](reactive-theme.md), [`animation.md`](animation.md)). The V2 model is what the entire widget library is written against; reading [`crates/teksilo-widgets/src/button.rs`](../crates/teksilo-widgets/src/button.rs) is the fastest way to see all of it together in one ~200-line widget.
 
-The `bati!` DSL desugars to V2 builder calls one-to-one at macro-expansion time — no runtime, no virtual tree. References: [`bati-macro-reference.md`](bati-macro-reference.md) (user-facing) and [`bati-language-spec-v3.md`](bati-language-spec-v3.md) (grammar and desugaring spec).
+The `teksu!` DSL desugars to V2 builder calls one-to-one at macro-expansion time — no runtime, no virtual tree. References: [`teksu-macro-reference.md`](teksu-macro-reference.md) (user-facing) and [`teksu-language-spec-v3.md`](teksu-language-spec-v3.md) (grammar and desugaring spec).
 
 ---
 
 ## 30. Open Questions (Current, May 2026)
 
-The bulk of the original post-milestone question list has landed. The short list below is what remains actively open; see [`bastyde-milestones.md`](bastyde-milestones.md) for detailed status and the Next-candidates roadmap.
+The bulk of the original post-milestone question list has landed. The short list below is what remains actively open; see [`teksilo-milestones.md`](teksilo-milestones.md) for detailed status and the Next-candidates roadmap.
 
-**External (OS) drag-and-drop.** Intra-app DnD works everywhere (Milestone 6). **Inbound** OS drops — files / text / URLs dragged from a file manager or another app into a Bastyde window — are implemented through the `ExternalDndBackend` trait in `bastyde-platform` (`install_external_dnd()`): macOS via a `NSDraggingDestination` overlay view (verified), Windows via OLE `RegisterDragDrop`/`IDropTarget`, Wayland via `wl_data_device`, X11 via XDND v5 (an `XdndProxy` helper window on its own connection — winit owns the toplevel's X connection and consumes XDND messages itself; see [drag-and-drop.md §11.3.1](drag-and-drop.md)). They reuse the in-app pipeline — an OS drop is a `DragPayload` with `origin() == External`. winit's own `DroppedFile`/`HoveredFile` are not used (no position, files-only, no Wayland). **Outbound** drags (Bastyde window → another app) are now implemented on every desktop target (macOS `NSDraggingSource` + Wayland `wl_data_source`, both verified; Windows OLE `DoDragDrop`; X11 an XDND source that polls the pointer rather than grabbing it): a normal `start_drag` whose payload carries MIME data auto-escalates to a native OS drag when the pointer leaves the window, completion is reported via `on_drag_ended(DropOutcome)`, and the typed payload is recovered on re-entry (enabling drag-and-drop between two windows of the same app). See [drag-and-drop.md §11.5](drag-and-drop.md).
+**External (OS) drag-and-drop.** Intra-app DnD works everywhere (Milestone 6). **Inbound** OS drops — files / text / URLs dragged from a file manager or another app into a Teksilo window — are implemented through the `ExternalDndBackend` trait in `teksilo-platform` (`install_external_dnd()`): macOS via a `NSDraggingDestination` overlay view (verified), Windows via OLE `RegisterDragDrop`/`IDropTarget`, Wayland via `wl_data_device`, X11 via XDND v5 (an `XdndProxy` helper window on its own connection — winit owns the toplevel's X connection and consumes XDND messages itself; see [drag-and-drop.md §11.3.1](drag-and-drop.md)). They reuse the in-app pipeline — an OS drop is a `DragPayload` with `origin() == External`. winit's own `DroppedFile`/`HoveredFile` are not used (no position, files-only, no Wayland). **Outbound** drags (Teksilo window → another app) are now implemented on every desktop target (macOS `NSDraggingSource` + Wayland `wl_data_source`, both verified; Windows OLE `DoDragDrop`; X11 an XDND source that polls the pointer rather than grabbing it): a normal `start_drag` whose payload carries MIME data auto-escalates to a native OS drag when the pointer leaves the window, completion is reported via `on_drag_ended(DropOutcome)`, and the typed payload is recovered on re-entry (enabling drag-and-drop between two windows of the same app). See [drag-and-drop.md §11.5](drag-and-drop.md).
 
-**Native menu bar on macOS.** Done (on-device macOS validation still pending). A widget-free `MenuModel` is the single declarative source of truth, routed two ways: the in-window widget `MenuBar` on Windows/Linux (where menus live in the window chrome), and the global `NSMenu` on macOS via the `NativeMenuBackend` trait in `bastyde-platform` (`install_native_menu()` + `MenuBar::from_model(..).native_on_macos(..)`). Item clicks route back through the `Intent`/`Action` pipeline; the trait + plain `NativeMenuSnapshot` boundary are platform-neutral for future Windows `HMENU` / Linux DBus backends (currently a no-op). See [native-menu.md](native-menu.md).
+**Native menu bar on macOS.** Done (on-device macOS validation still pending). A widget-free `MenuModel` is the single declarative source of truth, routed two ways: the in-window widget `MenuBar` on Windows/Linux (where menus live in the window chrome), and the global `NSMenu` on macOS via the `NativeMenuBackend` trait in `teksilo-platform` (`install_native_menu()` + `MenuBar::from_model(..).native_on_macos(..)`). Item clicks route back through the `Intent`/`Action` pipeline; the trait + plain `NativeMenuSnapshot` boundary are platform-neutral for future Windows `HMENU` / Linux DBus backends (currently a no-op). See [native-menu.md](native-menu.md).
 
 **Virtualized dropdowns.** `ComboBox` now virtualizes via `ListView` under `max_visible_items`: lists beyond the cap materialize only the visible rows (plus `ListView`'s small buffer) instead of building every `DropdownItem` eagerly. The searchable filtered path shares the same virtualized renderer. `MenuList` grew a `max_visible_items` builder that caps panel height and wraps the item column in a `ScrollArea`, but does **not** virtualize — its API still takes arbitrary `impl Widget` children, so true virtualization would require a model-driven MenuList rewrite (tracked as follow-up). The eager build is cheap enough that capped 100+ item menus are fine in practice.
 
@@ -614,4 +614,4 @@ The bulk of the original post-milestone question list has landed. The short list
 
 ## 31. First Milestone: Button in a Window
 
-Status of every milestone (M1 through current) lives in [`bastyde-milestones.md`](bastyde-milestones.md). M1 — a window displaying a single themed button with click handling, hover/press states, text rendering, AccessKit accessibility, and keyboard activation — landed as the `simple_button` example. It exercised the full vertical slice (bastyde-tokens for theme, bastyde-canvas for the SDF rounded rect, bastyde-core for arena/layout/events/focus/a11y, bastyde-text for the label, bastyde-render for the wgpu pipeline, bastyde-platform for the winit window + AccessKit adapter, bastyde-app for the event loop) and proved the end-to-end stack before any further widget work.
+Status of every milestone (M1 through current) lives in [`teksilo-milestones.md`](teksilo-milestones.md). M1 — a window displaying a single themed button with click handling, hover/press states, text rendering, AccessKit accessibility, and keyboard activation — landed as the `simple_button` example. It exercised the full vertical slice (teksilo-tokens for theme, teksilo-canvas for the SDF rounded rect, teksilo-core for arena/layout/events/focus/a11y, teksilo-text for the label, teksilo-render for the wgpu pipeline, teksilo-platform for the winit window + AccessKit adapter, teksilo-app for the event loop) and proved the end-to-end stack before any further widget work.

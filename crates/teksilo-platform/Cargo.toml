@@ -1,0 +1,150 @@
+# SPDX-License-Identifier: MPL-2.0
+# SPDX-FileCopyrightText: 2026 FernTech
+
+[package]
+name = "teksilo-platform"
+edition = "2024"
+version.workspace = true
+license-file.workspace = true
+publish.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+teksilo-tokens = { workspace = true }
+teksilo-core = { workspace = true }
+teksilo-canvas = { workspace = true }
+teksilo-render = { workspace = true }
+winit = { workspace = true }
+wgpu = { workspace = true }
+accesskit = { workspace = true }
+accesskit_winit = "0.33.2"
+arboard = { workspace = true, optional = true }
+raw-window-handle = "0.6"
+# rfd 0.17 dropped the `async-std` / `tokio` runtime-selection features: it no
+# longer goes through ashpd/zbus, it speaks the XDG portal directly and drives
+# it with `pollster` (implied by `xdg-portal`). `wayland` exports the parent
+# window handle to the portal, so `set_parent` really parents the dialog under
+# a Wayland session; it is part of rfd's own default set.
+rfd = { version = "0.17.2", default-features = false, features = [
+    "xdg-portal",
+    "wayland",
+], optional = true }
+async-std = { version = "1", optional = true }
+thiserror = { workspace = true }
+
+[features]
+default = []
+# Chains through `teksilo-app/clipboard` → `teksilo/clipboard`. Apps
+# enabling this feature get `ClipboardHandle` auto-installed into
+# the app-state registry during `TeksiloAppBuilder::run`, reachable
+# from widgets via `EventContext::app_state::<ClipboardHandle>()`.
+clipboard = ["dep:arboard"]
+
+# Defines the FileDialog trait surface (FileDialogBackend trait,
+# FileDialogHandle, FileDialogRequest, FileDialogResult,
+# FileDialogEventPayload, MemoryFileDialog). No external runtime
+# deps beyond teksilo-core. Lets a host app ship its own backend
+# without paying for rfd. Apps that want native dialogs enable
+# `rfd-backend` instead, which implies this feature.
+file-dialog = []
+
+# Adds `RfdAsyncBackend` — a native-dialog adapter backed by the
+# `rfd` crate plus an `async-std` worker pool to drive its futures
+# off the UI thread. Implies `file-dialog`.
+rfd-backend = ["file-dialog", "dep:rfd", "dep:async-std"]
+
+# Defines the native (OS) menu trait surface (NativeMenuBackend,
+# NativeMenuHandle, NativeMenuSnapshot, NativeMenuEventPayload) and the
+# per-OS backends (macOS NSMenu; Noop elsewhere). Lets `teksilo-widgets`
+# mirror a `MenuModel` into the platform's global menu bar. No external
+# deps beyond what each target already links.
+native-menu = []
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", features = [
+    "NSWorkspace",
+    "NSAccessibility",
+    "NSWindow",
+    "NSView",
+    "NSResponder",
+    "NSGraphics",
+    "NSButton",
+    "NSControl",
+    # External drag-and-drop destination: NSDraggingInfo / NSDraggingDestination /
+    # NSDragOperation, and NSPasteboard + NSPasteboardType constants.
+    "NSDragging",
+    "NSPasteboard",
+    # External drag-and-drop *source* (outbound, app → OS): NSDraggingSource /
+    # NSDraggingItem / NSDraggingSession, the drag image (NSImage), the
+    # triggering event (NSApplication::currentEvent → NSEvent).
+    "NSDraggingItem",
+    "NSDraggingSession",
+    "NSImage",
+    "NSApplication",
+    "NSEvent",
+    # Native (OS) menu bar mirroring a `MenuModel`: NSMenu / NSMenuItem,
+    # key equivalents, on/off/mixed item state.
+    "NSMenu",
+    "NSMenuItem",
+] }
+objc2-foundation = { version = "0.3", features = [
+    "NSArray",
+    "NSString",
+    "NSURL",
+    "NSDictionary",
+    "NSGeometry",
+    "NSEnumerator",
+] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { workspace = true, features = [
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_UI_Accessibility",
+    "UI_ViewManagement",
+    # Custom title bar (M4/M5): DwmExtendFrameIntoClientArea, the
+    # subclass chain (SetWindowSubclass / DefSubclassProc), per-monitor
+    # DPI metrics, monitor work-area clamping for maximized windows,
+    # and the POINT/RECT/HWND core types those APIs traffic in.
+    "Win32_Graphics_Dwm",
+    "Win32_Graphics_Gdi",
+    "Win32_UI_HiDpi",
+    "Win32_UI_Controls",                  # MARGINS
+    "Win32_UI_Shell",                     # SetWindowSubclass / DefSubclassProc / RemoveWindowSubclass / DragQueryFileW / HDROP
+    "Win32_UI_Input_KeyboardAndMouse",    # TrackMouseEvent / TRACKMOUSEEVENT / TME_*
+    "Win32_Foundation",
+    # External (OS) drag-and-drop: OLE drop target.
+    "Win32_System_Ole",                   # RegisterDragDrop / RevokeDragDrop / OleInitialize / IDropTarget / ReleaseStgMedium / CF_*
+    "Win32_System_Com",                   # IDataObject / FORMATETC / TYMED / DVASPECT
+    "Win32_System_Com_StructuredStorage", # STGMEDIUM / IDataObject::GetData / ReleaseStgMedium (moved here in windows 0.62)
+    "Win32_System_Memory",                # GlobalLock / GlobalUnlock
+    "Win32_System_SystemServices",        # CF_HDROP / CF_UNICODETEXT clipboard format constants
+    "Win32_System_DataExchange",          # RegisterClipboardFormatW (CFSTR_INETURL)
+] }
+# The `#[implement(IDropTarget)]` COM object in external_dnd/windows.rs makes the
+# `implement` macro emit a crate-root `::windows_core` path, which requires
+# windows-core as a *direct* dependency. Pinned to 0.62 to match `windows` and to
+# align with the windows-core 0.62 that accesskit_winit pulls transitively, so a
+# single windows-core version lives in this crate's closure and the sealed
+# `IUnknownImpl` bound resolves.
+windows-core = { workspace = true }
+
+# External (OS) drag-and-drop on Linux: a `wl_data_device` listener bound to
+# winit's Wayland display via the system libwayland multi-queue model
+# (`from_foreign_display`). No-op under X11 (the backend self-detects).
+[target.'cfg(all(unix, not(target_os = "macos")))'.dependencies]
+wayland-client = "0.31"
+wayland-backend = { version = "0.3", features = ["client_system"] }
+wayland-protocols = { version = "0.32", features = ["client", "staging"] }
+libc = "0.2"
+# X11: the EWMH capability probe (custom title bar) and the XDND backend.
+# Default features only — that is a pure-Rust `RustConnection` over its own
+# socket, with no `libxcb` linkage and no `unsafe`. We deliberately do NOT
+# reuse winit's connection (X11 has no equivalent of libwayland's multi-queue
+# model, so two readers on one fd would race on sequence numbers).
+#
+# Keep this on the same 0.13.x line winit resolves, so the dependency stays
+# unified and cargo does not build two copies. `just check-x11rb-unified` (and
+# the CI job of the same name) fails the build if it ever forks.
+x11rb = "0.13"

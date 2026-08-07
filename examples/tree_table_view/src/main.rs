@@ -20,11 +20,11 @@
 //! - `Role::TreeGrid` accessibility with per-row level + expanded.
 //! - ArrowLeft / ArrowRight on the tree column collapse / expand.
 
-use bastyde::data::{
+use teksilo::data::{
     SelectionMode, SelectionModel, SortDirection, SortFilterTreeModel, TreeFilterMode, TreeModel,
 };
-use bastyde::prelude::*;
-use bastyde::widgets::{
+use teksilo::prelude::*;
+use teksilo::widgets::{
     CellContext, Column, ColumnWidth, Expand, GridLines, HStack, Spacer,
     TableAlignment as Alignment, TableSelectionMode, TextWidget, Toolbar, TreeTableView, VStack,
 };
@@ -33,7 +33,7 @@ fn dark_mode_toolbar() -> impl Widget {
     Toolbar::new().child(
         HStack::new()
             .child(Spacer::new())
-            .child(bastyde::widgets::ThemeSwitcher::new()),
+            .child(teksilo::widgets::ThemeSwitcher::new()),
     )
 }
 
@@ -127,10 +127,10 @@ fn main() {
 
     let selection = SelectionModel::new(SelectionMode::Multi);
 
-    BastydeAppBuilder::new()
+    TeksiloAppBuilder::new()
         .install_automation_bridge_in_debug()
         .install_inspector_in_debug()
-        .theme(bastyde::presets::intui::light())
+        .theme(teksilo::presets::intui::light())
         .initial_window(
             WindowConfig::new()
                 .title("TreeTableView")

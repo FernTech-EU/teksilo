@@ -62,8 +62,8 @@ manageable fan-out.
 ```ignore
 // ItemId values are obtained from Scene::add_item in real code;
 // the example uses the crate-internal constructor for illustration.
-use bastyde_scene::{GridHashIndex, SpatialIndex, ItemId};
-use bastyde_canvas::Rect;
+use teksilo_scene::{GridHashIndex, SpatialIndex, ItemId};
+use teksilo_canvas::Rect;
 
 let mut index = GridHashIndex::default();
 let id = ItemId(1); // in practice: returned by Scene::add_item
@@ -83,7 +83,7 @@ assert!(index.is_empty());
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_scene/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_scene/index.html)
 
 ## `pub const DEFAULT_CELL_SIZE`
 

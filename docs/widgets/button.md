@@ -5,7 +5,7 @@
 
 Button — a labelled, activatable action trigger.
 
-`Button` is the primary action surface in Bastyde. It renders a text
+`Button` is the primary action surface in Teksilo. It renders a text
 label (optionally with a leading, trailing, top, or bottom icon), fires
 a closure on click / Space / Enter / AT click, and advertises seven
 design-language variants via `ButtonVariant`. Chrome (fill, border,
@@ -26,9 +26,9 @@ Keyboard: Space / Enter activate; the lone-KeyUp guard prevents spurious
 re-activation when a shortcut consumes the KeyDown and returns focus here.
 
 ```rust
-# use bastyde_widgets::{Button, ButtonVariant};
-# use bastyde_i18n::lit;
-# use bastyde_core::Intent;
+# use teksilo_widgets::{Button, ButtonVariant};
+# use teksilo_i18n::lit;
+# use teksilo_core::Intent;
 let _btn = Button::new(lit!("Save"))
     .variant(ButtonVariant::Filled)
     .on_activate_fn(|ctx| ctx.send_intent(Intent::new("app.save")));
@@ -40,7 +40,7 @@ let _btn = Button::new(lit!("Save"))
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/button/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/button/index.html)
 
 ## `pub enum InteractionState`
 
@@ -128,7 +128,7 @@ Override the active `ButtonStyle` for this widget instance
 only. Useful for one-off custom-painted buttons (glassmorphism
 CTA, Material-3 ripple, etc.) without forking the Button.
 
-#### `pub fn label(mut self, label: impl Into<bastyde_core::signal::Prop<String>>) -> Self`
+#### `pub fn label(mut self, label: impl Into<teksilo_core::signal::Prop<String>>) -> Self`
 
 Bind the button's label to a reactive source — replaces the
 static label captured at `new(...)`. Accepts any
@@ -172,7 +172,7 @@ Attach a rich tooltip driven by inline
 one-off tooltips that aren't worth registering in the central
 catalog. Overrides any previously set plain `.tooltip(...)`.
 
-#### `pub fn composite_tooltip( mut self, content: impl bastyde_core::widget::Widget + 'static, ) -> Self`
+#### `pub fn composite_tooltip( mut self, content: impl teksilo_core::widget::Widget + 'static, ) -> Self`
 
 Attach a composite tooltip — third tier, hosting an arbitrary
 widget tree (Crusader Kings 3 style: tabbed sections, charts,
@@ -190,7 +190,7 @@ label/icon leaves). Forwarded into the arena via
 `ctx.enabled_when(self_id, self.enabled.clone())` at build time —
 a bound signal updates live as it changes.
 
-#### `pub fn text_role(mut self, role: impl Into<bastyde_core::color_prop::ColorProp>) -> Self`
+#### `pub fn text_role(mut self, role: impl Into<teksilo_core::color_prop::ColorProp>) -> Self`
 
 Override the label and icon's tint with a static `ColorProp`.
 When set, the button ignores its `style` and the auto-derived
@@ -201,7 +201,7 @@ sub-widgets (e.g. tab-bar overflow-dropdown triggers that must
 match the strip's `idle_text_role` regardless of hover state).
 Accepts `Color`, `TextRole`, `Signal<Color>`, or `Signal<TextRole>`.
 
-#### `pub fn text_style(mut self, style: impl Into<bastyde_core::color_prop::TextStyleProp>) -> Self`
+#### `pub fn text_style(mut self, style: impl Into<teksilo_core::color_prop::TextStyleProp>) -> Self`
 
 Override the label's text style (font, size, weight). By default the
 label uses the inner `TextWidget`'s default style; pass a
@@ -213,7 +213,7 @@ Orthogonal to `Button::text_role`, which only sets the color.
 
 Add an icon to the button at the specified location.
 
-#### `pub fn has_popup(mut self, kind: bastyde_core::accesskit::HasPopup) -> Self`
+#### `pub fn has_popup(mut self, kind: teksilo_core::accesskit::HasPopup) -> Self`
 
 Declare that this button is a disclosure trigger for a
 popup (menu, dialog, listbox, tree, grid). Surfaced via

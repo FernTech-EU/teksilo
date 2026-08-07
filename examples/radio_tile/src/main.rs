@@ -16,8 +16,8 @@
 //! Keyboard: Tab focuses a group; Arrow keys move selection (2-D in the grid),
 //! Home / End jump. The whole group is a single WAI-ARIA roving radiogroup.
 
-use bastyde::prelude::*;
-use bastyde::widgets::{
+use teksilo::prelude::*;
+use teksilo::widgets::{
     IconWidget, Padding, RadioTile, RadioTileGroup, TextWidget, TileLayout, VStack,
 };
 
@@ -144,13 +144,13 @@ fn stage_grid(selected: Signal<usize>) -> impl Widget {
 }
 
 fn main() {
-    BastydeAppBuilder::new()
+    TeksiloAppBuilder::new()
         .install_automation_bridge_in_debug()
-        .theme(bastyde::presets::intui::dark())
+        .theme(teksilo::presets::intui::dark())
         .install_inspector_in_debug()
         .initial_window(
             WindowConfig::new()
-                .title("Bastyde — RadioTile")
+                .title("Teksilo — RadioTile")
                 .size(700, 940)
                 .root(|tree, _state| {
                     let format = Signal::new(0_usize);
@@ -173,19 +173,19 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bastyde::automation::{
+    use teksilo::automation::{
         AutomationOp, AutomationReply, RecordingWindowOps, SettleSpec, execute,
     };
-    use bastyde::core::WidgetTree;
-    use bastyde::core::accessibility::widget_id_to_node_id;
+    use teksilo::core::WidgetTree;
+    use teksilo::core::accessibility::widget_id_to_node_id;
 
-    /// Drive the same engine the `bastyde-automation` MCP `inspect_node` tool
+    /// Drive the same engine the `teksilo-automation` MCP `inspect_node` tool
     /// uses (`execute` + `AutomationOp::InspectNode`) to confirm every Vertical
     /// tile is laid out at the theme's fixed compact-row height (44 dp).
     #[test]
     fn automation_measures_vertical_tiles_at_theme_height() {
         let selected = Signal::new(3_usize);
-        let mut tree = WidgetTree::new().with_theme(bastyde::presets::intui::dark());
+        let mut tree = WidgetTree::new().with_theme(teksilo::presets::intui::dark());
         tree.add(project_list(selected));
         tree.layout(SizeProposal::exact(560.0, 600.0));
 
@@ -223,7 +223,7 @@ mod tests {
         use std::collections::HashMap;
 
         let selected = Signal::new(3_usize);
-        let mut tree = WidgetTree::new().with_theme(bastyde::presets::intui::dark());
+        let mut tree = WidgetTree::new().with_theme(teksilo::presets::intui::dark());
         tree.add(project_list(selected));
         tree.layout(SizeProposal::exact(560.0, 600.0));
 

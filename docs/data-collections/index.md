@@ -3,7 +3,7 @@
 
 # Data Collections
 
-Every public type in `bastyde-data`, grouped by category. Each page links to its full rustdoc API reference.
+Every public type in `teksilo-data`, grouped by category. Each page links to its full rustdoc API reference.
 
 ## Models
 

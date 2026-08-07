@@ -33,7 +33,7 @@ let region = DragRegion::with_child(host.clone(), TextWidget::new(lit!("My App")
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/title_bar/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/title_bar/index.html)
 
 ## `pub struct DragRegion`
 
@@ -61,7 +61,7 @@ Create a drag region with an already-registered child identified by `id`.
 Use this when the child widget was added to the tree before constructing the
 region (e.g. when you need the child's `WidgetId` for another reference).
 
-#### `pub fn close_action( mut self, action: Option<Rc<dyn Fn(&mut bastyde_core::widget::EventContext)>>, ) -> Self`
+#### `pub fn close_action( mut self, action: Option<Rc<dyn Fn(&mut teksilo_core::widget::EventContext)>>, ) -> Self`
 
 Forward the title bar's close-action override, so the fallback window
 menu's Close entry matches the close button. No effect on platforms

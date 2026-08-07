@@ -23,7 +23,7 @@ basis where the child's natural size acts as a floor before flex slack is
 added.
 
 ```rust
-# use bastyde_widgets::primitives::{HStack, Expand, RectWidget};
+# use teksilo_widgets::primitives::{HStack, Expand, RectWidget};
 // Two panels sharing horizontal space in a 1:2 ratio
 let _row = HStack::new()
     .child(Expand::new().flex(1.0).child(RectWidget::new()))
@@ -36,7 +36,7 @@ let _row = HStack::new()
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/primitives/expand/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/primitives/expand/index.html)
 
 ## `pub struct Expand`
 

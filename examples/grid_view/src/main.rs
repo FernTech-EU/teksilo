@@ -15,10 +15,10 @@
 //! - Sections grouped by album, with sticky pinned headers.
 //! - A live selection-count status line.
 
-use bastyde::canvas::EdgeInsets;
-use bastyde::data::{ListModel, SelectionMode, SelectionModel};
-use bastyde::prelude::*;
-use bastyde::widgets::{
+use teksilo::canvas::EdgeInsets;
+use teksilo::data::{ListModel, SelectionMode, SelectionModel};
+use teksilo::prelude::*;
+use teksilo::widgets::{
     Center, Expand, GridSizing, GridView, Padding, Panel, RectWidget, TextWidget, VStack, ZStack,
     grouping_sections,
 };
@@ -54,10 +54,10 @@ fn main() {
     let selection = SelectionModel::new(SelectionMode::Multi);
     let status = Signal::new(String::from("0 selected"));
 
-    BastydeAppBuilder::new()
+    TeksiloAppBuilder::new()
         .install_automation_bridge_in_debug()
         .install_inspector_in_debug()
-        .theme(bastyde::presets::intui::light())
+        .theme(teksilo::presets::intui::light())
         .initial_window(
             WindowConfig::new()
                 .title("GridView — Photo Library")

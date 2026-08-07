@@ -25,8 +25,8 @@ floor set here.
 - "Compress A before B": give A `Shrinkable`, leave B rigid (`shrink = 0`).
 
 ```rust
-# use bastyde_widgets::primitives::{HStack, Shrinkable, TextWidget};
-# use bastyde_i18n::lit;
+# use teksilo_widgets::primitives::{HStack, Shrinkable, TextWidget};
+# use teksilo_i18n::lit;
 // The label shrinks as far as 48 dp; the button stays rigid.
 let _row = HStack::new()
     .child(Shrinkable::new().min_width(48.0)
@@ -40,7 +40,7 @@ let _row = HStack::new()
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/primitives/shrinkable/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/primitives/shrinkable/index.html)
 
 ## `pub struct Shrinkable`
 
@@ -54,8 +54,8 @@ across shrinkable children proportional to their shrink weight, never below
 the floor set here.
 
 ```rust
-# use bastyde_widgets::primitives::{HStack, Shrinkable, TextWidget, IconWidget};
-# use bastyde_i18n::lit;
+# use teksilo_widgets::primitives::{HStack, Shrinkable, TextWidget, IconWidget};
+# use teksilo_i18n::lit;
 # let long_label = TextWidget::new(lit!("A very long label that may need to shrink"));
 # let icon = IconWidget::chevron_right(16.0);
 // The label gives up space before the (rigid) icon when the row is narrow:

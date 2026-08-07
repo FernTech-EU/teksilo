@@ -18,7 +18,7 @@ env:
 jobs:
   # Validate the release before creating it.
   # Note: the workspace is `publish = false`, so there is no crates.io publish
-  # job and no binary-artifact build — Bastyde is a framework, not a shippable
+  # job and no binary-artifact build — Teksilo is a framework, not a shippable
   # binary. This workflow only validates the tag and cuts a GitHub release.
   validate:
     name: Validate Release
@@ -43,7 +43,7 @@ jobs:
       - name: Verify version matches tag
         run: |
           TAG_VERSION="${GITHUB_REF#refs/tags/v}"
-          CARGO_VERSION=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "bastyde") | .version')
+          CARGO_VERSION=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "teksilo") | .version')
           if [[ "$TAG_VERSION" != "$CARGO_VERSION" ]]; then
             echo "::error::Tag version ($TAG_VERSION) does not match Cargo.toml version ($CARGO_VERSION)"
             echo "::error::Update the workspace version in Cargo.toml before tagging."

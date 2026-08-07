@@ -14,5 +14,5 @@ name = "file-dialogs"
 path = "src/main.rs"
 
 [dependencies]
-bastyde = { workspace = true, features = [
+teksilo = { workspace = true, features = [
     "automation","file-dialog"] }

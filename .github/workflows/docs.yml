@@ -2,14 +2,14 @@
 # SPDX-FileCopyrightText: 2026 FernTech
 
 # Build the documentation site and publish it to Cloudflare Pages
-# (https://bastyde.pages.dev). The site has two layers:
+# (https://teksilo.pages.dev). The site has two layers:
 #   * mdBook — the curated guides under docs/ plus a generated Widget Catalog,
 #     at the site root.
 #   * rustdoc — the deep API reference under /api/ (catalog pages deep-link in).
 #
 # Modelled on qleany's mdbook-gh-pages.yml (same Cloudflare Pages deploy via
 # wrangler-action + CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID secrets), with
-# the Bastyde-specific steps added: regenerate the catalog from widget source and
+# the Teksilo-specific steps added: regenerate the catalog from widget source and
 # build the rustdoc API reference.
 
 name: Deploy documentation to Cloudflare Pages
@@ -35,7 +35,7 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   MDBOOK_VERSION: "0.4.52"
-  BASE_URL: "https://bastyde.pages.dev"
+  BASE_URL: "https://teksilo.pages.dev"
 
 jobs:
   build:
@@ -71,13 +71,13 @@ jobs:
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Build the rustdoc API reference
-        # bastyde-widgets (its module paths bastyde_widgets/<module>/ are what the
+        # teksilo-widgets (its module paths teksilo_widgets/<module>/ are what the
         # catalog pages deep-link to) plus the peer crates the guides reference:
-        # bastyde-data (reactive data models), bastyde-settings (persistence), and
-        # bastyde-scene (the scene viewport). --no-deps keeps the deployed file
+        # teksilo-data (reactive data models), teksilo-settings (persistence), and
+        # teksilo-scene (the scene viewport). --no-deps keeps the deployed file
         # count well under Cloudflare Pages' 20,000-files-per-deployment limit.
         # Built BEFORE the catalog so --api-dir can verify each deep-link.
-        run: cargo doc -p bastyde-widgets -p bastyde-data -p bastyde-settings -p bastyde-scene --no-deps
+        run: cargo doc -p teksilo-widgets -p teksilo-data -p teksilo-settings -p teksilo-scene --no-deps
 
       - name: Generate the catalog pages (widgets + data + settings + scene)
         run: python3 tools/extract_widget_api.py --catalog-all --api-dir target/doc
@@ -94,7 +94,7 @@ jobs:
       - name: Assemble the site (book + /api)
         run: |
           cp -r target/doc book/api
-          printf '<meta http-equiv="refresh" content="0; url=bastyde_widgets/index.html">' > book/api/index.html
+          printf '<meta http-equiv="refresh" content="0; url=teksilo_widgets/index.html">' > book/api/index.html
 
       - name: Generate sitemap.xml
         run: |
@@ -131,7 +131,7 @@ jobs:
       - name: Generate llms.txt
         run: |
           cat > book/llms.txt << EOF
-          # Bastyde
+          # Teksilo
 
           > A pure-Rust GUI framework for serious desktop applications: a retained widget tree with SwiftUI-style layout negotiation, AccessKit accessibility, reactive Signal/Prop state, and a wgpu renderer. ~56 widgets + ~21 layout primitives, a four-tier theming system, i18n, data models, and persistence.
 
@@ -159,12 +159,12 @@ jobs:
           - [Internationalization](${BASE_URL}/i18n.html): Fluent-rs runtime, locale-aware formatting
           - [Grid view](${BASE_URL}/grid-view.html): Virtualized 2D tile grid
 
-          ### bati! DSL & formatting
+          ### teksu! DSL & formatting
 
-          - [bati! macro reference](${BASE_URL}/bati-macro-reference.html): Surface language and desugaring cheat sheet
-          - [bati! language spec](${BASE_URL}/bati-language-spec-v3.html): Design spec with worked translations
-          - [bastyde-fmt](${BASE_URL}/bastyde-fmt.html): bati! source formatter
-          - [bastyde-fmt in VS Code](${BASE_URL}/bastyde-fmt-vscode.html): Editor integration
+          - [teksu! macro reference](${BASE_URL}/teksu-macro-reference.html): Surface language and desugaring cheat sheet
+          - [teksu! language spec](${BASE_URL}/teksu-language-spec-v3.html): Design spec with worked translations
+          - [teksilo-fmt](${BASE_URL}/teksilo-fmt.html): teksu! source formatter
+          - [teksilo-fmt in VS Code](${BASE_URL}/teksilo-fmt-vscode.html): Editor integration
 
           ### Input, navigation, chrome
 
@@ -199,8 +199,8 @@ jobs:
           - [Tab widget](${BASE_URL}/tab-widget.html): TabBar/TabWidget with overflow and drag-reorder
           - [Font picker](${BASE_URL}/font-picker.html): Installed-font browser with live preview
           - [Charts](${BASE_URL}/charts.html): BarChart/LineChart/PieChart
-          - [Scene viewport](${BASE_URL}/bastyde-scene.html): Pannable/zoomable canvas with magnetism
-          - [Scene accessibility](${BASE_URL}/bastyde-scene-a11y.html): Accessibility support for the scene viewport
+          - [Scene viewport](${BASE_URL}/teksilo-scene.html): Pannable/zoomable canvas with magnetism
+          - [Scene accessibility](${BASE_URL}/teksilo-scene-a11y.html): Accessibility support for the scene viewport
 
           ### Visuals & resources
 
@@ -209,7 +209,7 @@ jobs:
           ### Tooling
 
           - [Debug inspector](${BASE_URL}/inspector.html): In-app introspection panel
-          - [Automation MCP](${BASE_URL}/automation-mcp.html): Drive a Bastyde app via the Model Context Protocol
+          - [Automation MCP](${BASE_URL}/automation-mcp.html): Drive a Teksilo app via the Model Context Protocol
 
           ### Catalogs
 
@@ -220,7 +220,7 @@ jobs:
 
           ### API reference
 
-          - [API reference](${BASE_URL}/api/bastyde_widgets/index.html): rustdoc for every public item
+          - [API reference](${BASE_URL}/api/teksilo_widgets/index.html): rustdoc for every public item
           EOF
 
       - name: Upload artifact
@@ -245,4 +245,4 @@ jobs:
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: pages deploy book --project-name=bastyde
+          command: pages deploy book --project-name=teksilo

@@ -15,11 +15,11 @@
 //! platforms the same model renders as the usual in-window bar (the native
 //! backend is a no-op there).
 
-use bastyde::core::Action;
-use bastyde::core::MenuItemId;
-use bastyde::core::shortcut::{KeyStroke, Shortcut};
-use bastyde::prelude::*;
-use bastyde::widgets::{
+use teksilo::core::Action;
+use teksilo::core::MenuItemId;
+use teksilo::core::shortcut::{KeyStroke, Shortcut};
+use teksilo::prelude::*;
+use teksilo::widgets::{
     Button, Divider, Expand, HStack, MenuBar, MenuEntry, MenuModel, NativeMenuMode, Padding, Panel,
     StandardMenu, StatusBar, TextWidget, VStack,
 };
@@ -248,14 +248,14 @@ impl Widget for Root {
 }
 
 fn main() {
-    BastydeAppBuilder::new()
+    TeksiloAppBuilder::new()
         .install_automation_bridge_in_debug()
         .install_native_menu()
         .install_inspector_in_debug()
-        .theme(bastyde::presets::intui::light())
+        .theme(teksilo::presets::intui::light())
         .initial_window(
             WindowConfig::new()
-                .title("Bastyde — Native Menu")
+                .title("Teksilo — Native Menu")
                 .size(720, 480)
                 .root(|tree, _state| tree.add(Root::new())),
         )

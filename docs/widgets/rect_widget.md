@@ -19,8 +19,8 @@ accepts `impl Into<ColorProp>`, so reactive interaction-driven colors require
 no extra wiring.
 
 ```rust
-# use bastyde_tokens::{Color, CornerRadius};
-# use bastyde_widgets::primitives::RectWidget;
+# use teksilo_tokens::{Color, CornerRadius};
+# use teksilo_widgets::primitives::RectWidget;
 // A pill-shaped accent badge background:
 let _w = RectWidget::new()
     .background(Color::from_rgba(0.2, 0.5, 1.0, 1.0))
@@ -33,7 +33,7 @@ let _w = RectWidget::new()
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/primitives/rect_widget/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/primitives/rect_widget/index.html)
 
 ## `pub struct RectWidget`
 

@@ -1,0 +1,45 @@
+# SPDX-License-Identifier: MPL-2.0
+# SPDX-FileCopyrightText: 2026 FernTech
+
+[package]
+name = "teksilo-inspector"
+edition = "2024"
+version.workspace = true
+license-file.workspace = true
+publish.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+# In-app debug inspector for Teksilo. Active only in debug builds
+# (`cfg(debug_assertions)`); release builds compile to no-ops.
+#
+# Apps wire it in with one line:
+#
+# ```rust
+# use teksilo_inspector::TeksiloAppBuilderInspectorExt;
+# TeksiloAppBuilder::new()
+#     .install_inspector_in_debug()   // no-op in release
+#     .initial_window(...)
+#     .run();
+# ```
+#
+# Toggle at runtime with F12, at launch with `--teksilo-inspector` or
+# `TEKSILO_INSPECTOR=1`.
+
+[dependencies]
+teksilo-canvas = { workspace = true }
+teksilo-core = { workspace = true }
+teksilo-app = { workspace = true }
+teksilo-data = { workspace = true }
+teksilo-i18n = { workspace = true }
+teksilo-platform = { workspace = true }
+teksilo-settings = { workspace = true }
+teksilo-tokens = { workspace = true }
+# The Tree tab's filter `TextInput` (and `teksilo-text` / text-typeset
+# behind it) come in unconditionally with teksilo-widgets. Inspector is
+# debug-only so the cost is acceptable; release builds compile out
+# everything in this crate.
+teksilo-widgets = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]

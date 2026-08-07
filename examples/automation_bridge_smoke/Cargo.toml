@@ -15,5 +15,5 @@ name = "automation_bridge_smoke"
 path = "src/main.rs"
 
 [dependencies]
-bastyde = { workspace = true, features = ["automation"] }
+teksilo = { workspace = true, features = ["automation"] }
 serde_json = { workspace = true }

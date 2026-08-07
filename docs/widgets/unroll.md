@@ -32,10 +32,10 @@ its end value instead of tweening (the external driver's owner is
 responsible for its own reduced-motion policy).
 
 ```rust
-# use bastyde_widgets::animations::{Unroll, UnrollFrom};
-# use bastyde_widgets::primitives::TextWidget;
-# use bastyde_core::signal::Signal;
-# use bastyde_i18n::lit;
+# use teksilo_widgets::animations::{Unroll, UnrollFrom};
+# use teksilo_widgets::primitives::TextWidget;
+# use teksilo_core::signal::Signal;
+# use teksilo_i18n::lit;
 let expanded = Signal::new(false);
 let _w = Unroll::new(expanded)
     .reveal_from(UnrollFrom::Leading)
@@ -48,7 +48,7 @@ let _w = Unroll::new(expanded)
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/animations/unroll/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/animations/unroll/index.html)
 
 ## `pub enum UnrollFrom`
 

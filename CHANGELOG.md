@@ -3,7 +3,7 @@
 
 # Changelog
 
-All notable changes to Bastyde are documented in this file.
+All notable changes to Teksilo are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/) —
@@ -13,7 +13,7 @@ by crate for clarity, not because crates version independently.
 
 ## [Unreleased]
 
-### Added — `bastyde-widgets` docking: rail actions + Strip bar slots
+### Added — `teksilo-widgets` docking: rail actions + Strip bar slots
 
 **`DockAction` — dockless command buttons in the activity rail.** A rail item
 was previously always one activity (a tab with a panel behind it); there was no
@@ -61,7 +61,7 @@ documented as such: the activity bar is built whenever the side has a rail, so
 `top_slot` / `bottom_slot` survive a collapsed side, while `leading_slot` /
 `trailing_slot` live inside the collapsing content region and disappear with it.
 
-### Fixed — `bastyde-widgets` docking: rail accessibility
+### Fixed — `teksilo-widgets` docking: rail accessibility
 
 **The activity rail was an invalid ARIA `tablist`.** `DockActivityBar` set
 `Role::TabList` on its whole root, so `top_slot` / `bottom_slot` widgets and the
@@ -77,7 +77,7 @@ a spec violation into a WCAG 2.1.1 failure — hence the wrapper.
 No app-facing API changed for this; a rail still reports one `Role::TabList` per
 side with the same localized name.
 
-### Changed — `bastyde-settings` (breaking)
+### Changed — `teksilo-settings` (breaking)
 
 **Cross-process safety is now the default and only behaviour for every
 persisted type in the crate**, not an opt-in mode. Previously,
@@ -125,7 +125,7 @@ performance trade-offs).
   path and the new live-reload watcher, not into new ceremony at the
   call site.
 
-### Changed — `bastyde-widgets` (breaking)
+### Changed — `teksilo-widgets` (breaking)
 
 - `NotificationArchiveModel::remove(index: usize)` → `remove_by_id(id: u64)`.
   Same reasoning as `set_pinned` above: an index names a position in this
@@ -134,7 +134,7 @@ performance trade-offs).
   actually runs. An id is stable identity regardless of how many
   neighboring rows moved in the meantime.
 
-### Added — `bastyde-data`
+### Added — `teksilo-data`
 
 - `ListModel::reconcile_by_key(new_items, key_fn)`: diffs the live model
   against a new authoritative `Vec<T>` by key and emits the minimal

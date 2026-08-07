@@ -21,11 +21,11 @@
 //!   the UI never blocks.)
 //! - A **live preview** paragraph rendered in the selected font.
 
-use bastyde::core::{BindingLevel, WidgetPlacement};
-use bastyde::prelude::*;
-use bastyde::text::WritingSystem;
-use bastyde::tokens::TextStyle;
-use bastyde::widgets::{
+use teksilo::core::{BindingLevel, WidgetPlacement};
+use teksilo::prelude::*;
+use teksilo::text::WritingSystem;
+use teksilo::tokens::TextStyle;
+use teksilo::widgets::{
     Checkbox, ComboBox, Expand, FontPicker, FontSpacingFilter, HStack, Padding, Panel, Spacer,
     TextWidget, ThemeSwitcher, Toolbar, VStack,
 };
@@ -246,7 +246,7 @@ impl Widget for Root {
 }
 
 fn theme_toolbar() -> impl Widget {
-    bati!(
+    teksu!(
         Toolbar {
             HStack {
                 Spacer
@@ -257,15 +257,15 @@ fn theme_toolbar() -> impl Widget {
 }
 
 fn main() {
-    BastydeAppBuilder::new()
+    TeksiloAppBuilder::new()
         .install_inspector_in_debug()
-        .theme(bastyde::presets::intui::light())
+        .theme(teksilo::presets::intui::light())
         .initial_window(
             WindowConfig::new()
-                .title("Bastyde — FontPicker")
+                .title("Teksilo — FontPicker")
                 .size(720, 620)
                 .root(|tree, _state| {
-                    bati!(tree => VStack {
+                    teksu!(tree => VStack {
                             child: theme_toolbar()
                             Expand {
                                 Root::new()

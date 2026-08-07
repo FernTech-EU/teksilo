@@ -3,17 +3,17 @@
 
 # Shortcut / Intent / Action Reference
 
-Bastyde's input-to-behavior pipeline has three first-class concepts:
+Teksilo's input-to-behavior pipeline has three first-class concepts:
 
-- **[`Shortcut`](../crates/bastyde-core/src/shortcut.rs)** — a rebindable
+- **[`Shortcut`](../crates/teksilo-core/src/shortcut.rs)** — a rebindable
   keyboard binding (`KeyStroke` → intent name). Owned by the
-  [`ShortcutRegistry`](../crates/bastyde-core/src/shortcut.rs); user
+  [`ShortcutRegistry`](../crates/teksilo-core/src/shortcut.rs); user
   rebindings layer on top of widget-declared defaults.
-- **[`Intent`](../crates/bastyde-core/src/intent.rs)** — a runtime
+- **[`Intent`](../crates/teksilo-core/src/intent.rs)** — a runtime
   "something wants to happen" message: a stable name plus an optional
   type-erased payload. Produced by shortcuts, by widgets via
   `ctx.send_intent(...)`, or programmatically.
-- **[`Action`](../crates/bastyde-core/src/action.rs)** — a widget-owned
+- **[`Action`](../crates/teksilo-core/src/action.rs)** — a widget-owned
   handler bound to an intent name. When an intent dispatches, the
   framework walks **source-widget → root** and lets the first matching
   enabled action consume (or propagate) it.
@@ -21,8 +21,8 @@ Bastyde's input-to-behavior pipeline has three first-class concepts:
 Pipeline in one line: `KeyStroke → Shortcut → Intent → Action handler`.
 
 Typed DTO bridge between an app's intent enum and the runtime
-[`Intent`]: the [`IntentKind`](../crates/bastyde-core/src/intent.rs) trait,
-usually derived with `#[derive(IntentKind)]` from `bastyde-macros`.
+[`Intent`]: the [`IntentKind`](../crates/teksilo-core/src/intent.rs) trait,
+usually derived with `#[derive(IntentKind)]` from `teksilo-macros`.
 
 Full end-to-end example:
 [`examples/shortcuts_demo`](../examples/shortcuts_demo/src/main.rs).
@@ -58,7 +58,7 @@ KeyStroke::new(Key::PageUp, Modifiers::NONE)   // plain PageUp
 ```
 
 `Display` renders "Ctrl+S" style text. Widgets displaying shortcuts to users
-should call `bastyde_widgets::keystroke_format::format_keystroke()` which handles
+should call `teksilo_widgets::keystroke_format::format_keystroke()` which handles
 platform-specific symbols (⌘ on macOS) and locale-aware modifier names via
 `tr_widget!` (e.g., "Strg" in German). `Serialize`/`Deserialize` are derived
 so user overrides can be persisted.
@@ -70,7 +70,7 @@ so user overrides can be persisted.
 Declarative, rebindable record. Built with a fluent `ShortcutBuilder`:
 
 ```rust
-use bastyde::core::shortcut::{KeyStroke, Shortcut, ShortcutScope};
+use teksilo::core::shortcut::{KeyStroke, Shortcut, ShortcutScope};
 
 Shortcut::new("app.save")                  // stable id (dispatch key)
     .name("Save")                          // menu/settings label
@@ -85,7 +85,7 @@ Shortcut::new("app.save")                  // stable id (dispatch key)
     .build();
 ```
 
-Key fields ([source](../crates/bastyde-core/src/shortcut.rs)):
+Key fields ([source](../crates/teksilo-core/src/shortcut.rs)):
 
 - **`id: &'static str`** — stable key used for persistence, menu
   lookups (`MenuItem::for_shortcut`), and dispatch. Dot-style
@@ -109,7 +109,7 @@ Key fields ([source](../crates/bastyde-core/src/shortcut.rs)):
   *if not registered* — the keystroke falls through to the focused
   widget's normal `on_key` dispatch. Compose composite predicates with
   the [`Signal<bool>` combinators](#composing-enabled_when-predicates)
-  (`and` / `or` / `not`) or [`Signal::zip`](../crates/bastyde-core/src/signal.rs)
+  (`and` / `or` / `not`) or [`Signal::zip`](../crates/teksilo-core/src/signal.rs)
   for typed tuples.
 - **`propagate_when_disabled: bool`** — controls what happens when the
   matching `Action` is disabled: `true` (default) lets the intent
@@ -159,7 +159,7 @@ Two-layer store, both keyed by shortcut **id** (`&'static str`):
    semantics — a widget that disappears and reappears keeps its
    customised bindings).
 
-The merged view is [`EffectiveShortcut`](../crates/bastyde-core/src/shortcut.rs):
+The merged view is [`EffectiveShortcut`](../crates/teksilo-core/src/shortcut.rs):
 primary/secondary = user override if touched, else declared default.
 Menus, tooltips, and dispatch consume this shape.
 
@@ -202,7 +202,7 @@ fine for always-mounted widgets — `build()` runs immediately on
 insert. It's **not** fine when the widget lives behind a lazy
 boundary:
 
-- A [`Switcher`](../crates/bastyde-widgets/src/primitives/switcher.rs)
+- A [`Switcher`](../crates/teksilo-widgets/src/primitives/switcher.rs)
   arm that hasn't been selected yet (lazy mount: the page widget
   stays Boxed until first selection).
 - A subtree gated by a feature flag or a closed disclosure.
@@ -311,7 +311,7 @@ same id. Rebinding one silently rebinds the other. Hierarchical
 dotted ids prevent this in practice (`editor.format.bold`, not just
 `bold`); there's no namespacing enforcement at the type level.
 Framework-internal chords use a `__` prefix by convention
-(`__bastyde_inspector.pick`) so app ids can't collide with them.
+(`__teksilo_inspector.pick`) so app ids can't collide with them.
 
 ### Same-chord precedence
 
@@ -362,7 +362,7 @@ targeted slot — they do **not** auto-unbind conflicting shortcuts.
 Use `ShortcutRegistry::find_conflict(keystroke, excluding_id)` before
 rebinding if you want the "exactly one effective binding per chord"
 invariant; that is what the pre-built
-[`ShortcutSettings`](../crates/bastyde-widgets/src/shortcut_settings.rs)
+[`ShortcutSettings`](../crates/teksilo-widgets/src/shortcut_settings.rs)
 widget does in its capture-event handler.
 
 ---
@@ -370,7 +370,7 @@ widget does in its capture-event handler.
 ## `CaptureHandle` — one-shot key capture
 
 Used to implement "press a chord" rebind UIs. `ctx.begin_key_capture`
-returns a [`CaptureHandle`](../crates/bastyde-core/src/shortcut.rs): the
+returns a [`CaptureHandle`](../crates/teksilo-core/src/shortcut.rs): the
 **next** KeyDown bypasses shortcut resolution and runs the callback
 with access to the registry and an `EventContext`. RAII: dropping the
 handle cancels an unfired capture.
@@ -387,7 +387,7 @@ Re-arming (calling `begin_key_capture` again while a previous handle
 is still alive) creates a fresh slot; the old slot is already orphaned
 so dropping the old handle cancels only the old slot — no race with
 the newer capture. The pre-built
-[`ShortcutSettings`](../crates/bastyde-widgets/src/shortcut_settings.rs)
+[`ShortcutSettings`](../crates/teksilo-widgets/src/shortcut_settings.rs)
 widget packages this flow (Rebind buttons, conflict resolution, reset).
 
 ---
@@ -397,7 +397,7 @@ widget packages this flow (Rebind buttons, conflict resolution, reset).
 Runtime message — name + optional payload. Construction:
 
 ```rust
-use bastyde::core::Intent;
+use teksilo::core::Intent;
 
 // Name-only (parameter-less):
 let i = Intent::new("app.save");
@@ -447,7 +447,7 @@ Use `#[derive(IntentKind)]` on an enum that catalogs the app's intents.
 Each variant declares its name via `#[name = "..."]`:
 
 ```rust
-use bastyde::IntentKind;
+use teksilo::IntentKind;
 
 #[derive(Debug, IntentKind)]
 enum AppIntent {
@@ -503,7 +503,7 @@ tuple, struct, arbitrary user types — because the whole variant is
 stored as the payload. The only requirement: the enum itself is
 `'static` (typically trivially true).
 
-Trade-off this codifies: Bastyde sits between Flutter's fully-typed
+Trade-off this codifies: Teksilo sits between Flutter's fully-typed
 Intents (no strings anywhere) and Qt's string-keyed `QAction`.
 Names are the dispatch key; `IntentKind` layers compile-time checking
 on top when the app opts in. Third-party widgets can still declare
@@ -516,7 +516,7 @@ intents without knowing the consuming app's enum.
 Widget-owned handler for one intent name:
 
 ```rust
-use bastyde::core::{Action, IntentResponse};
+use teksilo::core::{Action, IntentResponse};
 
 ctx.register_action(
     Action::new("app.save")
@@ -609,7 +609,7 @@ Action::new("app.open").on_invoke(|intent, _ctx| {
 ## Dispatch walk
 
 From
-[`widget_tree::dispatch_intent`](../crates/bastyde-core/src/widget_tree.rs):
+[`widget_tree::dispatch_intent`](../crates/teksilo-core/src/widget_tree.rs):
 
 1. Build the chain `source → parent → … → root`.
 2. For each `id` in the chain:
@@ -691,10 +691,10 @@ ancestor declared.
 ## End-to-end skeleton
 
 ```rust
-use bastyde::IntentKind;
-use bastyde::core::{Action, Intent};
-use bastyde::core::shortcut::{KeyStroke, Shortcut};
-use bastyde::prelude::*;
+use teksilo::IntentKind;
+use teksilo::core::{Action, Intent};
+use teksilo::core::shortcut::{KeyStroke, Shortcut};
+use teksilo::prelude::*;
 
 #[derive(Debug, IntentKind)]
 enum AppIntent {
@@ -800,9 +800,9 @@ impl Widget for Root {
 ## See also
 
 - Working demo: [`examples/shortcuts_demo/src/main.rs`](../examples/shortcuts_demo/src/main.rs)
-- Source: [`crates/bastyde-core/src/shortcut.rs`](../crates/bastyde-core/src/shortcut.rs),
-  [`intent.rs`](../crates/bastyde-core/src/intent.rs),
-  [`action.rs`](../crates/bastyde-core/src/action.rs)
-- Derive macro: [`crates/bastyde-macros/src/intent_kind.rs`](../crates/bastyde-macros/src/intent_kind.rs)
-- Pre-built settings widget: [`crates/bastyde-widgets/src/shortcut_settings.rs`](../crates/bastyde-widgets/src/shortcut_settings.rs)
+- Source: [`crates/teksilo-core/src/shortcut.rs`](../crates/teksilo-core/src/shortcut.rs),
+  [`intent.rs`](../crates/teksilo-core/src/intent.rs),
+  [`action.rs`](../crates/teksilo-core/src/action.rs)
+- Derive macro: [`crates/teksilo-macros/src/intent_kind.rs`](../crates/teksilo-macros/src/intent_kind.rs)
+- Pre-built settings widget: [`crates/teksilo-widgets/src/shortcut_settings.rs`](../crates/teksilo-widgets/src/shortcut_settings.rs)
 - Architecture §11: keyboard & shortcut design rationale

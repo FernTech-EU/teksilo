@@ -1,0 +1,26 @@
+RUSTFLAGS="-C force-frame-pointers=yes" CARGO_PROFILE_PROFILING_DEBUG=2 cargo build --profile profiling -p menus-and-dropdowns
+TEKSILO_IDLE_TRACE=1 ./target/profiling/menus-and-dropdowns
+
+RUSTFLAGS="-C force-frame-pointers=yes" CARGO_PROFILE_PROFILING_DEBUG=2 cargo build --profile profiling -p rich-text-viewer && TEKSILO_IDLE_TRACE=1 ./target/profiling/rich-text-viewer
+RUSTFLAGS="-C force-frame-pointers=yes" CARGO_PROFILE_PROFILING_DEBUG=2 cargo build --profile profiling -p widget-catalog && TEKSILO_IDLE_TRACE=1 ./target/profiling/widget-catalog
+RUSTFLAGS="-C force-frame-pointers=yes" CARGO_PROFILE_PROFILING_DEBUG=2 cargo build --profile profiling -p rich-text-editor && TEKSILO_IDLE_TRACE=1 ./target/profiling/rich-text-editor
+
+
+cargo build --workspace && cargo run -p menus-and-dropdowns && cargo run -p split-view && cargo run -p tab-widget && cargo run -p dialogs-and-popovers && cargo run -p data-collections
+
+
+
+for bin in animations data-collections dialogs-and-popovers drag-and-drop internationalization menus-and-dropdowns multi-window rich-text-editor rich-text-viewer shortcuts-demo simple-button spin-box split-view tab-widget text-and-layout title-bar-demo tool-box widget-catalog; do
+  out=$(timeout --preserve-status 2s ./target/debug/$bin 2>&1)
+  code=$?
+  if [ $code -eq 143 ] || [ $code -eq 124 ]; then
+    echo "OK      $bin"
+  else
+    echo "FAIL($code) $bin:"
+    echo "$out" | tail -5 | sed 's/^/    /'
+  fi
+done 2>&1 | tail -50
+
+
+
+cargo run --bin teksilo-widgets-previewer -- --widget=snakbar

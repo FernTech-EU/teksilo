@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: MPL-2.0 -->
 <!-- SPDX-FileCopyrightText: 2026 FernTech -->
 
-# Bastyde Accessibility Conformance Audit — Post-Remediation
+# Teksilo Accessibility Conformance Audit — Post-Remediation
 
 **Standards basis:** WCAG 2.1 Level A/AA · EN 301 549 v3.2.1 (§9 WCAG mapping + §11 Software) · WCAG2ICT (non-web applicability guidance)
 **Date:** 2026-07-02
@@ -11,14 +11,14 @@
 
 ## 1. Executive Summary
 
-Bastyde shipped a 14-commit accessibility remediation branch (`a11y/wcag-en301549-conformance`, `e1681ddc..bae92c18`) closing **16 of 17 tracked framework-level gaps**, plus a defensible **N/A reclassification of WCAG 1.4.12 Text Spacing** per WCAG2ICT. This audit independently re-verified all 16 fixes against live `.rs` source (file:line), re-ran the regression tests that gate them, and additionally scanned adjacent WCAG 2.1 criteria not covered by the original 16-gap list.
+Teksilo shipped a 14-commit accessibility remediation branch (`a11y/wcag-en301549-conformance`, `e1681ddc..bae92c18`) closing **16 of 17 tracked framework-level gaps**, plus a defensible **N/A reclassification of WCAG 1.4.12 Text Spacing** per WCAG2ICT. This audit independently re-verified all 16 fixes against live `.rs` source (file:line), re-ran the regression tests that gate them, and additionally scanned adjacent WCAG 2.1 criteria not covered by the original 16-gap list.
 
 **Honest bottom line:**
 
 - **Framework-level remediation is functionally complete for the 16 tracked gaps.** Every one is verified present, correctly wired end-to-end (not just declared), and covered by a passing test. No claimed fix was found to be a stub, a dead code path, or silently broken.
 - **One tracked residual remains open and is honestly self-disclosed by the framework's own docs**, not overclaimed: TableView/TreeTableView selection rows still paint a flat, color-only fill (`recipe_table_style.rs::make_row_background`) — no boundary stroke — unlike ListView/TreeView rows, which now draw a real non-color selection boundary.
 - **This audit surfaces a small number of new, narrow findings** the original 16-gap remediation did not target: WCAG 2.2.2 (Pause/Stop/Hide — `Cycle` widget has no pause API), WCAG 2.4.11 (Focus Not Obscured — no framework-level detection), WCAG 2.5.3 (Label in Name — `access_label` can silently diverge from visible text with no debug warning), an EN 301 549 §11.5.2.15 reactivity gap in `access_disabled` (plain `bool`, not `Prop<bool>`), and two stale doc comments (`icon_button.rs:98,582`) contradicting the corrected 24px Compact size.
-- **A conformance claim is always an application-level artifact, never a toolkit-level one.** Framework correctness is necessary but not sufficient — an app built on Bastyde still owns: actual alt-text content, information architecture (Multiple Ways), the assembled ACR/VPAT/déclaration, and its own use of the `access_*` override escape hatches without breaking what the framework got right.
+- **A conformance claim is always an application-level artifact, never a toolkit-level one.** Framework correctness is necessary but not sufficient — an app built on Teksilo still owns: actual alt-text content, information architecture (Multiple Ways), the assembled ACR/VPAT/déclaration, and its own use of the `access_*` override escape hatches without breaking what the framework got right.
 
 **Per-regime posture (see §4 for detail):**
 
@@ -34,23 +34,23 @@ Bastyde shipped a 14-commit accessibility remediation branch (`a11y/wcag-en30154
 
 | G-id | Criterion | What was fixed | Verified evidence |
 |---|---|---|---|
-| G1 | 4.1.2 / AT reactivity | Rebuild now dirties the AT snapshot (`a11y_dirty`) so screen readers see post-rebuild state | `crates/bastyde-core/src/widget_tree/layout_impl.rs:203`; test `rebuild_dirties_accessibility_tree` passes |
-| G2 | 1.4.3 Contrast (Minimum) | Correct WCAG relative-luminance contrast formula; default themes enforced ≥4.5:1 text | `crates/bastyde-tokens/src/color.rs:266-277`; `crates/bastyde-tokens/src/theme.rs:784-826` (CI-gated test) |
-| G3 | 1.4.11 Non-text Contrast | `border_focused`/`focus_ring` retuned to `#0C8294` (4.53:1) after raw accent measured only 2.47:1 | `crates/bastyde-tokens/src/theme.rs:286-289,342-345` |
-| G4 | 4.1.3 Status Messages | `ProgressBar` determinate value now bound `AccessibilityOnly` + unconditional `Live::Polite` | `crates/bastyde-widgets/src/progress_bar.rs:250-254,292-301`; test `accessibility_values` |
-| G5 | 3.3.1 Error Identification | Field↔error association via `access_described_by`, targeting the real inner editable node across TextInput/PasswordField/DateTimeEdit/DateRangeEdit | `crates/bastyde-widgets/src/text_input.rs:732`; `password_field.rs:578`; `date_time_edit.rs:726-727`; `date_range_edit.rs:578-579` |
-| G6 | 2.5.7 Dragging Movements | Scene items gain an Alt+Arrow (Shift = ×10) keyboard nudge equivalent to pointer group-drag | `crates/bastyde-scene/src/view/gestures_impl.rs:671-701`; test `alt_arrow_nudges_all_selected_items` |
-| G7 | EN 301 549 11.5.2.9 | Bold/italic/underline/strikethrough now reach AT `TextRun` nodes via `TextRunAttributes`, sourced from real `text-document` `TextFormat` | `crates/bastyde-core/src/accessibility.rs:156-165,937-988`; `crates/bastyde-widgets/src/rich_text.rs:2302-2358` |
-| G8 | 3.3.2 Labels or Instructions | `FormLayout` wires `access_labelled_by(field, label)` per row | `crates/bastyde-widgets/src/primitives/form_layout.rs:210-219`; test `line_wires_field_labelled_by_label` |
-| G9 | 1.3.1 / 3.3.2 | `DateEdit` no longer double-labels a redundant middle `GenericContainer` node — collapses to a clean 2-node AT tree | `crates/bastyde-widgets/src/date_edit.rs:716-756`; test `date_edit_collapses_middle_container_node` |
-| G10 | 1.3.5 Identify Input Purpose | `InputPurpose` enum → specialised AT roles (Email/Phone/Url/Number/Search), correct precedence under `PasswordInput` | `crates/bastyde-widgets/src/primitives/text_input_field.rs:118-148,1406-1438`; test `input_purpose_sets_specialised_at_role` |
-| G12 | 1.4.13 Content on Hover or Focus | Tooltip no longer dismisses on anchor-leave; hoverable via 100ms grace + overlay-bounds check; sticky tooltips keep Escape-dismissibility | `crates/bastyde-core/src/widget_tree/overlay_impl.rs:753-781`; `widget_tree.rs:900-969`; test `tooltip_dismissed_on_pointer_leave` |
-| G13 | 1.4.1/1.4.11 + high-contrast | `for_high_contrast()` theme variant (≥7:1 text) + live OS-pref re-query on window focus + non-color selection boundary on ListView/TreeView rows | `crates/bastyde-tokens/src/theme.rs:203-234`; `crates/bastyde-app/src/window_manager.rs:1300-1313`; `crates/bastyde-widgets/src/styles/recipe_standard_item_style.rs:132-154` |
-| G14 | 3.2.1 On Focus | Debug-only warning when an `on_focus` handler synchronously calls `open_window`/`focus_window` | `crates/bastyde-core/src/widget_tree/focus_impl.rs:39-46`; `crates/bastyde-core/src/widget/event_context.rs:392-408` |
-| G15 | 4.1.2 reactivity | `access_label`/`access_description`/`access_value` now registered at `BindingLevel::AccessibilityOnly` (previously only `access_hidden`) | `crates/bastyde-core/src/widget_tree.rs:1947-1965`; test `bound_access_label_change_dirties_accessibility_tree` |
-| G16 | 2.3.3 Animation from Interactions | Overlay/tooltip fades snap instantly under `prefers_reduced_motion` instead of tweening | `crates/bastyde-core/src/widget_tree/overlay_impl.rs` (`attach_overlay_fade` ~950-979, `process_tooltips_impl` ~157-161) |
-| G17 | 1.3.2 Meaningful Sequence | `Widget::accessibility_children()` lets AT reading order diverge from paint order; TableView/TreeTableView expose header-before-body to AT while keeping body-before-header for correct z-stacking | `crates/bastyde-core/src/widget.rs:410`; `widget_tree/accessibility_impl.rs:413-419`; `table_view.rs:2104-2135`; test `accessibility_children_overrides_at_reading_order` |
-| — | 2.5.8 Target Size (sub-fix bundled with G13) | `IconButtonSize::Compact` raised 22px→24px | `crates/bastyde-widgets/src/styles/recipe_icon_button_style.rs:32-33` |
+| G1 | 4.1.2 / AT reactivity | Rebuild now dirties the AT snapshot (`a11y_dirty`) so screen readers see post-rebuild state | `crates/teksilo-core/src/widget_tree/layout_impl.rs:203`; test `rebuild_dirties_accessibility_tree` passes |
+| G2 | 1.4.3 Contrast (Minimum) | Correct WCAG relative-luminance contrast formula; default themes enforced ≥4.5:1 text | `crates/teksilo-tokens/src/color.rs:266-277`; `crates/teksilo-tokens/src/theme.rs:784-826` (CI-gated test) |
+| G3 | 1.4.11 Non-text Contrast | `border_focused`/`focus_ring` retuned to `#0C8294` (4.53:1) after raw accent measured only 2.47:1 | `crates/teksilo-tokens/src/theme.rs:286-289,342-345` |
+| G4 | 4.1.3 Status Messages | `ProgressBar` determinate value now bound `AccessibilityOnly` + unconditional `Live::Polite` | `crates/teksilo-widgets/src/progress_bar.rs:250-254,292-301`; test `accessibility_values` |
+| G5 | 3.3.1 Error Identification | Field↔error association via `access_described_by`, targeting the real inner editable node across TextInput/PasswordField/DateTimeEdit/DateRangeEdit | `crates/teksilo-widgets/src/text_input.rs:732`; `password_field.rs:578`; `date_time_edit.rs:726-727`; `date_range_edit.rs:578-579` |
+| G6 | 2.5.7 Dragging Movements | Scene items gain an Alt+Arrow (Shift = ×10) keyboard nudge equivalent to pointer group-drag | `crates/teksilo-scene/src/view/gestures_impl.rs:671-701`; test `alt_arrow_nudges_all_selected_items` |
+| G7 | EN 301 549 11.5.2.9 | Bold/italic/underline/strikethrough now reach AT `TextRun` nodes via `TextRunAttributes`, sourced from real `text-document` `TextFormat` | `crates/teksilo-core/src/accessibility.rs:156-165,937-988`; `crates/teksilo-widgets/src/rich_text.rs:2302-2358` |
+| G8 | 3.3.2 Labels or Instructions | `FormLayout` wires `access_labelled_by(field, label)` per row | `crates/teksilo-widgets/src/primitives/form_layout.rs:210-219`; test `line_wires_field_labelled_by_label` |
+| G9 | 1.3.1 / 3.3.2 | `DateEdit` no longer double-labels a redundant middle `GenericContainer` node — collapses to a clean 2-node AT tree | `crates/teksilo-widgets/src/date_edit.rs:716-756`; test `date_edit_collapses_middle_container_node` |
+| G10 | 1.3.5 Identify Input Purpose | `InputPurpose` enum → specialised AT roles (Email/Phone/Url/Number/Search), correct precedence under `PasswordInput` | `crates/teksilo-widgets/src/primitives/text_input_field.rs:118-148,1406-1438`; test `input_purpose_sets_specialised_at_role` |
+| G12 | 1.4.13 Content on Hover or Focus | Tooltip no longer dismisses on anchor-leave; hoverable via 100ms grace + overlay-bounds check; sticky tooltips keep Escape-dismissibility | `crates/teksilo-core/src/widget_tree/overlay_impl.rs:753-781`; `widget_tree.rs:900-969`; test `tooltip_dismissed_on_pointer_leave` |
+| G13 | 1.4.1/1.4.11 + high-contrast | `for_high_contrast()` theme variant (≥7:1 text) + live OS-pref re-query on window focus + non-color selection boundary on ListView/TreeView rows | `crates/teksilo-tokens/src/theme.rs:203-234`; `crates/teksilo-app/src/window_manager.rs:1300-1313`; `crates/teksilo-widgets/src/styles/recipe_standard_item_style.rs:132-154` |
+| G14 | 3.2.1 On Focus | Debug-only warning when an `on_focus` handler synchronously calls `open_window`/`focus_window` | `crates/teksilo-core/src/widget_tree/focus_impl.rs:39-46`; `crates/teksilo-core/src/widget/event_context.rs:392-408` |
+| G15 | 4.1.2 reactivity | `access_label`/`access_description`/`access_value` now registered at `BindingLevel::AccessibilityOnly` (previously only `access_hidden`) | `crates/teksilo-core/src/widget_tree.rs:1947-1965`; test `bound_access_label_change_dirties_accessibility_tree` |
+| G16 | 2.3.3 Animation from Interactions | Overlay/tooltip fades snap instantly under `prefers_reduced_motion` instead of tweening | `crates/teksilo-core/src/widget_tree/overlay_impl.rs` (`attach_overlay_fade` ~950-979, `process_tooltips_impl` ~157-161) |
+| G17 | 1.3.2 Meaningful Sequence | `Widget::accessibility_children()` lets AT reading order diverge from paint order; TableView/TreeTableView expose header-before-body to AT while keeping body-before-header for correct z-stacking | `crates/teksilo-core/src/widget.rs:410`; `widget_tree/accessibility_impl.rs:413-419`; `table_view.rs:2104-2135`; test `accessibility_children_overrides_at_reading_order` |
+| — | 2.5.8 Target Size (sub-fix bundled with G13) | `IconButtonSize::Compact` raised 22px→24px | `crates/teksilo-widgets/src/styles/recipe_icon_button_style.rs:32-33` |
 
 **1.4.12 Text Spacing → reclassified N/A** per WCAG2ICT: no user-injectable line-height/letter-spacing/paragraph-spacing override mechanism exists anywhere in the toolkit (exhaustive grep confirms this), so the criterion's premise never arises for native desktop software. `TypographyTokens::scaled()` deliberately preserves `line_height`/`letter_spacing` unchanged and multiplies only `size`. The separately-verified `TextScaleControl` + wrap-reflow layout model correctly covers the adjacent, genuinely-applicable "enlarge text without clipping" concern (WCAG 1.4.4) without being conflated with 1.4.12 itself. Documented at `docs/a11y/a11y_issues.md:50-73`.
 
@@ -85,7 +85,7 @@ Bastyde shipped a 14-commit accessibility remediation branch (`a11y/wcag-en30154
 | 2.1.2 No Keyboard Trap | A | framework | ✅ supported | Modal scope always paired with `EscapeOrClickOutside` default |
 | 2.1.4 Character Key Shortcuts | A | framework | ✅ supported | Type-ahead / mnemonics only active while the owning component holds focus |
 | 2.2.1 Timing Adjustable | A | n/a | ➖ n/a | No session timeouts or time-limited interactions exist |
-| 2.2.2 Pause, Stop, Hide | A | framework | 🟡 partial | **New finding**: `Cycle` (rotating-content widget, 3s default) honours `prefers_reduced_motion` but has no `.paused(Signal<bool>)` or built-in pause affordance — `crates/bastyde-widgets/src/animations/cycle.rs:42-160`, no `pause` API found |
+| 2.2.2 Pause, Stop, Hide | A | framework | 🟡 partial | **New finding**: `Cycle` (rotating-content widget, 3s default) honours `prefers_reduced_motion` but has no `.paused(Signal<bool>)` or built-in pause affordance — `crates/teksilo-widgets/src/animations/cycle.rs:42-160`, no `pause` API found |
 | 2.3.1 Three Flashes or Below Threshold | A | framework | ✅ supported | Only `Shake` (spatial) and `Pulse` (~1.1Hz opacity) oscillate; neither is a flash hazard |
 | 2.4.1 Bypass Blocks | A | n/a | ➖ n/a | No web-style repeated-block navigation; roving tabindex already collapses composite groups to one Tab stop |
 | 2.4.2 Page Titled | A | n/a | ➖ n/a | `WindowConfig::title` is a required, always-supplied parameter |
@@ -136,7 +136,7 @@ Bastyde shipped a 14-commit accessibility remediation branch (`a11y/wcag-en30154
 
 - **Verdict:** Partial — narrow, named residuals only (upgraded from "active blockers affecting every app built on it").
 - **In-scope set:** EN 301 549 §9 (= WCAG 2.1 A/AA in full) + §11 (software: AT interoperability, user preferences, authoring tools).
-- **Required artifact:** An **Accessibility Conformance Report (ACR)** in the EN 301 549 ITI template, prepared by whoever ships the actual product built on Bastyde — never a toolkit-level document.
+- **Required artifact:** An **Accessibility Conformance Report (ACR)** in the EN 301 549 ITI template, prepared by whoever ships the actual product built on Teksilo — never a toolkit-level document.
 - **Residuals unique to this regime:** Because EAA pulls in the *full* WCAG 2.1 set (the widest of the three regimes), it retains the most residual exposure despite receiving the most fixes: TableView/TreeTableView selection-boundary gap (1.4.1/1.4.11), the autocomplete-token half of 1.3.5 (upstream-blocked), and the newly-surfaced 2.2.2/2.4.11/2.5.3 items in §5.
 
 ### 4.2 US Section 508 (Revised)
@@ -144,7 +144,7 @@ Bastyde shipped a 14-commit accessibility remediation branch (`a11y/wcag-en30154
 - **Verdict:** Effectively clean at the framework level.
 - **In-scope set:** WCAG **2.0** A/AA by reference (not 2.1), plus Chapter 3 Functional Performance Criteria (302.x).
 - **Required artifact:** A **VPAT 2.5 Rev (WCAG edition)**, scoped to 2.0 A/AA + the 302.x table — again an application-level document.
-- **Residuals unique to this regime:** Most of the still-open items (1.4.10 Reflow, 1.4.11 as a *named* SC, 1.4.12, 2.5.7, 2.5.8, 1.3.5) are 2.1-only and sit outside 508's literal WCAG-2.0 scope entirely — yet Bastyde fixed several of them anyway, so they are moot as 508 findings regardless of scope. The two SC that *do* bind under 2.0 AA — 1.4.3 and 4.1.2 — are both closed and CI-hardened. Chapter 3 FPC concerns (302.7 limited manipulation, 302.8 limited reach) are covered by G6 and the IconButton fix respectively.
+- **Residuals unique to this regime:** Most of the still-open items (1.4.10 Reflow, 1.4.11 as a *named* SC, 1.4.12, 2.5.7, 2.5.8, 1.3.5) are 2.1-only and sit outside 508's literal WCAG-2.0 scope entirely — yet Teksilo fixed several of them anyway, so they are moot as 508 findings regardless of scope. The two SC that *do* bind under 2.0 AA — 1.4.3 and 4.1.2 — are both closed and CI-hardened. Chapter 3 FPC concerns (302.7 limited manipulation, 302.8 limited reach) are covered by G6 and the IconButton fix respectively.
 
 ### 4.3 RGAA 4.1 (France)
 
@@ -161,7 +161,7 @@ Ranked by impact; each item tagged by who owns the follow-up.
 
 1. **[Framework, highest impact] TableView/TreeTableView selection band remains color-only.** `recipe_table_style.rs::make_row_background` (lines 171-222) paints selection exclusively via `.background(ColorProp::DynamicSurfaceRole(role))` — grep-confirmed zero `border_color`/`border_width` calls anywhere in the TableView/TreeTableView module tree. This is the direct counterpart of the fix already applied to `StandardListItem`/`StandardTreeItem` (`recipe_standard_item_style.rs:132-154`) and is honestly disclosed as an open follow-up in `docs/a11y/a11y_issues.md` — not misrepresented as fixed anywhere. **Recommendation:** port the same `border_color(BorderRole::Focused).border_width(selection_edge_width)` pattern to `make_row_background`.
 
-2. **[Upstream/external, cannot fix in Bastyde] WCAG 1.3.5 full autofill-token vocabulary is blocked by AccessKit 0.24.1.** The crate has no field carrying HTML autocomplete tokens (`given-name`, `street-address`, `cc-number`, etc.) — only role identification is achievable today, and that half is done (G10). Honestly documented in `docs/a11y/a11y_issues.md:21-34`. **Recommendation:** track upstream AccessKit issue/feature request; no framework-side workaround exists.
+2. **[Upstream/external, cannot fix in Teksilo] WCAG 1.3.5 full autofill-token vocabulary is blocked by AccessKit 0.24.1.** The crate has no field carrying HTML autocomplete tokens (`given-name`, `street-address`, `cc-number`, etc.) — only role identification is achievable today, and that half is done (G10). Honestly documented in `docs/a11y/a11y_issues.md:21-34`. **Recommendation:** track upstream AccessKit issue/feature request; no framework-side workaround exists.
 
 3. **[Framework, medium impact] EN 301 549 11.5.2.9 — text color/highlight/language attributes not forwarded to AT.** `text-document`'s `TextFormat`/`Highlight` types already carry `foreground_color`/`background_color` data; AccessKit's `Node` supports `set_foreground_color`/`set_background_color`/`set_language` as real properties — neither side is missing, only the plumbing between them (`accessibility.rs` has zero occurrences of these setters). **Recommendation:** extend `TextRunAttributes` with color/language fields, following the exact pattern G7 already established for bold/italic/underline/strikethrough.
 
@@ -177,7 +177,7 @@ Ranked by impact; each item tagged by who owns the follow-up.
 
 9. **[Author responsibility, always] 1.1.1 alt-text content, 2.4.5 Multiple Ways, and all conformance-artifact assembly.** The framework provides the mechanism; content and information architecture are inherently per-application decisions the toolkit cannot make on an app author's behalf.
 
-10. **[External/platform, expected and stable] AT-bridge coverage varies only by desktop-OS backend maturity, not by Bastyde's own code.** `accesskit_unix` (AT-SPI/D-Bus, identical across X11 and Wayland), `accesskit_macos` (NSAccessibility), `accesskit_windows` (UIA) are all real, non-stubbed bindings, unchanged by this remediation branch and independently re-confirmed. This is a platform-survey caveat, not a framework defect — it stays as-is regardless of any Bastyde-side work.
+10. **[External/platform, expected and stable] AT-bridge coverage varies only by desktop-OS backend maturity, not by Teksilo's own code.** `accesskit_unix` (AT-SPI/D-Bus, identical across X11 and Wayland), `accesskit_macos` (NSAccessibility), `accesskit_windows` (UIA) are all real, non-stubbed bindings, unchanged by this remediation branch and independently re-confirmed. This is a platform-survey caveat, not a framework defect — it stays as-is regardless of any Teksilo-side work.
 
 11. **[Documented, defensible] WCAG 1.4.12 Text Spacing — N/A.** No user-injectable spacing-override mechanism exists in native desktop software; the criterion's premise never arises. See §2 for the full rationale. This is a correct application of WCAG2ICT, not a gap.
 

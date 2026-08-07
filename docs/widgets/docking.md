@@ -28,7 +28,7 @@ DockingLayout
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/docking/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/docking/index.html)
 
 ## `pub struct DockingLayout`
 

@@ -21,7 +21,7 @@ archival; actions that should remain re-invokable from the log carry an
 
 ## When to use
 
-- Pair with `BastydeAppBuilder::install_toast_default()` to get the full
+- Pair with `TeksiloAppBuilder::install_toast_default()` to get the full
   bell-button + log + persistence stack for free.
 - Construct `NotificationArchiveModel::in_memory` directly in tests or
   custom toast setups.
@@ -34,7 +34,7 @@ let log = NotificationLog::new(archive.clone());
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/notification/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/notification/index.html)
 
 ## `pub struct NotificationEntry`
 

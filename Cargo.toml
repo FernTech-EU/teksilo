@@ -7,21 +7,21 @@ members = [
     "crates/*",
     "examples/*",
 ]
-# `bastyde-analytics-bastyde` builds protobuf-src from source (transitively
-# via `bastyde-collector-proto`), which needs a system `cmake` + C++
-# toolchain. It's opt-in and only consumed by the `telemetry-bastyde`
+# `teksilo-analytics-native` builds protobuf-src from source (transitively
+# via `teksilo-collector-proto`), which needs a system `cmake` + C++
+# toolchain. It's opt-in and only consumed by the `telemetry-teksilo`
 # example, so excluding both keeps a default `cargo build`/`cargo test`
 # working without that toolchain. Build them explicitly with
-# `-p bastyde-analytics-bastyde` (and
-# `--manifest-path examples/telemetry_bastyde/Cargo.toml`) when cmake is
+# `-p teksilo-analytics-native` (and
+# `--manifest-path examples/telemetry_teksilo/Cargo.toml`) when cmake is
 # available.
 #
-# `bastyde-collector-proto` itself lives in a sibling repo at
-# `../bastyde-collector-proto` — its wire-format version stream is
+# `teksilo-collector-proto` itself lives in a sibling repo at
+# `../teksilo-collector-proto` — its wire-format version stream is
 # decoupled from this workspace's release version.
 exclude = [
-    "crates/bastyde-analytics-bastyde",
-    "examples/telemetry_bastyde",
+    "crates/teksilo-analytics-native",
+    "examples/telemetry_teksilo",
 ]
 
 [workspace.package]
@@ -30,7 +30,7 @@ edition = "2024"
 license-file = "LICENSE"
 publish = true
 authors = ["Cyril Jacquet <cyril.jacquet@ferntech.eu>"]
-repository = "https://github.com/ferntech-eu/bastyde"
+repository = "https://github.com/ferntech-eu/teksilo"
 
 [workspace.dependencies]
 # Shared dependency versions
@@ -44,7 +44,7 @@ wgpu = "30.0.0"
 # than per-crate because five crates need it and the versions had drifted.
 pollster = "1.0.1"
 winit = "0.30"
-# Windows platform bindings. Only consumed by `bastyde-platform` (target-gated to
+# Windows platform bindings. Only consumed by `teksilo-platform` (target-gated to
 # `cfg(target_os = "windows")`), but the version is pinned here per the workspace
 # dependency convention; the crate selects its Win32 feature modules locally.
 # `windows-core` is a *direct* dep there because the `#[implement]` COM macro emits
@@ -58,7 +58,7 @@ unic-langid = "0.9"
 sys-locale = "0.3"
 notify = "8.2.0"
 # Advisory (fcntl/flock) cross-platform file locking, used by
-# `bastyde-settings`'s opt-in shared (cross-process) `SettingsFile` mode.
+# `teksilo-settings`'s opt-in shared (cross-process) `SettingsFile` mode.
 # `fs2` is small, dependency-light, and has been the de-facto standard for
 # this exact use case (Cargo itself has used it for the same purpose) for
 # years; we only need `lock_exclusive`/`unlock`, a tiny stable surface
@@ -107,7 +107,7 @@ jiff = "0.2"
 text-document = { path = "../text-document/crates/public_api", version = "1.9.3" }
 text-typeset = { path = "../text-typeset", version = "1.8.1" }
 
-# Terminal engine (consumed only by the opt-in `bastyde-terminal` crate,
+# Terminal engine (consumed only by the opt-in `teksilo-terminal` crate,
 # feature-gated so a default workspace build never pulls them). `portable-pty`
 # is WezTerm's cross-platform pseudo-terminal (ConPTY on Windows, openpty on
 # Unix); `alacritty_terminal` is Alacritty's standalone VT parser + grid +
@@ -117,54 +117,54 @@ portable-pty = "0.9"
 alacritty_terminal = "0.26"
 
 # Internal crates
-bastyde-tokens = { path = "crates/bastyde-tokens", version = "0.6.2" }
-bastyde-canvas = { path = "crates/bastyde-canvas", version = "0.6.2" }
-bastyde-core = { path = "crates/bastyde-core", version = "0.6.2" }
-bastyde-data = { path = "crates/bastyde-data", version = "0.6.2" }
-bastyde-settings = { path = "crates/bastyde-settings", version = "0.6.2" }
-bastyde-telemetry = { path = "crates/bastyde-telemetry", version = "0.6.2" }
-bastyde-analytics-plausible = { path = "crates/bastyde-analytics-plausible", version = "0.6.2" }
-bastyde-analytics-otlp = { path = "crates/bastyde-analytics-otlp", version = "0.6.2" }
-bastyde-widgets = { path = "crates/bastyde-widgets", version = "0.6.2" }
-bastyde-charts = { path = "crates/bastyde-charts", version = "0.6.2" }
-bastyde-scene = { path = "crates/bastyde-scene", version = "0.6.2" }
-bastyde-i18n = { path = "crates/bastyde-i18n", version = "0.6.2" }
-bastyde-i18n-macros = { path = "crates/bastyde-i18n-macros", version = "0.6.2" }
-cargo-bastyde-fmt = { path = "crates/cargo-bastyde-fmt", version = "0.6.2" }
-bastyde-fmt = { path = "crates/bastyde-fmt", version = "0.6.2" }
-bastyde-fmt-lsp = { path = "crates/bastyde-fmt-lsp", version = "0.6.2" }
-bastyde-parse = { path = "crates/bastyde-parse", version = "0.6.2" }
-bastyde-macros = { path = "crates/bastyde-macros", version = "0.6.2" }
-bastyde-text = { path = "crates/bastyde-text", version = "0.6.2" }
-bastyde-render = { path = "crates/bastyde-render", version = "0.6.2" }
-bastyde-platform = { path = "crates/bastyde-platform", version = "0.6.2" }
-bastyde-app = { path = "crates/bastyde-app", version = "0.6.2" }
-bastyde-async = { path = "crates/bastyde-async", version = "0.6.2" }
-bastyde-tokio = { path = "crates/bastyde-tokio", version = "0.6.2" }
-bastyde-async-std = { path = "crates/bastyde-async-std", version = "0.6.2" }
-bastyde-inspector = { path = "crates/bastyde-inspector", version = "0.6.2" }
-bastyde-resources = { path = "crates/bastyde-resources", version = "0.6.2" }
-bastyde-webview = { path = "crates/bastyde-webview", version = "0.6.2" }
-bastyde-terminal = { path = "crates/bastyde-terminal", version = "0.6.2" }
-bastyde-automation = { path = "crates/bastyde-automation", version = "0.6.2" }
-bastyde-automation-mcp = { path = "crates/bastyde-automation-mcp", version = "0.6.2" }
-bastyde = { path = "crates/bastyde", version = "0.6.2" }
-bastyde-preview = { path = "crates/bastyde-preview", version = "0.6.2" }
-bastyde-preview-ui = { path = "crates/bastyde-preview-ui", version = "0.6.2" }
-bastyde-theme-material3 = { path = "crates/bastyde-theme-material3", version = "0.6.2" }
-bastyde-theme-macos = { path = "crates/bastyde-theme-macos", version = "0.6.2" }
-bastyde-theme-fluent = { path = "crates/bastyde-theme-fluent", version = "0.6.2" }
+teksilo-tokens = { path = "crates/teksilo-tokens", version = "0.6.2" }
+teksilo-canvas = { path = "crates/teksilo-canvas", version = "0.6.2" }
+teksilo-core = { path = "crates/teksilo-core", version = "0.6.2" }
+teksilo-data = { path = "crates/teksilo-data", version = "0.6.2" }
+teksilo-settings = { path = "crates/teksilo-settings", version = "0.6.2" }
+teksilo-telemetry = { path = "crates/teksilo-telemetry", version = "0.6.2" }
+teksilo-analytics-plausible = { path = "crates/teksilo-analytics-plausible", version = "0.6.2" }
+teksilo-analytics-otlp = { path = "crates/teksilo-analytics-otlp", version = "0.6.2" }
+teksilo-widgets = { path = "crates/teksilo-widgets", version = "0.6.2" }
+teksilo-charts = { path = "crates/teksilo-charts", version = "0.6.2" }
+teksilo-scene = { path = "crates/teksilo-scene", version = "0.6.2" }
+teksilo-i18n = { path = "crates/teksilo-i18n", version = "0.6.2" }
+teksilo-i18n-macros = { path = "crates/teksilo-i18n-macros", version = "0.6.2" }
+cargo-teksilo-fmt = { path = "crates/cargo-teksilo-fmt", version = "0.6.2" }
+teksilo-fmt = { path = "crates/teksilo-fmt", version = "0.6.2" }
+teksilo-fmt-lsp = { path = "crates/teksilo-fmt-lsp", version = "0.6.2" }
+teksilo-parse = { path = "crates/teksilo-parse", version = "0.6.2" }
+teksilo-macros = { path = "crates/teksilo-macros", version = "0.6.2" }
+teksilo-text = { path = "crates/teksilo-text", version = "0.6.2" }
+teksilo-render = { path = "crates/teksilo-render", version = "0.6.2" }
+teksilo-platform = { path = "crates/teksilo-platform", version = "0.6.2" }
+teksilo-app = { path = "crates/teksilo-app", version = "0.6.2" }
+teksilo-async = { path = "crates/teksilo-async", version = "0.6.2" }
+teksilo-tokio = { path = "crates/teksilo-tokio", version = "0.6.2" }
+teksilo-async-std = { path = "crates/teksilo-async-std", version = "0.6.2" }
+teksilo-inspector = { path = "crates/teksilo-inspector", version = "0.6.2" }
+teksilo-resources = { path = "crates/teksilo-resources", version = "0.6.2" }
+teksilo-webview = { path = "crates/teksilo-webview", version = "0.6.2" }
+teksilo-terminal = { path = "crates/teksilo-terminal", version = "0.6.2" }
+teksilo-automation = { path = "crates/teksilo-automation", version = "0.6.2" }
+teksilo-automation-mcp = { path = "crates/teksilo-automation-mcp", version = "0.6.2" }
+teksilo = { path = "crates/teksilo", version = "0.6.2" }
+teksilo-preview = { path = "crates/teksilo-preview", version = "0.6.2" }
+teksilo-preview-ui = { path = "crates/teksilo-preview-ui", version = "0.6.2" }
+teksilo-theme-material3 = { path = "crates/teksilo-theme-material3", version = "0.6.2" }
+teksilo-theme-macos = { path = "crates/teksilo-theme-macos", version = "0.6.2" }
+teksilo-theme-fluent = { path = "crates/teksilo-theme-fluent", version = "0.6.2" }
 
-# gRPC proto crate — lives in a sibling repo at `../bastyde-collector-proto`
+# gRPC proto crate — lives in a sibling repo at `../teksilo-collector-proto`
 # so the wire-format spec has its own version stream (and the
-# `bastyde-collector` server can consume it without needing the entire
-# bastyde checkout). Path-dep into the sibling for now; promote to a
-# git-rev / crates.io dep once the schema stabilises. The only bastyde
-# consumer (`bastyde-analytics-bastyde`) owns its own tonic / prost / tokio
+# `teksilo-collector` server can consume it without needing the entire
+# teksilo checkout). Path-dep into the sibling for now; promote to a
+# git-rev / crates.io dep once the schema stabilises. The only teksilo
+# consumer (`teksilo-analytics-native`) owns its own tonic / prost / tokio
 # versions since no other framework crate uses them.
-bastyde-collector-proto = { path = "../bastyde-collector-proto", version = "0.1.0" }
-bastyde-analytics-bastyde = { path = "crates/bastyde-analytics-bastyde", version = "0.7.0" }
-bastyde-telemetry-codegen = { path = "crates/bastyde-telemetry-codegen", version = "0.6.2" }
+teksilo-collector-proto = { path = "../teksilo-collector-proto", version = "0.1.0" }
+teksilo-analytics-native = { path = "crates/teksilo-analytics-native", version = "0.7.0" }
+teksilo-telemetry-codegen = { path = "crates/teksilo-telemetry-codegen", version = "0.6.2" }
 
 
 [profile.release]

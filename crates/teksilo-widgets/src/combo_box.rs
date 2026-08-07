@@ -1,0 +1,1257 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
+//! ComboBox — dropdown selection widget.
+//!
+//! Generic over the item type `T: Clone + PartialEq + 'static`. Selection is
+//! value-based: the bound `Signal<Option<T>>` survives reorder and insertion
+//! of the backing model. Items come from one of four input paths:
+//!
+//! - [`ComboBox::new`] — static list of localizable strings (the 90% case).
+//! - [`ComboBox::from_items`] — static list of typed values.
+//! - [`ComboBox::from_model`] — reactive [`ListModel<T>`].
+//! - [`ComboBox::from_source`] — external [`ListDataSource<Item = T>`].
+//!
+//! The dropdown panel is pre-created during `build()` and kept dormant until
+//! opened via click, Enter, Space, or ArrowDown/ArrowUp.
+//!
+//! The widget is split across four internal modules:
+//! - `state` holds the interaction-state enum, the `ItemSource` accessor,
+//!   and color/index helpers.
+//! - `item` holds the single-row `DropdownItem` widget.
+//! - `panel` holds the `DropdownPanel` overlay content and the
+//!   `FilteredItemList` inner widget.
+//! - `tests` holds the headless unit tests.
+
+use std::cell::{Cell, RefCell};
+use std::rc::Rc;
+use std::time::{Duration, Instant};
+use teksilo_i18n::lit;
+
+use teksilo_canvas::{Rect, Size, SizeProposal};
+use teksilo_core::accessibility::{AccessNodeBuilder, widget_id_to_node_id};
+use teksilo_core::build_context::BuildContext;
+use teksilo_core::event::{EventResponse, Key, WidgetEvent};
+use teksilo_core::overlay::{
+    DismissBehavior, OverlayDismissCallback, OverlayLayer, OverlayPlacement, OverlayRequest,
+};
+use teksilo_core::signal::{Prop, Signal};
+use teksilo_core::styles::{ComboBoxStyle, ComboBoxStyleConfig, SharedComboBoxStyle};
+use teksilo_core::widget::{CursorIcon, EventContext, LayoutContext, Widget, WidgetPlacement};
+use teksilo_core::widget_builder::{HandlerSet, WidgetBuilder};
+use teksilo_core::widget_id::WidgetId;
+use teksilo_data::{DataChange, ListDataSource, ListModel};
+use teksilo_tokens::{TextRole, TextStyleRole};
+
+use crate::primitives::TextWidget;
+
+mod item;
+mod panel;
+mod state;
+
+#[cfg(test)]
+mod tests;
+
+use self::panel::DropdownPanel;
+use self::state::{DEFAULT_MAX_VISIBLE_ITEMS, ItemSource, resolve_index};
+
+// Re-export so callers can write `ComboBox::new(...).variant(ComboBoxVariant::Filled)`
+// without reaching into `teksilo::core::styles`.
+pub use teksilo_core::styles::ComboBoxVariant;
+use teksilo_i18n::LocalizedString;
+
+/// A dropdown selection widget.
+///
+/// ```ignore
+/// // Simple: list of strings.
+/// let selected = ctx.signal(None::<String>);
+/// ComboBox::new(["Apple", "Banana", "Cherry"], selected)
+///     .placeholder(lit!("Select a fruit..."))
+///
+/// // Typed items: any T: Clone + PartialEq, plus a label extractor.
+/// #[derive(Clone, PartialEq)] struct Fruit { name: String, emoji: &'static str }
+/// let selected = ctx.signal(None::<Fruit>);
+/// ComboBox::from_items(fruits, selected)
+///     .item_label(|f: &Fruit| lit!(format!("{} {}", f.emoji, f.name)))
+///
+/// // Model-backed: reactive.
+/// let model = ListModel::from_vec(fruits);
+/// ComboBox::from_model(model, selected)
+///     .item_label(|f: &Fruit| lit!(f.name.clone()))
+///     .max_visible_items(6)
+/// ```
+pub struct ComboBox<T: Clone + PartialEq + 'static> {
+    source: ItemSource<T>,
+    selected: Signal<Option<T>>,
+    item_label: Rc<dyn Fn(&T) -> LocalizedString>,
+    render_item: Option<Rc<dyn Fn(&T, bool) -> Box<dyn Widget>>>,
+    /// Optional custom renderer for the *trigger's selected value* (the
+    /// widget shown when the combo is closed). When set, the closed combo
+    /// shows this widget for the current selection instead of the plain
+    /// text label — e.g. a `FontPicker` rendering the chosen family in its
+    /// own typeface. Rebuilt on every selection change (see
+    /// [`render_selected`](Self::render_selected)).
+    render_selected: Option<Rc<dyn Fn(&T) -> Box<dyn Widget>>>,
+    /// Optional callback fired whenever the user commits a selection —
+    /// from a dropdown-row tap or keyboard pick — with a live
+    /// `EventContext`. Distinct from observing the `selected` signal:
+    /// it provides the `EventContext` needed for context-bearing actions
+    /// (navigation, `set_locale`, opening overlays). Fires only on
+    /// user-driven commits, not on external writes to `selected`.
+    on_select: Option<Rc<dyn Fn(&T, &mut EventContext)>>,
+    placeholder: LocalizedString,
+    /// Accessible label — independent of placeholder and current selection.
+    /// Screen readers announce this as the name of the control.
+    label: Option<LocalizedString>,
+    /// Enabled state, static or reactive; forwarded to the arena at
+    /// build time.
+    enabled: Prop<bool>,
+    max_visible_items: usize,
+    /// Type-ahead reset window: keystrokes more than this far apart start a
+    /// fresh prefix instead of extending the previous one. Mirrors
+    /// `MenuList::type_ahead_timeout`. A `Duration::ZERO` makes every
+    /// keystroke independent (used by tests).
+    type_ahead_timeout: Duration,
+    /// When `true`, the dropdown panel includes a search field at the top
+    /// and the list is filtered live against the query.
+    searchable: bool,
+    /// Custom match predicate used in searchable mode. If unset, the
+    /// default is a case-insensitive substring match on the label.
+    filter: Option<Rc<dyn Fn(&str, &T) -> bool>>,
+    /// Search query signal, created lazily on the first build when
+    /// `searchable` is enabled. Shared with the `DropdownPanel` so both
+    /// the trigger-side a11y state and the panel's filter see the same
+    /// value.
+    search_query: Option<Signal<String>>,
+    /// Cached index of the currently-selected value in `source`. Validated
+    /// on every read; a miss triggers a fresh O(n) scan. Shared across the
+    /// keyboard handler and the label-derive closure so both benefit from
+    /// the cache across selection changes.
+    selected_index_hint: Rc<Cell<Option<usize>>>,
+    /// Tier-1 design-language variant. The active `ComboBoxStyle`
+    /// decides how to paint each variant; IntUI's default ships
+    /// `Outlined` (bordered) and `Plain` (chrome-less) out of the box,
+    /// with `Filled` falling back to `Outlined` until per-variant
+    /// recipes land.
+    variant: ComboBoxVariant,
+    /// Per-call style override.
+    style_override: Option<SharedComboBoxStyle>,
+    /// Per-call override for the selected-value text style (font, size,
+    /// weight). `None` ⇒ the default `TextStyleRole::Body`.
+    label_style: Option<teksilo_core::color_prop::TextStyleProp>,
+    /// Per-call override for the selected-value text color. `None` ⇒
+    /// enabled-derived (`Primary` / `Disabled`); setting this replaces it.
+    text_role_override: Option<teksilo_core::color_prop::ColorProp>,
+    /// Optional plain tooltip text shown after a hover delay.
+    /// Mutually exclusive with `rich_tooltip_source` and
+    /// `composite_tooltip_content` — every tooltip setter clears the
+    /// other two so last-call wins.
+    tooltip_text: Option<LocalizedString>,
+    /// Optional rich tooltip source (registry key or inline content).
+    /// Mutually exclusive with `tooltip_text` and
+    /// `composite_tooltip_content` per the last-call-wins matrix.
+    rich_tooltip_source: Option<crate::tooltip::RichTooltipSource>,
+    /// Optional composite tooltip body. Hosts an arbitrary widget tree
+    /// (charts, grids, conditional rows). Mutually exclusive with
+    /// `tooltip_text` and `rich_tooltip_source`.
+    composite_tooltip_content: Option<Box<dyn Widget>>,
+    // Build state — four mutable signals replace the legacy
+    // `ComboBoxState` enum. `is_open` survives until the dropdown
+    // dismisses (overlay callback resets it); `is_focused` /
+    // `is_hovered` flip on the corresponding handlers; `is_disabled`
+    // mirrors `!self.enabled` (snapshotted at build because
+    // `.enabled(bool)` is an immutable builder option).
+    is_open: Signal<bool>,
+    is_hovered: Signal<bool>,
+    is_focused: Signal<bool>,
+    is_disabled: Signal<bool>,
+    root_child_id: Option<WidgetId>,
+    dropdown_content_id: Option<WidgetId>,
+}
+
+impl ComboBox<String> {
+    /// Create a ComboBox from a list of strings.
+    ///
+    /// Accepts any `impl Into<String>` — string literals (`&str`),
+    /// owned `String`s, resolved `LocalizedString`s, etc. For
+    /// translated items, resolve translations before passing in,
+    /// e.g. `vec![tr!(apple()).resolve_now(), ...]`.
+    pub fn new(
+        items: impl IntoIterator<Item = impl Into<String>>,
+        selected: Signal<Option<String>>,
+    ) -> Self {
+        let items: Vec<String> = items.into_iter().map(Into::into).collect();
+        Self::new_with_item_source(
+            ItemSource::from_vec(items),
+            selected,
+            Rc::new(|s: &String| LocalizedString::literal(s.clone())),
+        )
+    }
+}
+
+impl<T: Clone + PartialEq + 'static> ComboBox<T> {
+    fn new_with_item_source(
+        source: ItemSource<T>,
+        selected: Signal<Option<T>>,
+        item_label: Rc<dyn Fn(&T) -> LocalizedString>,
+    ) -> Self {
+        Self {
+            source,
+            selected,
+            item_label,
+            render_item: None,
+            render_selected: None,
+            on_select: None,
+            placeholder: LocalizedString::literal(String::new()),
+            label: None,
+            enabled: Prop::Static(true),
+            max_visible_items: DEFAULT_MAX_VISIBLE_ITEMS,
+            type_ahead_timeout: Duration::from_millis(500),
+            searchable: false,
+            filter: None,
+            search_query: None,
+            variant: ComboBoxVariant::default(),
+            style_override: None,
+            label_style: None,
+            text_role_override: None,
+            tooltip_text: None,
+            rich_tooltip_source: None,
+            composite_tooltip_content: None,
+            is_open: Signal::new(false),
+            is_hovered: Signal::new(false),
+            is_focused: Signal::new(false),
+            is_disabled: Signal::new(false),
+            root_child_id: None,
+            dropdown_content_id: None,
+            selected_index_hint: Rc::new(Cell::new(None)),
+        }
+    }
+
+    /// Static list of typed items. `item_label` is the display extractor —
+    /// it's required at construction so the compiler enforces it rather
+    /// than a runtime check. For `T = String`, use [`ComboBox::new`] which
+    /// defaults to the identity label.
+    pub fn from_items<F>(
+        items: impl IntoIterator<Item = T>,
+        selected: Signal<Option<T>>,
+        item_label: F,
+    ) -> Self
+    where
+        F: Fn(&T) -> LocalizedString + 'static,
+    {
+        Self::new_with_item_source(
+            ItemSource::from_vec(items.into_iter().collect()),
+            selected,
+            Rc::new(item_label),
+        )
+    }
+
+    /// Backed by a reactive [`ListModel<T>`]. Inserts, removes, and reorders
+    /// propagate into the dropdown automatically. If the currently-selected
+    /// value disappears from the model, `selected` becomes `None`.
+    pub fn from_model<F>(model: ListModel<T>, selected: Signal<Option<T>>, item_label: F) -> Self
+    where
+        F: Fn(&T) -> LocalizedString + 'static,
+    {
+        Self::new_with_item_source(ItemSource::from_model(model), selected, Rc::new(item_label))
+    }
+
+    /// Backed by a custom [`ListDataSource`] — for external or paged data.
+    pub fn from_source<S, F>(source: S, selected: Signal<Option<T>>, item_label: F) -> Self
+    where
+        S: ListDataSource<Item = T> + 'static,
+        F: Fn(&T) -> LocalizedString + 'static,
+    {
+        Self::new_with_item_source(
+            ItemSource::from_data_source(source),
+            selected,
+            Rc::new(item_label),
+        )
+    }
+
+    /// Override the display-label extractor. Rarely needed — prefer passing
+    /// `item_label` to the constructor. Useful for the `ComboBox<String>`
+    /// path when you want a non-identity projection.
+    pub fn item_label(mut self, f: impl Fn(&T) -> LocalizedString + 'static) -> Self {
+        self.item_label = Rc::new(f);
+        self
+    }
+
+    /// Custom cell rendering. The closure receives the item and a flag
+    /// indicating whether it is the currently-selected value.
+    ///
+    /// The framework wraps the returned widget with the correct
+    /// `Role::ListBoxOption` accessibility and tap handler, so callers
+    /// do not need to manage a11y or selection dispatch themselves.
+    ///
+    /// **Reactivity.** The `bool` argument is a snapshot at build time.
+    /// If the selection flips after the dropdown is open, the user's
+    /// subtree is not automatically re-rendered; the framework-managed
+    /// highlight background (behind the custom widget) does update, and
+    /// closing and re-opening the dropdown picks up the new state. If
+    /// you need a reactive appearance that tracks selection, close over
+    /// a `Signal<Option<T>>` in your closure and compare against the
+    /// item value inside a `.map()` / `bind_*` on primitives.
+    ///
+    /// **Accessibility.** The wrapper's `set_name(label)` (from
+    /// `item_label`) is what screen readers announce. If the returned
+    /// widget includes its own text nodes (e.g. a bare `TextWidget`), the
+    /// label may be announced twice — one from the wrapper, one from the
+    /// inner text. Wrap primary text nodes in `.a11y_hidden()` to avoid
+    /// duplication, and reserve visible widgets for presentation only.
+    pub fn render_item(mut self, f: impl Fn(&T, bool) -> Box<dyn Widget> + 'static) -> Self {
+        self.render_item = Some(Rc::new(f));
+        self
+    }
+
+    /// Custom renderer for the trigger's *selected value* — the widget shown
+    /// when the combo is closed. The parallel of [`render_item`](Self::render_item)
+    /// for the trigger rather than the dropdown rows.
+    ///
+    /// When set, the closed combo shows `f(&value)` for the current
+    /// selection instead of the plain text label (`item_label`). The
+    /// canonical use is a `FontPicker` rendering the selected family name in
+    /// its own typeface. The subtree is rebuilt whenever the selection
+    /// changes and whenever the locale changes (so a `None`-state
+    /// placeholder re-translates), without rebuilding the whole ComboBox.
+    ///
+    /// **Accessibility.** The rendered subtree is excluded from the
+    /// accessibility tree — the ComboBox's own `accessibility(builder)`
+    /// already announces the selected value via `set_value`, so the custom
+    /// visual can never double-announce. When nothing is selected the
+    /// trigger shows the `placeholder` text.
+    pub fn render_selected(mut self, f: impl Fn(&T) -> Box<dyn Widget> + 'static) -> Self {
+        self.render_selected = Some(Rc::new(f));
+        self
+    }
+
+    /// Register a callback fired when the user commits a selection — by
+    /// tapping a dropdown row or picking one with the keyboard (arrows /
+    /// type-ahead / Home / End). The callback receives the chosen value
+    /// and a live [`EventContext`], so it can run context-bearing actions
+    /// that observing the bound `selected` signal cannot — e.g.
+    /// `ctx.set_locale(...)`, navigation, or opening another overlay.
+    ///
+    /// It fires **only on user-driven commits**, not on external writes
+    /// to the `selected` signal (those are observed via `ctx.effect`).
+    /// The `selected` signal is updated *before* the callback runs.
+    pub fn on_select(mut self, f: impl Fn(&T, &mut EventContext) + 'static) -> Self {
+        self.on_select = Some(Rc::new(f));
+        self
+    }
+
+    /// Maximum number of items shown before the dropdown becomes scrollable.
+    /// Defaults to 8. Clamped to at least 1.
+    pub fn max_visible_items(mut self, n: usize) -> Self {
+        self.max_visible_items = n.max(1);
+        self
+    }
+
+    /// Reset window for keyboard type-ahead. Keystrokes more than `d` apart
+    /// begin a fresh prefix; within `d` they extend it. Defaults to 500 ms,
+    /// matching [`MenuList::type_ahead_timeout`](crate::MenuList::type_ahead_timeout). Pass `Duration::ZERO` to
+    /// treat each keystroke independently.
+    pub fn type_ahead_timeout(mut self, d: Duration) -> Self {
+        self.type_ahead_timeout = d;
+        self
+    }
+
+    /// Placeholder text shown in the trigger when `selected` is `None`.
+    /// Accepts a `tr!(...)` directly (resolved at build); use
+    /// `placeholder_literal` for an
+    /// untranslated string.
+    pub fn placeholder(mut self, text: impl Into<LocalizedString>) -> Self {
+        let ls: LocalizedString = text.into();
+        self.placeholder = ls;
+        self
+    }
+
+    /// Accessible label describing what this combo box is for
+    /// (e.g. "Fruit", "Font family"). Independent of the visible
+    /// placeholder and of the current selection — screen readers
+    /// announce this as the name of the control.
+    pub fn label(mut self, label: impl Into<LocalizedString>) -> Self {
+        let ls: LocalizedString = label.into();
+        self.label = Some(ls);
+        self
+    }
+
+    /// Set the enabled state, statically or reactively. Forwarded to
+    /// the arena at build time.
+    pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self {
+        self.enabled = enabled.into();
+        self
+    }
+
+    /// Pick a Tier-1 design-language variant
+    /// ([`ComboBoxVariant::Outlined`] / `Filled` / `Underline` / `Plain`).
+    /// The active [`ComboBoxStyle`] decides what to do with the hint —
+    /// IntUI's default impl honours `Outlined` (default) and `Plain`;
+    /// a custom impl (Material 3, macOS, etc.) might paint differently.
+    pub fn variant(mut self, variant: ComboBoxVariant) -> Self {
+        self.variant = variant;
+        self
+    }
+
+    /// Override the active [`ComboBoxStyle`] for this widget instance
+    /// only. The default IntUI chrome ([`crate::styles::RecipeComboBoxStyle`])
+    /// reads its tokens from `theme.components.combo_box`; custom impls
+    /// can paint anything they want around the selected-label slot.
+    pub fn style(mut self, style: impl ComboBoxStyle) -> Self {
+        self.style_override = Some(Rc::new(style));
+        self
+    }
+
+    /// Override the selected-value text style (font, size, weight).
+    /// Accepts a `TextStyleRole`, a `TextStyle`, or a `Signal` of either.
+    /// Default (unset) is `TextStyleRole::Body`.
+    pub fn text_style(mut self, style: impl Into<teksilo_core::color_prop::TextStyleProp>) -> Self {
+        self.label_style = Some(style.into());
+        self
+    }
+
+    /// Override the selected-value text color. Accepts `Color`, a role, or
+    /// a `Signal` of either. Default (unset) is enabled-derived
+    /// (`Primary` / `Disabled`); setting this replaces that cascade.
+    pub fn text_role(mut self, color: impl Into<teksilo_core::color_prop::ColorProp>) -> Self {
+        self.text_role_override = Some(color.into());
+        self
+    }
+
+    /// Attach a plain tooltip that appears after a hover delay. The
+    /// tooltip is anchored to the trigger only — with the framework's
+    /// overlay-boundary gate it does not re-trigger while the pointer
+    /// is over the open dropdown's option rows.
+    ///
+    /// Mutually exclusive with [`rich_tooltip`](Self::rich_tooltip) /
+    /// [`rich_tooltip_content`](Self::rich_tooltip_content) /
+    /// [`composite_tooltip`](Self::composite_tooltip) — last call wins.
+    pub fn tooltip(mut self, text: impl Into<LocalizedString>) -> Self {
+        self.tooltip_text = Some(text.into());
+        self.rich_tooltip_source = None;
+        self.composite_tooltip_content = None;
+        self
+    }
+
+    /// Attach a rich tooltip resolved from the app-wide tooltip registry.
+    /// The `key` is looked up via
+    /// [`TooltipRegistry`](crate::tooltip::TooltipRegistry) at build
+    /// time; the resolved body supports inline markup, a shortcut chip,
+    /// and a "more" disclosure. Overrides any previously set tooltip.
+    pub fn rich_tooltip(mut self, key: impl Into<String>) -> Self {
+        self.rich_tooltip_source = Some(crate::tooltip::RichTooltipSource::Key(key.into()));
+        self.tooltip_text = None;
+        self.composite_tooltip_content = None;
+        self
+    }
+
+    /// Attach a rich tooltip driven by inline
+    /// [`TooltipContent`](crate::tooltip::TooltipContent) — for one-off
+    /// tooltips that aren't worth registering centrally. Overrides any
+    /// previously set tooltip.
+    pub fn rich_tooltip_content(mut self, content: crate::tooltip::TooltipContent) -> Self {
+        self.rich_tooltip_source = Some(crate::tooltip::RichTooltipSource::Content(content));
+        self.tooltip_text = None;
+        self.composite_tooltip_content = None;
+        self
+    }
+
+    /// Attach a composite tooltip — third tier, hosting an arbitrary
+    /// widget tree (tabbed sections, charts, conditional rows). Promotes
+    /// to a focusable `Role::Dialog` after the standard dwell. Overrides
+    /// any plain or rich tooltip previously set.
+    pub fn composite_tooltip(mut self, content: impl Widget + 'static) -> Self {
+        self.composite_tooltip_content = Some(Box::new(content));
+        self.tooltip_text = None;
+        self.rich_tooltip_source = None;
+        self
+    }
+
+    /// Boxed variant of [`composite_tooltip`](Self::composite_tooltip).
+    /// Used by wrapper widgets (e.g. `ThemeSwitcher`) that store a
+    /// `Box<dyn Widget>` and forward it through.
+    pub(crate) fn composite_tooltip_boxed(mut self, content: Box<dyn Widget>) -> Self {
+        self.composite_tooltip_content = Some(content);
+        self.tooltip_text = None;
+        self.rich_tooltip_source = None;
+        self
+    }
+}
+
+/// Searchable-mode builders. The search field is a `TextInput`, which
+/// shares the `RichTextEditor` engine and therefore the `teksilo-text`
+/// dependency.
+impl<T: Clone + PartialEq + 'static> ComboBox<T> {
+    /// Show a search field at the top of the dropdown panel and filter
+    /// the list live against the user's query. When `true`, items are
+    /// matched by the closure passed to [`filter`](Self::filter), or —
+    /// if no filter is set — by a case-insensitive substring match on
+    /// the [`item_label`](Self::item_label).
+    ///
+    /// The search input becomes a child of the dropdown panel only,
+    /// not of the trigger: the closed combo box looks identical
+    /// whether searchable or not.
+    ///
+    /// The query signal is created internally. Use
+    /// [`search_query`](Self::search_query) to supply your own if you
+    /// want to observe or drive the query externally.
+    pub fn searchable(mut self, enabled: bool) -> Self {
+        self.searchable = enabled;
+        if !enabled {
+            self.search_query = None;
+        }
+        self
+    }
+
+    /// Bind the search field to an external `Signal<String>`. Implies
+    /// [`searchable(true)`](Self::searchable). Useful for observing or
+    /// programmatically setting the query from outside the widget
+    /// (e.g. a "Clear" button, persistence across sessions).
+    pub fn search_query(mut self, query: Signal<String>) -> Self {
+        self.search_query = Some(query);
+        self.searchable = true;
+        self
+    }
+
+    /// Custom match predicate for searchable mode. Called on every
+    /// visible-item pass with the current query string (as typed, not
+    /// normalized) and a reference to the item; return `true` to keep
+    /// the item in the filtered list. Only consulted when
+    /// [`searchable`](Self::searchable) is `true`. Ignored otherwise.
+    pub fn filter(mut self, f: impl Fn(&str, &T) -> bool + 'static) -> Self {
+        self.filter = Some(Rc::new(f));
+        self
+    }
+}
+
+impl<T: Clone + PartialEq + 'static> std::fmt::Debug for ComboBox<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ComboBox")
+            .field("items", &self.source.len())
+            .field("enabled", &self.enabled.get())
+            .finish()
+    }
+}
+
+impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
+    fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+        let self_id = ctx.self_id();
+        // Forward the enabled state to the arena; see IconButton.
+        ctx.enabled_when(self_id, self.enabled.clone());
+        let effective_enabled = ctx.effective_enabled_signal(self_id);
+
+        // Refresh the four interaction signals every build. The three
+        // non-disabled ones start in their resting state; `is_disabled`
+        // now mirrors the arena's effective enabled-state reactively
+        // (replaced the build-time snapshot — see IconButton). We
+        // wire `effective_enabled.not()` into `self.is_disabled` so
+        // existing observers keep working without rewiring.
+        self.is_open.set(false);
+        self.is_hovered.set(false);
+        self.is_focused.set(false);
+        // Drive `self.is_disabled` from the arena's effective_enabled.
+        // Replace with a derived signal — but `self.is_disabled` is
+        // owned by the widget and may have observers, so push the
+        // current value and register an effect to keep it in sync.
+        self.is_disabled.set(!effective_enabled.get());
+        {
+            let is_disabled = self.is_disabled.clone();
+            ctx.effect(&effective_enabled, move |on| {
+                let want = !*on;
+                if is_disabled.get() != want {
+                    is_disabled.set(want);
+                }
+            });
+        }
+
+        // Observe model changes so the dropdown panel rebuilds when the
+        // backing data mutates, and so selection is cleared when the
+        // currently-selected value disappears from the model.
+        //
+        // Trigger-level rebuild is NOT required: the trigger's label binds
+        // via `self.selected.map(...)`, which re-fires whenever `selected`
+        // itself changes. The observer already clears `selected` when the
+        // value vanishes, so the derived label updates automatically.
+        let panel_version = ctx.signal(0_u64);
+        let pv = panel_version.clone();
+        let observe_handle = (self.source.observe)(Box::new({
+            let source = self.source.clone();
+            let selected = self.selected.clone();
+            let hint = self.selected_index_hint.clone();
+            move |_change: &DataChange| {
+                // If the currently-selected value is no longer present
+                // in the model, clear selection. Works for Reset,
+                // ItemsRemoved, and ItemUpdated. The hint is also
+                // invalidated unconditionally: any mutation may have
+                // shifted the index of the selected value.
+                hint.set(None);
+                if let Some(cur) = selected.get()
+                    && resolve_index(&source, &cur, &hint).is_none()
+                {
+                    selected.set(None);
+                }
+                pv.set(pv.get().wrapping_add(1));
+            }
+        }));
+        ctx.own_handle(observe_handle);
+
+        // Derive label text from selected signal + source + locale.
+        // Uses `zip` so the label re-computes on both selection change
+        // and locale switch, enabling live re-translation.
+        let source_for_label = self.source.clone();
+        let item_label_for_trigger = self.item_label.clone();
+        let placeholder = self.placeholder.clone();
+        let hint_for_label = self.selected_index_hint.clone();
+        let locale_signal = ctx.locale_signal();
+        let label_text = self
+            .selected
+            .zip(&locale_signal)
+            .map(move |(sel, _)| match sel {
+                Some(v) => match resolve_index(&source_for_label, v, &hint_for_label) {
+                    Some(_) => (item_label_for_trigger)(v).resolve_now(),
+                    None => placeholder.resolve_now(),
+                },
+                None => placeholder.resolve_now(),
+            });
+
+        // Label colour follows the disabled signal — the chrome style
+        // owns bg / border / focus ring; the widget owns its label.
+        let text_role: teksilo_core::color_prop::ColorProp = match &self.text_role_override {
+            Some(c) => c.clone(),
+            None => self
+                .is_disabled
+                .map(|d| {
+                    if *d {
+                        TextRole::Disabled
+                    } else {
+                        TextRole::Primary
+                    }
+                })
+                .into(),
+        };
+
+        // Build the selected-value subtree the style will host. Either the
+        // default reactive text label, or — when `render_selected` is set —
+        // a custom trigger view (`SelectedContent`) rebuilt on each
+        // selection change. Both are excluded from the accessibility tree:
+        // the combo box's own `accessibility(builder)` already announces the
+        // selected value via `set_value`, so an exposed inner text node
+        // would double-announce.
+        let label_id = if let Some(render) = self.render_selected.clone() {
+            ctx.add(
+                SelectedContent {
+                    selected: self.selected.clone(),
+                    render,
+                    placeholder: self.placeholder.clone(),
+                    placeholder_style: self.label_style.clone(),
+                    text_role: text_role.clone(),
+                    child: None,
+                }
+                .access_exclude_subtree(),
+            )
+        } else {
+            let mut label = TextWidget::new(lit!(""))
+                .text(label_text)
+                .color(text_role)
+                .single_line()
+                .a11y_hidden();
+            label = match &self.label_style {
+                Some(style) => label.style(style.clone()),
+                None => label.style(TextStyleRole::Body),
+            };
+            ctx.add(label)
+        };
+
+        // Resolve the active style: per-call override > theme slot >
+        // built-in `RecipeComboBoxStyle` default. The style produces
+        // the entire trigger chrome (bg + border + padding + divider +
+        // chevron + min-height) around our `selected_label`.
+        let style: SharedComboBoxStyle = self
+            .style_override
+            .clone()
+            .or_else(|| ctx.theme().style_slots.combo_box.clone())
+            .unwrap_or_else(|| Rc::new(crate::styles::RecipeComboBoxStyle::default()));
+
+        let cfg = ComboBoxStyleConfig {
+            selected_label: label_id,
+            is_open: self.is_open.clone(),
+            is_hovered: self.is_hovered.clone(),
+            // `:focus-visible`: keyboard-only focus ring (gate raw focus on
+            // the input-modality signal).
+            is_focused: self.is_focused.and(&ctx.focus_visible()),
+            is_disabled: self.is_disabled.clone(),
+            variant: self.variant,
+        };
+        let root_id = style.make_body(&cfg, ctx);
+        self.root_child_id = Some(root_id);
+
+        // Attach a tooltip if configured. The three setters
+        // (`tooltip`, `rich_tooltip*`, `composite_tooltip`) are mutually
+        // exclusive — every setter clears the other two, so exactly one
+        // branch runs. The anchor is the trigger chrome (`root_id`); the
+        // framework's overlay-boundary gate keeps the tooltip from
+        // leaking onto the open dropdown's rows.
+        if let Some(content) = self.composite_tooltip_content.take() {
+            let delay = ctx.theme().motion.tooltip_delay_heavy;
+            crate::tooltip::attach_composite_tooltip_boxed(ctx, root_id, content, delay);
+        } else if let Some(source) = self.rich_tooltip_source.clone() {
+            let delay = ctx.theme().motion.tooltip_delay;
+            crate::tooltip::attach_rich_tooltip_source(ctx, root_id, source, delay);
+        } else if let Some(tooltip_text) = self.tooltip_text.clone() {
+            let tooltip_widget = crate::tooltip::TooltipWidget::new(tooltip_text);
+            let tooltip_id = ctx.add(tooltip_widget);
+            let delay = ctx.theme().motion.tooltip_delay;
+            ctx.attach_tooltip(root_id, tooltip_id, delay);
+        }
+
+        // Pre-create the dropdown panel (dormant until opened). On
+        // rebuild, first tear down the previous panel subtree — it was
+        // inserted as an arena root via `ctx.add(..)` + `set_dormant`,
+        // so the framework's rebuild path (which only destroys this
+        // widget's direct arena children) would otherwise leave it
+        // behind as an orphan on every model mutation.
+        if let Some(old_id) = self.dropdown_content_id.take() {
+            ctx.destroy_subtree(old_id);
+        }
+
+        // Searchable mode: allocate the query signal lazily so toggling
+        // `searchable(true)` → `false` between rebuilds doesn't keep a
+        // stale signal alive, while `true` → `true` preserves the
+        // in-progress query across model mutations.
+        let search_query = if self.searchable {
+            let existing = self.search_query.clone();
+            let q = existing.unwrap_or_else(|| Signal::new(String::new()));
+            self.search_query = Some(q.clone());
+            Some(q)
+        } else {
+            self.search_query = None;
+            None
+        };
+
+        // Shared slot carrying the search `TextInput`'s widget id —
+        // populated by the panel during its own `build` so the open
+        // path below can `ctx.request_focus(..)` the search field as
+        // soon as the overlay activates.
+        let search_input_slot: Rc<Cell<Option<WidgetId>>> = Rc::new(Cell::new(None));
+        let dropdown_panel = DropdownPanel {
+            source: self.source.clone(),
+            selected: self.selected.clone(),
+            item_label: self.item_label.clone(),
+            render_item: self.render_item.clone(),
+            on_select: self.on_select.clone(),
+            max_visible_items: self.max_visible_items,
+            version: panel_version,
+            search_query,
+            filter: self.filter.clone(),
+            search_input_slot: search_input_slot.clone(),
+            root_child_id: None,
+        };
+        let dropdown_id = ctx.add(dropdown_panel);
+        self.dropdown_content_id = Some(dropdown_id);
+        ctx.set_dormant(dropdown_id);
+        // Make `is_open` the single source of truth for the panel's
+        // activation. The panel is reported by `children()` (for hit-test /
+        // a11y / teardown) but is an orphan arena root opened as an overlay;
+        // without this binding a framework re-activation (e.g. the combo
+        // reappearing from a `visible_when` collapse inside a `Toolbar`) can
+        // leave the panel active while closed, painting ghost option rows. The
+        // per-pass visibility reconciliation dormants it again whenever the
+        // combo is not open.
+        ctx.visible_when(dropdown_id, self.is_open.clone());
+
+        // --- Handlers ---
+        let self_id = ctx.self_id();
+        let is_open_h = self.is_open.clone();
+        let is_hovered_h = self.is_hovered.clone();
+        let is_focused_h = self.is_focused.clone();
+
+        // Shared dismiss callback — invoked by the overlay manager
+        // whenever the dropdown is dismissed, regardless of path
+        // (our own Enter/Escape handlers, framework-level
+        // EscapeOrClickOutside, pointer-leave, cascade). Flips
+        // `is_open` back to false so `accessibility(builder)` stays
+        // truthful about the popup state.
+        let dismiss_callback: OverlayDismissCallback = {
+            let is_open = self.is_open.clone();
+            Rc::new(move || {
+                if is_open.get() {
+                    is_open.set(false);
+                }
+            })
+        };
+
+        // Helper to open the overlay — used by tap and several key handlers.
+        let open_overlay = {
+            let is_open = self.is_open.clone();
+            let dismiss_callback = dismiss_callback.clone();
+            let search_input_slot = search_input_slot.clone();
+            Rc::new(move |ctx: &mut EventContext| {
+                is_open.set(true);
+                ctx.activate(dropdown_id);
+                ctx.show_overlay(OverlayRequest {
+                    content_id: dropdown_id,
+                    anchor: self_id,
+                    placement: OverlayPlacement::BelowPreferred,
+                    dismiss: DismissBehavior::EscapeOrClickOutside,
+                    layer: OverlayLayer::InTree,
+                    parent_overlay: None,
+                    on_dismiss: Some(dismiss_callback.clone()),
+                    fade_duration: None,
+                });
+                // Searchable mode: land focus in the search field so
+                // the user can start typing immediately after opening.
+                if let Some(input_id) = search_input_slot.get() {
+                    ctx.request_focus(input_id);
+                }
+            })
+        };
+
+        // Framework gates events on `arena.is_enabled` — no per-
+        // handler enabled snapshot guards anymore.
+        let handler_set = HandlerSet::new()
+            .on_tap({
+                let open_overlay = open_overlay.clone();
+                move |_pos, ctx: &mut EventContext| {
+                    open_overlay(ctx);
+                }
+            })
+            .on_hover({
+                let is_open = is_open_h.clone();
+                let is_hovered = is_hovered_h.clone();
+                move |entered: bool, _ctx: &mut EventContext| {
+                    // Don't churn the hovered signal while the dropdown
+                    // is open — the bg stays in its open colour until
+                    // the overlay dismisses.
+                    if is_open.get() {
+                        return;
+                    }
+                    is_hovered.set(entered);
+                }
+            })
+            .on_key({
+                let is_open = self.is_open.clone();
+                let selected = self.selected.clone();
+                let source = self.source.clone();
+                let item_label_for_keys = self.item_label.clone();
+                let hint = self.selected_index_hint.clone();
+                let open_overlay = open_overlay.clone();
+                // PageUp/PageDown step by one visible page (clamped to 1
+                // so a `max_visible_items(1)` combo still moves).
+                let page_size = self.max_visible_items.max(1);
+                // Type-ahead buffer: (prefix, last_keystroke_time)
+                let typeahead: Rc<RefCell<(String, Instant)>> =
+                    Rc::new(RefCell::new((String::new(), Instant::now())));
+                let type_ahead_timeout = self.type_ahead_timeout;
+                // Helper: set selection to the item at `index`, update the
+                // cached hint, and fire `on_select` (with the live
+                // `EventContext`) in one shot — mirroring the dropdown-row
+                // tap path so keyboard and mouse commits are equivalent.
+                let on_select_for_keys = self.on_select.clone();
+                let pick_at = {
+                    let source = source.clone();
+                    let selected = selected.clone();
+                    let hint = hint.clone();
+                    Rc::new(move |index: usize, ctx: &mut EventContext| {
+                        if let Some(v) = source.get(index) {
+                            hint.set(Some(index));
+                            selected.set(Some(v.clone()));
+                            if let Some(cb) = &on_select_for_keys {
+                                cb(&v, ctx);
+                            }
+                        }
+                    })
+                };
+                move |event: &WidgetEvent, ctx: &mut EventContext| -> EventResponse {
+                    match event {
+                        WidgetEvent::KeyDown {
+                            key: Key::Enter | Key::Space,
+                            ..
+                        } => {
+                            if is_open.get() {
+                                is_open.set(false);
+                                ctx.dismiss_all_except_hosts();
+                            } else {
+                                open_overlay(ctx);
+                            }
+                            EventResponse::Handled
+                        }
+                        WidgetEvent::KeyDown {
+                            key: Key::Escape, ..
+                        } => {
+                            if is_open.get() {
+                                is_open.set(false);
+                                ctx.dismiss_all_except_hosts();
+                                EventResponse::Handled
+                            } else {
+                                EventResponse::Ignored
+                            }
+                        }
+                        // Tab is deliberately *not* handled here. It used to be:
+                        // the arm consumed the keystroke, closed the dropdown
+                        // and left focus sitting on the trigger, so a second Tab
+                        // was needed to actually move on. The framework now
+                        // dismisses any non-modal overlay the keyboard walks out
+                        // of, which covers this widget too — so letting Tab fall
+                        // through to the ordinary focus cycle both closes the
+                        // popup and advances in one press, the way a combobox is
+                        // supposed to behave as a normal tab stop.
+                        WidgetEvent::KeyDown {
+                            key: Key::ArrowDown,
+                            ..
+                        } => {
+                            if !is_open.get() {
+                                open_overlay(ctx);
+                            }
+                            let n = source.len();
+                            if n == 0 {
+                                return EventResponse::Handled;
+                            }
+                            // Treat "no selection" as an implicit cursor at
+                            // index 0 — ArrowDown advances to index 1 from
+                            // nothing (matching the framework convention
+                            // across widgets that keyboard-navigate lists).
+                            let current_idx = selected
+                                .get()
+                                .as_ref()
+                                .and_then(|v| resolve_index(&source, v, &hint))
+                                .unwrap_or(0);
+                            let target = (current_idx + 1) % n;
+                            pick_at(target, ctx);
+                            EventResponse::Handled
+                        }
+                        WidgetEvent::KeyDown {
+                            key: Key::ArrowUp, ..
+                        } => {
+                            if !is_open.get() {
+                                open_overlay(ctx);
+                            }
+                            let n = source.len();
+                            if n == 0 {
+                                return EventResponse::Handled;
+                            }
+                            let current_idx = selected
+                                .get()
+                                .as_ref()
+                                .and_then(|v| resolve_index(&source, v, &hint))
+                                .unwrap_or(0);
+                            let target = if current_idx == 0 {
+                                n - 1
+                            } else {
+                                current_idx - 1
+                            };
+                            pick_at(target, ctx);
+                            EventResponse::Handled
+                        }
+                        WidgetEvent::KeyDown { key: Key::Home, .. } => {
+                            if source.len() == 0 {
+                                return EventResponse::Handled;
+                            }
+                            pick_at(0, ctx);
+                            EventResponse::Handled
+                        }
+                        WidgetEvent::KeyDown { key: Key::End, .. } => {
+                            let n = source.len();
+                            if n == 0 {
+                                return EventResponse::Handled;
+                            }
+                            pick_at(n - 1, ctx);
+                            EventResponse::Handled
+                        }
+                        // PageDown / PageUp — advance or retreat selection
+                        // by one page, where a page is `max_visible_items`
+                        // rows. Mirrors the standard combo-box keyboard
+                        // convention and also gets the visible range to
+                        // follow via `register_scroll_into_view`.
+                        WidgetEvent::KeyDown {
+                            key: Key::PageDown, ..
+                        } => {
+                            let n = source.len();
+                            if n == 0 {
+                                return EventResponse::Handled;
+                            }
+                            if !is_open.get() {
+                                open_overlay(ctx);
+                            }
+                            let current_idx = selected
+                                .get()
+                                .as_ref()
+                                .and_then(|v| resolve_index(&source, v, &hint))
+                                .unwrap_or(0);
+                            let target = current_idx.saturating_add(page_size).min(n - 1);
+                            pick_at(target, ctx);
+                            EventResponse::Handled
+                        }
+                        WidgetEvent::KeyDown {
+                            key: Key::PageUp, ..
+                        } => {
+                            let n = source.len();
+                            if n == 0 {
+                                return EventResponse::Handled;
+                            }
+                            if !is_open.get() {
+                                open_overlay(ctx);
+                            }
+                            let current_idx = selected
+                                .get()
+                                .as_ref()
+                                .and_then(|v| resolve_index(&source, v, &hint))
+                                .unwrap_or(0);
+                            let target = current_idx.saturating_sub(page_size);
+                            pick_at(target, ctx);
+                            EventResponse::Handled
+                        }
+                        // Type-ahead: letter/character keys jump to matching item.
+                        WidgetEvent::KeyDown { key, .. } if key.to_char().is_some() => {
+                            let ch = key.to_char().unwrap();
+                            let mut ta = typeahead.borrow_mut();
+                            let now = Instant::now();
+                            // Reset the prefix once keystrokes fall outside the
+                            // type-ahead window.
+                            if now.duration_since(ta.1) > type_ahead_timeout {
+                                ta.0.clear();
+                            }
+                            // Full Unicode lowercasing so accented input (e.g.
+                            // 'É') matches accented labels — `to_ascii_lowercase`
+                            // is a no-op on non-ASCII and would never match.
+                            ta.0.extend(ch.to_lowercase());
+                            ta.1 = now;
+                            let prefix = ta.0.clone();
+                            drop(ta);
+
+                            // Find first item whose label starts with the prefix
+                            // (case-insensitive).
+                            let n = source.len();
+                            for i in 0..n {
+                                if let Some(v) = source.get(i) {
+                                    let label = (item_label_for_keys)(&v).resolve_now();
+                                    if label.to_lowercase().starts_with(&prefix) {
+                                        pick_at(i, ctx);
+                                        break;
+                                    }
+                                }
+                            }
+                            EventResponse::Handled
+                        }
+                        _ => EventResponse::Ignored,
+                    }
+                }
+            })
+            .on_focus(move |gained: bool, _ctx: &mut EventContext| {
+                is_focused_h.set(gained);
+            })
+            // `accessibility` advertises `Action::Click`; the dispatcher
+            // routes an AT / automation click here rather than
+            // synthesizing a pointer tap, so the dropdown must be opened
+            // explicitly. Every platform adapter funnels activation
+            // through `Click` (AT-SPI `DoAction(0)`, Windows Invoke,
+            // macOS `accessibilityPerformPress`) — none sends
+            // `Expand`/`Collapse` — so this is the only AT open path.
+            .on_access_action({
+                let open_overlay = open_overlay.clone();
+                move |action, ctx: &mut EventContext| {
+                    if action == teksilo_core::accesskit::Action::Click {
+                        open_overlay(ctx);
+                        EventResponse::Handled
+                    } else {
+                        EventResponse::Ignored
+                    }
+                }
+            })
+            // Focus walker skips disabled subtrees on its own.
+            .focusable(true)
+            .cursor(CursorIcon::Pointer);
+
+        ctx.apply_self_handlers(handler_set);
+
+        // Return BOTH the trigger root AND the dormant dropdown as
+        // children so the framework links `dropdown_id` under this
+        // widget in the arena instead of leaving it an orphan root.
+        // Hit-test walks all arena roots; an orphan dormant subtree
+        // can leak into hit-tests at fallback bounds and intercept
+        // clicks meant for siblings. See popover_widget.rs for the
+        // same pattern.
+        vec![root_id, dropdown_id]
+    }
+
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        ctx: &LayoutContext,
+    ) -> teksilo_core::widget::LayoutResponse {
+        let min_height = crate::styles::recipe_combo_box_style::COMBO_BOX_HEIGHT;
+        const MIN_WIDTH: f32 = 120.0;
+        // Rigid: size to content (clamped to the combo's minimum), no shrink
+        // (see Button's note). Wrap in `Shrinkable` to opt into compression.
+        match self.root_child_id {
+            Some(id) => {
+                let child_size = ctx
+                    .child_size(id, proposal)
+                    .unwrap_or_else(|| proposal.resolve(0.0, 0.0));
+                Size::new(
+                    child_size.width.max(MIN_WIDTH),
+                    child_size.height.max(min_height),
+                )
+            }
+            None => proposal.resolve(MIN_WIDTH, min_height),
+        }
+        .into()
+    }
+
+    fn place_children(
+        &self,
+        bounds: Rect,
+        _proposal: SizeProposal,
+        children: &mut [WidgetPlacement],
+        _ctx: &LayoutContext,
+    ) {
+        // The trigger fills our bounds; the dropdown's bounds are
+        // owned by the overlay manager when shown (`position_overlays`),
+        // so we zero-size it here.
+        for child in children.iter_mut() {
+            if Some(child.id) == self.dropdown_content_id {
+                child.size = teksilo_canvas::Size::ZERO;
+                continue;
+            }
+            child.origin = bounds.origin();
+            child.size = bounds.size();
+        }
+    }
+
+    fn accessibility(&self, builder: &mut AccessNodeBuilder) {
+        builder.set_role(teksilo_core::accesskit::Role::ComboBox);
+        builder.set_has_popup(teksilo_core::accesskit::HasPopup::Listbox);
+
+        if let Some(name) = self.label.as_ref() {
+            builder.set_name(name.resolve_now());
+        }
+
+        // A11y gap #3: use `placeholder` when nothing is selected, `value`
+        // when something is. The two are distinct ARIA properties; screen
+        // readers announce placeholders as hints rather than current values.
+        match self.selected.get() {
+            Some(v) => {
+                let label = (self.item_label)(&v).resolve_now();
+                if !label.is_empty() {
+                    builder.set_value(label);
+                }
+            }
+            None => {
+                let ph = self.placeholder.resolve_now();
+                if !ph.is_empty() {
+                    builder.set_placeholder(ph);
+                }
+            }
+        }
+
+        builder.set_expanded(self.is_open.get());
+
+        // Only set aria-controls when the popup is open — the listbox node is
+        // absent from the tree when closed, and pointing at a missing node
+        // causes AT crashes (VoiceOver unwrap in linked_ui_elements).
+        if self.is_open.get()
+            && let Some(popup_id) = self.dropdown_content_id
+        {
+            builder.push_controlled(widget_id_to_node_id(popup_id));
+        }
+
+        // ARIA combobox pattern: when the popup is a filtered list, mark
+        // `aria-autocomplete="list"` so assistive tech announces the
+        // filter behavior. Only applied in searchable mode.
+        if self.searchable {
+            builder.set_auto_complete(teksilo_core::accesskit::AutoComplete::List);
+        }
+
+        // Always advertise actions — framework gates them at dispatch
+        // via `arena.is_enabled`, and the a11y walker handles
+        // `set_disabled` from the same arena state.
+        builder.add_action(teksilo_core::accesskit::Action::Click);
+        builder.add_action(teksilo_core::accesskit::Action::Focus);
+    }
+
+    fn children(&self) -> Vec<WidgetId> {
+        let mut out = Vec::new();
+        if let Some(id) = self.root_child_id {
+            out.push(id);
+        }
+        if let Some(id) = self.dropdown_content_id {
+            out.push(id);
+        }
+        out
+    }
+}
+
+/// Trigger-content wrapper used when the caller supplies
+/// [`ComboBox::render_selected`]. Rebuilds its single child whenever the
+/// selection (or locale) changes, so the custom selected-value view tracks
+/// the selection without rebuilding the whole ComboBox. Laid out to fill the
+/// slot the [`ComboBoxStyle`] gives it, exactly like the default text label.
+struct SelectedContent<T: Clone + PartialEq + 'static> {
+    selected: Signal<Option<T>>,
+    render: Rc<dyn Fn(&T) -> Box<dyn Widget>>,
+    placeholder: LocalizedString,
+    placeholder_style: Option<teksilo_core::color_prop::TextStyleProp>,
+    text_role: teksilo_core::color_prop::ColorProp,
+    child: Option<WidgetId>,
+}
+
+impl<T: Clone + PartialEq + 'static> std::fmt::Debug for SelectedContent<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SelectedContent").finish_non_exhaustive()
+    }
+}
+
+impl<T: Clone + PartialEq + 'static> Widget for SelectedContent<T> {
+    fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+        use teksilo_core::binding::BindingLevel;
+        // Rebuild on selection change (new value → new custom view) and on
+        // locale change (so the `None`-state placeholder re-translates).
+        self.selected
+            .bind_to(ctx.self_id(), ctx.binding_registry(), BindingLevel::Rebuild);
+        ctx.locale_signal()
+            .bind_to(ctx.self_id(), ctx.binding_registry(), BindingLevel::Rebuild);
+
+        let child = match self.selected.get() {
+            Some(v) => ctx.add_boxed((self.render)(&v)),
+            None => {
+                let mut ph = TextWidget::new(self.placeholder.clone())
+                    .color(self.text_role.clone())
+                    .single_line();
+                ph = match &self.placeholder_style {
+                    Some(style) => ph.style(style.clone()),
+                    None => ph.style(TextStyleRole::Body),
+                };
+                ctx.add(ph)
+            }
+        };
+        self.child = Some(child);
+        vec![child]
+    }
+
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        ctx: &LayoutContext,
+    ) -> teksilo_core::widget::LayoutResponse {
+        self.child
+            .and_then(|id| ctx.child_size(id, proposal))
+            .unwrap_or_else(|| proposal.resolve(0.0, 0.0))
+            .into()
+    }
+
+    fn place_children(
+        &self,
+        bounds: Rect,
+        _proposal: SizeProposal,
+        children: &mut [WidgetPlacement],
+        _ctx: &LayoutContext,
+    ) {
+        for child in children.iter_mut() {
+            child.origin = bounds.origin();
+            child.size = bounds.size();
+        }
+    }
+
+    fn children(&self) -> Vec<WidgetId> {
+        self.child.into_iter().collect()
+    }
+}

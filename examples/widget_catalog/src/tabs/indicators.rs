@@ -4,13 +4,13 @@
 //! Indicators tab — read-only status: ProgressBar, Spinner, Link, Badge, Avatar.
 //!
 //! `classic()` constructs every widget with imperative builder calls
-//! (`Type::new().method(...)`). `bati()` constructs the *same* widget
-//! tree via the `bati!` macro DSL so the toggle visibly proves the two
+//! (`Type::new().method(...)`). `teksu()` constructs the *same* widget
+//! tree via the `teksu!` macro DSL so the toggle visibly proves the two
 //! authoring styles produce identical output.
 
-use bastyde::prelude::*;
-use bastyde::tokens::Orientation;
-use bastyde::widgets::{
+use teksilo::prelude::*;
+use teksilo::tokens::Orientation;
+use teksilo::widgets::{
     Avatar, AvatarPresence, AvatarShape, AvatarSize, Badge, Divider, FixedSize, Link, ProgressBar,
     Spinner, TextWidget, VStack, Wrap,
 };
@@ -110,15 +110,15 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     )
 }
 
-// ── bati! DSL version ──────────────────────────────────────────────────
+// ── teksu! DSL version ──────────────────────────────────────────────────
 //
-// Same widget tree as `classic`, expressed in bati! syntax. The block
+// Same widget tree as `classic`, expressed in teksu! syntax. The block
 // shape is `Type::ctor(args) { method: value … bare_child … }` per the
-// bati! reference. Children of a stack are written as bare expressions
+// teksu! reference. Children of a stack are written as bare expressions
 // (UpperCamel calls) or via the `child:` property for free functions
 // returning Widget.
-pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
-    bati!(ctx => VStack {
+pub fn teksu(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
+    teksu!(ctx => VStack {
             spacing: 20.0
 
             // header (title + refs)

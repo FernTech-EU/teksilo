@@ -3,14 +3,14 @@
 
 # SettingsBundleError
 
-`SettingsBundle` — declarative configuration for the bastyde-app
+`SettingsBundle` — declarative configuration for the teksilo-app
 integration.
 
-`BastydeAppBuilder::settings(bundle)` consumes a `SettingsBundle`,
+`TeksiloAppBuilder::settings(bundle)` consumes a `SettingsBundle`,
 opens the requested services against the app's `AppPaths`, and
 registers each one in the application's `app_state` registry so it
 is reachable from any handler via the `SettingsExt` trait
-(`use bastyde_settings::SettingsExt;`).
+(`use teksilo_settings::SettingsExt;`).
 
 ## What's in the bundle
 
@@ -25,12 +25,12 @@ Anything that needs an app-defined item type (recently-opened
 projects/files, color palettes, saved searches) is **not** in the
 bundle. Apps construct an `MruList<T>` for each
 such collection and register it themselves via
-`BastydeAppBuilder::app_state(handle)`.
+`TeksiloAppBuilder::app_state(handle)`.
 
 ## Example
 
 ```ignore
-use bastyde_settings::{AppPaths, SettingsBundle};
+use teksilo_settings::{AppPaths, SettingsBundle};
 use std::time::Duration;
 
 let paths = AppPaths::for_testing(std::env::temp_dir());
@@ -48,7 +48,7 @@ let opened = SettingsBundle::new()
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_settings/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_settings/index.html)
 
 ## `pub enum SettingsBundleError`
 
@@ -69,7 +69,7 @@ Declarative configuration for the persistence services an app
 wants installed.
 
 ```
-use bastyde_settings::SettingsBundle;
+use teksilo_settings::SettingsBundle;
 use std::time::Duration;
 
 let bundle = SettingsBundle::new()

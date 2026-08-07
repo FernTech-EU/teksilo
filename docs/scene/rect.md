@@ -33,10 +33,10 @@ or event handlers, embed a full widget with `Scene::add_widget`.
 ## Example
 
 ```ignore
-use bastyde_scene::{SceneModel, RectItem};
-use bastyde_canvas::{Point, Rect};
-use bastyde_tokens::Color;
-use bastyde_i18n::lit;
+use teksilo_scene::{SceneModel, RectItem};
+use teksilo_canvas::{Point, Rect};
+use teksilo_tokens::Color;
+use teksilo_i18n::lit;
 
 let model = SceneModel::new();
 
@@ -56,7 +56,7 @@ model.add_item(item, Point::new(40.0, 40.0));
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_scene/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_scene/index.html)
 
 ## `pub struct RectItem`
 

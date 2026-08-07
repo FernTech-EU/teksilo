@@ -29,7 +29,7 @@ the lazy placeholder are wired one way everywhere:
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/index.html)
 
 ## `pub enum ActivateOn`
 
@@ -83,7 +83,7 @@ pub enum DragTransferMode { /* variants */ }
 
 The public, generic drag payload every data-view row (or selected set)
 emits. It occupies the single typed slot of a
-`bastyde_core::drag_payload::DragPayload` and serves both audiences:
+`teksilo_core::drag_payload::DragPayload` and serves both audiences:
 
 - the origin view's own erased classifier reads `source` +
   `rows` to recognise a same-view reorder;

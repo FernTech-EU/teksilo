@@ -10,18 +10,18 @@ authors.workspace = true
 publish = false
 
 [dependencies]
-bastyde = { workspace = true, features = [
+teksilo = { workspace = true, features = [
     "automation",
     "system-emoji",
     "telemetry",
     "theme-material3",
 ] }
-bastyde-charts = { workspace = true }
-bastyde-scene = { workspace = true }
-bastyde-telemetry = { workspace = true }
+teksilo-charts = { workspace = true }
+teksilo-scene = { workspace = true }
+teksilo-telemetry = { workspace = true }
 jiff = { workspace = true }
 
 [dev-dependencies]
-bastyde-render = { workspace = true }
+teksilo-render = { workspace = true }
 wgpu = { workspace = true }
 pollster = { workspace = true }

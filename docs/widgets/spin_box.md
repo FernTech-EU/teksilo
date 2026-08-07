@@ -67,7 +67,7 @@ no separate a11y nodes.
 # Example
 
 ```ignore
-use bastyde::widgets::{SpinBox, WrapMode};
+use teksilo::widgets::{SpinBox, WrapMode};
 
 let font_size = ctx.signal(12_i32);
 ctx.add(
@@ -93,7 +93,7 @@ ctx.add(
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/spin_box/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/spin_box/index.html)
 
 ## `pub enum WrapMode`
 
@@ -178,7 +178,7 @@ pub struct SpinBox<T: SpinValue> { /* fields */ }
 Construct a new SpinBox bound to `value` with the given
 inclusive range. `min` must be ≤ `max`.
 
-#### `pub fn style(mut self, style: impl bastyde_core::styles::SpinBoxStyle) -> Self`
+#### `pub fn style(mut self, style: impl teksilo_core::styles::SpinBoxStyle) -> Self`
 
 Per-call style override. Higher precedence than the theme-wide
 `style_slots.spin_box` slot.
@@ -250,8 +250,8 @@ and field from overlapping). Default: 120 dp, matching Qt
 `QSpinBox` sizeHint and Int UI form density.
 
 ```rust
-# use bastyde_widgets::SpinBox;
-# use bastyde_core::signal::Signal;
+# use teksilo_widgets::SpinBox;
+# use teksilo_core::signal::Signal;
 # let v = Signal::new(0_i32);
 let _w = SpinBox::new(v.clone(), 0, 9999).width(80.0);        // narrow
 let _w = SpinBox::new(v.clone(), 0, 9999).width(200.0);       // wider
@@ -268,8 +268,8 @@ measurement uses the actual theme font at build time (same
 right under runtime theme switches and HiDPI scale changes.
 
 ```rust
-# use bastyde_widgets::SpinBox;
-# use bastyde_core::signal::Signal;
+# use teksilo_widgets::SpinBox;
+# use teksilo_core::signal::Signal;
 # let port = Signal::new(8080_i32);
 # let pct = Signal::new(0_i32);
 let _w = SpinBox::new(port, 0, 65_535).width_chars(5);           // 5 digits

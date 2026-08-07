@@ -4,10 +4,10 @@
 //! Containers tab — Panel, Card, GroupBox, GroupHeader, Accordion, ToolBox,
 //! ScrollArea, ScrollBar, SplitView.
 
-use bastyde::prelude::*;
-use bastyde::tokens::Orientation;
-use bastyde::widgets::scroll_bar::ScrollBarOrientation;
-use bastyde::widgets::{
+use teksilo::prelude::*;
+use teksilo::tokens::Orientation;
+use teksilo::widgets::scroll_bar::ScrollBarOrientation;
+use teksilo::widgets::{
     Accordion, Card, Checkbox, Divider, FixedSize, GroupBox, GroupHeader, MaxSize, Padding, Panel,
     ScrollArea, ScrollBar, Splitter, SplitterModel, TabId, TabIndicatorPosition, TabInfo,
     TabWidget, TextWidget, ToolBox, ToolBoxItem, VStack,
@@ -235,7 +235,7 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
     )
 }
 
-pub fn bati(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
+pub fn teksu(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
     // Card.header/.content/.footer take Widgets — pre-register where
     // chained method calls are unavoidable. ToolBox::add takes
     // ToolBoxItem; chained .add() calls don't translate to one
@@ -314,7 +314,7 @@ pub fn bati(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
     let acc_open = sigs.accordion_expanded.clone();
     let acc2_open = sigs.accordion2_expanded.clone();
 
-    bati!(ctx => VStack {
+    teksu!(ctx => VStack {
             spacing: 20.0
             VStack {
                 spacing: 4.0

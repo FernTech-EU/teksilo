@@ -5,7 +5,7 @@
 
 Link — a clickable text label rendered as underlined inline text.
 
-`Link` is Bastyde's hyperlink control: it responds to tap, Enter, and
+`Link` is Teksilo's hyperlink control: it responds to tap, Enter, and
 Space like a `Button`, but renders as styled underlined text rather than a
 bordered box. It supports an optional `url` field (informational — the app
 decides whether and how to open it), a reactive `visited` state that shifts
@@ -23,8 +23,8 @@ forwarded to `set_url` so screen readers can announce the destination.
 Exposes `Action::Click` and `Action::Focus`.
 
 ```rust
-# use bastyde_widgets::Link;
-# use bastyde_i18n::lit;
+# use teksilo_widgets::Link;
+# use teksilo_i18n::lit;
 let _w = Link::new(lit!("Open documentation"))
     .url("https://example.com/docs");
 ```
@@ -35,7 +35,7 @@ let _w = Link::new(lit!("Open documentation"))
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/link/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/link/index.html)
 
 ## `pub struct Link`
 
@@ -58,7 +58,7 @@ when no transient interaction (hover / press) is active. Visited
 is overridden by hover/press, following the web convention. The
 app owns the signal (typically backed by URL-history state).
 
-#### `pub fn style(mut self, style: impl bastyde_core::styles::LinkStyle) -> Self`
+#### `pub fn style(mut self, style: impl teksilo_core::styles::LinkStyle) -> Self`
 
 Per-call style override for the link chrome.
 
@@ -84,7 +84,7 @@ registry. See `Button::rich_tooltip`.
 
 Attach a rich tooltip driven by inline `TooltipContent`.
 
-#### `pub fn composite_tooltip( mut self, content: impl bastyde_core::widget::Widget + 'static, ) -> Self`
+#### `pub fn composite_tooltip( mut self, content: impl teksilo_core::widget::Widget + 'static, ) -> Self`
 
 Attach a composite tooltip — third tier, hosting an arbitrary
 widget tree. See `Button::composite_tooltip`.

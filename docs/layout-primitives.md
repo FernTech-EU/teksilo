@@ -4,7 +4,7 @@
 # Layout Primitives
 
 **Companion to:** [architecture.md](architecture.md) §2 (Layout Model)
-**Scope:** Reference for the layout primitives in [crates/bastyde-widgets/src/primitives/](../crates/bastyde-widgets/src/primitives/) — the containers and size wrappers every other widget composes against.
+**Scope:** Reference for the layout primitives in [crates/teksilo-widgets/src/primitives/](../crates/teksilo-widgets/src/primitives/) — the containers and size wrappers every other widget composes against.
 
 This document is a working reference: each primitive comes with a one-line summary, the public surface as you'd actually call it, the rule the layout engine applies, and at least one runnable example. Where two primitives can express the same intent, the trade-off is called out explicitly.
 
@@ -12,7 +12,7 @@ This document is a working reference: each primitive comes with a one-line summa
 
 ## 1. Mental model
 
-Bastyde layout is a SwiftUI-style two-phase negotiation, recursive over the widget tree:
+Teksilo layout is a SwiftUI-style two-phase negotiation, recursive over the widget tree:
 
 1. The parent calls `child.layout_response(proposal, ctx)`. The child returns a `LayoutResponse { size, flex, min, shrink }` — the size it wants (a floor for growth), a `flex` weight for positive-slack distribution, a `min` compression floor, and a `shrink` weight for over-constraint deficits. `flex` and `shrink` are independent (CSS-flexbox grow vs shrink); `From<Size>` defaults to fully rigid (`flex = 0`, `shrink = 0`, `min = size`).
 2. The parent decides each child's **main-axis** size (grow on surplus, shrink on a deficit), then measures each child's **cross axis** at its final main size (height-for-width), then calls `child.place_children(bounds, …)` to position them.
@@ -45,12 +45,12 @@ Three containers cover almost everything: `VStack`, `HStack`, `ZStack`. They sha
 
 ### 2.1 `VStack` — vertical stack
 
-[crates/bastyde-widgets/src/primitives/vstack.rs](../crates/bastyde-widgets/src/primitives/vstack.rs)
+[crates/teksilo-widgets/src/primitives/vstack.rs](../crates/teksilo-widgets/src/primitives/vstack.rs)
 
 Lays children top-to-bottom. Cross-axis (horizontal) alignment is `HAlignment` — default `Leading`. Spacing accepts a static `f32` or a `Signal<f32>`.
 
 ```rust
-use bastyde::prelude::*;
+use teksilo::prelude::*;
 
 VStack::new()
     .spacing(8.0)
@@ -66,7 +66,7 @@ VStack::new()
 
 ### 2.2 `HStack` — horizontal stack
 
-[crates/bastyde-widgets/src/primitives/hstack.rs](../crates/bastyde-widgets/src/primitives/hstack.rs)
+[crates/teksilo-widgets/src/primitives/hstack.rs](../crates/teksilo-widgets/src/primitives/hstack.rs)
 
 Mirror of `VStack`. Cross-axis (vertical) alignment is `VAlignment` — default `Center`. **RTL-aware:** in `LayoutDirection::RightToLeft`, children are placed right-to-left automatically. There is no manual mirroring.
 
@@ -85,7 +85,7 @@ HStack::new()
 
 ### 2.3 `ZStack` — overlay stack
 
-[crates/bastyde-widgets/src/primitives/zstack.rs](../crates/bastyde-widgets/src/primitives/zstack.rs)
+[crates/teksilo-widgets/src/primitives/zstack.rs](../crates/teksilo-widgets/src/primitives/zstack.rs)
 
 Children overlap; later children paint on top. Size is the max of children's intrinsic sizes; the proposal is *only* used as a fallback when no child has a queryable size. Container-level alignment is a full `Alignment` (both axes); per-child override via `tree.set_alignment(id, …)`.
 
@@ -113,7 +113,7 @@ Slack is the leftover space inside a stack after every child's wanted size and t
 
 ### 3.1 `Spacer` — fills available space
 
-[crates/bastyde-widgets/src/primitives/spacer.rs](../crates/bastyde-widgets/src/primitives/spacer.rs)
+[crates/teksilo-widgets/src/primitives/spacer.rs](../crates/teksilo-widgets/src/primitives/spacer.rs)
 
 Returns `LayoutResponse::flexible(Size::new(min, min), 1.0)`. The min-length is a floor on the main axis (default 0); the parent stack adds slack share on top.
 
@@ -136,7 +136,7 @@ HStack::new()
 
 ### 3.2 `Expand` — claim space and fill a child
 
-[crates/bastyde-widgets/src/primitives/expand.rs](../crates/bastyde-widgets/src/primitives/expand.rs)
+[crates/teksilo-widgets/src/primitives/expand.rs](../crates/teksilo-widgets/src/primitives/expand.rs)
 
 `Expand` is the workhorse. It returns flex (default `1.0`) and stretches its single child to its allocated bounds. Unlike `Spacer`, it has a child.
 
@@ -169,7 +169,7 @@ By default `Expand` reports `wanted = 0` on its flex axes. That's CSS `flex-basi
 
 Switch with `.respect_intrinsic()` (CSS `flex-basis: auto`) when the parent is unconstrained on the flex axis. The child's natural size acts as a floor and slack is added on top. Use this inside an outer `VStack` with `height = None`, where zero-basis would let the child overflow because the parent has no bound to share.
 
-**Trade-off (called out at [expand.rs:130](../crates/bastyde-widgets/src/primitives/expand.rs#L130)):** with `respect_intrinsic`, exact ratios bend by content. The same `[1, 2]` split inside a 300 px parent now gives `60 + 66 = 126` and `40 + 133 = 173` rather than `100 / 200`. Keep zero-basis for ratio layouts and reach for `respect_intrinsic` only when you actually need the floor.
+**Trade-off (called out at [expand.rs:130](../crates/teksilo-widgets/src/primitives/expand.rs#L130)):** with `respect_intrinsic`, exact ratios bend by content. The same `[1, 2]` split inside a 300 px parent now gives `60 + 66 = 126` and `40 + 133 = 173` rather than `100 / 200`. Keep zero-basis for ratio layouts and reach for `respect_intrinsic` only when you actually need the floor.
 
 #### `horizontal()` / `vertical()` semantics
 
@@ -178,11 +178,11 @@ The named axis is the one the wrapper *competes for slack on*. Cross-axis behavi
 - `Expand::vertical()` inside a `VStack` (parent binds width, distributes height) — fills the VStack's full width AND distributes vertical slack.
 - `Expand::horizontal()` inside a `VStack` — claims the VStack's full width, but reports `flex = 0` on the open vertical axis. It does **not** steal vertical slack from siblings — height stays at child intrinsic.
 
-Symmetric for HStack. The behavior is documented and tested at [expand.rs:25-41](../crates/bastyde-widgets/src/primitives/expand.rs#L25-L41).
+Symmetric for HStack. The behavior is documented and tested at [expand.rs:25-41](../crates/teksilo-widgets/src/primitives/expand.rs#L25-L41).
 
 ### 3.3 `Center` — center a child within given space
 
-[crates/bastyde-widgets/src/primitives/center.rs](../crates/bastyde-widgets/src/primitives/center.rs)
+[crates/teksilo-widgets/src/primitives/center.rs](../crates/teksilo-widgets/src/primitives/center.rs)
 
 Centers a single child within the space `Center` is **given**. Per axis: it
 **fills an axis the parent bounded** and **shrink-wraps to the child on an axis
@@ -202,7 +202,7 @@ of Flutter's `Expanded(child: Center(...))`).
 
 ### 3.4 `Shrinkable` — opt a child into compression
 
-[crates/bastyde-widgets/src/primitives/shrinkable.rs](../crates/bastyde-widgets/src/primitives/shrinkable.rs)
+[crates/teksilo-widgets/src/primitives/shrinkable.rs](../crates/teksilo-widgets/src/primitives/shrinkable.rs)
 
 The shrink counterpart to `Expand`. By default widgets are rigid: when a stack is over-constrained they keep their wanted size and overflow. Wrap a child in `Shrinkable` to let it absorb a share of the deficit, down to a floor:
 
@@ -217,7 +217,7 @@ HStack::new()
 
 **"Compress A before B"** = give A `shrink > 0` and B `shrink = 0`: A absorbs the entire deficit (down to its floor) before B is touched.
 
-**Native shrink (no wrapper needed).** Single-line / ellipsis `TextWidget` opts in for you: it reports `shrink = 1` with a `min` of the ellipsis-glyph width, so display labels truncate-to-fit (tune with `.min_shrink_width`, disable with `.no_shrink`). **Controls (`Button`, `IconButton`, `Badge`, `ComboBox`) are deliberately rigid** — a truncated *action* reads poorly, so the desktop convention is to overflow excess actions into a menu rather than shrink them (see [`Toolbar`](../crates/bastyde-widgets/src/toolbar.rs)). The wrappers `Padding` / `ZStack` / `MinSize` propagate `flex` + `shrink` + `min`, so a shrinkable child stays shrinkable through them, and a stack advertises its aggregate grow/shrink to its parent only on its own main axis.
+**Native shrink (no wrapper needed).** Single-line / ellipsis `TextWidget` opts in for you: it reports `shrink = 1` with a `min` of the ellipsis-glyph width, so display labels truncate-to-fit (tune with `.min_shrink_width`, disable with `.no_shrink`). **Controls (`Button`, `IconButton`, `Badge`, `ComboBox`) are deliberately rigid** — a truncated *action* reads poorly, so the desktop convention is to overflow excess actions into a menu rather than shrink them (see [`Toolbar`](../crates/teksilo-widgets/src/toolbar.rs)). The wrappers `Padding` / `ZStack` / `MinSize` propagate `flex` + `shrink` + `min`, so a shrinkable child stays shrinkable through them, and a stack advertises its aggregate grow/shrink to its parent only on its own main axis.
 
 ### 3.5 Height-for-width
 
@@ -243,7 +243,7 @@ Five primitives constrain what their child can be:
 
 ### 4.1 `FixedSize`
 
-[crates/bastyde-widgets/src/primitives/fixed_size.rs](../crates/bastyde-widgets/src/primitives/fixed_size.rs)
+[crates/teksilo-widgets/src/primitives/fixed_size.rs](../crates/teksilo-widgets/src/primitives/fixed_size.rs)
 
 ```rust
 // Static width, child decides height:
@@ -265,7 +265,7 @@ Both `width` and `height` accept `impl Into<Prop<f32>>` — pass an `f32` for st
 
 ### 4.2 `MinSize`
 
-[crates/bastyde-widgets/src/primitives/min_size.rs](../crates/bastyde-widgets/src/primitives/min_size.rs)
+[crates/teksilo-widgets/src/primitives/min_size.rs](../crates/teksilo-widgets/src/primitives/min_size.rs)
 
 ```rust
 // 48×48 minimum touch target — the Button composite uses this internally:
@@ -279,11 +279,11 @@ MinSize::height(36.0).child(row)
 MinSize::width(0.0).min_width(min_w_signal).child(text)
 ```
 
-The proposal forwarded to the child is **clamped upward** to the minimum. A wrapping `TextWidget` inside `MinSize::width(100)` measures against `width >= 100`, so its wrapped height reflects the minimum width — not the unconstrained natural width. Tested at [min_size.rs:230-258](../crates/bastyde-widgets/src/primitives/min_size.rs#L230-L258).
+The proposal forwarded to the child is **clamped upward** to the minimum. A wrapping `TextWidget` inside `MinSize::width(100)` measures against `width >= 100`, so its wrapped height reflects the minimum width — not the unconstrained natural width. Tested at [min_size.rs:230-258](../crates/teksilo-widgets/src/primitives/min_size.rs#L230-L258).
 
 ### 4.3 `MaxSize`
 
-[crates/bastyde-widgets/src/primitives/max_size.rs](../crates/bastyde-widgets/src/primitives/max_size.rs)
+[crates/teksilo-widgets/src/primitives/max_size.rs](../crates/teksilo-widgets/src/primitives/max_size.rs)
 
 ```rust
 // Reading-width cap on a long article:
@@ -300,7 +300,7 @@ Symmetric to `MinSize`: proposal clamped *downward*, wanted size clamped downwar
 
 ### 4.4 `AspectRatio`
 
-[crates/bastyde-widgets/src/primitives/aspect_ratio.rs](../crates/bastyde-widgets/src/primitives/aspect_ratio.rs)
+[crates/teksilo-widgets/src/primitives/aspect_ratio.rs](../crates/teksilo-widgets/src/primitives/aspect_ratio.rs)
 
 ```rust
 AspectRatio::widescreen().child(video_thumbnail)     // 16:9
@@ -314,7 +314,7 @@ The child fills the resolved bounds.
 
 ### 4.5 `Padding`
 
-[crates/bastyde-widgets/src/primitives/padding.rs](../crates/bastyde-widgets/src/primitives/padding.rs)
+[crates/teksilo-widgets/src/primitives/padding.rs](../crates/teksilo-widgets/src/primitives/padding.rs)
 
 ```rust
 // All four insets:
@@ -341,12 +341,12 @@ For tables of mixed-size content, multi-column flow, and form-style label/field 
 
 ### 5.1 `Grid` — explicit row and column tracks
 
-[crates/bastyde-widgets/src/primitives/grid.rs](../crates/bastyde-widgets/src/primitives/grid.rs)
+[crates/teksilo-widgets/src/primitives/grid.rs](../crates/teksilo-widgets/src/primitives/grid.rs)
 
 Children are placed in **row-major order** — child *i* goes to row `i / cols`, column `i % cols`. Tracks come in three sizing modes:
 
 ```rust
-use bastyde::widgets::{Grid, TrackSize};
+use teksilo::widgets::{Grid, TrackSize};
 
 // 3 columns: [auto | 1fr | 80px], 2 rows of intrinsic height
 Grid::new()
@@ -370,13 +370,13 @@ Grid::new()
 - **`Auto`** — sized to the largest child intrinsic size in that track.
 - **`Fractional(weight)`** — splits remaining space (after Fixed and Auto are claimed) by weight.
 
-**Two-pass layout.** Auto tracks are resolved against children's unspecified-proposal width. Fractional tracks then take the remainder. Children that landed in Fractional columns *narrower* than their intrinsic single-line width are re-measured at the resolved column width — wrapping content reports its actual wrapped height instead of bleeding outside its cell. See [grid.rs:159-223](../crates/bastyde-widgets/src/primitives/grid.rs#L159-L223) for the reasoning.
+**Two-pass layout.** Auto tracks are resolved against children's unspecified-proposal width. Fractional tracks then take the remainder. Children that landed in Fractional columns *narrower* than their intrinsic single-line width are re-measured at the resolved column width — wrapping content reports its actual wrapped height instead of bleeding outside its cell. See [grid.rs:159-223](../crates/teksilo-widgets/src/primitives/grid.rs#L159-L223) for the reasoning.
 
 Both `column_gap` and `row_gap` accept `impl Into<Prop<f32>>`.
 
 ### 5.2 `Wrap` — line-breaking flow
 
-[crates/bastyde-widgets/src/primitives/wrap.rs](../crates/bastyde-widgets/src/primitives/wrap.rs)
+[crates/teksilo-widgets/src/primitives/wrap.rs](../crates/teksilo-widgets/src/primitives/wrap.rs)
 
 A horizontal flow that wraps to the next line when a child won't fit. Each child keeps its intrinsic size; lines are packed greedily.
 
@@ -393,7 +393,7 @@ Use cases: tag clouds, toolbar overflow, chip lists, breadcrumb segments that fo
 
 ### 5.3 `MasonryLayout` — Pinterest-style packing
 
-[crates/bastyde-widgets/src/primitives/masonry.rs](../crates/bastyde-widgets/src/primitives/masonry.rs)
+[crates/teksilo-widgets/src/primitives/masonry.rs](../crates/teksilo-widgets/src/primitives/masonry.rs)
 
 Variable-height grid where each child slots into the **shortest column** at the time. Column count is fixed; column width is `(available_width − gaps) / columns`. RTL-aware (column 0 is the rightmost in RTL).
 
@@ -410,7 +410,7 @@ Each child is queried at column-width to get its real height, then placed under 
 
 ### 5.4 `ColumnFlow` — responsive columns that reflow
 
-[crates/bastyde-widgets/src/primitives/column_flow.rs](../crates/bastyde-widgets/src/primitives/column_flow.rs)
+[crates/teksilo-widgets/src/primitives/column_flow.rs](../crates/teksilo-widgets/src/primitives/column_flow.rs)
 
 The newspaper model. Content runs down column 0, then down column 1. The column count is **derived from the available width** and `min_column_width`; when the width no longer affords *N* columns the layout drops to *N−1* and **every** child is re-partitioned across the survivors. Children are atomic — one child never straddles a column boundary.
 
@@ -443,7 +443,7 @@ Children are distributed as **contiguous runs in source order** — column 0 tak
 reading order: 1..6             reading order: 1..6
 ```
 
-This is why `ColumnFlow` does **not** reuse `MasonryLayout`'s shortest-column packing: masonry interleaves children (child 4 may land above child 3), which divorces the visual order from the source order. Bastyde's focus traversal and its AccessKit walk both derive from tree order, so an interleaving layout would read out of order. WCAG 1.3.2 *Meaningful Sequence* names multi-column text as its first example and blesses exactly this column-major order.
+This is why `ColumnFlow` does **not** reuse `MasonryLayout`'s shortest-column packing: masonry interleaves children (child 4 may land above child 3), which divorces the visual order from the source order. Teksilo's focus traversal and its AccessKit walk both derive from tree order, so an interleaving layout would read out of order. WCAG 1.3.2 *Meaningful Sequence* names multi-column text as its first example and blesses exactly this column-major order.
 
 Because the order is right by construction, no `aria-flowto` is needed — that attribute is an advisory fallback for when the logical order is *wrong*, and it doesn't affect Tab order anyway.
 
@@ -507,7 +507,7 @@ It is deliberately **not** `Role::Grid`: the ARIA grid pattern mandates arrow-ke
 
 ### 5.5 `FormLayout` — two-column label / field
 
-[crates/bastyde-widgets/src/primitives/form_layout.rs](../crates/bastyde-widgets/src/primitives/form_layout.rs)
+[crates/teksilo-widgets/src/primitives/form_layout.rs](../crates/teksilo-widgets/src/primitives/form_layout.rs)
 
 A specialized two-column layout: label column auto-sizes to the widest label, field column takes the rest. Supports full-width rows for separators or wide inputs.
 
@@ -532,7 +532,7 @@ Row height is `max(label.height, field.height)`. The label column width is the w
 
 ### 5.6 `Switcher` — show one child at a time
 
-[crates/bastyde-widgets/src/primitives/switcher.rs](../crates/bastyde-widgets/src/primitives/switcher.rs)
+[crates/teksilo-widgets/src/primitives/switcher.rs](../crates/teksilo-widgets/src/primitives/switcher.rs)
 
 Internally a `ZStack` where each child has a `visible_when` binding derived from `selected.map(|i| i == index)`. Layout is the size of the active child.
 
@@ -555,7 +555,7 @@ Use for tab content, wizard pages, or any "one of N visible" pattern. Hidden fro
 
 ### 6.1 `Divider` — themed separator line
 
-[crates/bastyde-widgets/src/primitives/divider.rs](../crates/bastyde-widgets/src/primitives/divider.rs)
+[crates/teksilo-widgets/src/primitives/divider.rs](../crates/teksilo-widgets/src/primitives/divider.rs)
 
 A 1 px (theme-tokenable) line. Horizontal by default, fills the proposal's main axis, claims `thickness` on the cross axis.
 
@@ -573,7 +573,7 @@ HStack::new()
 
 `color()` accepts the full `ColorProp` range — `Color`, a role (typically `BorderRole`), or `Signal<Color>`. Defaults to `BorderRole::Divider`. Emits `Role::Splitter` to AT.
 
-Note: `Divider` is a *visual* separator, not a draggable splitter — for drag-to-resize panes, use `SplitView` from bastyde-widgets.
+Note: `Divider` is a *visual* separator, not a draggable splitter — for drag-to-resize panes, use `SplitView` from teksilo-widgets.
 
 ### 6.2 Spacing summary
 
@@ -644,12 +644,12 @@ Behavior under `prefers-reduced-motion`: `to_or_snap` snaps the value instead of
 
 ## 9. Composing your own
 
-A custom layout container is an ordinary `Widget` that returns children from `build()`, picks a wanted size in `layout_response`, and places its children in `place_children`. The layout engine doesn't care whether a widget is shipped in bastyde-widgets or written in your app crate.
+A custom layout container is an ordinary `Widget` that returns children from `build()`, picks a wanted size in `layout_response`, and places its children in `place_children`. The layout engine doesn't care whether a widget is shipped in teksilo-widgets or written in your app crate.
 
 ```rust
-use bastyde_canvas::{Point, Rect, Size, SizeProposal};
-use bastyde_core::widget::{LayoutContext, LayoutResponse, Widget, WidgetPlacement};
-use bastyde_core::widget_id::WidgetId;
+use teksilo_canvas::{Point, Rect, Size, SizeProposal};
+use teksilo_core::widget::{LayoutContext, LayoutResponse, Widget, WidgetPlacement};
+use teksilo_core::widget_id::WidgetId;
 
 #[derive(Debug)]
 struct StaggeredColumn {
@@ -699,14 +699,14 @@ Three things to remember:
 - **Match `place_children`'s child query to your sizing policy.** If `layout_response` queried with `SizeProposal::with_width(w)`, query the same way in `place_children` — otherwise wrapping children measure twice with different results.
 - **Honor flex.** If your layout wants stacks-style slack distribution, sum `child_layout_response(...).flex` and apply the standard rule. If your layout doesn't distribute slack, ignore flex; that's fine.
 
-For testing, [crates/bastyde-core/src/test_widgets.rs](../crates/bastyde-core/src/test_widgets.rs) ships `FillWidget` and `StackWidget` (pub(crate)); for end-to-end layout tests use `WidgetTree` directly with `tree.layout(SizeProposal::exact(w, h))` and assert `tree.bounds(id)`.
+For testing, [crates/teksilo-core/src/test_widgets.rs](../crates/teksilo-core/src/test_widgets.rs) ships `FillWidget` and `StackWidget` (pub(crate)); for end-to-end layout tests use `WidgetTree` directly with `tree.layout(SizeProposal::exact(w, h))` and assert `tree.bounds(id)`.
 
 ---
 
 ## 10. References
 
 - Architecture: [architecture.md §2 Layout Model](architecture.md)
-- Reactive layer: [reactive-theme.md](reactive-theme.md), `Signal<T>` / `Prop<T>` in [crates/bastyde-core/src/signal.rs](../crates/bastyde-core/src/signal.rs)
+- Reactive layer: [reactive-theme.md](reactive-theme.md), `Signal<T>` / `Prop<T>` in [crates/teksilo-core/src/signal.rs](../crates/teksilo-core/src/signal.rs)
 - Animation tied to layout: [animation.md](animation.md)
-- Custom widget patterns: [`Widget` trait](../crates/bastyde-core/src/widget.rs), [BuildContext](../crates/bastyde-core/src/build_context.rs)
+- Custom widget patterns: [`Widget` trait](../crates/teksilo-core/src/widget.rs), [BuildContext](../crates/teksilo-core/src/build_context.rs)
 - Visual tour: `cargo run -p widget-catalog`, `cargo run -p text-and-layout`, `cargo run -p data-grid`

@@ -60,7 +60,7 @@ screen readers can announce "Apple, 1 of 5".
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/search_field/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/search_field/index.html)
 
 ## `pub struct SearchField`
 
@@ -76,7 +76,7 @@ pub struct SearchField { /* fields */ }
 
 Create a search field bound to `text`, the reactive query string.
 
-#### `pub fn style(mut self, style: impl bastyde_core::styles::SearchFieldStyle) -> Self`
+#### `pub fn style(mut self, style: impl teksilo_core::styles::SearchFieldStyle) -> Self`
 
 Per-call SearchFieldStyle override.
 

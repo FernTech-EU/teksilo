@@ -28,7 +28,7 @@ share-by-clone handle (`Rc<RefCell<…>>` internally).
 ## Example
 
 ```
-use bastyde_data::{KeyedTreeCheckedModel, CheckState, TreeDataSlice, TreeRow};
+use teksilo_data::{KeyedTreeCheckedModel, CheckState, TreeDataSlice, TreeRow};
 
 // An outline: Binder(1) → { Chapter(2) → Scene(3), Scene(4) }
 let slice: TreeDataSlice<u64, &str> = TreeDataSlice::from_rows(vec![
@@ -52,7 +52,7 @@ assert_eq!(checked.check_state(&1), CheckState::Indeterminate); // Binder: 2 of 
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_data/keyed_tree_checked_model/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_data/keyed_tree_checked_model/index.html)
 
 ## `pub struct KeyedTreeCheckedModel`
 

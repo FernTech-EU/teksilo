@@ -31,7 +31,7 @@ snaps to its end value instead of tweening.
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/animations/collapse/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/animations/collapse/index.html)
 
 ## `pub struct Collapse`
 

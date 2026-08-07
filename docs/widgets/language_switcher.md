@@ -15,9 +15,9 @@ means a speaker of each language can always find their own in the list.
 Zero-config: drop it into a settings panel and it
 
 - self-populates from the installed `I18nManager`
-  (`bastyde_i18n::current_supported_locales()`),
+  (`teksilo_i18n::current_supported_locales()`),
 - shows the active locale as the current selection
-  (`bastyde_i18n::current_locale()`),
+  (`teksilo_i18n::current_locale()`),
 - switches the app locale on selection via `EventContext::set_locale`,
   which the window manager fans out to every window (re-translating
   text and flipping layout direction for RTL locales like Arabic),
@@ -31,7 +31,7 @@ VStack::new()
 ```
 
 Endonyms come from ICU4X CLDR data via
-`bastyde_i18n::language_endonym`; an unknown tag falls back to the
+`teksilo_i18n::language_endonym`; an unknown tag falls back to the
 raw BCP-47 tag. When no `I18nManager` is configured the switcher
 renders an empty, placeholder ComboBox.
 
@@ -41,7 +41,7 @@ renders an empty, placeholder ComboBox.
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/language_switcher/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/language_switcher/index.html)
 
 ## `pub struct LanguageSwitcher`
 

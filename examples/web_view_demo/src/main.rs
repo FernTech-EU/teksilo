@@ -23,10 +23,10 @@
 //! demo forces itself onto XWayland (`GDK_BACKEND=x11`) so wry can embed —
 //! unless built `--features servo`, where the runtime picks Servo instead.
 
-use bastyde::core::binding::BindingLevel;
-use bastyde::prelude::*;
-use bastyde::web_view::{PageLoadState, WebView};
-use bastyde::widgets::{Button, Divider, Expand, HStack, Spacer, Switcher, TextWidget, VStack};
+use teksilo::core::binding::BindingLevel;
+use teksilo::prelude::*;
+use teksilo::web_view::{PageLoadState, WebView};
+use teksilo::widgets::{Button, Divider, Expand, HStack, Spacer, Switcher, TextWidget, VStack};
 
 fn main() {
     force_xwayland_for_wry();
@@ -36,18 +36,18 @@ fn main() {
     // source high and pump GTK every tick. No-op off Linux / without wry.
     let poll = std::rc::Rc::new(std::cell::Cell::new(true));
 
-    BastydeAppBuilder::new()
+    TeksiloAppBuilder::new()
         .install_automation_bridge_in_debug()
         .theme(intui::light())
         .on_loop_tick(poll.clone(), || {
-            bastyde::web_view::pump_gtk_events();
+            teksilo::web_view::pump_gtk_events();
             false
         })
         .install_inspector_in_debug()
         .install_web_view_default()
         .initial_window(
             WindowConfig::new()
-                .title("Bastyde — WebView demo")
+                .title("Teksilo — WebView demo")
                 .size(1000, 720)
                 .root(|tree, _state| {
                     // --- Reactive state shared across toolbar + view ---
@@ -157,10 +157,10 @@ fn main() {
                     });
                     let status_label = TextWidget::new(lit!("")).text(status);
 
-                    // --- Native-UI tab content (pure Bastyde) ---
+                    // --- Native-UI tab content (pure Teksilo) ---
                     let native_panel = VStack::new()
                         .spacing(8.0)
-                        .child(TextWidget::new(lit!("This tab is pure Bastyde.")))
+                        .child(TextWidget::new(lit!("This tab is pure Teksilo.")))
                         .child(TextWidget::new(lit!(
                             "Switching here parks the Browser tab's WebView dormant; \
                              its native subview must disappear."

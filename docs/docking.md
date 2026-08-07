@@ -9,10 +9,10 @@ splittable, draggable side regions — **leading / trailing / top / bottom**. It
 is a *layout like any other* (not a window shell à la Qt `QMainWindow`), backed
 by a cloneable, serializable [`DockingModel`]. **No floating docks.**
 
-- Widget + orchestrator: [crates/bastyde-widgets/src/docking.rs](../crates/bastyde-widgets/src/docking.rs)
-- Geometry engine: [crates/bastyde-widgets/src/docking/geometry.rs](../crates/bastyde-widgets/src/docking/geometry.rs)
-- Model + state: [model.rs](../crates/bastyde-widgets/src/docking/model.rs), [state.rs](../crates/bastyde-widgets/src/docking/state.rs)
-- Panels / drag / rail / handle: [panel.rs](../crates/bastyde-widgets/src/docking/panel.rs), [drag.rs](../crates/bastyde-widgets/src/docking/drag.rs), [activity_bar.rs](../crates/bastyde-widgets/src/docking/activity_bar.rs), [resize_handle.rs](../crates/bastyde-widgets/src/docking/resize_handle.rs)
+- Widget + orchestrator: [crates/teksilo-widgets/src/docking.rs](../crates/teksilo-widgets/src/docking.rs)
+- Geometry engine: [crates/teksilo-widgets/src/docking/geometry.rs](../crates/teksilo-widgets/src/docking/geometry.rs)
+- Model + state: [model.rs](../crates/teksilo-widgets/src/docking/model.rs), [state.rs](../crates/teksilo-widgets/src/docking/state.rs)
+- Panels / drag / rail / handle: [panel.rs](../crates/teksilo-widgets/src/docking/panel.rs), [drag.rs](../crates/teksilo-widgets/src/docking/drag.rs), [activity_bar.rs](../crates/teksilo-widgets/src/docking/activity_bar.rs), [resize_handle.rs](../crates/teksilo-widgets/src/docking/resize_handle.rs)
 - Demo: `cargo run -p docking`
 
 ## The structure — four levels
@@ -41,7 +41,7 @@ stays visible and is the reopen affordance.
 ## Quick start
 
 ```rust
-use bastyde::widgets::{DockingLayout, DockingModel, DockWidget, DockWidgetId, DockSide, DockOpenLocation};
+use teksilo::widgets::{DockingLayout, DockingModel, DockWidget, DockWidgetId, DockSide, DockOpenLocation};
 
 let model = DockingModel::new();
 let explorer = DockWidgetId::fresh();
@@ -75,7 +75,7 @@ The five region rectangles are computed **directly** (a border-layout with
 configurable corners — Qt `QMainWindow::setCorner`). A nested-`Splitter` tree
 genuinely cannot express per-corner ownership (in any splitter nesting the
 corners always belong to the outer axis), so `DockingLayout` runs a small pure
-[`geometry::compute_rects`](../crates/bastyde-widgets/src/docking/geometry.rs)
+[`geometry::compute_rects`](../crates/teksilo-widgets/src/docking/geometry.rs)
 engine in `place_children`.
 
 - Each side contributes, along the axis toward the centre: an always-visible
@@ -412,7 +412,7 @@ Serious apps ship a **fixed** chrome the user can't tear apart. A [`DockPolicy`]
 `open_dock`, `set_tab_hidden`, etc. still drive the locked layout.
 
 ```rust
-use bastyde::widgets::{DockPolicy, DockSide};
+use teksilo::widgets::{DockPolicy, DockSide};
 
 // Fully lock, then disable a side the app doesn't use:
 model.set_policy(DockPolicy::locked());          // no user drag / collapse / hide
@@ -492,7 +492,7 @@ owners). App-config — rail thickness, minimums, content factories, header
 actions — is declared each run and reconstructed (Qt `saveState` parity). On import, unknown
 dock ids are dropped, emptied panes/tabs pruned, selections clamped.
 
-### Saving / restoring with `bastyde-settings`
+### Saving / restoring with `teksilo-settings`
 
 `DockLayoutState` is `Versioned + Serialize + Deserialize + Default + Clone`,
 which is exactly what [`SettingsFile<T>`](settings.md) needs — so the disk side
@@ -502,12 +502,12 @@ is a debounced, atomic, corrupt-file-quarantining projection of the model.
 quarantined to `<path>.broken-<ts>` + `default()`):
 
 ```rust
-use bastyde::settings::{AppPaths, SettingsFile};
-use bastyde::widgets::DockLayoutState;
-use bastyde_settings::Migrator;
+use teksilo::settings::{AppPaths, SettingsFile};
+use teksilo::widgets::DockLayoutState;
+use teksilo_settings::Migrator;
 use std::time::Duration;
 
-let paths = AppPaths::new("eu", "FernTech", "Bastyde").expect("config dir");
+let paths = AppPaths::new("eu", "FernTech", "Teksilo").expect("config dir");
 let dock_file = SettingsFile::<DockLayoutState>::load(
     paths.config_file("docking.toml"),
     Duration::from_millis(500),   // write debounce

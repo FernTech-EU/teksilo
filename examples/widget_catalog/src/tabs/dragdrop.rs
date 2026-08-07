@@ -6,8 +6,8 @@
 //! OS file drops are live once `install_external_dnd()` is wired (it
 //! is, in main.rs). On X11 the keyboard Browse fallback is the path.
 
-use bastyde::prelude::*;
-use bastyde::widgets::{
+use teksilo::prelude::*;
+use teksilo::widgets::{
     Divider, DropTarget, DropTargetVariant, DropZone, FixedSize, Padding, Panel, TextWidget, VStack,
 };
 
@@ -121,8 +121,8 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     )
 }
 
-pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
-    // DropZone / DropTarget carry drop callbacks (closures) that bati!
+pub fn teksu(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
+    // DropZone / DropTarget carry drop callbacks (closures) that teksu!
     // property syntax can't express — pre-build and splice via `#{ id }`.
     let log = ctx.signal(tr!(dnd_log_initial()).resolve_now());
     let any_id = ctx.add(any_zone(log.clone()));
@@ -130,7 +130,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     let target_id = ctx.add(wrapping_target(log.clone()));
     let log_id = ctx.add(log_panel(log));
 
-    bati!(ctx => VStack {
+    teksu!(ctx => VStack {
             spacing: 20.0
             VStack {
                 spacing: 4.0

@@ -124,7 +124,7 @@ jobs:
         with:
           shared-key: linux
 
-      # A single x11rb in the graph. Bastyde and winit both depend on it, and a
+      # A single x11rb in the graph. Teksilo and winit both depend on it, and a
       # version fork would silently double the X11 code in every binary and make
       # any future type shared across the boundary fail to compile.
       - name: Assert a single x11rb version
@@ -136,7 +136,7 @@ jobs:
             echo "::error::x11rb has forked into multiple versions"; exit 1; }
 
       - name: Build tests
-        run: cargo test -p bastyde-platform --no-run
+        run: cargo test -p teksilo-platform --no-run
 
       # Xvfb alone has NO window manager, which would turn every EWMH assertion
       # into a silent pass rather than a failure — openbox is what makes the
@@ -151,9 +151,9 @@ jobs:
           openbox &
           sleep 1
           xprop -root _NET_SUPPORTING_WM_CHECK
-          # WAYLAND_DISPLAY must be empty so Bastyde's window-system detection
+          # WAYLAND_DISPLAY must be empty so Teksilo's window-system detection
           # (which mirrors winit's precedence) resolves to X11.
-          WAYLAND_DISPLAY= cargo test -p bastyde-platform -- --ignored --test-threads=1
+          WAYLAND_DISPLAY= cargo test -p teksilo-platform -- --ignored --test-threads=1
 
   test-cross:
     name: Test (${{ matrix.name }})

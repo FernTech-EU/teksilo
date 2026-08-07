@@ -12,8 +12,8 @@ Int UI and Jewel use this pattern as a lightweight "soft divider with a
 caption" between groups of related controls.
 
 ```rust
-# use bastyde_widgets::GroupHeader;
-# use bastyde_i18n::lit;
+# use teksilo_widgets::GroupHeader;
+# use teksilo_i18n::lit;
 let _w = GroupHeader::new(lit!("Appearance"));
 ```
 
@@ -26,7 +26,7 @@ Trivially composed from existing primitives:
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/group_header/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/group_header/index.html)
 
 ## `pub struct GroupHeader`
 

@@ -24,7 +24,7 @@ For per-view expand/collapse state wrap the model in a
 ## Example
 
 ```rust
-# use bastyde_data::{TreeModel, TreeChange};
+# use teksilo_data::{TreeModel, TreeChange};
 let tree = TreeModel::new();
 let root = tree.insert_root(0, "root");
 let child = tree.insert_child(root, 0, "child");
@@ -44,7 +44,7 @@ assert_eq!(tree.root_count(), 2); // both handles share the same data
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_data/tree_model/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_data/tree_model/index.html)
 
 ## `pub struct TreeModel`
 

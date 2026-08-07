@@ -1,24 +1,24 @@
 <!-- SPDX-License-Identifier: MPL-2.0 -->
 <!-- SPDX-FileCopyrightText: 2026 FernTech -->
 
-![CI](https://img.shields.io/github/actions/workflow/status/ferntech-eu/bastyde/ci.yml?branch=main&style=flat-square&label=CI)
-![audit](https://img.shields.io/github/actions/workflow/status/ferntech-eu/bastyde/audit.yml?branch=main&style=flat-square&label=audit)
+![CI](https://img.shields.io/github/actions/workflow/status/ferntech-eu/teksilo/ci.yml?branch=main&style=flat-square&label=CI)
+![audit](https://img.shields.io/github/actions/workflow/status/ferntech-eu/teksilo/audit.yml?branch=main&style=flat-square&label=audit)
 [![license](https://img.shields.io/badge/license-MPL--2.0-blue?style=flat-square)](#license)
 
-# Bastyde
+# Teksilo
 
 A pure-Rust, batteries-included GUI framework for desktop applications. Accessibility, internationalization, rich text, themes, persistent settings, drag-and-drop, charts, and a scene canvas all ship as first-class citizens.
 
 ```rust
-use bastyde::prelude::*;
-use bastyde::widgets::Button;
+use teksilo::prelude::*;
+use teksilo::widgets::Button;
 
 fn main() {
-    BastydeAppBuilder::new()
+    TeksiloAppBuilder::new()
         .theme(intui::light())
         .initial_window(
             WindowConfig::new()
-                .title("Hello Bastyde")
+                .title("Hello Teksilo")
                 .size(400, 300)
                 .root(|tree, _state| {
                     tree.add(
@@ -34,11 +34,11 @@ fn main() {
 Add reactive state and derived bindings:
 
 ```rust
-use bastyde::prelude::*;
-use bastyde::widgets::{Button, TextWidget, VStack};
+use teksilo::prelude::*;
+use teksilo::widgets::{Button, TextWidget, VStack};
 
 fn main() {
-    BastydeAppBuilder::new()
+    TeksiloAppBuilder::new()
         .theme(intui::light())
         .initial_window(
             WindowConfig::new()
@@ -66,13 +66,13 @@ fn main() {
 
 ## Real-world example
 
-Skribisto, a rich-text writing tool built with Bastyde, was ported from C++/Qt to Rust/Bastyde. It is available [here](https://github.com/jacquetc/skribisto/).
+Skribisto, a rich-text writing tool built with Teksilo, was ported from C++/Qt to Rust/Teksilo. It is available [here](https://github.com/jacquetc/skribisto/).
 
-A widget catalog example is available if you run `cargo run -p widget-catalog` in the Bastyde repo. It shows most of the widgets, with live property editing and multi-variant rendering.
+A widget catalog example is available if you run `cargo run -p widget-catalog` in the Teksilo repo. It shows most of the widgets, with live property editing and multi-variant rendering.
 
 ## Documentation
 
-Available in `docs/` and on [Cloudflare Pages](https://bastyde.pages.dev).
+Available in `docs/` and on [Cloudflare Pages](https://teksilo.pages.dev).
 
 ## Who is this for
 
@@ -80,27 +80,27 @@ Built primarily for professional desktop applications (writing tools, IDEs, disp
 
 Default styles are inspired by JetBrains' Int UI, with a light and dark theme that meet WCAG 2.1 AA contrast out of the box. No Win95-style "classic" theme is provided; the framework is intended for modern desktop applications.
 
-Particularly relevant to projects with regulatory accessibility or internationalization requirements (EU Accessibility Act, US Section 508, France RGAA, government procurement, regulated industries such as healthcare and finance). Accessibility and localization are architectural, not retrofitted: a real AccessKit bridge binds on every window on Linux, Windows, and macOS; every widget declares its role, name, and value at the trait level, with a per-widget override surface for labels, descriptions, and relationships; and Fluent-backed translations are checked at compile time. The default light and dark themes meet WCAG 2.1 AA contrast out of the box, enforced by a CI gate; an opt-in high-contrast variant tracks the OS "increase contrast" setting live; and keyboard alternatives cover the primary drag interactions. Conformance obligations attach to your application, not the toolkit: Bastyde's role is to supply correct primitives and stay out of the way. See [`docs/accessibility-audit.md`](docs/accessibility-audit.md) for a code-verified conformance assessment, including known gaps.
+Particularly relevant to projects with regulatory accessibility or internationalization requirements (EU Accessibility Act, US Section 508, France RGAA, government procurement, regulated industries such as healthcare and finance). Accessibility and localization are architectural, not retrofitted: a real AccessKit bridge binds on every window on Linux, Windows, and macOS; every widget declares its role, name, and value at the trait level, with a per-widget override surface for labels, descriptions, and relationships; and Fluent-backed translations are checked at compile time. The default light and dark themes meet WCAG 2.1 AA contrast out of the box, enforced by a CI gate; an opt-in high-contrast variant tracks the OS "increase contrast" setting live; and keyboard alternatives cover the primary drag interactions. Conformance obligations attach to your application, not the toolkit: Teksilo's role is to supply correct primitives and stay out of the way. See [`docs/accessibility-audit.md`](docs/accessibility-audit.md) for a code-verified conformance assessment, including known gaps.
 
 Also useful as a shelf of ready-to-use widgets if you're shopping the Rust GUI ecosystem for a specific component (rich text editor, table view, tree view, scene canvas, calendar, color picker) to drop into your app.
 
 ## Design priorities
 
-Bastyde is a retained-tree framework inspired by Qt and the ShiftUI layouting.
+Teksilo is a retained-tree framework inspired by Qt and the ShiftUI layouting.
 
 - **Composition with painting layered on top.** The `Widget` trait offers both `build()` (compose children) and `paint()` (draw chrome); both methods are optional, and a single widget can do both. Most of the widgets are pure compositions of primitives (`RectWidget`, `TextWidget`, `HStack`, `Padding`); `Card`, `Panel`, overlays, and custom chrome layer paint on top of their composed children.
 - **Accessibility at the trait level.** Every widget declares its role and name in an `accessibility()` method that sits beside `layout_response` and `paint`. The AT tree is built alongside the widget tree, not reconstructed from it.
 - **Compile-time-checked i18n.** The `tr!` macro reads `.ftl` files at proc-macro expansion time and rejects missing keys, missing arguments, and unknown arguments at build time.
 - **Rich-text stack as foundation.** The document model, shaping, BiDi, color emoji, and undo/redo are the foundation, not a widget on top. Even the plain `TextWidget` routes through it.
-- **Two API surfaces, one semantics.** A fluent builder API for everything, plus an optional `bati!` macro for SwiftUI-style declarative syntax. The macro desugars one-to-one to builder calls, so you can mix both in one file.
+- **Two API surfaces, one semantics.** A fluent builder API for everything, plus an optional `teksu!` macro for SwiftUI-style declarative syntax. The macro desugars one-to-one to builder calls, so you can mix both in one file.
 
 ## Status
 
 Expect breaking changes between 0.x versions.
 
-The test suite is roughly 2,600 tests in bastyde and over 4,000 across the whole stack. Tests target behavior (event dispatch, layout output, accessibility-tree structure), not implementation snapshots. The same widget tree runs under tests without a window, a GPU, or winit, and a simulated clock makes time-dependent behavior deterministic.
+The test suite is roughly 2,600 tests in teksilo and over 4,000 across the whole stack. Tests target behavior (event dispatch, layout output, accessibility-tree structure), not implementation snapshots. The same widget tree runs under tests without a window, a GPU, or winit, and a simulated clock makes time-dependent behavior deterministic.
 
-Bastyde builds on two earlier MPL-2.0 crates already at v1.x: [text-document](https://github.com/jacquetc/text-document) (rich-text document model) and [text-typeset](https://github.com/jacquetc/text-typeset) (typesetting engine).
+Teksilo builds on two earlier MPL-2.0 crates already at v1.x: [text-document](https://github.com/jacquetc/text-document) (rich-text document model) and [text-typeset](https://github.com/jacquetc/text-typeset) (typesetting engine).
 
 Production deployment is currently limited to FernTech's own applications; the 0.x version label reflects this scope. The known gaps are listed at the end of this README.
 
@@ -110,7 +110,7 @@ Project. Architecture, design reviews, code review and final acceptance were hum
 
 ## Authorship and review
 
-The rules under which Bastyde is built:
+The rules under which Teksilo is built:
 
 1. Direct human communication is written by humans. PR messages, issues, posts, replies: no AI drafting, no AI polish. Common decency.
 
@@ -148,7 +148,7 @@ The rules under which Bastyde is built:
 
 **Input.** Keyboard shortcuts, menus, and accessibility actions flow through one rebindable pipeline; a user remap updates every surface that mentions the binding. External-source events (databases, file watchers) bypass it; widgets subscribe directly.
 
-**Async.** Optional main-thread executor for imperative `async`/`.await` inside handlers: `spawn_local` for UI futures, `spawn_blocking` to offload work, and `spawn_local_with` to deliver a result with a fresh context. Off by default: the core stays synchronous and pays nothing; `bastyde-tokio` / `bastyde-async-std` add reactors for awaiting native runtime futures (timers, sockets, `reqwest`). For "data arrives, UI reacts," the reactive subscription path above stays simpler. See [`docs/async.md`](docs/async.md).
+**Async.** Optional main-thread executor for imperative `async`/`.await` inside handlers: `spawn_local` for UI futures, `spawn_blocking` to offload work, and `spawn_local_with` to deliver a result with a fresh context. Off by default: the core stays synchronous and pays nothing; `teksilo-tokio` / `teksilo-async-std` add reactors for awaiting native runtime futures (timers, sockets, `reqwest`). For "data arrives, UI reacts," the reactive subscription path above stays simpler. See [`docs/async.md`](docs/async.md).
 
 **Tooltips.** Three tiers from one system: plain text, rich (inline markup + shortcut hint + expandable detail), and composite (arbitrary widget body). Rich and composite tooltips become focusable on dwell.
 
@@ -168,7 +168,7 @@ The rules under which Bastyde is built:
 
 **Tooling.** In-app debug inspector (F12, debug builds only) with tabs for tree, properties, accessibility, theme, focus, shortcuts, overlays, and data models. Opt-in privacy-conscious telemetry stack with compile-time-validated event schemas and a build-time linter for schema drift.
 
-**Agent automation (MCP).** A Model Context Protocol server lets an AI agent observe (the live accessibility tree plus screenshots) and drive (accessibility actions, synthetic pointer / key / IME input) a Bastyde app, in-process, with no OS accessibility layer needed. A debug-only Unix-socket bridge (Linux/macOS only; no surface in release builds) drives a live running app; a headless mode runs the toolkit's CI harness (and is a kit for building your own headless test harness: `bastyde-automation::execute` against your own tree). It reuses the same AccessKit tree every widget already declares: a node id is stable while the widget lives (re-find after a structural rebuild). Complements, rather than replaces, a real screen-reader smoke test. See [`docs/automation-mcp.md`](docs/automation-mcp.md).
+**Agent automation (MCP).** A Model Context Protocol server lets an AI agent observe (the live accessibility tree plus screenshots) and drive (accessibility actions, synthetic pointer / key / IME input) a Teksilo app, in-process, with no OS accessibility layer needed. A debug-only Unix-socket bridge (Linux/macOS only; no surface in release builds) drives a live running app; a headless mode runs the toolkit's CI harness (and is a kit for building your own headless test harness: `teksilo-automation::execute` against your own tree). It reuses the same AccessKit tree every widget already declares: a node id is stable while the widget lives (re-find after a structural rebuild). Complements, rather than replaces, a real screen-reader smoke test. See [`docs/automation-mcp.md`](docs/automation-mcp.md).
 
 For depth on any of these, see `docs/`.
 
@@ -177,14 +177,14 @@ For depth on any of these, see `docs/`.
 ```sh
 cargo new my-app
 cd my-app
-cargo add bastyde
+cargo add teksilo
 ```
 
 Then read the examples:
 
 ```sh
-git clone https://github.com/ferntech-eu/bastyde
-cd bastyde
+git clone https://github.com/ferntech-eu/teksilo
+cd teksilo
 cargo run -p simple-button      # the minimal app
 cargo run -p widget-catalog     # browse every widget
 cargo run -p file-dialogs       # native file dialogs
@@ -220,11 +220,11 @@ What is not yet shipped:
 
 ## Architecture stack
 
-Bastyde is part of a small stack:
+Teksilo is part of a small stack:
 
 - [text-document](https://github.com/jacquetc/text-document), the document model. **Required dependency.**
 - [text-typeset](https://github.com/jacquetc/text-typeset), the typesetting engine. **Required dependency.**
-- [Qleany](https://github.com/jacquetc/qleany), an architecture materializer that generates Clean Architecture (Vertical Slice variant) in Rust or C++/Qt from a YAML manifest. Independent and optional; pairs naturally with Bastyde for application backends.
+- [Qleany](https://github.com/jacquetc/qleany), an architecture materializer that generates Clean Architecture (Vertical Slice variant) in Rust or C++/Qt from a YAML manifest. Independent and optional; pairs naturally with Teksilo for application backends.
 
 ## Contributing
 
@@ -233,13 +233,13 @@ Bug reports and patches are welcome. Please open an issue before sending a non-t
 - The framework was built to support FernTech's application portfolio; roadmap priorities are weighted by what those applications need.
 - Architectural changes need a design discussion first. Surface-level changes (new builder methods, bug fixes, new examples) are easier.
 - Tests are required for new code. The suite runs headlessly, with no GPU or display server.
-- The `bati!` macro and the builder API both need to keep working. New widgets should be usable from both.
+- The `teksu!` macro and the builder API both need to keep working. New widgets should be usable from both.
 
 No CLA. A DCO sign-off (`git commit -s`) on each commit is enough.
 
 ## License
 
-Mozilla Public License 2.0. See `LICENSE`. Bastyde can be used in commercial and closed-source software without restriction; modifications to the Bastyde files themselves must be shared under MPL2 if distributed; application code that merely uses Bastyde is under its own license.
+Mozilla Public License 2.0. See `LICENSE`. Teksilo can be used in commercial and closed-source software without restriction; modifications to the Teksilo files themselves must be shared under MPL2 if distributed; application code that merely uses Teksilo is under its own license.
 
 ## Commercial support
 
@@ -247,8 +247,8 @@ For priority bug fixes, written support, or an indemnification agreement, contac
 
 ## Trademark
 
-"Bastyde" is a trademark of FernTech. The MPL-2.0 source license does **not** grant trademark rights. Forks and derivative works may use the source code under MPL-2.0 but must adopt a distinct name and distinct branding when distributed (compare Firefox / Iceweasel, Chromium / Chrome). Nominative use ("built with Bastyde", "Bastyde-compatible widget", articles describing Bastyde) is fine. See [TRADEMARKS.md](TRADEMARKS.md) for the full policy; for anything it doesn't cover, contact <trademarks@ferntech.eu>.
+"Teksilo" is a trademark of FernTech. The MPL-2.0 source license does **not** grant trademark rights. Forks and derivative works may use the source code under MPL-2.0 but must adopt a distinct name and distinct branding when distributed (compare Firefox / Iceweasel, Chromium / Chrome). Nominative use ("built with Teksilo", "Teksilo-compatible widget", articles describing Teksilo) is fine. See [TRADEMARKS.md](TRADEMARKS.md) for the full policy; for anything it doesn't cover, contact <trademarks@ferntech.eu>.
 
 ## Acknowledgments
 
-Bastyde builds on the work of others: AccessKit; winit and wgpu; HarfBuzz (via harfrust), swash, fontdb, etagere, and ICU4X; unicode-bidi and unicode-linebreak; Fluent and the Mozilla l10n team; the published design notes of the Druid, Masonry, and Xilem projects; and SwiftUI's layout protocol. Anthropic and Mistral provided the language models whose code generation contributed substantially under human review.
+Teksilo builds on the work of others: AccessKit; winit and wgpu; HarfBuzz (via harfrust), swash, fontdb, etagere, and ICU4X; unicode-bidi and unicode-linebreak; Fluent and the Mozilla l10n team; the published design notes of the Druid, Masonry, and Xilem projects; and SwiftUI's layout protocol. Anthropic and Mistral provided the language models whose code generation contributed substantially under human review.

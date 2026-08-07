@@ -4,15 +4,15 @@
 # CodeEditor, PlainTextEditor, and LogView
 
 Three multi-line text surfaces over one core
-([`crates/bastyde-widgets/src/code_editor/`](../crates/bastyde-widgets/src/code_editor.rs)):
+([`crates/teksilo-widgets/src/code_editor/`](../crates/teksilo-widgets/src/code_editor.rs)):
 
-- [`CodeEditor`](../crates/bastyde-widgets/src/code_editor/widget.rs) — a source
+- [`CodeEditor`](../crates/teksilo-widgets/src/code_editor/widget.rs) — a source
   editor: a line-number gutter, a current-line band, indentation, bracket
   handling, multiple carets, and completion.
-- [`PlainTextEditor`](../crates/bastyde-widgets/src/code_editor/widget.rs) — the
+- [`PlainTextEditor`](../crates/teksilo-widgets/src/code_editor/widget.rs) — the
   same core with the code affordances off and wrapping on: a notes field, a
   commit message, a description box.
-- [`LogView`](../crates/bastyde-widgets/src/code_editor/log_view.rs) — a
+- [`LogView`](../crates/teksilo-widgets/src/code_editor/log_view.rs) — a
   read-only, append-only, tail-following streaming view that scales to 100 000+
   lines. Its own page: [Log view](log-view.md).
 
@@ -23,7 +23,7 @@ let them drift.
 
 ## Why not RichTextEditor
 
-[`RichTextEditor`](../crates/bastyde-widgets/src/rich_text.rs) already edits
+[`RichTextEditor`](../crates/teksilo-widgets/src/rich_text.rs) already edits
 multi-line text, and this deliberately does not build on it. Its command
 vocabulary is tables, lists, blockquotes, and bold — reusing it would put
 Tab-navigates-a-table-cell and Ctrl+B-emboldens into a source file, where the
@@ -31,14 +31,14 @@ first is wrong and the second is meaningless. Its state carries a table-aware
 Ctrl+A ladder and a rich clipboard fragment; this one carries an indent policy
 and a caret vector. What the two genuinely share — the caret blink clock, the
 debounce window, the scroll arithmetic — lives in the crate-internal
-[`common::editor_runtime`](../crates/bastyde-widgets/src/common/editor_runtime.rs),
+[`common::editor_runtime`](../crates/teksilo-widgets/src/common/editor_runtime.rs),
 used by both, so the overlap is factored, not copied.
 
 ## Language-agnostic by construction
 
 There is no `Language` enum anywhere in this module. Comment tokens, bracket
 pairs, indent width, and completion candidates are
-[`CodeConfig`](../crates/bastyde-widgets/src/code_editor/config.rs) values the
+[`CodeConfig`](../crates/teksilo-widgets/src/code_editor/config.rs) values the
 application supplies: the editor knows how to toggle a line comment, not that
 Rust uses `//`. Guessing would be worse than not knowing — inserting `//` into a
 Python file corrupts it silently — so the defaults do only what needs no language
@@ -46,8 +46,8 @@ knowledge (indent, auto-indent) and leave comment toggling and bracket handling
 **off** until the application says what the tokens are.
 
 ```rust
-use bastyde::widgets::{CodeEditor, COMMON_BRACKETS};
-use bastyde::text_document::TextDocument;
+use teksilo::widgets::{CodeEditor, COMMON_BRACKETS};
+use teksilo::text_document::TextDocument;
 
 let doc = TextDocument::new();
 doc.set_plain_text(source).unwrap();
@@ -93,7 +93,7 @@ Shared by `CodeEditor` and `PlainTextEditor`:
 
 ## Code semantics
 
-Every command in [`keyboard.rs`](../crates/bastyde-widgets/src/code_editor/keyboard.rs)
+Every command in [`keyboard.rs`](../crates/teksilo-widgets/src/code_editor/keyboard.rs)
 is driven by injected configuration and is a single atomic undo step:
 
 - **Auto-indent on Enter** carries the previous line's indentation (and splits a
@@ -118,9 +118,9 @@ popup, and replaces the word on accept. Language-agnostic — the app knows the
 candidates (keywords, in-scope names, an LSP reply), the editor knows the
 mechanics. Without a provider there is no completion.
 
-- [`CompletionContext`](../crates/bastyde-widgets/src/code_editor/completion.rs)
+- [`CompletionContext`](../crates/teksilo-widgets/src/code_editor/completion.rs)
   carries the `prefix`, `line`, `column`, and document `position`.
-- [`CompletionItem`](../crates/bastyde-widgets/src/code_editor/completion.rs) is
+- [`CompletionItem`](../crates/teksilo-widgets/src/code_editor/completion.rs) is
   `new(label).insert_text(..).detail(..).kind(CompletionKind)`.
 - The editor owns the keys while the popup is open (Up/Down/PageUp-Down/Enter/Tab/
   Escape) — the popup is a detached overlay, not an ancestor, so keys cannot
@@ -133,7 +133,7 @@ mechanics. Without a provider there is no completion.
 Both the editor and the log present their text to assistive technology as a tree
 — a `Role::Paragraph` per line, a `Role::TextRun` per formatting run — built by
 the shared walk in
-[`a11y.rs`](../crates/bastyde-widgets/src/code_editor/a11y.rs). Each run carries
+[`a11y.rs`](../crates/teksilo-widgets/src/code_editor/a11y.rs). Each run carries
 the per-character byte lengths, word starts, and geometry a screen reader needs
 to speak and navigate character by character, plus:
 
@@ -158,8 +158,8 @@ through a per-run synthetic-node map. The editor walks the whole bounded documen
 ## Rendering & scale
 
 The body paints via the shared
-[`rich_text::paint::paint_frame`](../crates/bastyde-widgets/src/rich_text/paint.rs)
-over the [`RichTextEngine`](../crates/bastyde-text/src/rich_text_engine.rs). For a
+[`rich_text::paint::paint_frame`](../crates/teksilo-widgets/src/rich_text/paint.rs)
+over the [`RichTextEngine`](../crates/teksilo-text/src/rich_text_engine.rs). For a
 bounded document the standard full layout is right; for the unbounded streaming
 case the `LogView` uses the windowed layout path — the text-stack additions that
 make that possible (windowed `layout_window`, O(1) append, front-truncate) are
@@ -172,7 +172,7 @@ The core is fully headless — no GPU, no display. Tests run against the private
 engine's fixed metrics and verify the editor's own logic (viewport adoption,
 caret bookkeeping, event classification, policy gating, the a11y walk), not
 shaping, which is `text-typeset`'s own suite's job. See
-[`code_editor/tests.rs`](../crates/bastyde-widgets/src/code_editor/tests.rs).
+[`code_editor/tests.rs`](../crates/teksilo-widgets/src/code_editor/tests.rs).
 
 ## Demos
 

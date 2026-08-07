@@ -32,7 +32,7 @@ removal) falls back to a per-series rebuild reported as
 `SeriesDataReplaced`.
 
 ```ignore
-use bastyde_data::{ChartModel, ChartWindow};
+use teksilo_data::{ChartModel, ChartWindow};
 let model: ChartModel<i32> = ChartModel::new();
 let s = model.add_series("sensor");
 for i in 0..100 {
@@ -48,7 +48,7 @@ assert_eq!(window.point_count(s), 10); // last 10 points only
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_data/chart_window/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_data/chart_window/index.html)
 
 ## `pub struct ChartWindow`
 

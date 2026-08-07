@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: MPL-2.0 -->
 <!-- SPDX-FileCopyrightText: 2026 FernTech -->
 
-# Bastyde i18n showcase
+# Teksilo i18n showcase
 
 Phase H demo from the §12 internationalization implementation. Run it:
 
@@ -22,7 +22,7 @@ and the direction note at the top updates accordingly.
 - Three compiled-in locales (`en-US`, `fr-FR`, `ar-SA`)
 - RTL layout flip via `rtl_from_locale` + `HAlignment::resolve(rtl)`
 - `EventContext::set_locale(...)` broadcasting to every tree
-- `bastyde_widgets::framework_locales()` registration so a11y strings
+- `teksilo_widgets::framework_locales()` registration so a11y strings
   like *Dialog* and *Status* are available in fr-FR
 
 ## Translator hot-reload
@@ -99,7 +99,7 @@ Editing either file reloads that locale's bundle independently.
 
 | File | Purpose |
 |---|---|
-| [`src/main.rs`](src/main.rs) | Root widget, `LangCmd` enum, `parse_translation_dev_flags`, `BastydeAppBuilder` wiring |
+| [`src/main.rs`](src/main.rs) | Root widget, `LangCmd` enum, `parse_translation_dev_flags`, `TeksiloAppBuilder` wiring |
 | [`locales/en-US.ftl`](locales/en-US.ftl) | Source language — validated by `tr!` at compile time |
 | [`locales/fr-FR.ftl`](locales/fr-FR.ftl) | French runtime translation |
 | [`locales/ar-SA.ftl`](locales/ar-SA.ftl) | Arabic runtime translation (triggers RTL) |

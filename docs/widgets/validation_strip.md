@@ -26,7 +26,7 @@ let strip = ctx.add(ValidationStrip::new(fb_signal));
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/primitives/validation_strip/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/primitives/validation_strip/index.html)
 
 ## `pub struct ValidationStrip`
 

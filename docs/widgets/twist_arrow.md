@@ -17,7 +17,7 @@ the parent row's node owns `set_expanded`.
 // an EventContext to wire the tap callback. The snippet below shows the
 // construction pattern used inside a custom tree-row build().
 let arrow = TwistArrow::new(16.0, true, false)
-    .on_click(|ctx| ctx.send_intent(bastyde_core::Intent::new("tree.toggle")));
+    .on_click(|ctx| ctx.send_intent(teksilo_core::Intent::new("tree.toggle")));
 ```
 
 ## Builder methods at a glance
@@ -26,7 +26,7 @@ let arrow = TwistArrow::new(16.0, true, false)
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/primitives/twist_arrow/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/primitives/twist_arrow/index.html)
 
 ## `pub struct TwistArrow`
 

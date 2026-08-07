@@ -48,7 +48,7 @@ overwrite bug).
 ## Example
 
 ```
-use bastyde_settings::{Keyed, Migrator, PersistedListModel};
+use teksilo_settings::{Keyed, Migrator, PersistedListModel};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
@@ -74,7 +74,7 @@ plm.flush_now().expect("flush");
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_settings/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_settings/index.html)
 
 ## `pub enum ListOp`
 

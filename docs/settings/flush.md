@@ -89,7 +89,7 @@ worker is leaner and has identical semantics from the caller's point of view.
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_settings/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_settings/index.html)
 
 ## `pub enum FlushError`
 
@@ -126,7 +126,7 @@ pub type WriteFailureSink = Arc<dyn Fn(PathBuf, u32, usize, String) + Send + Syn
 
 Register a process-wide sink invoked whenever any `DebouncedWriter`
 permanently discards a queued write (see `WriteFailureSink`). There is
-only one slot: a later call replaces an earlier one. `bastyde-app` uses
+only one slot: a later call replaces an earlier one. `teksilo-app` uses
 this to forward the failure to the UI thread as a typed `AppEvent`.
 
 ```rust

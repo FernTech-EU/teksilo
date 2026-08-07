@@ -39,7 +39,7 @@ swatch grid each carry their own appropriate role and value.
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/color_picker/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/color_picker/index.html)
 
 ## `pub const DEFAULT_SWATCHES`
 
@@ -59,9 +59,9 @@ integration patterns. Use `ColorEdit`
 to wrap this in a compact trigger + popover pattern.
 
 ```ignore
-use bastyde_core::signal::Signal;
-use bastyde_tokens::Color;
-use bastyde_widgets::color_picker::{ColorPicker, ColorPickerLayout};
+use teksilo_core::signal::Signal;
+use teksilo_tokens::Color;
+use teksilo_widgets::color_picker::{ColorPicker, ColorPickerLayout};
 
 let color = ctx.signal(Color::new(0.42, 0.70, 0.35, 1.0));
 let _picker = ColorPicker::new(color)
@@ -87,7 +87,7 @@ concrete `Some(color)`. Apps that want a "clear to None"
 affordance should expose a separate Clear button alongside
 the picker.
 
-#### `pub fn style(mut self, style: impl bastyde_core::styles::ColorPickerStyle) -> Self`
+#### `pub fn style(mut self, style: impl teksilo_core::styles::ColorPickerStyle) -> Self`
 
 Per-call style override. Higher precedence than the theme-wide
 `style_slots.color_picker` slot.

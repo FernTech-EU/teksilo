@@ -20,7 +20,7 @@ synchronously (before the registering call returns) after each mutation.
 ```ignore
 // ChartModel::observe_changes returns an ObserverHandle whose drop
 // unregisters the callback — keep it alive for the observer's lifetime.
-use bastyde_data::{ChartModel, ChartChange};
+use teksilo_data::{ChartModel, ChartChange};
 let model: ChartModel<String> = ChartModel::new();
 let _handle = model.observe_changes(|change| {
     println!("{change:?}");
@@ -31,7 +31,7 @@ model.add_series("Revenue");
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_data/chart_change/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_data/chart_change/index.html)
 
 ## `pub struct SeriesId`
 

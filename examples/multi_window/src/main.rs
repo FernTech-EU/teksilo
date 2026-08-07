@@ -23,11 +23,11 @@
 //!   `appearsActive` / `:backdrop` behaviour, driven by the per-window
 //!   `window_active` signal.
 
-use bastyde::IntentKind;
-use bastyde::core::Action;
-use bastyde::core::shortcut::{KeyStroke, Shortcut};
-use bastyde::prelude::*;
-use bastyde::widgets::{
+use teksilo::IntentKind;
+use teksilo::core::Action;
+use teksilo::core::shortcut::{KeyStroke, Shortcut};
+use teksilo::prelude::*;
+use teksilo::widgets::{
     Button, ButtonVariant, Expand, HStack, Spacer, TextInput, TextWidget, Toolbar, VStack,
 };
 
@@ -44,18 +44,18 @@ fn dark_mode_toolbar() -> impl Widget {
     Toolbar::new().child(
         HStack::new()
             .child(Spacer::new())
-            .child(bastyde::widgets::ThemeSwitcher::new()),
+            .child(teksilo::widgets::ThemeSwitcher::new()),
     )
 }
 
 fn main() {
-    BastydeAppBuilder::new()
+    TeksiloAppBuilder::new()
         .install_automation_bridge_in_debug()
         .install_inspector_in_debug()
-        .theme(bastyde::presets::intui::light())
+        .theme(teksilo::presets::intui::light())
         .initial_window(
             WindowConfig::new()
-                .title("Bastyde — Multi-Window Demo")
+                .title("Teksilo — Multi-Window Demo")
                 .id("main")
                 .size(520, 320)
                 .min_size(320, 200)
@@ -98,7 +98,7 @@ impl Widget for MainRoot {
             }
             ctx.open_window(
                 WindowConfig::new()
-                    .title("Bastyde — Help")
+                    .title("Teksilo — Help")
                     .id("help")
                     .size(360, 220)
                     .root(|tree, _state| {

@@ -25,8 +25,8 @@ Wrap-mode text is height-variable and therefore always rigid; opt it into
 compression with `Shrinkable`.
 
 ```rust
-# use bastyde_widgets::primitives::TextWidget;
-# use bastyde_i18n::lit;
+# use teksilo_widgets::primitives::TextWidget;
+# use teksilo_i18n::lit;
 // Single-line label that truncates with a trailing ellipsis if too narrow:
 let _w = TextWidget::new(lit!("Save document")).single_line();
 ```
@@ -37,7 +37,7 @@ let _w = TextWidget::new(lit!("Save document")).single_line();
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/primitives/text_widget/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/primitives/text_widget/index.html)
 
 ## `pub struct TextWidget`
 
@@ -103,7 +103,7 @@ Cap the paragraph at `n` lines when wrapping. Only meaningful
 in `TextOverflow::Wrap` mode — ignored for ellipsis modes.
 Lines beyond the cap are silently dropped.
 
-#### `pub fn text_backend(mut self, backend: Rc<RefCell<dyn bastyde_canvas::TextBackend>>) -> Self`
+#### `pub fn text_backend(mut self, backend: Rc<RefCell<dyn teksilo_canvas::TextBackend>>) -> Self`
 
 Override the text backend used for measurement and rasterization.
 In normal app code the framework provides the backend automatically;

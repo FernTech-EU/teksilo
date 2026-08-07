@@ -3,23 +3,23 @@
 
 # Toast Notification Reference
 
-`bastyde_widgets::toast` ships the Bastyde notification system: stackable,
+`teksilo_widgets::toast` ships the Teksilo notification system: stackable,
 action-rich, severity-aware floating notifications backed by a
 persistent archive with a log + bell-button + dialog UI.
 
 Mental model in one line:
 
 ```
-BastydeAppBuilder.install_toast_default() → ctx.show_toast(Toast::…) from any handler
+TeksiloAppBuilder.install_toast_default() → ctx.show_toast(Toast::…) from any handler
 ```
 
 Distinct from siblings:
 
 | Widget | Shape | Lifetime | Stackable | Archive |
 |---|---|---|---|---|
-| [`Snackbar`](../crates/bastyde-widgets/src/snackbar.rs) | Bottom-center, single-instance | Auto-dismiss (4s default) | No (calls `dismiss_all_except_hosts`) | No |
-| [`Banner`](../crates/bastyde-widgets/src/banner.rs) | Inline persistent strip | Until user dismisses | No (inline) | No |
-| [`MessageBox`](../crates/bastyde-widgets/src/message_box.rs) | Modal dialog | Until user picks a button | No (one modal at a time) | No |
+| [`Snackbar`](../crates/teksilo-widgets/src/snackbar.rs) | Bottom-center, single-instance | Auto-dismiss (4s default) | No (calls `dismiss_all_except_hosts`) | No |
+| [`Banner`](../crates/teksilo-widgets/src/banner.rs) | Inline persistent strip | Until user dismisses | No (inline) | No |
+| [`MessageBox`](../crates/teksilo-widgets/src/message_box.rs) | Modal dialog | Until user picks a button | No (one modal at a time) | No |
 | **`Toast`** | Corner-anchored, stackable | Auto-dismiss (10s default) or persistent | **Yes** | **Yes** (persistent across restarts) |
 
 End-to-end demo: `cargo run -p toast-demo`. Source:
@@ -30,11 +30,11 @@ End-to-end demo: `cargo run -p toast-demo`. Source:
 ## Quickstart
 
 ```rust
-use bastyde::prelude::*;
-use bastyde::settings::AppPaths;
+use teksilo::prelude::*;
+use teksilo::settings::AppPaths;
 
 fn main() {
-    BastydeAppBuilder::new()
+    TeksiloAppBuilder::new()
         .theme(intui::light())
         .app_paths(AppPaths::new("eu", "FernTech", "MyApp").unwrap())
         .install_toast_default()                    // ← one-line install
@@ -86,8 +86,8 @@ ctx.show_toast(
 
 ## Installing the toast system
 
-One line at the builder. The `BastydeAppBuilderToastExt` extension trait
-is re-exported from the umbrella prelude (`bastyde::prelude::*`) so
+One line at the builder. The `TeksiloAppBuilderToastExt` extension trait
+is re-exported from the umbrella prelude (`teksilo::prelude::*`) so
 `install_toast(...)` / `install_toast_default()` are callable without
 an extra import:
 
@@ -102,7 +102,7 @@ an extra import:
 
 The toast subsystem ships behind the umbrella's `toast` feature
 (default-on). To drop it (and the bell-icon SVG + archive code),
-depend on `bastyde` with `default-features = false` and re-add only
+depend on `teksilo` with `default-features = false` and re-add only
 the features you need.
 
 What `install_toast` does, internally:
@@ -113,7 +113,7 @@ What `install_toast` does, internally:
    message otherwise.
 2. Constructs a shared [`ToastRegistry`](#toastregistry) bound to the
    archive (or naked if no archive is configured).
-3. Registers a [`DefaultPostRoot`](../crates/bastyde-app/src/default_post_root.rs)
+3. Registers a [`DefaultPostRoot`](../crates/teksilo-app/src/default_post_root.rs)
    closure that wraps every window's root with
    `ZStack { user_root, ToastHost::new(registry, options) }`. The
    `DefaultPostRoot` fires for every window the app opens — initial
@@ -354,7 +354,7 @@ The persistent layer behind the live toast queue. Two backends:
 | `Persistent { file_name, limit }` | `<config>/<file>.toml` via [`PersistedListModel`](settings.md#listfile-and-persistedlistmodel). Survives restarts. |
 
 Default `limit`: `DEFAULT_ARCHIVE_LIMIT = 200`. IntelliJ keeps
-hundreds; Bastyde picks a pragmatic cap so persistent files don't
+hundreds; Teksilo picks a pragmatic cap so persistent files don't
 grow unbounded.
 
 ### `NotificationEntry`
@@ -440,7 +440,7 @@ VStack {
 }
 ```
 
-Each row is a [`StandardListItem`](../crates/bastyde-widgets/src/standard_item.rs):
+Each row is a [`StandardListItem`](../crates/teksilo-widgets/src/standard_item.rs):
 severity glyph leading, title in `BodyBold` (unread) / `Body`
 (read), body as subtitle, action buttons trailing. Outer node
 carries `Role::List` + `set_name("Notifications")`.
@@ -642,7 +642,7 @@ Built-in keys (en-US source + fr-FR translation shipped):
 | `notifications-archive-replay-disabled` | "(no longer available)" |
 
 Apps that need more locales register them through the framework's
-standard `I18nConfig::framework_locales(bastyde_widgets::framework_locales())`.
+standard `I18nConfig::framework_locales(teksilo_widgets::framework_locales())`.
 
 ---
 
@@ -650,27 +650,27 @@ standard `I18nConfig::framework_locales(bastyde_widgets::framework_locales())`.
 
 | Concern | File |
 |---|---|
-| `Toast` request + `ToastAction` + `ToastDismissCause` + `ToastHandle` | [crates/bastyde-widgets/src/toast.rs](../crates/bastyde-widgets/src/toast.rs) |
-| `ToastRegistry` (queue + archive bridge + in-place merge) | [crates/bastyde-widgets/src/toast/registry.rs](../crates/bastyde-widgets/src/toast/registry.rs) |
-| `EventContextToastExt` (`ctx.show_toast` / `ctx.dismiss_toast`) | [crates/bastyde-widgets/src/toast/ext.rs](../crates/bastyde-widgets/src/toast/ext.rs) |
-| `ToastSurface` (chrome + a11y + custom actions) | [crates/bastyde-widgets/src/toast/surface.rs](../crates/bastyde-widgets/src/toast/surface.rs) |
-| `ToastHost` (queue display + timer + hover-pause) + `ToastInstallOptions` | [crates/bastyde-widgets/src/toast/host.rs](../crates/bastyde-widgets/src/toast/host.rs) |
-| `RecipeToastStyle` (default chrome) | [crates/bastyde-widgets/src/styles/recipe_toast_style.rs](../crates/bastyde-widgets/src/styles/recipe_toast_style.rs) |
-| `ToastStyle` trait + `ToastPriority` + `ToastStyleConfig` | [crates/bastyde-core/src/styles/toast_style.rs](../crates/bastyde-core/src/styles/toast_style.rs) |
-| `NotificationEntry` + `ArchivedAction` + `NotificationUpdate` | [crates/bastyde-widgets/src/notification.rs](../crates/bastyde-widgets/src/notification.rs) |
-| `NotificationArchiveModel` (`InMemory` / `Persistent`) | [crates/bastyde-widgets/src/notification/archive.rs](../crates/bastyde-widgets/src/notification/archive.rs) |
-| `NotificationLog` (toolbar + buckets + rows) | [crates/bastyde-widgets/src/notification/log.rs](../crates/bastyde-widgets/src/notification/log.rs) |
-| `NotificationCenterButton` (bell + badge + popover) | [crates/bastyde-widgets/src/notification/center_button.rs](../crates/bastyde-widgets/src/notification/center_button.rs) |
-| `NotificationLogDialog` (modal preset) | [crates/bastyde-widgets/src/notification/log_dialog.rs](../crates/bastyde-widgets/src/notification/log_dialog.rs) |
-| `install_toast` extension trait (`BastydeAppBuilderToastExt`) | [crates/bastyde/src/toast_install.rs](../crates/bastyde/src/toast_install.rs) |
+| `Toast` request + `ToastAction` + `ToastDismissCause` + `ToastHandle` | [crates/teksilo-widgets/src/toast.rs](../crates/teksilo-widgets/src/toast.rs) |
+| `ToastRegistry` (queue + archive bridge + in-place merge) | [crates/teksilo-widgets/src/toast/registry.rs](../crates/teksilo-widgets/src/toast/registry.rs) |
+| `EventContextToastExt` (`ctx.show_toast` / `ctx.dismiss_toast`) | [crates/teksilo-widgets/src/toast/ext.rs](../crates/teksilo-widgets/src/toast/ext.rs) |
+| `ToastSurface` (chrome + a11y + custom actions) | [crates/teksilo-widgets/src/toast/surface.rs](../crates/teksilo-widgets/src/toast/surface.rs) |
+| `ToastHost` (queue display + timer + hover-pause) + `ToastInstallOptions` | [crates/teksilo-widgets/src/toast/host.rs](../crates/teksilo-widgets/src/toast/host.rs) |
+| `RecipeToastStyle` (default chrome) | [crates/teksilo-widgets/src/styles/recipe_toast_style.rs](../crates/teksilo-widgets/src/styles/recipe_toast_style.rs) |
+| `ToastStyle` trait + `ToastPriority` + `ToastStyleConfig` | [crates/teksilo-core/src/styles/toast_style.rs](../crates/teksilo-core/src/styles/toast_style.rs) |
+| `NotificationEntry` + `ArchivedAction` + `NotificationUpdate` | [crates/teksilo-widgets/src/notification.rs](../crates/teksilo-widgets/src/notification.rs) |
+| `NotificationArchiveModel` (`InMemory` / `Persistent`) | [crates/teksilo-widgets/src/notification/archive.rs](../crates/teksilo-widgets/src/notification/archive.rs) |
+| `NotificationLog` (toolbar + buckets + rows) | [crates/teksilo-widgets/src/notification/log.rs](../crates/teksilo-widgets/src/notification/log.rs) |
+| `NotificationCenterButton` (bell + badge + popover) | [crates/teksilo-widgets/src/notification/center_button.rs](../crates/teksilo-widgets/src/notification/center_button.rs) |
+| `NotificationLogDialog` (modal preset) | [crates/teksilo-widgets/src/notification/log_dialog.rs](../crates/teksilo-widgets/src/notification/log_dialog.rs) |
+| `install_toast` extension trait (`TeksiloAppBuilderToastExt`) | [crates/teksilo/src/toast_install.rs](../crates/teksilo/src/toast_install.rs) |
 | Runnable demo | [examples/toast_demo/src/main.rs](../examples/toast_demo/src/main.rs) |
 
 ## Related core API additions
 
-The toast system landed alongside small bastyde-core extensions reusable
+The toast system landed alongside small teksilo-core extensions reusable
 by other overlay-shaped widgets:
 
-- `bastyde_tokens::Corner` (`TopLeading` / `TopTrailing` / `BottomLeading` /
+- `teksilo_tokens::Corner` (`TopLeading` / `TopTrailing` / `BottomLeading` /
   `BottomTrailing`) with RTL-aware `resolve(content, viewport, margin, rtl)`.
 - `OverlayPlacement::ViewportCorner { corner, margin }` —
   anchor-independent corner-snapped overlay placement.
@@ -682,10 +682,10 @@ by other overlay-shaped widgets:
 - `EventContext::pause_overlay_auto_dismiss(id)` /
   `resume_overlay_auto_dismiss(id)` — handler-side queue that
   forwards to `OverlayManager` after the dispatcher returns.
-- `BastydeAppBuilder::configured_app_paths()` — read-side companion to
+- `TeksiloAppBuilder::configured_app_paths()` — read-side companion to
   the existing `app_paths(paths)` setter. Builder-extension traits
   use it to open persistent files at install time before `run`.
-- `bastyde_core::styles::ToastStyle` slot + `ComponentStyleSlots::toast`.
+- `teksilo_core::styles::ToastStyle` slot + `ComponentStyleSlots::toast`.
 
 ## Limitations & explicit non-goals
 
@@ -697,7 +697,7 @@ by other overlay-shaped widgets:
   toast): out of scope. Toast is an *in-app* widget. Apps wanting
   OS notifications wire that through a separate crate.
 - **Inline reply / combo / picker inside a toast** (Windows toast
-  text-box / combo): non-portable, out of pattern for Bastyde.
+  text-box / combo): non-portable, out of pattern for Teksilo.
 - **Cross-window deduplication**: `Toast::id` is per-app (the
   registry is app-singleton), but the `NotificationLog` rebuild
   signal is per-archive — multi-window apps see the SAME log in

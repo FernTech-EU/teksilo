@@ -17,7 +17,7 @@
 //!
 //! Measure with the project's idle-drain tools:
 //! ```sh
-//! BASTYDE_IDLE_TRACE=1 /tmp/measure_long.sh
+//! TEKSILO_IDLE_TRACE=1 /tmp/measure_long.sh
 //! ```
 //! Expected: Animated tab → ~30 Hz rendered_frames, modest CPU (the
 //! shader path keeps paint() out of the hot loop). Static tab →
@@ -26,9 +26,9 @@
 use std::thread;
 use std::time::Duration;
 
-use bastyde::core::app_event::AppEvent;
-use bastyde::prelude::*;
-use bastyde::widgets::{
+use teksilo::core::app_event::AppEvent;
+use teksilo::prelude::*;
+use teksilo::widgets::{
     Expand, HStack, ProgressBar, Spacer, TabId, TabInfo, TabWidget, TextWidget, Toolbar, VStack,
 };
 
@@ -41,7 +41,7 @@ fn dark_mode_toolbar() -> impl Widget {
     Toolbar::new().child(
         HStack::new()
             .child(Spacer::new())
-            .child(bastyde::widgets::ThemeSwitcher::new()),
+            .child(teksilo::widgets::ThemeSwitcher::new()),
     )
 }
 
@@ -61,13 +61,13 @@ fn main() {
     let selected_for_root = selected.clone();
 
     let mut builder =
-        BastydeAppBuilder::new()
+        TeksiloAppBuilder::new()
             .install_automation_bridge_in_debug()
             .install_inspector_in_debug()
-            .theme(bastyde::presets::intui::light())
+            .theme(teksilo::presets::intui::light())
             .initial_window(
                 WindowConfig::new()
-                    .title("Bastyde — Animations Drain Test")
+                    .title("Teksilo — Animations Drain Test")
                     .size(640, 420)
                     .root(move |tree, _state| {
                         tree.add(VStack::new().child(dark_mode_toolbar()).child(
@@ -198,7 +198,7 @@ fn static_page() -> impl Widget + 'static {
     VStack::new().spacing(20.0).child(
         TextWidget::new(lit!(
             "Static tab — no animations, no timers, no per-frame work. CPU and GPU \
-             should drop to idle; BASTYDE_IDLE_TRACE=1 should emit zero lines."
+             should drop to idle; TEKSILO_IDLE_TRACE=1 should emit zero lines."
         ))
         .style(TextStyleRole::BodyBold),
     )

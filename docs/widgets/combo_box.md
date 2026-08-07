@@ -31,7 +31,7 @@ The widget is split across four internal modules:
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/combo_box/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/combo_box/index.html)
 
 ## `pub struct ComboBox`
 
@@ -197,13 +197,13 @@ only. The default IntUI chrome (`crate::styles::RecipeComboBoxStyle`)
 reads its tokens from `theme.components.combo_box`; custom impls
 can paint anything they want around the selected-label slot.
 
-#### `pub fn text_style(mut self, style: impl Into<bastyde_core::color_prop::TextStyleProp>) -> Self`
+#### `pub fn text_style(mut self, style: impl Into<teksilo_core::color_prop::TextStyleProp>) -> Self`
 
 Override the selected-value text style (font, size, weight).
 Accepts a `TextStyleRole`, a `TextStyle`, or a `Signal` of either.
 Default (unset) is `TextStyleRole::Body`.
 
-#### `pub fn text_role(mut self, color: impl Into<bastyde_core::color_prop::ColorProp>) -> Self`
+#### `pub fn text_role(mut self, color: impl Into<teksilo_core::color_prop::ColorProp>) -> Self`
 
 Override the selected-value text color. Accepts `Color`, a role, or
 a `Signal` of either. Default (unset) is enabled-derived

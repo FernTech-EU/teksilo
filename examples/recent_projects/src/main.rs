@@ -1,17 +1,17 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
-//! Recent Projects Demo — end-to-end exercise of `bastyde-settings`.
+//! Recent Projects Demo — end-to-end exercise of `teksilo-settings`.
 //!
 //! Run with: `cargo run -p recent-projects`
 //!
 //! Demonstrates:
 //!
-//! * `BastydeAppBuilder::application(...)` + `.settings(SettingsBundle)`
+//! * `TeksiloAppBuilder::application(...)` + `.settings(SettingsBundle)`
 //!   wiring the dynamic K/V store and the window-state service into
 //!   the app's `app_state` registry. Window geometry save/restore is
 //!   automatic when the `WindowConfig` carries an `id("main")` —
-//!   `bastyde-app` reads the saved state, sanitizes it against the
+//!   `teksilo-app` reads the saved state, sanitizes it against the
 //!   current monitor (so a coordinate from a now-disconnected screen
 //!   is recentered, never spawned off-screen), then opens the
 //!   window. Every move/resize/maximize is debounced into the
@@ -31,23 +31,23 @@
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
-use bastyde::IntentKind;
-use bastyde::core::Action;
-use bastyde::prelude::*;
-use bastyde::settings::{
+use serde::{Deserialize, Serialize};
+use teksilo::IntentKind;
+use teksilo::core::Action;
+use teksilo::prelude::*;
+use teksilo::settings::{
     AppPaths, Keyed, MruEntry, MruList, SettingsBundle, SettingsExt, SettingsKey,
 };
-use bastyde::widgets::{
+use teksilo::widgets::{
     Button, ButtonVariant, Expand, HStack, Padding, Panel, Repeater, Spacer, TextWidget, Toolbar,
     VStack,
 };
-use serde::{Deserialize, Serialize};
 
 fn dark_mode_toolbar() -> impl Widget {
     Toolbar::new().child(
         HStack::new()
             .child(Spacer::new())
-            .child(bastyde::widgets::ThemeSwitcher::new()),
+            .child(teksilo::widgets::ThemeSwitcher::new()),
     )
 }
 
@@ -190,7 +190,7 @@ impl Widget for Root {
             let mru = ctx.mru::<RecentProject>();
             for (path, name, pinned) in [
                 ("/projects/skribisto", "Skribisto", true),
-                ("/projects/bastyde", "Bastyde", false),
+                ("/projects/teksilo", "Teksilo", false),
                 ("/notes/journal-2026.md", "journal-2026.md", false),
                 ("/sandbox/playground", "playground", false),
             ] {
@@ -202,7 +202,7 @@ impl Widget for Root {
             }
         }));
 
-        // (No widget-side window-persist call needed — bastyde-app's
+        // (No widget-side window-persist call needed — teksilo-app's
         // window manager handles it automatically when the
         // WindowConfig carries `id(WINDOW_LABEL)` and a
         // WindowStateService is registered via `.settings(...)`.)
@@ -417,23 +417,23 @@ fn main() {
     let recents: MruList<RecentProject> =
         MruList::open(&paths, "recent_projects", 8).expect("open recent_projects.toml");
 
-    BastydeAppBuilder::new()
+    TeksiloAppBuilder::new()
         .install_automation_bridge_in_debug()
         .install_inspector_in_debug()
-        .theme(bastyde::presets::intui::light())
+        .theme(teksilo::presets::intui::light())
         .app_paths(paths)
         .settings(SettingsBundle::new().with_window_state(true))
         .app_state(recents)
         .initial_window(
             // Auto save/restore is enabled by `.id(WINDOW_LABEL)`:
-            // bastyde-app's window manager looks up the saved geometry
+            // teksilo-app's window manager looks up the saved geometry
             // for that id, sanitizes it against the current monitor,
             // and opens the window at the corrected size/position.
             // Subsequent move/resize/maximize events flow back to
             // disk debounced.
             WindowConfig::new()
                 .id(WINDOW_LABEL)
-                .title("Bastyde — Recent Projects Demo")
+                .title("Teksilo — Recent Projects Demo")
                 .size(DEFAULT_SIZE.0, DEFAULT_SIZE.1)
                 .min_size(MIN_SIZE.0, MIN_SIZE.1)
                 .root(|tree, _state| {

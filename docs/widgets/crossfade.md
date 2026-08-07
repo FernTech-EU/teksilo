@@ -42,7 +42,7 @@ instead of tweening (instant swap).
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/animations/crossfade/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/animations/crossfade/index.html)
 
 ## `pub struct Crossfade`
 

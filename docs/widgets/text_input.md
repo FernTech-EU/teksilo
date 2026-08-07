@@ -34,7 +34,7 @@ TextInput::new(search.clone())
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/text_input/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/text_input/index.html)
 
 ## `pub enum ValidationState`
 
@@ -237,7 +237,7 @@ Canonical alias for `Self::rich_tooltip` — matches the name used by
 `Button`, `ComboBox`, and other widgets. Mutually exclusive with
 `tooltip` and `composite_tooltip` (last call wins).
 
-#### `pub fn composite_tooltip( mut self, content: impl bastyde_core::widget::Widget + 'static, ) -> Self`
+#### `pub fn composite_tooltip( mut self, content: impl teksilo_core::widget::Widget + 'static, ) -> Self`
 
 Attach a composite tooltip — third tier, hosting an arbitrary
 widget tree. See `Button::composite_tooltip`.

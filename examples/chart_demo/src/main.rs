@@ -24,19 +24,19 @@
 //!
 //! Run with: `cargo run -p chart-demo`
 
-use bastyde::core::styles::{
+use teksilo::core::styles::{
     BorderPosition, BorderRecipe, BorderStyle, ChartFillContext, ChartStyle, FillRecipe,
     GradientStop, RecipeColor,
 };
-use bastyde::core::{FrameTickSubscription, WidgetPlacement};
-use bastyde::data::SelectionMode;
-use bastyde::prelude::*;
-use bastyde::tokens::{Color, HAlignment};
-use bastyde::widgets::{
+use teksilo::core::{FrameTickSubscription, WidgetPlacement};
+use teksilo::data::SelectionMode;
+use teksilo::prelude::*;
+use teksilo::tokens::{Color, HAlignment};
+use teksilo::widgets::{
     Button, ButtonVariant, Center, Expand, GroupHeader, HStack, Padding, ScrollArea,
     SegmentedControl, Spacer, Switcher, TextWidget, Toolbar, VStack,
 };
-use bastyde_charts::{
+use teksilo_charts::{
     AxisConfig, BarChart, BarGrouping, ChartAggregate, ChartAggregateFn, ChartDatum, ChartModel,
     ChartSelection, ChartSeries, ChartWindow, LegendPosition, LineChart, PieChart, PieLabelMode,
     SeriesId,
@@ -82,7 +82,7 @@ fn dark_mode_toolbar() -> impl Widget {
     Toolbar::new().child(
         HStack::new()
             .child(Spacer::new())
-            .child(bastyde::widgets::ThemeSwitcher::new()),
+            .child(teksilo::widgets::ThemeSwitcher::new()),
     )
 }
 
@@ -634,7 +634,7 @@ impl Widget for LiveStripPane {
         let last_advance: Rc<Cell<Option<Instant>>> = Rc::new(Cell::new(None));
 
         // Absolute-time gated, throttled tick — same pattern as `Cycle`'s
-        // once-per-period advance (see crates/bastyde-widgets/src/animations/cycle.rs).
+        // once-per-period advance (see crates/teksilo-widgets/src/animations/cycle.rs).
         ctx.effect(&ctx.frame_tick(), move |_delta| {
             if feed_state.get() == 1 {
                 return; // paused
@@ -727,13 +727,13 @@ impl Widget for LiveStripPane {
 }
 
 fn main() {
-    BastydeAppBuilder::new()
+    TeksiloAppBuilder::new()
         .install_automation_bridge_in_debug()
         .install_inspector_in_debug()
-        .theme(bastyde::presets::intui::light())
+        .theme(teksilo::presets::intui::light())
         .initial_window(
             WindowConfig::new()
-                .title("Bastyde — Chart Demo")
+                .title("Teksilo — Chart Demo")
                 .size(880, 860)
                 .root(|tree, _state| {
                     let series_model = make_series_model(1);

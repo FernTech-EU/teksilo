@@ -1,9 +1,9 @@
 <!-- SPDX-License-Identifier: MPL-2.0 -->
 <!-- SPDX-FileCopyrightText: 2026 FernTech -->
 
-# Bastyde Documentation
+# Teksilo Documentation
 
-Bastyde is a pure-Rust GUI framework for serious desktop applications: a
+Teksilo is a pure-Rust GUI framework for serious desktop applications: a
 retained widget tree with SwiftUI-style layout, AccessKit accessibility, and a
 wgpu renderer.
 
@@ -11,7 +11,7 @@ This site has two layers:
 
 - **[Widget Catalog](widgets/index.md)** — a per-widget discovery page for every
   shipped widget (its abilities, an example, and a deep link to the full rustdoc
-  API). Start here if you are exploring what Bastyde can draw.
+  API). Start here if you are exploring what Teksilo can draw.
 - **Reference & design docs** — the focused subsystem documents below (layout,
   styling, events, accessibility, data, …). Start here if you are building.
 
@@ -25,7 +25,7 @@ any widget's API to the terminal (`python3 tools/extract_widget_api.py Button`).
   reference: scrolling, arena, Canvas API, rendering pipeline, HiDPI,
   threading, testability, crate dependency graph, design comparisons,
   open questions. Per-subsystem APIs live in the focused docs below.
-- [bastyde-milestones.md](bastyde-milestones.md) — the demo-driven milestone
+- [teksilo-milestones.md](teksilo-milestones.md) — the demo-driven milestone
   roadmap; each milestone produces a runnable example exercising one slice
   of the architecture.
 
@@ -69,16 +69,16 @@ any widget's API to the terminal (`python3 tools/extract_widget_api.py Button`).
   the per-engine `font_scale` for editable text, and the `follow_text_scale`
   opt-in/opt-out surfaces (icons, `RichTextEditor`, scene text).
 
-## `bati!` DSL & formatting
+## `teksu!` DSL & formatting
 
-- [bati-macro-reference.md](bati-macro-reference.md) — user-facing reference
-  for the `bati!` block-DSL (parse → IR → builder calls).
-- [bati-language-spec-v3.md](bati-language-spec-v3.md) — design spec with
+- [teksu-macro-reference.md](teksu-macro-reference.md) — user-facing reference
+  for the `teksu!` block-DSL (parse → IR → builder calls).
+- [teksu-language-spec-v3.md](teksu-language-spec-v3.md) — design spec with
   full grammar, structural forms, and worked translations of catalog
   examples.
-- [bastyde-fmt.md](bastyde-fmt.md) — `cargo bastyde-fmt`, the formatter for `bati!`
+- [teksilo-fmt.md](teksilo-fmt.md) — `cargo teksilo-fmt`, the formatter for `teksu!`
   blocks (`rustfmt` skips macro bodies).
-- [bastyde-fmt-vscode.md](bastyde-fmt-vscode.md) — wiring `bastyde-fmt-lsp` into
+- [teksilo-fmt-vscode.md](teksilo-fmt-vscode.md) — wiring `teksilo-fmt-lsp` into
   VS Code for in-editor formatting.
 
 ## Input, navigation, chrome
@@ -94,11 +94,11 @@ any widget's API to the terminal (`python3 tools/extract_widget_api.py Button`).
   button actions, `Toast::id` update-in-place) + `ToastHost` queue +
   persistent `NotificationArchiveModel` + `NotificationLog` / bell
   `NotificationCenterButton` / `NotificationLogDialog` UI;
-  `BastydeAppBuilder::install_toast_default()` one-line install.
+  `TeksiloAppBuilder::install_toast_default()` one-line install.
 - [native-menu.md](native-menu.md) — declarative `MenuModel` shared by the
   in-window `MenuBar` and the macOS native menu bar (`NSMenu`);
   `MenuBar::from_model(..).native_on_macos(..)`,
-  `BastydeAppBuilder::install_native_menu()`, reactive checks, ⌘ key
+  `TeksiloAppBuilder::install_native_menu()`, reactive checks, ⌘ key
   equivalents, focus-follows-window.
 - [web-view.md](web-view.md) — embeddable `WebView` widget (native OS
   subview on top of wgpu), pluggable `WebViewBackend` (wry default /
@@ -133,15 +133,15 @@ any widget's API to the terminal (`python3 tools/extract_widget_api.py Button`).
   `SettingsStore`, `SettingsFile<T>`, `MruList<T>`, window-state auto
   save/restore.
 - [telemetry.md](telemetry.md) — consent-gated event reporting, the
-  bastyde-collector / Plausible / OTLP adapters, the `events.yaml` schema
+  teksilo-collector / Plausible / OTLP adapters, the `events.yaml` schema
   pipeline.
 
 ## Async & concurrency
 
 - [async.md](async.md) — the optional main-thread async executor
-  (`bastyde-async`): `install_async()`, `ctx.spawn_local(...)` /
+  (`teksilo-async`): `install_async()`, `ctx.spawn_local(...)` /
   `spawn_local_with`, `spawn_blocking`, the async-agnostic `on_loop_tick`
-  hook, and the `bastyde-tokio` / `bastyde-async-std` reactor adapters for
+  hook, and the `teksilo-tokio` / `teksilo-async-std` reactor adapters for
   awaiting native runtime futures. Off by default; complements the reactive
   `subscribe_event` data path.
 
@@ -163,11 +163,11 @@ any widget's API to the terminal (`python3 tools/extract_widget_api.py Button`).
   reorder, overflow dropdown, horizontal + vertical orientations).
 - [charts.md](charts.md) — `BarChart` / `LineChart` / `PieChart`
   (shared axis / palette / legend / tooltip infrastructure).
-- [bastyde-scene.md](bastyde-scene.md) — the pannable, zoomable scene viewport
+- [teksilo-scene.md](teksilo-scene.md) — the pannable, zoomable scene viewport
   (canvases, board layouts, diagram editors), including magnetism (typed
   snap-and-connect between item anchors).
-- [bastyde-scene-a11y.md](bastyde-scene-a11y.md) — shaping the accessibility
-  tree of a `bastyde-scene` viewport, including synthetic magnet nodes and
+- [teksilo-scene-a11y.md](teksilo-scene-a11y.md) — shaping the accessibility
+  tree of a `teksilo-scene` viewport, including synthetic magnet nodes and
   the roving `active_descendant` keyboard connect flow.
 
 ## Visuals & resources
@@ -177,6 +177,6 @@ any widget's API to the terminal (`python3 tools/extract_widget_api.py Button`).
 
 ## Tooling
 
-- [inspector.md](inspector.md) — `bastyde-inspector`, the in-app debug
+- [inspector.md](inspector.md) — `teksilo-inspector`, the in-app debug
   surface (Tree / Properties / Accessibility / Theme / Models tabs;
   picker + bounds overlay; debug-only).

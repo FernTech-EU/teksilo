@@ -4,13 +4,13 @@
 //! Shared state and helpers for the widget catalog.
 //!
 //! `Signals` is the single bundle of reactive values that every tab
-//! reads from and writes to. Both the classic and `bati!` builds of a
+//! reads from and writes to. Both the classic and `teksu!` builds of a
 //! tab share this struct, so flipping the mode toggle preserves all
 //! interactive state (slider positions, checkbox states, etc.).
 
-use bastyde::prelude::*;
-use bastyde::widgets::tooltip::TooltipContent;
-use bastyde::widgets::{CheckState, Panel, TabId};
+use teksilo::prelude::*;
+use teksilo::widgets::tooltip::TooltipContent;
+use teksilo::widgets::{CheckState, Panel, TabId};
 
 // ── Cascading-tooltip registry keys ───────────────────────────────────
 // Three-deep cascade: each tip's body links into the next via the
@@ -137,7 +137,7 @@ pub fn tab_header(
     title: impl Into<LocalizedString>,
     refs: impl Into<LocalizedString>,
 ) -> WidgetId {
-    use bastyde::widgets::{TextWidget, VStack};
+    use teksilo::widgets::{TextWidget, VStack};
     ctx.add(
         VStack::new()
             .spacing(4.0)
@@ -161,7 +161,7 @@ pub fn tab_header(
 /// only when you want emphasis; the text will still resolve via the
 /// theme's contrast tokens.
 pub fn color_cell(role: impl Into<ColorProp>, label: &'static str) -> impl Widget + 'static {
-    use bastyde::widgets::TextWidget;
+    use teksilo::widgets::TextWidget;
     Panel::new()
         .background(role)
         .corner_radius(4.0)
@@ -216,8 +216,8 @@ pub const FIELD_MAX_WIDTH: f32 = 360.0;
 /// `Wrap` sidesteps this entirely: it consumes the width it is offered and
 /// grows *downward*, which the enclosing `ScrollArea` already scrolls
 /// correctly.
-pub fn demo_row(spacing: f32) -> bastyde::widgets::Wrap {
-    use bastyde::widgets::Wrap;
+pub fn demo_row(spacing: f32) -> teksilo::widgets::Wrap {
+    use teksilo::widgets::Wrap;
     Wrap::new().spacing(spacing).line_spacing(spacing)
 }
 
@@ -233,7 +233,7 @@ pub fn section(
     title: impl Into<LocalizedString>,
     body: impl Widget + 'static,
 ) -> WidgetId {
-    use bastyde::widgets::{TextWidget, VStack};
+    use teksilo::widgets::{TextWidget, VStack};
     ctx.add(
         VStack::new()
             .spacing(6.0)

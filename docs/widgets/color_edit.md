@@ -32,8 +32,8 @@ AT name updates as the picker mutates the bound color.
 # Example
 
 ```ignore
-use bastyde_core::signal::Signal;
-use bastyde_tokens::Color;
+use teksilo_core::signal::Signal;
+use teksilo_tokens::Color;
 
 let color = ctx.signal(Color::new(0.21, 0.52, 0.89, 1.0));
 let _edit = ColorEdit::new(color)
@@ -47,7 +47,7 @@ let _edit = ColorEdit::new(color)
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/color_edit/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/color_edit/index.html)
 
 ## `pub struct ColorEdit`
 

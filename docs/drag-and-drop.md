@@ -10,18 +10,18 @@
 
 ## 1. What DnD means here
 
-Three distinct user stories share the same mechanics in Bastyde:
+Three distinct user stories share the same mechanics in Teksilo:
 
 1. **Intra-widget reordering** — drag a row inside a list or a node inside a tree. No serialisation; the payload is a typed Rust value.
 2. **Inter-widget transfer** — drag a row from one list into another, or drop a file shortcut onto a bookmarks bar. Also a typed payload, possibly with a MIME-annotated byte representation for adapter layers.
 3. **External (OS) drops** — accept files / text / URLs dragged in from a file manager or another app. Built on the same primitives plus a per-OS `ExternalDndBackend`. **Inbound is shipped** on every desktop target (macOS verified; Windows OLE, Wayland `wl_data_device` and X11 XDND cfg-gated) — see [§11](#11-external-os-drag-and-drop--drops-from-outside-the-app) and the `DropZone` widget.
-4. **External (OS) export** — drag a file / text / URL *out* of a Bastyde window into another application. **Shipped** on every desktop target (macOS and Wayland verified; Windows OLE and X11 XDND cfg-gated) — the source needs no new API: a normal `start_drag` whose payload carries MIME data auto-escalates to a native OS drag when the pointer leaves the window. See [§11.5](#115-outbound-export-app--os).
+4. **External (OS) export** — drag a file / text / URL *out* of a Teksilo window into another application. **Shipped** on every desktop target (macOS and Wayland verified; Windows OLE and X11 XDND cfg-gated) — the source needs no new API: a normal `start_drag` whose payload carries MIME data auto-escalates to a native OS drag when the pointer leaves the window. See [§11.5](#115-outbound-export-app--os).
 
 All flows reuse the same payload type, the same handler set, and the same gesture recognizer. Only the source of the events differs (in-app gesture vs. OS backend).
 
 ## 2. Payload — `DragPayload`
 
-Every drag carries a [`DragPayload`](../crates/bastyde-core/src/drag_payload.rs). It can hold:
+Every drag carries a [`DragPayload`](../crates/teksilo-core/src/drag_payload.rs). It can hold:
 
 - **A typed Rust value** — stored via `DragPayload::typed(value)`, retrieved via `payload.get_typed::<T>()` / `take_typed::<T>()` or probed with `has_typed::<T>()`.
 - **Zero or more MIME-annotated byte representations** — added via `with_mime(mime_type, bytes)`, queried via `mime_types()` / `get_mime(mime)`. Populated for external (OS) drops (e.g. `text/uri-list`, `text/plain`) alongside the typed `files()` / `text()` / `uris()` accessors; see [§11](#11-external-os-drag-and-drop--drops-from-outside-the-app).
@@ -48,7 +48,7 @@ handlers = handlers.on_drag_hover(move |payload, pos, _ctx| {
 A widget becomes a drag source by attaching `on_drag`. The framework auto-wires a `DragRecognizer` (press → 5 px threshold → recognise) into the widget's gesture arena and fires `on_drag` with a `DragPhase`:
 
 ```rust
-use bastyde::core::gesture::DragPhase;
+use teksilo::core::gesture::DragPhase;
 
 handlers = handlers.on_drag(move |phase, ctx| {
     if let DragPhase::Started { .. } = phase {
@@ -61,12 +61,12 @@ handlers = handlers.on_drag(move |phase, ctx| {
 });
 ```
 
-Two source APIs on [`EventContext`](../crates/bastyde-core/src/widget.rs):
+Two source APIs on [`EventContext`](../crates/teksilo-core/src/widget.rs):
 
 | Call | Effect |
 |---|---|
 | `start_drag(source, payload)` | Start a drag with no visible preview. Cursor still turns into `Grabbing`; target-side feedback still fires. Useful for "abstract" drags where the row itself doesn't move (e.g. colour pickers). |
-| `start_drag_with_preview(source, payload, Box<dyn Widget>)` | Same, plus a floating overlay that tracks the pointer. `ListView` / `TreeView` use this — they re-invoke their delegate for the dragged row and wrap it in a raised panel (see [crates/bastyde-widgets/src/drag_preview.rs](../crates/bastyde-widgets/src/drag_preview.rs)). |
+| `start_drag_with_preview(source, payload, Box<dyn Widget>)` | Same, plus a floating overlay that tracks the pointer. `ListView` / `TreeView` use this — they re-invoke their delegate for the dragged row and wrap it in a raised panel (see [crates/teksilo-widgets/src/drag_preview.rs](../crates/teksilo-widgets/src/drag_preview.rs)). |
 
 Three cursor / capture invariants the framework guarantees for the source:
 
@@ -76,7 +76,7 @@ Three cursor / capture invariants the framework guarantees for the source:
 
 ## 4. Dropping — target side
 
-A widget becomes a drop target by attaching at least `on_drag_hover` or `on_drop`. Target hit-testing uses [`find_drop_target_at_or_above`](../crates/bastyde-core/src/widget_tree/drag_drop_impl.rs): hit-test the pointer position, walk up until a node with either handler is found.
+A widget becomes a drop target by attaching at least `on_drag_hover` or `on_drop`. Target hit-testing uses [`find_drop_target_at_or_above`](../crates/teksilo-core/src/widget_tree/drag_drop_impl.rs): hit-test the pointer position, walk up until a node with either handler is found.
 
 Target-side handlers fire in this strict order, each at most once per role per drag:
 
@@ -99,13 +99,13 @@ handlers = handlers.on_drag_hover(move |payload, pos, _ctx| {
 });
 ```
 
-**Coordinates are target-local** — origin at the target widget's top-left, in logical pixels. Same coordinate system as the target's own `bounds` / `paint`, so drop-index math doesn't have to know where the widget sits in the window. (Before we fixed this the indicator was offset by the header height; see the regression test `on_drag_hover_and_on_drop_receive_widget_local_coordinates` in [drag_drop_impl.rs](../crates/bastyde-core/src/widget_tree/drag_drop_impl.rs).)
+**Coordinates are target-local** — origin at the target widget's top-left, in logical pixels. Same coordinate system as the target's own `bounds` / `paint`, so drop-index math doesn't have to know where the widget sits in the window. (Before we fixed this the indicator was offset by the header height; see the regression test `on_drag_hover_and_on_drop_receive_widget_local_coordinates` in [drag_drop_impl.rs](../crates/teksilo-core/src/widget_tree/drag_drop_impl.rs).)
 
 ### 4.2 `on_drag_tick(local_pos, ctx)`
 
 Fires once per layout pass while this widget is the current drop target. Use it for **per-frame behaviours that must keep progressing when the pointer is stationary**:
 
-- **Viewport-edge auto-scroll.** When the pointer dwells inside, say, the top 32 px of a scrollable target, the widget nudges its own scroll signal down a fixed delta each frame. `ListView` / `TreeView` ship this — see the `on_drag_tick` handler block in [list_view.rs](../crates/bastyde-widgets/src/list_view.rs).
+- **Viewport-edge auto-scroll.** When the pointer dwells inside, say, the top 32 px of a scrollable target, the widget nudges its own scroll signal down a fixed delta each frame. `ListView` / `TreeView` ship this — see the `on_drag_tick` handler block in [list_view.rs](../crates/teksilo-widgets/src/list_view.rs).
 - **Spring-loaded folders.** `TreeView` records which flat row the pointer sits over in `on_drag_hover`, together with the time it first saw it. `on_drag_tick` checks elapsed time against `SPRING_DELAY_MS = 700`; after the dwell, a collapsed branch auto-expands so the user can drop into its children.
 
 ```rust
@@ -115,7 +115,7 @@ handlers = handlers.on_drag_tick(move |pos, _ctx| {
 });
 ```
 
-`on_drag_tick` is the only DnD hook that isn't event-driven. The framework fires it from [`WidgetTree::layout`](../crates/bastyde-core/src/widget_tree/layout_impl.rs) itself, right after the animation scheduler tick.
+`on_drag_tick` is the only DnD hook that isn't event-driven. The framework fires it from [`WidgetTree::layout`](../crates/teksilo-core/src/widget_tree/layout_impl.rs) itself, right after the animation scheduler tick.
 
 ### 4.3 `on_drag_leave(ctx)`
 
@@ -186,11 +186,11 @@ When a drag starts with `start_drag_with_preview`, the framework:
 2. Creates an overlay with `OverlayLayer::InTree` + `OverlayPlacement::AtPointer(Point::ZERO)`.
 3. Marks the preview content `needs_layout` so the next layout pass runs `position_overlays` and actually positions the overlay at the pointer rather than leaving it at `(0, 0)`.
 
-On every `PointerMove` during drag, [`handle_drag_move`](../crates/bastyde-core/src/widget_tree/drag_drop_impl.rs) calls `overlay_manager.update_placement(AtPointer(position))` **and** marks the preview content `needs_layout` again — without the dirty mark, `layout()` short-circuits (`any_needs_layout()` is false) and the overlay stays pinned at its previous position.
+On every `PointerMove` during drag, [`handle_drag_move`](../crates/teksilo-core/src/widget_tree/drag_drop_impl.rs) calls `overlay_manager.update_placement(AtPointer(position))` **and** marks the preview content `needs_layout` again — without the dirty mark, `layout()` short-circuits (`any_needs_layout()` is false) and the overlay stays pinned at its previous position.
 
 Cleanup: `cleanup_drag_preview()` dismisses the overlay and destroys its content subtree. It runs on drop, Escape cancel, and explicit `cancel_drag`.
 
-### The [`DragPreview`](../crates/bastyde-widgets/src/drag_preview.rs) wrapper
+### The [`DragPreview`](../crates/teksilo-widgets/src/drag_preview.rs) wrapper
 
 `ListView` / `TreeView` don't hand the raw delegate widget to `start_drag_with_preview` — they wrap it in a small `DragPreview` composite that:
 
@@ -205,7 +205,7 @@ Two related interactions, both handled by the framework:
 
 ### 6.1 Mouse-wheel scroll over a drop target
 
-While `active_drag` is `Some`, `WidgetEvent::Scroll` is routed to the drag session's `current_target` instead of the normally-hovered widget. The drop target's `on_scroll` handler (e.g. `ListView`'s internal one) fires, updating its scroll signal. The framework then synthesises a re-hover at the stationary pointer so drop-index math, feedback line, and preview placement all refresh against the new scroll offset. Implementation: the `WidgetEvent::Scroll` arm of the `active_drag.is_some()` match in [`dispatch_event`](../crates/bastyde-core/src/widget_tree/event_dispatch_impl.rs).
+While `active_drag` is `Some`, `WidgetEvent::Scroll` is routed to the drag session's `current_target` instead of the normally-hovered widget. The drop target's `on_scroll` handler (e.g. `ListView`'s internal one) fires, updating its scroll signal. The framework then synthesises a re-hover at the stationary pointer so drop-index math, feedback line, and preview placement all refresh against the new scroll offset. Implementation: the `WidgetEvent::Scroll` arm of the `active_drag.is_some()` match in [`dispatch_event`](../crates/teksilo-core/src/widget_tree/event_dispatch_impl.rs).
 
 ### 6.2 Viewport-edge auto-scroll
 
@@ -258,11 +258,11 @@ Both widgets combine every primitive above, but the **acceptance decision and
 the commit are owned by the backing data source**, not the view (see
 [data-source.md §3](data-source.md)). The view supplies geometry and rendering;
 the source answers `can_accept` / `accept_drop`. Reading
-[list_view.rs](../crates/bastyde-widgets/src/list_view.rs) and
-[tree_view.rs](../crates/bastyde-widgets/src/tree_view.rs) as reference examples:
+[list_view.rs](../crates/teksilo-widgets/src/list_view.rs) and
+[tree_view.rs](../crates/teksilo-widgets/src/tree_view.rs) as reference examples:
 
 - `drop_feedback` signal (bound at `BindingLevel::RepaintOnly`) — set by `on_drag_hover`, cleared by `on_drag_leave`. Reading it in `paint()` is enough; the binding dirties the widget when the signal changes.
-- `on_drag` (per item wrapper) — fires only when the source's `drag(key)` returns `CanDrag`; emits the shared **public** [`RowDragData<T> { source: ViewId, rows: Vec<usize>, items: Option<Vec<T>> }`](../crates/bastyde-widgets/src/data_views.rs) typed payload (one type for all five data views) and a `DragPreview` built by re-invoking the delegate for the dragged row. `rows` is the selection-aware dragged set; `items` is `Some` only when the view opted into [`.exportable(..)`](#12-dragging-rows-out-of-a-data-view--cross-widget-export). The identity is a kind-tagged, process-global [`ViewId`](../crates/bastyde-widgets/src/data_views.rs) so a foreign drag is never misread as a same-view reorder.
+- `on_drag` (per item wrapper) — fires only when the source's `drag(key)` returns `CanDrag`; emits the shared **public** [`RowDragData<T> { source: ViewId, rows: Vec<usize>, items: Option<Vec<T>> }`](../crates/teksilo-widgets/src/data_views.rs) typed payload (one type for all five data views) and a `DragPreview` built by re-invoking the delegate for the dragged row. `rows` is the selection-aware dragged set; `items` is `Some` only when the view opted into [`.exportable(..)`](#12-dragging-rows-out-of-a-data-view--cross-widget-export). The identity is a kind-tagged, process-global [`ViewId`](../crates/teksilo-widgets/src/data_views.rs) so a foreign drag is never misread as a same-view reorder.
 - `on_drag_hover` (on the list/tree itself) — computes the geometric `(target, position)` from local Y + scroll offset, asks the source `can_accept`, and sets the feedback signal to match the verdict (`Accept` → insertion line, `Reject` → suppress, `Redirect` → snap). `TreeView` also records the hovered node + timestamp for spring-load. The row under a given `y` is resolved by the same `PrefixSumOffsets::row_at` a click uses, so the two agree even at a zero-height row boundary — see [table-view.md "Which row a `y` coordinate resolves to"](table-view.md) for the degenerate-height tie-break `row_at` applies.
 - `on_drag_tick` — edge auto-scroll (linear ramp inside a 32 px zone, max 12 px/frame). `TreeView` additionally checks the spring-load timer and expands the hovered branch after 700 ms.
 - `on_drag_leave` — clears the feedback signal and the spring-load timer.
@@ -279,14 +279,14 @@ Everything is headless. The key harness helpers (on `WidgetTree`):
 | `advance_time(Duration)` | Advance the sim clock (used by tooltip / long-press delays) |
 | `overlay_manager().len()` / `.overlay(id)` | Inspect active overlays (incl. drag preview) |
 | `widget_as_any(id)` | Downcast a widget for test introspection (via the `Widget::as_any` hook) |
-| `active_drag.is_some()` (pub(crate) — in bastyde-core tests only) | Check whether a session is live |
+| `active_drag.is_some()` (pub(crate) — in teksilo-core tests only) | Check whether a session is live |
 
 Common patterns from the existing suite:
 
-- **Core-level lifecycle tests** ([drag_drop_impl.rs tests module](../crates/bastyde-core/src/widget_tree/drag_drop_impl.rs)) — use `FillWidget` / `InsetWidget` / `StackWidget` with handlers attached directly, drive events with `tree.dispatch_event(...)`, assert via `Rc<Cell<u32>>` counters and `tree.active_drag`. The `on_drag_leave_*` tests are the canonical examples.
-- **Widget-level integration tests** ([list_view.rs](../crates/bastyde-widgets/src/list_view.rs), [tree_view.rs](../crates/bastyde-widgets/src/tree_view.rs) tests modules) — build a real `ListView`/`TreeView` with a `ListModel` / `TreeModel`, run the full gesture chain via a `drag_item` helper, assert the model's observable state (`with_item`, `root_count`) and the feedback signal via the `widget_as_any` downcast.
+- **Core-level lifecycle tests** ([drag_drop_impl.rs tests module](../crates/teksilo-core/src/widget_tree/drag_drop_impl.rs)) — use `FillWidget` / `InsetWidget` / `StackWidget` with handlers attached directly, drive events with `tree.dispatch_event(...)`, assert via `Rc<Cell<u32>>` counters and `tree.active_drag`. The `on_drag_leave_*` tests are the canonical examples.
+- **Widget-level integration tests** ([list_view.rs](../crates/teksilo-widgets/src/list_view.rs), [tree_view.rs](../crates/teksilo-widgets/src/tree_view.rs) tests modules) — build a real `ListView`/`TreeView` with a `ListModel` / `TreeModel`, run the full gesture chain via a `drag_item` helper, assert the model's observable state (`with_item`, `root_count`) and the feedback signal via the `widget_as_any` downcast.
 - **Drag across a rebuild** — `drag_survives_rebuild_triggered_by_selection` in `list_view.rs` pins the scenario where clicking a row triggers a selection-driven rebuild between `PointerDown` and the first `PointerMove`. The drag must still complete.
-- **External handlers survive rebuild** — `external_handlers_survive_rebuild` in [widget_builder.rs](../crates/bastyde-core/src/widget_builder.rs) pins the handler-bucket invariant: closures attached via `SomeWidget::new().on_tap(...)` must keep firing after the widget rebuilds in place.
+- **External handlers survive rebuild** — `external_handlers_survive_rebuild` in [widget_builder.rs](../crates/teksilo-core/src/widget_builder.rs) pins the handler-bucket invariant: closures attached via `SomeWidget::new().on_tap(...)` must keep firing after the widget rebuilds in place.
 
 See [events-and-gestures.md §8](events-and-gestures.md) for the general testing patterns.
 
@@ -320,17 +320,17 @@ fn on_drop(payload: DragPayload, _pos, ctx) -> bool {
 
 ### 11.2 The backend trait
 
-[`ExternalDndBackend`](../crates/bastyde-platform/src/external_dnd.rs) registers
+[`ExternalDndBackend`](../crates/teksilo-platform/src/external_dnd.rs) registers
 the app as the OS drop target for a window and, for each phase
 (`Entered { data, position }` / `Moved` / `Left` / `Dropped { data, position }`),
 posts an `ExternalDndEventPayload` through `AppEventPoster::post_external` — the
-same channel file dialogs use. `bastyde-app` routes it to the window's tree and
+same channel file dialogs use. `teksilo-app` routes it to the window's tree and
 drives `WidgetTree::{begin,update,end,cancel}_external_drag`, which construct a
 `DragSession` (with `source_widget = None`, `is_external = true`, no pointer
 capture, no preview overlay) and run the normal `handle_drag_move` /
 `handle_drag_drop` path.
 
-Apps opt in with `BastydeAppBuilder::install_external_dnd()`. Each window is
+Apps opt in with `TeksiloAppBuilder::install_external_dnd()`. Each window is
 registered on creation and revoked on close.
 
 ### 11.3 Per-platform status
@@ -349,7 +349,7 @@ drop-zone widget that must hit-test position.
 #### 11.3.1 X11: why a proxy window, and why no pointer grab
 
 Two things about X11 shape the backend, and both are worth knowing before
-reading [`external_dnd/x11.rs`](../crates/bastyde-platform/src/external_dnd/x11.rs).
+reading [`external_dnd/x11.rs`](../crates/teksilo-platform/src/external_dnd/x11.rs).
 
 **Inbound needs `XdndProxy`.** XDND messages are `ClientMessage`s sent with an
 empty event mask, which the X protocol delivers *only* to the client that
@@ -358,14 +358,14 @@ connection, and exposes no hook into its X event stream (`WindowExtX11` is an
 empty trait) — so a second connection cannot see them, and winit's own built-in
 XDND handling (files only, no position) cannot be turned off. The spec's own
 answer is `XdndProxy`: a window may name another window that "should be checked
-for `XdndAware` and should receive all the client messages". Bastyde creates a
+for `XdndAware` and should receive all the client messages". Teksilo creates a
 1×1 `InputOnly` helper window on its own connection, marks it `XdndAware` and
 self-pointing `XdndProxy` (the spec's stale-proxy guard), and points the
 toplevel's `XdndProxy` at it. GTK 3/4, Qt 5/6 and Java/AWT all honour this with
 the same validation, covering every mainstream toolkit and file manager.
 
 **Outbound needs no pointer grab.** An XDND source conventionally grabs the
-pointer to keep receiving motion over other applications' windows. Bastyde
+pointer to keep receiving motion over other applications' windows. Teksilo
 cannot: X11 pointer grabs are exclusive per client, and the `ButtonPress` that
 started the drag already gave winit's connection an implicit grab lasting until
 release — `GrabPointer` from the backend would return `AlreadyGrabbed` *every*
@@ -392,13 +392,13 @@ would.
 
 **Known limitation.** A source that ignores `XdndProxy` — a hand-rolled XDND
 client; no mainstream toolkit does — reaches winit's built-in handler instead,
-whose events Bastyde does not consume, so such a drop is ignored rather than
+whose events Teksilo does not consume, so such a drop is ignored rather than
 delivered. Raw Xt/Motif clients speak `_MOTIF_DRAG_*`, not XDND, and were never
 reachable.
 
 ### 11.4 The `DropZone` widget
 
-[`DropZone`](../crates/bastyde-widgets/src/drop_zone.rs) is the ready-made
+[`DropZone`](../crates/teksilo-widgets/src/drop_zone.rs) is the ready-made
 "drop files here" target: hover accept/reject highlight, `accept_extensions`
 filter, `allow_multiple` policy, `on_files_dropped` / `on_text_dropped` /
 `on_urls_dropped` callbacks, and a keyboard-operable **Browse…** button (the
@@ -413,7 +413,7 @@ keyboard fallback (Browse) — not a synthetic drag action.
 
 ### 11.5 Outbound export (app → OS)
 
-Dragging a file / text / URL **out** of a Bastyde window into another
+Dragging a file / text / URL **out** of a Teksilo window into another
 application. The model is **unified, escalate-at-boundary**: a drag is not
 pre-committed to "internal" or "external" — the destination decides. `DragPayload`
 already carries both representations (a typed `Box<dyn Any>` fast-path *and*
@@ -432,7 +432,7 @@ row.on_drag(|phase, ctx| {
 });
 ```
 
-Bastyde runs its normal in-app drag (preview overlay, `on_drag_hover` feedback).
+Teksilo runs its normal in-app drag (preview overlay, `on_drag_hover` feedback).
 **When the pointer leaves the window** carrying an OS-exportable payload, the
 framework escalates to a native OS drag (`WidgetTree::try_escalate_to_os_drag` →
 `WindowOps::begin_os_drag` → the backend's `ExternalDndGuard::begin_drag`). Drops
@@ -477,7 +477,7 @@ and "Internal drop target" in `cargo run -p file-drop`.
 
 ### 11.6 The `DropTarget` widget
 
-[`DropTarget`](../crates/bastyde-widgets/src/drop_target.rs) is the *wrapping*
+[`DropTarget`](../crates/teksilo-widgets/src/drop_target.rs) is the *wrapping*
 counterpart to `DropZone`: instead of being a standalone "drop here" placeholder,
 it turns **any existing widget subtree** into a drop target without replacing its
 look. The wrapped child fills the bounds and stays fully visible; the highlight is
@@ -528,7 +528,7 @@ Leading, Trailing}` — each with its own optional hint, and route the drop by
 *where* the pointer released. This is the reusable form of `DockingLayout`'s
 hand-computed five-zone drag-to-dock overlay (its `compute_drop_zone` /
 `DockDropOverlay`); the pure hit-test (`region_at`) and geometry (`region_rect`)
-live in `bastyde-core::styles`.
+live in `teksilo-core::styles`.
 
 ```rust
 DropTarget::new()
@@ -592,7 +592,7 @@ another data view, or the OS. All five views share one opt-in builder surface.
 ### 12.1 The payload — `RowDragData<T>`
 
 Every data-view row drag carries the public, generic
-[`RowDragData<T>`](../crates/bastyde-widgets/src/data_views.rs):
+[`RowDragData<T>`](../crates/teksilo-widgets/src/data_views.rs):
 
 ```rust
 pub struct RowDragData<T: 'static> {
@@ -607,7 +607,7 @@ and serves both audiences: the origin's own erased classifier reads
 `source` + `rows` to recognise a same-view reorder; a **foreign** receiver reads
 `items`. A plain `.reorderable(true)` drag carries `items == None`, so a
 reorder-only view is never accidentally consumed elsewhere — a receiver gates on
-[`RowDragData::is_export()`](../crates/bastyde-widgets/src/data_views.rs).
+[`RowDragData::is_export()`](../crates/teksilo-widgets/src/data_views.rs).
 
 ### 12.2 Send side — opting rows into export
 
@@ -663,14 +663,14 @@ same-view reorder lands the block **contiguously** (`ListModel::move_items`
 emits `ItemsMoved` so index selection follows; trees re-anchor and drop
 descendants of another dragged node, and reject a drop *into* a dragged
 subtree). See the integration tests in
-[list_view.rs](../crates/bastyde-widgets/src/list_view.rs) (`exportable_*`,
+[list_view.rs](../crates/teksilo-widgets/src/list_view.rs) (`exportable_*`,
 `accept_foreign_rows_receives_from_another_view`,
 `two_views_over_same_model_do_not_spuriously_reorder`).
 
 ## 13. Non-goals — what DnD does NOT do yet
 
 - **Cross-window / re-entry *move* semantics.** A drop that crossed the window boundary reports `OsCopy`, never `OsMove`/`InApp` — the source can't know to delete its item. True app-internal move across windows would need a private-MIME handshake beyond the current Copy-only export. (A data-view `.exportable(Move)` drag therefore behaves as a copy across the window boundary — see §12.4.)
-- **A drag icon on X11.** XDND has no drag image in the wire protocol; GTK and Qt each create their own override-redirect window and reposition it per motion, which needs an ARGB visual and a running compositor to avoid drawing a black rectangle. Bastyde changes the cursor instead, so `DragImageData` is ignored on X11.
+- **A drag icon on X11.** XDND has no drag image in the wire protocol; GTK and Qt each create their own override-redirect window and reposition it per motion, which needs an ARGB visual and a running compositor to avoid drawing a black rectangle. Teksilo changes the cursor instead, so `DragImageData` is ignored on X11.
 - **Non-`XdndProxy` X11 sources.** See §11.3.1 — a source that ignores the proxy reaches winit's built-in handler and its drop is not delivered. No mainstream toolkit is affected.
 - **`Opacity` primitive for previews.** The current `DragPreview` uses a raised surface — no transparency. Opacity is a separate widget-primitive enhancement.
 - **Public `preview_builder(..)` on ListView / TreeView.** Today the preview is always a delegate-built `DragPreview`. Apps that need a differently-styled preview have to re-implement the full reorderable widget or wait for the builder API.
@@ -681,8 +681,8 @@ subtree). See the integration tests in
 - [events-and-gestures.md §4 Gesture recognizers](events-and-gestures.md) — how `DragRecognizer` fits into the gesture arena.
 - [data-models.md §8 Drag-and-drop integration](data-models.md) — how `ListModel::move_item` / `TreeModel::move_node` / `DataChange::ItemsMoved` / `TreeChange::NodeMoved` plug into the drop handlers.
 - [shortcut-intent-action.md](shortcut-intent-action.md) — when a drop should fire a typed `Intent` instead of mutating a model directly.
-- [crates/bastyde-core/src/drag_payload.rs](../crates/bastyde-core/src/drag_payload.rs), [drag_state.rs](../crates/bastyde-core/src/drag_state.rs) — the framework types.
-- [crates/bastyde-widgets/src/list_view.rs](../crates/bastyde-widgets/src/list_view.rs), [tree_view.rs](../crates/bastyde-widgets/src/tree_view.rs), [drag_preview.rs](../crates/bastyde-widgets/src/drag_preview.rs) — the canonical widget integrations.
-- [crates/bastyde-platform/src/external_dnd.rs](../crates/bastyde-platform/src/external_dnd.rs) — the external (OS) drag backend trait (`ExternalDndGuard::begin_drag` for outbound), handle, and macOS / Wayland / no-op / memory backends; [external_dnd/macos.rs](../crates/bastyde-platform/src/external_dnd/macos.rs) (`NSDraggingSource`), [external_dnd/wayland.rs](../crates/bastyde-platform/src/external_dnd/wayland.rs) (`wl_data_source`); [drop_zone.rs](../crates/bastyde-widgets/src/drop_zone.rs) — the standalone `DropZone` widget; [drop_target.rs](../crates/bastyde-widgets/src/drop_target.rs) — the wrapping `DropTarget` widget (§11.6).
-- Outbound escalation + typed re-entry live in [crates/bastyde-core/src/widget_tree/drag_drop_impl.rs](../crates/bastyde-core/src/widget_tree/drag_drop_impl.rs) (`try_escalate_to_os_drag`, `handle_os_drag_ended`, the global typed-payload stash); `DropOutcome` / `OutboundDragData` / `DragImageData` / `DragPayload::{to_outbound,is_os_exportable,enrich_external_from_mime}` in [drag_payload.rs](../crates/bastyde-core/src/drag_payload.rs); `WindowOps::begin_os_drag` in [window/ops.rs](../crates/bastyde-core/src/window/ops.rs).
+- [crates/teksilo-core/src/drag_payload.rs](../crates/teksilo-core/src/drag_payload.rs), [drag_state.rs](../crates/teksilo-core/src/drag_state.rs) — the framework types.
+- [crates/teksilo-widgets/src/list_view.rs](../crates/teksilo-widgets/src/list_view.rs), [tree_view.rs](../crates/teksilo-widgets/src/tree_view.rs), [drag_preview.rs](../crates/teksilo-widgets/src/drag_preview.rs) — the canonical widget integrations.
+- [crates/teksilo-platform/src/external_dnd.rs](../crates/teksilo-platform/src/external_dnd.rs) — the external (OS) drag backend trait (`ExternalDndGuard::begin_drag` for outbound), handle, and macOS / Wayland / no-op / memory backends; [external_dnd/macos.rs](../crates/teksilo-platform/src/external_dnd/macos.rs) (`NSDraggingSource`), [external_dnd/wayland.rs](../crates/teksilo-platform/src/external_dnd/wayland.rs) (`wl_data_source`); [drop_zone.rs](../crates/teksilo-widgets/src/drop_zone.rs) — the standalone `DropZone` widget; [drop_target.rs](../crates/teksilo-widgets/src/drop_target.rs) — the wrapping `DropTarget` widget (§11.6).
+- Outbound escalation + typed re-entry live in [crates/teksilo-core/src/widget_tree/drag_drop_impl.rs](../crates/teksilo-core/src/widget_tree/drag_drop_impl.rs) (`try_escalate_to_os_drag`, `handle_os_drag_ended`, the global typed-payload stash); `DropOutcome` / `OutboundDragData` / `DragImageData` / `DragPayload::{to_outbound,is_os_exportable,enrich_external_from_mime}` in [drag_payload.rs](../crates/teksilo-core/src/drag_payload.rs); `WindowOps::begin_os_drag` in [window/ops.rs](../crates/teksilo-core/src/window/ops.rs).
 - [examples/drag_and_drop](../examples/drag_and_drop/) — runnable in-app DnD demo; [examples/file_drop](../examples/file_drop/) — external (OS) drop demo.

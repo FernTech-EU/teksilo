@@ -1,0 +1,28 @@
+# SPDX-License-Identifier: MPL-2.0
+# SPDX-FileCopyrightText: 2026 FernTech
+
+[package]
+name = "teksilo-scene"
+edition = "2024"
+version.workspace = true
+license-file.workspace = true
+publish.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+teksilo-tokens = { workspace = true }
+teksilo-canvas = { workspace = true }
+teksilo-core = { workspace = true }
+teksilo-data = { workspace = true }
+teksilo-i18n = { workspace = true }
+# Runtime dep: the scene reuses the widget catalog both as heavyweight
+# item content and to render lightweight-item tooltips (TooltipWidget).
+# teksilo-widgets does not depend on teksilo-scene, so this is acyclic.
+teksilo-widgets = { workspace = true }
+accesskit = { workspace = true }
+
+[dev-dependencies]
+# Test-only: property-based testing (see the `proptest` entry in the
+# workspace manifest for why proptest rather than cargo-fuzz).
+proptest = { workspace = true }

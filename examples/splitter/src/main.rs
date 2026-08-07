@@ -21,10 +21,10 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use bastyde::core::{Signal, WidgetPlacement};
-use bastyde::prelude::*;
-use bastyde::tokens::Orientation;
-use bastyde::widgets::{
+use teksilo::core::{Signal, WidgetPlacement};
+use teksilo::prelude::*;
+use teksilo::tokens::Orientation;
+use teksilo::widgets::{
     Badge, Button, Expand, FixedSize, HStack, PaneDescriptor, Panel, ScrollArea, Spacer, Splitter,
     SplitterModel, SplitterState, TextWidget, Toolbar, VStack,
 };
@@ -139,7 +139,7 @@ impl Widget for SplitterDemo {
                         }),
                     )
                     .child(Spacer::new())
-                    .child(bastyde::widgets::ThemeSwitcher::new()),
+                    .child(teksilo::widgets::ThemeSwitcher::new()),
             )
         };
 
@@ -255,10 +255,10 @@ fn text_pane(title: &str, body: &str) -> impl Widget {
 }
 
 fn main() {
-    BastydeAppBuilder::new()
+    TeksiloAppBuilder::new()
         .install_automation_bridge_in_debug()
         .install_inspector_in_debug()
-        .theme(bastyde::presets::intui::light())
+        .theme(teksilo::presets::intui::light())
         .initial_window(
             WindowConfig::new()
                 .title("Splitter")

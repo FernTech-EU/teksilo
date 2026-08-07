@@ -24,12 +24,12 @@ scene.handlers_mut(id).unwrap()
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_scene/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_scene/index.html)
 
 ## `pub struct SceneTapEvent`
 
 Click-style gesture envelope for scene items. Mirrors the
-widget-tier `bastyde_core::gesture::TapEvent` but with the
+widget-tier `teksilo_core::gesture::TapEvent` but with the
 position in **scene** coordinates instead of widget-local. Used
 by the tap / double-tap / triple-tap / long-press / context-menu
 handlers on `SceneItemHandlerSet`.

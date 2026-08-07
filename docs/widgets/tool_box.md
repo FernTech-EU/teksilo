@@ -38,7 +38,7 @@ ToolBox::new(selected.clone())
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/tool_box/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/tool_box/index.html)
 
 ## `pub enum ToolBoxOrientation`
 

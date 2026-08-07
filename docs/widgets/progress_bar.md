@@ -25,8 +25,8 @@ paths exist internally:
   the track plus a proportional fill rect.
 
 ```rust
-# use bastyde_widgets::ProgressBar;
-# use bastyde_core::signal::Signal;
+# use teksilo_widgets::ProgressBar;
+# use teksilo_core::signal::Signal;
 // Static determinate bar at 70 %:
 let _bar = ProgressBar::new(0.7).thickness(6.0);
 
@@ -44,7 +44,7 @@ let _spinner_bar = ProgressBar::indeterminate();
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/progress_bar/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/progress_bar/index.html)
 
 ## `pub struct ProgressBar`
 
@@ -89,7 +89,7 @@ Accepts `Color`, roles, or `Signal<Color>`.
 Override the fill / sweep color. Default (unset) is `SurfaceRole::Accent`.
 Accepts `Color`, roles, or `Signal<Color>`.
 
-#### `pub fn style(mut self, style: impl bastyde_core::styles::ProgressBarStyle) -> Self`
+#### `pub fn style(mut self, style: impl teksilo_core::styles::ProgressBarStyle) -> Self`
 
 Per-call style override for the stationary chrome (track +
 determinate fill). The indeterminate sweep is widget-owned and

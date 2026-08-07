@@ -31,7 +31,7 @@ What it adds over the read-only code viewer:
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/code_editor/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/code_editor/index.html)
 
 ## `pub struct LogView`
 
@@ -99,17 +99,17 @@ Vertical scrollbar policy (default `Auto`).
 
 Horizontal scrollbar policy (default `Auto`).
 
-#### `pub fn background(self, color: impl Into<bastyde_core::color_prop::ColorProp>) -> Self`
+#### `pub fn background(self, color: impl Into<teksilo_core::color_prop::ColorProp>) -> Self`
 
 Override the background colour (accepts a `Color`, theme role, or
 `Signal`). Default tracks the theme's `editor_bg`.
 
-#### `pub fn text_color(self, color: impl Into<bastyde_core::color_prop::ColorProp>) -> Self`
+#### `pub fn text_color(self, color: impl Into<teksilo_core::color_prop::ColorProp>) -> Self`
 
 Override the default text colour. Per-line severity colours (from
 `severity_highlighter`) still win.
 
-#### `pub fn selection_color(self, color: impl Into<bastyde_core::color_prop::ColorProp>) -> Self`
+#### `pub fn selection_color(self, color: impl Into<teksilo_core::color_prop::ColorProp>) -> Self`
 
 Override the selection colour.
 
@@ -158,19 +158,19 @@ Empty the view, resetting it to its pristine state. UI-thread only.
 
 Scroll to the bottom, resuming tail-following. UI-thread only.
 
-#### `pub fn line_count(&self) -> bastyde_core::Signal<usize>`
+#### `pub fn line_count(&self) -> teksilo_core::Signal<usize>`
 
 The live line count — a status bar can bind it.
 
-#### `pub fn document_version(&self) -> bastyde_core::Signal<u64>`
+#### `pub fn document_version(&self) -> teksilo_core::Signal<u64>`
 
 Bumps on every content change.
 
-#### `pub fn scroll_y(&self) -> bastyde_core::Signal<f32>`
+#### `pub fn scroll_y(&self) -> teksilo_core::Signal<f32>`
 
 The vertical scroll offset — a follow-state indicator can read it against
 `max_scroll_y`.
 
-#### `pub fn max_scroll_y(&self) -> bastyde_core::Signal<f32>`
+#### `pub fn max_scroll_y(&self) -> teksilo_core::Signal<f32>`
 
 The maximum vertical scroll offset.

@@ -31,8 +31,8 @@ graphical time picker).
   it's editable.
 
 ```ignore
-use bastyde_core::signal::Signal;
-use bastyde_widgets::time_edit::{TimeEdit, TimeFormat, SecondsMode};
+use teksilo_core::signal::Signal;
+use teksilo_widgets::time_edit::{TimeEdit, TimeFormat, SecondsMode};
 
 let value = Signal::new(None);
 let _field = TimeEdit::new(value)
@@ -46,7 +46,7 @@ let _field = TimeEdit::new(value)
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/time_edit/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/time_edit/index.html)
 
 ## `pub enum TimeFormat`
 
@@ -93,7 +93,7 @@ pub struct TimeEdit { /* fields */ }
 
 Construct bound to `value` (`None` = empty field; `Some(t)` = pre-filled time).
 
-#### `pub fn style(mut self, style: impl bastyde_core::styles::DateEditStyle) -> Self`
+#### `pub fn style(mut self, style: impl teksilo_core::styles::DateEditStyle) -> Self`
 
 Per-call DateEditStyle override (shared with DateEdit family).
 

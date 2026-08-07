@@ -1,0 +1,213 @@
+# SPDX-License-Identifier: MPL-2.0
+# SPDX-FileCopyrightText: 2026 FernTech
+
+[package]
+name = "teksilo"
+edition = "2024"
+version.workspace = true
+license-file.workspace = true
+publish.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[features]
+# Default set: widgets, text backend, i18n runtime, plus Arabic and
+# Hebrew fallback fonts so the internationalization demo and common
+# RTL cases work out of the box. Applications that want a Latin-only
+# minimal build can disable fonts via `default-features = false` and
+# re-add only the features they need (e.g. `features = ["widgets",
+# "text", "i18n"]` for text support without the Noto bundles).
+default = [
+    "widgets",
+    "text",
+    "i18n",
+    "inspector",
+    "toast",
+    "file-dialog",
+    "clipboard",
+    "fonts-arabic",
+    "fonts-hebrew",
+]
+
+widgets = ["dep:teksilo-widgets"]
+text = ["dep:teksilo-text", "teksilo-app/text"]
+i18n = ["dep:teksilo-i18n"]
+# Debug-only in-app inspector (`F12`, picker, AllBounds overlay,
+# theme/locale switchers, models tab, …). Pulls in `widgets` because
+# the Tree tab's filter input is a `TextInput`. The crate itself is
+# `cfg(debug_assertions)` — release builds compile to a no-op — but the
+# Cargo dep is unconditional; turn this feature off if you want to drop
+# the inspector cost too.
+inspector = ["dep:teksilo-inspector", "widgets"]
+# Toast notifications. The `TeksiloAppBuilderToastExt::install_toast`
+# entry point lives in this crate (mirroring how `inspector` declares
+# `TeksiloAppBuilderInspectorExt` in `teksilo-inspector`); the actual Toast
+# widget types live in `teksilo-widgets`. Pulls in `widgets` because the
+# install closure constructs a `ToastHost` and the archive model. On
+# by default — apps that don't show toasts pay only the lookup of the
+# `ToastRegistry` slot in `app_state` (one HashMap miss).
+toast = ["widgets"]
+# Forwards clipboard support through teksilo-app so `TextInput`,
+# `RichTextEditor::editor`, and any other clipboard-aware widget can
+# copy/cut/paste via the system clipboard. On by default — text input
+# is essentially unusable without it. Disable via
+# `default-features = false` if the binary-size cost of `arboard` is
+# unacceptable; clipboard commands then silently no-op (they are
+# filtered at the `ctx.app_state::<ClipboardHandle>()` lookup).
+clipboard = ["teksilo-app/clipboard"]
+
+# Native file dialogs via `rfd`, with `RfdAsyncBackend` auto-installable
+# through `TeksiloAppBuilder::install_file_dialog`. On by default — the
+# extra binary cost is small and the pattern (open / save / pick folder)
+# is core to most desktop apps. Apps that want only the trait surface
+# (e.g. to ship a custom backend) opt in to the leaner `file-dialog-trait`.
+file-dialog = ["teksilo-app/rfd-backend"]
+# Just the trait surface, mock backend, and `EventContextFileDialogExt`
+# extension trait — no rfd, no async-std. For apps that bring their own
+# backend.
+file-dialog-trait = ["teksilo-app/file-dialog"]
+
+# Embeddable `WebView` widget (`teksilo-webview`), backed by the production
+# `wry` engine (macOS WKWebView / Windows WebView2 / Linux-X11 WebKitGTK) —
+# **wry is the default engine**, so enabling `web-view` gives you a working
+# webview out of the box. Brings in the widget, the backend trait +
+# `WebViewRegistry`, the `wry` engine backend, and the
+# `TeksiloAppBuilderWebViewExt::install_web_view{,_default}` entry point
+# (defined in this crate, mirroring `toast`); also turns on `teksilo-app/web-view`
+# so the event loop routes backend events back to the originating window's tree.
+# Off in `teksilo`'s own default set — apps that don't embed web content pull no
+# browser engine. (Mirrors the `file-dialog` / `file-dialog-trait` split.)
+web-view = ["web-view-headless", "teksilo-webview/wry-backend"]
+# Additive Servo support for Linux/Wayland (where wry's WebKitGTK can't
+# reparent). Implies `web-view`, so this ships BOTH engines and
+# `install_web_view_default()` picks Servo only under a Wayland session, wry
+# everywhere else. Never a "servo-only" build — Servo renders whole-window via
+# GL (conflicting with wgpu) and is the wrong engine off Wayland.
+web-view-servo = ["web-view", "teksilo-webview/servo-backend"]
+# The widget + event routing WITHOUT any engine — `install_web_view_default()`
+# installs the inert no-op backend. For headless tests, or apps that bring
+# their own backend via `install_web_view(custom)`. The escape hatch for a
+# true Servo-only target: add `teksilo-webview` directly with
+# `features = ["servo-backend"]` and install `ServoBackend` explicitly.
+web-view-headless = ["dep:teksilo-webview", "teksilo-app/web-view"]
+
+# Embeddable terminal-emulator (`Terminal`) widget (`teksilo-terminal`), backed
+# by `portable-pty` (the PTY) + `alacritty_terminal` (the VT model). Off by
+# default — apps that don't embed a terminal pull neither a PTY layer nor a VT
+# parser. Unlike `web-view`, the terminal renders into the wgpu surface and
+# needs no `teksilo-app` event routing, so there is no `teksilo-app/terminal`.
+terminal = ["dep:teksilo-terminal", "teksilo-terminal/alacritty"]
+
+# Debug-only automation bridge. Adds `install_automation_bridge_in_debug()`
+# (re-exported here as `TeksiloAppBuilderAutomationExt`, mirroring `toast` /
+# `web-view`) so `teksilo-automation-mcp --connect <sock>` can drive a live
+# running app. The active socket is additionally gated on `debug_assertions`,
+# so a release build with this feature still ships no bridge. Also re-exports
+# the GUI-free `teksilo-automation` toolkit as `teksilo::automation`.
+automation = ["dep:teksilo-automation", "teksilo-app/automation"]
+
+# Optional main-thread async executor (`teksilo-async`): adds
+# `TeksiloAppBuilder::install_async()` plus `ctx.spawn_local(...)` /
+# `spawn_blocking` for imperative async-in-UI flows. Off by default — apps
+# that don't need an executor pay nothing, and teksilo-core / teksilo-app gain
+# no async dependency. `teksilo-tokio` / `teksilo-async-std` build on this to
+# add native-ecosystem reactor support.
+async = ["dep:teksilo-async"]
+# Tokio reactor for the async executor (`teksilo-tokio`). Implies `async`.
+# Lets handlers `.await` native Tokio futures (timers / sockets / reqwest)
+# directly inside `ctx.spawn_local(...)`, and adds `install_async_tokio()`.
+tokio = ["async", "dep:teksilo-tokio"]
+# async-std reactor for the async executor (`teksilo-async-std`). Implies
+# `async`; adds `install_async_async_std()`.
+async-std = ["async", "dep:teksilo-async-std"]
+
+# Telemetry support. Forwards to the `telemetry` features on
+# `teksilo-app` (gates `.telemetry(bundle)` + the install wiring) and on
+# `teksilo-widgets` (gates the `PrivacySettings` widget). Off by default
+# — apps that don't ship analytics pay nothing. Standalone analytics
+# adapter crates (`teksilo-analytics-{plausible,teksilo,otlp}`) are not
+# pulled in by this feature; apps add them as direct deps.
+telemetry = ["teksilo-app/telemetry", "teksilo-widgets?/telemetry"]
+
+# Sibling preset crates — opt-in alternatives to the bundled IntUI
+# preset (`teksilo::prelude::intui::{light, dark}`). Each is a
+# stub today that returns an IntUI-shaped baseline with TODO markers;
+# the per-tier customisation work lands incrementally as the
+# four-tier styling refactor finishes the remaining widget
+# migrations. Apps that opt in get a stable import path
+# (`teksilo::prelude::material3::{light, dark}`, etc.) so the
+# refactor's surface stays additive — when the styles fill in,
+# existing code automatically picks them up.
+theme-material3 = ["dep:teksilo-theme-material3"]
+theme-macos = ["dep:teksilo-theme-macos"]
+theme-fluent = ["dep:teksilo-theme-fluent"]
+
+# Font bundle features — forwarded to `teksilo-text`'s own feature set
+# via the `teksilo-text?/...` optional-dep syntax. The `?` means the
+# forwarding only activates when `teksilo-text` itself is in the build
+# (i.e., when the `text` feature is enabled); a user that only wants
+# i18n-without-text will see these as silent no-ops. Applications
+# enable the scripts they ship for and disable the rest.
+#
+# Each feature maps 1:1 to a feature of the same name on `teksilo-text`,
+# which in turn decides whether to `include_bytes!` the corresponding
+# Noto Sans variable font at compile time and register it with the
+# typesetter's fallback chain.
+fonts-arabic = ["teksilo-text?/fonts-arabic"]
+fonts-hebrew = ["teksilo-text?/fonts-hebrew"]
+fonts-thai = ["teksilo-text?/fonts-thai"]
+fonts-devanagari = ["teksilo-text?/fonts-devanagari"]
+fonts-cjk-sc = ["teksilo-text?/fonts-cjk-sc"]
+fonts-cjk-jp = ["teksilo-text?/fonts-cjk-jp"]
+fonts-cjk-kr = ["teksilo-text?/fonts-cjk-kr"]
+
+# Convenience meta-features, again forwarded to `teksilo-text`.
+fonts-all-non-cjk = ["teksilo-text?/fonts-all-non-cjk"]
+fonts-all = ["teksilo-text?/fonts-all"]
+
+# Opt-in runtime color-emoji fallback. Forwards to
+# `teksilo-text/system-emoji`, which loads Noto Color Emoji / Apple
+# Color Emoji / Segoe UI Emoji from a hard-coded list of installed
+# system paths at startup. Off by default — color-emoji fonts are
+# large (20-30 MB) and not always present; apps that ship cross-
+# platform UI with emoji should opt in here.
+system-emoji = ["teksilo-text?/system-emoji"]
+
+[dependencies]
+teksilo-tokens = { workspace = true }
+teksilo-canvas = { workspace = true }
+teksilo-core = { workspace = true }
+teksilo-macros = { workspace = true }
+teksilo-data = { workspace = true }
+teksilo-render = { workspace = true }
+teksilo-platform = { workspace = true }
+teksilo-app = { workspace = true }
+teksilo-async = { workspace = true, optional = true }
+teksilo-tokio = { workspace = true, optional = true }
+teksilo-async-std = { workspace = true, optional = true }
+teksilo-settings = { workspace = true }
+teksilo-widgets = { workspace = true, optional = true }
+# Declared directly (not via `workspace = true`) so we can set
+# `default-features = false` — Cargo rejects overriding
+# `default-features` on a workspace-inherited dep. teksilo's own
+# feature flags are then the authoritative control over which Noto
+# Sans fonts get bundled: `default = ["fonts-arabic", "fonts-hebrew"]`
+# restores the out-of-the-box behavior, and downstream apps that use
+# `default-features = false` on teksilo get a clean slate with no
+# Noto fonts bundled.
+teksilo-text = { path = "../teksilo-text", version = "0.6.2", optional = true, default-features = false }
+teksilo-i18n = { workspace = true, optional = true }
+teksilo-inspector = { workspace = true, optional = true }
+teksilo-webview = { workspace = true, optional = true }
+teksilo-terminal = { workspace = true, optional = true }
+teksilo-automation = { workspace = true, optional = true }
+teksilo-resources = { workspace = true }
+teksilo-theme-material3 = { workspace = true, optional = true }
+teksilo-theme-macos = { workspace = true, optional = true }
+teksilo-theme-fluent = { workspace = true, optional = true }
+
+[dev-dependencies]
+trybuild = "1"
+# Toast install tests build a builder with a `Persistent` archive
+# against a temp directory.
+tempfile = { workspace = true }

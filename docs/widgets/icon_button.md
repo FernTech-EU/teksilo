@@ -16,10 +16,10 @@ icon stays at full visual weight (Primary at rest), the right default
 for stand-alone toolbar / menu rows.
 
 ```rust
-# use bastyde_widgets::{IconButton};
-# use bastyde_widgets::primitives::IconWidget;
-# use bastyde_i18n::lit;
-# use bastyde_core::Intent;
+# use teksilo_widgets::{IconButton};
+# use teksilo_widgets::primitives::IconWidget;
+# use teksilo_i18n::lit;
+# use teksilo_core::Intent;
 # const MY_SVG: &str = "<svg xmlns='http://www.w3.org/2000/svg'/>";
 // Stand-alone toolbar use — full-weight icon.
 let _w = IconButton::new(IconWidget::from_svg(MY_SVG))
@@ -40,8 +40,8 @@ Common roles ship with the appropriate icon and an i18n tooltip
 call `.embedded()`, `.toolbar()`, `.large()`, etc. to configure:
 
 ```rust
-# use bastyde_widgets::IconButton;
-# use bastyde_core::signal::Signal;
+# use teksilo_widgets::IconButton;
+# use teksilo_core::signal::Signal;
 # let visible = Signal::new(false);
 let _w = IconButton::browse().embedded();           // 24 dp, dim — TextInput trailing
 let _w = IconButton::clear().embedded();            // 24 dp, dim — clear-X
@@ -67,10 +67,10 @@ Host widgets that accept icon buttons follow the `trailing_slot`
 convention established by `TabWidget`:
 
 ```rust
-# use bastyde_widgets::{IconButton, TextInput};
-# use bastyde_widgets::primitives::HStack;
-# use bastyde_core::signal::Signal;
-# use bastyde_core::Intent;
+# use teksilo_widgets::{IconButton, TextInput};
+# use teksilo_widgets::primitives::HStack;
+# use teksilo_core::signal::Signal;
+# use teksilo_core::Intent;
 # let value = Signal::new(String::new());
 let _w = TextInput::new(value)
     .trailing_slot(HStack::new().spacing(0.0)
@@ -85,7 +85,7 @@ let _w = TextInput::new(value)
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/icon_button/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/icon_button/index.html)
 
 ## `pub struct IconButton`
 
@@ -107,7 +107,7 @@ Apply `.embedded()` for the JetBrains "built-in" dim look,
 and one of the size methods (`.large()` / `.toolbar()` /
 `.hero()`) or `.size(...)` to pick a different size.
 
-#### `pub fn style(mut self, style: impl bastyde_core::styles::IconButtonStyle) -> Self`
+#### `pub fn style(mut self, style: impl teksilo_core::styles::IconButtonStyle) -> Self`
 
 Per-call style override. Replaces the theme-wide default
 `IconButtonStyle` for just this IconButton instance — same role
@@ -159,7 +159,7 @@ designed to live inside another widget's trailing slot
 visually with the host's content. Default mode is stand-alone
 (icon at full visual weight, `Primary` always).
 
-#### `pub fn icon_role(mut self, role: impl Into<bastyde_core::color_prop::ColorProp>) -> Self`
+#### `pub fn icon_role(mut self, role: impl Into<teksilo_core::color_prop::ColorProp>) -> Self`
 
 Override the icon's tint with a static `ColorProp`. When set,
 the icon ignores `embedded` and the auto-derived idle/hover/press
@@ -201,12 +201,12 @@ registry. See `Button::rich_tooltip`.
 
 Attach a rich tooltip driven by inline `TooltipContent`.
 
-#### `pub fn composite_tooltip( mut self, content: impl bastyde_core::widget::Widget + 'static, ) -> Self`
+#### `pub fn composite_tooltip( mut self, content: impl teksilo_core::widget::Widget + 'static, ) -> Self`
 
 Attach a composite tooltip — third tier, hosting an arbitrary
 widget tree. See `Button::composite_tooltip`.
 
-#### `pub fn composite_tooltip_boxed( mut self, content: Box<dyn bastyde_core::widget::Widget>, ) -> Self`
+#### `pub fn composite_tooltip_boxed( mut self, content: Box<dyn teksilo_core::widget::Widget>, ) -> Self`
 
 Attach a composite tooltip from an already-boxed widget — the boxed twin
 of `composite_tooltip`, for hosts that build
@@ -275,7 +275,7 @@ swaps to `toggled_icon`. The visibility-toggle pattern (eye ↔
 eye-off). For surface-only bistate (icon stays the same), use
 `toggle`.
 
-#### `pub fn has_popup(mut self, kind: bastyde_core::accesskit::HasPopup) -> Self`
+#### `pub fn has_popup(mut self, kind: teksilo_core::accesskit::HasPopup) -> Self`
 
 Declare that this button is a disclosure trigger for a popup
 (menu, dialog, listbox, …). Surfaced via `set_has_popup` in
@@ -359,7 +359,7 @@ it to decide whether to mask or show the text.
 Icon factory set for predefined built-in buttons.
 
 Each field is a function pointer that creates an `IconWidget`.
-The default implementation uses SVG icons embedded in bastyde-widgets.
+The default implementation uses SVG icons embedded in teksilo-widgets.
 
 # Overriding
 
@@ -367,8 +367,8 @@ Call `BuiltInIcons::set_global` at app startup (before creating any
 built-in buttons) to replace the default icon set:
 
 ```rust
-# use bastyde_widgets::{BuiltInIcons};
-# use bastyde_widgets::primitives::IconWidget;
+# use teksilo_widgets::{BuiltInIcons};
+# use teksilo_widgets::primitives::IconWidget;
 # const MY_BROWSE_SVG: &str = "<svg xmlns='http://www.w3.org/2000/svg'/>";
 # const MY_CLEAR_SVG: &str = "<svg xmlns='http://www.w3.org/2000/svg'/>";
 BuiltInIcons::set_global(BuiltInIcons {
@@ -386,7 +386,7 @@ pub struct BuiltInIcons { /* fields */ }
 
 #### `pub fn defaults() -> Self`
 
-Return the default icon set (SVGs embedded in bastyde-widgets).
+Return the default icon set (SVGs embedded in teksilo-widgets).
 
 #### `pub fn set_global(icons: Self)`
 

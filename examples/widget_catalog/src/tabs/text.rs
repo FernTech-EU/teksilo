@@ -3,8 +3,8 @@
 
 //! Text tab — TextInput, SpinBox, SearchField, PasswordField, FilePickerField, InputDialog.
 
-use bastyde::prelude::*;
-use bastyde::widgets::{
+use teksilo::prelude::*;
+use teksilo::widgets::{
     Button, ButtonVariant, Divider, FilePickerField, FilePickerKind, InputDialog, MaxSize,
     PasswordField, SearchField, SpinBox, TextInput, TextWidget, VStack,
 };
@@ -124,9 +124,9 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
                     let msg = tr!(txt_password_validation());
                     move |s| {
                         if s.chars().count() >= 8 {
-                            bastyde::widgets::ValidationOutcome::Valid
+                            teksilo::widgets::ValidationOutcome::Valid
                         } else {
-                            bastyde::widgets::ValidationOutcome::Invalid {
+                            teksilo::widgets::ValidationOutcome::Invalid {
                                 message: msg.clone(),
                             }
                         }
@@ -174,13 +174,13 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
     )
 }
 
-pub fn bati(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
+pub fn teksu(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
     let username_sig = sigs.username_text.clone();
     let readonly_sig = sigs.readonly_text.clone();
     let spin_sig = sigs.spin_value.clone();
     let file_path_signal = ctx.signal(String::new());
     // Pre-register: `with_suggestions` / `on_select` / `on_submit_fn`
-    // each take a non-trivial closure; the bati! property syntax handles
+    // each take a non-trivial closure; the teksu! property syntax handles
     // single-line closures fine but the suggestion closure is multi-line.
     let search_id =
         ctx.add(MaxSize::width(FIELD_MAX_WIDTH).child(search_field(sigs.search_text.clone())));
@@ -194,9 +194,9 @@ pub fn bati(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
                     let msg = tr!(txt_password_validation());
                     move |s| {
                         if s.chars().count() >= 8 {
-                            bastyde::widgets::ValidationOutcome::Valid
+                            teksilo::widgets::ValidationOutcome::Valid
                         } else {
-                            bastyde::widgets::ValidationOutcome::Invalid {
+                            teksilo::widgets::ValidationOutcome::Invalid {
                                 message: msg.clone(),
                             }
                         }
@@ -205,7 +205,7 @@ pub fn bati(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
         ),
     );
 
-    bati!(ctx => VStack {
+    teksu!(ctx => VStack {
             spacing: 20.0
             VStack {
                 spacing: 4.0

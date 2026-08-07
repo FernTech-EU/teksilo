@@ -13,9 +13,9 @@ does not re-run between frames and there's no signal-dirty-mark
 cascade.
 
 ```rust
-# use bastyde_widgets::Spinner;
-# use bastyde_tokens::TextRole;
-# use bastyde_i18n::lit;
+# use teksilo_widgets::Spinner;
+# use teksilo_tokens::TextRole;
+# use teksilo_i18n::lit;
 let _s = Spinner::new(24.0)
     .color(TextRole::Secondary)
     .label(lit!("Loading"));
@@ -36,7 +36,7 @@ rotate.
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/spinner/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/spinner/index.html)
 
 ## `pub struct Spinner`
 

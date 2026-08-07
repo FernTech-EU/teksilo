@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
-//! `scene-magnetism` — a small node-graph demonstrating `bastyde-scene`
+//! `scene-magnetism` — a small node-graph demonstrating `teksilo-scene`
 //! magnetism: typed snap-and-connect between anchor points.
 //!
 //! Each node is a lightweight, draggable `RectItem` carrying two magnets:
@@ -32,11 +32,11 @@
 //!
 //! Run with: `cargo run -p scene-magnetism`
 
-use bastyde::canvas::{Path, Point, Rect, StrokeStyle};
-use bastyde::prelude::*;
-use bastyde::tokens::Alignment;
-use bastyde::widgets::{Expand, TextWidget, VStack, ZStack};
-use bastyde_scene::{
+use teksilo::canvas::{Path, Point, Rect, StrokeStyle};
+use teksilo::prelude::*;
+use teksilo::tokens::Alignment;
+use teksilo::widgets::{Expand, TextWidget, VStack, ZStack};
+use teksilo_scene::{
     A11yNode, A11yRelation, ItemFlags, Magnet, MagnetConnection, MagnetRef, MagnetRole,
     MagnetVerdict, MagnetismConfig, PathItem, RectItem, SceneLayer, SceneModel, SceneView,
 };
@@ -221,7 +221,7 @@ fn build_root() -> impl Widget + 'static {
     VStack::new()
         .spacing(8.0)
         .child(
-            TextWidget::new(lit!("bastyde-scene magnetism — node graph"))
+            TextWidget::new(lit!("teksilo-scene magnetism — node graph"))
                 .style(TextStyleRole::BodyBold),
         )
         .child(TextWidget::new(lit!(
@@ -238,13 +238,13 @@ fn build_root() -> impl Widget + 'static {
 }
 
 fn main() {
-    BastydeAppBuilder::new()
+    TeksiloAppBuilder::new()
         .install_automation_bridge_in_debug()
         .install_inspector_in_debug()
-        .theme(bastyde::presets::intui::light())
+        .theme(teksilo::presets::intui::light())
         .initial_window(
             WindowConfig::new()
-                .title("Bastyde — scene magnetism")
+                .title("Teksilo — scene magnetism")
                 .size(1000, 700)
                 .root(|tree, _state| tree.add(build_root())),
         )

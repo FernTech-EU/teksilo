@@ -47,4 +47,4 @@ Implementors: `crate::SettingsFile`, `crate::SettingsStore`,
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_settings/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_settings/index.html)

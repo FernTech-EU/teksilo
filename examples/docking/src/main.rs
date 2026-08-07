@@ -16,9 +16,9 @@
 //!   * drag a panel out / between sides; hide / show sides from the rail or the
 //!     toolbar; flip a corner owner live; export → restore the layout.
 
-use bastyde::core::Signal;
-use bastyde::prelude::*;
-use bastyde::widgets::{
+use teksilo::core::Signal;
+use teksilo::prelude::*;
+use teksilo::widgets::{
     Badge, Button, DockCorner, DockOpenLocation, DockPolicy, DockRail, DockRailItemSize, DockSide,
     DockWidget, DockWidgetId, DockingLayout, DockingModel, Expand, HStack, IconButton,
     IconButtonSize, IconWidget, MenuItem, MenuList, Panel, ScrollArea, Spacer, TextWidget, Toolbar,
@@ -28,7 +28,7 @@ use bastyde::widgets::{
 #[derive(Debug)]
 struct DockingDemo {
     model: DockingModel,
-    saved: std::rc::Rc<std::cell::RefCell<Option<bastyde::widgets::DockLayoutState>>>,
+    saved: std::rc::Rc<std::cell::RefCell<Option<teksilo::widgets::DockLayoutState>>>,
     status: Signal<String>,
     bottom_corner_to_leading: Signal<bool>,
     root_child_id: Option<WidgetId>,
@@ -59,7 +59,7 @@ enum DockIcon {
 /// line-paths so the activity rail and the Icon / Icon + Text tab modes show
 /// real icons (not just the title's initial). Designed in a 24-unit box.
 fn dock_icon(kind: DockIcon, size: f32) -> IconWidget {
-    use bastyde::canvas::{Path, Point};
+    use teksilo::canvas::{Path, Point};
     let u = size / 24.0;
     let p = |x: f32, y: f32| Point::new(x * u, y * u);
     let mut path = Path::new();
@@ -137,7 +137,7 @@ fn dock_icon(kind: DockIcon, size: f32) -> IconWidget {
 
 /// A simple "+" glyph for the "New …" header action.
 fn plus_icon(size: f32) -> IconWidget {
-    use bastyde::canvas::{Path, Point};
+    use teksilo::canvas::{Path, Point};
     let u = size / 24.0;
     let p = |x: f32, y: f32| Point::new(x * u, y * u);
     let mut path = Path::new();
@@ -426,7 +426,7 @@ impl Widget for DockingDemo {
         &self,
         bounds: Rect,
         _proposal: SizeProposal,
-        children: &mut [bastyde::core::WidgetPlacement],
+        children: &mut [teksilo::core::WidgetPlacement],
         _ctx: &LayoutContext,
     ) {
         for child in children.iter_mut() {
@@ -516,16 +516,16 @@ impl DockingDemo {
                     }
                 }))
                 .child(Spacer::new())
-                .child(bastyde::widgets::ThemeSwitcher::new()),
+                .child(teksilo::widgets::ThemeSwitcher::new()),
         )
     }
 }
 
 fn main() {
-    BastydeAppBuilder::new()
+    TeksiloAppBuilder::new()
         .install_automation_bridge_in_debug()
         .install_inspector_in_debug()
-        .theme(bastyde::presets::intui::light())
+        .theme(teksilo::presets::intui::light())
         .initial_window(
             WindowConfig::new()
                 .title("Docking")

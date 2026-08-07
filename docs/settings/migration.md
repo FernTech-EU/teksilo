@@ -11,7 +11,7 @@ transformations expressed on raw `toml::Value` — pre-deserialization,
 so a v1 file that no longer matches the v2 type can still be upgraded.
 
 ```
-use bastyde_settings::{Versioned, Migrator};
+use teksilo_settings::{Versioned, Migrator};
 use serde::{Serialize, Deserialize};
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Default)]
@@ -49,7 +49,7 @@ let migrator: Migrator<Recents> = Migrator::new()
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_settings/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_settings/index.html)
 
 ## `pub enum MigrationError`
 

@@ -15,9 +15,9 @@
 //! 4. A "Rename…" button that opens an InputDialog modal.
 //! 5. Two CommandLinkButtons in a "Welcome" landing pane.
 
-use bastyde::core::widget::WidgetPlacement;
-use bastyde::prelude::*;
-use bastyde::widgets::{
+use teksilo::core::widget::WidgetPlacement;
+use teksilo::prelude::*;
+use teksilo::widgets::{
     Banner, Button, ButtonVariant, Card, Collapse, CommandLinkButton, Expand, FilePickerField,
     FilePickerKind, GroupHeader, HStack, IconWidget, Panel, SearchField, Spacer, TextWidget,
     Toolbar, VStack,
@@ -27,7 +27,7 @@ fn dark_mode_toolbar() -> impl Widget {
     Toolbar::new().child(
         HStack::new()
             .child(Spacer::new())
-            .child(bastyde::widgets::ThemeSwitcher::new()),
+            .child(teksilo::widgets::ThemeSwitcher::new()),
     )
 }
 
@@ -62,7 +62,7 @@ impl Root {
         let warn_visible = self.show_warn_banner.clone();
         let error_visible = self.show_error_banner.clone();
 
-        let info_banner = Banner::info(lit!("Welcome to Bastyde")).description(lit!(
+        let info_banner = Banner::info(lit!("Welcome to Teksilo")).description(lit!(
             "Persistent inline status strips for app-level conditions."
         ));
         let warn_banner = Banner::warning(lit!("Unsaved changes"))
@@ -263,7 +263,7 @@ impl Root {
                 move |ctx| {
                     let rename_text = rename_text.clone();
                     let last_action = last_action.clone();
-                    use bastyde::widgets::InputDialog;
+                    use teksilo::widgets::InputDialog;
                     InputDialog::new(lit!("Rename document"))
                         .prompt(lit!("Enter the new file name:"))
                         .default_text(rename_text.get())
@@ -295,8 +295,8 @@ impl Root {
         // inlined into the binary and parsed once into an SvgIcon
         // resource; `IconWidget::from_svg_icon` then produces a fresh
         // tintable IconWidget on each build call.
-        let save_icon = bastyde::res!("resources/icons/save.svg");
-        let home_icon = bastyde::res!("resources/icons/home.svg");
+        let save_icon = teksilo::res!("resources/icons/save.svg");
+        let home_icon = teksilo::res!("resources/icons/home.svg");
 
         let new_project = CommandLinkButton::new(lit!("Create new project"))
             .description(lit!("Start with a blank workspace."))
@@ -363,10 +363,10 @@ impl Widget for Root {
 }
 
 fn main() {
-    BastydeAppBuilder::new()
+    TeksiloAppBuilder::new()
         .install_automation_bridge_in_debug()
         .install_inspector_in_debug()
-        .theme(bastyde::presets::intui::light())
+        .theme(teksilo::presets::intui::light())
         .install_file_dialog()
         .initial_window(
             WindowConfig::new()

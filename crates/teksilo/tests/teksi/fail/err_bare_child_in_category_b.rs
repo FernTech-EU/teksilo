@@ -1,0 +1,44 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
+//! Spec §9.2: a bare child element inside a Category B widget (Card
+//! here) produces a targeted hint pointing at a slot instead of the
+//! generic "no method named `child`" compiler error.
+
+use teksilo::prelude::*;
+
+#[derive(Debug, Default)]
+struct Card;
+impl Card {
+    fn new() -> Self {
+        Self
+    }
+}
+impl Widget for Card {
+    fn layout_response(&self, p: SizeProposal, _: &LayoutContext) -> teksilo_core::widget::LayoutResponse {
+        p.resolve(0.0, 0.0).into()
+    }
+}
+
+#[derive(Debug)]
+struct TextWidget {
+    _text: &'static str,
+}
+impl TextWidget {
+    fn new(text: &'static str) -> Self {
+        Self { _text: text }
+    }
+}
+impl Widget for TextWidget {
+    fn layout_response(&self, p: SizeProposal, _: &LayoutContext) -> teksilo_core::widget::LayoutResponse {
+        p.resolve(0.0, 0.0).into()
+    }
+}
+
+fn main() {
+    let _: Card = teksu!(
+        Card {
+            TextWidget("hi")
+        }
+    );
+}

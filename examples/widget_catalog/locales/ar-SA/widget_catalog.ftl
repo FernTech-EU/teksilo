@@ -1,14 +1,14 @@
 # SPDX-License-Identifier: MPL-2.0
 # SPDX-FileCopyrightText: 2026 FernTech
 
-# Bastyde Widget Catalog — Arabic translations.
+# Teksilo Widget Catalog — Arabic translations.
 #
 # المفاتيح بصيغة kebab-case في طبقة Fluent، وتُحوَّل إلى snake_case في
 # Rust بواسطة الماكرو. ترتيب علامات التبويب ثابت — الفهرس N يقابل
 # استدعاء `static_tab(...)` رقم N في main.rs.
 
 # ── واجهة التطبيق ───────────────────────────────────────────────────────
-app-title = Bastyde — كتالوج الودجات
+app-title = Teksilo — كتالوج الودجات
 app-subtitle = اسحب · انقر مزدوجًا للتكبير · انقر بزر الماوس الأيمن للقائمة
 app-unsupported-chrome = (الإطار المخصص غير مدعوم على هذه المنصة — العودة إلى الزخارف الأصلية)
 
@@ -20,8 +20,8 @@ app-menu-documentation = &التوثيق
 app-menu-about = &عن
 
 # ── مفتاح وضع العرض (الفتحة الخلفية لـ TabWidget) ────────────────────────
-mode-label = ‏bati! DSL
-mode-tooltip = بدّل كل علامة تبويب بين البنّاء التقليدي ونسخة الماكرو bati! للشجرة نفسها.
+mode-label = ‏teksu! DSL
+mode-tooltip = بدّل كل علامة تبويب بين البنّاء التقليدي ونسخة الماكرو teksu! للشجرة نفسها.
 
 # ── مبدِّل اللغة ────────────────────────────────────────────────────────
 locale-en = English
@@ -75,8 +75,8 @@ tab-overlays-refs = التلميحات والنوافذ المنبثقة وال�
 tab-data-refs = ListView و TreeView و TableView و TreeTableView. انظر: cargo run -p data_grid, cargo run -p tree_table, cargo run -p data_collections.
 tab-animations-refs = التلاشي والنبض والانزلاق والضبابية وما إلى ذلك. انظر: cargo run -p animations, cargo run -p animations_kit.
 tab-settings-refs = ودجات إعادة ربط الاختصارات وإعدادات الخصوصية. انظر: cargo run -p shortcuts_demo.
-tab-charts-refs = رسوم بيانية شريطية وخطية وحلقية (bastyde-charts). انظر: cargo run -p chart_demo.
-tab-scene-refs = منطقة عرض مشهد قابلة للتحريك والتكبير (bastyde-scene). انظر: cargo run -p scene_showcase, cargo run -p scene_corkboard.
+tab-charts-refs = رسوم بيانية شريطية وخطية وحلقية (teksilo-charts). انظر: cargo run -p chart_demo.
+tab-scene-refs = منطقة عرض مشهد قابلة للتحريك والتكبير (teksilo-scene). انظر: cargo run -p scene_showcase, cargo run -p scene_corkboard.
 tab-richtext-refs = نص غني قابل للتحرير وللقراءة فقط فوق نموذج text-document. انظر: cargo run -p rich_text_editor, cargo run -p rich_text_viewer.
 tab-dragdrop-refs = DropZone و DropTarget لعمليات الإفلات من النظام أو داخل التطبيق. انظر: cargo run -p file_drop.
 
@@ -106,7 +106,7 @@ demo-loading = جاري التحميل…
 
 # ── علامة تبويب المؤشرات ────────────────────────────────────────────────
 ind-progress-determinate-label = ٦٠ ٪
-ind-link-docs = افتح وثائق Bastyde
+ind-link-docs = افتح وثائق Teksilo
 ind-link-handler = مع معالج نقر
 
 # ── علامة تبويب الإدخال ─────────────────────────────────────────────────
@@ -135,7 +135,7 @@ btn-default = افتراضي
 btn-regular = عادي
 btn-flat = مسطّح
 btn-confirm-label = تأكيد
-btn-cmdlink-signin-title = تسجيل الدخول إلى حساب Bastyde الخاص بك
+btn-cmdlink-signin-title = تسجيل الدخول إلى حساب Teksilo الخاص بك
 btn-cmdlink-signin-desc = استخدم بيانات الاعتماد الموجودة للوصول إلى المشاريع.
 btn-cmdlink-signup-title = إنشاء حساب جديد
 btn-cmdlink-signup-desc = مجاني للاستخدام الشخصي ومفتوح المصدر.
@@ -170,7 +170,7 @@ cnt-split-trailing = اللوحة الخلفية
 # ── علامة تبويب الإطار ──────────────────────────────────────────────────
 chr-status = جاهز · ١٢٤٧ سطرًا · UTF-8 · Rust
 chr-banner-info-title = معلومة
-chr-banner-info-body = هل علمت أن Bastyde يدعم الكتابة من اليمين إلى اليسار؟
+chr-banner-info-body = هل علمت أن Teksilo يدعم الكتابة من اليمين إلى اليسار؟
 chr-banner-success-title = نجاح
 chr-banner-success-body = تم حفظ الإعدادات.
 chr-banner-warning-title = تحذير
@@ -179,11 +179,11 @@ chr-banner-error-title = خطأ
 chr-banner-error-body = انقطع الاتصال بالشبكة.
 chr-breadcrumb-home = الرئيسية
 chr-breadcrumb-docs = المستندات
-chr-breadcrumb-bastyde = Bastyde
+chr-breadcrumb-teksilo = Teksilo
 chr-breadcrumb-current = widget-catalog
 chr-wizard-title = الإعداد الأوّلي
 chr-wizard-step1 = مرحبًا
-chr-wizard-step1-body = الخطوة ١ — مرحبًا بك في Bastyde
+chr-wizard-step1-body = الخطوة ١ — مرحبًا بك في Teksilo
 chr-wizard-step2 = إعداد
 chr-wizard-step2-body = الخطوة ٢ — أعدّ المحرّر
 chr-wizard-step3 = إنهاء

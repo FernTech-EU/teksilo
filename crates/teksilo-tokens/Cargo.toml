@@ -1,0 +1,20 @@
+# SPDX-License-Identifier: MPL-2.0
+# SPDX-FileCopyrightText: 2026 FernTech
+
+[package]
+name = "teksilo-tokens"
+edition = "2024"
+version.workspace = true
+license-file.workspace = true
+publish.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+
+[dev-dependencies]
+# Test-only: property-based testing (see the `proptest` entry in the
+# workspace manifest for why proptest rather than cargo-fuzz).
+proptest = { workspace = true }
+serde_json = "1"

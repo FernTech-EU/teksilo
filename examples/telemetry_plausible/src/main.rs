@@ -5,7 +5,7 @@
 //!
 //! Demonstrates the anonymous-mode telemetry pipeline end-to-end:
 //!
-//! 1. `BastydeAppBuilder::application(...)` resolves OS-correct paths.
+//! 1. `TeksiloAppBuilder::application(...)` resolves OS-correct paths.
 //! 2. `.settings(...)` registers the persistence layer.
 //! 3. `.telemetry(TelemetryBundle::new(...).with_anonymous(...))` wires
 //!    a `PlausibleAdapter` and registers the `TelemetryContext` so
@@ -18,7 +18,7 @@
 //!
 //! Default endpoint is `http://127.0.0.1:8000/api/event` (a
 //! self-hosted Plausible at localhost). Override at runtime by
-//! editing `~/.config/bastyde-demos/telemetry-plausible/general.toml`
+//! editing `~/.config/teksilo-demos/telemetry-plausible/general.toml`
 //! and setting:
 //!
 //! ```toml
@@ -34,21 +34,21 @@
 //! emission — the dispatch tap is consent-gated and would drop every
 //! event without the auto-grant below.
 
-use bastyde::core::Action;
-use bastyde::prelude::*;
-use bastyde::widgets::{
+use std::rc::Rc;
+use teksilo::core::Action;
+use teksilo::prelude::*;
+use teksilo::widgets::{
     Button, ButtonVariant, Expand, HStack, Padding, PrivacySettings, Spacer, TextWidget, Toolbar,
     VStack,
 };
-use bastyde_analytics_plausible::PlausibleAdapter;
-use bastyde_telemetry::{TelemetryBundle, TelemetryMode, UsageReporter};
-use std::rc::Rc;
+use teksilo_analytics_plausible::PlausibleAdapter;
+use teksilo_telemetry::{TelemetryBundle, TelemetryMode, UsageReporter};
 
 fn dark_mode_toolbar() -> impl Widget {
     Toolbar::new().child(
         HStack::new()
             .child(Spacer::new())
-            .child(bastyde::widgets::ThemeSwitcher::new()),
+            .child(teksilo::widgets::ThemeSwitcher::new()),
     )
 }
 
@@ -63,7 +63,7 @@ impl Widget for DemoRoot {
         // the way to the root looking for a handler.
         for name in ["app.demo.click", "app.demo.save", "app.demo.about"] {
             ctx.register_action(Action::new(name).on_invoke(
-                |intent: &bastyde::core::Intent, _ctx| {
+                |intent: &teksilo::core::Intent, _ctx| {
                     println!("intent dispatched: {}", intent.name);
                 },
             ));
@@ -72,17 +72,17 @@ impl Widget for DemoRoot {
         let click_btn = Button::new(lit!("Fire 'click' intent"))
             .variant(ButtonVariant::Filled)
             .on_activate_fn(|ctx| {
-                ctx.send_intent(bastyde::core::Intent::new("app.demo.click"));
+                ctx.send_intent(teksilo::core::Intent::new("app.demo.click"));
             });
         let save_btn = Button::new(lit!("Fire 'save' intent"))
             .variant(ButtonVariant::Filled)
             .on_activate_fn(|ctx| {
-                ctx.send_intent(bastyde::core::Intent::new("app.demo.save"));
+                ctx.send_intent(teksilo::core::Intent::new("app.demo.save"));
             });
         let about_btn = Button::new(lit!("Fire 'about' intent"))
             .variant(ButtonVariant::Filled)
             .on_activate_fn(|ctx| {
-                ctx.send_intent(bastyde::core::Intent::new("app.demo.about"));
+                ctx.send_intent(teksilo::core::Intent::new("app.demo.about"));
             });
 
         let column = VStack::new()
@@ -133,7 +133,7 @@ fn main() {
             )
             .domain(
                 std::env::var("PLAUSIBLE_DOMAIN")
-                    .unwrap_or_else(|_| "bastyde.localhost".to_string()),
+                    .unwrap_or_else(|_| "teksilo.localhost".to_string()),
             )
             .build(),
     ) as Rc<dyn UsageReporter>;
@@ -142,18 +142,18 @@ fn main() {
         .with_anonymous(plausible)
         .with_default_mode(TelemetryMode::Anonymous)
         .with_data_processor_name("Plausible Insights OÜ")
-        .with_data_residency_region(bastyde_telemetry::DataResidencyRegion::EU);
+        .with_data_residency_region(teksilo_telemetry::DataResidencyRegion::EU);
 
-    BastydeAppBuilder::new()
+    TeksiloAppBuilder::new()
         .install_automation_bridge_in_debug()
         .install_inspector_in_debug()
         .application("eu", "FernTech", "telemetry-plausible-demo")
         .settings(SettingsBundle::new())
         .telemetry(telemetry)
-        .theme(bastyde::presets::intui::light())
+        .theme(teksilo::presets::intui::light())
         .initial_window(
             WindowConfig::new()
-                .title("Bastyde — Plausible telemetry demo")
+                .title("Teksilo — Plausible telemetry demo")
                 .size(640, 720)
                 .root(|tree, _state| {
                     tree.add(

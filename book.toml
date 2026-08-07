@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: MPL-2.0
 # SPDX-FileCopyrightText: 2026 FernTech
 
-# mdBook configuration for the Bastyde documentation site.
+# mdBook configuration for the Teksilo documentation site.
 #
 # The book sources ARE the existing `docs/` tree: `docs/SUMMARY.md` is the table
 # of contents, and the "Widget Catalog" section is regenerated from widget source
@@ -12,18 +12,18 @@
 # Serve:  mdbook serve --open
 
 [book]
-title = "Bastyde Documentation"
+title = "Teksilo Documentation"
 authors = ["Cyril Jacquet"]
-description = "Reference and design documentation for the Bastyde pure-Rust GUI framework."
+description = "Reference and design documentation for the Teksilo pure-Rust GUI framework."
 src = "docs"
 language = "en"
 
 [output.html]
 default-theme = "light"
 preferred-dark-theme = "navy"
-git-repository-url = "https://github.com/ferntech-eu/bastyde"
-edit-url-template = "https://github.com/ferntech-eu/bastyde/edit/main/{path}"
-# The site is served at the domain root (bastyde-docs.pages.dev), not a subpath.
+git-repository-url = "https://github.com/ferntech-eu/teksilo"
+edit-url-template = "https://github.com/ferntech-eu/teksilo/edit/main/{path}"
+# The site is served at the domain root (teksilo-docs.pages.dev), not a subpath.
 site-url = "/"
 no-section-label = false
 

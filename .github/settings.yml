@@ -5,7 +5,7 @@
 
 repository:
   description: A pure-Rust, batteries-included GUI framework for desktop applications
-  homepage: https://github.com/ferntech-eu/bastyde
+  homepage: https://github.com/ferntech-eu/teksilo
   topics: rust gui gui-framework desktop wgpu accessibility retained-mode
   has_issues: true
   has_projects: false

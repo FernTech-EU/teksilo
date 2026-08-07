@@ -4,7 +4,7 @@
 # Tooltip Reference
 
 Tooltips are hover-/focus-triggered overlays that surface ancillary information
-about a control. Bastyde ships **three tiers** that share one attachment pipeline:
+about a control. Teksilo ships **three tiers** that share one attachment pipeline:
 
 - **Plain tooltips** — a single localized string in a themed rounded-rect
   surface. Pure-text, ephemeral, no interaction.
@@ -28,14 +28,14 @@ the other two.
 
 | Layer | Type | Crate | What it does |
 |-------|------|-------|--------------|
-| Plain content widget | [`TooltipWidget`](../crates/bastyde-widgets/src/tooltip.rs) | `bastyde-widgets` | Themed rounded-rect with one line of text |
-| Rich content widget | [`RichTooltipWidget`](../crates/bastyde-widgets/src/tooltip/rich.rs) | `bastyde-widgets` | Body + shortcut chip + "more" disclosure + dwell indicator |
-| Composite content widget | [`CompositeTooltipWidget`](../crates/bastyde-widgets/src/tooltip/composite.rs) | `bastyde-widgets` | Surface hosting an arbitrary widget tree (TabWidget, charts, progress bars, conditional rows, dynamic values) with dwell-to-sticky promotion |
-| Registry | [`TooltipRegistry`](../crates/bastyde-widgets/src/tooltip/registry.rs) / [`TooltipContent`](../crates/bastyde-widgets/src/tooltip/registry.rs) | `bastyde-widgets` | Thread-local catalog keyed by short stable ids |
-| Attach helpers | [`attach_rich_tooltip*`](../crates/bastyde-widgets/src/tooltip/attach.rs) / [`attach_composite_tooltip*`](../crates/bastyde-widgets/src/tooltip/attach.rs) | `bastyde-widgets` | Wire a tooltip onto an anchor inside `build()` |
-| Tree machinery | [`WidgetTree::attach_tooltip*`](../crates/bastyde-core/src/widget_tree/overlay_impl.rs) | `bastyde-core` | Hover/focus tracking, dwell promotion, overlay lifetime |
-| Visual progress | [`DwellIndicator`](../crates/bastyde-widgets/src/tooltip/dwell_indicator.rs) | `bastyde-widgets` | Pie-wedge / pin glyph for sticky-on-dwell |
-| Tokens | [`TooltipStyle`](../crates/bastyde-core/src/styles/tooltip_style.rs) (trait) / constants in [`recipe_tooltip_style.rs`](../crates/bastyde-widgets/src/styles/recipe_tooltip_style.rs) | `bastyde-core` / `bastyde-widgets` | `TOOLTIP_PADDING_HORIZONTAL`, `TOOLTIP_PADDING_VERTICAL`, `TOOLTIP_CORNER_RADIUS`, `TOOLTIP_MAX_WIDTH`; composite variants prefixed `COMPOSITE_TOOLTIP_*` |
+| Plain content widget | [`TooltipWidget`](../crates/teksilo-widgets/src/tooltip.rs) | `teksilo-widgets` | Themed rounded-rect with one line of text |
+| Rich content widget | [`RichTooltipWidget`](../crates/teksilo-widgets/src/tooltip/rich.rs) | `teksilo-widgets` | Body + shortcut chip + "more" disclosure + dwell indicator |
+| Composite content widget | [`CompositeTooltipWidget`](../crates/teksilo-widgets/src/tooltip/composite.rs) | `teksilo-widgets` | Surface hosting an arbitrary widget tree (TabWidget, charts, progress bars, conditional rows, dynamic values) with dwell-to-sticky promotion |
+| Registry | [`TooltipRegistry`](../crates/teksilo-widgets/src/tooltip/registry.rs) / [`TooltipContent`](../crates/teksilo-widgets/src/tooltip/registry.rs) | `teksilo-widgets` | Thread-local catalog keyed by short stable ids |
+| Attach helpers | [`attach_rich_tooltip*`](../crates/teksilo-widgets/src/tooltip/attach.rs) / [`attach_composite_tooltip*`](../crates/teksilo-widgets/src/tooltip/attach.rs) | `teksilo-widgets` | Wire a tooltip onto an anchor inside `build()` |
+| Tree machinery | [`WidgetTree::attach_tooltip*`](../crates/teksilo-core/src/widget_tree/overlay_impl.rs) | `teksilo-core` | Hover/focus tracking, dwell promotion, overlay lifetime |
+| Visual progress | [`DwellIndicator`](../crates/teksilo-widgets/src/tooltip/dwell_indicator.rs) | `teksilo-widgets` | Pie-wedge / pin glyph for sticky-on-dwell |
+| Tokens | [`TooltipStyle`](../crates/teksilo-core/src/styles/tooltip_style.rs) (trait) / constants in [`recipe_tooltip_style.rs`](../crates/teksilo-widgets/src/styles/recipe_tooltip_style.rs) | `teksilo-core` / `teksilo-widgets` | `TOOLTIP_PADDING_HORIZONTAL`, `TOOLTIP_PADDING_VERTICAL`, `TOOLTIP_CORNER_RADIUS`, `TOOLTIP_MAX_WIDTH`; composite variants prefixed `COMPOSITE_TOOLTIP_*` |
 
 ---
 
@@ -44,7 +44,7 @@ the other two.
 ### Plain tooltip on any widget
 
 ```rust
-use bastyde::prelude::*;
+use teksilo::prelude::*;
 
 Button::new(tr!(save()))
     .tooltip(tr!(save_hint()))                 // i18n
@@ -58,11 +58,11 @@ scaffolding.
 ### Rich tooltip from the registry
 
 ```rust
-use bastyde::prelude::*;
-use bastyde_widgets::tooltip::TooltipContent;
+use teksilo::prelude::*;
+use teksilo_widgets::tooltip::TooltipContent;
 
 fn main() {
-    BastydeAppBuilder::new()
+    TeksiloAppBuilder::new()
         .register_tooltips(vec![
             TooltipContent::new("save-as", tr!(save_as_tooltip()))
                 .for_shortcut("app.save_as"),
@@ -89,7 +89,7 @@ For tooltips that need a full widget tree — tabs, charts, progress bars,
 conditional rows, dynamic numeric values — use `.composite_tooltip(content)`:
 
 ```rust
-use bastyde::prelude::*;
+use teksilo::prelude::*;
 
 Button::new(tr!(province_info()))
     .composite_tooltip(
@@ -118,7 +118,7 @@ the 500 ms `tooltip_delay` used by plain/rich tooltips, because composite
 surfaces are heavier and shouldn't pop on transient hover). Default
 `max_width` × `max_height` are
 both 480 dp (`COMPOSITE_TOOLTIP_MAX_WIDTH` / `COMPOSITE_TOOLTIP_MAX_HEIGHT`
-constants in `bastyde-widgets/src/styles/recipe_tooltip_style.rs`),
+constants in `teksilo-widgets/src/styles/recipe_tooltip_style.rs`),
 configurable per-instance with `.max_width(f32)` / `.max_height(f32)` on
 `CompositeTooltipWidget`.
 
@@ -192,7 +192,7 @@ dropdown row's own tooltip) still fires.
 
 ---
 
-## Registration: `BastydeAppBuilder::register_tooltips`
+## Registration: `TeksiloAppBuilder::register_tooltips`
 
 The application's tooltip catalog is a single `Vec<TooltipContent>` registered
 once at boot. The bundle is frozen into a thread-local `TooltipRegistry` *before
@@ -201,7 +201,7 @@ before invoking the root builder, so tooltip widgets created during the very
 first build can resolve their content immediately.
 
 ```rust
-BastydeAppBuilder::new()
+TeksiloAppBuilder::new()
     .register_tooltips(vec![ /* ... */ ])
     .run();
 ```
@@ -244,7 +244,7 @@ entries:
 ```rust
 TooltipContent::new(
     "autosave",
-    tr!(autosave_with_link()),    // "Bastyde autosaves. See [details](:autosave-details)…"
+    tr!(autosave_with_link()),    // "Teksilo autosaves. See [details](:autosave-details)…"
 )
 ```
 
@@ -336,7 +336,7 @@ The attach helpers do three things:
 ### Default delays
 
 All tooltip dwell delays are theme-defined on `MotionTokens`
-([motion.rs](../crates/bastyde-tokens/src/motion.rs)), so apps retune the feel
+([motion.rs](../crates/teksilo-tokens/src/motion.rs)), so apps retune the feel
 in one place. Each widget reads the value at `build()` time via
 `ctx.theme().motion.*`.
 
@@ -467,9 +467,9 @@ tooltip into a focusable, click-through Dialog. Promotion advertises focus
 but does **not** steal it: the panel becomes focusable and AT-reachable and
 the user Tabs in (the correct non-modal-panel pattern) — whatever the user
 was doing keeps keyboard focus. The threshold lives in
-[`DWELL_PROMOTION`](../crates/bastyde-widgets/src/tooltip/rich.rs) and is
+[`DWELL_PROMOTION`](../crates/teksilo-widgets/src/tooltip/rich.rs) and is
 `Duration::from_secs(2)`; it's split into 4 visible quarters of 500 ms each,
-driving the [`DwellIndicator`](../crates/bastyde-widgets/src/tooltip/dwell_indicator.rs)
+driving the [`DwellIndicator`](../crates/teksilo-widgets/src/tooltip/dwell_indicator.rs)
 in the tooltip's top-right corner.
 
 Visual progression of the indicator:
@@ -577,7 +577,7 @@ bound at `BindingLevel::Rebuild`).
 ## Theming knobs
 
 Tooltip layout constants are defined in
-[`bastyde-widgets/src/styles/recipe_tooltip_style.rs`](../crates/bastyde-widgets/src/styles/recipe_tooltip_style.rs):
+[`teksilo-widgets/src/styles/recipe_tooltip_style.rs`](../crates/teksilo-widgets/src/styles/recipe_tooltip_style.rs):
 
 ```rust
 pub const TOOLTIP_PADDING_HORIZONTAL: f32 = 10.0;
@@ -610,7 +610,7 @@ Color tokens (`Theme::colors`):
 
 Int UI's house style: tooltip surfaces stay dark in both light and dark themes
 for high-contrast popups (also reused by `Snackbar`). The OS-theme bridge
-([`theme.rs`](../crates/bastyde-tokens/src/theme.rs)) lets a host OS override
+([`theme.rs`](../crates/teksilo-tokens/src/theme.rs)) lets a host OS override
 `tooltip_bg` / `tooltip_text` if the platform exposes corresponding values.
 
 Motion knobs come from `MotionTokens`:
@@ -647,12 +647,12 @@ Exceptions and extras worth knowing:
 
 | Widget(s) | Difference |
 |-----------|------------|
-| [`SplitButton`](../crates/bastyde-widgets/src/split_button.rs) | Mirrors all four onto its chevron with a parallel `chevron_tooltip` / `chevron_rich_tooltip` / `chevron_rich_tooltip_content` / `chevron_composite_tooltip` matrix. |
-| [`SegmentedControl`](../crates/bastyde-widgets/src/segmented_control.rs) (per-`Segment`), [`ToolbarAction`](../crates/bastyde-widgets/src/toolbar.rs) | `Clone` value types: `.composite_tooltip(...)` takes a **factory** `impl Fn() -> Box<dyn Widget>` (not an `impl Widget` instance), since `Box<dyn Widget>` isn't `Clone`. |
-| [`TextInput`](../crates/bastyde-widgets/src/text_input.rs), [`PasswordField`](../crates/bastyde-widgets/src/password_field.rs) | Also keep a legacy `rich_tooltip_key(key)` alias predating the canonical `rich_tooltip(key)`; prefer the canonical name. |
-| [`TabDelegate`](../crates/bastyde-widgets/src/tab_widget/delegate.rs) | Closure-driven per-tab delegate — `rich_tooltip_key` / `rich_tooltip_content_with` / `composite_tooltip_with` take `Fn(&T) -> …` closures rather than fixed values. |
-| [`ThemeSwitcher`](../crates/bastyde-widgets/src/theme_switcher.rs), [`LanguageSwitcher`](../crates/bastyde-widgets/src/language_switcher.rs) | Thin `ComboBox` presets; the four setters **forward** onto the inner `ComboBox`. |
-| [`Toast`](../crates/bastyde-widgets/src/toast.rs) | Not applicable — a request builder, not a `Widget`; tooltip is data rendered by `toast/surface.rs`. |
+| [`SplitButton`](../crates/teksilo-widgets/src/split_button.rs) | Mirrors all four onto its chevron with a parallel `chevron_tooltip` / `chevron_rich_tooltip` / `chevron_rich_tooltip_content` / `chevron_composite_tooltip` matrix. |
+| [`SegmentedControl`](../crates/teksilo-widgets/src/segmented_control.rs) (per-`Segment`), [`ToolbarAction`](../crates/teksilo-widgets/src/toolbar.rs) | `Clone` value types: `.composite_tooltip(...)` takes a **factory** `impl Fn() -> Box<dyn Widget>` (not an `impl Widget` instance), since `Box<dyn Widget>` isn't `Clone`. |
+| [`TextInput`](../crates/teksilo-widgets/src/text_input.rs), [`PasswordField`](../crates/teksilo-widgets/src/password_field.rs) | Also keep a legacy `rich_tooltip_key(key)` alias predating the canonical `rich_tooltip(key)`; prefer the canonical name. |
+| [`TabDelegate`](../crates/teksilo-widgets/src/tab_widget/delegate.rs) | Closure-driven per-tab delegate — `rich_tooltip_key` / `rich_tooltip_content_with` / `composite_tooltip_with` take `Fn(&T) -> …` closures rather than fixed values. |
+| [`ThemeSwitcher`](../crates/teksilo-widgets/src/theme_switcher.rs), [`LanguageSwitcher`](../crates/teksilo-widgets/src/language_switcher.rs) | Thin `ComboBox` presets; the four setters **forward** onto the inner `ComboBox`. |
+| [`Toast`](../crates/teksilo-widgets/src/toast.rs) | Not applicable — a request builder, not a `Widget`; tooltip is data rendered by `toast/surface.rs`. |
 
 `tooltip_literal` is a permanent `#[doc(hidden)]` shim that wraps a raw
 `String` in `LocalizedString::literal` — same grep marker as

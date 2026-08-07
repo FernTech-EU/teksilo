@@ -6,12 +6,12 @@
 //! heavyweight `Panel` card with a real `Button` placed at scene
 //! coordinates. Pan with the scroll wheel, drag the "drag me" rects.
 //! Cannibalized from the `scene-showcase` example. Lives in the
-//! `bastyde-scene` crate.
+//! `teksilo-scene` crate.
 
-use bastyde::canvas::{Path, Point, Rect};
-use bastyde::prelude::*;
-use bastyde::widgets::{Button, Divider, MaxSize, Panel, TextWidget, VStack};
-use bastyde_scene::{
+use teksilo::canvas::{Path, Point, Rect};
+use teksilo::prelude::*;
+use teksilo::widgets::{Button, Divider, MaxSize, Panel, TextWidget, VStack};
+use teksilo_scene::{
     GroupItem, PathItem, RectItem, Scene, SceneSelectionMode, SceneView, TextItem,
 };
 
@@ -151,12 +151,12 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     )
 }
 
-pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
+pub fn teksu(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     // The scene is assembled imperatively (Scene::add_item / add_widget
     // return ItemIds, and items carry closures) — pre-build and splice.
     let scene_id = ctx.add(sized_scene());
 
-    bati!(ctx => VStack {
+    teksu!(ctx => VStack {
             spacing: 20.0
             VStack {
                 spacing: 4.0

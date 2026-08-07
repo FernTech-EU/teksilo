@@ -5,7 +5,7 @@
 
 Serious desktop apps change how a window looks when it loses OS focus: the text
 caret stops blinking and disappears, text and list selections desaturate to a
-muted grey, and accent-coloured chrome dims. Bastyde does this automatically and
+muted grey, and accent-coloured chrome dims. Teksilo does this automatically and
 gives apps an opt-in hook for custom content.
 
 This mirrors the modern, accepted pattern across toolkits — a **reactive ambient
@@ -18,7 +18,7 @@ WPF `InactiveSelectionHighlightBrush`.
 
 A window is **active** when it is `focused AND not occluded` — it holds OS
 keyboard focus and isn't fully hidden behind another window. This is computed
-per window by `bastyde-app` from winit's `Focused` / `Occluded` events and
+per window by `teksilo-app` from winit's `Focused` / `Occluded` events and
 published as a reactive signal on each window's widget tree.
 
 `window_active` is **distinct from view focus**. A `ListView` can hold keyboard
@@ -99,7 +99,7 @@ fade back in a background window (a colourful side panel, a bespoke accent
 surface), wrap it:
 
 ```rust
-use bastyde::prelude::*;
+use teksilo::prelude::*;
 
 ctx.add(my_panel.dim_when_inactive(0.4));   // 40 % opacity when inactive
 ctx.add(my_panel.dim_when_inactive_default());   // default 70 %
@@ -141,9 +141,9 @@ let _ = tree.render();
 ```
 
 A fresh tree starts active (`is_window_active() == true`). See the tests in
-`crates/bastyde-core/src/dim_when_inactive.rs`,
-`crates/bastyde-widgets/src/rich_text/tests.rs`, and the
-`window_active`-named tests under `bastyde-widgets`.
+`crates/teksilo-core/src/dim_when_inactive.rs`,
+`crates/teksilo-widgets/src/rich_text/tests.rs`, and the
+`window_active`-named tests under `teksilo-widgets`.
 
 ## Demo
 

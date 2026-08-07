@@ -15,8 +15,8 @@ overridden per-container or per-child.
 For a vertical counterpart see `VStack`.
 
 ```rust
-# use bastyde_widgets::primitives::{HStack, TextWidget, Spacer};
-# use bastyde_i18n::lit;
+# use teksilo_widgets::primitives::{HStack, TextWidget, Spacer};
+# use teksilo_i18n::lit;
 let _row = HStack::new()
     .spacing(8.0)
     .child(TextWidget::new(lit!("Label")))
@@ -30,7 +30,7 @@ let _row = HStack::new()
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/primitives/hstack/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/primitives/hstack/index.html)
 
 ## `pub struct HStack`
 

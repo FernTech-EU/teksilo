@@ -1,0 +1,32 @@
+# SPDX-License-Identifier: MPL-2.0
+# SPDX-FileCopyrightText: 2026 FernTech
+
+[package]
+name = "teksilo-i18n"
+edition = "2024"
+version.workspace = true
+license-file.workspace = true
+publish.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+teksilo-core = { workspace = true }
+teksilo-i18n-macros = { workspace = true }
+fluent-bundle = { workspace = true }
+fluent-syntax = { workspace = true }
+unic-langid = { workspace = true }
+sys-locale = { workspace = true }
+notify = { workspace = true }
+intl-memoizer = { workspace = true }
+icu_decimal = { workspace = true }
+icu_datetime = { workspace = true }
+icu_calendar = { workspace = true }
+icu_locale_core = { workspace = true }
+fixed_decimal = { workspace = true }
+jiff = { workspace = true }
+thiserror = { workspace = true }
+icu_experimental = { workspace = true }
+
+[dev-dependencies]
+trybuild = "1"

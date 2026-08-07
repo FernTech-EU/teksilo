@@ -20,8 +20,8 @@
 //! returns `None` and the demo falls back to a plain content view with no
 //! title bar.
 
-use bastyde::prelude::*;
-use bastyde::widgets::{
+use teksilo::prelude::*;
+use teksilo::widgets::{
     Expand, HStack, RectWidget, Spacer, TextWidget, TitleBar, Toolbar, VStack, WindowFrame, ZStack,
 };
 
@@ -29,18 +29,18 @@ fn dark_mode_toolbar() -> impl Widget {
     Toolbar::new().child(
         HStack::new()
             .child(Spacer::new())
-            .child(bastyde::widgets::ThemeSwitcher::new()),
+            .child(teksilo::widgets::ThemeSwitcher::new()),
     )
 }
 
 fn main() {
-    BastydeAppBuilder::new()
+    TeksiloAppBuilder::new()
         .install_automation_bridge_in_debug()
         .install_inspector_in_debug()
-        .theme(bastyde::presets::intui::dark())
+        .theme(teksilo::presets::intui::dark())
         .initial_window(
             WindowConfig::new()
-                .title("Bastyde — Title Bar Demo")
+                .title("Teksilo — Title Bar Demo")
                 .size(900, 600)
                 .decorations(DecorationsMode::CustomChrome)
                 .root(|tree, _state| {
@@ -61,7 +61,7 @@ fn main() {
                                 .background(SurfaceRole::Pressed)
                                 .border(TextRole::Secondary, 2.0)
                                 .leading(
-                                    TextWidget::new(lit!("  Bastyde — Title Bar Demo"))
+                                    TextWidget::new(lit!("  Teksilo — Title Bar Demo"))
                                         .style(theme.typography.body_bold.clone())
                                         .color(TextRole::Primary),
                                 )

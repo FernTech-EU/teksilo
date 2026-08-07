@@ -3,14 +3,14 @@
 
 # Debug Inspector Reference
 
-`bastyde-inspector` is an in-app debug surface for Bastyde applications.
+`teksilo-inspector` is an in-app debug surface for Teksilo applications.
 It compiles to nothing in release builds (everything lives behind
 `cfg(debug_assertions)`) and adds zero overhead when not enabled.
 
 Mental model in one line:
 
 ```
-BastydeAppBuilder.install_inspector_in_debug() → F12 toggles a bottom panel inside every window
+TeksiloAppBuilder.install_inspector_in_debug() → F12 toggles a bottom panel inside every window
 ```
 
 The panel hosts nine tabs: live widget tree + properties + accessibility,
@@ -26,14 +26,14 @@ End-to-end smoke example: `cargo run -p simple-button` then press F12.
 ## Enabling the inspector
 
 One line at the builder, regardless of release/debug. The
-`BastydeAppBuilderInspectorExt` extension trait is re-exported from the
-umbrella prelude (`bastyde::prelude::*`) so `install_inspector_in_debug()`
+`TeksiloAppBuilderInspectorExt` extension trait is re-exported from the
+umbrella prelude (`teksilo::prelude::*`) so `install_inspector_in_debug()`
 is callable without an extra import or dependency:
 
 ```rust
-use bastyde::prelude::*;
+use teksilo::prelude::*;
 
-BastydeAppBuilder::new()
+TeksiloAppBuilder::new()
     .theme(intui::light())
     .install_inspector_in_debug()       // no-op in release
     .initial_window(WindowConfig::new()…)
@@ -41,19 +41,19 @@ BastydeAppBuilder::new()
 ```
 
 The inspector ships behind the umbrella's `inspector` feature
-(default-on). To drop it (and the `bastyde-inspector` dependency it
-pulls in), depend on `bastyde` with `default-features = false` and
+(default-on). To drop it (and the `teksilo-inspector` dependency it
+pulls in), depend on `teksilo` with `default-features = false` and
 re-add only the features you need.
 Apps that drop the feature can still call
 `install_inspector_in_debug` only if they take a direct dependency
-on `bastyde-inspector` themselves.
+on `teksilo-inspector` themselves.
 
 `install_inspector_in_debug` is a no-op stub when
 `!cfg(debug_assertions)`, so the call site stays clean of `#[cfg]`
 lines. In debug builds it:
 
-1. Parses `--bastyde-inspector` from `std::env::args()` and
-   `BASTYDE_INSPECTOR=1` (or `=true`) from the environment to seed
+1. Parses `--teksilo-inspector` from `std::env::args()` and
+   `TEKSILO_INSPECTOR=1` (or `=true`) from the environment to seed
    the inspector's initial visibility.
 2. Stores a shared `InspectorState` (toggle / selection / picker
    mode / overlay mode / opacity / shell ids) into `app_state`.
@@ -61,7 +61,7 @@ lines. In debug builds it:
    every window's user root with `InspectorShell` and registers
    the F12 shortcut.
 4. If the app has wired a `SettingsStore` via
-   `BastydeAppBuilder::settings(...)`, bridges the inspector's
+   `TeksiloAppBuilder::settings(...)`, bridges the inspector's
    persistent preferences to it (see *Persistence* below).
 
 ## Toggling the inspector
@@ -69,12 +69,12 @@ lines. In debug builds it:
 | Path | What it does |
 |---|---|
 | **F12** | Global shortcut, owned by the user-root widget per window. Toggles the panel on/off. |
-| **`--bastyde-inspector` CLI arg** | Open the inspector at startup. |
-| **`BASTYDE_INSPECTOR=1` env** | Same as the CLI arg. |
+| **`--teksilo-inspector` CLI arg** | Open the inspector at startup. |
+| **`TEKSILO_INSPECTOR=1` env** | Same as the CLI arg. |
 | **`×` toolbar button** | Closes the panel (F12 reopens). |
 | **Persisted state** | If the app uses `SettingsStore`, the toggle remembers its last state across launches. |
 
-The shortcut id is `__bastyde_inspector.toggle`. The double-underscore
+The shortcut id is `__teksilo_inspector.toggle`. The double-underscore
 prefix marks it as framework-reserved — do not bind it from app code.
 It is also shown dimmed in the inspector's Shortcuts tab.
 
@@ -95,7 +95,7 @@ button) to take focus, then:
 | **Ctrl+Shift+Tab** | Switch to the previous tab. |
 | **Esc** | If picker mode is active, stop picking. Otherwise close the panel. |
 
-All five share the framework-reserved `__bastyde_inspector.*` prefix and
+All five share the framework-reserved `__teksilo_inspector.*` prefix and
 appear dimmed in the Shortcuts tab.
 
 ## Toolbar
@@ -131,7 +131,7 @@ inspector paints Flutter-style **yellow/black hazard stripes** on the overhang
 plus a bright red border — so over-constrained layouts are impossible to miss.
 It paints even with the panel closed (any time the inspector is installed).
 
-Detection rules (in [highlight.rs](../crates/bastyde-inspector/src/highlight.rs),
+Detection rules (in [highlight.rs](../crates/teksilo-inspector/src/highlight.rs),
 `collect_overflow`):
 
 - Only **distributing containers** are checked — `HStack`, `VStack`, `Grid`,
@@ -145,7 +145,7 @@ After [over-constraint handling](layout-primitives.md#35-height-for-width),
 shrinkable content compresses to fit and shows **no** stripes; stripes mean the
 layout genuinely cannot fit (only rigid children, or every shrinkable child
 already at its `min`). Toggle from the toolbar; the choice persists via
-`__bastyde_inspector.overflow_overlay`. Demo: `cargo run -p over-constraint`.
+`__teksilo_inspector.overflow_overlay`. Demo: `cargo run -p over-constraint`.
 
 ## Tabs
 
@@ -168,7 +168,7 @@ after construction. Available on `ListModel<T>`, `TreeModel<T>`, and
 `SelectionModel`:
 
 ```rust
-use bastyde_data::{ListModel, SelectionMode, SelectionModel, TreeModel};
+use teksilo_data::{ListModel, SelectionMode, SelectionModel, TreeModel};
 
 let recents: ListModel<RecentProject> =
     ListModel::from_vec(load_recents()).debug_named("recents");
@@ -185,7 +185,7 @@ dump). `debug_named` is always available — in release builds it is a
 no-op pass-through, so call sites do not need `#[cfg]` lines.
 
 Internally, each model registers a `Weak<dyn ModelDebug>` adapter in
-the thread-local `bastyde_data::debug_registry`:
+the thread-local `teksilo_data::debug_registry`:
 
 - `ListModel` / `TreeModel` — the adapter holds a `Weak` to the
   model's inner `Rc<RefCell<…>>`, so it never extends the model's
@@ -201,18 +201,18 @@ its natural lifetime.
 
 ## Persistence
 
-When `BastydeAppBuilder::settings(SettingsBundle::new())` has been wired,
+When `TeksiloAppBuilder::settings(SettingsBundle::new())` has been wired,
 the inspector bridges five signals to keys under the framework-reserved
-`__bastyde_inspector.*` namespace:
+`__teksilo_inspector.*` namespace:
 
-- `__bastyde_inspector.open` (bool) — last toggle state. Read at startup
-  if neither `--bastyde-inspector` nor `BASTYDE_INSPECTOR` was given.
-- `__bastyde_inspector.bounds_mode` (`"off"` / `"selection"` / `"all"`)
-- `__bastyde_inspector.overlay_opacity` (f32)
-- `__bastyde_inspector.active_tab` (i64) — index of the last-used panel
+- `__teksilo_inspector.open` (bool) — last toggle state. Read at startup
+  if neither `--teksilo-inspector` nor `TEKSILO_INSPECTOR` was given.
+- `__teksilo_inspector.bounds_mode` (`"off"` / `"selection"` / `"all"`)
+- `__teksilo_inspector.overlay_opacity` (f32)
+- `__teksilo_inspector.active_tab` (i64) — index of the last-used panel
   tab. Stored as `i64` because TOML lacks unsigned integers and
   `usize` width varies by target. Out-of-range values seed at 0.
-- `__bastyde_inspector.panel_height` (f32) — last user-set panel height.
+- `__teksilo_inspector.panel_height` (f32) — last user-set panel height.
   Clamped to `[120, 720]` on load and on every observer fire so a
   hand-edited or stale value can't shrink the panel below the toolbar
   or grow it past the user-root.
@@ -280,21 +280,21 @@ through. Use the opacity slider to dim them for dense UIs.
 
 ## Where the code lives
 
-- Crate: [crates/bastyde-inspector/](../crates/bastyde-inspector/)
-- Entry point: [crates/bastyde-inspector/src/lib.rs](../crates/bastyde-inspector/src/lib.rs)
-- Shared state: [crates/bastyde-inspector/src/state.rs](../crates/bastyde-inspector/src/state.rs)
-- Wrapping shell: [crates/bastyde-inspector/src/shell.rs](../crates/bastyde-inspector/src/shell.rs)
-- Highlight overlay: [crates/bastyde-inspector/src/highlight.rs](../crates/bastyde-inspector/src/highlight.rs)
-- Picker tool: [crates/bastyde-inspector/src/picker.rs](../crates/bastyde-inspector/src/picker.rs)
-- Resize handle: [crates/bastyde-inspector/src/resize_handle.rs](../crates/bastyde-inspector/src/resize_handle.rs)
-- Panel keyboard shortcuts: [crates/bastyde-inspector/src/keyboard.rs](../crates/bastyde-inspector/src/keyboard.rs)
-- Persistence: [crates/bastyde-inspector/src/persistence.rs](../crates/bastyde-inspector/src/persistence.rs)
-- Tabs: [crates/bastyde-inspector/src/tabs/](../crates/bastyde-inspector/src/tabs/)
-- Debug-registry hook: [crates/bastyde-data/src/debug_registry.rs](../crates/bastyde-data/src/debug_registry.rs)
+- Crate: [crates/teksilo-inspector/](../crates/teksilo-inspector/)
+- Entry point: [crates/teksilo-inspector/src/lib.rs](../crates/teksilo-inspector/src/lib.rs)
+- Shared state: [crates/teksilo-inspector/src/state.rs](../crates/teksilo-inspector/src/state.rs)
+- Wrapping shell: [crates/teksilo-inspector/src/shell.rs](../crates/teksilo-inspector/src/shell.rs)
+- Highlight overlay: [crates/teksilo-inspector/src/highlight.rs](../crates/teksilo-inspector/src/highlight.rs)
+- Picker tool: [crates/teksilo-inspector/src/picker.rs](../crates/teksilo-inspector/src/picker.rs)
+- Resize handle: [crates/teksilo-inspector/src/resize_handle.rs](../crates/teksilo-inspector/src/resize_handle.rs)
+- Panel keyboard shortcuts: [crates/teksilo-inspector/src/keyboard.rs](../crates/teksilo-inspector/src/keyboard.rs)
+- Persistence: [crates/teksilo-inspector/src/persistence.rs](../crates/teksilo-inspector/src/persistence.rs)
+- Tabs: [crates/teksilo-inspector/src/tabs/](../crates/teksilo-inspector/src/tabs/)
+- Debug-registry hook: [crates/teksilo-data/src/debug_registry.rs](../crates/teksilo-data/src/debug_registry.rs)
 
 ## Related core API additions (debug-build only in spirit)
 
-These public APIs were added to bastyde-core to support the inspector
+These public APIs were added to teksilo-core to support the inspector
 but are not gated by `cfg` — they are useful for any tooling that
 wants to introspect a running tree:
 
@@ -315,5 +315,5 @@ wants to introspect a running tree:
 - `WindowConfig::post_root(F)` per-window root-wrapping hook
 - `LayoutContext::widget_bounds(id)`, `widget_at_point(point, exclude)`,
   `arena()`, `focused()`, `shortcut_registry()`, `overlay_manager()`
-- `bastyde_app::DefaultPostRoot` typed `app_state` slot for an app-wide
+- `teksilo_app::DefaultPostRoot` typed `app_state` slot for an app-wide
   default `post_root` wrapper

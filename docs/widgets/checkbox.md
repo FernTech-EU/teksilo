@@ -28,9 +28,9 @@ row that owns the AT name). Keyboard: Space toggles; lone-KeyUp guard
 prevents spurious toggle when focus is restored after a shortcut.
 
 ```rust
-# use bastyde_widgets::Checkbox;
-# use bastyde_core::signal::Signal;
-# use bastyde_i18n::lit;
+# use teksilo_widgets::Checkbox;
+# use teksilo_core::signal::Signal;
+# use teksilo_i18n::lit;
 let checked = Signal::new(false);
 let _cb = Checkbox::new(checked)
     .label(lit!("Accept terms and conditions"));
@@ -42,7 +42,7 @@ let _cb = Checkbox::new(checked)
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/checkbox/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/checkbox/index.html)
 
 ## `pub struct Checkbox`
 
@@ -111,7 +111,7 @@ Pick the design-language variant. Default `Square`. The active
 (the IntUI `RecipeCheckboxStyle` honours all three variants
 directly via corner-shape changes).
 
-#### `pub fn style(mut self, style: impl bastyde_core::styles::CheckboxStyle) -> Self`
+#### `pub fn style(mut self, style: impl teksilo_core::styles::CheckboxStyle) -> Self`
 
 Per-call style override. Replaces the theme-wide default
 `CheckboxStyle` for just this Checkbox instance — same role as
@@ -131,7 +131,7 @@ registry. See `Button::rich_tooltip`.
 
 Attach a rich tooltip driven by inline `TooltipContent`.
 
-#### `pub fn composite_tooltip( mut self, content: impl bastyde_core::widget::Widget + 'static, ) -> Self`
+#### `pub fn composite_tooltip( mut self, content: impl teksilo_core::widget::Widget + 'static, ) -> Self`
 
 Attach a composite tooltip — third tier, hosting an arbitrary
 widget tree. See `Button::composite_tooltip`.

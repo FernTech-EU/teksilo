@@ -23,7 +23,7 @@ wrapping on — a notes field, a commit message — so the two never drift.
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/code_editor/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/code_editor/index.html)
 
 ## `pub struct CodeEditor`
 
@@ -111,20 +111,20 @@ document content.
 
 A callback fired once per drain batch that contained a real content edit.
 
-#### `pub fn background(self, color: impl Into<bastyde_core::color_prop::ColorProp>) -> Self`
+#### `pub fn background(self, color: impl Into<teksilo_core::color_prop::ColorProp>) -> Self`
 
 Override the editor background colour (accepts `Color`, a theme role, or a
 `Signal`). `None`-equivalent default tracks the theme's `editor_bg`.
 
-#### `pub fn text_color(self, color: impl Into<bastyde_core::color_prop::ColorProp>) -> Self`
+#### `pub fn text_color(self, color: impl Into<teksilo_core::color_prop::ColorProp>) -> Self`
 
 Override the text colour. Default tracks the theme's `editor_fg`.
 
-#### `pub fn caret_color(self, color: impl Into<bastyde_core::color_prop::ColorProp>) -> Self`
+#### `pub fn caret_color(self, color: impl Into<teksilo_core::color_prop::ColorProp>) -> Self`
 
 Override the caret colour. Default tracks the theme's `editor_caret`.
 
-#### `pub fn selection_color(self, color: impl Into<bastyde_core::color_prop::ColorProp>) -> Self`
+#### `pub fn selection_color(self, color: impl Into<teksilo_core::color_prop::ColorProp>) -> Self`
 
 Override the selection colour. A pinned colour opts out of the
 window-inactive desaturation.
@@ -245,7 +245,7 @@ Whether the editor follows the global accessibility text scale.
 
 A callback fired on each content-changing edit batch.
 
-#### `pub fn background(mut self, color: impl Into<bastyde_core::color_prop::ColorProp>) -> Self`
+#### `pub fn background(mut self, color: impl Into<teksilo_core::color_prop::ColorProp>) -> Self`
 
 Override the background colour.
 

@@ -6,7 +6,7 @@
 `SceneModel` — a shared, cloneable handle to a `Scene`.
 
 Mirrors the `ListModel = Rc<RefCell<ListModelInner>>` pattern from
-`bastyde-data`: cloning a `SceneModel` produces a **second handle to the
+`teksilo-data`: cloning a `SceneModel` produces a **second handle to the
 same scene**, so multiple `SceneView`s can render one
 scene (overview + detail panes, same-document multi-window, headless model
 reuse). Mutate the model once and every attached view reconciles.
@@ -46,7 +46,7 @@ later).
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_scene/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_scene/index.html)
 
 ## `pub struct SceneModel`
 

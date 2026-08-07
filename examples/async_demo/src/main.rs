@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
-//! `bastyde-async` demo — imperative async inside UI handlers.
+//! `teksilo-async` demo — imperative async inside UI handlers.
 //!
 //! Run with: `cargo run -p async-demo`
 //!
@@ -17,8 +17,8 @@
 
 use std::time::Duration;
 
-use bastyde::prelude::*;
-use bastyde::widgets::{Button, ButtonVariant, TextWidget, VStack};
+use teksilo::prelude::*;
+use teksilo::widgets::{Button, ButtonVariant, TextWidget, VStack};
 
 struct Root {
     status: Signal<String>,
@@ -116,7 +116,7 @@ impl Widget for Root {
         let root = ctx.add(
             VStack::new()
                 .spacing(14.0)
-                .child(TextWidget::new(lit!("bastyde-async demo")).style(TextStyleRole::BodyBold))
+                .child(TextWidget::new(lit!("teksilo-async demo")).style(TextStyleRole::BodyBold))
                 .child(TextWidget::new(lit!("")).text(self.status.clone()))
                 .child(load_btn)
                 .child(open_btn),
@@ -134,14 +134,14 @@ impl Widget for Root {
 }
 
 fn main() {
-    BastydeAppBuilder::new()
+    TeksiloAppBuilder::new()
         .install_automation_bridge_in_debug()
-        .theme(bastyde::presets::intui::light())
+        .theme(teksilo::presets::intui::light())
         .install_async()
         .install_inspector_in_debug()
         .initial_window(
             WindowConfig::new()
-                .title("Bastyde — Async Demo")
+                .title("Teksilo — Async Demo")
                 .size(560, 360)
                 .root(|tree, _state| tree.add(Root::new())),
         )

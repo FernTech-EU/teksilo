@@ -19,8 +19,8 @@ gap; use `HStack` for the horizontal
 counterpart.
 
 ```rust
-# use bastyde_widgets::primitives::{VStack, TextWidget};
-# use bastyde_i18n::lit;
+# use teksilo_widgets::primitives::{VStack, TextWidget};
+# use teksilo_i18n::lit;
 let _col = VStack::new()
     .spacing(8.0)
     .child(TextWidget::new(lit!("Heading")))
@@ -33,7 +33,7 @@ let _col = VStack::new()
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/primitives/vstack/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/primitives/vstack/index.html)
 
 ## `pub struct VStack`
 

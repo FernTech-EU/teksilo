@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
-//! `scene-corkboard` — `bastyde-scene` multi-view + delegate demo.
+//! `scene-corkboard` — `teksilo-scene` multi-view + delegate demo.
 //!
 //! **Two `SceneView` panes share one `SceneModel`.** A story corkboard is shown
 //! in a wide "editor" pane and a zoomed-out "overview" pane side by side; both
@@ -47,12 +47,12 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use accesskit::Live;
-use bastyde::canvas::{Path, Point, Rect};
-use bastyde::core::BindingLevel;
-use bastyde::data::ListModel;
-use bastyde::prelude::*;
-use bastyde::widgets::{Button, Expand, HStack, Panel, Spacer, TextWidget, Toolbar, VStack};
-use bastyde_scene::{
+use teksilo::canvas::{Path, Point, Rect};
+use teksilo::core::BindingLevel;
+use teksilo::data::ListModel;
+use teksilo::prelude::*;
+use teksilo::widgets::{Button, Expand, HStack, Panel, Spacer, TextWidget, Toolbar, VStack};
+use teksilo_scene::{
     A11yGroup, A11yGroupId, A11yNode, ItemFlags, ItemId, PathItem, RectItem, SceneItem, SceneLayer,
     SceneListAdapter, SceneModel, SceneSelection, SceneSelectionMode, SceneView,
 };
@@ -421,13 +421,13 @@ impl Camera {
         // pan animation (the scroll handler pans via `animate_to`), so a reset
         // mid-scroll would be overridden on the next scheduler tick.
         self.pan_x
-            .animate_to(0.0, dur, bastyde::tokens::Easing::EaseOut);
+            .animate_to(0.0, dur, teksilo::tokens::Easing::EaseOut);
         self.pan_y
-            .animate_to(0.0, dur, bastyde::tokens::Easing::EaseOut);
+            .animate_to(0.0, dur, teksilo::tokens::Easing::EaseOut);
         self.zoom
-            .animate_to(rest_zoom, dur, bastyde::tokens::Easing::EaseOut);
+            .animate_to(rest_zoom, dur, teksilo::tokens::Easing::EaseOut);
         self.rotation
-            .animate_to(0.0, dur, bastyde::tokens::Easing::EaseOut);
+            .animate_to(0.0, dur, teksilo::tokens::Easing::EaseOut);
     }
 }
 
@@ -529,18 +529,18 @@ fn build_toolbar(
                 Button::new(lit!("Reset Overview")).on_activate_fn(move |_ctx| cam.reset(0.5))
             })
             .child(Spacer::new())
-            .child(bastyde::widgets::ThemeSwitcher::new()),
+            .child(teksilo::widgets::ThemeSwitcher::new()),
     )
 }
 
 fn main() {
-    BastydeAppBuilder::new()
+    TeksiloAppBuilder::new()
         .install_automation_bridge_in_debug()
         .install_inspector_in_debug()
-        .theme(bastyde::presets::intui::light())
+        .theme(teksilo::presets::intui::light())
         .initial_window(
             WindowConfig::new()
-                .title("Bastyde — Scene Corkboard (two panes, one shared SceneModel)")
+                .title("Teksilo — Scene Corkboard (two panes, one shared SceneModel)")
                 .size(1300, 640)
                 .root(|tree, _state| {
                     let (model, cork) = build_initial_scene();
@@ -587,8 +587,8 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bastyde::core::WidgetTree;
     use std::collections::BTreeSet;
+    use teksilo::core::WidgetTree;
 
     /// A `WidgetTree` + two panes over one shared model, the way `main()` wires
     /// them. Returns `(tree, model, selection, main_id, overview_id)`.
@@ -597,7 +597,7 @@ mod tests {
         let selection = SceneSelection::new(SceneSelectionMode::Multi);
         let main_cam = Camera::new(1.0);
         let overview_cam = Camera::new(0.5);
-        let mut tree = WidgetTree::new().with_theme(bastyde::presets::intui::light());
+        let mut tree = WidgetTree::new().with_theme(teksilo::presets::intui::light());
         let main_id = tree.add(build_pane(&model, &selection, &main_cam));
         let overview_id = tree.add(build_pane(&model, &selection, &overview_cam));
         let _root = tree.add(
@@ -669,7 +669,7 @@ mod tests {
         let (model, _cork) = build_initial_scene();
         let selection = SceneSelection::new(SceneSelectionMode::Multi);
         let camera = Camera::new(1.0);
-        let mut tree = WidgetTree::new().with_theme(bastyde::presets::intui::light());
+        let mut tree = WidgetTree::new().with_theme(teksilo::presets::intui::light());
         let view_id = tree.add(build_pane(&model, &selection, &camera));
         tree.layout(SizeProposal::exact(900.0, 600.0));
 
@@ -700,7 +700,7 @@ mod tests {
         let selection = SceneSelection::new(SceneSelectionMode::Multi);
         let main_cam = Camera::new(1.0);
         let overview_cam = Camera::new(0.5);
-        let mut tree = WidgetTree::new().with_theme(bastyde::presets::intui::light());
+        let mut tree = WidgetTree::new().with_theme(teksilo::presets::intui::light());
         let main_id = tree.add(build_pane(&model, &selection, &main_cam));
         let overview_id = tree.add(build_pane(&model, &selection, &overview_cam));
         // Exactly main()'s structure: VStack { toolbar, Expand { HStack { … } } }.
@@ -733,7 +733,7 @@ mod tests {
         let acts_before = cork.acts.len();
         let selection = SceneSelection::new(SceneSelectionMode::Multi);
         let camera = Camera::new(1.0);
-        let mut tree = WidgetTree::new().with_theme(bastyde::presets::intui::light());
+        let mut tree = WidgetTree::new().with_theme(teksilo::presets::intui::light());
         let view_id = tree.add(build_pane(&model, &selection, &camera));
         tree.layout(SizeProposal::exact(900.0, 600.0));
         assert_eq!(tree.children(view_id).len(), CARDS.len());

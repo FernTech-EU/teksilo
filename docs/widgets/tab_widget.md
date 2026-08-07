@@ -75,7 +75,7 @@ opted in via `TabInfo::focusable_panel(true)`.
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/tab_widget/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/tab_widget/index.html)
 
 ## `pub type StaticContentFactory`
 
@@ -166,14 +166,14 @@ internal state the content owns.
 Ergonomic shorthand for a title-only static tab:
 `tab(label, content)` is `static_tab(TabInfo::new().title(label),
 content)`. `label` accepts `tr!(...)` (translated) or `lit!(...)`.
-This is the method the `bati!` `tab:` slot lowers to
+This is the method the `teksu!` `tab:` slot lowers to
 (`tab: lit!("Overview"), Card { … }`).
 
 #### `pub fn tab_id(self, label: impl Into<LocalizedString>, id: WidgetId) -> Self`
 
 `WidgetId` twin of `tab` — `tab_id(label, id)` is
 `static_tab_id(TabInfo::new().title(label), id)`. This is what the
-`bati!` `tab:` slot lowers to when its content is an id binding
+`teksu!` `tab:` slot lowers to when its content is an id binding
 (`#{…}` / `name = Element`).
 
 #### `pub fn static_tab_factory( mut self, info: TabInfo, factory: impl Fn(&TabHandle) -> Box<dyn Widget> + 'static, ) -> Self`
@@ -185,7 +185,7 @@ build — and the resulting pane is memoized just like
 
 #### `pub fn static_tab_id(mut self, info: TabInfo, content_id: WidgetId) -> Self`
 
-Element-valued slot variant for the `bati!` DSL — accepts a
+Element-valued slot variant for the `teksu!` DSL — accepts a
 pre-registered widget id rather than a `Box<dyn Widget>`.
 Equivalent to `static_tab` with an
 already-built child; the id is wrapped in a tab pane on
@@ -239,7 +239,7 @@ flipped to swap icon / text / icon+text live (the bar rebuilds,
 memoized panes survive), with no rebuild on the parent's part. Bound
 at `BindingLevel::Rebuild`.
 
-#### `pub fn tab_background(mut self, color: impl Into<bastyde_core::color_prop::ColorProp>) -> Self`
+#### `pub fn tab_background(mut self, color: impl Into<teksilo_core::color_prop::ColorProp>) -> Self`
 
 All-states shorthand for the per-tab background — every tab
 (selected, idle, hovered) paints this unless a per-state override
@@ -248,22 +248,22 @@ is set. Accepts any `Color`, `SurfaceRole`, or `Signal<Color>` (via
 transparent. To tint the bar's backdrop instead, use
 `bar_background`.
 
-#### `pub fn selected_tab_background( mut self, color: impl Into<bastyde_core::color_prop::ColorProp>, ) -> Self`
+#### `pub fn selected_tab_background( mut self, color: impl Into<teksilo_core::color_prop::ColorProp>, ) -> Self`
 
 Background for the **selected** tab. Falls back to
 `tab_background`, then transparent.
 
-#### `pub fn hover_tab_background( mut self, color: impl Into<bastyde_core::color_prop::ColorProp>, ) -> Self`
+#### `pub fn hover_tab_background( mut self, color: impl Into<teksilo_core::color_prop::ColorProp>, ) -> Self`
 
 Background for the **hovered** (non-selected) tab. Falls back to
 `tab_background`, then transparent.
 
-#### `pub fn idle_tab_background( mut self, color: impl Into<bastyde_core::color_prop::ColorProp>, ) -> Self`
+#### `pub fn idle_tab_background( mut self, color: impl Into<teksilo_core::color_prop::ColorProp>, ) -> Self`
 
 Background for **idle** tabs (not selected, not hovered). Falls back
 to `tab_background`, then transparent.
 
-#### `pub fn bar_background(mut self, color: impl Into<bastyde_core::color_prop::ColorProp>) -> Self`
+#### `pub fn bar_background(mut self, color: impl Into<teksilo_core::color_prop::ColorProp>) -> Self`
 
 Set the bar-strip backdrop fill (behind headers, slots, arrows),
 independent of the per-tab backgrounds. Default transparent.
@@ -272,33 +272,33 @@ independent of the per-tab backgrounds. Default transparent.
 
 Draw a 1 dp divider between consecutive tabs. Off by default.
 
-#### `pub fn tab_divider_color( mut self, color: impl Into<bastyde_core::color_prop::ColorProp>, ) -> Self`
+#### `pub fn tab_divider_color( mut self, color: impl Into<teksilo_core::color_prop::ColorProp>, ) -> Self`
 
 Like `tab_dividers` with an explicit colour
 (`Color`, `BorderRole`, or
 `Signal<Color>`). Implies `tab_dividers()`.
 
-#### `pub fn active_indicator( mut self, position: bastyde_core::styles::TabIndicatorPosition, ) -> Self`
+#### `pub fn active_indicator( mut self, position: teksilo_core::styles::TabIndicatorPosition, ) -> Self`
 
 Choose which edge the active-tab highlight indicator hugs. Default
 `TabIndicatorPosition::OuterEdge`;
 `InnerEdge`
 puts it below the label (horizontal) / trailing edge (vertical).
 
-#### `pub fn selected_text_role(mut self, role: bastyde_tokens::TextRole) -> Self`
+#### `pub fn selected_text_role(mut self, role: teksilo_tokens::TextRole) -> Self`
 
 Set the text role used for the label (and matching icon tint)
-on the **selected** tab. Default: `bastyde_tokens::TextRole::Primary`
+on the **selected** tab. Default: `teksilo_tokens::TextRole::Primary`
 — the Int UI editor-strip convention. Override to e.g.
-`bastyde_tokens::TextRole::Accent` when the strip sits over a
+`teksilo_tokens::TextRole::Accent` when the strip sits over a
 tinted surface.
 
-#### `pub fn idle_text_role(mut self, role: bastyde_tokens::TextRole) -> Self`
+#### `pub fn idle_text_role(mut self, role: teksilo_tokens::TextRole) -> Self`
 
 Set the text role used for the label (and matching icon tint)
 on **idle** tabs (not selected, not disabled). Default:
-`bastyde_tokens::TextRole::Secondary`. Disabled tabs always read
-as `bastyde_tokens::TextRole::Disabled` regardless of this
+`teksilo_tokens::TextRole::Secondary`. Disabled tabs always read
+as `teksilo_tokens::TextRole::Disabled` regardless of this
 setting.
 
 #### `pub fn min_tab_width(mut self, dp: f32) -> Self`
@@ -431,7 +431,7 @@ return `true` if accepted.
 
 This is the "open a dropped file as a tab" hook (VS Code style).
 Independent of `accept_external_tabs`.
-OS drops also require `BastydeAppBuilder::install_external_dnd()`.
+OS drops also require `TeksiloAppBuilder::install_external_dnd()`.
 
 #### `pub fn bar_leading_slot(mut self, w: impl Widget + 'static) -> Self`
 
@@ -448,7 +448,7 @@ tab and overflow button). Memoized like
 
 Element-valued variant of
 `bar_leading_slot` accepting a
-pre-registered `WidgetId` (for the `bati!` DSL).
+pre-registered `WidgetId` (for the `teksu!` DSL).
 
 #### `pub fn bar_trailing_slot_id(mut self, id: WidgetId) -> Self`
 

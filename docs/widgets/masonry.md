@@ -14,9 +14,9 @@ spacing are independently configurable. RTL layout mirrors the
 column order so the first logical child still goes to the leading edge.
 
 ```rust
-# use bastyde_widgets::primitives::masonry::MasonryLayout;
-# use bastyde_widgets::primitives::TextWidget;
-# use bastyde_i18n::lit;
+# use teksilo_widgets::primitives::masonry::MasonryLayout;
+# use teksilo_widgets::primitives::TextWidget;
+# use teksilo_i18n::lit;
 let _grid = MasonryLayout::new(3)
     .column_spacing(8.0)
     .item_spacing(8.0)
@@ -31,7 +31,7 @@ let _grid = MasonryLayout::new(3)
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/primitives/masonry/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/primitives/masonry/index.html)
 
 ## `pub struct MasonryLayout`
 

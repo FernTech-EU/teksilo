@@ -66,7 +66,7 @@ leaking for the life of the process.
 ## Example
 
 ```ignore
-use bastyde_settings::{SettingsKey, SettingsStore};
+use teksilo_settings::{SettingsKey, SettingsStore};
 use std::time::Duration;
 
 // Declare a typed, statically-named key once — typically at the module level.
@@ -82,12 +82,12 @@ let store = SettingsStore::open_with_delay(
 let font_size = store.signal_for(&FONT_SIZE); // Signal<f32>, seeded from disk
 font_size.set(18.0);                          // writes back to TOML on next flush
 store.flush_now()?;                           // force sync (useful in tests)
-# Ok::<(), bastyde_settings::SettingsStoreError>(())
+# Ok::<(), teksilo_settings::SettingsStoreError>(())
 ```
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_settings/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_settings/index.html)
 
 ## `pub const DEFAULT_DEBOUNCE`
 
@@ -117,7 +117,7 @@ A statically-named setting. Centralizes the dotted key, the value
 type, and the default factory. Construct as a `const`:
 
 ```
-use bastyde_settings::SettingsKey;
+use teksilo_settings::SettingsKey;
 
 const FONT_SIZE: SettingsKey<f32> =
     SettingsKey::new("editor.font_size", || 14.0);
@@ -137,7 +137,7 @@ Create a new key descriptor; intended for use in `const` declarations.
 
 Persisted user-controlled global text-scale factor (`1.0` = 100 %).
 
-Read at startup by `bastyde-app` to seed every window's text scale, and
+Read at startup by `teksilo-app` to seed every window's text scale, and
 bound by the `TextScaleControl` widget so edits persist. The key accepts
 any `f32`; the UI control restricts the user-facing range to 80 %–200 %.
 The effective rendered scale is this value multiplied by the OS

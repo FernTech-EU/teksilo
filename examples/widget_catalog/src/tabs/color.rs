@@ -3,8 +3,8 @@
 
 //! Color tab — HexColorInput, ColorEdit, ColorPicker.
 
-use bastyde::prelude::*;
-use bastyde::widgets::{
+use teksilo::prelude::*;
+use teksilo::widgets::{
     ColorEdit, ColorPicker, Divider, HexColorInput, MaxSize, TextWidget, VStack,
 };
 
@@ -65,12 +65,12 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     )
 }
 
-pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
+pub fn teksu(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     let hex_color = ctx.signal(Color::from_hex("#CC6633"));
     let edit_color = ctx.signal(Color::from_hex("#55AADD"));
     let pick_color = ctx.signal(Color::from_hex("#8844BB"));
 
-    bati!(ctx => VStack {
+    teksu!(ctx => VStack {
             spacing: 20.0
             VStack {
                 spacing: 4.0

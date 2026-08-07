@@ -3,17 +3,17 @@
 
 //! Charts tab — BarChart, LineChart, PieChart (donut + center slot), plus a
 //! `ChartStyle` override showcase. Cannibalized from the `chart-demo`
-//! example. Charts live in the `bastyde-charts` crate (same tier as
-//! `bastyde-widgets`) and are bound to a `ChartModel<T>`.
+//! example. Charts live in the `teksilo-charts` crate (same tier as
+//! `teksilo-widgets`) and are bound to a `ChartModel<T>`.
 
-use bastyde::core::styles::{
+use teksilo::core::styles::{
     BorderPosition, BorderRecipe, BorderStyle, ChartFillContext, ChartStyle, FillRecipe,
     GradientStop, RecipeColor,
 };
-use bastyde::prelude::*;
-use bastyde::tokens::HAlignment;
-use bastyde::widgets::{Center, Divider, MaxSize, TextWidget, VStack};
-use bastyde_charts::{
+use teksilo::prelude::*;
+use teksilo::tokens::HAlignment;
+use teksilo::widgets::{Center, Divider, MaxSize, TextWidget, VStack};
+use teksilo_charts::{
     AxisConfig, BarChart, BarGrouping, ChartDatum, ChartModel, ChartSeries, LegendPosition,
     LineChart, PieChart, PieLabelMode,
 };
@@ -213,17 +213,17 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     )
 }
 
-pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
+pub fn teksu(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     // Charts take a `ChartModel<…>` constructor arg plus closure-bearing
     // builder chains (axis formatter, center slot, style override) that
-    // bati! property syntax can't express — pre-build each and splice via
+    // teksu! property syntax can't express — pre-build each and splice via
     // `#{ id }`.
     let bar_id = ctx.add(sized(560.0, 260.0, make_bar()));
     let bar_gradient_id = ctx.add(sized(560.0, 260.0, make_bar_gradient()));
     let line_id = ctx.add(sized(560.0, 260.0, make_line()));
     let pie_id = ctx.add(sized(560.0, 280.0, make_pie()));
 
-    bati!(ctx => VStack {
+    teksu!(ctx => VStack {
             spacing: 20.0
             VStack {
                 spacing: 4.0

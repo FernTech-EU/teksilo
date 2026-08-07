@@ -2,10 +2,10 @@
 # SPDX-License-Identifier: MPL-2.0
 # SPDX-FileCopyrightText: 2026 FernTech
 
-"""Analyze inter-crate dependencies across the Bastyde workspace.
+"""Analyze inter-crate dependencies across the Teksilo workspace.
 
 Scans every crate's ``Cargo.toml``, extracts dependencies on *other*
-``bastyde-*`` crates (split into normal/build vs dev), then:
+``teksilo-*`` crates (split into normal/build vs dev), then:
 
   * flags **release-blocking cycles** — cycles in the normal + build
     dependency graph that make a clean ``cargo publish`` impossible.
@@ -30,7 +30,7 @@ forms this workspace actually uses:
     dep = { workspace = true }
     dep = "1.2"
     dep.workspace = true
-    dep = { package = "bastyde-real-name", ... }   # rename
+    dep = { package = "teksilo-real-name", ... }   # rename
     [target.'cfg(...)'.dependencies] / [build-dependencies] / [dev-dependencies]
 
 Crates that inherit their publishability with ``publish.workspace = true``
@@ -63,7 +63,7 @@ import re
 import sys
 from dataclasses import dataclass, field
 
-INTERNAL_PREFIX = "bastyde-"
+INTERNAL_PREFIX = "teksilo-"
 
 # A dependency line's left-hand side: `name`, `name.workspace`, `name.path`, ...
 # We only need the bare crate name (everything before the first '.' or '=').
@@ -265,7 +265,7 @@ def discover_crates(root: str, include_examples: bool,
     # Hidden directories are skipped wholesale: besides .git/.idea/.vscode,
     # this keeps us out of git worktrees parked under `.claude/worktrees/`,
     # which are *full copies of this repo* — descending into one yields a
-    # second `bastyde-core` etc. that silently shadows the real crate.
+    # second `teksilo-core` etc. that silently shadows the real crate.
     skip_dirs = {"target", "node_modules"}
     for dirpath, dirnames, filenames in os.walk(root):
         dirnames[:] = [d for d in dirnames
@@ -428,7 +428,7 @@ def main() -> int:
     crates, excluded_crates = discover_crates(
         root, args.include_examples, workspace_publish, workspace_exclude)
     if not crates:
-        print(f"error: no bastyde-* crates found under {root}", file=sys.stderr)
+        print(f"error: no teksilo-* crates found under {root}", file=sys.stderr)
         return 2
 
     names = sorted(crates)
@@ -509,7 +509,7 @@ def main() -> int:
         return 1 if blocking_cycles else 0
 
     # --- Human-readable report ---
-    print(f"Bastyde dependency report  ({len(names)} internal crates under {root})")
+    print(f"Teksilo dependency report  ({len(names)} internal crates under {root})")
     print(f"[workspace.package] publish = {str(workspace_publish).lower()}"
           "   (inherited by every `publish.workspace = true` crate)")
     if excluded_crates:

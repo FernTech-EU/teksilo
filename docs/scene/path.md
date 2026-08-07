@@ -26,9 +26,9 @@ stroke. For solid rectangular regions, prefer the cheaper `RectItem`.
 ## Example
 
 ```ignore
-use bastyde_scene::{SceneModel, PathItem};
-use bastyde_canvas::{Path, Point, Rect};
-use bastyde_tokens::Color;
+use teksilo_scene::{SceneModel, PathItem};
+use teksilo_canvas::{Path, Point, Rect};
+use teksilo_tokens::Color;
 
 let model = SceneModel::new();
 
@@ -49,7 +49,7 @@ model.add_item(item, Point::new(50.0, 50.0));
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_scene/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_scene/index.html)
 
 ## `pub struct PathItem`
 

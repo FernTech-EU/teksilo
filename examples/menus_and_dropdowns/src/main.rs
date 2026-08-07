@@ -18,13 +18,13 @@
 //!
 //! Run with: `cargo run -p menus-and-dropdowns`
 
-use bastyde::prelude::*;
-use bastyde::widgets::{
+use teksilo::prelude::*;
+use teksilo::widgets::{
     Button, ButtonVariant, ComboBox, Divider, Expand, HStack, IconButton, IconWidget, MenuBar,
     MenuItem, MenuList, Padding, Panel, PopoverButton, PopoverIconButton, ScrollArea, Slider,
     Spacer, StatusBar, TextWidget, Toolbar, VStack,
 };
-use bastyde_data::CheckState;
+use teksilo_data::CheckState;
 
 // ---------------------------------------------------------------------------
 // Root composite
@@ -650,7 +650,7 @@ impl Widget for Root {
                             .color(TextRole::Primary),
                     )
                     .child(Spacer::new())
-                    .child(bastyde::widgets::ThemeSwitcher::new()),
+                    .child(teksilo::widgets::ThemeSwitcher::new()),
             ),
         );
 
@@ -667,7 +667,7 @@ impl Widget for Root {
         );
         let padded = ctx.add(Padding::uniform(24.0).child_id(content));
         let scroll = ctx.add(
-            ScrollArea::from_id(padded).scroll_bar_style(bastyde::widgets::ScrollBarMode::Overlay),
+            ScrollArea::from_id(padded).scroll_bar_style(teksilo::widgets::ScrollBarMode::Overlay),
         );
 
         let word_wrap_for_view = word_wrap.clone();
@@ -794,14 +794,14 @@ impl Widget for Root {
                                 MenuItem::new(lit!("&Light Theme"))
                                     .radio(0, theme_choice_for_view.clone())
                                     .on_activate_fn(|ctx| {
-                                        ctx.set_theme(bastyde::presets::intui::light())
+                                        ctx.set_theme(teksilo::presets::intui::light())
                                     }),
                             )
                             .item(
                                 MenuItem::new(lit!("&Dark Theme"))
                                     .radio(1, theme_choice_for_view.clone())
                                     .on_activate_fn(|ctx| {
-                                        ctx.set_theme(bastyde::presets::intui::dark())
+                                        ctx.set_theme(teksilo::presets::intui::dark())
                                     }),
                             )
                             .item(
@@ -874,13 +874,13 @@ impl Widget for Root {
 // ---------------------------------------------------------------------------
 
 fn main() {
-    BastydeAppBuilder::new()
+    TeksiloAppBuilder::new()
         .install_automation_bridge_in_debug()
         .install_inspector_in_debug()
-        .theme(bastyde::presets::intui::light())
+        .theme(teksilo::presets::intui::light())
         .initial_window(
             WindowConfig::new()
-                .title("Bastyde — Menus & Dropdowns (Milestone 4)")
+                .title("Teksilo — Menus & Dropdowns (Milestone 4)")
                 .size(900, 700)
                 .root(|tree, _state| tree.add(Root::new())),
         )

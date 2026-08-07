@@ -1,0 +1,24 @@
+# SPDX-License-Identifier: MPL-2.0
+# SPDX-FileCopyrightText: 2026 FernTech
+
+[package]
+name = "cargo-teksilo-fmt"
+edition = "2024"
+version.workspace = true
+license-file.workspace = true
+publish.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Formatter for teksu! DSL blocks in Rust source files"
+
+[[bin]]
+name = "cargo-teksilo-fmt"
+path = "src/main.rs"
+
+[dependencies]
+teksilo-fmt = { workspace = true }
+tempfile = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

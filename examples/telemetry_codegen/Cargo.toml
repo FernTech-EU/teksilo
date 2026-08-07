@@ -11,5 +11,5 @@ authors.workspace = true
 repository.workspace = true
 
 [dependencies]
-bastyde-telemetry = { workspace = true }
-bastyde-telemetry-codegen = { workspace = true }
+teksilo-telemetry = { workspace = true }
+teksilo-telemetry-codegen = { workspace = true }

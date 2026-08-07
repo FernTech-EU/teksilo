@@ -43,7 +43,7 @@ Every read and every write goes through the exclusive advisory lock on
   to a full re-read only when something actually moved.
 
 ```ignore
-use bastyde_settings::{SettingsFile, Migrator, Versioned};
+use teksilo_settings::{SettingsFile, Migrator, Versioned};
 use serde::{Serialize, Deserialize};
 
 #[derive(Serialize, Deserialize, Debug, Default, Clone)]
@@ -67,7 +67,7 @@ file.mutate(|p| p.font_size = 16.0).unwrap();
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_settings/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_settings/index.html)
 
 ## `pub enum SettingsFileError`
 

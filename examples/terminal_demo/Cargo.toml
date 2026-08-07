@@ -16,4 +16,4 @@ path = "src/main.rs"
 [dependencies]
 # `terminal` = the Console widget (portable-pty + alacritty_terminal); `clipboard`
 # so Ctrl+Shift+C / Ctrl+Shift+V work.
-bastyde = { workspace = true, features = ["terminal", "clipboard"] }
+teksilo = { workspace = true, features = ["terminal", "clipboard"] }

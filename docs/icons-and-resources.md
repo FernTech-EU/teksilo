@@ -5,7 +5,7 @@
 
 ## Overview
 
-Bastyde supports three icon formats — SVG, PNG, and WebP — embedded at compile time via the `res!()` macro. Icons are tintable by default: their color follows the theme and interaction state (hover, pressed, disabled) automatically.
+Teksilo supports three icon formats — SVG, PNG, and WebP — embedded at compile time via the `res!()` macro. Icons are tintable by default: their color follows the theme and interaction state (hover, pressed, disabled) automatically.
 
 ## Supported Formats
 
@@ -38,16 +38,16 @@ Embed and use them:
 
 ```rust
 // SVG — returns &'static SvgIcon, compile-time validated
-let save = bastyde::res!("resources/icons/save.svg");
+let save = teksilo::res!("resources/icons/save.svg");
 
 // PNG — returns &'static RasterIcon, compile-time validated
-let star = bastyde::res!("resources/icons/star.png");
+let star = teksilo::res!("resources/icons/star.png");
 
 // WebP — returns &'static RasterIcon (static) or &'static AnimatedIcon (animated)
-let clock = bastyde::res!("resources/icons/clock.webp");
+let clock = teksilo::res!("resources/icons/clock.webp");
 
 // Unknown extensions — returns &'static [u8], existence checked only
-let font = bastyde::res!("resources/fonts/custom.ttf");
+let font = teksilo::res!("resources/fonts/custom.ttf");
 ```
 
 The macro validates known formats at compile time (XML structure for SVG, magic bytes for PNG/WebP). Unknown extensions are embedded as raw bytes without validation — only file existence is checked.
@@ -55,7 +55,7 @@ The macro validates known formats at compile time (XML structure for SVG, magic 
 ### Using icons in buttons
 
 ```rust
-let save = bastyde::res!("resources/icons/save.svg");
+let save = teksilo::res!("resources/icons/save.svg");
 
 // Leading icon — most common
 Button::new(lit!("Save"))
@@ -68,12 +68,12 @@ Button::new(lit!("Save"))
     .style(ButtonVariant::Ghost)
 
 // Raster icon
-let star = bastyde::res!("resources/icons/star.png");
+let star = teksilo::res!("resources/icons/star.png");
 Button::new(lit!("Favorite"))
     .icon(IconWidget::from_raster(star, 24.0), IconLocation::Leading)
 ```
 
-The button controls the icon's display size via the `BUTTON_ICON_SIZE` constant (default 16dp) in `bastyde-widgets`. The icon's color is bound to the button's text color signal — it follows hover, pressed, disabled, and theme changes automatically.
+The button controls the icon's display size via the `BUTTON_ICON_SIZE` constant (default 16dp) in `teksilo-widgets`. The icon's color is bound to the button's text color signal — it follows hover, pressed, disabled, and theme changes automatically.
 
 ### Icon locations
 

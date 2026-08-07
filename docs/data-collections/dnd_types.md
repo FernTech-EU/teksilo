@@ -5,7 +5,7 @@
 
 Shared capability types for the data-source drag-and-drop + lazy protocol.
 
-These types are the Bastyde-shaped equivalent of Qt's
+These types are the Teksilo-shaped equivalent of Qt's
 `flags`/`canDropMimeData`/`dropMimeData` (DnD validation) and
 `canFetchMore`/`fetchMore` (lazy loading), expressed as defaulted methods on
 `ListDataSource` and
@@ -27,17 +27,17 @@ view without the view ever mutating a mirror model.
 
 ```ignore
 // Example: implementing can_accept for a custom ListDataSource
-fn can_accept(&self, query: &bastyde_data::DropQuery<'_, usize>) -> bastyde_data::DropResponse {
+fn can_accept(&self, query: &teksilo_data::DropQuery<'_, usize>) -> teksilo_data::DropResponse {
     match &query.source {
-        bastyde_data::DragSource::SameView { .. } => bastyde_data::DropResponse::Accept,
-        bastyde_data::DragSource::Foreign { .. } => bastyde_data::DropResponse::Reject,
+        teksilo_data::DragSource::SameView { .. } => teksilo_data::DropResponse::Accept,
+        teksilo_data::DragSource::Foreign { .. } => teksilo_data::DropResponse::Reject,
     }
 }
 ```
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_data/dnd_types/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_data/dnd_types/index.html)
 
 ## `pub enum RowState`
 

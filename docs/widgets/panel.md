@@ -23,9 +23,9 @@ the group node when the panel is purely decorative (e.g. a toolbar
 background that should not introduce a spurious container in the AT tree).
 
 ```rust
-# use bastyde_widgets::Panel;
-# use bastyde_widgets::primitives::TextWidget;
-# use bastyde_i18n::lit;
+# use teksilo_widgets::Panel;
+# use teksilo_widgets::primitives::TextWidget;
+# use teksilo_i18n::lit;
 let _w = Panel::new()
     .padding(12.0)
     .child(TextWidget::new(lit!("Content")));
@@ -37,7 +37,7 @@ let _w = Panel::new()
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/panel/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/panel/index.html)
 
 ## `pub struct Panel`
 
@@ -61,7 +61,7 @@ IntUI default maps Plain → `surface_main`, Sunken →
 `surface_sunken`, Raised → `surface_raised`, Highlighted →
 `accent_subtle_bg`, with matching border defaults).
 
-#### `pub fn style(mut self, style: impl bastyde_core::styles::PanelStyle) -> Self`
+#### `pub fn style(mut self, style: impl teksilo_core::styles::PanelStyle) -> Self`
 
 Per-call style override. Replaces the theme-wide default
 `PanelStyle` for just this Panel instance — same role as

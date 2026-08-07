@@ -16,12 +16,12 @@
 //! the data-driven default impl behind every widget and isn't
 //! separately demoed here. See `docs/styling-system.md`.
 
-use bastyde::core::styles::{
+use teksilo::core::styles::{
     ButtonStyle, ButtonStyleConfig, CardVariant, CheckboxVariant, ToggleStyle, ToggleStyleConfig,
     ToggleVariant,
 };
-use bastyde::prelude::*;
-use bastyde::widgets::{
+use teksilo::prelude::*;
+use teksilo::widgets::{
     Button, ButtonVariant, Card, Checkbox, Divider, FixedSize, Padding, RectWidget, TextWidget,
     Toggle, VStack, Wrap, ZStack,
 };
@@ -317,8 +317,8 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     )
 }
 
-pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
-    // `bati!` borrows `ctx` for the whole block, so anything needing
+pub fn teksu(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
+    // `teksu!` borrows `ctx` for the whole block, so anything needing
     // `&mut ctx` — fresh signals, the `.style(...)`-carrying widgets
     // whose value is a plain Rust expr the DSL can't take inline —
     // is created up front and spliced via `#{ … }`.
@@ -333,7 +333,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     let tog_custom = ctx.signal(true);
 
     // Tier-3 rows: the per-call `.style(impl FooStyle)` override takes
-    // a value the `bati!` property grammar can't express directly, so
+    // a value the `teksu!` property grammar can't express directly, so
     // these are built with the plain builder API and spliced in.
     let glow_button = ctx.add(Button::new(lit!("Glow")).style(GlowButton));
     let square_toggle = ctx.add(
@@ -342,7 +342,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
             .label(lit!("Square")),
     );
 
-    bati!(ctx => VStack {
+    teksu!(ctx => VStack {
             spacing: 20.0
             VStack {
                 spacing: 4.0

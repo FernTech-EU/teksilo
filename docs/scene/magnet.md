@@ -35,8 +35,8 @@ always authoritative on whether two magnets may connect.
 ## Example — two items connected by a typed magnet pair
 
 ```rust
-use bastyde_scene::{Scene, RectItem, Magnet, MagnetRole, MagnetRef, MagnetVerdict};
-use bastyde_canvas::{Point, Rect, Vec2};
+use teksilo_scene::{Scene, RectItem, Magnet, MagnetRole, MagnetRef, MagnetVerdict};
+use teksilo_canvas::{Point, Rect, Vec2};
 
 // A predicate that accepts Source → Target pairs on different items.
 fn source_to_target(a: &MagnetRef, b: &MagnetRef) -> MagnetVerdict {
@@ -77,7 +77,7 @@ if let Some(snap) = scene.compute_item_snap(dragged, Vec2::new(95.0, 0.0), 20.0,
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_scene/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_scene/index.html)
 
 ## `pub struct MagnetId`
 

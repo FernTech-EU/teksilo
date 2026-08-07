@@ -24,11 +24,11 @@
 //!    popover-style pickers (default, alpha, nullable).
 //! 9. **Disabled** — `.enabled(false)` on a ColorPicker.
 
-use bastyde::core::WidgetPlacement;
-use bastyde::i18n::I18nConfig;
-use bastyde::prelude::*;
-use bastyde::tokens::Color;
-use bastyde::widgets::{
+use teksilo::core::WidgetPlacement;
+use teksilo::i18n::I18nConfig;
+use teksilo::prelude::*;
+use teksilo::tokens::Color;
+use teksilo::widgets::{
     ColorEdit, ColorPicker, ColorPickerLayout, Expand, HStack, HexColorInput, Padding, Panel,
     ScrollArea, Spacer, TextWidget, Toolbar, VStack,
 };
@@ -37,7 +37,7 @@ fn dark_mode_toolbar() -> impl Widget {
     Toolbar::new().child(
         HStack::new()
             .child(Spacer::new())
-            .child(bastyde::widgets::ThemeSwitcher::new()),
+            .child(teksilo::widgets::ThemeSwitcher::new()),
     )
 }
 
@@ -204,7 +204,7 @@ fn section(title: &'static str, body: impl Widget + 'static) -> impl Widget + 's
 /// A 64×64 panel filled with the bound color — visible feedback that the
 /// signal binding works end-to-end.
 fn live_preview(color: Signal<Color>) -> impl Widget + 'static {
-    use bastyde::core::ColorProp;
+    use teksilo::core::ColorProp;
     let bg: ColorProp = color.into();
     Panel::new()
         .background(bg)
@@ -235,17 +235,17 @@ fn material_palette() -> Vec<Color> {
 }
 
 fn main() {
-    BastydeAppBuilder::new()
+    TeksiloAppBuilder::new()
         .install_automation_bridge_in_debug()
         .install_inspector_in_debug()
-        .theme(bastyde::presets::intui::light())
-        // Register bastyde-widgets' own translatable strings so internal
+        .theme(teksilo::presets::intui::light())
+        // Register teksilo-widgets' own translatable strings so internal
         // labels (Role::Slider names, swatch hex readouts, etc.) resolve
         // instead of falling back to literal Fluent keys.
-        .i18n(I18nConfig::new().framework_locales(bastyde::widgets::framework_locales()))
+        .i18n(I18nConfig::new().framework_locales(teksilo::widgets::framework_locales()))
         .initial_window(
             WindowConfig::new()
-                .title("Bastyde — ColorPicker gallery")
+                .title("Teksilo — ColorPicker gallery")
                 .size(960, 900)
                 .root(|tree, _state| {
                     tree.add(

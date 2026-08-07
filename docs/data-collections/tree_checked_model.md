@@ -24,7 +24,7 @@ observers it triggers itself.
 ## Example
 
 ```rust
-# use bastyde_data::{TreeModel, TreeCheckedModel, CheckState};
+# use teksilo_data::{TreeModel, TreeCheckedModel, CheckState};
 let tree = TreeModel::new();
 let root = tree.insert_root(0, "root");
 let child_a = tree.insert_child(root, 0, "a");
@@ -68,7 +68,7 @@ and clear the relevant entries. Tracked as out-of-scope for V1.
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_data/tree_checked_model/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_data/tree_checked_model/index.html)
 
 ## `pub enum AggregateMode`
 

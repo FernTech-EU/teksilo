@@ -26,7 +26,7 @@ For hierarchical lists with descendant→ancestor tristate aggregation, see
 `crate::TreeCheckedModel` instead.
 
 ```rust
-# use bastyde_data::CheckedModel;
+# use teksilo_data::CheckedModel;
 let model = CheckedModel::new();
 model.check(1);
 model.check(3);
@@ -42,7 +42,7 @@ assert!(!model.is_checked(1));
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_data/checked_model/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_data/checked_model/index.html)
 
 ## `pub struct CheckedModel`
 

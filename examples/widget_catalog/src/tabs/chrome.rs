@@ -3,8 +3,8 @@
 
 //! Chrome tab — Toolbar, StatusBar, Banner, Breadcrumb, Wizard.
 
-use bastyde::prelude::*;
-use bastyde::widgets::{
+use teksilo::prelude::*;
+use teksilo::widgets::{
     Banner, Breadcrumb, BreadcrumbItem, Button, ButtonVariant, Divider, MaxSize, StatusBar, Step,
     Stepper, TextWidget, Toolbar, VStack, Wizard, Wrap,
 };
@@ -117,7 +117,7 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
         Breadcrumb::new()
             .item(BreadcrumbItem::new(tr!(chr_breadcrumb_home())))
             .item(BreadcrumbItem::new(tr!(chr_breadcrumb_docs())))
-            .item(BreadcrumbItem::new(tr!(chr_breadcrumb_bastyde())))
+            .item(BreadcrumbItem::new(tr!(chr_breadcrumb_teksilo())))
             .item(BreadcrumbItem::current(tr!(chr_breadcrumb_current()))),
     );
     let wizard = section(ctx, lit!("Wizard"), make_wizard());
@@ -141,15 +141,15 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     )
 }
 
-pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
+pub fn teksu(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     // Toolbar/StatusBar wrap a single child via .child(impl Widget).
     // Banner family takes title in ctor, description chained — fits
-    // bati! Type::ctor(args) { method: value }. Wizard takes nested
+    // teksu! Type::ctor(args) { method: value }. Wizard takes nested
     // steps with closures — pre-register.
     let wizard_widget = ctx.add(make_wizard());
     let stepper_widget = ctx.add(MaxSize::new(560.0, 220.0).child(make_stepper()));
 
-    bati!(ctx => VStack {
+    teksu!(ctx => VStack {
             spacing: 20.0
             VStack {
                 spacing: 4.0
@@ -233,7 +233,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                 Breadcrumb {
                     item: BreadcrumbItem::new(tr!(chr_breadcrumb_home()))
                     item: BreadcrumbItem::new(tr!(chr_breadcrumb_docs()))
-                    item: BreadcrumbItem::new(tr!(chr_breadcrumb_bastyde()))
+                    item: BreadcrumbItem::new(tr!(chr_breadcrumb_teksilo()))
                     item: BreadcrumbItem::current(tr!(chr_breadcrumb_current()))
                 }
             }

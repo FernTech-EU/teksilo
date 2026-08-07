@@ -25,16 +25,16 @@
 //! - Tab between the field and its eye button: the focus ring stays lit
 //!   across the whole control.
 
-use bastyde::core::WidgetPlacement;
-use bastyde::prelude::*;
-use bastyde::widgets::{
+use teksilo::core::WidgetPlacement;
+use teksilo::prelude::*;
+use teksilo::widgets::{
     AtRevealPolicy, Button, ButtonVariant, EchoMode, Expand, GroupBox, HStack, Padding,
     PasswordField, RevealMode, Spacer, TextInput, TextWidget, ThemeSwitcher, Toolbar, VStack,
     ValidationOutcome,
 };
 
 fn dark_mode_toolbar() -> impl Widget {
-    bati!(
+    teksu!(
         Toolbar {
             HStack {
                 TextWidget::new(lit!("PasswordField demo")) {
@@ -207,16 +207,16 @@ fn labeled(caption: &str, field: impl Widget + 'static) -> impl Widget {
 }
 
 fn main() {
-    BastydeAppBuilder::new()
+    TeksiloAppBuilder::new()
         .install_automation_bridge_in_debug()
         .install_inspector_in_debug()
-        .theme(bastyde::presets::intui::light())
+        .theme(teksilo::presets::intui::light())
         .initial_window(
             WindowConfig::new()
-                .title("Bastyde — PasswordField")
+                .title("Teksilo — PasswordField")
                 .size(820, 520)
                 .root(|tree, _state| {
-                    bati!(tree => VStack {
+                    teksu!(tree => VStack {
                         child: dark_mode_toolbar()
                         Expand {
                             Root::new()

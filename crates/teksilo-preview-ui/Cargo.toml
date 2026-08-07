@@ -1,0 +1,26 @@
+# SPDX-License-Identifier: MPL-2.0
+# SPDX-FileCopyrightText: 2026 FernTech
+
+[package]
+name = "teksilo-preview-ui"
+edition = "2024"
+version.workspace = true
+license-file.workspace = true
+publish.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+teksilo-core = { workspace = true }
+teksilo-tokens = { workspace = true }
+teksilo-canvas = { workspace = true }
+teksilo-data = { workspace = true }
+teksilo-app = { workspace = true }
+teksilo-i18n = { workspace = true }
+teksilo-widgets = { workspace = true }
+teksilo-preview = { workspace = true }
+teksilo-render = { workspace = true }
+teksilo-platform = { workspace = true }
+png = { workspace = true }
+wgpu = { workspace = true }
+pollster = { workspace = true }

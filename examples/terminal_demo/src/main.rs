@@ -4,7 +4,7 @@
 //! `terminal-demo` — showcase for the embeddable [`Terminal`] (Console) widget.
 //!
 //! A real shell runs over a pseudo-terminal (ConPTY on Windows, openpty on
-//! Unix); the VT emulation is `alacritty_terminal`, the view is Bastyde's. Try
+//! Unix); the VT emulation is `alacritty_terminal`, the view is Teksilo's. Try
 //! `ls --color`, `vim`, `htop`, `tmux`; `Ctrl+C` interrupts (proving the
 //! terminal owns keyboard input), `Shift+PageUp`/`Shift+PageDown` and the wheel
 //! scroll the scrollback, `Ctrl+Shift+C` / `Ctrl+Shift+V` (⌘C / ⌘V on macOS)
@@ -14,17 +14,17 @@
 //!
 //! Click the terminal to give it keyboard focus.
 
-use bastyde::prelude::*;
-use bastyde::terminal::{BellStyle, CursorStyle, Terminal};
-use bastyde::widgets::{Button, Divider, HStack, Spacer, TextWidget, VStack};
+use teksilo::prelude::*;
+use teksilo::terminal::{BellStyle, CursorStyle, Terminal};
+use teksilo::widgets::{Button, Divider, HStack, Spacer, TextWidget, VStack};
 
 fn main() {
-    BastydeAppBuilder::new()
+    TeksiloAppBuilder::new()
         .install_inspector_in_debug()
         .theme(intui::dark())
         .initial_window(
             WindowConfig::new()
-                .title("Bastyde — Terminal")
+                .title("Teksilo — Terminal")
                 .size(920, 620)
                 .root(|tree, _state| {
                     let terminal = Terminal::new()

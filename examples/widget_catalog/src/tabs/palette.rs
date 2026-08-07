@@ -5,9 +5,9 @@
 //! the editor-pane roles. Includes a rich-text + emoji pangram so
 //! color-emoji font fallback is visibly exercised under each theme.
 
-use bastyde::prelude::*;
-use bastyde::widgets::primitives::TrackSize;
-use bastyde::widgets::{
+use teksilo::prelude::*;
+use teksilo::widgets::primitives::TrackSize;
+use teksilo::widgets::{
     Divider, FixedSize, Grid, HStack, Padding, Panel, Spacer, TextWidget, VStack,
 };
 
@@ -448,7 +448,7 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
 
 /// Surface-swatch entries: (background role, name to print, text-role
 /// caption, foreground role for the printed name). Driven by a `for`
-/// loop in the bati! body.
+/// loop in the teksu! body.
 const SURFACES: &[(SurfaceRole, &str, &str, TextRole)] = &[
     (
         SurfaceRole::Main,
@@ -549,7 +549,7 @@ const SURFACES: &[(SurfaceRole, &str, &str, TextRole)] = &[
 ];
 
 /// `text_samples_panel` rows: (printed name, foreground role, English
-/// description). Driven by a `for` loop in the bati! body.
+/// description). Driven by a `for` loop in the teksu! body.
 type TextSampleRow = (&'static str, TextRole, &'static str);
 const TEXT_SAMPLES: &[TextSampleRow] = &[
     ("text_primary", TextRole::Primary, "body, main labels"),
@@ -603,8 +603,8 @@ fn editor_swatches() -> [EditorSwatchEntry; 6] {
     ]
 }
 
-pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
-    bati!(ctx => VStack {
+pub fn teksu(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
+    teksu!(ctx => VStack {
             spacing: 20.0
 
             // ── tab header ──────────────────────────────────────────

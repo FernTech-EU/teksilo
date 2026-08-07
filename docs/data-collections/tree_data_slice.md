@@ -39,8 +39,8 @@ the app.
 ## Wiring an external source
 
 ```
-use bastyde_data::{TreeDataSlice, TreeRow};
-use bastyde_data::dnd_types::{DragEligibility, DropPosition};
+use teksilo_data::{TreeDataSlice, TreeRow};
+use teksilo_data::dnd_types::{DragEligibility, DropPosition};
 
 // key = entity id, item = the row's display data
 let slice: TreeDataSlice<u64, String> = TreeDataSlice::new();
@@ -64,7 +64,7 @@ assert_eq!(slice.visible_count(), 3);         // all expanded
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_data/tree_data_slice/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_data/tree_data_slice/index.html)
 
 ## `pub struct TreeRow`
 

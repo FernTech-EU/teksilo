@@ -10,6 +10,6 @@ authors.workspace = true
 publish = false
 
 [dependencies]
-bastyde = { workspace = true, features = [
+teksilo = { workspace = true, features = [
     "automation","fonts-arabic"] }
 jiff = { workspace = true }

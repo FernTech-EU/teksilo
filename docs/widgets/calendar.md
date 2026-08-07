@@ -59,7 +59,7 @@ Used standalone for event apps and scheduling, and embedded in
 # Example
 
 ```ignore
-use bastyde::widgets::{Calendar, common::datetime::Date};
+use teksilo::widgets::{Calendar, common::datetime::Date};
 
 let date = ctx.signal(Some(Date::constant(2026, 5, 2)));
 ctx.add(
@@ -75,7 +75,7 @@ ctx.add(
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/calendar/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/calendar/index.html)
 
 ## `pub struct DateRange`
 

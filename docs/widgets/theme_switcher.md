@@ -32,7 +32,7 @@ with an English literal fallback so a host app that hasn't installed an
 `I18nManager` still reads "Light / Dark / System" rather than raw keys.
 
 Custom themes: `.themes([(label, theme), …])` replaces Light/Dark with an
-app-supplied set (e.g. the `bastyde-theme-{fluent,macos,material3}` presets);
+app-supplied set (e.g. the `teksilo-theme-{fluent,macos,material3}` presets);
 `.system(false)` drops the System entry.
 
 ## Builder methods at a glance
@@ -41,7 +41,7 @@ app-supplied set (e.g. the `bastyde-theme-{fluent,macos,material3}` presets);
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/theme_switcher/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/theme_switcher/index.html)
 
 ## `pub struct ThemeSwitcher`
 
@@ -69,7 +69,7 @@ Set the accessible / control label (defaults to the translated "Theme").
 #### `pub fn themes( mut self, themes: impl IntoIterator<Item = (impl Into<LocalizedString>, Theme)>, ) -> Self`
 
 Replace the default Light/Dark fixed-theme list with an app-supplied set
-of `(label, theme)` pairs — e.g. the `bastyde-theme-*` presets. The
+of `(label, theme)` pairs — e.g. the `teksilo-theme-*` presets. The
 System (follow-OS) entry is still appended unless `system`
 is `false`.
 

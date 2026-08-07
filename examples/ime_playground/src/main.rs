@@ -27,12 +27,12 @@
 //!    on commit / cancel. On the secure field the composition shows as
 //!    masked bullets and is never exposed to assistive tech.
 
-use bastyde::app::SyntheticImeInject;
-use bastyde::core::event::WidgetEvent;
-use bastyde::prelude::*;
-use bastyde::text_document::TextDocument;
-use bastyde::widgets::rich_text::RichTextEditor;
-use bastyde::widgets::{Expand, PasswordField, TextInput, TextWidget, VStack};
+use teksilo::app::SyntheticImeInject;
+use teksilo::core::event::WidgetEvent;
+use teksilo::prelude::*;
+use teksilo::text_document::TextDocument;
+use teksilo::widgets::rich_text::RichTextEditor;
+use teksilo::widgets::{Expand, PasswordField, TextInput, TextWidget, VStack};
 
 /// Pinyin: build `nihao` candidate then commit `你好`. The empty preedit
 /// is winit's synthetic clear emitted right before the commit.
@@ -176,13 +176,13 @@ fn labeled(label: &str, control: impl Widget + 'static) -> impl Widget {
 }
 
 fn main() {
-    BastydeAppBuilder::new()
+    TeksiloAppBuilder::new()
         .install_automation_bridge_in_debug()
         .install_inspector_in_debug()
-        .theme(bastyde::presets::intui::light())
+        .theme(teksilo::presets::intui::light())
         .initial_window(
             WindowConfig::new()
-                .title("Bastyde — IME Playground")
+                .title("Teksilo — IME Playground")
                 .size(720, 520)
                 .root(|tree, _state| tree.add(Root::new())),
         )

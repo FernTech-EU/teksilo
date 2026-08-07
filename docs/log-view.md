@@ -3,20 +3,20 @@
 
 # LogView — a scalable streaming log
 
-[`LogView`](../crates/bastyde-widgets/src/code_editor/log_view.rs) is the code
+[`LogView`](../crates/teksilo-widgets/src/code_editor/log_view.rs) is the code
 editor's core turned inside out: instead of a bounded document a person edits,
 it is an unbounded one the *program* appends to and the person only reads,
 scrolls, selects, and copies. It reuses
-[`CodeEditorState`](../crates/bastyde-widgets/src/code_editor/state.rs) — so
+[`CodeEditorState`](../crates/teksilo-widgets/src/code_editor/state.rs) — so
 selection, copy, theming, and accessibility come for free and cannot drift from
 the editors' — but owns its own frame step
-([`log_stream.rs`](../crates/bastyde-widgets/src/code_editor/log_stream.rs)) and
+([`log_stream.rs`](../crates/teksilo-widgets/src/code_editor/log_stream.rs)) and
 paint body, because content arrives faster than a person types, forever, and
 neither the editor's full relayout nor its event handling can carry that load.
 
 ```rust
-use bastyde::widgets::{LogView, LogViewHandle};
-use bastyde::tokens::Color;
+use teksilo::widgets::{LogView, LogViewHandle};
+use teksilo::tokens::Color;
 
 let log = LogView::new()
     .scrollback_limit(50_000)                 // bound the retained lines
@@ -69,7 +69,7 @@ real memory sink:
 | 100 000 | **622.9 MB** | **3.7 MB** (168× less) |
 
 `LogView` shapes only the rows the viewport can show, via
-[`RichTextEngine::layout_window_from_snapshots`](../crates/bastyde-text/src/rich_text_engine.rs),
+[`RichTextEngine::layout_window_from_snapshots`](../crates/teksilo-text/src/rich_text_engine.rs),
 placing each row arithmetically at `y = index × row_height`; the scrollbar spans
 the whole document even though almost none of it is shaped. Render already culls
 to the viewport, so shaping the rest only ever cost memory. The document's raw
@@ -82,7 +82,7 @@ are byte-for-byte unchanged:
 
 - **text-typeset** — `DocumentFlow::{layout_window, set_uniform_extent, add_block,
   remove_leading, block_params_for}`.
-- **bastyde-text** — `RichTextEngine::{layout_window, layout_window_from_snapshots,
+- **teksilo-text** — `RichTextEngine::{layout_window, layout_window_from_snapshots,
   set_uniform_extent, append_block, remove_leading, block_visual_info}`.
 - **text-document** — `TextDocument::{append_line, append_lines, truncate_front}`
   (undoable-false, all-or-nothing), whose events now also reach `on_change`
@@ -128,7 +128,7 @@ size — so a genuinely unbounded, sustained high-rate producer should set a cap
 `Role::Document` (not `Role::Log` — that role is excluded from `accesskit`'s
 text-range support, so a reader could not track a caret through it), read-only,
 with the same paragraph/run walk as the editor
-([`a11y.rs`](../crates/bastyde-widgets/src/code_editor/a11y.rs)) — but **windowed**:
+([`a11y.rs`](../crates/teksilo-widgets/src/code_editor/a11y.rs)) — but **windowed**:
 only the visible lines are emitted as paragraphs (numbered by global line, "line
 41 002 of 128 449"), so an append re-walks O(window), not O(document). The tree
 re-walks on the log's own `a11y_version`, bumped only when the visible window

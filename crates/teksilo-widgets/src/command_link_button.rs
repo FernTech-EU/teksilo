@@ -1,0 +1,470 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
+//! CommandLinkButton — large two-line button with icon, title, and
+//! subtitle. Used for wizard landing screens, onboarding choices, and
+//! any "card-shaped CTA" pattern.
+//!
+//! Modeled on Qt's `QCommandLinkButton`. Distinct from a regular
+//! [`Button`](crate::button::Button) by its layout (`HStack(icon +
+//! VStack(title + subtitle))`) and default visual variant (`Flat` —
+//! Int UI convention — with an interactive surface tint on hover).
+//!
+//! ```ignore
+//! CommandLinkButton::new(tr!(create_new_project()))
+//!     .description(tr!(create_new_project_subtitle()))
+//!     .icon(IconWidget::from_svg(NEW_PROJECT_ICON))
+//!     .on_activate_fn(|ctx| ctx.send_intent(AppIntent::NewProject))
+//! ```
+
+use teksilo_canvas::{Rect, SizeProposal};
+use teksilo_core::accessibility::AccessNodeBuilder;
+use teksilo_core::build_context::BuildContext;
+use teksilo_core::signal::{Prop, Signal};
+use teksilo_core::widget::{EventContext, LayoutContext, Widget, WidgetPlacement};
+use teksilo_core::widget_id::WidgetId;
+use teksilo_tokens::{
+    BorderRole, CornerRadius, HAlignment, SurfaceRole, TextRole, TextStyleRole, VAlignment,
+};
+
+use crate::button::InteractionState;
+use crate::primitives::icon_widget::IconWidget;
+use crate::primitives::{HStack, Padding, RectWidget, TextWidget, VStack, ZStack};
+use teksilo_i18n::LocalizedString;
+
+/// CommandLinkButton design tokens. The widget is a group-4 composite
+/// with no dedicated recipe module.
+pub const COMMAND_LINK_BUTTON_ICON_SIZE: f32 = 28.0;
+pub const COMMAND_LINK_BUTTON_ICON_TEXT_GAP: f32 = 14.0;
+pub const COMMAND_LINK_BUTTON_TITLE_DESCRIPTION_GAP: f32 = 4.0;
+pub const COMMAND_LINK_BUTTON_PADDING_HORIZONTAL: f32 = 16.0;
+pub const COMMAND_LINK_BUTTON_PADDING_VERTICAL: f32 = 14.0;
+pub const COMMAND_LINK_BUTTON_MIN_HEIGHT: f32 = 64.0;
+
+/// A large two-line CTA button: icon + title + subtitle.
+pub struct CommandLinkButton {
+    title: LocalizedString,
+    description: Option<LocalizedString>,
+    icon: Option<IconWidget>,
+    /// Enabled state, static or reactive; forwarded to the arena at
+    /// build time.
+    enabled: Prop<bool>,
+    action: Option<Box<dyn Fn(&mut EventContext)>>,
+    /// Per-call title text-style override. `None` ⇒ `TextStyleRole::BodyBold`.
+    title_style: Option<teksilo_core::color_prop::TextStyleProp>,
+    /// Per-call description text-style override. `None` ⇒ `TextStyleRole::Body`.
+    description_style: Option<teksilo_core::color_prop::TextStyleProp>,
+    /// Per-call title text-color override. `None` ⇒ `TextRole::Primary`.
+    title_color: Option<teksilo_core::color_prop::ColorProp>,
+    /// Per-call description text-color override. `None` ⇒ `TextRole::Secondary`.
+    description_color: Option<teksilo_core::color_prop::ColorProp>,
+    interaction: Signal<InteractionState>,
+    root_child_id: Option<WidgetId>,
+    /// Optional plain tooltip text shown after a hover delay. Mutually exclusive
+    /// with the rich / composite slots — every setter clears the other two so
+    /// the last call wins.
+    tooltip_text: Option<LocalizedString>,
+    /// Optional rich tooltip source (registry key or inline content).
+    rich_tooltip_source: Option<crate::tooltip::RichTooltipSource>,
+    /// Optional composite tooltip body (arbitrary widget tree).
+    composite_tooltip_content: Option<Box<dyn Widget>>,
+}
+
+impl CommandLinkButton {
+    /// Create a `CommandLinkButton` with the given title text.
+    /// Chain `.description(...)` and `.icon(...)` to complete the card layout.
+    pub fn new(title: impl Into<LocalizedString>) -> Self {
+        let ls: LocalizedString = title.into();
+        Self {
+            title: ls,
+            description: None,
+            icon: None,
+            enabled: Prop::Static(true),
+            action: None,
+            title_style: None,
+            description_style: None,
+            title_color: None,
+            description_color: None,
+            interaction: Signal::new(InteractionState::Idle),
+            root_child_id: None,
+            tooltip_text: None,
+            rich_tooltip_source: None,
+            composite_tooltip_content: None,
+        }
+    }
+
+    /// Optional descriptive subtitle rendered below the title.
+    pub fn description(mut self, text: impl Into<LocalizedString>) -> Self {
+        let ls: LocalizedString = text.into();
+        self.description = Some(ls);
+        self
+    }
+
+    /// Leading icon — large enough to anchor the card visually
+    /// (rendered at 28 dp).
+    pub fn icon(mut self, icon: IconWidget) -> Self {
+        self.icon = Some(icon);
+        self
+    }
+
+    /// Set the enabled state, statically or reactively. Forwarded to
+    /// the arena at build time.
+    pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self {
+        self.enabled = enabled.into();
+        self
+    }
+
+    /// Closure invoked on activation. Use `ctx.send_intent(...)` to
+    /// route through the Action / Intent system.
+    pub fn on_activate_fn(mut self, f: impl Fn(&mut EventContext) + 'static) -> Self {
+        self.action = Some(Box::new(f));
+        self
+    }
+
+    /// Override the title's text style (font, size, weight). Accepts a
+    /// `TextStyleRole`, a `TextStyle`, or a `Signal` of either. Default
+    /// (unset) is `TextStyleRole::BodyBold`.
+    pub fn title_style(
+        mut self,
+        style: impl Into<teksilo_core::color_prop::TextStyleProp>,
+    ) -> Self {
+        self.title_style = Some(style.into());
+        self
+    }
+
+    /// Override the description's text style. Default is `TextStyleRole::Body`.
+    pub fn description_style(
+        mut self,
+        style: impl Into<teksilo_core::color_prop::TextStyleProp>,
+    ) -> Self {
+        self.description_style = Some(style.into());
+        self
+    }
+
+    /// Override the title's text color. Accepts `Color`, a role, or a
+    /// `Signal` of either. Default (unset) is `TextRole::Primary`.
+    pub fn title_color(mut self, color: impl Into<teksilo_core::color_prop::ColorProp>) -> Self {
+        self.title_color = Some(color.into());
+        self
+    }
+
+    /// Override the description's text color. Default is `TextRole::Secondary`.
+    pub fn description_color(
+        mut self,
+        color: impl Into<teksilo_core::color_prop::ColorProp>,
+    ) -> Self {
+        self.description_color = Some(color.into());
+        self
+    }
+
+    /// Attach a plain single-line tooltip shown after a hover delay.
+    /// Clears any previously set rich or composite tooltip.
+    pub fn tooltip(mut self, text: impl Into<LocalizedString>) -> Self {
+        self.tooltip_text = Some(text.into());
+        self.rich_tooltip_source = None;
+        self.composite_tooltip_content = None;
+        self
+    }
+
+    /// Attach a rich tooltip looked up by registry key.
+    /// Clears any previously set plain or composite tooltip.
+    pub fn rich_tooltip(mut self, key: impl Into<String>) -> Self {
+        self.rich_tooltip_source = Some(crate::tooltip::RichTooltipSource::Key(key.into()));
+        self.tooltip_text = None;
+        self.composite_tooltip_content = None;
+        self
+    }
+
+    /// Attach a rich tooltip with inline content (no registry lookup).
+    /// Clears any previously set plain or composite tooltip.
+    pub fn rich_tooltip_content(mut self, content: crate::tooltip::TooltipContent) -> Self {
+        self.rich_tooltip_source = Some(crate::tooltip::RichTooltipSource::Content(content));
+        self.tooltip_text = None;
+        self.composite_tooltip_content = None;
+        self
+    }
+
+    /// Attach a composite tooltip hosting an arbitrary widget tree body.
+    /// Clears any previously set plain or rich tooltip.
+    pub fn composite_tooltip(mut self, content: impl Widget + 'static) -> Self {
+        self.composite_tooltip_content = Some(Box::new(content));
+        self.tooltip_text = None;
+        self.rich_tooltip_source = None;
+        self
+    }
+}
+
+impl std::fmt::Debug for CommandLinkButton {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CommandLinkButton")
+            .field("title", &self.title)
+            .field("description", &self.description)
+            .field("enabled", &self.enabled.get())
+            .finish()
+    }
+}
+
+fn resolve_bg_role(state: InteractionState) -> SurfaceRole {
+    match state {
+        InteractionState::Pressed => SurfaceRole::Pressed,
+        InteractionState::Hovered => SurfaceRole::Hover,
+        _ => SurfaceRole::Transparent,
+    }
+}
+
+fn resolve_border_role(state: InteractionState) -> BorderRole {
+    match state {
+        InteractionState::Focused => BorderRole::Focused,
+        _ => BorderRole::Transparent,
+    }
+}
+
+impl Widget for CommandLinkButton {
+    fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+        let self_id = ctx.self_id();
+        // Forward the enabled state to the arena; see IconButton.
+        ctx.enabled_when(self_id, self.enabled.clone());
+
+        let interaction = ctx.signal(InteractionState::Idle);
+        self.interaction = interaction.clone();
+
+        // The leaves' `ColorProp::resolve(theme, ctx.effective_enabled)`
+        // substitutes `TextRole::Disabled` automatically when the arena
+        // says we're disabled; we no longer need to fold the Disabled
+        // state into these role-derivations.
+        let bg_role = interaction.map(|s| resolve_bg_role(*s));
+        let border_role = interaction.map(|s| resolve_border_role(*s));
+        let title_role = interaction.map(|_s| TextRole::Primary);
+        let desc_role = interaction.map(|_s| TextRole::Secondary);
+        let icon_role = title_role.clone();
+
+        let normal_bw = crate::styles::recipe_button_style::BUTTON_BORDER_WIDTH;
+        let focus_bw = ctx.theme().shape.focus_ring_width;
+        let border_width = interaction.map(move |s| match s {
+            InteractionState::Focused => focus_bw,
+            _ => normal_bw,
+        });
+        let corner_radius = crate::styles::recipe_button_style::BUTTON_CORNER_RADIUS;
+
+        // Title + optional description column.
+        let title_color: teksilo_core::color_prop::ColorProp = self
+            .title_color
+            .clone()
+            .unwrap_or_else(|| title_role.into());
+        let title_style: teksilo_core::color_prop::TextStyleProp = self
+            .title_style
+            .clone()
+            .unwrap_or_else(|| TextStyleRole::BodyBold.into());
+        let title_widget = TextWidget::new(self.title.clone())
+            .style(title_style)
+            .color(title_color)
+            .single_line()
+            .a11y_hidden();
+        let title_id = ctx.add(title_widget);
+
+        let mut text_column = VStack::new()
+            .spacing(COMMAND_LINK_BUTTON_TITLE_DESCRIPTION_GAP)
+            .alignment(HAlignment::Leading)
+            .add_child(title_id);
+        if let Some(description) = &self.description {
+            let desc_color: teksilo_core::color_prop::ColorProp = self
+                .description_color
+                .clone()
+                .unwrap_or_else(|| desc_role.into());
+            let desc_style: teksilo_core::color_prop::TextStyleProp = self
+                .description_style
+                .clone()
+                .unwrap_or_else(|| TextStyleRole::Body.into());
+            let desc = ctx.add(
+                TextWidget::new(description.clone())
+                    .style(desc_style)
+                    .color(desc_color)
+                    .a11y_hidden(),
+            );
+            text_column = text_column.add_child(desc);
+        }
+        let text_column_id = ctx.add(text_column);
+
+        // Optional leading icon.
+        let mut row = HStack::new()
+            .spacing(COMMAND_LINK_BUTTON_ICON_TEXT_GAP)
+            .alignment(VAlignment::Center);
+        if let Some(icon) = self.icon.take() {
+            let icon_id = ctx.add(
+                icon.icon_size(COMMAND_LINK_BUTTON_ICON_SIZE)
+                    .color(icon_role),
+            );
+            row = row.add_child(icon_id);
+        }
+        row = row.add_child(text_column_id);
+        let row_id = ctx.add(row);
+
+        // Padding inside the surface.
+        let padded = ctx.add(
+            Padding::symmetric(
+                COMMAND_LINK_BUTTON_PADDING_VERTICAL,
+                COMMAND_LINK_BUTTON_PADDING_HORIZONTAL,
+            )
+            .child_id(row_id),
+        );
+
+        // Surface (background + border, drives hover / press / focus).
+        let rect = ctx.add(
+            RectWidget::new()
+                .background(bg_role)
+                .border_color(border_role)
+                .border_width(border_width)
+                .corner_radius(CornerRadius::uniform(corner_radius)),
+        );
+
+        let zstack = ctx.add(ZStack::new().add_child(rect).add_child(padded));
+        let root = ctx.add(
+            crate::primitives::MinSize::new(0.0, COMMAND_LINK_BUTTON_MIN_HEIGHT).child_id(zstack),
+        );
+
+        // Attached handlers via the shared button-family helper
+        // (`build_interaction_handlers`) — same interaction/keyboard/AT
+        // contract as Button, including the lone-KeyUp guard. No
+        // shortcut / tooltip / has_popup machinery here.
+        let action: std::rc::Rc<Option<Box<dyn Fn(&mut EventContext)>>> =
+            std::rc::Rc::new(self.action.take());
+        let on_activate: std::rc::Rc<dyn Fn(&mut EventContext)> =
+            std::rc::Rc::new(move |ctx: &mut EventContext| {
+                if let Some(ref a) = *action {
+                    a(ctx);
+                }
+            });
+        let handlers = crate::button::build_interaction_handlers(interaction, on_activate, true);
+        ctx.apply_self_handlers(handlers);
+
+        self.root_child_id = Some(root);
+
+        if let Some(content) = self.composite_tooltip_content.take() {
+            let delay = ctx.theme().motion.tooltip_delay_heavy;
+            crate::tooltip::attach_composite_tooltip_boxed(ctx, root, content, delay);
+        } else if let Some(source) = self.rich_tooltip_source.clone() {
+            let delay = ctx.theme().motion.tooltip_delay;
+            crate::tooltip::attach_rich_tooltip_source(ctx, root, source, delay);
+        } else if let Some(text) = self.tooltip_text.clone() {
+            let tooltip_widget = crate::tooltip::TooltipWidget::new(text);
+            let tooltip_id = ctx.add(tooltip_widget);
+            let delay = ctx.theme().motion.tooltip_delay;
+            ctx.attach_tooltip(root, tooltip_id, delay);
+        }
+
+        vec![root]
+    }
+
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        ctx: &LayoutContext,
+    ) -> teksilo_core::widget::LayoutResponse {
+        let _ = ctx;
+        self.root_child_id
+            .and_then(|id| ctx.child_size(id, proposal))
+            .unwrap_or_else(|| proposal.resolve(0.0, COMMAND_LINK_BUTTON_MIN_HEIGHT))
+            .into()
+    }
+
+    fn place_children(
+        &self,
+        bounds: Rect,
+        _proposal: SizeProposal,
+        children: &mut [WidgetPlacement],
+        _ctx: &LayoutContext,
+    ) {
+        for child in children.iter_mut() {
+            child.origin = bounds.origin();
+            child.size = bounds.size();
+        }
+    }
+
+    fn accessibility(&self, builder: &mut AccessNodeBuilder) {
+        builder.set_role(teksilo_core::accesskit::Role::Button);
+        // Compose the AT name as "title — description" so screen reader
+        // users hear both lines without having to drill into children.
+        let name = match &self.description {
+            Some(desc) => format!("{} — {}", self.title.resolve_now(), desc.resolve_now()),
+            None => self.title.resolve_now(),
+        };
+        builder.set_name(name);
+    }
+
+    fn children(&self) -> Vec<WidgetId> {
+        self.root_child_id.into_iter().collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use teksilo_core::event::WidgetEvent;
+    use teksilo_core::widget_tree::WidgetTree;
+    use teksilo_i18n::lit;
+
+    #[test]
+    fn builds_with_title_and_description() {
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let id = tree.add(
+            CommandLinkButton::new(lit!("Create new project"))
+                .description(lit!("Start with a blank workspace.")),
+        );
+        tree.layout(SizeProposal {
+            width: Some(420.0),
+            height: None,
+        });
+        let b = tree.bounds(id);
+        assert!(b.width > 0.0);
+        let _ = teksilo_core::presets::intui::light();
+        assert!(b.height >= COMMAND_LINK_BUTTON_MIN_HEIGHT);
+    }
+
+    #[test]
+    fn a11y_role_is_button_with_combined_name() {
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let id = tree.add(
+            CommandLinkButton::new(lit!("Create new project")).description(lit!("Start blank.")),
+        );
+        tree.layout(SizeProposal::exact(400.0, 100.0));
+        let info = tree.accessibility_node(id);
+        assert_eq!(info.role(), teksilo_core::accesskit::Role::Button);
+        assert_eq!(info.name(), Some("Create new project — Start blank."));
+    }
+
+    #[test]
+    fn click_via_access_action_invokes_callback() {
+        use std::cell::Cell;
+        use std::rc::Rc;
+        let fired = Rc::new(Cell::new(0usize));
+        let fired_clone = fired.clone();
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let id = tree.add(
+            CommandLinkButton::new(lit!("Open existing project"))
+                .on_activate_fn(move |_| fired_clone.set(fired_clone.get() + 1)),
+        );
+        tree.layout(SizeProposal::exact(400.0, 100.0));
+        tree.dispatch_event(WidgetEvent::AccessAction {
+            action: teksilo_core::accesskit::Action::Click,
+            target: Some(id),
+            target_node: teksilo_core::accessibility::root_node_id(),
+            data: None,
+        });
+        assert_eq!(fired.get(), 1);
+    }
+
+    #[test]
+    fn tooltip_appears_on_hover() {
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let id = tree.add(CommandLinkButton::new(lit!("New Project")).tooltip(lit!("Tip")));
+        tree.layout(SizeProposal::exact(300.0, 200.0));
+        tree.pointer_move(tree.bounds(id).center());
+        tree.advance_time(std::time::Duration::from_secs(1));
+        assert_eq!(
+            tree.active_overlays().len(),
+            1,
+            "tooltip should appear on hover"
+        );
+        assert!(tree.find_by_label("Tip").is_some());
+    }
+}

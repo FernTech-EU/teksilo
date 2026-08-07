@@ -7,7 +7,7 @@
 //!
 //! Demonstrates:
 //!
-//! * `BastydeAppBuilder::install_toast_default()` — one-line install
+//! * `TeksiloAppBuilder::install_toast_default()` — one-line install
 //!   that registers a `ToastRegistry` + persistent
 //!   `NotificationArchiveModel` in app-state and wraps every
 //!   window's root with a `ToastHost`.
@@ -38,10 +38,10 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
-use bastyde::core::event_source::{EventSource, SubscriptionHandle};
-use bastyde::prelude::*;
-use bastyde::settings::AppPaths;
-use bastyde::widgets::{
+use teksilo::core::event_source::{EventSource, SubscriptionHandle};
+use teksilo::prelude::*;
+use teksilo::settings::AppPaths;
+use teksilo::widgets::{
     Button, ButtonVariant, Expand, HStack, Padding, Spacer, StatusBar, TextWidget, Toolbar, VStack,
 };
 
@@ -215,7 +215,7 @@ impl Widget for BellButton {
 
     fn layout_response(
         &self,
-        proposal: bastyde::canvas::SizeProposal,
+        proposal: teksilo::canvas::SizeProposal,
         ctx: &LayoutContext,
     ) -> LayoutResponse {
         self.child_id
@@ -238,7 +238,7 @@ fn bump(cell: &Rc<Cell<usize>>) -> usize {
 // worker thread emits progress from *off* the UI thread; the framework
 // bridges each event back to the UI thread and hands the subscription
 // callback a fresh `EventContext`, so it can drive an evolving toast.
-// This is exactly how a Bastyde app surfaces a backend long-operation's
+// This is exactly how a Teksilo app surfaces a backend long-operation's
 // `Origin::LongOperation(Progress | Completed | Cancelled)` events.
 // =====================================================================
 
@@ -356,7 +356,7 @@ impl Widget for JobProgressListener {
 
     fn layout_response(
         &self,
-        proposal: bastyde::canvas::SizeProposal,
+        proposal: teksilo::canvas::SizeProposal,
         _ctx: &LayoutContext,
     ) -> LayoutResponse {
         proposal.resolve(0.0, 0.0).into()
@@ -418,9 +418,9 @@ fn main() {
     let bus = DemoBus::default();
     let cancel = JobCancel(Arc::new(AtomicBool::new(false)));
 
-    BastydeAppBuilder::new()
+    TeksiloAppBuilder::new()
         .install_automation_bridge_in_debug()
-        .theme(bastyde::presets::intui::light())
+        .theme(teksilo::presets::intui::light())
         .app_paths(AppPaths::new("eu", "FernTech", "ToastDemo").expect("config dir"))
         .install_toast_default()
         .event_source(bus.clone())

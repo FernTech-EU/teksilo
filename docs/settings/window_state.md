@@ -23,11 +23,11 @@ read-merge-write via a `DebouncedWriter` — a live window drag (which
 calls `record` once per reported geometry frame) costs one disk
 write per debounce window, not one per frame.
 
-In a typical Bastyde app, `WindowStateService` is managed by the
+In a typical Teksilo app, `WindowStateService` is managed by the
 framework's `SettingsBundle` and wired automatically when the
 `WindowConfig` carries a stable `id(...)` — no widget-side plumbing
 needed. The service is only used directly when building custom window
-management or embedding it outside the standard `BastydeAppBuilder`
+management or embedding it outside the standard `TeksiloAppBuilder`
 path.
 
 ## Wayland caveat
@@ -42,8 +42,8 @@ Width, height, and `WindowPlacement` are honored on every platform.
 
 ```ignore
 use std::time::Duration;
-use bastyde_settings::{AppPaths, WindowStateService, PerWindowState};
-use bastyde_core::WindowPlacement;
+use teksilo_settings::{AppPaths, WindowStateService, PerWindowState};
+use teksilo_core::WindowPlacement;
 
 // In tests use AppPaths::for_testing(tmp_dir); in production use AppPaths::new(...).
 let paths = AppPaths::for_testing(std::path::Path::new("/tmp/my-app"));
@@ -71,7 +71,7 @@ if let Some(saved) = svc.state_for("main") {
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_settings/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_settings/index.html)
 
 ## `pub struct PerWindowState`
 
@@ -125,7 +125,7 @@ reads straight from memory with no I/O.
 
 `SettingsFile`'s `mutate` is a *synchronous* locked read-modify-write, which
 is right for a document written rarely (a settings change; one record per
-backup). Window geometry is the opposite: `bastyde-app`'s `window_persist`
+backup). Window geometry is the opposite: `teksilo-app`'s `window_persist`
 observes the `size` / `position` / `placement` signals and calls `record`
 on **every change** — i.e. once per frame while the user drags a window. A
 synchronous `flock` + read + parse + serialize + fsync per frame would make

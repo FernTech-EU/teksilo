@@ -4,8 +4,8 @@
 # Charts
 
 **Companion to:** [architecture.md](architecture.md), [data-models.md](data-models.md)
-**Scope:** The `bastyde-charts` crate — `BarChart`, `LineChart`, `PieChart`
-(pie + donut), the `ChartModel<T>` data model (`bastyde-data`) and its
+**Scope:** The `teksilo-charts` crate — `BarChart`, `LineChart`, `PieChart`
+(pie + donut), the `ChartModel<T>` data model (`teksilo-data`) and its
 `ChartSeries<T>` / `ChartDatum<T>` construction DTOs, the Tier-3
 `ChartStyle` trait, the shared axis / palette / legend infrastructure,
 and the rendering and reactivity contracts that connect them to the
@@ -13,35 +13,35 @@ widget tree.
 
 ---
 
-## 1. Why bastyde-charts is its own crate
+## 1. Why teksilo-charts is its own crate
 
 Charts are widget-shaped — they implement
-[`Widget`](../crates/bastyde-core/src/widget.rs) and live inside the
+[`Widget`](../crates/teksilo-core/src/widget.rs) and live inside the
 retained tree like any other view — but the catalog is large enough
-that bundling it into [`bastyde-widgets`](../crates/bastyde-widgets/) would
+that bundling it into [`teksilo-widgets`](../crates/teksilo-widgets/) would
 mean every chart-free desktop app drags ~3,000 lines of axis math,
 nice-numbers tick generation, polygonal slice paths, and the Okabe-Ito
-palette into its binary. So `bastyde-charts` sits *at the same layering
-tier* as `bastyde-widgets`, not on top of it:
+palette into its binary. So `teksilo-charts` sits *at the same layering
+tier* as `teksilo-widgets`, not on top of it:
 
 ```
-bastyde-tokens → bastyde-canvas → bastyde-core ── bastyde-data ─┬→ bastyde-widgets
-                                                    └→ bastyde-charts
+teksilo-tokens → teksilo-canvas → teksilo-core ── teksilo-data ─┬→ teksilo-widgets
+                                                    └→ teksilo-charts
 ```
 
-`bastyde-charts` deliberately does **not** depend on `bastyde-widgets`. The
+`teksilo-charts` deliberately does **not** depend on `teksilo-widgets`. The
 hover tooltip, the legend, the donut center placeholder all live inside
-`bastyde-charts` and use only `bastyde-core` + `bastyde-canvas` primitives.
-Tests reach for `bastyde-widgets::TextWidget` as a *dev-dependency* to
+`teksilo-charts` and use only `teksilo-core` + `teksilo-canvas` primitives.
+Tests reach for `teksilo-widgets::TextWidget` as a *dev-dependency* to
 populate the donut center slot, but no production code path crosses
 the boundary.
 
-What this buys an app: depending on `bastyde-charts` brings just charts.
-Depending on `bastyde-widgets` brings just widgets. The umbrella
-[`bastyde`](../crates/bastyde/) crate re-exports both, so apps that
+What this buys an app: depending on `teksilo-charts` brings just charts.
+Depending on `teksilo-widgets` brings just widgets. The umbrella
+[`teksilo`](../crates/teksilo/) crate re-exports both, so apps that
 want the union pay nothing extra.
 
-The directory layout under [crates/bastyde-charts/src/](../crates/bastyde-charts/src/)
+The directory layout under [crates/teksilo-charts/src/](../crates/teksilo-charts/src/)
 is module-flat (no `mod.rs` per coding conventions): one file per
 public widget plus shared helpers for axes, palette, legend, and
 plot-area carving.
@@ -61,7 +61,7 @@ grid lines, axis titles, and an embedded legend are all opt-in flags
 on the builder.
 
 ```rust
-use bastyde_charts::{AxisConfig, BarChart, BarGrouping, ChartModel, ChartSeries, LegendPosition};
+use teksilo_charts::{AxisConfig, BarChart, BarGrouping, ChartModel, ChartSeries, LegendPosition};
 
 let mut revenue = ChartSeries::<String>::new("Revenue");
 revenue.push("Q1".into(), 12.5);
@@ -96,7 +96,7 @@ Polyline per series with optional area fill, hover tooltips, and
 embedded legend. PR-3 / PR-4 territory.
 
 ```rust
-use bastyde_charts::{AxisConfig, ChartModel, ChartSeries, LineChart};
+use teksilo_charts::{AxisConfig, ChartModel, ChartSeries, LineChart};
 
 let mut series = ChartSeries::<String>::new("Latency p99");
 series.push("Mon".into(), 142.0);
@@ -127,8 +127,8 @@ default) for a pie; any positive value is a donut. The optional
 so swapping pie ↔ donut at runtime is safe.
 
 ```rust
-use bastyde_charts::{ChartDatum, ChartModel, LegendPosition, PieChart, PieLabelMode};
-use bastyde::widgets::{TextWidget, VStack};
+use teksilo_charts::{ChartDatum, ChartModel, LegendPosition, PieChart, PieLabelMode};
+use teksilo::widgets::{TextWidget, VStack};
 
 let data: Vec<ChartDatum<String>> = /* … */;
 let total = format!("${:.0}", data.iter().map(|d| d.value).sum::<f32>());
@@ -148,9 +148,9 @@ PieChart::new(model)
 ```
 
 The center slot follows the existing `Option<PendingChild>` pattern
-used by [`Card`](../crates/bastyde-widgets/src/card.rs:31),
-[`DialogContent`](../crates/bastyde-widgets/src/dialog.rs:351), and
-[`GroupBox`](../crates/bastyde-widgets/src/group_box.rs:29): two builders
+used by [`Card`](../crates/teksilo-widgets/src/card.rs:31),
+[`DialogContent`](../crates/teksilo-widgets/src/dialog.rs:351), and
+[`GroupBox`](../crates/teksilo-widgets/src/group_box.rs:29): two builders
 (`.center(impl Widget)` and `.center_id(WidgetId)`), resolved in
 `build()` via `ctx.add_boxed`.
 
@@ -161,8 +161,8 @@ larger compositions need to be self-clipping.
 
 ## 3. Data model — `ChartModel<T>`
 
-Series data lives in a [`ChartModel<T>`](../crates/bastyde-data/src/chart_model.rs)
-— a concrete reactive multi-series chart data model in `bastyde-data`,
+Series data lives in a [`ChartModel<T>`](../crates/teksilo-data/src/chart_model.rs)
+— a concrete reactive multi-series chart data model in `teksilo-data`,
 the same tier as `ListModel<T>` / `TreeModel<T>`. All three chart
 widgets (`BarChart::new`, `LineChart::new`, `PieChart::new`) take a
 `ChartModel<T>` directly; there is no `Prop<Vec<ChartSeries<T>>>` or
@@ -173,12 +173,12 @@ widgets (`BarChart::new`, `LineChart::new`, `PieChart::new`) take a
 `ChartModel<T>` is `Rc<RefCell<…>>` inside — cloning shares the same
 series and points, and every clone receives the same change
 notifications. Series live in a flat `SlotMap` arena keyed by
-[`SeriesId`](../crates/bastyde-data/src/chart_change.rs) (a stable
+[`SeriesId`](../crates/teksilo-data/src/chart_change.rs) (a stable
 handle, like `NodeId`) plus a separate `order: Vec<SeriesId>` for
 display order. Every mutation method follows the mutate-then-notify
 discipline (drop the borrow, then notify) and:
 
-1. emits a [`ChartChange`](../crates/bastyde-data/src/chart_change.rs)
+1. emits a [`ChartChange`](../crates/teksilo-data/src/chart_change.rs)
    describing exactly what changed (`SeriesInserted`, `SeriesRemoved`,
    `SeriesMoved`, `SeriesRenamed`, `SeriesColorChanged`,
    `SeriesVisibilityChanged`, `PointsInserted`, `PointsRemoved`,
@@ -188,8 +188,8 @@ discipline (drop the borrow, then notify) and:
    widgets bind internally — see §8 for the full mapping.
 
 `ChartSeries<T>` and `ChartDatum<T>` (the construction DTOs) now live
-in `bastyde-data` alongside the model and are re-exported from
-`bastyde_charts` for convenience:
+in `teksilo-data` alongside the model and are re-exported from
+`teksilo_charts` for convenience:
 
 ```rust
 pub struct ChartDatum<T> {
@@ -217,7 +217,7 @@ change (§8).
 Construction:
 
 ```rust
-use bastyde_charts::{ChartDatum, ChartModel, ChartSeries};
+use teksilo_charts::{ChartDatum, ChartModel, ChartSeries};
 
 // Multi-series (BarChart / LineChart):
 let model = ChartModel::from_series_vec(vec![
@@ -262,7 +262,7 @@ for the full API.
 
 ## 4. Axes — `nice_ticks` and formatting
 
-[crates/bastyde-charts/src/axis.rs](../crates/bastyde-charts/src/axis.rs)
+[crates/teksilo-charts/src/axis.rs](../crates/teksilo-charts/src/axis.rs)
 implements the Wilkinson / Heckbert nice-numbers algorithm extended
 with the d3 / matplotlib `2.5` step (so `0..100 / target=4` produces
 `[0, 25, 50, 75, 100]` instead of degrading to step 20):
@@ -303,7 +303,7 @@ formatter can hook in here without API churn.
 
 ## 5. Palette
 
-[`ChartPalette`](../crates/bastyde-charts/src/palette.rs) is the
+[`ChartPalette`](../crates/teksilo-charts/src/palette.rs) is the
 mechanism that decides series colors when a series didn't pick its
 own:
 
@@ -315,7 +315,7 @@ pub enum ChartPalette {
 ```
 
 Default is `FromTheme`, which reads
-[`ColorTokens::chart_palette`](../crates/bastyde-tokens/src/theme.rs).
+[`ColorTokens::chart_palette`](../crates/teksilo-tokens/src/theme.rs).
 The built-in light and dark themes ship the **Okabe-Ito**
 colorblind-safe sequence (Okabe & Ito 2008), the same palette used by
 ggplot2 and seaborn:
@@ -347,7 +347,7 @@ unreadable.
 > the chart palette dims when its window loses OS focus (see
 > [window-activation.md](window-activation.md)). The paint walker
 > swaps in
-> [`ColorTokens::for_inactive_window`](../crates/bastyde-tokens/src/theme.rs),
+> [`ColorTokens::for_inactive_window`](../crates/teksilo-tokens/src/theme.rs),
 > which desaturates `chart_palette` by
 > `ColorTokens::INACTIVE_CHART_DESATURATION` (`0.35`) — deliberately
 > **lighter** than `INACTIVE_ACCENT_DESATURATION` (`0.70`) used for the
@@ -366,12 +366,12 @@ constructed with `.legend(true)`, lays it out at `legend_position`
 (`Top` / `Bottom` / `Leading` / `Trailing`), and shares the same
 `ChartModel` and `palette` prop.
 
-**Standalone** — build a [`ChartLegend`](../crates/bastyde-charts/src/legend.rs)
+**Standalone** — build a [`ChartLegend`](../crates/teksilo-charts/src/legend.rs)
 yourself and place it anywhere in your widget tree, sharing the
 same `ChartModel` the chart binds to:
 
 ```rust
-use bastyde_charts::{ChartLegend, ChartModel, LegendOrientation};
+use teksilo_charts::{ChartLegend, ChartModel, LegendOrientation};
 
 let model = ChartModel::from_series_vec(make_series());
 let chart = LineChart::new(model.clone())
@@ -400,12 +400,12 @@ Override with the standalone widget if you need something different.
 All three charts are **proposal-driven**: `layout_response` returns
 whatever the parent proposes, with a 320×200 (line / bar) or 320×220
 (pie) fallback when the proposal is unbounded. This matches
-[`ProgressBar`](../crates/bastyde-widgets/src/progress_bar.rs) and
-[`ScrollArea`](../crates/bastyde-widgets/src/scroll_area.rs) — charts
+[`ProgressBar`](../crates/teksilo-widgets/src/progress_bar.rs) and
+[`ScrollArea`](../crates/teksilo-widgets/src/scroll_area.rs) — charts
 fit any container.
 
 Inside `paint`, the bounds are carved into a plot rect by
-[`carve_plot_area`](../crates/bastyde-charts/src/layout.rs), which:
+[`carve_plot_area`](../crates/teksilo-charts/src/layout.rs), which:
 
 1. Reserves the legend band on the requested edge (when shown).
 2. Reserves a y-axis band on the leading edge: max tick label
@@ -414,7 +414,7 @@ Inside `paint`, the bounds are carved into a plot rect by
    tick length + gap + axis-title height.
 4. Insets the inner plot by `plot_padding_*` from the dimension
    constants in
-   [crates/bastyde-charts/src/style.rs](../crates/bastyde-charts/src/style.rs)
+   [crates/teksilo-charts/src/style.rs](../crates/teksilo-charts/src/style.rs)
    (not to be confused with the Tier-3 `ChartStyle` *trait* — §11 below
    — which carries paint recipes, not dimensions).
 
@@ -484,7 +484,7 @@ path for "pulsing" / "highlighted" colors that don't change geometry.
 All three charts — `BarChart`, `LineChart`, `PieChart` — draw their
 hover tooltips **inline inside their own `paint()`**, clipped to the
 plot rect. This is deliberately different from
-[`TooltipWidget`](../crates/bastyde-widgets/src/tooltip.rs):
+[`TooltipWidget`](../crates/teksilo-widgets/src/tooltip.rs):
 
 - Chart tooltips track the cursor across the plot to the **nearest
   data point**, snapping per-pixel. `TooltipWidget` is anchored to a
@@ -521,7 +521,7 @@ For pie/donut, the hit-test is polar: convert pointer position to
 whose angular range covers the pointer. The angle conversion has to
 subtract `start_angle_degrees` and flip for non-clockwise charts —
 both are easy to forget; the
-[`pie_hit_test_uses_logical_angle_space`](../crates/bastyde-charts/src/pie_chart.rs)
+[`pie_hit_test_uses_logical_angle_space`](../crates/teksilo-charts/src/pie_chart.rs)
 test locks this.
 
 Disable with `.hover_tooltip(false)` if you'd rather the chart not
@@ -531,7 +531,7 @@ a busy overlay). A clone of the hover signal is also public via
 for apps that want to observe hover from outside without
 re-implementing the hit-test.
 
-`ChartSelection` ([bastyde-data](../crates/bastyde-data/src/chart_selection.rs),
+`ChartSelection` ([teksilo-data](../crates/teksilo-data/src/chart_selection.rs),
 keyed by `(SeriesId, usize)`) is consumed by all three charts the
 same way: `.selection(ChartSelection)` reuses the exact hit-test the
 hover handler uses (`hit::rect_hit` / `hit::nearest_point` /
@@ -544,7 +544,7 @@ slice's outline) on top of its normal fill; see
 
 ## 10. Theming — chart style constants
 
-[`crates/bastyde-charts/src/style.rs`](../crates/bastyde-charts/src/style.rs)
+[`crates/teksilo-charts/src/style.rs`](../crates/teksilo-charts/src/style.rs)
 carries chart-specific dimension constants: padding (`PLOT_PADDING_TOP`,
 `PLOT_PADDING_RIGHT`, `PLOT_PADDING_BOTTOM`, `PLOT_PADDING_LEADING`),
 tick lengths, label gaps, gridline width, default line / point sizes,
@@ -565,14 +565,14 @@ Charts pull their colors from existing roles, not new fields:
 The only chart-specific color is the `chart_palette` (§5). A theme
 overriding the palette doesn't need to touch any other chart token;
 a theme tightening density can change the `PLOT_PADDING_*` constants
-in `bastyde-charts/src/style.rs` without touching colors.
+in `teksilo-charts/src/style.rs` without touching colors.
 
 ## 11. Styling — the `ChartStyle` trait
 
 Charts sit on the same Tier-3 styling ladder as every other themable
 widget (see [styling-system.md](styling-system.md)) via
-[`ChartStyle`](../crates/bastyde-core/src/styles/chart_style.rs), a
-trait in `bastyde-core::styles`:
+[`ChartStyle`](../crates/teksilo-core/src/styles/chart_style.rs), a
+trait in `teksilo-core::styles`:
 
 ```rust
 pub struct ChartFillContext<'a> {
@@ -612,12 +612,12 @@ per-call .style(impl ChartStyle)  >  theme.style_slots.chart  >  RecipeChartStyl
 (`SharedChartStyle`).
 
 **Layering note:** `RecipeChartStyle`, the shipped default, lives in
-**`bastyde-charts` itself, not `bastyde-widgets/src/styles/*`** — the
+**`teksilo-charts` itself, not `teksilo-widgets/src/styles/*`** — the
 one place this default breaks the convention every other `Recipe*Style`
 follows (see §1 and [styling-system.md](styling-system.md)). The
-reason is layering, not oversight: `bastyde-charts` deliberately does
-not depend on `bastyde-widgets`, so its default style implementation
-has to live where its dependencies already reach. `bastyde-core` only
+reason is layering, not oversight: `teksilo-charts` deliberately does
+not depend on `teksilo-widgets`, so its default style implementation
+has to live where its dependencies already reach. `teksilo-core` only
 holds the trait and the `Rc<dyn ChartStyle>` slot type — it has no
 opinion on where the default lives.
 
@@ -642,7 +642,7 @@ return `FillRecipe::LinearGradient { .. }` / `FillRecipe::RadialGradient
 { .. }` instead of `Solid` — a custom `ChartStyle` is the only way to
 opt in (`RecipeChartStyle` stays flat). Gradient fills route through
 the same two recipe methods plus
-[`Canvas::fill_path(path: &Path, paint: impl Into<Paint>)`](../crates/bastyde-canvas/src/canvas.rs)
+[`Canvas::fill_path(path: &Path, paint: impl Into<Paint>)`](../crates/teksilo-canvas/src/canvas.rs)
 (widened from a flat-color-only signature) and a new Tier-3
 path-gradient GPU pipeline (`path_gradient.wgsl`). Radial gradients on
 a donut are continuous across wedge boundaries (the gradient is
@@ -662,9 +662,9 @@ describes the shape (`"Bar chart: 3 series, 4 categories"`,
 also its own synthetic child node — `Role::GraphicsObject`, name
 `"{series name}, {category}: {value}"`, and `numeric_value` set to the
 datum's `f32` value — emitted via
-[`hit::emit_mark_node`](../crates/bastyde-charts/src/hit.rs) under
+[`hit::emit_mark_node`](../crates/teksilo-charts/src/hit.rs) under
 `SyntheticKind::ChartMark` (the same synthetic-child mechanism
-`bastyde-scene` uses for lightweight scene items). Node ids are
+`teksilo-scene` uses for lightweight scene items). Node ids are
 deterministic within a process run, derived from `(SeriesId, usize)`
 via `DefaultHasher`, so a mark keeps the same AT id across repeated
 `accessibility()` walks. Apps that need full data-table semantics
@@ -707,14 +707,14 @@ Still genuinely open:
   reads correctly per-wedge but has a visible seam across wedge
   boundaries.
 - **No chart widget wires `ChartWindow` / `ChartAggregate`
-  internally.** Both remain `bastyde-data` building blocks (§3, and
+  internally.** Both remain `teksilo-data` building blocks (§3, and
   [data-models.md §15](data-models.md)) an app composes on top of a
   `ChartModel` for a strip-chart or a downsampled long series.
   `ChartSelection` is the one exception — see §9 — all three charts
   consume it directly via `.selection(ChartSelection)`.
 
 For each of these, the file pattern in
-[crates/bastyde-charts/src/](../crates/bastyde-charts/src/) is the place
+[crates/teksilo-charts/src/](../crates/teksilo-charts/src/) is the place
 to look — the modules are intentionally split so future work lands
 in one or two files at most.
 
@@ -774,6 +774,6 @@ What it shows, end to end:
   constraint. Reduced-motion builds the (empty) chart but skips the
   timer.
 
-Useful as a sanity-check after any change to bastyde-charts;
-`cargo test -p bastyde-charts` (88 headless tests, no GPU) is the
+Useful as a sanity-check after any change to teksilo-charts;
+`cargo test -p teksilo-charts` (88 headless tests, no GPU) is the
 faster CI path.

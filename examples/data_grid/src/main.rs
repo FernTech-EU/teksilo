@@ -33,12 +33,12 @@
 //! Home / End / PgUp / PgDn / Tab on the focused cell to navigate.
 //! Press F2 (or just start typing) on a focused name cell to edit it.
 
-use bastyde::core::signal::Signal;
-use bastyde::data::{
+use teksilo::core::signal::Signal;
+use teksilo::data::{
     ListDataSource, ListModel, SelectionMode, SelectionModel, SortDirection, SortFilterListModel,
 };
-use bastyde::prelude::*;
-use bastyde::widgets::{
+use teksilo::prelude::*;
+use teksilo::widgets::{
     Button, CellContext, Column, ColumnWidth, EditTrigger, Expand, GridLines, HStack, Padding,
     Panel, Spacer, TableAlignment as Alignment, TableSelectionMode, TableView, TextInput,
     TextWidget, Toolbar, VStack,
@@ -100,7 +100,7 @@ fn id_column() -> Column<Employee> {
     })
     .width(ColumnWidth::Fixed(64.0))
     .sortable(true)
-    .pinned(bastyde::widgets::PinnedSide::Leading)
+    .pinned(teksilo::widgets::PinnedSide::Leading)
 }
 
 fn name_column() -> Column<Employee> {
@@ -207,14 +207,14 @@ fn main() {
         Toolbar::new().child(
             HStack::new()
                 .child(Spacer::new())
-                .child(bastyde::widgets::ThemeSwitcher::new()),
+                .child(teksilo::widgets::ThemeSwitcher::new()),
         )
     }
 
-    BastydeAppBuilder::new()
+    TeksiloAppBuilder::new()
         .install_automation_bridge_in_debug()
         .install_inspector_in_debug()
-        .theme(bastyde::presets::intui::light())
+        .theme(teksilo::presets::intui::light())
         .initial_window(WindowConfig::new().title("Data Grid").size(1100, 640).root(
             move |tree, _| {
                 let mut table = TableView::from_source(proxy.clone())

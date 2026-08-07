@@ -20,7 +20,7 @@ subscribe internally; app code rarely needs to subscribe directly.
 ```ignore
 // TreeModel::observe_changes returns an ObserverHandle whose drop
 // unregisters the callback — keep it alive for the observer's lifetime.
-use bastyde_data::{TreeModel, TreeChange};
+use teksilo_data::{TreeModel, TreeChange};
 let tree: TreeModel<String> = TreeModel::new();
 let _handle = tree.observe_changes(|change| {
     println!("{change:?}");
@@ -31,7 +31,7 @@ tree.insert_root(0, "root".to_string());
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_data/tree_change/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_data/tree_change/index.html)
 
 ## `pub struct NodeId`
 

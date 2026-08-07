@@ -22,15 +22,15 @@
 //! A `Reset all` button below returns every value to a sensible
 //! default so the demo can be re-played without restarting.
 
-use bastyde::core::WidgetPlacement;
-use bastyde::prelude::*;
-use bastyde::widgets::{
+use teksilo::core::WidgetPlacement;
+use teksilo::prelude::*;
+use teksilo::widgets::{
     Button, ButtonVariant, Expand, HStack, Padding, Panel, Spacer, SpinBox, StepType, TextWidget,
     ThemeSwitcher, Toolbar, VStack, WheelMode, WrapMode,
 };
 
 fn dark_mode_toolbar() -> impl Widget {
-    bati!(
+    teksu!(
         Toolbar {
             HStack {
                 Spacer
@@ -102,7 +102,7 @@ impl Widget for Root {
         let reset_timeout = self.values.timeout.clone();
         let reset_frequency = self.values.frequency.clone();
 
-        let root = bati!(ctx => Padding::uniform(24.0) {
+        let root = teksu!(ctx => Padding::uniform(24.0) {
                 Panel {
                     Padding::uniform(20.0) {
                         VStack {
@@ -295,10 +295,10 @@ impl Widget for Root {
 /// Single demo row: [label | SpinBox | live readout].
 fn row(
     label: &str,
-    spin: SpinBox<impl bastyde::widgets::SpinValue>,
+    spin: SpinBox<impl teksilo::widgets::SpinValue>,
     readout: Signal<String>,
 ) -> impl Widget {
-    bati!(
+    teksu!(
         HStack {
             spacing: 12.0
             MinSizeForLabel::new(TextWidget::new(lit!(label))) {
@@ -373,16 +373,16 @@ impl Widget for MinSizeForLabel {
 }
 
 fn main() {
-    BastydeAppBuilder::new()
+    TeksiloAppBuilder::new()
         .install_automation_bridge_in_debug()
         .install_inspector_in_debug()
-        .theme(bastyde::presets::intui::light())
+        .theme(teksilo::presets::intui::light())
         .initial_window(
             WindowConfig::new()
-                .title("Bastyde — SpinBox gallery")
+                .title("Teksilo — SpinBox gallery")
                 .size(720, 560)
                 .root(|tree, _state| {
-                    bati!(tree => VStack {
+                    teksu!(tree => VStack {
                             child: dark_mode_toolbar()
                             Expand {
                                 Root::new()

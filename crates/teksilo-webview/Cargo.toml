@@ -1,0 +1,57 @@
+# SPDX-License-Identifier: MPL-2.0
+# SPDX-FileCopyrightText: 2026 FernTech
+
+[package]
+name = "teksilo-webview"
+description = "Embeddable WebView widget for Teksilo — pluggable native engine backend (wry / Servo) behind a Teksilo-native widget."
+edition = "2024"
+version.workspace = true
+license-file.workspace = true
+publish.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+teksilo-core = { workspace = true }
+teksilo-tokens = { workspace = true }
+teksilo-canvas = { workspace = true }
+
+# --- Native engine backends (opt-in) ---
+# Kept OFF by default so a plain workspace `cargo build` / `cargo test`
+# stays light and green without pulling a browser engine. The umbrella
+# `teksilo` crate's `web-view` feature selects the right one per platform.
+#
+# wry 0.55.1 (winit-0.30 compatible) is the production backend on
+# macOS / Windows / Linux-X11; servo 0.2.0 is the best-effort Wayland
+# backend. Both are optional + feature-gated, so the default build never
+# pulls a browser engine.
+wry = { version = "0.55.1", optional = true, features = ["devtools"] }
+servo = { version = "0.4.0", optional = true }
+# Servo embedding-API support types (its WebView/RenderingContext speak `url`,
+# `dpi`, and raw-window-handle 0.6 — the same rwh major as teksilo-core).
+url = { version = "2", optional = true }
+dpi = { version = "0.1", optional = true }
+raw-window-handle = { version = "0.6", optional = true }
+
+# wry's Linux engine is WebKitGTK, which runs on the GLib/GTK main loop. When
+# embedded in a winit (non-GTK) app, the host must `gtk::init()` and pump the
+# GTK loop each turn or the page never paints — that's what `pump_gtk_events`
+# does. Same gtk major (0.18) that wry 0.55 pulls. Linux-only.
+[target.'cfg(target_os = "linux")'.dependencies]
+gtk = { version = "0.18", optional = true }
+
+[features]
+default = []
+# Production engine backend (macOS WKWebView / Windows WebView2 /
+# Linux-X11 WebKitGTK) via `wry`.
+wry-backend = ["dep:wry", "dep:gtk"]
+# Best-effort pure-Rust engine backend (Linux/Wayland) via `servo`.
+servo-backend = ["dep:servo", "dep:url", "dep:dpi", "dep:raw-window-handle"]
+
+[dev-dependencies]
+teksilo-core = { workspace = true }
+# Used by the lifecycle tests to park a WebView in a real `Switcher` and
+# assert the dormancy → set_visible(false/true) bridge. Dev-only; the crate
+# itself stays free of any widget-catalog dependency.
+teksilo-widgets = { workspace = true }
+teksilo-canvas = { workspace = true }

@@ -32,9 +32,9 @@ The bar carries `Role::MenuBar`; each trigger is `Role::MenuItem` with
 Mnemonic letters are announced via `set_access_key` for Windows Narrator.
 
 ```rust
-# use bastyde_widgets::{MenuBar, MenuList, MenuItem};
-# use bastyde_i18n::lit;
-# use bastyde_core::Intent;
+# use teksilo_widgets::{MenuBar, MenuList, MenuItem};
+# use teksilo_i18n::lit;
+# use teksilo_core::Intent;
 let _w = MenuBar::new()
     .menu(lit!("File"), || Box::new(
         MenuList::new()
@@ -54,7 +54,7 @@ let _w = MenuBar::new()
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/menu_bar/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/menu_bar/index.html)
 
 ## `pub enum CollapsePolicy`
 

@@ -3,7 +3,7 @@
 
 # Settings
 
-Every public type in `bastyde-settings`, grouped by category. Each page links to its full rustdoc API reference.
+Every public type in `teksilo-settings`, grouped by category. Each page links to its full rustdoc API reference.
 
 ## Collection
 
@@ -16,7 +16,7 @@ Every public type in `bastyde-settings`, grouped by category. Each page links to
 - [MruEntry](mru.md) — Most-recently-used list — a generic, persisted reactive collection
 - [PerWindowState](window_state.md) — Per-window geometry persistence via `WindowStateService`
 - [Reloadable](reload.md) — `Reloadable` — the contract a (separately-built) file watcher uses to
-- [SettingsBundleError](bundle.md) — `SettingsBundle` — declarative configuration for the bastyde-app
+- [SettingsBundleError](bundle.md) — `SettingsBundle` — declarative configuration for the teksilo-app
 - [SettingsExt](ext.md) — Extension traits exposing settings services on `BuildContext` and
 - [SettingsFileError](file.md) — `SettingsFile<T>` — typed single-struct persistence
 - [SettingsReloadSink](watch.md) — Live cross-process settings sync: a `notify`-based directory watcher

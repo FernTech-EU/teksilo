@@ -25,12 +25,12 @@
 use std::cell::Cell;
 use std::rc::Rc;
 
-use bastyde::core::widget::WidgetPlacement;
-use bastyde::data::{
+use teksilo::core::widget::WidgetPlacement;
+use teksilo::data::{
     CheckedModel, ListModel, SelectionMode, SelectionModel, TreeCheckedModel, TreeModel,
 };
-use bastyde::prelude::*;
-use bastyde::widgets::{
+use teksilo::prelude::*;
+use teksilo::widgets::{
     Button, ButtonVariant, Card, Expand, HStack, ListView, Padding, Panel, Repeater, Spacer,
     StandardListItem, StandardTreeItem, TabId, TabInfo, TabWidget, TextWidget, Toolbar, TreeView,
     VStack,
@@ -40,7 +40,7 @@ fn dark_mode_toolbar() -> impl Widget {
     Toolbar::new().child(
         HStack::new()
             .child(Spacer::new())
-            .child(bastyde::widgets::ThemeSwitcher::new()),
+            .child(teksilo::widgets::ThemeSwitcher::new()),
     )
 }
 
@@ -495,7 +495,7 @@ fn main() {
     let tags = ListModel::from_vec(vec![
         "Rust".into(),
         "GUI".into(),
-        "Bastyde".into(),
+        "Teksilo".into(),
         "Desktop".into(),
     ]);
 
@@ -504,7 +504,7 @@ fn main() {
     let tree_model = TreeModel::new();
     let docs = tree_model.insert_root(0, "Documents".into());
     let proj = tree_model.insert_child(docs, 0, "Projects".into());
-    tree_model.insert_child(proj, 0, "Bastyde".into());
+    tree_model.insert_child(proj, 0, "Teksilo".into());
     tree_model.insert_child(proj, 1, "Skribisto".into());
     let notes = tree_model.insert_child(docs, 1, "Notes".into());
     tree_model.insert_child(notes, 0, "Meeting 2026-04-01".into());
@@ -514,10 +514,10 @@ fn main() {
     tree_model.insert_child(pics, 1, "Screenshots".into());
     tree_model.insert_root(2, "Downloads".into());
 
-    BastydeAppBuilder::new()
+    TeksiloAppBuilder::new()
         .install_automation_bridge_in_debug()
         .install_inspector_in_debug()
-        .theme(bastyde::presets::intui::light())
+        .theme(teksilo::presets::intui::light())
         .initial_window(
             WindowConfig::new()
                 .title("Data Collections — Milestone 6")

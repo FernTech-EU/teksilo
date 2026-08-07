@@ -1,15 +1,15 @@
 <!-- SPDX-License-Identifier: MPL-2.0 -->
 <!-- SPDX-FileCopyrightText: 2026 FernTech -->
 
-# Automation MCP — Drive a Bastyde App from an Agent
+# Automation MCP — Drive a Teksilo App from an Agent
 
-A Bastyde app exposes a rich semantic surface — the **AccessKit accessibility
+A Teksilo app exposes a rich semantic surface — the **AccessKit accessibility
 tree** — plus an **AT-action dispatch path**, both of which are queryable and
 drivable **in-process, without the OS accessibility layer**. The
-`bastyde-automation-mcp` server turns that latent capability into a
+`teksilo-automation-mcp` server turns that latent capability into a
 [Model Context Protocol](https://modelcontextprotocol.io) (MCP) server so an
 AI agent (or any MCP client) can **observe** (semantic tree + screenshots) and
-**drive** (AT actions + synthetic input) a Bastyde app.
+**drive** (AT actions + synthetic input) a Teksilo app.
 
 This is the capability an agent can't get otherwise: the `TreeUpdate` lives
 inside private platform state with no external channel except the OS AT layer;
@@ -24,31 +24,31 @@ mode is the toolkit's CI harness / a build-your-own-harness kit (see below).
 
 | Mode | Command | What it drives |
 | --- | --- | --- |
-| **Headless** (default) | `bastyde-automation-mcp --headless` | A built-in demo app owned entirely in-process on a dedicated thread. No display, GPU daemon, or AT layer needed. The right mode for CI and agent test-authoring. |
-| **Live (connect)** | `bastyde-automation-mcp --connect <sock> --token <uuid>` | A *running* app that opted into the debug-only in-app bridge. The agent drives the real window the user sees. |
+| **Headless** (default) | `teksilo-automation-mcp --headless` | A built-in demo app owned entirely in-process on a dedicated thread. No display, GPU daemon, or AT layer needed. The right mode for CI and agent test-authoring. |
+| **Live (connect)** | `teksilo-automation-mcp --connect <sock> --token <uuid>` | A *running* app that opted into the debug-only in-app bridge. The agent drives the real window the user sees. |
 
 Both speak MCP over **stdio**.
 
 ### Headless
 
 ```text
-bastyde-automation-mcp --headless
+teksilo-automation-mcp --headless
 ```
 
 A dedicated `std::thread` owns a `HeadlessApp` and the async rmcp handlers
 marshal `Send` DTOs to it; the `!Send` `WidgetTree` never leaves that thread.
 Screenshots render offscreen on the tree thread via `pollster::block_on`
-(reusing `bastyde_render::test_support::create_test_renderer` — the same
+(reusing `teksilo_render::test_support::create_test_renderer` — the same
 offscreen path the widget previewer's PNG export uses).
 
-**What the stock binary drives.** `bastyde-automation-mcp --headless` builds a
+**What the stock binary drives.** `teksilo-automation-mcp --headless` builds a
 small *built-in demo* (a heading, two buttons, a text field, a checkbox) — it
 is the toolkit's own conformance harness and a worked reference, **not** your
 app. To headlessly automate *your* app there are two paths:
 
-- **Build a tiny harness** with the GUI-free `bastyde-automation` crate: own
+- **Build a tiny harness** with the GUI-free `teksilo-automation` crate: own
   your app's `WidgetTree` on one thread (or reuse a headless test tree) and
-  call `bastyde_automation::execute(&mut tree, &mut ops, &op, &settle)` per
+  call `teksilo_automation::execute(&mut tree, &mut ops, &op, &settle)` per
   request. `execute` works against any `WidgetTree`, so this is ~a screenful of
   glue — but it is a kit, not a turnkey "point it at my app" binary.
 - **Use the live `--connect` mode** below — the turnkey "drive my real app"
@@ -59,9 +59,9 @@ app. To headlessly automate *your* app there are two paths:
 A debug build opts in with one line:
 
 ```rust
-use bastyde::prelude::*;
+use teksilo::prelude::*;
 
-BastydeAppBuilder::new()
+TeksiloAppBuilder::new()
     .theme(intui::light())
     .install_automation_bridge_in_debug()   // debug-only; a no-op in release
     .initial_window(/* ... */)
@@ -71,15 +71,15 @@ BastydeAppBuilder::new()
 On startup it prints the socket path and token to stderr:
 
 ```text
-bastyde-automation: bridge socket = /run/user/1000/bastyde-automation-12345.sock
-BASTYDE_AUTOMATION_TOKEN=8f3c…
-bastyde-automation: connect with `bastyde-automation-mcp --connect /run/user/1000/bastyde-automation-12345.sock --token 8f3c…`
+teksilo-automation: bridge socket = /run/user/1000/teksilo-automation-12345.sock
+TEKSILO_AUTOMATION_TOKEN=8f3c…
+teksilo-automation: connect with `teksilo-automation-mcp --connect /run/user/1000/teksilo-automation-12345.sock --token 8f3c…`
 ```
 
 Then point the server at it:
 
 ```text
-bastyde-automation-mcp --connect /run/user/1000/bastyde-automation-12345.sock --token 8f3c…
+teksilo-automation-mcp --connect /run/user/1000/teksilo-automation-12345.sock --token 8f3c…
 ```
 
 Each rmcp tool handler writes the op to the Unix socket and reads one reply;
@@ -94,15 +94,15 @@ Add the `automation` feature to the umbrella crate (debug-only by design):
 
 ```toml
 [dependencies]
-bastyde = { version = "0.6", features = ["automation"] }
+teksilo = { version = "0.6", features = ["automation"] }
 ```
 
 `install_automation_bridge_in_debug()` is gated on `debug_assertions`: a
 **release** build with the feature on still contains no socket, token, or
 bridge — the method is the identity. The GUI-free DTO toolkit is available as
-`bastyde::automation` for writing harnesses against the same protocol.
+`teksilo::automation` for writing harnesses against the same protocol.
 
-The server binary builds from `cargo build -p bastyde-automation-mcp`.
+The server binary builds from `cargo build -p teksilo-automation-mcp`.
 
 ## Tool surface (27 tools)
 
@@ -156,7 +156,7 @@ window-relative pixels, identical to the AT `bounds`.)
 
 ### Right-click & context menus
 
-Bastyde context menus are attached with the `.context_menu(factory)` builder
+Teksilo context menus are attached with the `.context_menu(factory)` builder
 and open on a **Secondary `PointerDown`** — a real right-click. To open one from
 automation, use the node-based **`right_click`** tool:
 
@@ -188,7 +188,7 @@ with `inject_key { "key": "escape" }` or by clicking elsewhere.
 
 ### Multi-window routing
 
-Every tool accepts an optional `window_id` (the `BastydeWindowId` raw value
+Every tool accepts an optional `window_id` (the `TeksiloWindowId` raw value
 from `list_windows`). `window_id: None` resolves to the focused window, else
 the primary. Headless is single-tree, so routing is always unambiguous there.
 
@@ -213,7 +213,7 @@ holds or `settle_timeout_ms` elapses (`WAIT_TIMEOUT`).
 
 ### Live regions & announcements
 
-Bastyde has no OS AT layer in headless mode, and no in-process way to observe
+Teksilo has no OS AT layer in headless mode, and no in-process way to observe
 what the platform *spoke*. So the `WidgetTree` diffs the live (`Live::Polite` /
 `Live::Assertive`) nodes of each freshly-built `TreeUpdate` and records the
 changes into a ring buffer. `pull_announcements { since_seq }` drains it — a
@@ -255,7 +255,7 @@ The live bridge is defence-in-depth:
 - **Single connection at a time**, single in-flight request, with a 10 s
   read-timeout on the token handshake and a 16 MiB cap on a request frame.
 - **Per-process UUID token**: the client must send the token (printed to
-  stderr, or pinned via `BASTYDE_AUTOMATION_TOKEN`) as the first line, or the
+  stderr, or pinned via `TEKSILO_AUTOMATION_TOKEN`) as the first line, or the
   connection is rejected.
 - **Bounded main-thread settle.** Because the live settle runs on the winit
   main thread, the bridge clamps `max_anim_frames ≤ 120` and
@@ -273,7 +273,7 @@ on must not contain it — a CI canary:
 
 ```sh
 cargo build --release -p widget-catalog          # has the bridge wired + feature
-! grep -qa "bastyde-automation: bridge socket" target/release/widget-catalog \
+! grep -qa "teksilo-automation: bridge socket" target/release/widget-catalog \
   || { echo "BRIDGE LEAKED INTO RELEASE"; exit 1; }
 ```
 
@@ -293,10 +293,10 @@ Headless mode has no socket at all.
 ## Architecture
 
 The wire protocol is **serde DTOs, never closures or `!Send` handles**. One
-core function does the work, in the GUI-free `bastyde-automation` crate:
+core function does the work, in the GUI-free `teksilo-automation` crate:
 
 ```rust
-bastyde_automation::execute(
+teksilo_automation::execute(
     tree: &mut WidgetTree,
     ops: &mut dyn WindowOps,
     op: &AutomationOp,
@@ -313,10 +313,10 @@ alone hold.
 
 | Crate | Role |
 | --- | --- |
-| `bastyde-automation` | GUI-free toolkit: DTOs, `execute`, `RecordingWindowOps`, the tool catalog. Mirrors `bastyde-data`'s core-only-peer design. |
-| `bastyde-automation-mcp` | The rmcp server binary (`--headless` / `--connect`) + offscreen screenshots. `tokio` / `rmcp` are confined here. |
-| `bastyde-app` (`automation` feature) | The debug-only in-app bridge — `std::os::unix::net` + the existing `send_external` path; no async runtime in the framework. |
-| `bastyde-platform` | `PlatformWindow::capture_offscreen` — the live-window readback. |
+| `teksilo-automation` | GUI-free toolkit: DTOs, `execute`, `RecordingWindowOps`, the tool catalog. Mirrors `teksilo-data`'s core-only-peer design. |
+| `teksilo-automation-mcp` | The rmcp server binary (`--headless` / `--connect`) + offscreen screenshots. `tokio` / `rmcp` are confined here. |
+| `teksilo-app` (`automation` feature) | The debug-only in-app bridge — `std::os::unix::net` + the existing `send_external` path; no async runtime in the framework. |
+| `teksilo-platform` | `PlatformWindow::capture_offscreen` — the live-window readback. |
 
 `RecordingWindowOps` is why an AT action that opens a window (a menu item, a
 "New window" button) never crashes the headless server: instead of panicking
@@ -326,10 +326,10 @@ on `open_window`, it records the request and returns a synthetic id.
 
 ```text
 # Headless MCP server (CI / agent test-authoring):
-bastyde-automation-mcp --headless
+teksilo-automation-mcp --headless
 
 # Drive a live running app (after `install_automation_bridge_in_debug()`):
-bastyde-automation-mcp --connect <sock> --token <uuid>
+teksilo-automation-mcp --connect <sock> --token <uuid>
 
 # Live-bridge smoke test (needs a display):
 cargo run -p automation_bridge_smoke
@@ -339,17 +339,17 @@ cargo run -p automation_bridge_smoke -- --serve
 
 ## Testing
 
-- **Toolkit** (`bastyde-automation`): unit tests driven through `execute()`,
+- **Toolkit** (`teksilo-automation`): unit tests driven through `execute()`,
   each validating the produced `TreeUpdate` with the real `accesskit_consumer`.
-- **MCP conformance** (`bastyde-automation-mcp`): the 24-tool router, the
+- **MCP conformance** (`teksilo-automation-mcp`): the 24-tool router, the
   async-handler ⇄ tree-thread marshaling, and a screenshot that decodes to PNG
   magic bytes (skipped when no GPU).
 - **Golden screenshots** behind the `golden-tests` feature
-  (`cargo test -p bastyde-automation-mcp --features golden-tests`), inline
+  (`cargo test -p teksilo-automation-mcp --features golden-tests`), inline
   per-channel pixel compare with tolerance ≤ 2, `UPDATE_GOLDENS=1` to refresh.
 - **Bridge round-trip** (`examples/automation_bridge_smoke`): a real app +
   `install_automation_bridge_in_debug()`, an in-process client running
   `snapshot → invoke → re-snapshot` and asserting the `0600` socket.
 
 See also: [Accessibility overrides](accessibility-overrides.md),
-[Scene accessibility](bastyde-scene-a11y.md).
+[Scene accessibility](teksilo-scene-a11y.md).

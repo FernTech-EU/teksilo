@@ -19,7 +19,7 @@ the `MinSize` floor.
 For the inverse operation (capping a maximum size) see `MaxSize`.
 
 ```rust
-# use bastyde_widgets::primitives::{MinSize, icon_widget::IconWidget};
+# use teksilo_widgets::primitives::{MinSize, icon_widget::IconWidget};
 // Guarantee a 44×44 dp tap target around a 20 dp icon.
 let _tap_target = MinSize::new(44.0, 44.0)
     .child(IconWidget::checkmark(20.0));
@@ -31,7 +31,7 @@ let _tap_target = MinSize::new(44.0, 44.0)
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/primitives/min_size/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/primitives/min_size/index.html)
 
 ## `pub struct MinSize`
 

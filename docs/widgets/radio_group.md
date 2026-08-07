@@ -38,7 +38,7 @@ RadioGroup::new()
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/radio_group/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/radio_group/index.html)
 
 ## `pub struct RadioGroup`
 

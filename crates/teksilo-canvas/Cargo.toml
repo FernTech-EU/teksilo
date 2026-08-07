@@ -1,0 +1,22 @@
+# SPDX-License-Identifier: MPL-2.0
+# SPDX-FileCopyrightText: 2026 FernTech
+
+[package]
+name = "teksilo-canvas"
+edition = "2024"
+version.workspace = true
+license-file.workspace = true
+publish.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+teksilo-tokens = { workspace = true }
+quick-xml = { workspace = true }
+png = { workspace = true }
+image-webp = { workspace = true }
+zune-jpeg = { workspace = true }
+zune-core = { workspace = true }
+thiserror = { workspace = true }
+bytemuck = { workspace = true }
+serde = { workspace = true }

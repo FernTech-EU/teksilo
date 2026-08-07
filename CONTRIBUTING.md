@@ -1,9 +1,9 @@
 <!-- SPDX-License-Identifier: MPL-2.0 -->
 <!-- SPDX-FileCopyrightText: 2026 FernTech -->
 
-# Contributing to Bastyde
+# Contributing to Teksilo
 
-Thank you for your interest in contributing to Bastyde! This document provides guidelines and information for contributors.
+Thank you for your interest in contributing to Teksilo! This document provides guidelines and information for contributors.
 
 ## Code of Conduct
 
@@ -11,7 +11,7 @@ Please be respectful and constructive in all interactions. We aim to maintain a 
 
 ## Authorship and review
 
-Bastyde is built under the following eight rules. They apply to your contributions too.
+Teksilo is built under the following eight rules. They apply to your contributions too.
 
 1. Direct human communication is written by humans. PR messages, issues, posts, replies: no AI drafting, no AI polish. Common decency.
 
@@ -39,7 +39,7 @@ Bastyde is built under the following eight rules. They apply to your contributio
 ### Suggesting Features
 
 - Open an issue describing the feature and its use case
-- Explain why this would be valuable for Bastyde users
+- Explain why this would be valuable for Teksilo users
 - Be open to discussion about alternative approaches
 
 ### Submitting Code
@@ -96,7 +96,7 @@ git rebase --signoff HEAD~N
 
 ## License
 
-By contributing to Bastyde, you agree that your contributions will be licensed under the [Mozilla Public License 2.0](LICENSE).
+By contributing to Teksilo, you agree that your contributions will be licensed under the [Mozilla Public License 2.0](LICENSE).
 
 ## Questions?
 

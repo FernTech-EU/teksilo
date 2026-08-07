@@ -27,7 +27,7 @@ let _f = FilePickerField::new(path.clone())
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/file_picker_field/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/file_picker_field/index.html)
 
 ## `pub enum FilePickerKind`
 

@@ -1,0 +1,22 @@
+# SPDX-License-Identifier: MPL-2.0
+# SPDX-FileCopyrightText: 2026 FernTech
+
+[package]
+name = "teksilo-async"
+edition = "2024"
+version.workspace = true
+license-file.workspace = true
+publish.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Optional main-thread async executor for Teksilo — spawn_local / spawn_blocking driven by the app event loop."
+
+[dependencies]
+teksilo-core = { workspace = true }
+teksilo-app = { workspace = true }
+thiserror = { workspace = true }
+# Lightweight MPSC used as the one-shot result channel for `spawn_blocking`.
+# Kept local — no other teksilo crate uses it, and the runtime/transport
+# choice should not leak to consumers (same policy as tokio in
+# `teksilo-analytics-native` and async-std in `teksilo-platform`).
+async-channel = "2"

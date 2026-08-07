@@ -25,10 +25,10 @@ Supply `.announcement(...)` to give the alert a descriptive name
 instead of the generic "notification" fallback.
 
 ```ignore
-use bastyde_widgets::{Snackbar};
-use bastyde_i18n::lit;
-use bastyde_widgets::primitives::TextWidget;
-use bastyde_tokens::TextRole;
+use teksilo_widgets::{Snackbar};
+use teksilo_i18n::lit;
+use teksilo_widgets::primitives::TextWidget;
+use teksilo_tokens::TextRole;
 
 // In build():
 ctx.add(
@@ -45,7 +45,7 @@ ctx.add(
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/snackbar/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/snackbar/index.html)
 
 ## `pub struct Snackbar`
 
@@ -66,7 +66,7 @@ pub struct Snackbar { /* fields */ }
 
 Create a snackbar whose default trigger button shows `label`.
 
-#### `pub fn style(mut self, style: impl bastyde_core::styles::SnackbarStyle) -> Self`
+#### `pub fn style(mut self, style: impl teksilo_core::styles::SnackbarStyle) -> Self`
 
 Per-call style override for the snackbar surface chrome.
 Replaces the theme-wide default `SnackbarStyle` for just this

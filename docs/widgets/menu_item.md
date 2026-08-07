@@ -30,9 +30,9 @@ underline 'S' when Alt is held; `&&` → literal `&`). The enclosing
 `MenuList` wires bare-letter in-menu activation automatically.
 
 ```rust
-# use bastyde_widgets::MenuItem;
-# use bastyde_i18n::lit;
-# use bastyde_core::Intent;
+# use teksilo_widgets::MenuItem;
+# use teksilo_i18n::lit;
+# use teksilo_core::Intent;
 let _w = MenuItem::new(lit!("&Save"))
     .on_activate_fn(|ctx| ctx.send_intent(Intent::new("app.save")));
 ```
@@ -43,7 +43,7 @@ let _w = MenuItem::new(lit!("&Save"))
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/menu_item/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/menu_item/index.html)
 
 ## `pub struct MenuItem`
 
@@ -137,18 +137,18 @@ enables/disables the item reactively (paint, cursor, and AT all follow),
 so `MenuItem::new(...).enabled(can_save_signal)` greys out live without a
 rebuild.
 
-#### `pub fn style(mut self, style: impl bastyde_core::styles::MenuItemStyle) -> Self`
+#### `pub fn style(mut self, style: impl teksilo_core::styles::MenuItemStyle) -> Self`
 
 Per-call style override. Replaces the theme-wide default
 `MenuItemStyle` for just this MenuItem instance.
 
-#### `pub fn text_style(mut self, style: impl Into<bastyde_core::color_prop::TextStyleProp>) -> Self`
+#### `pub fn text_style(mut self, style: impl Into<teksilo_core::color_prop::TextStyleProp>) -> Self`
 
 Override the label's text style (font, size, weight). Accepts a
 `TextStyleRole`, a `TextStyle`, or a `Signal` of either. Default
 (unset) is `TextStyleRole::Body`.
 
-#### `pub fn text_role(mut self, color: impl Into<bastyde_core::color_prop::ColorProp>) -> Self`
+#### `pub fn text_role(mut self, color: impl Into<teksilo_core::color_prop::ColorProp>) -> Self`
 
 Override the label text color. Accepts `Color`, a role, or a
 `Signal` of either. Default (unset) is the interaction/enabled

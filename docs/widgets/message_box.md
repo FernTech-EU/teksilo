@@ -10,15 +10,15 @@ for the classic "tell the user something and ask for a response"
 pattern: unsaved-changes prompts, error surfaces, confirmation
 dialogs, and informational notices. Mirrors QMessageBox (Qt),
 NSAlert (AppKit), and SwiftUI's `.alert(...)` while staying inside
-Bastyde's idioms — closure result handlers, `Signal`/`Prop`
+Teksilo's idioms — closure result handlers, `Signal`/`Prop`
 reactivity, `Intent`/`Action`/`Shortcut` routing for keyboard
 defaults, and AccessKit `Role::AlertDialog` accessibility.
 
 ## Quick tour
 
 ```ignore
-use bastyde::prelude::*;
-use bastyde::widgets::{MessageBox, MessageBoxButtons, StandardButton};
+use teksilo::prelude::*;
+use teksilo::widgets::{MessageBox, MessageBoxButtons, StandardButton};
 
 fn on_close(ctx: &mut EventContext) {
     MessageBox::question(lit!("Save changes?"))
@@ -50,7 +50,7 @@ its tint:
   click-outside dismissal (Qt convention).
 - `None` — no icon, no tint.
 
-Severity is conveyed through the icon + title + text. Per Bastyde's
+Severity is conveyed through the icon + title + text. Per Teksilo's
 Int UI baseline, buttons are **never** colored as "destructive":
 destructive intent lives in the dialog's severity and wording, not
 in the button. See `crate::button` for details.
@@ -87,7 +87,7 @@ announce the dialog and its body on open.
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/message_box/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/message_box/index.html)
 
 ## `pub enum MessageBoxSeverity`
 
@@ -110,7 +110,7 @@ pub enum MessageBoxSeverity { /* variants */ }
 
 Semantic role of a message-box button. Used for fallback escape
 resolution (`Reject` wins when no explicit escape button is set).
-Bastyde deliberately does **not** render `Destructive` buttons with
+Teksilo deliberately does **not** render `Destructive` buttons with
 a red fill — the dialog's severity icon and wording carry that
 signal. See `crate::button` for the framework-level rationale.
 

@@ -23,8 +23,8 @@ announce nothing. The parent widget (e.g. `Button`, `IconButton`) is
 responsible for the accessible label.
 
 ```rust
-# use bastyde_widgets::primitives::icon_widget::{IconWidget, IconMode};
-# use bastyde_tokens::TextRole;
+# use teksilo_widgets::primitives::icon_widget::{IconWidget, IconMode};
+# use teksilo_tokens::TextRole;
 let _check = IconWidget::checkmark(20.0);
 
 let _chevron = IconWidget::chevron_down(16.0)
@@ -38,7 +38,7 @@ let _chevron = IconWidget::chevron_down(16.0)
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/primitives/icon_widget/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/primitives/icon_widget/index.html)
 
 ## `pub enum IconMode`
 
@@ -46,7 +46,7 @@ Whether an icon is rendered as a theme-tinted mask or in its original colors.
 
 Applies to every source an `IconWidget` can hold — raster *and* SVG. For an
 SVG the two modes select between the two representations the parser builds
-(see `bastyde_canvas::svg`): `Tintable` draws the merged
+(see `teksilo_canvas::svg`): `Tintable` draws the merged
 silhouette in the widget's color, `FullColor` walks the
 document-ordered ops and honours each shape's own fill / stroke / gradient.
 

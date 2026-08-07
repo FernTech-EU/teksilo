@@ -4,29 +4,29 @@
 # Reactive Data Models
 
 **Companion to:** [architecture.md](architecture.md), [charts.md](charts.md)
-**Scope:** The `bastyde-data` crate — `ListModel`, `TreeModel`, `TreeSlice`, `TreeDataSlice`, `TreeRowFilter`, `SelectionModel`, `CheckedModel`, `TreeCheckedModel`, `KeyedTreeCheckedModel`, `CheckState`, `ListDataSource`, `TreeDataSource`, `ChartModel`, `ChartWindow`, `ChartAggregate`, `ChartSelection`, and the change-notification enums that connect them to data-driven widgets (`ListView`, `TreeView`, `Repeater`) and to `bastyde-charts` (`BarChart` / `LineChart` / `PieChart`).
-**API reference:** the full rustdoc for every type lives at [`/api/bastyde_data/`](api/bastyde_data/index.html).
+**Scope:** The `teksilo-data` crate — `ListModel`, `TreeModel`, `TreeSlice`, `TreeDataSlice`, `TreeRowFilter`, `SelectionModel`, `CheckedModel`, `TreeCheckedModel`, `KeyedTreeCheckedModel`, `CheckState`, `ListDataSource`, `TreeDataSource`, `ChartModel`, `ChartWindow`, `ChartAggregate`, `ChartSelection`, and the change-notification enums that connect them to data-driven widgets (`ListView`, `TreeView`, `Repeater`) and to `teksilo-charts` (`BarChart` / `LineChart` / `PieChart`).
+**API reference:** the full rustdoc for every type lives at [`/api/teksilo_data/`](api/teksilo_data/index.html).
 
 ---
 
-## 1. Why bastyde-data is its own crate
+## 1. Why teksilo-data is its own crate
 
 Data models sit *above* the widget tree conceptually: a `ListModel<String>` has no idea whether it is rendered by a `ListView`, a `Repeater`, or pretty-printed to stdout. Keeping them in their own crate enforces that separation in the dependency graph.
 
-- `bastyde-core` → widgets, layout, events — the retained-tree infrastructure.
-- `bastyde-data` → reactive collections — depends on `bastyde-core` only for `Signal<T>` and `ObserverHandle` (utility plumbing).
-- `bastyde-widgets` → depends on both and consumes bastyde-data through its widgets.
+- `teksilo-core` → widgets, layout, events — the retained-tree infrastructure.
+- `teksilo-data` → reactive collections — depends on `teksilo-core` only for `Signal<T>` and `ObserverHandle` (utility plumbing).
+- `teksilo-widgets` → depends on both and consumes teksilo-data through its widgets.
 
-Application code that wants to share a `ListModel<Project>` between a Bastyde view and, say, a headless validation pipeline can depend on `bastyde-data` without pulling in the renderer. The Qleany Clean-Architecture consumer is the main beneficiary: a domain layer holds its entity collections as `ListModel<Entity>`, a view-model layer observes and transforms, and the view layer binds a `ListView` to the result. See §6 on MVVM below.
+Application code that wants to share a `ListModel<Project>` between a Teksilo view and, say, a headless validation pipeline can depend on `teksilo-data` without pulling in the renderer. The Qleany Clean-Architecture consumer is the main beneficiary: a domain layer holds its entity collections as `ListModel<Entity>`, a view-model layer observes and transforms, and the view layer binds a `ListView` to the result. See §6 on MVVM below.
 
-Cloning any bastyde-data handle produces a second handle to the same underlying data. There is no deep-copy semantics and no ownership complication — the models are `Rc<RefCell<…>>` inside, so clones cost two pointer copies and all see the same items.
+Cloning any teksilo-data handle produces a second handle to the same underlying data. There is no deep-copy semantics and no ownership complication — the models are `Rc<RefCell<…>>` inside, so clones cost two pointer copies and all see the same items.
 
 ## 2. `ListModel<T>` — the common case
 
 `ListModel<T>` is a concrete reactive list: a `Vec<T>` plus an observer list, behind an `Rc<RefCell<…>>`. Every mutation method (`push`, `insert`, `remove`, `set`, `move_item`, `replace_all`, `clear`) drops the mutable borrow *before* notifying observers, so a callback that reads `len()` or `with_item(...)` during the notification does not deadlock the cell.
 
 ```rust
-use bastyde_data::{ListModel, DataChange};
+use teksilo_data::{ListModel, DataChange};
 
 let projects: ListModel<Project> = ListModel::new();
 projects.push(Project::new("Widget Catalog"));
@@ -84,7 +84,7 @@ Two orthogonal companions ride *alongside* a tree view rather than being sources
 The tree equivalent of `ListModel<T>`. Nodes are stored in a `SlotMap<DefaultKey, TreeNode<T>>`; each node carries its data, a parent reference, and a `Vec<NodeId>` of children. `NodeId` is an opaque handle that is **stable across mutations** — inserting or removing other nodes does not invalidate existing handles. This is what lets a view (see TreeSlice below) remember an expanded-set of node IDs across a model mutation.
 
 ```rust
-use bastyde_data::{TreeModel, NodeId};
+use teksilo_data::{TreeModel, NodeId};
 
 let fs: TreeModel<FsEntry> = TreeModel::new();
 let docs: NodeId = fs.insert_root(0, FsEntry::dir("docs"));
@@ -122,12 +122,12 @@ Consumers access entries via `slice.with_entry(index, |data, entry| …)` and ge
 
 ### 4.4 `TreeDataSlice<K, T>` — the same, over an *external* tree
 
-`TreeSlice` needs a `TreeModel` to wrap. When the tree's source of truth lives **outside** bastyde — a Qleany entity store, a database, a virtual filesystem — and you don't want to mirror it into a `TreeModel`, `TreeDataSlice<K, T>` gives the same machinery over your own data. It is the tree counterpart of the `ListDataSource` escape hatch (§3), but *ready-made* rather than a bare trait — it implements `TreeDataSource` for you.
+`TreeSlice` needs a `TreeModel` to wrap. When the tree's source of truth lives **outside** teksilo — a Qleany entity store, a database, a virtual filesystem — and you don't want to mirror it into a `TreeModel`, `TreeDataSlice<K, T>` gives the same machinery over your own data. It is the tree counterpart of the `ListDataSource` escape hatch (§3), but *ready-made* rather than a bare trait — it implements `TreeDataSource` for you.
 
 You hand it the tree as a flat, **indent-ordered** row stream — the shape an outline is actually stored in (binders / chapters / scenes, OPML, Markdown headings) — and it derives the hierarchy:
 
 ```rust
-use bastyde_data::{TreeDataSlice, TreeRow};
+use teksilo_data::{TreeDataSlice, TreeRow};
 
 let slice: TreeDataSlice<EntityId, Row> = TreeDataSlice::new();
 slice.set_expand_new_nodes(true);          // new nodes appear expanded
@@ -183,7 +183,7 @@ It reuses the three `TreeFilterMode` strategies and sorts siblings per parent, t
 
 ## 5. `SelectionModel` — one rule set, two widgets
 
-Both `ListView` and `TreeView` share selection semantics, so selection lives in its own type in bastyde-data:
+Both `ListView` and `TreeView` share selection semantics, so selection lives in its own type in teksilo-data:
 
 ```rust
 pub enum SelectionMode { None, Single, Multi }
@@ -290,7 +290,7 @@ impl<T: 'static> TreeCheckedModel<T> {
 
 `TreeCheckedModel` defaults to `DescendantsDriveAncestors`: a parent's `CheckState` is `Checked` when all descendants are, `Unchecked` when none are, `Indeterminate` otherwise. Setting a parent cascades to all descendants. The `None` mode disables aggregation when nodes own their state independently.
 
-The `CheckState` enum (`Unchecked | Checked | Indeterminate`) lives in `bastyde-data` (re-exported from `bastyde::widgets::CheckState` for convenience). The `Checkbox` widget consumes it via `Checkbox::tristate(Signal<CheckState>)`; `StandardListItem.tristate_checkbox(...)` and `StandardTreeItem.tristate_checkbox(...)` accept the same signal.
+The `CheckState` enum (`Unchecked | Checked | Indeterminate`) lives in `teksilo-data` (re-exported from `teksilo::widgets::CheckState` for convenience). The `Checkbox` widget consumes it via `Checkbox::tristate(Signal<CheckState>)`; `StandardListItem.tristate_checkbox(...)` and `StandardTreeItem.tristate_checkbox(...)` accept the same signal.
 
 Wiring with the new row widgets:
 
@@ -388,23 +388,23 @@ Use `ListView` for **unbounded or large collections that scroll**:
 
 `ListView` and `TreeView` are drag sources and drop targets out of the box. Intra-widget reorder routes through `ListModel::move_item(from, to)` / `TreeModel::move_node(node, new_parent, new_index)`; the widget produces visual feedback (insertion lines, depth-tinted highlight on tree drop targets) and emits typed reorder intents. Cross-widget drag flows through `DragPayload`; external (OS) drops (files / text / URLs from another app) arrive as a `DragPayload` with `origin() == External` through the same handlers — see [architecture.md §14 Drag and Drop](architecture.md) and [drag-and-drop.md §11](drag-and-drop.md) for the full picture.
 
-The relevant bastyde-data hook is the `DataChange::ItemsMoved { from, to, count }` / `TreeChange::NodeMoved { node, old_parent, new_parent, new_index }` notifications. The source widget emits the mutation on the model; every observer of the model — including other `ListView`s sharing the data — receives the notification and updates consistently.
+The relevant teksilo-data hook is the `DataChange::ItemsMoved { from, to, count }` / `TreeChange::NodeMoved { node, old_parent, new_parent, new_index }` notifications. The source widget emits the mutation on the model; every observer of the model — including other `ListView`s sharing the data — receives the notification and updates consistently.
 
 ## 10. Qleany and adjacent-app integration
 
-For applications that already have a Clean Architecture split, bastyde-data sits naturally at the ViewModel layer:
+For applications that already have a Clean Architecture split, teksilo-data sits naturally at the ViewModel layer:
 
-- Qleany entities live in the domain crate, no bastyde dependency.
-- The view-model crate depends on bastyde-data to publish entity collections as `ListModel<EntityVM>`.
-- The view crate (widgets + windows) depends on bastyde-widgets and binds `ListView` / `TreeView` to those models.
+- Qleany entities live in the domain crate, no teksilo dependency.
+- The view-model crate depends on teksilo-data to publish entity collections as `ListModel<EntityVM>`.
+- The view crate (widgets + windows) depends on teksilo-widgets and binds `ListView` / `TreeView` to those models.
 
 The architecture doc's `EntityListModel` example shows the shape: a wrapper that observes a Qleany store, maps its entities through a presentation transform on change, and holds the result in a `ListModel<EntityVM>`. The widget side is unaware of Qleany.
 
-Nothing in bastyde-data requires Qleany. An application that uses `diesel` + raw structs, or one that streams events off a Kafka topic, follows the same pattern with whatever domain-layer types it prefers.
+Nothing in teksilo-data requires Qleany. An application that uses `diesel` + raw structs, or one that streams events off a Kafka topic, follows the same pattern with whatever domain-layer types it prefers.
 
 ## 11. Testing patterns
 
-bastyde-data is headless. Tests hold models, mutate them, and assert observer callbacks received the right `DataChange` / `TreeChange`:
+teksilo-data is headless. Tests hold models, mutate them, and assert observer callbacks received the right `DataChange` / `TreeChange`:
 
 ```rust
 let model = ListModel::<String>::new();
@@ -500,7 +500,7 @@ external `DataChange::Reset` contract of the proxies is unchanged.
 ## 14. Projecting an external source of truth
 
 §7 and §10 assume the view-model *owns* its model (the `QStandardItemModel`
-shape). When the **domain owns the data** and the bastyde model is a projection
+shape). When the **domain owns the data** and the teksilo model is a projection
 over it (a Qleany entity store, a DB, an event stream — the
 `QAbstractItemModel` shape), **implement a data source over the domain instead
 of mirroring it into a built-in model.**
@@ -549,8 +549,8 @@ configuration, not data.
 
 ## 15. `ChartModel`, projections, and selection
 
-`bastyde-charts` (`BarChart` / `LineChart` / `PieChart`) is the other
-consumer of bastyde-data besides the widget-catalog row views — it
+`teksilo-charts` (`BarChart` / `LineChart` / `PieChart`) is the other
+consumer of teksilo-data besides the widget-catalog row views — it
 gets its own model family rather than reusing `ListModel<T>` because
 chart data is two-level (series, then points within a series) and
 carries chart-specific concerns (a color per series, a visibility
@@ -563,12 +563,12 @@ covers the data-layer mechanism.
 
 ### 15.1 `ChartModel<T>` — the source
 
-[`ChartModel<T>`](../crates/bastyde-data/src/chart_model.rs) is a
+[`ChartModel<T>`](../crates/teksilo-data/src/chart_model.rs) is a
 concrete reactive multi-series chart data model, `Rc<RefCell<…>>`
 inside like every other model here — cloning shares the same series
 and points and all clones see the same `ChartChange` notifications.
 Series live in a flat `SlotMap` arena keyed by
-[`SeriesId`](../crates/bastyde-data/src/chart_change.rs) (an opaque,
+[`SeriesId`](../crates/teksilo-data/src/chart_change.rs) (an opaque,
 stable handle — the chart counterpart of `NodeId`: removing other
 series never invalidates an existing `SeriesId`), plus a separate
 `order: Vec<SeriesId>` giving display order independent of arena
@@ -576,7 +576,7 @@ layout. Each series holds a `Vec<ChartDatum<T>>` (`{ category: T,
 value: f32 }`).
 
 ```rust
-use bastyde_data::{ChartModel, ChartSeries, ChartDatum};
+use teksilo_data::{ChartModel, ChartSeries, ChartDatum};
 
 let model = ChartModel::from_series_vec(vec![
     ChartSeries::new("Revenue").data(vec![
@@ -591,7 +591,7 @@ model.push_point(revenue, "Q3".to_string(), 30.0);
 Every mutation method follows the mutate-then-notify discipline
 (drop the `RefCell` borrow, *then* notify) and does two things:
 
-1. Emits a [`ChartChange`](../crates/bastyde-data/src/chart_change.rs)
+1. Emits a [`ChartChange`](../crates/teksilo-data/src/chart_change.rs)
    describing exactly what changed — `SeriesInserted` / `SeriesRemoved`
    / `SeriesMoved` / `SeriesRenamed` / `SeriesColorChanged` /
    `SeriesVisibilityChanged` / `PointsInserted` / `PointsRemoved` /
@@ -630,7 +630,7 @@ of views) — so the `RefCell` borrow never escapes.
 
 ### 15.2 `ChartWindow<T>` — last-N-points streaming projection
 
-[`ChartWindow<T>`](../crates/bastyde-data/src/chart_window.rs) wraps a
+[`ChartWindow<T>`](../crates/teksilo-data/src/chart_window.rs) wraps a
 `ChartModel<T>` and exposes only the tail `window_size` points of
 every series — the live-scrolling-strip-chart pattern (a sensor feed,
 a log-rate graph, a stock ticker). Unlike `ChartAggregate` below, it
@@ -659,10 +659,10 @@ because chart data is naturally two-level.
 
 ### 15.3 `ChartAggregate<T>` — bucket/rollup projection
 
-[`ChartAggregate<T>`](../crates/bastyde-data/src/chart_aggregate.rs)
+[`ChartAggregate<T>`](../crates/teksilo-data/src/chart_aggregate.rs)
 wraps a `ChartModel<T>` and reduces each series into fixed-size
 buckets of `bucket_size` source points, each collapsed to one
-`ChartDatum` via a [`ChartAggregateFn`](../crates/bastyde-data/src/chart_aggregate.rs)
+`ChartDatum` via a [`ChartAggregateFn`](../crates/teksilo-data/src/chart_aggregate.rs)
 — `Mean` / `Sum` / `Min` / `Max` / `First` / `Last` / `Custom(Rc<dyn
 Fn(&[f32]) -> f32>)`. The "downsample a long series for display"
 pattern — a year of daily sensor readings shown as weekly means, a
@@ -688,7 +688,7 @@ Same per-series `first_changed_index()` side-channel as `ChartWindow`.
 
 ### 15.4 `ChartSelection` — point-level selection
 
-[`ChartSelection`](../crates/bastyde-data/src/chart_selection.rs) is
+[`ChartSelection`](../crates/teksilo-data/src/chart_selection.rs) is
 the chart counterpart of `SelectionModel` (§5) / `KeyedSelectionModel`
 — it manages which `(SeriesId, usize)` pairs are selected across a
 `ChartModel`, share-by-clone like the model itself, with the current
@@ -719,7 +719,7 @@ which points are selected. `prune(exists)` drops any selected point
 `exists` rejects — the same shape as `KeyedTreeCheckedModel::prune_missing`
 (§6.1).
 
-`ChartWindow` and `ChartAggregate` stay pure `bastyde-data` building
+`ChartWindow` and `ChartAggregate` stay pure `teksilo-data` building
 blocks an app composes on top of a `ChartModel` (feed a `ChartWindow`'s
 or `ChartAggregate`'s output into a fresh `ChartModel::from_series_vec`
 snapshot). `ChartSelection` is wired in directly, though: all three
@@ -740,8 +740,8 @@ wiring.
 - [architecture.md §6 UI Construction Patterns](architecture.md) — `Repeater` in context, static-vs-dynamic children.
 - [architecture.md §14 Drag and Drop](architecture.md) — `DragPayload`, cross-widget reorder.
 - [shortcut-intent-action.md](shortcut-intent-action.md) — typed intents, ancestor `Action`s, how the MVVM command layer lands in Rust.
-- [crates/bastyde-data/src/list_model.rs](../crates/bastyde-data/src/list_model.rs), [tree_model.rs](../crates/bastyde-data/src/tree_model.rs), [tree_slice.rs](../crates/bastyde-data/src/tree_slice.rs), [tree_data_slice.rs](../crates/bastyde-data/src/tree_data_slice.rs), [tree_row_filter.rs](../crates/bastyde-data/src/tree_row_filter.rs), [selection_model.rs](../crates/bastyde-data/src/selection_model.rs), [list_data_source.rs](../crates/bastyde-data/src/list_data_source.rs), [tree_data_source.rs](../crates/bastyde-data/src/tree_data_source.rs), [keyed_tree_checked_model.rs](../crates/bastyde-data/src/keyed_tree_checked_model.rs).
-- [crates/bastyde-data/src/data_change.rs](../crates/bastyde-data/src/data_change.rs), [tree_change.rs](../crates/bastyde-data/src/tree_change.rs).
-- [crates/bastyde-data/src/chart_model.rs](../crates/bastyde-data/src/chart_model.rs) (§15) — `ChartModel<T>`, `ChartChange`, `SeriesId`; see also [chart_window.rs](../crates/bastyde-data/src/chart_window.rs), [chart_aggregate.rs](../crates/bastyde-data/src/chart_aggregate.rs), [chart_selection.rs](../crates/bastyde-data/src/chart_selection.rs).
+- [crates/teksilo-data/src/list_model.rs](../crates/teksilo-data/src/list_model.rs), [tree_model.rs](../crates/teksilo-data/src/tree_model.rs), [tree_slice.rs](../crates/teksilo-data/src/tree_slice.rs), [tree_data_slice.rs](../crates/teksilo-data/src/tree_data_slice.rs), [tree_row_filter.rs](../crates/teksilo-data/src/tree_row_filter.rs), [selection_model.rs](../crates/teksilo-data/src/selection_model.rs), [list_data_source.rs](../crates/teksilo-data/src/list_data_source.rs), [tree_data_source.rs](../crates/teksilo-data/src/tree_data_source.rs), [keyed_tree_checked_model.rs](../crates/teksilo-data/src/keyed_tree_checked_model.rs).
+- [crates/teksilo-data/src/data_change.rs](../crates/teksilo-data/src/data_change.rs), [tree_change.rs](../crates/teksilo-data/src/tree_change.rs).
+- [crates/teksilo-data/src/chart_model.rs](../crates/teksilo-data/src/chart_model.rs) (§15) — `ChartModel<T>`, `ChartChange`, `SeriesId`; see also [chart_window.rs](../crates/teksilo-data/src/chart_window.rs), [chart_aggregate.rs](../crates/teksilo-data/src/chart_aggregate.rs), [chart_selection.rs](../crates/teksilo-data/src/chart_selection.rs).
 - [examples/data_collections](../examples/data_collections/) — runnable demonstration of ListView, TreeView, Repeater, SelectionModel, and intra-widget DnD.
-- [examples/chart_demo](../examples/chart_demo/) — `bastyde-charts` demo; see [charts.md](charts.md) for the chart-widget side of `ChartModel`.
+- [examples/chart_demo](../examples/chart_demo/) — `teksilo-charts` demo; see [charts.md](charts.md) for the chart-widget side of `ChartModel`.

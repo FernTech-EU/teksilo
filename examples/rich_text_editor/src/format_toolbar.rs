@@ -3,26 +3,26 @@
 
 //! Two-row formatting toolbar for the rich_text_editor example.
 //!
-//! Built against [`bastyde::widgets::rich_text::EditorHandle`], which
+//! Built against [`teksilo::widgets::rich_text::EditorHandle`], which
 //! exposes the editor's command and signal API in a clone-able form
 //! suitable for closure captures. The toolbar drives every reactive
 //! pattern a third-party formatting toolbar needs:
 //!
 //! * Per-button `Signal<bool>` mirroring inline format state
 //!   (Bold / Italic / Underline / Strikethrough). The signal is a
-//!   regular `bastyde::Signal` (not derived) — required because
-//!   [`bastyde::widgets::IconButton::toggle`] writes back on click,
+//!   regular `teksilo::Signal` (not derived) — required because
+//!   [`teksilo::widgets::IconButton::toggle`] writes back on click,
 //!   and derived signals are read-only.
 //! * A four-way mutually-exclusive alignment group. The same
 //!   [`IconButton::toggle`] click-flip applies, so the activation
 //!   closure re-syncs all four signals immediately after setting the
 //!   alignment — that defeats the click-flip when the user clicks
 //!   the already-active alignment.
-//! * A two-way bound [`bastyde::widgets::ComboBox`] heading picker.
+//! * A two-way bound [`teksilo::widgets::ComboBox`] heading picker.
 //!   Editor→picker writes go through one `ctx.effect`; picker→editor
 //!   writes go through another, guarded by an explicit value check
 //!   (because [`Signal::set`] does not short-circuit on equal values).
-//! * Contextual enable via [`bastyde::core::build_context::BuildContext::enabled_when`]
+//! * Contextual enable via [`teksilo::core::build_context::BuildContext::enabled_when`]
 //!   for the table-operations row, which disables when the caret is
 //!   outside any table.
 //!
@@ -30,13 +30,13 @@
 //! across toolbar clicks — Ctrl+B typed after a toolbar click still
 //! reaches the editor.
 
-use bastyde::canvas::svg::SvgIcon;
-use bastyde::core::widget::WidgetPlacement;
-use bastyde::prelude::*;
-use bastyde::res;
-use bastyde::text_document::Alignment;
-use bastyde::widgets::rich_text::{EditorHandle, RichTextEditor};
-use bastyde::widgets::{ComboBox, Divider, FontPicker, IconButton, IconWidget, Toolbar, VStack};
+use teksilo::canvas::svg::SvgIcon;
+use teksilo::core::widget::WidgetPlacement;
+use teksilo::prelude::*;
+use teksilo::res;
+use teksilo::text_document::Alignment;
+use teksilo::widgets::rich_text::{EditorHandle, RichTextEditor};
+use teksilo::widgets::{ComboBox, Divider, FontPicker, IconButton, IconWidget, Toolbar, VStack};
 
 /// Heading level shown in the picker. Matches the HTML `<h1>..<h6>`
 /// convention; `Normal` is the plain-paragraph option (level 0).
@@ -643,8 +643,8 @@ fn alignment_action(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bastyde::core::widget_tree::WidgetTree;
-    use bastyde::text_document::TextDocument;
+    use teksilo::core::widget_tree::WidgetTree;
+    use teksilo::text_document::TextDocument;
 
     #[test]
     fn format_toolbar_builds_and_lays_out() {

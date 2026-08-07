@@ -37,7 +37,7 @@ falls back to a full per-series rebuild reported as
 `SeriesDataReplaced`. A `PointUpdated` recomputes just its own bucket.
 
 ```ignore
-use bastyde_data::{ChartModel, ChartAggregate, ChartAggregateFn};
+use teksilo_data::{ChartModel, ChartAggregate, ChartAggregateFn};
 let model: ChartModel<i32> = ChartModel::new();
 let s = model.add_series("daily");
 for i in 0..70 {
@@ -53,7 +53,7 @@ assert_eq!(weekly.point_count(s), 10); // 70 / 7
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_data/chart_aggregate/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_data/chart_aggregate/index.html)
 
 ## `pub enum ChartAggregateFn`
 

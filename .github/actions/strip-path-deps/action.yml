@@ -11,7 +11,7 @@ runs:
       shell: bash
       run: |
         # Only strip path attrs whose value starts with `..` (external siblings:
-        # text-typeset, text-document, bastyde-collector-proto). Internal crates
+        # text-typeset, text-document, teksilo-collector-proto). Internal crates
         # live under `crates/...` and MUST keep their path — they are unpublished
         # (workspace is publish = false), so a crates.io fallback would fail.
         sed -i.bak -E \

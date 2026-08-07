@@ -25,10 +25,10 @@
 use std::cell::Cell;
 use std::rc::Rc;
 
-use bastyde::core::widget::WidgetPlacement;
-use bastyde::data::ListModel;
-use bastyde::prelude::*;
-use bastyde::widgets::{
+use teksilo::core::widget::WidgetPlacement;
+use teksilo::data::ListModel;
+use teksilo::prelude::*;
+use teksilo::widgets::{
     Badge, Breadcrumb, BreadcrumbItem, Button, ButtonVariant, Card, HStack, IconWidget, MessageBox,
     MessageBoxButtons, Panel, StandardButton, TabBarOrientation, TabHandle, TabId, TabInfo,
     TabSizing, TabWidget, TextWidget, VStack,
@@ -139,7 +139,7 @@ impl Widget for Root {
                 model_for_new.push(new_doc_tab(n));
             });
 
-        let theme_btn = bastyde::widgets::ThemeSwitcher::new();
+        let theme_btn = teksilo::widgets::ThemeSwitcher::new();
 
         let orientation_for_btn = self.orientation.clone();
         let orient_btn = Button::new(lit!("Orient"))
@@ -353,7 +353,7 @@ impl Widget for Root {
         // TabWidget collapses to its natural height and the
         // window's vertical area shows mostly empty Panel.
         let tabs_filling = ctx.add(
-            bastyde::widgets::Expand::vertical()
+            teksilo::widgets::Expand::vertical()
                 .respect_intrinsic()
                 .child_id(tabs),
         );
@@ -565,10 +565,10 @@ fn doc_pane(state: &DocState) -> impl Widget + 'static {
 }
 
 fn main() {
-    BastydeAppBuilder::new()
+    TeksiloAppBuilder::new()
         .install_automation_bridge_in_debug()
         .install_inspector_in_debug()
-        .theme(bastyde::presets::intui::light())
+        .theme(teksilo::presets::intui::light())
         .initial_window(
             WindowConfig::new()
                 .title("TabWidget — Showcase")

@@ -45,7 +45,7 @@ accessibility semantics. The scope node is never itself a Tab stop
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/focus_scope/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/focus_scope/index.html)
 
 ## `pub struct FocusScope`
 
@@ -64,7 +64,7 @@ Create a traversal scope with the given boundary `policy`.
 
 #### `pub fn child(mut self, widget: impl Widget + 'static) -> Self`
 
-Inline child widget (deferred insertion — the form `bati!` lowers to).
+Inline child widget (deferred insertion — the form `teksu!` lowers to).
 
 #### `pub fn child_id(mut self, id: WidgetId) -> Self`
 

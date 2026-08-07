@@ -5,7 +5,7 @@
 
 Selection model for `Scene` items.
 
-Mirrors the API of `bastyde_data::SelectionModel` but keyed by
+Mirrors the API of `teksilo_data::SelectionModel` but keyed by
 `ItemId` instead of `usize` — the natural address for scene
 entries. Click-to-select, Ctrl+click toggle, Shift+click range,
 and marquee box-select all flow through this single model;
@@ -17,11 +17,11 @@ so `SceneItem` paint code can render selected items differently
 by binding their colors / strokes to a derived signal:
 
 ```
-# use bastyde_scene::{SceneModel, SceneSelection, SceneSelectionMode};
-# use bastyde_canvas::{Point, Rect};
-# use bastyde_tokens::Color;
+# use teksilo_scene::{SceneModel, SceneSelection, SceneSelectionMode};
+# use teksilo_canvas::{Point, Rect};
+# use teksilo_tokens::Color;
 # let model = SceneModel::new();
-# let card_id = model.add_item(bastyde_scene::RectItem::new(Rect::new(0.0, 0.0, 100.0, 80.0)), Point::ZERO);
+# let card_id = model.add_item(teksilo_scene::RectItem::new(Rect::new(0.0, 0.0, 100.0, 80.0)), Point::ZERO);
 let selection = SceneSelection::new(SceneSelectionMode::Multi);
 let selected = selection.selection_signal();
 let stroke_color = selected.map(move |s| {
@@ -35,11 +35,11 @@ let stroke_color = selected.map(move |s| {
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_scene/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_scene/index.html)
 
 ## `pub enum SceneSelectionMode`
 
-Selection-mode discriminator. Mirrors `bastyde_data::SelectionMode`.
+Selection-mode discriminator. Mirrors `teksilo_data::SelectionMode`.
 
 ```rust
 pub enum SceneSelectionMode { /* variants */ }

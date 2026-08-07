@@ -15,15 +15,15 @@ matching Windows Explorer, macOS path bar, and web breadcrumb conventions.
 ## Building a trail
 
 ```rust
-# use bastyde_widgets::{Breadcrumb, BreadcrumbItem};
-# use bastyde_core::Intent;
-# use bastyde_i18n::lit;
+# use teksilo_widgets::{Breadcrumb, BreadcrumbItem};
+# use teksilo_core::Intent;
+# use teksilo_i18n::lit;
 let _bc = Breadcrumb::new()
     .item(BreadcrumbItem::new(lit!("Home"))
         .on_activate_fn(|ctx| ctx.send_intent(Intent::new("app.nav.home"))))
     .item(BreadcrumbItem::new(lit!("Projects"))
         .on_activate_fn(|ctx| ctx.send_intent(Intent::new("app.nav.projects"))))
-    .item(BreadcrumbItem::current(lit!("Bastyde")));
+    .item(BreadcrumbItem::current(lit!("Teksilo")));
 ```
 
 ## Accessibility
@@ -39,7 +39,7 @@ chevrons are hidden from the AT tree. The `…` overflow button declares
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/breadcrumb/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/breadcrumb/index.html)
 
 ## `pub const BREADCRUMB_ITEM_HEIGHT`
 

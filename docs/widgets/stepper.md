@@ -46,7 +46,7 @@ Stepper::new()
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/stepper/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/stepper/index.html)
 
 ## `pub enum StepperOrientation`
 

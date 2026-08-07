@@ -23,8 +23,8 @@
 
 use std::time::Duration;
 
-use bastyde::prelude::*;
-use bastyde::widgets::{
+use teksilo::prelude::*;
+use teksilo::widgets::{
     Blur, Button, ButtonVariant, Card, Center, Collapse, Crossfade, Cycle, Divider, Expand, Fade,
     FixedSize, HStack, Padding, Panel, ProgressBar, Pulse, RectWidget, Rotate, Scale, ScaleOrigin,
     ScrollArea, Shake, Slide, SlideEdge, SmoothSize, Spacer, Spinner, TextWidget, Toggle, Toolbar,
@@ -35,18 +35,18 @@ fn dark_mode_toolbar() -> impl Widget {
     Toolbar::new().child(
         HStack::new()
             .child(Spacer::new())
-            .child(bastyde::widgets::ThemeSwitcher::new()),
+            .child(teksilo::widgets::ThemeSwitcher::new()),
     )
 }
 
 fn main() {
-    BastydeAppBuilder::new()
+    TeksiloAppBuilder::new()
         .install_automation_bridge_in_debug()
         .install_inspector_in_debug()
-        .theme(bastyde::presets::intui::light())
+        .theme(teksilo::presets::intui::light())
         .initial_window(
             WindowConfig::new()
-                .title("Bastyde — Animations Kit")
+                .title("Teksilo — Animations Kit")
                 .size(560, 720)
                 .root(|tree, _state| {
                     let toggle_state = Signal::new(false);
@@ -345,7 +345,7 @@ fn build_kit(
                             angle.animate_to(
                                 target,
                                 Duration::from_millis(400),
-                                bastyde::tokens::Easing::EaseOut,
+                                teksilo::tokens::Easing::EaseOut,
                             );
                         })
                 }),
@@ -373,7 +373,7 @@ fn build_kit(
                             radius.animate_to(
                                 target,
                                 Duration::from_millis(220),
-                                bastyde::tokens::Easing::EaseOut,
+                                teksilo::tokens::Easing::EaseOut,
                             );
                         }),
                 )

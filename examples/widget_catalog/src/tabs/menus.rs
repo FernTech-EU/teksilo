@@ -3,8 +3,8 @@
 
 //! Menus tab — MenuBar, MenuList, MenuItem.
 
-use bastyde::prelude::*;
-use bastyde::widgets::{
+use teksilo::prelude::*;
+use teksilo::widgets::{
     CollapsePolicy, Divider, FixedSize, HStack, MenuBar, MenuItem, MenuList, Slider, TextWidget,
     VStack,
 };
@@ -152,15 +152,15 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     )
 }
 
-pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
-    // MenuBar's `.menu(...)` method takes a closure — bati! property
+pub fn teksu(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
+    // MenuBar's `.menu(...)` method takes a closure — teksu! property
     // syntax can't express that cleanly, so we pre-register.
     let menu_bar = ctx.add(make_menu_bar());
     let collapsible_width = ctx.signal(160.0_f32);
     let collapsible = ctx.add(collapsible_section(collapsible_width));
     let menu_list = ctx.add(make_menu_list());
 
-    bati!(ctx => VStack {
+    teksu!(ctx => VStack {
             spacing: 20.0
             VStack {
                 spacing: 4.0

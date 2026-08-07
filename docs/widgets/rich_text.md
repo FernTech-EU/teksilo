@@ -22,7 +22,7 @@ palette panels issue formatting commands from closures that cannot borrow the
 editor directly.
 
 ```ignore
-use bastyde_text::text_document::TextDocument;
+use teksilo_text::text_document::TextDocument;
 let doc = TextDocument::new();
 let editor = RichTextEditor::editor(doc)
     .min_lines(3)
@@ -36,7 +36,7 @@ let editor = RichTextEditor::editor(doc)
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/rich_text/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/rich_text/index.html)
 
 ## `pub enum ScrollPolicy`
 
@@ -151,7 +151,7 @@ Painting is a separate concern: a highlight session draws the underline. A
 highlight carries no text and this carries no colour, so neither is
 derivable from the other and both are supplied independently.
 
-#### `pub fn set_highlight_mask(&self, mask: bastyde_text::text_document::HighlightMask)`
+#### `pub fn set_highlight_mask(&self, mask: teksilo_text::text_document::HighlightMask)`
 
 Set which highlight sessions **this view** renders, at runtime.
 
@@ -316,7 +316,7 @@ children, so the editor lands at its intrinsic height —
 exactly the messenger-composer / chat-input pattern.
 
 A parent that *forces* the height (e.g. `FixedSize`) wins
-regardless. This is intentional and matches Bastyde's
+regardless. This is intentional and matches Teksilo's
 general layout discipline: parents always have the final
 say on the dimensions they pin.
 
@@ -357,7 +357,7 @@ preference. Composed as
 Clamped to `[0.1, 10.0]`. Use `set_font_size_scale`
 after mount.
 
-#### `pub fn context_menu( mut self, factory: impl Fn( bastyde_canvas::Point, &mut bastyde_core::widget::EventContext, ) -> Option<Box<dyn bastyde_core::widget::Widget>> + 'static, ) -> Self`
+#### `pub fn context_menu( mut self, factory: impl Fn( teksilo_canvas::Point, &mut teksilo_core::widget::EventContext, ) -> Option<Box<dyn teksilo_core::widget::Widget>> + 'static, ) -> Self`
 
 Replace the built-in right-click context menu with a
 user-provided factory. Same shape as the framework's
@@ -397,7 +397,7 @@ regardless of this flag — this setter only governs the
 
 Install a custom font registrar for the fallback private
 engine. Only has effect when the editor is built outside a
-windowed bastyde-app — once `build()` sees a `SharedTypesetter`
+windowed teksilo-app — once `build()` sees a `SharedTypesetter`
 in `app_state`, the private engine is replaced with one that
 shares the app's typesetter and this registrar is ignored.
 
@@ -586,7 +586,7 @@ highlight marks the range and a subsequent replace acts on it. Used to select a 
 match. (The non-collapsing two-call shape is the same one the AccessKit
 `SetTextSelection` handler uses.)
 
-#### `pub fn reveal_range( &self, ctx: &mut bastyde_core::widget::EventContext, start: usize, end: usize, )`
+#### `pub fn reveal_range( &self, ctx: &mut teksilo_core::widget::EventContext, start: usize, end: usize, )`
 
 Scroll the character range ``start, end)` into view within the enclosing scroll area.
 
@@ -919,7 +919,7 @@ borrow of `&editor`: `RichTextEditor` itself is move-only
 (the optional context-menu factory holds a `Box<dyn Fn>`,
 which prevents `Clone`).
 
-#### `pub fn copy(&self, ctx: &bastyde_core::widget::EventContext)`
+#### `pub fn copy(&self, ctx: &teksilo_core::widget::EventContext)`
 
 Copy the current selection to the system clipboard (plain +
 HTML payloads). No-op when there is no selection.
@@ -930,21 +930,21 @@ need read access — the clipboard handle is looked up via
 `&mut EventContext` can pass `&ctx` directly; Rust reborrows
 automatically.
 
-#### `pub fn cut(&self, ctx: &bastyde_core::widget::EventContext)`
+#### `pub fn cut(&self, ctx: &teksilo_core::widget::EventContext)`
 
 Cut the current selection: copy first, then remove.
 
-#### `pub fn paste(&self, ctx: &bastyde_core::widget::EventContext)`
+#### `pub fn paste(&self, ctx: &teksilo_core::widget::EventContext)`
 
 Paste from the system clipboard. Prefers an in-process fragment
 over HTML over plain text — see
 `rich_text/clipboard.rs`.
 
-#### `pub fn paste_unformatted(&self, ctx: &bastyde_core::widget::EventContext)`
+#### `pub fn paste_unformatted(&self, ctx: &teksilo_core::widget::EventContext)`
 
 Paste plain text only, stripping any rich payload.
 
-#### `pub fn can_paste(&self, ctx: &bastyde_core::widget::EventContext) -> bool`
+#### `pub fn can_paste(&self, ctx: &teksilo_core::widget::EventContext) -> bool`
 
 Whether a paste would insert anything — `true` iff the system
 clipboard carries text **or** an HTML payload (the shapes
@@ -1008,7 +1008,7 @@ or it will force a reshape on every caret move.
 
 What this editor's caret band is currently configured to draw.
 
-#### `pub fn caret_window_rect(&self) -> Option<bastyde_canvas::Rect>`
+#### `pub fn caret_window_rect(&self) -> Option<teksilo_canvas::Rect>`
 
 The caret's rectangle in **absolute window (tree) coordinates**, or
 `None` when the editor is unfocused or has not been laid out yet.
@@ -1033,7 +1033,7 @@ an async `set_html` / `set_markdown` import completes). Starts
 at 0; observers see a new value each time a long import
 finishes.
 
-#### `pub fn on_link_activated( self, handler: impl Fn(&str, &mut bastyde_core::widget::EventContext) + 'static, ) -> Self`
+#### `pub fn on_link_activated( self, handler: impl Fn(&str, &mut teksilo_core::widget::EventContext) + 'static, ) -> Self`
 
 Install a callback fired when the user Primary-clicks a link
 (an element with an anchor `href`). The callback receives the
@@ -1043,7 +1043,7 @@ The callback replaces any prior link-click callback on this
 builder chain. To stop observing, reconstruct the editor
 without the setter.
 
-#### `pub fn on_image_activated( self, handler: impl Fn(&str, &mut bastyde_core::widget::EventContext) + 'static, ) -> Self`
+#### `pub fn on_image_activated( self, handler: impl Fn(&str, &mut teksilo_core::widget::EventContext) + 'static, ) -> Self`
 
 Install a callback fired when the user Primary-clicks an inline
 image. The callback receives the image's resource name and the
@@ -1258,12 +1258,12 @@ is preserved). Call this at the top of a custom
 — and any caret-relative action — operates where the user clicked, exactly
 as the built-in menu and the single-line field do.
 
-#### `pub fn reveal_range( &self, ctx: &mut bastyde_core::widget::EventContext, start: usize, end: usize, )`
+#### `pub fn reveal_range( &self, ctx: &mut teksilo_core::widget::EventContext, start: usize, end: usize, )`
 
 Scroll the character range `[start, end)` into view. A no-op until the
 editor has a full layout. See `RichTextEditor::reveal_range`.
 
-#### `pub fn focus(&self, ctx: &mut bastyde_core::widget::EventContext)`
+#### `pub fn focus(&self, ctx: &mut teksilo_core::widget::EventContext)`
 
 Move keyboard focus onto the editor. Lets a control built *above* the
 editor — a find banner returning focus to the prose on Escape — put the
@@ -1353,7 +1353,7 @@ settings or theme effect after the editor is mounted.
 
 What this editor's caret band is currently configured to draw.
 
-#### `pub fn caret_window_rect(&self) -> Option<bastyde_canvas::Rect>`
+#### `pub fn caret_window_rect(&self) -> Option<teksilo_canvas::Rect>`
 
 The caret's rectangle in **absolute window (tree) coordinates** — the
 `EditorHandle` counterpart of `RichTextEditor::caret_window_rect`.
@@ -1588,28 +1588,28 @@ Close the group opened by `begin_edit_block`.
 
 Run `edits` as one undo entry — the pairing-safe form.
 
-#### `pub fn copy(&self, ctx: &bastyde_core::widget::EventContext)`
+#### `pub fn copy(&self, ctx: &teksilo_core::widget::EventContext)`
 
 Copy the current selection to the system clipboard (plain + HTML
 payloads). No-op when there is no selection. See
 `RichTextEditor::copy`.
 
-#### `pub fn cut(&self, ctx: &bastyde_core::widget::EventContext)`
+#### `pub fn cut(&self, ctx: &teksilo_core::widget::EventContext)`
 
 Cut the current selection: copy first, then remove. See
 `RichTextEditor::cut`.
 
-#### `pub fn paste(&self, ctx: &bastyde_core::widget::EventContext)`
+#### `pub fn paste(&self, ctx: &teksilo_core::widget::EventContext)`
 
 Paste from the system clipboard. Prefers an in-process fragment
 over HTML over plain text. See `RichTextEditor::paste`.
 
-#### `pub fn paste_unformatted(&self, ctx: &bastyde_core::widget::EventContext)`
+#### `pub fn paste_unformatted(&self, ctx: &teksilo_core::widget::EventContext)`
 
 Paste plain text only, stripping any rich payload. See
 `RichTextEditor::paste_unformatted`.
 
-#### `pub fn can_paste(&self, ctx: &bastyde_core::widget::EventContext) -> bool`
+#### `pub fn can_paste(&self, ctx: &teksilo_core::widget::EventContext) -> bool`
 
 Whether a paste would insert anything — `true` iff the system
 clipboard carries text **or** an HTML payload. A point-in-time

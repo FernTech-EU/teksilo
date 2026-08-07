@@ -3,9 +3,9 @@
 
 use std::time::Duration;
 
-use bastyde::core::WidgetPlacement;
-use bastyde::prelude::*;
-use bastyde::widgets::{
+use teksilo::core::WidgetPlacement;
+use teksilo::prelude::*;
+use teksilo::widgets::{
     Badge, Button, ButtonVariant, Dialog, DialogContent, EventContextMessageBoxExt, Expand, HStack,
     MessageBox, MessageBoxButton, MessageBoxButtons, Panel, Popover, ScrollArea, Snackbar, Spacer,
     StandardButton, TextWidget, Toolbar, VStack,
@@ -15,7 +15,7 @@ fn dark_mode_toolbar() -> impl Widget {
     Toolbar::new().child(
         HStack::new()
             .child(Spacer::new())
-            .child(bastyde::widgets::ThemeSwitcher::new()),
+            .child(teksilo::widgets::ThemeSwitcher::new()),
     )
 }
 
@@ -127,7 +127,7 @@ impl OverlayDemo {
             .on_activate_fn(move |ctx| {
                 let record = record_welcome.clone();
                 ctx.present_message_box(
-                    MessageBox::information(lit!("Welcome to Bastyde"))
+                    MessageBox::information(lit!("Welcome to Teksilo"))
                         .text(lit!(
                             "This demo showcases the MessageBox pipeline across severities."
                         ))
@@ -271,7 +271,7 @@ impl Widget for OverlayDemo {
                         .supporting_text(lit!("The framework chooses the best modal presentation for the current backend: a native modal child window when reliable, otherwise a centered in-tree dialog."),
                         )
                         .body(
-                            TextWidget::new(lit!("The app code does not branch on Wayland or window-system support here; it issues one modal request and lets Bastyde resolve it."),
+                            TextWidget::new(lit!("The app code does not branch on Wayland or window-system support here; it issues one modal request and lets Teksilo resolve it."),
                             )
                             .style(TextStyleRole::Body)
                             .color(TextRole::Secondary),
@@ -295,7 +295,7 @@ impl Widget for OverlayDemo {
                             .color(TextRole::Primary),
                     )
                     .child(
-                        TextWidget::new(lit!("Bastyde now resolves dialogs through a shared modal presentation pipeline, alongside anchored popovers and timed snackbars."),
+                        TextWidget::new(lit!("Teksilo now resolves dialogs through a shared modal presentation pipeline, alongside anchored popovers and timed snackbars."),
                         )
                         .style(TextStyleRole::Body)
                         .color(TextRole::Secondary),
@@ -359,7 +359,7 @@ impl Widget for OverlayDemo {
                                         .color(TextRole::Primary),
                                 )
                                 .child(
-                                    TextWidget::new(lit!("Dialogs now share one modal request API. Footer actions can dismiss the current modal without knowing whether Bastyde resolved it to an in-tree overlay or a native modal child window."),
+                                    TextWidget::new(lit!("Dialogs now share one modal request API. Footer actions can dismiss the current modal without knowing whether Teksilo resolved it to an in-tree overlay or a native modal child window."),
                                     )
                                     .style(TextStyleRole::Body)
                                     .color(TextRole::Secondary),
@@ -406,10 +406,10 @@ impl Widget for OverlayDemo {
 }
 
 fn main() {
-    BastydeAppBuilder::new()
+    TeksiloAppBuilder::new()
         .install_automation_bridge_in_debug()
         .install_inspector_in_debug()
-        .theme(bastyde::presets::intui::light())
+        .theme(teksilo::presets::intui::light())
         .initial_window(
             WindowConfig::new()
                 .title("Dialogs and Popovers")

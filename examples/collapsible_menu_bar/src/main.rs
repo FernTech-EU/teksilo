@@ -26,11 +26,11 @@
 //!
 //! Run with: `cargo run -p collapsible-menu-bar`
 
-use bastyde::IntentKind;
-use bastyde::core::Action;
-use bastyde::core::shortcut::{KeyStroke, Shortcut};
-use bastyde::prelude::*;
-use bastyde::widgets::{
+use teksilo::IntentKind;
+use teksilo::core::Action;
+use teksilo::core::shortcut::{KeyStroke, Shortcut};
+use teksilo::prelude::*;
+use teksilo::widgets::{
     Button, ButtonVariant, CollapsePolicy, Divider, Expand, FixedSize, HStack, MenuBar, MenuItem,
     MenuList, Padding, Panel, ScrollArea, Slider, StatusBar, TextWidget, VStack,
 };
@@ -274,13 +274,13 @@ impl Widget for Root {
 }
 
 fn main() {
-    BastydeAppBuilder::new()
+    TeksiloAppBuilder::new()
         .install_automation_bridge_in_debug()
         .install_inspector_in_debug()
-        .theme(bastyde::presets::intui::light())
+        .theme(teksilo::presets::intui::light())
         .initial_window(
             WindowConfig::new()
-                .title("Bastyde — Collapsible MenuBar")
+                .title("Teksilo — Collapsible MenuBar")
                 .size(900, 640)
                 .root(|tree, _state| tree.add(Root::new())),
         )

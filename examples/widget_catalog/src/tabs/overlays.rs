@@ -7,8 +7,8 @@
 use std::rc::Rc;
 use std::time::Duration;
 
-use bastyde::prelude::*;
-use bastyde::widgets::{
+use teksilo::prelude::*;
+use teksilo::widgets::{
     Button, ButtonVariant, Divider, EventContextMessageBoxExt, MaxSize, MessageBox,
     MessageBoxButtons, Panel, Popover, ProgressBar, Snackbar, Spacer, TabInfo, TabWidget,
     TextWidget, VStack, Wrap,
@@ -175,7 +175,7 @@ fn province_composite_body() -> impl Widget + 'static {
 /// (dark-on-dark in the light theme). Tab content text uses
 /// `TextRole::TooltipText` for the same reason.
 fn tabbed_composite_body() -> impl Widget + 'static {
-    let selected: Signal<Option<bastyde::widgets::tab_widget::TabId>> = Signal::new(None);
+    let selected: Signal<Option<teksilo::widgets::tab_widget::TabId>> = Signal::new(None);
     let body = TabWidget::new(selected)
         .selected_text_role(TextRole::TooltipText)
         .idle_text_role(TextRole::TooltipShortcut)
@@ -428,7 +428,7 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     )
 }
 
-pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
+pub fn teksu(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     // Popover.content(VStack with chained children), Snackbar
     // .content+.trigger+chained — the chained imperative form is the
     // straightforward reading; pre-register and splice via #{...}.
@@ -459,7 +459,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     let archive = ctx.app_state::<Rc<NotificationArchiveModel>>().cloned();
     let toast_widget = ctx.add(toast_row(archive));
 
-    bati!(ctx => VStack {
+    teksu!(ctx => VStack {
             spacing: 20.0
             VStack {
                 spacing: 4.0

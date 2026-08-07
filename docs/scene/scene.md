@@ -33,10 +33,10 @@ when the content is linear or tree-shaped without spatial relationships.
 ## Example
 
 ```rust
-use bastyde_scene::{Scene, ItemChange, SceneLayer};
-use bastyde_scene::{RectItem, ItemId};
-use bastyde_canvas::{Point, Rect};
-use bastyde_tokens::Color;
+use teksilo_scene::{Scene, ItemChange, SceneLayer};
+use teksilo_scene::{RectItem, ItemId};
+use teksilo_canvas::{Point, Rect};
+use teksilo_tokens::Color;
 
 let mut scene = Scene::new();
 
@@ -64,7 +64,7 @@ assert_eq!(scene.scene_pos(id), Some(Point::new(100.0, 100.0)));
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_scene/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_scene/index.html)
 
 ## `pub enum ItemChange`
 
@@ -666,7 +666,7 @@ dispatches via `entry_index` (an `HashMap<ItemId, usize>`),
 so the per-candidate cost is O(parent-chain-depth) — not
 O(N). Total query is O(visible × chain) instead of O(N).
 
-#### `pub fn item_thumbnails(&self) -> Vec<(Rect, bastyde_tokens::Color)>`
+#### `pub fn item_thumbnails(&self) -> Vec<(Rect, teksilo_tokens::Color)>`
 
 Snapshot every visible item — **both tiers** — as a `(scene_rect,
 color)` pair suitable for a minimap thumbnail. Filters out items with

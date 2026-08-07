@@ -43,10 +43,10 @@ derived from a stale position. The one requirement is that an item's
 always true for a `ListModel`.
 
 ```rust
-# use bastyde_widgets::Repeater;
-# use bastyde_widgets::primitives::TextWidget;
-# use bastyde_data::ListModel;
-# use bastyde_i18n::lit;
+# use teksilo_widgets::Repeater;
+# use teksilo_widgets::primitives::TextWidget;
+# use teksilo_data::ListModel;
+# use teksilo_i18n::lit;
 let model: ListModel<u32> = ListModel::from_vec(vec![1, 2, 3]);
 let _w = Repeater::new(model, |item| {
     Box::new(TextWidget::new(lit!(format!("item {item}"))))
@@ -74,7 +74,7 @@ standard builder overrides that every widget supports — these stay
 locale-reactive:
 
 ```rust,ignore
-use bastyde_core::accesskit::Role;
+use teksilo_core::accesskit::Role;
 Repeater::new(tags, factory)
     .access_role(Role::List)
     .access_label(tr!(tags()))
@@ -86,7 +86,7 @@ Repeater::new(tags, factory)
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/repeater/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/repeater/index.html)
 
 ## `pub enum RepeaterLayout`
 

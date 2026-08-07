@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MPL-2.0
 # SPDX-FileCopyrightText: 2026 FernTech
 
-"""Build every Bastyde example, launch each one, screenshot its window, and
+"""Build every Teksilo example, launch each one, screenshot its window, and
 bundle the captures into a single archive.
 
 This is the visual companion to ``bench_examples.py`` (runtime metrics) and
@@ -30,7 +30,7 @@ The fix (same as ``.claude/skills/run-app`` in the Skribisto repo):
 
   1. Launch the example and remember its **PID**.
   2. Raise + focus *exactly that window* via KWin's D-Bus scripting API,
-     matching on ``window.pid`` (bastyde sets the Wayland app_id to the binary
+     matching on ``window.pid`` (teksilo sets the Wayland app_id to the binary
      name but PID matching is unambiguous — it can never grab the user's other
      open windows, e.g. a running Skribisto).
   3. Capture the now-active window with ``spectacle -b -n -a`` (Wayland
@@ -92,7 +92,7 @@ CATALOG_TABS_FALLBACK = [
 def workspace_excludes() -> set[str]:
     """Directories the root Cargo.toml excludes from the workspace.
 
-    Excluded examples (e.g. ``examples/telemetry_bastyde``, which needs a
+    Excluded examples (e.g. ``examples/telemetry_teksilo``, which needs a
     system cmake/C++ toolchain for protobuf-src) are not built by a default
     ``cargo build`` and can't be reached with ``cargo build -p``, so we skip
     them rather than mislabel them as failures.
@@ -209,7 +209,7 @@ class KWin:
         """
         self._token += 1
         tok = self._token
-        sentinel = f"BASTYDE_SHOT tok={tok} pid={pid} found="
+        sentinel = f"TEKSILO_SHOT tok={tok} pid={pid} found="
         js = f"""
 const wins = workspace.windowList ? workspace.windowList() : workspace.clientList();
 let hit = false;
@@ -435,7 +435,7 @@ def shoot_catalog_cycle(
 # ── packaging ────────────────────────────────────────────────────────────────
 
 def write_manifest(out_dir: Path, results: list[ShotResult], meta: dict) -> Path:
-    lines = ["# Bastyde example screenshots", ""]
+    lines = ["# Teksilo example screenshots", ""]
     for k, v in meta.items():
         lines.append(f"- **{k}:** {v}")
     lines.append("")
@@ -607,7 +607,7 @@ def main() -> int:
 
     if not args.no_package:
         stamp = started.strftime("%Y-%m-%d")
-        archive = REPO_ROOT / "dist" / f"bastyde-screenshots-{stamp}.tar.gz"
+        archive = REPO_ROOT / "dist" / f"teksilo-screenshots-{stamp}.tar.gz"
         total = package(out_dir, archive)
         size = archive.stat().st_size
         print(f"\n   packaged -> {archive} "

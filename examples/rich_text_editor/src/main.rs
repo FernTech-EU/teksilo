@@ -69,10 +69,10 @@ mod format_toolbar;
 mod highlight_controls;
 mod highlighters;
 
-use bastyde::prelude::*;
-use bastyde::text_document::{Alignment, BlockFormat, MoveMode, TextDocument};
-use bastyde::widgets::rich_text::{RichTextEditor, ScrollPolicy};
-use bastyde::widgets::{
+use teksilo::prelude::*;
+use teksilo::text_document::{Alignment, BlockFormat, MoveMode, TextDocument};
+use teksilo::widgets::rich_text::{RichTextEditor, ScrollPolicy};
+use teksilo::widgets::{
     Expand, HStack, Orientation, PaneDescriptor, Spacer, Splitter, SplitterModel, Toolbar,
 };
 
@@ -152,7 +152,7 @@ fn dark_mode_toolbar() -> impl Widget {
     Toolbar::new().child(
         HStack::new()
             .child(Spacer::new())
-            .child(bastyde::widgets::ThemeSwitcher::new()),
+            .child(teksilo::widgets::ThemeSwitcher::new()),
     )
 }
 
@@ -379,13 +379,13 @@ fn main() {
     apply_default_margins(&doc);
     apply_alignment_demos(&doc);
 
-    BastydeAppBuilder::new()
+    TeksiloAppBuilder::new()
         .install_automation_bridge_in_debug()
         .install_inspector_in_debug()
-        .theme(bastyde::presets::intui::light())
+        .theme(teksilo::presets::intui::light())
         .initial_window(
             WindowConfig::new()
-                .title("Bastyde — Rich Text Editor")
+                .title("Teksilo — Rich Text Editor")
                 .size(1100, 640)
                 .root(move |tree, _state| {
                     // Build the editable view first so the formatting
@@ -406,7 +406,7 @@ fn main() {
                         Orientation::Horizontal,
                     );
                     tree.add(
-                        bastyde::widgets::VStack::new()
+                        teksilo::widgets::VStack::new()
                             .child(dark_mode_toolbar())
                             .child(toolbar)
                             .child(highlight_controls)

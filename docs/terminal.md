@@ -3,13 +3,13 @@
 
 # Terminal (Console)
 
-`bastyde-terminal` is an embeddable, fully-accessible terminal-emulator widget —
+`teksilo-terminal` is an embeddable, fully-accessible terminal-emulator widget —
 a real shell running over a pseudo-terminal on Windows (ConPTY / "modern
 terminal"), Linux and macOS. It is the framework's answer to VS Code's
 integrated terminal, Qt `QTermWidget`, GTK `VteTerminal`, and SwiftTerm.
 
 ```rust
-use bastyde::prelude::*;   // with the `terminal` feature enabled
+use teksilo::prelude::*;   // with the `terminal` feature enabled
 
 let terminal = Terminal::new()                 // runs the user's default shell
     .scrollback_lines(10_000)
@@ -19,12 +19,12 @@ let terminal = Terminal::new()                 // runs the user's default shell
 
 Run the showcase: `cargo run -p terminal-demo`.
 
-## Design: Bastyde owns the *view*, not the emulator
+## Design: Teksilo owns the *view*, not the emulator
 
 A VT emulator (escape-sequence parsing, the cell grid, scrollback, reflow) is a
 correctness-critical *domain library*, not a GUI concern — reinventing it would
-be a mistake. So the split mirrors `bastyde-data` ("a peer of the GUI, not part
-of it") and `bastyde-webview` (a heavy engine behind a feature flag):
+be a mistake. So the split mirrors `teksilo-data` ("a peer of the GUI, not part
+of it") and `teksilo-webview` (a heavy engine behind a feature flag):
 
 - **The view (this crate)** — grid rendering, keyboard→byte encoding, mouse
   reporting, selection, `Role::Terminal` accessibility, theming, lifecycle.
@@ -34,12 +34,12 @@ of it") and `bastyde-webview` (a heavy engine behind a feature flag):
   openpty) with [`alacritty_terminal`](https://docs.rs/alacritty_terminal) (the
   VT parser + grid + scrollback). Nothing in this crate parses escape codes.
 
-Unlike `bastyde-webview`, the terminal renders **into the wgpu surface**, so it
+Unlike `teksilo-webview`, the terminal renders **into the wgpu surface**, so it
 keeps full accessibility, theming, and the opacity/blur/transform paint scopes,
 and needs no native-subview compositing.
 
-The crate sits at the `bastyde-widgets` tier but depends only on `bastyde-core`,
-`bastyde-tokens`, `bastyde-canvas`, and `bastyde-platform` (for the clipboard).
+The crate sits at the `teksilo-widgets` tier but depends only on `teksilo-core`,
+`teksilo-tokens`, `teksilo-canvas`, and `teksilo-platform` (for the clipboard).
 It is **off by default** — apps that don't embed a terminal pull neither a PTY
 layer nor a VT parser.
 
@@ -94,7 +94,7 @@ re-themes live when you swap the scheme.
   are honoured.
 - **Copy / paste** — `Ctrl+Shift+C` / `Ctrl+Shift+V` (⌘C / ⌘V on macOS). Paste
   is wrapped in bracketed-paste markers when the child enables the mode. The
-  clipboard is the app-installed `ClipboardHandle` (bastyde-app's `clipboard`
+  clipboard is the app-installed `ClipboardHandle` (teksilo-app's `clipboard`
   feature).
 - **Selection** — drag to select (word on double-click, line on triple-click,
   rectangular with Alt).
@@ -117,7 +117,7 @@ ARIA live regions. Verify with the automation MCP (`snapshot_tree`,
 
 ## Two framework primitives this widget introduced
 
-Both are generally useful and live in `bastyde-core`, not just here:
+Both are generally useful and live in `teksilo-core`, not just here:
 
 - **`WidgetBuilder::keyboard_capture(bool)`** — while focused, the node receives
   every `KeyDown` raw, bypassing shortcut → intent → action resolution. Any
@@ -126,7 +126,7 @@ Both are generally useful and live in `bastyde-core`, not just here:
 - **`RepaintWindowRequest { window_id }`** — a thread-safe "repaint this window"
   request posted via `AppEventPoster::post_external` from a background thread. A
   bare redraw re-presents cached paint, so content changed **off the UI thread**
-  (the PTY-reader thread) needs its window marked paint-dirty; bastyde-app routes
+  (the PTY-reader thread) needs its window marked paint-dirty; teksilo-app routes
   this request to do exactly that. It is the off-thread analogue of
   `ctx.request_frame()`. Canonical treatment (and the zero-frame-rule contract):
   [idle-and-animation.md](idle-and-animation.md) "Off-thread repaint".
@@ -145,15 +145,15 @@ Both are generally useful and live in `bastyde-core`, not just here:
 
 ## Files
 
-- Widget: [crates/bastyde-terminal/src/terminal.rs](../crates/bastyde-terminal/src/terminal.rs)
+- Widget: [crates/teksilo-terminal/src/terminal.rs](../crates/teksilo-terminal/src/terminal.rs)
   (+ `state.rs`, `render.rs`, `input.rs`, `mouse.rs`, `a11y.rs`, `style.rs`,
   `color_scheme.rs`).
-- Engine trait + types: [engine.rs](../crates/bastyde-terminal/src/engine.rs);
-  default backend: [alacritty_engine.rs](../crates/bastyde-terminal/src/alacritty_engine.rs)
-  + [pty.rs](../crates/bastyde-terminal/src/pty.rs). Test double:
-  [memory.rs](../crates/bastyde-terminal/src/memory.rs).
+- Engine trait + types: [engine.rs](../crates/teksilo-terminal/src/engine.rs);
+  default backend: [alacritty_engine.rs](../crates/teksilo-terminal/src/alacritty_engine.rs)
+  + [pty.rs](../crates/teksilo-terminal/src/pty.rs). Test double:
+  [memory.rs](../crates/teksilo-terminal/src/memory.rs).
 - Framework primitives: `keyboard_capture` in
-  [widget_builder.rs](../crates/bastyde-core/src/widget_builder.rs);
-  `RepaintWindowRequest` in [app_event.rs](../crates/bastyde-core/src/app_event.rs),
-  routed in [bastyde-app/src/app.rs](../crates/bastyde-app/src/app.rs).
+  [widget_builder.rs](../crates/teksilo-core/src/widget_builder.rs);
+  `RepaintWindowRequest` in [app_event.rs](../crates/teksilo-core/src/app_event.rs),
+  routed in [teksilo-app/src/app.rs](../crates/teksilo-app/src/app.rs).
 - Demo: [examples/terminal_demo/src/main.rs](../examples/terminal_demo/src/main.rs).

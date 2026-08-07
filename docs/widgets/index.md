@@ -3,7 +3,7 @@
 
 # Widget Catalog
 
-Every public widget in `bastyde-widgets`, grouped by category. Each page links to its full rustdoc API reference.
+Every public widget in `teksilo-widgets`, grouped by category. Each page links to its full rustdoc API reference.
 
 ## Layout primitives
 

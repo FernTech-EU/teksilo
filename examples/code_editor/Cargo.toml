@@ -10,4 +10,4 @@ authors.workspace = true
 publish = false
 
 [dependencies]
-bastyde = { workspace = true, features = ["clipboard"] }
+teksilo = { workspace = true, features = ["clipboard"] }

@@ -7,13 +7,13 @@
 //! from the data_collections / data_grid / tree_table / grid_view
 //! examples and shrunk to fit a scrolling catalog tab.
 
-use bastyde::canvas::EdgeInsets;
-use bastyde::data::{
+use teksilo::canvas::EdgeInsets;
+use teksilo::data::{
     ListModel, SelectionMode, SelectionModel, SortDirection, SortFilterListModel,
     SortFilterTreeModel, TreeFilterMode, TreeModel,
 };
-use bastyde::prelude::*;
-use bastyde::widgets::{
+use teksilo::prelude::*;
+use teksilo::widgets::{
     CellContext, Center, Column, ColumnWidth, Divider, GridLines, GridSizing, GridView, ListView,
     MaxSize, RectWidget, Repeater, StandardListItem, StandardTreeItem, TableAlignment,
     TableSelectionMode, TableView, TextWidget, TreeTableView, TreeView, VStack, ZStack,
@@ -75,7 +75,7 @@ fn make_tree_model() -> TreeModel<String> {
     let t = TreeModel::new();
     let docs = t.insert_root(0, "Documents".into());
     let proj = t.insert_child(docs, 0, "Projects".into());
-    t.insert_child(proj, 0, "Bastyde".into());
+    t.insert_child(proj, 0, "Teksilo".into());
     t.insert_child(proj, 1, "Skribisto".into());
     t.insert_child(docs, 1, "Notes".into());
     let pics = t.insert_root(1, "Pictures".into());
@@ -353,9 +353,9 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     )
 }
 
-pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
+pub fn teksu(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     // Every data widget takes a closure delegate (and the table family
-    // also binds sort/filter signals) — bati! property syntax can't
+    // also binds sort/filter signals) — teksu! property syntax can't
     // express those, so pre-build each and splice via `#{ id }`.
     let repeater_id = ctx.add(repeater_widget());
     let list_view_id = ctx.add(sized(280.0, 180.0, list_view_widget()));
@@ -364,7 +364,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     let tree_table_id = ctx.add(sized(540.0, 200.0, tree_table_widget()));
     let grid_view_id = ctx.add(sized(540.0, 230.0, grid_view_widget()));
 
-    bati!(ctx => VStack {
+    teksu!(ctx => VStack {
             spacing: 20.0
             VStack {
                 spacing: 4.0

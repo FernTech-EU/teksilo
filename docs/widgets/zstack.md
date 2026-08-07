@@ -23,10 +23,10 @@ Propagates shrink weight and minimum size when any child opts in, so
 wrapping a shrinkable single-line label in a `ZStack` stays shrinkable.
 
 ```rust
-# use bastyde_widgets::primitives::{ZStack, TextWidget};
-# use bastyde_widgets::RectWidget;
-# use bastyde_i18n::lit;
-# use bastyde_tokens::SurfaceRole;
+# use teksilo_widgets::primitives::{ZStack, TextWidget};
+# use teksilo_widgets::RectWidget;
+# use teksilo_i18n::lit;
+# use teksilo_tokens::SurfaceRole;
 let _card = ZStack::new()
     .child(RectWidget::new().background(SurfaceRole::Raised))
     .child(TextWidget::new(lit!("Hello")));
@@ -38,7 +38,7 @@ let _card = ZStack::new()
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/primitives/zstack/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/primitives/zstack/index.html)
 
 ## `pub struct ZStack`
 

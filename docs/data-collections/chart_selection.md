@@ -35,7 +35,7 @@ self-wire in their own constructors. Forgetting to wire `adjust` up
 manually otherwise leaves the selection silently stale after a mutation.
 
 ```rust
-# use bastyde_data::{ChartModel, ChartSelection, SelectionMode};
+# use teksilo_data::{ChartModel, ChartSelection, SelectionMode};
 let model: ChartModel<i32> = ChartModel::new();
 let s = model.add_series("s");
 for i in 0..5 {
@@ -60,7 +60,7 @@ assert_eq!(sel.count(), 0);
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_data/chart_selection/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_data/chart_selection/index.html)
 
 ## `pub struct ChartSelection`
 

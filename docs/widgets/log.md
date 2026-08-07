@@ -40,7 +40,7 @@ let archive: Rc<NotificationArchiveModel> = ctx.app_state().unwrap();
 let log = NotificationLog::new(archive)
     .on_action_invoked(|_entry, action, ctx| {
         if let Some(name) = &action.intent_name {
-            ctx.send_intent(bastyde_core::Intent::new(name));
+            ctx.send_intent(teksilo_core::Intent::new(name));
         }
     });
 ```
@@ -51,7 +51,7 @@ let log = NotificationLog::new(archive)
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/notification/log/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/notification/log/index.html)
 
 ## `pub struct NotificationLog`
 
@@ -77,7 +77,7 @@ pub struct NotificationLog { /* fields */ }
 Construct a log bound to the shared archive. The archive is
 expected to outlive the log (typically held in `app_state`).
 
-#### `pub fn for_window(mut self, window_id: BastydeWindowId) -> Self`
+#### `pub fn for_window(mut self, window_id: TeksiloWindowId) -> Self`
 
 Scope this log to entries routed to window `window_id` (plus
 any `Broadcast` entry) — the shape a `NotificationCenterButton`

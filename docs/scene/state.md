@@ -9,9 +9,9 @@ pan / zoom / rotation, suitable for persistence between sessions.
 ## Pattern
 
 ```ignore
-use bastyde_scene::{Scene, SceneView, SceneViewState};
+use teksilo_scene::{Scene, SceneView, SceneViewState};
 
-// On load: read from your persistence layer (bastyde-settings,
+// On load: read from your persistence layer (teksilo-settings,
 // a custom JSON file, etc.) and pass to SceneView.
 let saved: SceneViewState = my_settings.scene_view.get();
 let view = SceneView::new(scene);
@@ -24,8 +24,8 @@ my_settings.scene_view.set(current);
 
 ## Why a plain struct, not Serialize
 
-`bastyde-scene` deliberately doesn't depend on `serde`. Apps that
-want to persist via `bastyde-settings` (which is `serde`-based)
+`teksilo-scene` deliberately doesn't depend on `serde`. Apps that
+want to persist via `teksilo-settings` (which is `serde`-based)
 either:
 
 - Add their own newtype wrapper that implements
@@ -42,7 +42,7 @@ The struct is plain-old-data — manual round-trip is trivial.
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_scene/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_scene/index.html)
 
 ## `pub struct SceneViewState`
 

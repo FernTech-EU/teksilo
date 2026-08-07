@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MPL-2.0
 # SPDX-FileCopyrightText: 2026 FernTech
 
-"""Publish the Bastyde workspace to crates.io, one crate at a time.
+"""Publish the Teksilo workspace to crates.io, one crate at a time.
 
 Drives ``cargo publish -p <crate>`` over the dependency-correct order
 produced by :mod:`tools/check_release_order.py` (``--list``), and copes
@@ -44,7 +44,7 @@ Usage:
     python3 tools/publish_crates.py --dry-run       # cargo publish --dry-run
     python3 tools/publish_crates.py                 # the real thing
     python3 tools/publish_crates.py --limit 10      # just spend the burst
-    python3 tools/publish_crates.py --start-at bastyde-widgets
+    python3 tools/publish_crates.py --start-at teksilo-widgets
     python3 tools/publish_crates.py --self-test     # parser unit checks
 
 Authentication is cargo's: run ``cargo login`` first, or export
@@ -71,7 +71,7 @@ import urllib.request
 from dataclasses import dataclass, field
 
 SPARSE_INDEX = "https://index.crates.io"
-USER_AGENT = "bastyde-publish-crates (https://github.com/ferntech-eu/bastyde)"
+USER_AGENT = "teksilo-publish-crates (https://github.com/ferntech-eu/teksilo)"
 
 # --- Server-message recognition ---------------------------------------
 #
@@ -574,11 +574,11 @@ def self_test() -> int:
             print(f"FAIL {label}: got {got!r}, want {want!r}")
             failures += 1
 
-    check("index_path 4+", index_path("bastyde-core"), "ba/st/bastyde-core")
+    check("index_path 4+", index_path("teksilo-core"), "ba/st/teksilo-core")
     check("index_path 3", index_path("abc"), "3/a/abc")
     check("index_path 2", index_path("ab"), "2/ab")
     check("index_path 1", index_path("a"), "1/a")
-    check("index_path case", index_path("Bastyde"), "ba/st/bastyde")
+    check("index_path case", index_path("Teksilo"), "ba/st/teksilo")
 
     utc = dt.timezone.utc
     check("ts offset", parse_timestamp("2026-07-23T15:04:05+0000"),
@@ -722,7 +722,7 @@ def main() -> int:
 
     # Shared-version workspace (release.toml sets `shared-version = true`),
     # so any member's version keys the state file; prefer the umbrella.
-    ws_version = versions.get("bastyde") or versions.get(order[0], "")
+    ws_version = versions.get("teksilo") or versions.get(order[0], "")
     state_path = args.state or os.path.join(root, "target",
                                             "publish-crates-state.json")
     state = State.load(state_path, ws_version)

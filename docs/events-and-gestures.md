@@ -4,7 +4,7 @@
 # Events and Gestures
 
 **Companion to:** [architecture.md](architecture.md)
-**Scope:** How input becomes widget behavior in Bastyde — attached handlers, preview/bubble dispatch, gesture recognizers, and the `EventContext` deferred-operations pattern.
+**Scope:** How input becomes widget behavior in Teksilo — attached handlers, preview/bubble dispatch, gesture recognizers, and the `EventContext` deferred-operations pattern.
 
 ---
 
@@ -54,7 +54,7 @@ Every event that targets a specific widget (via hit testing for pointer events, 
      root
 ```
 
-Implementation is a single walk per pass in [widget_tree/event_dispatch_impl.rs](../crates/bastyde-core/src/widget_tree/event_dispatch_impl.rs): `dispatch_to_widget_returning_handled(target, &event)` collects ancestors, runs preview top-down, then runs bubble target-up, returning on the first `Handled`.
+Implementation is a single walk per pass in [widget_tree/event_dispatch_impl.rs](../crates/teksilo-core/src/widget_tree/event_dispatch_impl.rs): `dispatch_to_widget_returning_handled(target, &event)` collects ancestors, runs preview top-down, then runs bubble target-up, returning on the first `Handled`.
 
 The framework decides what "target" means per event type:
 
@@ -67,7 +67,7 @@ There is no "capture phase" distinct from preview, no event replay, no explicit 
 
 ## 3. Attached handlers
 
-Widget builders register event handlers via blanket-implemented methods on the [`WidgetBuilder`](../crates/bastyde-core/src/widget_builder.rs) trait. Every widget gets them for free:
+Widget builders register event handlers via blanket-implemented methods on the [`WidgetBuilder`](../crates/teksilo-core/src/widget_builder.rs) trait. Every widget gets them for free:
 
 ```rust
 ctx.add(
@@ -92,7 +92,7 @@ Under the hood, the builder wraps the widget in a `WidgetWithHandlers<W>` that c
 
 ### 3.1 Handler catalogue
 
-[`event_handlers.rs`](../crates/bastyde-core/src/event_handlers.rs) defines the full set. Summarized:
+[`event_handlers.rs`](../crates/teksilo-core/src/event_handlers.rs) defines the full set. Summarized:
 
 | Handler | Fires when | Signature (simplified) |
 |---|---|---|
@@ -117,7 +117,7 @@ Under the hood, the builder wraps the widget in a `WidgetWithHandlers<W>` that c
 
 ### 3.1.1 `TapEvent` — button + modifiers in the callback
 
-The four click-style handlers (`on_tap` / `on_double_tap` / `on_triple_tap` / `on_long_press`) all receive a borrowed [`TapEvent`](../crates/bastyde-core/src/gesture.rs):
+The four click-style handlers (`on_tap` / `on_double_tap` / `on_triple_tap` / `on_long_press`) all receive a borrowed [`TapEvent`](../crates/teksilo-core/src/gesture.rs):
 
 ```rust
 #[non_exhaustive]
@@ -241,7 +241,7 @@ The `event()`-method vs attached-handlers tradeoff flipped once three things bec
 
 ## 4. Gesture recognizers — composition with backpressure
 
-[`gesture.rs`](../crates/bastyde-core/src/gesture.rs) defines the recognizer state machines. Each is a pure, platform-free value type that consumes `RawPointerEvent::{Down, Move, Up}` and emits `GestureResult::{Pending, Recognized(GestureEvent), Failed}`.
+[`gesture.rs`](../crates/teksilo-core/src/gesture.rs) defines the recognizer state machines. Each is a pure, platform-free value type that consumes `RawPointerEvent::{Down, Move, Up}` and emits `GestureResult::{Pending, Recognized(GestureEvent), Failed}`.
 
 Built-in recognizers (the four click-style ones default to `ButtonMask::PRIMARY` — call `.accept_buttons(...)` / `.accept_any_button()` to widen):
 
@@ -296,7 +296,7 @@ Two consequences worth knowing:
   drag threshold); only a press-and-drag escalates to the ancestor. This is
   exactly what makes "drag from on top of a select-only scene card starts a
   marquee, click selects it" work (see
-  [bastyde-scene.md](bastyde-scene.md) "Drag mode").
+  [teksilo-scene.md](teksilo-scene.md) "Drag mode").
 
 ## 5. `EventContext` — the deferred-operations pattern
 
@@ -352,7 +352,7 @@ Via `EventContext`, any handler can:
 - `ctx.dismiss_all_overlays()` — useful after menu item activation.
 - `ctx.send_intent(AppIntent::X)` — fire a typed intent; framework walks source → root invoking any matching `Action`. See [shortcut-intent-action.md](shortcut-intent-action.md).
 - `ctx.request_frame()` — ask the event loop to pump one more frame (caret blink restart, drag auto-scroll, pending document events).
-- `ctx.app_state::<T>()` — look up an app-scoped value registered on `BastydeAppBuilder` by `TypeId`.
+- `ctx.app_state::<T>()` — look up an app-scoped value registered on `TeksiloAppBuilder` by `TypeId`.
 
 These are the methods that make it possible to build app-level behavior (menu routing, theme switching, shortcut rebind UIs) without any global statics or hardcoded backchannels.
 
@@ -370,7 +370,7 @@ Focus cleanup on destroy is automatic: destroying a focused widget clears focus;
 
 ### 6.1 Traversal scopes (`FocusScope`)
 
-Tab order is **not** one flat global ring — it is a tree of **traversal scopes**. Every focusable widget belongs to its nearest enclosing [`FocusScope`](../crates/bastyde-widgets/src/focus_scope.rs); the whole window (or, while a centered modal is open, that modal's content) is an implicit root scope. Within a scope, members — focusable leaves *and* nested scopes, each counted as one unit — are ordered by **scoped `tab_index`** (then document order). Because `tab_index` is compared only among siblings of the same scope, two sibling scopes that both number their children `1, 2, 3` never interleave. This is Bastyde's analogue of Flutter `FocusTraversalGroup` / WPF `KeyboardNavigation.TabNavigation`.
+Tab order is **not** one flat global ring — it is a tree of **traversal scopes**. Every focusable widget belongs to its nearest enclosing [`FocusScope`](../crates/teksilo-widgets/src/focus_scope.rs); the whole window (or, while a centered modal is open, that modal's content) is an implicit root scope. Within a scope, members — focusable leaves *and* nested scopes, each counted as one unit — are ordered by **scoped `tab_index`** (then document order). Because `tab_index` is compared only among siblings of the same scope, two sibling scopes that both number their children `1, 2, 3` never interleave. This is Teksilo's analogue of Flutter `FocusTraversalGroup` / WPF `KeyboardNavigation.TabNavigation`.
 
 A scope is declared by wrapping a subtree in the layout-transparent `FocusScope` wrapper, which carries a `TraversalScopePolicy` governing what Tab does at the scope's ends:
 
@@ -380,7 +380,7 @@ A scope is declared by wrapping a subtree in the layout-transparent `FocusScope`
 | `Cycle` | Tab **wraps** within the scope and never leaves via keyboard — modal dialogs only. |
 
 ```rust
-// bati!: a modal dialog whose Tab order is confined to its own content
+// teksu!: a modal dialog whose Tab order is confined to its own content
 FocusScope(TraversalScopePolicy::Cycle) {
     Button::new(lit!("OK"))
     Button::new(lit!("Cancel"))
@@ -399,7 +399,7 @@ The root scope is implicitly `Cycle` (whole-tree last↔first wrap, the historic
 
 > **Not to be confused with `view_focus_*`.** `BuildContext::begin_view_focus` / `view_focus_active` (formerly the `focus_scope` chrome API) is an unrelated build-time mechanism that tracks "does this data view's subtree hold focus" to drive selection chrome and focus rings. It has nothing to do with Tab traversal. Traversal scopes are the `FocusScope` widget + `set_traversal_scope`.
 
-Implemented in [`cycle_focus`](../crates/bastyde-core/src/widget_tree/focus_impl.rs) (the recursive scope-tree walk) and [`set_traversal_scope`](../crates/bastyde-core/src/widget_tree.rs) (the node marker, directly usable from headless tests).
+Implemented in [`cycle_focus`](../crates/teksilo-core/src/widget_tree/focus_impl.rs) (the recursive scope-tree walk) and [`set_traversal_scope`](../crates/teksilo-core/src/widget_tree.rs) (the node marker, directly usable from headless tests).
 
 ### Overlays follow focus out
 
@@ -417,7 +417,7 @@ An overlay's **anchor counts as part of it.** A non-searchable `ComboBox` keeps 
 
 Nested overlays close as a cascade: the walk goes *up* `parent_overlay` and dismisses the outermost eligible level, which takes every level below it — APG's plural "all menus and submenus" — while stopping at a host surface so a menu never drags its hosting dialog, composite tooltip or revealed menubar down with it.
 
-Implemented in [`dismiss_overlays_left_by_focus`](../crates/bastyde-core/src/widget_tree/overlay_impl.rs), called from `focus_with_origin_ops` — the single funnel every focus change passes through, so Tab, click-to-focus, AccessKit and `ctx.request_focus` are all covered by one mechanism.
+Implemented in [`dismiss_overlays_left_by_focus`](../crates/teksilo-core/src/widget_tree/overlay_impl.rs), called from `focus_with_origin_ops` — the single funnel every focus change passes through, so Tab, click-to-focus, AccessKit and `ctx.request_focus` are all covered by one mechanism.
 
 ## 6.5 Drag-and-drop lifecycle
 
@@ -487,10 +487,10 @@ No Xvfb, no GPU, no display server required.
 - [shortcut-intent-action.md](shortcut-intent-action.md) — how intents travel source → root and fire `Action`s; rebindable keystrokes via `ShortcutRegistry`.
 - [architecture.md §22 Window Management](architecture.md) — modal-vs-modeless, window focus routing.
 - [architecture.md §13 Overlay System](architecture.md) — overlay stack, click-outside, Escape cascade, focus-restore on dismiss.
-- [crates/bastyde-core/src/event_handlers.rs](../crates/bastyde-core/src/event_handlers.rs) — `EventHandlers` struct.
-- [crates/bastyde-core/src/widget_builder.rs](../crates/bastyde-core/src/widget_builder.rs) — blanket-impl builder methods.
-- [crates/bastyde-core/src/gesture.rs](../crates/bastyde-core/src/gesture.rs) — recognizer state machines.
-- [crates/bastyde-core/src/widget_tree/event_dispatch_impl.rs](../crates/bastyde-core/src/widget_tree/event_dispatch_impl.rs) — dispatch walk.
-- [crates/bastyde-core/src/widget.rs](../crates/bastyde-core/src/widget.rs) — `EventContext`.
-- [crates/bastyde-widgets/src/focus_scope.rs](../crates/bastyde-widgets/src/focus_scope.rs) — the `FocusScope` traversal-scope wrapper (§6.1).
-- [crates/bastyde-core/src/widget_tree/focus_impl.rs](../crates/bastyde-core/src/widget_tree/focus_impl.rs) — `cycle_focus` scope-tree traversal, `set_traversal_scope`, `view_focus_*` chrome signals.
+- [crates/teksilo-core/src/event_handlers.rs](../crates/teksilo-core/src/event_handlers.rs) — `EventHandlers` struct.
+- [crates/teksilo-core/src/widget_builder.rs](../crates/teksilo-core/src/widget_builder.rs) — blanket-impl builder methods.
+- [crates/teksilo-core/src/gesture.rs](../crates/teksilo-core/src/gesture.rs) — recognizer state machines.
+- [crates/teksilo-core/src/widget_tree/event_dispatch_impl.rs](../crates/teksilo-core/src/widget_tree/event_dispatch_impl.rs) — dispatch walk.
+- [crates/teksilo-core/src/widget.rs](../crates/teksilo-core/src/widget.rs) — `EventContext`.
+- [crates/teksilo-widgets/src/focus_scope.rs](../crates/teksilo-widgets/src/focus_scope.rs) — the `FocusScope` traversal-scope wrapper (§6.1).
+- [crates/teksilo-core/src/widget_tree/focus_impl.rs](../crates/teksilo-core/src/widget_tree/focus_impl.rs) — `cycle_focus` scope-tree traversal, `set_traversal_scope`, `view_focus_*` chrome signals.

@@ -12,10 +12,10 @@ presence indicator (Online / Offline / Away / Busy) and outer ring.
 Can be made activable to serve as a user-menu trigger.
 
 ```rust
-# use bastyde_widgets::{Avatar, AvatarPresence, AvatarSize};
-# use bastyde_canvas::raster::RasterIcon;
-# use bastyde_i18n::lit;
-# use bastyde_core::Intent;
+# use teksilo_widgets::{Avatar, AvatarPresence, AvatarSize};
+# use teksilo_canvas::raster::RasterIcon;
+# use teksilo_i18n::lit;
+# use teksilo_core::Intent;
 # let face = RasterIcon::from_raw(vec![0u8; 4 * 4 * 4], 4, 4);
 // Image with a presence dot.
 let _w = Avatar::with_image(&face)
@@ -44,7 +44,7 @@ track the active theme automatically.
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/avatar/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/avatar/index.html)
 
 ## `pub struct Avatar`
 
@@ -89,7 +89,7 @@ screen-reader name for the image.
 Create an avatar from raw RGBA pixels (`width × height × 4` bytes).
 Same pixel-layout convention as `ImageWidget::from_raw`.
 
-#### `pub fn style(mut self, style: impl bastyde_core::styles::AvatarStyle) -> Self`
+#### `pub fn style(mut self, style: impl teksilo_core::styles::AvatarStyle) -> Self`
 
 Per-call style override for the avatar chrome.
 
@@ -179,7 +179,7 @@ Make the avatar activable. Promotes the a11y role to
 Enter, and Space all fire the closure. Cursor changes to
 `Pointer` on hover.
 
-#### `pub fn has_popup(mut self, kind: bastyde_core::accesskit::HasPopup) -> Self`
+#### `pub fn has_popup(mut self, kind: teksilo_core::accesskit::HasPopup) -> Self`
 
 Declare that this avatar is a disclosure trigger for a popup
 (typically `HasPopup::Menu` for a user-menu trigger). Surfaces

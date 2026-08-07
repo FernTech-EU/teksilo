@@ -25,7 +25,7 @@ Banner::warning(tr!(unsaved_changes()))
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/banner/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/banner/index.html)
 
 ## `pub struct Banner`
 
@@ -37,7 +37,7 @@ pub struct Banner { /* fields */ }
 
 ### Methods
 
-#### `pub fn style(mut self, style: impl bastyde_core::styles::BannerStyle) -> Self`
+#### `pub fn style(mut self, style: impl teksilo_core::styles::BannerStyle) -> Self`
 
 Per-call style override for the banner strip chrome. Replaces
 the theme-wide default `BannerStyle` for just this instance.

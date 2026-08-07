@@ -1,0 +1,1954 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
+//! Virtualized 2D tile grid bound to a `ListModel<T>` / `ListDataSource`.
+//!
+//! `GridView` is the photo-gallery / icon-view / file-manager-grid /
+//! collection-view widget — the 2D sibling of [`ListView`](crate::list_view::ListView)
+//! and [`TableView`](crate::table_view::TableView). It realizes only the
+//! tiles currently visible (plus a buffer), reflows on resize, supports
+//! single / multi selection with 2D keyboard navigation, and is fully
+//! accessible (`Role::Grid` → `Role::GridCell`).
+//!
+//! The layout is pluggable via `GridLayoutStrategy`;
+//! the stock [`UniformGrid`] gives fixed tile size /
+//! fixed column count / adaptive min-width grids. (Variable-row-height and
+//! waterfall strategies, plus marquee selection, drag-reorder, sections and
+//! sticky headers, are layered on in later phases.)
+//!
+//! ```ignore
+//! GridView::new(model, |tc| {
+//!     Box::new(Card::new().child(TextWidget::new(lit!(&tc.item.name))))
+//! })
+//! .sizing(GridSizing::Adaptive { min_width: 120.0, max_width: None, height: 140.0 })
+//! .spacing(8.0)
+//! .selection(selection_model)
+//! ```
+
+pub(crate) mod a11y;
+pub(crate) mod body_pane;
+pub(crate) mod drag;
+pub(crate) mod keyboard;
+pub mod layout;
+pub mod sections;
+pub(crate) mod selection;
+#[cfg(test)]
+mod tests;
+
+use std::cell::Cell;
+use std::collections::BTreeSet;
+use std::rc::Rc;
+
+use teksilo_canvas::{EdgeInsets, Point, Rect, Size, SizeProposal};
+use teksilo_core::accessibility::{AccessNodeBuilder, widget_id_to_node_id};
+use teksilo_core::binding::BindingLevel;
+use teksilo_core::build_context::BuildContext;
+use teksilo_core::drag_payload::DragPayload;
+use teksilo_core::event::{EventResponse, ScrollDelta, WidgetEvent};
+use teksilo_core::signal::{Prop, Signal};
+use teksilo_core::styles::GridViewStyle;
+use teksilo_core::widget::{LayoutContext, PaintContext, Widget, WidgetPlacement};
+use teksilo_core::widget_builder::HandlerSet;
+use teksilo_core::widget_id::WidgetId;
+use teksilo_data::{
+    DataChange, DropPosition, DropResponse, ListModel, SelectionMode, SelectionModel,
+};
+use teksilo_tokens::{Easing, SurfaceRole};
+
+use std::time::Duration;
+
+use crate::common::scroll::OverscrollBehavior;
+use crate::data_views::{DragTransferMode, RowDragData, ViewId, ViewKind, flat_insertion_target};
+use crate::list_source::ListSource;
+use crate::primitives::TextWidget;
+use crate::scroll_area::ScrollBarMode;
+use crate::scroll_bar::{ScrollBar, ScrollBarOrientation, ScrollBarVisual};
+
+use body_pane::{GridBodyPane, TileDelegate};
+use keyboard::{GridKeyConfig, build_grid_key_handler};
+use layout::masonry::VirtualizedMasonry;
+use layout::sectioned::SectionedGrid;
+use layout::strategy::{GridLayoutStrategy, TileRect};
+use layout::uniform::UniformGrid;
+use layout::variable_row::VariableRowGrid;
+use sections::{SectionData, SectionProvider};
+use selection::{MarqueeConfig, MarqueeState, build_marquee_handler};
+
+pub use sections::{GroupingSections, SectionProvider as GridSectionProvider, grouping_sections};
+
+/// Which layout strategy `GridView` builds.
+#[derive(Debug, Clone, Copy)]
+enum StrategyKind {
+    /// Fixed row height (the default).
+    Uniform,
+    /// Each row sized to its tallest tile; `estimated` seeds unmeasured rows.
+    VariableRow { estimated: f32 },
+    /// Pinterest-style column-balanced waterfall; per-item variable height.
+    Waterfall { estimated: f32 },
+}
+
+pub use keyboard::GridTabTraversal;
+pub use layout::{GridSizing, ScrollAnchor};
+
+/// The erased `can_accept` closure type carried by the grid's source.
+type CanAcceptFn = Rc<dyn Fn(&DragPayload, usize, DropPosition, ViewId) -> DropResponse>;
+
+/// Whether a drop at flat insertion `idx` is allowed: the source accepts it
+/// (same-view reorder, or a source that handles the foreign payload directly),
+/// the grid accepts foreign exported tiles via `accept_foreign_rows`, OR it is
+/// a foreign payload and the grid carries an app-level `on_item_drop` handler.
+fn drop_allowed<T: 'static>(
+    can_accept: &CanAcceptFn,
+    payload: &DragPayload,
+    idx: usize,
+    len: usize,
+    view_id: ViewId,
+    has_drop_cb: bool,
+    export: &crate::data_views::RowExport<T>,
+) -> bool {
+    match flat_insertion_target(idx, len) {
+        Some((target, position)) => match (can_accept)(payload, target, position, view_id) {
+            DropResponse::Accept | DropResponse::Redirect(_) => true,
+            DropResponse::Reject => {
+                let foreign = is_foreign::<T>(payload, view_id);
+                foreign && (has_drop_cb || export.accepts_foreign_export(payload, view_id))
+            }
+        },
+        None => false,
+    }
+}
+
+/// A payload is foreign to this grid when it is not a `RowDragData<T>`
+/// originating here (an external app/OS drop, or a tile dragged from
+/// another view).
+fn is_foreign<T: 'static>(payload: &DragPayload, view_id: ViewId) -> bool {
+    payload
+        .get_typed::<RowDragData<T>>()
+        .is_none_or(|rd| rd.source != view_id)
+}
+
+/// Scrollbar thickness, matching `ListView` / `TableView`.
+const SCROLLBAR_THICKNESS: f32 = 12.0;
+
+/// Context passed to the tile delegate for each realized tile.
+///
+/// Richer than `ListView`'s `(index, &item, selected)` — carries the 2D
+/// grid coordinates and focus state (mirrors `TableView`'s `CellContext`).
+/// There is intentionally **no** `is_hovered`: hover changes on every
+/// mouse-move and is handled per-tile inside the delegate's own widget
+/// (its interaction signal), never by rebuilding the grid.
+pub struct TileContext<'a, T: 'static> {
+    /// Flat model index.
+    pub index: usize,
+    /// Row in the logical grid (0-based).
+    pub row: usize,
+    /// Column in the logical grid (0-based).
+    pub col: usize,
+    /// Borrow of the item.
+    pub item: &'a T,
+    /// Whether this tile is in the selection set.
+    pub is_selected: bool,
+    /// Whether this tile is the keyboard-focus current item. A build-time
+    /// snapshot — the canonical focus indicator is the grid's painted focus
+    /// ring (it does not rebuild tiles), so a delegate reading this for
+    /// custom styling accepts a one-rebuild lag.
+    pub is_focused: bool,
+}
+
+/// A virtualized 2D tile grid backed by a `ListModel<T>`.
+pub struct GridView<T: 'static> {
+    source: ListSource<T>,
+    delegate: TileDelegate<T>,
+
+    // Layout configuration (consumed when the strategy is first built).
+    /// The resolved tile sizing. When `sizing_signal` is set (a reactive
+    /// `.sizing(signal)`), `build()` refreshes this from the signal and rebuilds
+    /// the cached strategy on change — the slider-driven live-resize path.
+    sizing: GridSizing,
+    /// Reactive tile sizing, if bound via `.sizing(impl Into<Prop<GridSizing>>)`.
+    /// `None` for the static `.sizing(GridSizing::…)` / `.tile_size` / `.column_count`
+    /// sugar. Mirrors `TabWidget`'s `sizing: Option<Signal<TabSizing>>`.
+    sizing_signal: Option<Signal<GridSizing>>,
+    col_gap: f32,
+    row_gap: f32,
+    inset: EdgeInsets,
+    strategy_kind: StrategyKind,
+    /// Exact per-item natural height (the variable-height fast-path).
+    #[allow(clippy::type_complexity)]
+    exact_item_height: Option<Rc<dyn Fn(usize) -> f32>>,
+    /// Lazily built on first `build()` and cached so variable-height
+    /// strategies keep their measurement caches across rebuilds.
+    strategy: Option<Rc<dyn GridLayoutStrategy>>,
+
+    // Selection / focus
+    selection: Option<SelectionModel>,
+    #[allow(clippy::type_complexity)]
+    on_selection_changed: Option<Rc<dyn Fn(&BTreeSet<usize>)>>,
+    focused_index: Signal<Option<usize>>,
+    /// Enable rubber-band marquee (default true; only active in Multi mode).
+    marquee_selection: bool,
+    marquee: Signal<Option<MarqueeState>>,
+
+    // Keyboard
+    wrap_navigation: bool,
+    tab_traversal: GridTabTraversal,
+
+    // Scroll
+    show_scrollbar: bool,
+    overscroll_behavior: OverscrollBehavior,
+    /// Animate wheel scrolling instead of snapping to the new offset.
+    /// Enabled by default — mirrors `ScrollArea`.
+    smooth_scrolling: bool,
+    /// Duration of the smooth scroll animation.
+    smooth_scroll_duration: Duration,
+    /// How the scroll bar is displayed. Defaults to `Permanent` (reserves
+    /// a layout column); `Overlay` / `Thin` float over the content.
+    scroll_bar_style: ScrollBarMode,
+    scroll_y: Signal<f32>,
+    max_scroll_y: Signal<f32>,
+    viewport_ratio_y: Signal<f32>,
+    /// Live column count for the current viewport width. Written in
+    /// `place_children`; drives the body pane's reflow rebuild on resize and
+    /// is read by the keyboard handler.
+    column_count: Signal<usize>,
+
+    // Drag-to-reorder + drop
+    reorderable: bool,
+    #[allow(clippy::type_complexity)]
+    on_item_drop: Option<
+        Rc<
+            dyn Fn(
+                teksilo_core::drag_payload::DragPayload,
+                usize,
+                &mut teksilo_core::widget::EventContext,
+            ) -> bool,
+        >,
+    >,
+    /// Insertion index during a reorder drag (painted by `GridOverlay`).
+    insertion: Signal<Option<usize>>,
+    /// Stable, kind-tagged ID for this GridView instance (identifies its own
+    /// reorder vs. a foreign drop, even across widget kinds / windows).
+    model_id: ViewId,
+
+    /// Cross-widget export / foreign-receive machinery — the builders
+    /// (`.exportable`, `.export_external`, `.accept_foreign_rows`,
+    /// `.on_rows_received`, `.on_rows_transferred_out`), the drag-start payload
+    /// build, and the move-out completion, shared by all five data views.
+    export: crate::data_views::RowExport<T>,
+
+    // Activation / context menu / type-ahead
+    #[allow(clippy::type_complexity)]
+    on_tile_activate: Option<Rc<dyn Fn(usize, &mut teksilo_core::widget::EventContext)>>,
+    /// Whether tile activation is a single or double click (default
+    /// `DoubleClick`). Enter always activates.
+    activate_on: crate::data_views::ActivateOn,
+    #[allow(clippy::type_complexity)]
+    tile_context_menu: Option<
+        Rc<
+            dyn Fn(
+                usize,
+                Point,
+                &mut teksilo_core::widget::EventContext,
+            ) -> Option<Box<dyn Widget>>,
+        >,
+    >,
+    type_ahead_timeout: std::time::Duration,
+    #[allow(clippy::type_complexity)]
+    type_ahead_label: Option<Rc<dyn Fn(usize) -> String>>,
+    /// Per-tile accessible name — sets each `GridCell`'s `Node::label` so a
+    /// screen reader announces a concise item name ("Title, Type") instead of
+    /// only the grid coordinates. `None` leaves the cell name to its contents.
+    #[allow(clippy::type_complexity)]
+    tile_a11y_label: Option<Rc<dyn Fn(usize) -> String>>,
+
+    // Empty / loading state
+    #[allow(clippy::type_complexity)]
+    empty_view: Option<Rc<dyn Fn() -> Box<dyn Widget>>>,
+    #[allow(clippy::type_complexity)]
+    loading_view: Option<Rc<dyn Fn() -> Box<dyn Widget>>>,
+    is_loading: Option<Prop<bool>>,
+    loading_id: Option<WidgetId>,
+
+    // Sections
+    section_data: Option<SectionData>,
+    #[allow(clippy::type_complexity)]
+    header_delegate: Option<Rc<dyn Fn(usize, &str) -> Box<dyn Widget>>>,
+    header_height: f32,
+    pinned_section_headers: bool,
+    current_section: Signal<usize>,
+    pinned_header_id: Option<WidgetId>,
+
+    // Accessibility
+    a11y_label: Option<String>,
+    /// Shared map (flat index → tile wrapper id), written by the body pane,
+    /// read by `accessibility` for `active_descendant` roving focus.
+    tile_map: Rc<std::cell::RefCell<Vec<(usize, WidgetId)>>>,
+
+    /// Per-call Tier-3 decoration style override (focus ring / marquee /
+    /// insertion bar / pinned header). `None` → theme slot → stock default.
+    style: Option<Rc<dyn GridViewStyle>>,
+
+    // Geometry (synchronous cells, read within the layout pass)
+    viewport_width: Rc<Cell<f32>>,
+    viewport_height: Rc<Cell<f32>>,
+    /// The grid body pane's absolute (window) origin, published by
+    /// `GridBodyPane::place_children` (`None` until laid out). Shared into the
+    /// keyboard handler so it can chase the focused tile into any enclosing
+    /// scroll area (`ctx.ensure_visible`).
+    viewport_origin: Rc<Cell<Option<Point>>>,
+    /// Remembered scrollbar decision so each layout queries the strategy at a
+    /// single, stable body width — querying at two widths per frame would
+    /// thrash a variable strategy's per-row measurement cache.
+    last_needs_scrollbar: Cell<bool>,
+
+    // Build state
+    body_pane_id: Option<WidgetId>,
+    empty_id: Option<WidgetId>,
+    scrollbar_id: Option<WidgetId>,
+    overlay_id: Option<WidgetId>,
+
+    /// Whole-view enabled state, statically or reactively. Forwarded to the
+    /// arena via `ctx.enabled_when(self_id, self.enabled.clone())` at build
+    /// time; a disabled view greys out and stops accepting focus /
+    /// selection / keyboard input (arena-gated).
+    enabled: Prop<bool>,
+}
+
+impl<T: 'static> GridView<T> {
+    /// Create a grid backed by a `ListModel<T>`. The `delegate` builds the
+    /// widget for each tile from a [`TileContext`].
+    pub fn new(
+        model: ListModel<T>,
+        delegate: impl Fn(&TileContext<'_, T>) -> Box<dyn Widget> + 'static,
+    ) -> Self {
+        Self::create(ListSource::from_model(model), delegate)
+    }
+
+    /// Create a grid backed by any `ListDataSource` (large / external data).
+    pub fn from_source<S: teksilo_data::ListDataSource<Item = T>>(
+        source: S,
+        delegate: impl Fn(&TileContext<'_, T>) -> Box<dyn Widget> + 'static,
+    ) -> Self {
+        Self::create(ListSource::from_data_source(source), delegate)
+    }
+
+    fn create(
+        source: ListSource<T>,
+        delegate: impl Fn(&TileContext<'_, T>) -> Box<dyn Widget> + 'static,
+    ) -> Self {
+        Self {
+            source,
+            delegate: Rc::new(delegate),
+            sizing: GridSizing::Adaptive {
+                min_width: 120.0,
+                max_width: None,
+                height: 120.0,
+            },
+            sizing_signal: None,
+            col_gap: 8.0,
+            row_gap: 8.0,
+            inset: EdgeInsets::ZERO,
+            strategy_kind: StrategyKind::Uniform,
+            exact_item_height: None,
+            strategy: None,
+            selection: None,
+            on_selection_changed: None,
+            focused_index: Signal::new(None),
+            marquee_selection: true,
+            marquee: Signal::new(None),
+            wrap_navigation: false,
+            tab_traversal: GridTabTraversal::OutOfGrid,
+            show_scrollbar: true,
+            overscroll_behavior: OverscrollBehavior::default(),
+            smooth_scrolling: true,
+            smooth_scroll_duration: Duration::from_millis(150),
+            scroll_bar_style: ScrollBarMode::Permanent,
+            scroll_y: Signal::new_animated(0.0),
+            max_scroll_y: Signal::new(0.0),
+            viewport_ratio_y: Signal::new(1.0),
+            column_count: Signal::new(1),
+            reorderable: false,
+            on_item_drop: None,
+            insertion: Signal::new(None),
+            model_id: ViewId::next(ViewKind::Grid),
+            export: crate::data_views::RowExport::default(),
+            on_tile_activate: None,
+            activate_on: crate::data_views::ActivateOn::default(),
+            tile_context_menu: None,
+            type_ahead_timeout: std::time::Duration::from_millis(500),
+            type_ahead_label: None,
+            tile_a11y_label: None,
+            empty_view: None,
+            loading_view: None,
+            is_loading: None,
+            loading_id: None,
+            section_data: None,
+            header_delegate: None,
+            header_height: 28.0,
+            pinned_section_headers: false,
+            current_section: Signal::new(0),
+            pinned_header_id: None,
+            a11y_label: None,
+            tile_map: Rc::new(std::cell::RefCell::new(Vec::new())),
+            style: None,
+            viewport_width: Rc::new(Cell::new(400.0)),
+            viewport_height: Rc::new(Cell::new(400.0)),
+            viewport_origin: Rc::new(Cell::new(None)),
+            last_needs_scrollbar: Cell::new(false),
+            body_pane_id: None,
+            empty_id: None,
+            scrollbar_id: None,
+            overlay_id: None,
+            enabled: Prop::Static(true),
+        }
+    }
+
+    /// Enable or disable the whole view. A disabled view greys out and stops
+    /// accepting focus / selection / keyboard input (arena-gated).
+    pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self {
+        self.enabled = enabled.into();
+        self
+    }
+
+    // ── Tile sizing & layout ────────────────────────────────────────────
+
+    /// Set the tile sizing / column-count policy.
+    ///
+    /// Accepts a plain [`GridSizing`] (static) **or** a `Signal<GridSizing>`
+    /// (reactive). A bound signal is observed at [`BindingLevel::Rebuild`]: when
+    /// it changes, `build()` rebuilds the cached layout strategy and reflows —
+    /// the internal `scroll_y` / `focused_index` / selection are field signals on
+    /// the same widget instance, so they survive the rebuild (no scroll jump).
+    /// This is the card-size-slider path; mirrors
+    /// [`TabWidget::sizing`](crate::TabWidget::sizing).
+    pub fn sizing(mut self, sizing: impl Into<Prop<GridSizing>>) -> Self {
+        let sig = sizing.into().as_signal();
+        self.sizing = sig.get();
+        self.sizing_signal = Some(sig);
+        self
+    }
+
+    /// Sugar for [`GridSizing::Fixed`] — every tile is exactly `width` × `height`.
+    pub fn tile_size(mut self, width: f32, height: f32) -> Self {
+        self.sizing = GridSizing::Fixed { width, height };
+        self.sizing_signal = None;
+        self
+    }
+
+    /// Sugar for [`GridSizing::FixedColumnCount`] — exactly `count` columns.
+    pub fn column_count(mut self, count: usize, tile_height: f32) -> Self {
+        self.sizing = GridSizing::FixedColumnCount {
+            count,
+            height: tile_height,
+        };
+        self.sizing_signal = None;
+        self
+    }
+
+    /// Switch to variable row heights: each row is sized to its tallest
+    /// tile (SwiftUI `LazyVGrid` semantics). `estimated` seeds rows that
+    /// haven't been measured yet; the scroll position is anchored when an
+    /// estimate is later corrected. Combine with
+    /// [`item_height`](Self::item_height) for exact heights.
+    pub fn variable_row_heights(mut self, estimated: f32) -> Self {
+        self.strategy_kind = StrategyKind::VariableRow {
+            estimated: estimated.max(1.0),
+        };
+        self
+    }
+
+    /// Supply an exact per-**item** natural height. Width-independent, so it
+    /// doesn't depend on the runtime column count: `VariableRowGrid` sizes
+    /// each row to `max(item_height(i))` over its items. Implies variable row
+    /// heights, gives an exact scrollbar, and removes anchoring jitter.
+    pub fn item_height(mut self, f: impl Fn(usize) -> f32 + 'static) -> Self {
+        self.exact_item_height = Some(Rc::new(f));
+        if matches!(self.strategy_kind, StrategyKind::Uniform) {
+            self.strategy_kind = StrategyKind::VariableRow {
+                estimated: self.sizing.tile_height().max(1.0),
+            };
+        }
+        self
+    }
+
+    /// Switch to a Pinterest-style waterfall: per-item variable heights flow
+    /// into the currently-shortest column. Column count comes from the
+    /// configured [`sizing`](Self::sizing); heights are auto-measured (or
+    /// exact via [`item_height`](Self::item_height)). `estimated` seeds
+    /// unmeasured items.
+    pub fn waterfall(mut self, estimated: f32) -> Self {
+        self.strategy_kind = StrategyKind::Waterfall {
+            estimated: estimated.max(1.0),
+        };
+        self
+    }
+
+    // ── Spacing & insets ────────────────────────────────────────────────
+
+    /// Horizontal gap between tiles (default 8).
+    pub fn column_spacing(mut self, spacing: f32) -> Self {
+        self.col_gap = spacing.max(0.0);
+        self
+    }
+
+    /// Vertical gap between tile rows (default 8).
+    pub fn row_spacing(mut self, spacing: f32) -> Self {
+        self.row_gap = spacing.max(0.0);
+        self
+    }
+
+    /// Set both column and row spacing.
+    pub fn spacing(mut self, spacing: f32) -> Self {
+        self.col_gap = spacing.max(0.0);
+        self.row_gap = spacing.max(0.0);
+        self
+    }
+
+    /// Inset from the scroll-content edge to the tiles.
+    pub fn content_inset(mut self, inset: EdgeInsets) -> Self {
+        self.inset = inset;
+        self
+    }
+
+    // ── Selection ───────────────────────────────────────────────────────
+
+    /// Set the selection model (modes `None` / `Single` / `Multi`).
+    pub fn selection(mut self, sel: SelectionModel) -> Self {
+        self.selection = Some(sel);
+        self
+    }
+
+    /// Called whenever the selection set changes — including programmatic
+    /// changes — with the new set of selected indices.
+    pub fn on_selection_changed(mut self, f: impl Fn(&BTreeSet<usize>) + 'static) -> Self {
+        self.on_selection_changed = Some(Rc::new(f));
+        self
+    }
+
+    /// Enable / disable rubber-band marquee selection (default enabled; only
+    /// active when the selection model is in `Multi` mode).
+    pub fn marquee_selection(mut self, enabled: bool) -> Self {
+        self.marquee_selection = enabled;
+        self
+    }
+
+    // ── Keyboard ────────────────────────────────────────────────────────
+
+    /// Whether arrow navigation wraps across row/grid edges (default false).
+    pub fn wrap_navigation(mut self, enabled: bool) -> Self {
+        self.wrap_navigation = enabled;
+        self
+    }
+
+    /// How Tab moves out of (or within) the grid (default `OutOfGrid`).
+    pub fn tab_traversal(mut self, traversal: GridTabTraversal) -> Self {
+        self.tab_traversal = traversal;
+        self
+    }
+
+    // ── Scrolling ───────────────────────────────────────────────────────
+
+    /// Suppress the internal scrollbar (mount your own via the signal
+    /// accessors so it survives rebuilds).
+    pub fn show_scrollbar(mut self, show: bool) -> Self {
+        self.show_scrollbar = show;
+        self
+    }
+
+    /// Scroll-chaining behavior at the boundary (default `Chain`).
+    pub fn overscroll_behavior(mut self, behavior: OverscrollBehavior) -> Self {
+        self.overscroll_behavior = behavior;
+        self
+    }
+
+    /// Enable or disable animated wheel scrolling (enabled by default).
+    pub fn smooth_scrolling(mut self, enabled: bool) -> Self {
+        self.smooth_scrolling = enabled;
+        self
+    }
+
+    /// Duration of the smooth scroll animation (default 150 ms).
+    pub fn smooth_scroll_duration(mut self, duration: Duration) -> Self {
+        self.smooth_scroll_duration = duration;
+        self
+    }
+
+    /// How the scroll bar is displayed (default `Permanent`). `Overlay`
+    /// and `Thin` float the bar over the content instead of reserving a
+    /// layout column, mirroring `ScrollArea::scroll_bar_style`.
+    pub fn scroll_bar_style(mut self, style: ScrollBarMode) -> Self {
+        self.scroll_bar_style = style;
+        self
+    }
+
+    /// The vertical scroll offset signal.
+    pub fn scroll_y_signal(&self) -> &Signal<f32> {
+        &self.scroll_y
+    }
+
+    /// The maximum scroll offset signal (`content_height - viewport_height`).
+    pub fn max_scroll_y_signal(&self) -> &Signal<f32> {
+        &self.max_scroll_y
+    }
+
+    /// The vertical viewport-to-content ratio signal (drives the thumb size).
+    pub fn viewport_ratio_y_signal(&self) -> &Signal<f32> {
+        &self.viewport_ratio_y
+    }
+
+    /// Scroll the minimum distance to bring `index` into view per `anchor`.
+    pub fn ensure_index_visible(&self, index: usize, anchor: ScrollAnchor) {
+        let Some(ref strategy) = self.strategy else {
+            return;
+        };
+        let delta = strategy.scroll_delta_to_reveal(
+            index,
+            self.scroll_y.get(),
+            self.viewport_height.get(),
+            self.viewport_width.get(),
+            anchor,
+        );
+        if delta.abs() > 0.01 {
+            let max = self.max_scroll_y.get();
+            self.scroll_y
+                .set((self.scroll_y.get() + delta).clamp(0.0, max));
+        }
+    }
+
+    /// Scroll to `index`, forcing the viewport position per `anchor`
+    /// (`Auto` behaves like [`ensure_index_visible`](Self::ensure_index_visible)).
+    pub fn scroll_to_index(&self, index: usize, anchor: ScrollAnchor) {
+        self.ensure_index_visible(index, anchor);
+    }
+
+    // ── Accessibility / empty state ─────────────────────────────────────
+
+    // ── Sections ────────────────────────────────────────────────────────
+
+    /// Group the flat model into sections, rendering a header above each
+    /// section's tile band. Sections compose with the uniform tile layout.
+    pub fn sections<P: SectionProvider>(mut self, provider: P) -> Self {
+        let provider = Rc::new(provider);
+        let counts_provider = provider.clone();
+        let title_provider = provider.clone();
+        self.section_data = Some(SectionData {
+            counts_fn: Rc::new(move || counts_provider.section_counts()),
+            title_fn: Rc::new(move |s| title_provider.section_title(s)),
+        });
+        self
+    }
+
+    /// Custom section-header widget builder `(section_index, title)`. Without
+    /// it a default bold-text header is used.
+    pub fn section_header_delegate(
+        mut self,
+        f: impl Fn(usize, &str) -> Box<dyn Widget> + 'static,
+    ) -> Self {
+        self.header_delegate = Some(Rc::new(f));
+        self
+    }
+
+    /// Height of each section header row (default 28).
+    pub fn section_header_height(mut self, height: f32) -> Self {
+        self.header_height = height.max(0.0);
+        self
+    }
+
+    /// Keep the current section's header pinned to the top while scrolling
+    /// through it (SwiftUI `pinnedViews:[.sectionHeaders]`).
+    pub fn pinned_section_headers(mut self, enabled: bool) -> Self {
+        self.pinned_section_headers = enabled;
+        self
+    }
+
+    /// Accessible label for the grid container.
+    pub fn a11y_label(mut self, label: impl Into<String>) -> Self {
+        self.a11y_label = Some(label.into());
+        self
+    }
+
+    /// Per-call Tier-3 decoration style override (focus ring, marquee,
+    /// insertion bar, pinned-header surface). Precedence: this override →
+    /// `theme.style_slots.grid_view` → the stock `RecipeGridViewStyle`.
+    pub fn style(mut self, style: impl GridViewStyle) -> Self {
+        self.style = Some(Rc::new(style));
+        self
+    }
+
+    /// Build the header-widget factory (section → widget) shared by the body
+    /// pane and the pinned slot, falling back to a default bold-text header.
+    #[allow(clippy::type_complexity)]
+    fn header_factory(&self) -> Option<Rc<dyn Fn(usize) -> Box<dyn Widget>>> {
+        let data = self.section_data.as_ref()?;
+        let title_fn = data.title_fn.clone();
+        let delegate = self.header_delegate.clone();
+        Some(Rc::new(move |section| {
+            let title = title_fn(section);
+            match &delegate {
+                Some(d) => d(section, &title),
+                None => Box::new(TextWidget::new(teksilo_i18n::lit!(title))) as Box<dyn Widget>,
+            }
+        }))
+    }
+
+    /// Widget shown when the model is empty.
+    pub fn empty_view(mut self, f: impl Fn() -> Box<dyn Widget> + 'static) -> Self {
+        self.empty_view = Some(Rc::new(f));
+        self
+    }
+
+    /// Widget overlaid while `is_loading` reads `true`.
+    pub fn loading_view(mut self, f: impl Fn() -> Box<dyn Widget> + 'static) -> Self {
+        self.loading_view = Some(Rc::new(f));
+        self
+    }
+
+    /// Reactive loading flag; when `true` the [`loading_view`](Self::loading_view)
+    /// is shown above the grid.
+    pub fn is_loading(mut self, flag: impl Into<Prop<bool>>) -> Self {
+        self.is_loading = Some(flag.into());
+        self
+    }
+
+    // ── Drag-to-reorder ─────────────────────────────────────────────────
+
+    /// Enable intra-grid drag reordering (and keyboard Alt+Arrow). The move is
+    /// routed through the source's `accept_drop` (a built-in `ListModel`
+    /// reorders via `move_item`; an external source applies its own command).
+    pub fn reorderable(mut self, enabled: bool) -> Self {
+        self.reorderable = enabled;
+        self
+    }
+
+    /// Make tiles **droppable outside this view** — on a
+    /// [`DropTarget`](crate::DropTarget), another data view, or the OS.
+    ///
+    /// A dragged tile (or the whole selection, when the pressed tile is part of
+    /// a multi-selection) carries clones of its items in a public
+    /// [`RowDragData<T>`](crate::RowDragData), so a foreign receiver can pull
+    /// them out with `payload.get_typed::<RowDragData<T>>()` /
+    /// `DropTarget::on_drop_typed::<RowDragData<T>>()` — no serialization. This
+    /// also makes tiles a drag source even without [`reorderable`](Self::reorderable).
+    ///
+    /// `mode` chooses what happens to the origin rows once a *foreign* target
+    /// accepts them: [`DragTransferMode::Move`] removes them (via the source's
+    /// `on_drag_out`, or [`on_rows_transferred_out`](Self::on_rows_transferred_out)),
+    /// [`DragTransferMode::Copy`] leaves them. A same-view reorder is never a
+    /// transfer, so `mode` never affects it. Requires `T: Clone`.
+    pub fn exportable(mut self, mode: DragTransferMode) -> Self
+    where
+        T: Clone,
+    {
+        self.export.set_exportable(mode);
+        self
+    }
+
+    /// Additionally advertise the dragged tiles as MIME data so they can be
+    /// dropped on a [`DropZone`](crate::DropZone) or exported to another
+    /// application / window via the OS. `f` maps the dragged items to
+    /// `(mime_type, bytes)` pairs (e.g. `text/plain`, `text/uri-list`, an
+    /// app-specific `application/x-…`). Implies [`exportable`](Self::exportable)
+    /// (defaulting to [`DragTransferMode::Move`] if not already set). Requires
+    /// `T: Clone`.
+    pub fn export_external(mut self, f: impl Fn(&[T]) -> Vec<(String, Vec<u8>)> + 'static) -> Self
+    where
+        T: Clone,
+    {
+        self.export.set_export_external(f);
+        self
+    }
+
+    /// Override how rows moved out to a foreign target are removed from this
+    /// view. Receives the dragged rows' indices (descending-safe) and the live
+    /// context. Without this, an [`exportable`](Self::exportable)
+    /// [`Move`](DragTransferMode::Move) drag removes them through the source's
+    /// `on_drag_out` (works out of the box for a `ListModel`).
+    pub fn on_rows_transferred_out(
+        mut self,
+        f: impl Fn(&[usize], &mut teksilo_core::widget::EventContext) + 'static,
+    ) -> Self {
+        self.export.set_on_rows_transferred_out(f);
+        self
+    }
+
+    /// Accept exported rows dropped from a **different** view or source without
+    /// writing a custom `ListDataSource`. Pair with
+    /// [`on_rows_received`](Self::on_rows_received), which is handed the dropped
+    /// items and the insertion index. (Same-view reorder is
+    /// [`reorderable`](Self::reorderable); a custom `ListDataSource` can still
+    /// accept foreign drops through its `can_accept`/`accept_drop` instead.)
+    pub fn accept_foreign_rows(mut self, accept: bool) -> Self {
+        self.export.accept_foreign_rows = accept;
+        self
+    }
+
+    /// Handler for rows accepted via [`accept_foreign_rows`](Self::accept_foreign_rows):
+    /// `(items, insertion_index, ctx)`. Insert them into your model at the
+    /// index.
+    pub fn on_rows_received(
+        mut self,
+        f: impl Fn(Vec<T>, usize, &mut teksilo_core::widget::EventContext) + 'static,
+    ) -> Self {
+        self.export.set_on_rows_received(f);
+        self
+    }
+
+    /// Accept external drops at a flat insertion index. Returns `true` when
+    /// the drop is accepted.
+    pub fn on_item_drop(
+        mut self,
+        f: impl Fn(
+            teksilo_core::drag_payload::DragPayload,
+            usize,
+            &mut teksilo_core::widget::EventContext,
+        ) -> bool
+        + 'static,
+    ) -> Self {
+        self.on_item_drop = Some(Rc::new(f));
+        self
+    }
+
+    // ── Activation / context menu / type-ahead / loading ────────────────
+
+    /// Called when a tile is activated (a click per [`activate_on`](Self::activate_on),
+    /// or Enter on the focused tile) — the "open / default action", distinct
+    /// from selection.
+    pub fn on_tile_activate(
+        mut self,
+        f: impl Fn(usize, &mut teksilo_core::widget::EventContext) + 'static,
+    ) -> Self {
+        self.on_tile_activate = Some(Rc::new(f));
+        self
+    }
+
+    /// Choose single- vs double-click tile activation (default
+    /// [`ActivateOn::DoubleClick`](crate::ActivateOn)). Enter activates in either
+    /// mode.
+    pub fn activate_on(mut self, mode: crate::data_views::ActivateOn) -> Self {
+        self.activate_on = mode;
+        self
+    }
+
+    /// Per-tile context-menu factory: `(index, pointer_position, ctx)` →
+    /// optional menu widget.
+    pub fn tile_context_menu(
+        mut self,
+        f: impl Fn(usize, Point, &mut teksilo_core::widget::EventContext) -> Option<Box<dyn Widget>>
+        + 'static,
+    ) -> Self {
+        self.tile_context_menu = Some(Rc::new(f));
+        self
+    }
+
+    /// Supply a per-item label for type-ahead navigation (typing letters
+    /// jumps to the first matching item). Required to enable type-ahead.
+    pub fn type_ahead_label(mut self, f: impl Fn(usize) -> String + 'static) -> Self {
+        self.type_ahead_label = Some(Rc::new(f));
+        self
+    }
+
+    /// Supply a per-item accessible name applied to each tile's `GridCell`
+    /// (`Node::label`), so a screen reader announces a concise item name in
+    /// addition to the row/column position. Without it, the cell's name is left
+    /// to its contents.
+    pub fn tile_a11y_label(mut self, f: impl Fn(usize) -> String + 'static) -> Self {
+        self.tile_a11y_label = Some(Rc::new(f));
+        self
+    }
+
+    /// Type-ahead reset timeout (default 500 ms; `ZERO` disables).
+    pub fn type_ahead_timeout(mut self, timeout: std::time::Duration) -> Self {
+        self.type_ahead_timeout = timeout;
+        self
+    }
+
+    // ── Internals ───────────────────────────────────────────────────────
+
+    /// Build (once) and return the layout strategy. Cached so variable
+    /// strategies keep their measurement caches across rebuilds.
+    fn ensure_strategy(&mut self) -> Rc<dyn GridLayoutStrategy> {
+        if self.strategy.is_none() {
+            // Sections override the strategy kind (uniform tiles + headers).
+            if let Some(ref data) = self.section_data {
+                let s: Rc<dyn GridLayoutStrategy> = Rc::new(SectionedGrid::new(
+                    self.sizing,
+                    self.col_gap,
+                    self.row_gap,
+                    self.inset,
+                    self.header_height,
+                    data.counts_fn.clone(),
+                ));
+                self.strategy = Some(s);
+                return self.strategy.as_ref().unwrap().clone();
+            }
+            let s: Rc<dyn GridLayoutStrategy> = match self.strategy_kind {
+                StrategyKind::Uniform => Rc::new(UniformGrid::new(
+                    self.sizing,
+                    self.col_gap,
+                    self.row_gap,
+                    self.inset,
+                )),
+                StrategyKind::VariableRow { estimated } => Rc::new(VariableRowGrid::new(
+                    self.sizing,
+                    self.col_gap,
+                    self.row_gap,
+                    self.inset,
+                    estimated,
+                    self.exact_item_height.clone(),
+                )),
+                StrategyKind::Waterfall { estimated } => Rc::new(VirtualizedMasonry::new(
+                    self.sizing,
+                    self.col_gap,
+                    self.row_gap,
+                    self.inset,
+                    estimated,
+                    self.exact_item_height.clone(),
+                )),
+            };
+            self.strategy = Some(s);
+        }
+        self.strategy.as_ref().unwrap().clone()
+    }
+}
+
+impl<T: 'static> std::fmt::Debug for GridView<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("GridView")
+            .field("items", &self.source.len())
+            .field("scroll_bar_style", &self.scroll_bar_style)
+            .field("scroll_y", &self.scroll_y.get())
+            .finish()
+    }
+}
+
+impl<T: 'static> Widget for GridView<T> {
+    fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+        let self_id = ctx.self_id();
+        ctx.enabled_when(self_id, self.enabled.clone());
+
+        // Reactive tile sizing (the card-size slider): observe the bound signal
+        // at Rebuild, and when its value changes, drop the cached strategy so
+        // `ensure_strategy` rebuilds it with the new sizing and the grid reflows.
+        // Done before `ensure_strategy` so this build already uses the new value.
+        if let Some(ref sig) = self.sizing_signal {
+            sig.bind_to(self_id, ctx.binding_registry(), BindingLevel::Rebuild);
+            let next = sig.get();
+            if self.sizing != next {
+                self.sizing = next;
+                self.strategy = None;
+            }
+        }
+
+        let strategy = self.ensure_strategy();
+
+        // Rebuild trigger (data changes, empty/non-empty transition).
+        let version = ctx.signal(0_u64);
+        version.bind_to(ctx.self_id(), ctx.binding_registry(), BindingLevel::Rebuild);
+
+        // scroll_y at Relayout so place_children re-writes max_scroll/ratio.
+        self.scroll_y.bind_to(
+            ctx.self_id(),
+            ctx.binding_registry(),
+            BindingLevel::Relayout,
+        );
+        ctx.register_animated_signal(&self.scroll_y);
+
+        // Re-walk container a11y when selection / focus changes.
+        if let Some(ref sel) = self.selection {
+            sel.selection_signal().bind_to(
+                ctx.self_id(),
+                ctx.binding_registry(),
+                BindingLevel::AccessibilityOnly,
+            );
+        }
+        self.focused_index.bind_to(
+            ctx.self_id(),
+            ctx.binding_registry(),
+            BindingLevel::AccessibilityOnly,
+        );
+
+        // Observe model changes.
+        {
+            let v = version.clone();
+            let counter = Rc::new(Cell::new(0_u64));
+            let strategy_obs = strategy.clone();
+            let selection_obs = self.selection.clone();
+            let len_fn = self.source.len_fn.clone();
+            let scroll_reset = self.scroll_y.clone();
+            let focused_obs = self.focused_index.clone();
+            let handle = (self.source.observe_fn)(Box::new(move |change| {
+                match change {
+                    DataChange::ItemsInserted { range } => {
+                        strategy_obs.invalidate_rows(range.start..usize::MAX);
+                        strategy_obs.resize((len_fn)());
+                        if let Some(ref s) = selection_obs {
+                            s.adjust_for_insert(range.start, range.end - range.start);
+                        }
+                    }
+                    DataChange::ItemsRemoved { range } => {
+                        strategy_obs.invalidate_rows(range.start..usize::MAX);
+                        strategy_obs.resize((len_fn)());
+                        if let Some(ref s) = selection_obs {
+                            s.adjust_for_remove(range.start, range.end - range.start);
+                        }
+                    }
+                    DataChange::ItemsMoved { from, to, count } => {
+                        strategy_obs.invalidate_rows(0..usize::MAX);
+                        if let Some(ref s) = selection_obs {
+                            s.adjust_for_move(*from, *to, *count);
+                        }
+                    }
+                    DataChange::ItemUpdated { index } => {
+                        strategy_obs.invalidate_rows(*index..index + 1);
+                    }
+                    DataChange::WindowLoaded { range } => {
+                        strategy_obs.invalidate_rows(range.start..range.end);
+                    }
+                    DataChange::Reset => {
+                        strategy_obs.invalidate_rows(0..usize::MAX);
+                        strategy_obs.resize(0);
+                        if let Some(ref s) = selection_obs {
+                            s.clear();
+                        }
+                        scroll_reset.set(0.0);
+                    }
+                }
+                // Keep the keyboard-focus anchor in step too — otherwise it
+                // silently points at the wrong tile after an insert / remove
+                // / move (reachable not just from local edits but from a
+                // live watcher pushing in a peer process's write), and the
+                // next Enter/Space acts on the wrong item. Mirrors
+                // `ListView`'s `focused_index` adjustment.
+                if let Some(current) = focused_obs.get() {
+                    focused_obs.set(teksilo_data::data_change::adjust_single_index_for_change(
+                        current, change,
+                    ));
+                }
+                let next = counter.get() + 1;
+                counter.set(next);
+                v.set(next);
+            }));
+            ctx.own_handle(handle);
+        }
+
+        // Fire on_selection_changed on every selection change (interactive
+        // or programmatic). The framework's reactive observers don't carry
+        // an EventContext, so the callback receives only the selection set.
+        if let (Some(sel), Some(cb)) = (&self.selection, &self.on_selection_changed) {
+            let cb = cb.clone();
+            ctx.effect(&sel.selection_signal(), move |set| cb(set));
+        }
+
+        // Rebuild when the loading flag toggles (shows/hides the overlay).
+        if let Some(flag) = &self.is_loading {
+            let v = version.clone();
+            let c = Rc::new(Cell::new(0_u64));
+            ctx.effect(&flag.as_signal(), move |_| {
+                c.set(c.get() + 1);
+                v.set(c.get());
+            });
+        }
+
+        // Self handlers: scroll wheel + keyboard.
+        let mut handlers = HandlerSet::new().clips_children(true).focusable(true);
+        {
+            let scroll_y = self.scroll_y.clone();
+            let max_scroll = self.max_scroll_y.clone();
+            let line_height = strategy.estimated_row_height().max(1.0);
+            let overscroll = self.overscroll_behavior;
+            let smooth_scrolling = self.smooth_scrolling;
+            let smooth_scroll_duration = self.smooth_scroll_duration;
+            handlers = handlers.on_scroll(move |event, _ctx| match event {
+                WidgetEvent::Scroll { delta, .. } => {
+                    let dy = match delta {
+                        ScrollDelta::Lines { y, .. } => y * line_height,
+                        ScrollDelta::Pixels { y, .. } => *y,
+                    };
+                    // Base off the animation target so successive notches
+                    // accumulate instead of restarting mid-animation.
+                    let base = scroll_y.animation_target().unwrap_or(scroll_y.get());
+                    let (new_y, moved) =
+                        crate::common::scroll::scroll_clamp_axis(base, dy, max_scroll.get());
+                    if moved {
+                        if smooth_scrolling {
+                            scroll_y.animate_to(new_y, smooth_scroll_duration, Easing::EaseOut);
+                        } else {
+                            scroll_y.set(new_y);
+                        }
+                    }
+                    crate::common::scroll::scroll_response(
+                        moved,
+                        overscroll == OverscrollBehavior::Contain,
+                    )
+                }
+                _ => EventResponse::Ignored,
+            });
+        }
+        handlers = handlers.on_key(build_grid_key_handler(GridKeyConfig {
+            len_fn: self.source.len_fn.clone(),
+            col_count: self.column_count.clone(),
+            focused_index: self.focused_index.clone(),
+            selection: self.selection.clone(),
+            scroll_y: self.scroll_y.clone(),
+            max_scroll_y: self.max_scroll_y.clone(),
+            viewport_height: self.viewport_height.clone(),
+            viewport_width: self.viewport_width.clone(),
+            viewport_origin: self.viewport_origin.clone(),
+            strategy: strategy.clone(),
+            wrap_navigation: self.wrap_navigation,
+            tab_traversal: self.tab_traversal,
+            on_tile_activate: self.on_tile_activate.clone(),
+            reorderable: self.reorderable,
+            accept_drop_fn: self.source.dnd.accept_drop_fn.clone(),
+            view_id: self.model_id,
+            make_reorder_payload: {
+                let model_id = self.model_id;
+                let stash = self.source.dnd.stash_drag_keys_fn.clone();
+                Rc::new(move |idx| {
+                    // Synthetic same-view payloads must stash the dragged
+                    // row's key at construction — the accept path resolves
+                    // identity from the stash, never from `rows`.
+                    (stash)(&[idx]);
+                    DragPayload::typed(RowDragData::<T> {
+                        source: model_id,
+                        rows: vec![idx],
+                        items: None,
+                    })
+                })
+            },
+            type_ahead_timeout: self.type_ahead_timeout,
+            // Route through the source's string accessor so an unloaded
+            // (lazy/windowed) row is skipped rather than searched with
+            // whatever the app's index-only closure happens to compute for
+            // it — mirrors `ListView::with_item_str_fn`. The public
+            // `type_ahead_label(usize) -> String` API is unchanged; this
+            // just gates it on row residency.
+            type_ahead_label: self.type_ahead_label.as_ref().map(|label| {
+                let label = label.clone();
+                let with_item_str = self.source.with_item_str_fn.clone();
+                Rc::new(move |i: usize| (with_item_str)(i, &|_item: &T| label(i)))
+                    as Rc<dyn Fn(usize) -> Option<String>>
+            }),
+        }));
+
+        // Rubber-band marquee (Multi mode only). A container pointer handler
+        // records the modifier state at press time for additive selection;
+        // the drag handler sweeps the rectangle.
+        let marquee_on = self.marquee_selection
+            && self
+                .selection
+                .as_ref()
+                .map(|s| s.mode() == SelectionMode::Multi)
+                .unwrap_or(false);
+        if marquee_on {
+            let additive_mods = Rc::new(Cell::new(false));
+            {
+                let mods = additive_mods.clone();
+                handlers = handlers.on_pointer_event(move |event, _ctx| {
+                    if let WidgetEvent::PointerDown { modifiers, .. } = event {
+                        mods.set(modifiers.ctrl() || modifiers.shift());
+                    }
+                    EventResponse::Ignored
+                });
+            }
+            handlers = handlers.on_drag(build_marquee_handler(MarqueeConfig {
+                marquee: self.marquee.clone(),
+                selection: self.selection.clone().unwrap(),
+                strategy: strategy.clone(),
+                scroll_y: self.scroll_y.clone(),
+                viewport_width: self.viewport_width.clone(),
+                len_fn: self.source.len_fn.clone(),
+                additive_mods,
+            }));
+
+            // Viewport-edge auto-scroll while the marquee is active, so a
+            // rubber-band selection can extend past the visible window —
+            // matching `TabBar`/`TreeView`'s drag-tick edge-scroll. Those
+            // ride `on_drag_tick`, which only fires for an `active_drag`
+            // (a `DragPayload` session started via `start_drag`); the
+            // marquee is a plain gesture-recognizer drag (`on_drag`) with
+            // no such session, so it drives itself from the raw per-frame
+            // handle instead — the same "owner-driven, non-visibility-
+            // bound" path the rich-text editor's drag-select auto-scroll
+            // uses. Not gated on reduced-motion: this is an interaction
+            // (extending the selection), not decorative motion.
+            let frame_request = ctx.frame_request_handle();
+            let marquee_for_tick = self.marquee.clone();
+            let scroll_for_tick = self.scroll_y.clone();
+            let max_scroll_for_tick = self.max_scroll_y.clone();
+            let viewport_h_for_tick = self.viewport_height.clone();
+            ctx.effect(&ctx.frame_tick(), move |_delta| {
+                let Some(st) = marquee_for_tick.get() else {
+                    return;
+                };
+                let step =
+                    selection::marquee_auto_scroll_step(st.current.y, viewport_h_for_tick.get());
+                if step != 0.0 {
+                    let max = max_scroll_for_tick.get();
+                    let new_y = (scroll_for_tick.get() + step).clamp(0.0, max);
+                    scroll_for_tick.set(new_y);
+                    // Still inside the edge band (or the marquee moved
+                    // again next frame) — keep the chain alive so the
+                    // pointer doesn't need to wiggle to keep scrolling.
+                    frame_request.set(true);
+                }
+            });
+        }
+
+        // Drop target: intra-grid reorder + foreign-rows receive + external
+        // drops, with an insertion indicator painted by the overlay.
+        // Hover/drop are routed through the SOURCE's `can_accept` /
+        // `accept_drop` (the pre-drop validation), so a same-view
+        // `RowDragData<T>` reorders and a foreign payload is the source's
+        // call — falling back to the zero-custom-source `accept_foreign_rows`
+        // sugar, then the app-level `on_item_drop` escape hatch.
+        if self.export.is_drop_target(self.reorderable) || self.on_item_drop.is_some() {
+            let has_drop_cb = self.on_item_drop.is_some();
+            let my_id = self.model_id;
+
+            let strategy_h = strategy.clone();
+            let scroll_h = self.scroll_y.clone();
+            let vp_w_h = self.viewport_width.clone();
+            let len_h = self.source.len_fn.clone();
+            let can_accept_h = self.source.dnd.can_accept_fn.clone();
+            let insertion_h = self.insertion.clone();
+            let export_for_hover = self.export.clone();
+            handlers = handlers.on_drag_hover(move |payload, position, _ctx| {
+                let len = (len_h)();
+                let idx = drag::insertion_index(
+                    strategy_h.as_ref(),
+                    position,
+                    scroll_h.get(),
+                    vp_w_h.get(),
+                    len,
+                );
+                let allowed = drop_allowed::<T>(
+                    &can_accept_h,
+                    payload,
+                    idx,
+                    len,
+                    my_id,
+                    has_drop_cb,
+                    &export_for_hover,
+                );
+                if allowed {
+                    insertion_h.set(Some(idx));
+                    // Engage (stops drop-target bubbling); the overlay paints
+                    // the insertion bar, so no framework-drawn feedback.
+                    teksilo_core::DropFeedback::Accept
+                } else {
+                    insertion_h.set(None);
+                    teksilo_core::DropFeedback::NoFeedback
+                }
+            });
+
+            let insertion_leave = self.insertion.clone();
+            handlers = handlers.on_drag_leave(move |_ctx| {
+                insertion_leave.set(None);
+            });
+
+            let strategy_d = strategy.clone();
+            let scroll_d = self.scroll_y.clone();
+            let vp_w_d = self.viewport_width.clone();
+            let len_d = self.source.len_fn.clone();
+            let accept_drop_d = self.source.dnd.accept_drop_fn.clone();
+            let drop_cb = self.on_item_drop.clone();
+            let insertion_d = self.insertion.clone();
+            let export_for_drop = self.export.clone();
+            let reorderable_for_drop = self.reorderable;
+            handlers = handlers.on_drop(move |mut payload, position, ctx| {
+                insertion_d.set(None);
+                let len = (len_d)();
+                let to = drag::insertion_index(
+                    strategy_d.as_ref(),
+                    position,
+                    scroll_d.get(),
+                    vp_w_d.get(),
+                    len,
+                );
+                let is_same_view = payload
+                    .get_typed::<RowDragData<T>>()
+                    .is_some_and(|rd| rd.source == my_id);
+                // (a) Same-view reorder + any source-handled drop go through
+                // accept_drop first. A same-view drop only reorders when this
+                // view is `reorderable` — otherwise it falls through and is
+                // treated like a foreign payload (branches b/c).
+                if (reorderable_for_drop || !is_same_view)
+                    && let Some((target, position_kind)) = flat_insertion_target(to, len)
+                    && (accept_drop_d)(&payload, target, position_kind, my_id)
+                {
+                    // Only suppress our OWN move-out for a genuine same-view
+                    // drop.
+                    if is_same_view {
+                        export_for_drop.note_self_reorder();
+                    }
+                    return true;
+                }
+                // (b) Shared foreign-receive sugar: accept exported rows from
+                // a different view/source without a custom ListDataSource.
+                // Peeks before taking, so a payload that doesn't match
+                // (same-view, or reorder-only) still reaches the raw escape
+                // hatch (c) with its typed data intact.
+                if export_for_drop.foreign_receive(&mut payload, my_id, to, ctx) {
+                    return true;
+                }
+                // (c) Raw escape hatch for any other payload the app wants to
+                // handle itself.
+                if let Some(ref cb) = drop_cb {
+                    return cb(payload, to, ctx);
+                }
+                false
+            });
+        }
+        ctx.apply_self_handlers(handlers);
+
+        // Children: body pane (or empty view), scrollbar, overlay.
+        // (Incremental loading — `request_window` / `fetch_more` — lives in the
+        // body pane's realize loop now, driven by the source's `can_fetch_more`
+        // / `fetch_more` capabilities; it fires on each scroll-buffer exit.)
+        self.body_pane_id = None;
+        self.empty_id = None;
+        self.scrollbar_id = None;
+        self.overlay_id = None;
+        self.pinned_header_id = None;
+
+        let len = self.source.len();
+        if len == 0 {
+            self.tile_map.borrow_mut().clear();
+            if let Some(ref ef) = self.empty_view {
+                self.empty_id = Some(ctx.add_boxed(ef()));
+            }
+        } else {
+            // Pane → root total refresh (measuring strategies): re-place
+            // this root when the body pane's measurements changed the
+            // content total, so `max_scroll_y` / the thumb ratio pick up
+            // the corrected value next frame.
+            let pane_total_refresh = ctx.signal(0_u64);
+            pane_total_refresh.bind_to(
+                ctx.self_id(),
+                ctx.binding_registry(),
+                teksilo_core::binding::BindingLevel::Relayout,
+            );
+            let pane = GridBodyPane {
+                len_fn: self.source.len_fn.clone(),
+                with_item_fn: self.source.with_item_fn.clone(),
+                delegate: self.delegate.clone(),
+                strategy: strategy.clone(),
+                viewport_width: self.viewport_width.clone(),
+                viewport_height: self.viewport_height.clone(),
+                viewport_origin: self.viewport_origin.clone(),
+                column_count: self.column_count.clone(),
+                scroll_y: self.scroll_y.clone(),
+                selection: self.selection.clone(),
+                focused_index: self.focused_index.clone(),
+                on_tile_activate: self.on_tile_activate.clone(),
+                activate_on: self.activate_on,
+                tile_context_menu: self.tile_context_menu.clone(),
+                tile_a11y_label: self.tile_a11y_label.clone(),
+                reorderable: self.reorderable,
+                model_id: self.model_id,
+                scope_owner: ctx.self_id(),
+                drag_fn: self.source.dnd.drag_fn.clone(),
+                row_state_fn: self.source.dnd.row_state_fn.clone(),
+                request_window_fn: self.source.dnd.request_window_fn.clone(),
+                can_fetch_more_fn: self.source.dnd.can_fetch_more_fn.clone(),
+                fetch_more_fn: self.source.dnd.fetch_more_fn.clone(),
+                export: self.export.clone(),
+                read_item_fn: self.source.read_item_fn.clone(),
+                snapshot_out_fn: self.source.dnd.snapshot_out_fn.clone(),
+                tile_map: self.tile_map.clone(),
+                header_factory: self.header_factory(),
+                header_title: self.section_data.as_ref().map(|d| d.title_fn.clone()),
+                // Fresh per GridView rebuild; persists across the
+                // pane's own (buffer-exit / re-check) rebuilds.
+                version: Signal::new(0_u64),
+                prev_built_start: Rc::new(Cell::new(0)),
+                prev_built_end: Rc::new(Cell::new(0)),
+                total_refresh: pane_total_refresh,
+                tile_entries: Vec::new(),
+                header_entries: Vec::new(),
+                in_place_children: Cell::new(false),
+            };
+            self.body_pane_id = Some(ctx.add(pane));
+
+            let overlay = GridOverlay {
+                focused_index: self.focused_index.clone(),
+                // Grid root's inclusive focus signal (stack empty here → resolves
+                // to this root) + input modality, so the ring is keyboard-only
+                // and hides when the grid loses focus.
+                view_focused: ctx.view_focus_active(),
+                focus_visible: ctx.focus_visible(),
+                selection: self.selection.clone(),
+                scroll_y: self.scroll_y.clone(),
+                strategy: strategy.clone(),
+                viewport_width: self.viewport_width.clone(),
+                marquee: self.marquee.clone(),
+                insertion: self.insertion.clone(),
+                style: self.style.clone(),
+                len_fn: self.source.len_fn.clone(),
+            };
+            self.overlay_id = Some(ctx.add(overlay));
+
+            // Sticky pinned header slot (reused widget showing the current
+            // section's header at the viewport top). Skipped when the
+            // provider declares zero sections — `PinnedHeader::build` would
+            // otherwise unconditionally invoke the factory at
+            // `current_section`'s default (0), and a hand-rolled provider
+            // indexing directly into its own section list would panic.
+            self.pinned_header_id = None;
+            let section_count = self
+                .section_data
+                .as_ref()
+                .map(|d| (d.counts_fn)().len())
+                .unwrap_or(0);
+            if self.pinned_section_headers && section_count > 0 {
+                if let Some(factory) = self.header_factory() {
+                    let ph = PinnedHeader {
+                        current_section: self.current_section.clone(),
+                        factory,
+                        child: None,
+                        style: self.style.clone(),
+                    };
+                    self.pinned_header_id = Some(ctx.add(ph));
+                }
+            }
+        }
+
+        if self.show_scrollbar {
+            let sb = ScrollBar::new(
+                ScrollBarOrientation::Vertical,
+                self.scroll_y.clone(),
+                self.max_scroll_y.clone(),
+                self.viewport_ratio_y.clone(),
+            )
+            .visual(match self.scroll_bar_style {
+                ScrollBarMode::Permanent => ScrollBarVisual::Permanent,
+                ScrollBarMode::Overlay => ScrollBarVisual::Overlay,
+                ScrollBarMode::Thin => ScrollBarVisual::Thin,
+            });
+            self.scrollbar_id = Some(ctx.add(sb));
+        }
+
+        // Loading overlay (on top of everything).
+        self.loading_id = None;
+        if let Some(flag) = &self.is_loading {
+            if flag.get() {
+                if let Some(ref lv) = self.loading_view {
+                    self.loading_id = Some(ctx.add_boxed(lv()));
+                }
+            }
+        }
+
+        // Order = paint order. Overlay then loading paint last (on top).
+        let mut children = Vec::new();
+        if let Some(id) = self.body_pane_id {
+            children.push(id);
+        }
+        if let Some(id) = self.empty_id {
+            children.push(id);
+        }
+        if let Some(id) = self.scrollbar_id {
+            children.push(id);
+        }
+        if let Some(id) = self.overlay_id {
+            children.push(id);
+        }
+        if let Some(id) = self.pinned_header_id {
+            children.push(id);
+        }
+        if let Some(id) = self.loading_id {
+            children.push(id);
+        }
+        children
+    }
+
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        _ctx: &LayoutContext,
+    ) -> teksilo_core::widget::LayoutResponse {
+        // Only an allocation may seed the cached viewport (`common::viewport`);
+        // the body pane shares these cells, and `build` sizes its realization
+        // window — and the strategy its column count — from them.
+        let size = crate::common::viewport::viewport_size(
+            proposal,
+            &self.viewport_height,
+            Size::new(400.0, 400.0),
+        );
+        if proposal.width.is_some() {
+            self.viewport_width.set(size.width);
+        }
+        size.into()
+    }
+
+    fn place_children(
+        &self,
+        bounds: Rect,
+        _proposal: SizeProposal,
+        children: &mut [WidgetPlacement],
+        _ctx: &LayoutContext,
+    ) {
+        let Some(ref strategy) = self.strategy else {
+            return;
+        };
+        let len = self.source.len();
+        let vp_h = bounds.height;
+
+        // Query the strategy at a SINGLE, stable body width per frame (using
+        // the previous frame's scrollbar decision). Querying at two widths
+        // would flip a variable strategy's column count back and forth and
+        // reset its measurement cache every frame. The scrollbar appearing /
+        // disappearing settles in one frame.
+        // Permanent reserves a column for the bar; Overlay / Thin float
+        // over the content, so tiles span the full width.
+        let reserves_bar = self.scroll_bar_style == ScrollBarMode::Permanent;
+        let body_w = if self.last_needs_scrollbar.get() && reserves_bar {
+            (bounds.width - SCROLLBAR_THICKNESS).max(0.0)
+        } else {
+            bounds.width
+        };
+        self.viewport_width.set(body_w);
+
+        let cols = strategy.column_count(body_w).max(1);
+        if self.column_count.get() != cols {
+            self.column_count.set(cols);
+        }
+
+        let total = strategy.total_content_height(len, body_w);
+        let needs_sb = self.show_scrollbar && total > vp_h + 0.5;
+        if self.last_needs_scrollbar.get() != needs_sb {
+            self.last_needs_scrollbar.set(needs_sb);
+        }
+        let max_y = (total - vp_h).max(0.0);
+        self.max_scroll_y.set(max_y);
+        let ratio = if total > 0.0 {
+            (vp_h / total).clamp(0.0, 1.0)
+        } else {
+            1.0
+        };
+        self.viewport_ratio_y.set(ratio);
+        // Clamp scroll (matches ListView).
+        let cur = self.scroll_y.get();
+        let clamped = cur.clamp(0.0, max_y);
+        if (clamped - cur).abs() > 0.001 {
+            self.scroll_y.set(clamped);
+        }
+
+        // Sticky pinned header: track the current section and decide whether
+        // the in-flow header has scrolled above the top.
+        let pinned_rect = if self.pinned_header_id.is_some() {
+            let cur = strategy.current_section(self.scroll_y.get(), body_w);
+            if let Some(cur) = cur {
+                if self.current_section.get() != cur {
+                    self.current_section.set(cur);
+                }
+                // Show the pinned slot only once the real header is above top.
+                strategy.header_rect(cur, body_w).map(|r| {
+                    let screen_y = bounds.y + r.y - self.scroll_y.get();
+                    let visible = screen_y < bounds.y - 0.5;
+                    (visible, r.height)
+                })
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        let body_rect_origin = bounds.origin();
+        let body_size = Size::new(body_w, vp_h);
+        for child in children.iter_mut() {
+            if Some(child.id) == self.scrollbar_id {
+                if needs_sb {
+                    // Right edge in all modes — in Overlay / Thin `body_w`
+                    // spans the full width, so anchor off `bounds.width`.
+                    child.origin =
+                        Point::new(bounds.x + bounds.width - SCROLLBAR_THICKNESS, bounds.y);
+                    child.size = Size::new(SCROLLBAR_THICKNESS, vp_h);
+                } else {
+                    child.origin = bounds.origin();
+                    child.size = Size::ZERO;
+                }
+            } else if Some(child.id) == self.pinned_header_id {
+                match pinned_rect {
+                    Some((true, h)) => {
+                        child.origin = bounds.origin();
+                        child.size = Size::new(body_w, h);
+                    }
+                    _ => {
+                        child.origin = bounds.origin();
+                        child.size = Size::ZERO;
+                    }
+                }
+            } else {
+                // body pane / empty view / overlay all fill the body rect.
+                child.origin = body_rect_origin;
+                child.size = body_size;
+            }
+        }
+    }
+
+    fn accessibility(&self, builder: &mut AccessNodeBuilder) {
+        builder.set_role(teksilo_core::accesskit::Role::Grid);
+        if let Some(ref label) = self.a11y_label {
+            builder.set_name(label.clone());
+        }
+
+        let total = self.source.len();
+        let cols = self.column_count.get().max(1);
+        let rows = total.div_ceil(cols);
+        builder.set_row_count(rows);
+        builder.set_column_count(cols);
+
+        if let Some(ref sel) = self.selection {
+            if sel.mode() == SelectionMode::Multi {
+                builder.set_multiselectable(true);
+            }
+            let count = sel.count();
+            if count > 0 {
+                builder.set_value(format!(
+                    "{} item{} selected",
+                    count,
+                    if count == 1 { "" } else { "s" }
+                ));
+            }
+            builder.set_live(teksilo_core::accesskit::Live::Polite);
+        }
+
+        // Roving focus: point active_descendant at the focused tile node.
+        if let Some(idx) = self.focused_index.get() {
+            let map = self.tile_map.borrow();
+            if let Some((_, tile_id)) = map.iter().find(|(i, _)| *i == idx) {
+                builder.set_active_descendant(widget_id_to_node_id(*tile_id));
+            }
+        }
+    }
+
+    fn as_any(&self) -> Option<&dyn std::any::Any> {
+        Some(self)
+    }
+
+    fn children(&self) -> Vec<WidgetId> {
+        let mut ids = Vec::new();
+        if let Some(id) = self.body_pane_id {
+            ids.push(id);
+        }
+        if let Some(id) = self.empty_id {
+            ids.push(id);
+        }
+        if let Some(id) = self.scrollbar_id {
+            ids.push(id);
+        }
+        if let Some(id) = self.overlay_id {
+            ids.push(id);
+        }
+        if let Some(id) = self.pinned_header_id {
+            ids.push(id);
+        }
+        if let Some(id) = self.loading_id {
+            ids.push(id);
+        }
+        ids
+    }
+
+    fn clips_children(&self) -> bool {
+        true
+    }
+}
+
+/// A top-most, event-transparent leaf that paints the focus ring (and, in
+/// later phases, the marquee rectangle and drag-insertion feedback). Drawing
+/// here rather than in the container sidesteps any parent-vs-child paint-order
+/// ambiguity — a last sibling always paints over the tiles.
+struct GridOverlay {
+    focused_index: Signal<Option<usize>>,
+    /// `true` while the grid (its root or a descendant) holds keyboard focus —
+    /// the grid root's inclusive [`BuildContext::view_focus_active`] signal.
+    /// Gates the focus ring so an unfocused grid shows none.
+    view_focused: Signal<bool>,
+    /// Input-modality `:focus-visible`. Gates the focus ring to keyboard
+    /// navigation, never a mouse click.
+    focus_visible: Signal<bool>,
+    /// The grid's selection, for the **container focus ring**: when the grid is
+    /// keyboard-focused but has no current tile *and* nothing is selected, no
+    /// tile chrome marks the focus, so the whole grid outlines itself instead.
+    selection: Option<SelectionModel>,
+    scroll_y: Signal<f32>,
+    strategy: Rc<dyn GridLayoutStrategy>,
+    viewport_width: Rc<Cell<f32>>,
+    marquee: Signal<Option<MarqueeState>>,
+    insertion: Signal<Option<usize>>,
+    style: Option<Rc<dyn GridViewStyle>>,
+    /// Live item count — `focused_index` is adjusted on every model change,
+    /// but paint reads a snapshot signal on a different binding level
+    /// (`AccessibilityOnly` on the grid root vs `RepaintOnly` here), so a
+    /// stale index can transiently outlive the adjustment. Bounds-check
+    /// before drawing a ring at a tile that no longer exists.
+    len_fn: Rc<dyn Fn() -> usize>,
+}
+
+impl std::fmt::Debug for GridOverlay {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("GridOverlay").finish()
+    }
+}
+
+impl GridOverlay {
+    fn focus_recipe(&self, ctx: &PaintContext) -> teksilo_core::styles::GridFocusRingRecipe {
+        resolve_grid_style(&self.style, ctx, |s| s.focus_ring())
+    }
+    fn marquee_recipe(&self, ctx: &PaintContext) -> teksilo_core::styles::GridMarqueeRecipe {
+        resolve_grid_style(&self.style, ctx, |s| s.marquee())
+    }
+    fn insertion_recipe(&self, ctx: &PaintContext) -> teksilo_core::styles::GridInsertionRecipe {
+        resolve_grid_style(&self.style, ctx, |s| s.insertion())
+    }
+}
+
+/// Geometry of the drag-reorder insertion bar: `(bar_x, row_rect)`, where
+/// `bar_x` is the bar's CENTER x and `row_rect` supplies its `y`/`height`.
+/// When `ins < len` this is the LEADING edge of the target tile
+/// `tile_rect(ins)` — using the target row (not the previous tile's row)
+/// is what keeps the bar on the correct row at a row boundary, where
+/// `ins` is the first index of a new row. When `ins >= len` (append) it's
+/// the trailing edge of the last tile. `None` for an empty grid.
+fn insertion_bar_geometry(
+    strategy: &dyn GridLayoutStrategy,
+    ins: usize,
+    len: usize,
+    viewport_width: f32,
+) -> Option<(f32, TileRect)> {
+    if len == 0 {
+        return None;
+    }
+    if ins < len {
+        let r = strategy.tile_rect(ins, viewport_width);
+        Some((r.x, r))
+    } else {
+        let r = strategy.tile_rect(len - 1, viewport_width);
+        Some((r.x + r.width, r))
+    }
+}
+
+/// Resolve a decoration recipe from the per-call override → theme slot →
+/// stock default.
+fn resolve_grid_style<R: Default>(
+    override_style: &Option<Rc<dyn GridViewStyle>>,
+    ctx: &PaintContext,
+    f: impl Fn(&dyn GridViewStyle) -> R,
+) -> R {
+    if let Some(s) = override_style {
+        f(s.as_ref())
+    } else if let Some(s) = ctx.theme.style_slots.grid_view.as_ref() {
+        f(s.as_ref())
+    } else {
+        R::default()
+    }
+}
+
+impl Widget for GridOverlay {
+    fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+        // Repaint on focus / scroll / marquee / insertion change.
+        self.scroll_y.bind_to(
+            ctx.self_id(),
+            ctx.binding_registry(),
+            BindingLevel::RepaintOnly,
+        );
+        self.focused_index.bind_to(
+            ctx.self_id(),
+            ctx.binding_registry(),
+            BindingLevel::RepaintOnly,
+        );
+        self.view_focused.bind_to(
+            ctx.self_id(),
+            ctx.binding_registry(),
+            BindingLevel::RepaintOnly,
+        );
+        self.focus_visible.bind_to(
+            ctx.self_id(),
+            ctx.binding_registry(),
+            BindingLevel::RepaintOnly,
+        );
+        if let Some(ref sel) = self.selection {
+            sel.selection_signal().bind_to(
+                ctx.self_id(),
+                ctx.binding_registry(),
+                BindingLevel::RepaintOnly,
+            );
+        }
+        self.marquee.bind_to(
+            ctx.self_id(),
+            ctx.binding_registry(),
+            BindingLevel::RepaintOnly,
+        );
+        self.insertion.bind_to(
+            ctx.self_id(),
+            ctx.binding_registry(),
+            BindingLevel::RepaintOnly,
+        );
+        // Transparent to pointer events so the body beneath stays interactive.
+        ctx.apply_self_handlers(HandlerSet::new().event_pass_through(true));
+        Vec::new()
+    }
+
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        _ctx: &LayoutContext,
+    ) -> teksilo_core::widget::LayoutResponse {
+        proposal.resolve(0.0, 0.0).into()
+    }
+
+    fn paint(&self, bounds: Rect, canvas: &mut teksilo_canvas::Canvas, ctx: &PaintContext) {
+        // Marquee rectangle (in widget-local coords → offset by bounds origin).
+        if let Some(m) = self.marquee.get() {
+            let lr = m.local_rect(self.scroll_y.get());
+            let rect = Rect::new(bounds.x + lr.x, bounds.y + lr.y, lr.width, lr.height);
+            let recipe = self.marquee_recipe(ctx);
+            let c = recipe.role.resolve(&ctx.theme.colors);
+            let fill = teksilo_tokens::Color::new(c.r(), c.g(), c.b(), recipe.fill_alpha);
+            canvas.fill_rect(rect, fill);
+            canvas.stroke_rect(rect, c, recipe.stroke_width);
+        }
+
+        // Drag-reorder insertion bar: a vertical accent bar at the leading
+        // edge of the target tile (or trailing edge of the last tile when
+        // appending).
+        if let Some(ins) = self.insertion.get()
+            && let Some((bar_x, r)) =
+                insertion_bar_geometry(self.strategy.as_ref(), ins, (self.len_fn)(), bounds.width)
+        {
+            let scroll_y = self.scroll_y.get();
+            let y = bounds.y + r.y - scroll_y;
+            let h = r.height;
+            if y + h >= bounds.y && y <= bounds.bottom() {
+                let recipe = self.insertion_recipe(ctx);
+                let color = recipe.role.resolve(&ctx.theme.colors);
+                let t = recipe.thickness;
+                canvas.fill_rect(Rect::new(bounds.x + bar_x - t * 0.5, y, t, h), color);
+            }
+        }
+
+        // Focus ring — keyboard-only (`:focus-visible`) and only while the grid
+        // holds focus, so a mouse click never leaves a ring.
+        if !self.view_focused.get() || !self.focus_visible.get() {
+            return;
+        }
+        // A stale index (outlived by a not-yet-applied model-change
+        // adjustment) can't draw a ring at a tile that no longer exists —
+        // treat it the same as "no current tile".
+        let idx = self.focused_index.get().filter(|&i| i < (self.len_fn)());
+        let Some(idx) = idx else {
+            // No current tile. If nothing is selected either, no tile chrome
+            // marks the focus — outline the whole grid so a Tab-focused empty
+            // grid still shows where focus landed (mirrors TreeView / ListView).
+            let empty = self.selection.as_ref().is_none_or(|s| s.count() == 0);
+            if empty {
+                let inset = 1.0_f32;
+                let rect = Rect::new(
+                    bounds.x + inset,
+                    bounds.y + inset,
+                    (bounds.width - inset * 2.0).max(0.0),
+                    (bounds.height - inset * 2.0).max(0.0),
+                );
+                let color = teksilo_tokens::BorderRole::Focused.resolve(&ctx.theme.colors);
+                canvas.stroke_rect(rect, color, 1.5);
+            }
+            return;
+        };
+        let vp_w = bounds.width;
+        let r = self.strategy.tile_rect(idx, vp_w);
+        let scroll_y = self.scroll_y.get();
+        let recipe = self.focus_recipe(ctx);
+        let inset = recipe.inset;
+        let stroke = recipe.thickness;
+        let rx = bounds.x + r.x + inset;
+        let ry = bounds.y + r.y - scroll_y + inset;
+        let rw = (r.width - inset * 2.0).max(0.0);
+        let rh = (r.height - inset * 2.0).max(0.0);
+        // Cull if fully outside the viewport.
+        if ry + rh < bounds.y || ry > bounds.bottom() {
+            return;
+        }
+        let color = recipe.role.resolve(&ctx.theme.colors);
+        canvas.fill_rect(Rect::new(rx, ry, rw, stroke), color); // top
+        canvas.fill_rect(Rect::new(rx, ry + rh - stroke, rw, stroke), color); // bottom
+        canvas.fill_rect(Rect::new(rx, ry, stroke, rh), color); // left
+        canvas.fill_rect(Rect::new(rx + rw - stroke, ry, stroke, rh), color); // right
+    }
+
+    fn accessibility(&self, builder: &mut AccessNodeBuilder) {
+        builder.set_hidden();
+    }
+}
+
+/// The reused sticky-header slot: rebuilds its child from the section header
+/// factory whenever the current section changes, and paints an opaque
+/// background so tiles scrolling underneath don't show through.
+struct PinnedHeader {
+    current_section: Signal<usize>,
+    #[allow(clippy::type_complexity)]
+    factory: Rc<dyn Fn(usize) -> Box<dyn Widget>>,
+    child: Option<WidgetId>,
+    style: Option<Rc<dyn GridViewStyle>>,
+}
+
+impl std::fmt::Debug for PinnedHeader {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PinnedHeader")
+            .field("section", &self.current_section.get())
+            .finish()
+    }
+}
+
+impl Widget for PinnedHeader {
+    fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+        self.current_section
+            .bind_to(ctx.self_id(), ctx.binding_registry(), BindingLevel::Rebuild);
+        let section = self.current_section.get();
+        let id = ctx.add_boxed((self.factory)(section));
+        self.child = Some(id);
+        vec![id]
+    }
+
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        _ctx: &LayoutContext,
+    ) -> teksilo_core::widget::LayoutResponse {
+        proposal.resolve(0.0, 0.0).into()
+    }
+
+    fn place_children(
+        &self,
+        bounds: Rect,
+        _proposal: SizeProposal,
+        children: &mut [WidgetPlacement],
+        _ctx: &LayoutContext,
+    ) {
+        for child in children.iter_mut() {
+            child.origin = bounds.origin();
+            child.size = bounds.size();
+        }
+    }
+
+    fn paint(&self, bounds: Rect, canvas: &mut teksilo_canvas::Canvas, ctx: &PaintContext) {
+        if bounds.height > 0.5 {
+            let surface = self
+                .style
+                .as_ref()
+                .or(ctx.theme.style_slots.grid_view.as_ref())
+                .map(|s| s.pinned_header_surface())
+                .unwrap_or(SurfaceRole::Raised);
+            canvas.fill_rect(bounds, surface.resolve(&ctx.theme.colors));
+        }
+    }
+
+    fn children(&self) -> Vec<WidgetId> {
+        self.child.into_iter().collect()
+    }
+
+    fn clips_children(&self) -> bool {
+        true
+    }
+}

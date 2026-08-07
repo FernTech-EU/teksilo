@@ -20,15 +20,15 @@ as a heavyweight scene widget instead.
 ## Example
 
 ```ignore
-use bastyde_scene::{SceneModel, ImageItem};
-use bastyde_canvas::Rect;
-use bastyde_i18n::lit;
+use teksilo_scene::{SceneModel, ImageItem};
+use teksilo_canvas::Rect;
+use teksilo_i18n::lit;
 
 let model = SceneModel::new();
 let item = ImageItem::new(Rect::new(0.0, 0.0, 64.0, 64.0), "avatar")
     .label(lit!("User avatar"))
     .draggable(true);
-model.add_item(item, bastyde_canvas::Point::new(100.0, 50.0));
+model.add_item(item, teksilo_canvas::Point::new(100.0, 50.0));
 ```
 
 ## Builder methods at a glance
@@ -37,7 +37,7 @@ model.add_item(item, bastyde_canvas::Point::new(100.0, 50.0));
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_scene/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_scene/index.html)
 
 ## `pub struct ImageItem`
 

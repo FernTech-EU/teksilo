@@ -1,14 +1,14 @@
 # SPDX-License-Identifier: MPL-2.0
 # SPDX-FileCopyrightText: 2026 FernTech
 
-# Bastyde Widget Catalog — English (source) translations.
+# Teksilo Widget Catalog — English (source) translations.
 #
 # Keys use kebab-case at the Fluent layer; Rust call sites use the
 # snake_case form, and the proc macro converts. Tab order is stable —
 # index N corresponds to the Nth `static_tab(...)` call in main.rs.
 
 # ── App chrome ──────────────────────────────────────────────────────────
-app-title = Bastyde — Widget Catalog
+app-title = Teksilo — Widget Catalog
 app-subtitle = drag · double-click maximize · right-click for menu
 app-unsupported-chrome = (custom chrome unsupported on this platform — falling back to native decorations)
 
@@ -20,8 +20,8 @@ app-menu-documentation = &Documentation
 app-menu-about = &About
 
 # ── View mode toggle (TabWidget trailing slot) ──────────────────────────
-mode-label = bati! DSL
-mode-tooltip = Switch every tab between the classic builder and the bati! macro version of the same tree.
+mode-label = teksu! DSL
+mode-tooltip = Switch every tab between the classic builder and the teksu! macro version of the same tree.
 
 # ── Locale switcher ─────────────────────────────────────────────────────
 locale-en = English
@@ -75,8 +75,8 @@ tab-overlays-refs = Tooltips, popovers, dialogs, snackbars. See: cargo run -p to
 tab-data-refs = ListView, TreeView, TableView, TreeTableView. See: cargo run -p data_grid, cargo run -p tree_table, cargo run -p data_collections.
 tab-animations-refs = Fade, pulse, slide, blur, and friends. See: cargo run -p animations, cargo run -p animations_kit.
 tab-settings-refs = Shortcut rebinding and privacy settings widgets. See: cargo run -p shortcuts_demo.
-tab-charts-refs = Bar, line, and donut charts (bastyde-charts). See: cargo run -p chart_demo.
-tab-scene-refs = Pannable / zoomable scene viewport (bastyde-scene). See: cargo run -p scene_showcase, cargo run -p scene_corkboard.
+tab-charts-refs = Bar, line, and donut charts (teksilo-charts). See: cargo run -p chart_demo.
+tab-scene-refs = Pannable / zoomable scene viewport (teksilo-scene). See: cargo run -p scene_showcase, cargo run -p scene_corkboard.
 tab-richtext-refs = Editable + read-only rich text over the text-document model. See: cargo run -p rich_text_editor, cargo run -p rich_text_viewer.
 tab-dragdrop-refs = DropZone and DropTarget for OS / in-app drops. See: cargo run -p file_drop.
 
@@ -106,7 +106,7 @@ demo-loading = Loading…
 
 # ── Indicators tab ──────────────────────────────────────────────────────
 ind-progress-determinate-label = 60 %
-ind-link-docs = Open the Bastyde docs
+ind-link-docs = Open the Teksilo docs
 ind-link-handler = With a click handler
 
 # ── Inputs tab ──────────────────────────────────────────────────────────
@@ -135,7 +135,7 @@ btn-default = Default
 btn-regular = Regular
 btn-flat = Flat
 btn-confirm-label = Confirm
-btn-cmdlink-signin-title = Sign in to your Bastyde account
+btn-cmdlink-signin-title = Sign in to your Teksilo account
 btn-cmdlink-signin-desc = Use your existing credentials to access projects.
 btn-cmdlink-signup-title = Create a new account
 btn-cmdlink-signup-desc = Free for personal and open-source use.
@@ -170,7 +170,7 @@ cnt-split-trailing = Trailing pane
 # ── Chrome tab ──────────────────────────────────────────────────────────
 chr-status = Ready · 1247 lines · UTF-8 · Rust
 chr-banner-info-title = Info
-chr-banner-info-body = Did you know Bastyde is RTL-aware?
+chr-banner-info-body = Did you know Teksilo is RTL-aware?
 chr-banner-success-title = Success
 chr-banner-success-body = Settings saved.
 chr-banner-warning-title = Warning
@@ -179,11 +179,11 @@ chr-banner-error-title = Error
 chr-banner-error-body = Network connection lost.
 chr-breadcrumb-home = Home
 chr-breadcrumb-docs = Documents
-chr-breadcrumb-bastyde = Bastyde
+chr-breadcrumb-teksilo = Teksilo
 chr-breadcrumb-current = widget-catalog
 chr-wizard-title = Onboarding
 chr-wizard-step1 = Welcome
-chr-wizard-step1-body = Step 1 — welcome to Bastyde
+chr-wizard-step1-body = Step 1 — welcome to Teksilo
 chr-wizard-step2 = Configure
 chr-wizard-step2-body = Step 2 — configure your editor
 chr-wizard-step3 = Finish
