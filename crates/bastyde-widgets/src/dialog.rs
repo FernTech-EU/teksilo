@@ -1004,6 +1004,90 @@ mod tests {
         assert_eq!(info.name(), Some("Outer title"));
     }
 
+    /// A panel that directs initial focus to its *second* child.
+    ///
+    /// The shape real dialogs have: the first focusable descendant is the
+    /// close button in the title strip, and focus must land on the first form
+    /// field instead — otherwise the dialog opens focused on "dismiss me" and
+    /// swallows whatever the user types first.
+    #[derive(Debug)]
+    struct HintingPanel {
+        first: Rc<std::cell::Cell<Option<WidgetId>>>,
+        hinted: Rc<std::cell::Cell<Option<WidgetId>>>,
+    }
+
+    impl Widget for HintingPanel {
+        fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+            let first = ctx.add(FixedLeaf(40.0, 20.0));
+            let hinted = ctx.add(FixedLeaf(40.0, 20.0));
+            self.first.set(Some(first));
+            self.hinted.set(Some(hinted));
+            vec![first, hinted]
+        }
+
+        fn initial_focus_hint(&self) -> Option<WidgetId> {
+            self.hinted.get()
+        }
+
+        fn layout_response(
+            &self,
+            _proposal: SizeProposal,
+            _ctx: &LayoutContext,
+        ) -> bastyde_core::widget::LayoutResponse {
+            Size::new(220.0, 120.0).into()
+        }
+    }
+
+    /// Wrapping content in a `ModalContainer` must not cost it the ability to
+    /// direct initial focus.
+    ///
+    /// `ModalContainer` does **not** override `initial_focus_hint`, and does not
+    /// need to: `WidgetTree::widget_initial_focus_hint` walks the subtree and
+    /// finds the content's own hint through the container and its chrome panel.
+    /// Nothing pinned that before, which made it look like a missing feature
+    /// rather than a load-bearing one — and an app about to move a dozen
+    /// hand-chromed panels onto `ModalContainer` is betting on it.
+    ///
+    /// If that walk is ever flattened to "ask the content root, then give up",
+    /// every wrapped dialog silently reopens focused on its close button.
+    #[test]
+    fn modal_container_lets_its_content_direct_initial_focus() {
+        let first = Rc::new(std::cell::Cell::new(None));
+        let hinted = Rc::new(std::cell::Cell::new(None));
+
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        let container = tree.add(ModalContainer::new(HintingPanel {
+            first: first.clone(),
+            hinted: hinted.clone(),
+        }));
+        tree.layout(SizeProposal::exact(600.0, 400.0));
+
+        let target = tree.widget_initial_focus_hint(container);
+        assert_eq!(
+            target,
+            hinted.get(),
+            "the content's hint must survive being wrapped in a ModalContainer"
+        );
+        assert_ne!(
+            target,
+            first.get(),
+            "…and must not fall back to the first descendant, which is the \
+             close button in a real dialog"
+        );
+    }
+
+    /// The other half: the walk reports a hint, it does not invent one. Content
+    /// with nothing to say leaves the pipeline free to fall through to
+    /// `first_focusable_descendant`.
+    #[test]
+    fn modal_container_without_a_hint_reports_none() {
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        let container = tree.add(ModalContainer::new(FixedLeaf(220.0, 120.0)));
+        tree.layout(SizeProposal::exact(600.0, 400.0));
+
+        assert_eq!(tree.widget_initial_focus_hint(container), None);
+    }
+
     #[test]
     fn modal_container_preserves_shell_sizing_defaults() {
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
