@@ -25,7 +25,7 @@ exclude = [
 ]
 
 [workspace.package]
-version = "0.6.2"
+version = "0.7.0"
 edition = "2024"
 license-file = "LICENSE"
 publish = true
@@ -117,43 +117,43 @@ portable-pty = "0.9"
 alacritty_terminal = "0.26"
 
 # Internal crates
-teksilo-tokens = { path = "crates/teksilo-tokens", version = "0.6.2" }
-teksilo-canvas = { path = "crates/teksilo-canvas", version = "0.6.2" }
-teksilo-core = { path = "crates/teksilo-core", version = "0.6.2" }
-teksilo-data = { path = "crates/teksilo-data", version = "0.6.2" }
-teksilo-settings = { path = "crates/teksilo-settings", version = "0.6.2" }
-teksilo-telemetry = { path = "crates/teksilo-telemetry", version = "0.6.2" }
-teksilo-analytics-plausible = { path = "crates/teksilo-analytics-plausible", version = "0.6.2" }
-teksilo-analytics-otlp = { path = "crates/teksilo-analytics-otlp", version = "0.6.2" }
-teksilo-widgets = { path = "crates/teksilo-widgets", version = "0.6.2" }
-teksilo-charts = { path = "crates/teksilo-charts", version = "0.6.2" }
-teksilo-scene = { path = "crates/teksilo-scene", version = "0.6.2" }
-teksilo-i18n = { path = "crates/teksilo-i18n", version = "0.6.2" }
-teksilo-i18n-macros = { path = "crates/teksilo-i18n-macros", version = "0.6.2" }
-cargo-teksilo-fmt = { path = "crates/cargo-teksilo-fmt", version = "0.6.2" }
-teksilo-fmt = { path = "crates/teksilo-fmt", version = "0.6.2" }
-teksilo-fmt-lsp = { path = "crates/teksilo-fmt-lsp", version = "0.6.2" }
-teksilo-parse = { path = "crates/teksilo-parse", version = "0.6.2" }
-teksilo-macros = { path = "crates/teksilo-macros", version = "0.6.2" }
-teksilo-text = { path = "crates/teksilo-text", version = "0.6.2" }
-teksilo-render = { path = "crates/teksilo-render", version = "0.6.2" }
-teksilo-platform = { path = "crates/teksilo-platform", version = "0.6.2" }
-teksilo-app = { path = "crates/teksilo-app", version = "0.6.2" }
-teksilo-async = { path = "crates/teksilo-async", version = "0.6.2" }
-teksilo-tokio = { path = "crates/teksilo-tokio", version = "0.6.2" }
-teksilo-async-std = { path = "crates/teksilo-async-std", version = "0.6.2" }
-teksilo-inspector = { path = "crates/teksilo-inspector", version = "0.6.2" }
-teksilo-resources = { path = "crates/teksilo-resources", version = "0.6.2" }
-teksilo-webview = { path = "crates/teksilo-webview", version = "0.6.2" }
-teksilo-terminal = { path = "crates/teksilo-terminal", version = "0.6.2" }
-teksilo-automation = { path = "crates/teksilo-automation", version = "0.6.2" }
-teksilo-automation-mcp = { path = "crates/teksilo-automation-mcp", version = "0.6.2" }
-teksilo = { path = "crates/teksilo", version = "0.6.2" }
-teksilo-preview = { path = "crates/teksilo-preview", version = "0.6.2" }
-teksilo-preview-ui = { path = "crates/teksilo-preview-ui", version = "0.6.2" }
-teksilo-theme-material3 = { path = "crates/teksilo-theme-material3", version = "0.6.2" }
-teksilo-theme-macos = { path = "crates/teksilo-theme-macos", version = "0.6.2" }
-teksilo-theme-fluent = { path = "crates/teksilo-theme-fluent", version = "0.6.2" }
+teksilo-tokens = { path = "crates/teksilo-tokens", version = "0.7.0" }
+teksilo-canvas = { path = "crates/teksilo-canvas", version = "0.7.0" }
+teksilo-core = { path = "crates/teksilo-core", version = "0.7.0" }
+teksilo-data = { path = "crates/teksilo-data", version = "0.7.0" }
+teksilo-settings = { path = "crates/teksilo-settings", version = "0.7.0" }
+teksilo-telemetry = { path = "crates/teksilo-telemetry", version = "0.7.0" }
+teksilo-analytics-plausible = { path = "crates/teksilo-analytics-plausible", version = "0.7.0" }
+teksilo-analytics-otlp = { path = "crates/teksilo-analytics-otlp", version = "0.7.0" }
+teksilo-widgets = { path = "crates/teksilo-widgets", version = "0.7.0" }
+teksilo-charts = { path = "crates/teksilo-charts", version = "0.7.0" }
+teksilo-scene = { path = "crates/teksilo-scene", version = "0.7.0" }
+teksilo-i18n = { path = "crates/teksilo-i18n", version = "0.7.0" }
+teksilo-i18n-macros = { path = "crates/teksilo-i18n-macros", version = "0.7.0" }
+cargo-teksilo-fmt = { path = "crates/cargo-teksilo-fmt", version = "0.7.0" }
+teksilo-fmt = { path = "crates/teksilo-fmt", version = "0.7.0" }
+teksilo-fmt-lsp = { path = "crates/teksilo-fmt-lsp", version = "0.7.0" }
+teksilo-parse = { path = "crates/teksilo-parse", version = "0.7.0" }
+teksilo-macros = { path = "crates/teksilo-macros", version = "0.7.0" }
+teksilo-text = { path = "crates/teksilo-text", version = "0.7.0" }
+teksilo-render = { path = "crates/teksilo-render", version = "0.7.0" }
+teksilo-platform = { path = "crates/teksilo-platform", version = "0.7.0" }
+teksilo-app = { path = "crates/teksilo-app", version = "0.7.0" }
+teksilo-async = { path = "crates/teksilo-async", version = "0.7.0" }
+teksilo-tokio = { path = "crates/teksilo-tokio", version = "0.7.0" }
+teksilo-async-std = { path = "crates/teksilo-async-std", version = "0.7.0" }
+teksilo-inspector = { path = "crates/teksilo-inspector", version = "0.7.0" }
+teksilo-resources = { path = "crates/teksilo-resources", version = "0.7.0" }
+teksilo-webview = { path = "crates/teksilo-webview", version = "0.7.0" }
+teksilo-terminal = { path = "crates/teksilo-terminal", version = "0.7.0" }
+teksilo-automation = { path = "crates/teksilo-automation", version = "0.7.0" }
+teksilo-automation-mcp = { path = "crates/teksilo-automation-mcp", version = "0.7.0" }
+teksilo = { path = "crates/teksilo", version = "0.7.0" }
+teksilo-preview = { path = "crates/teksilo-preview", version = "0.7.0" }
+teksilo-preview-ui = { path = "crates/teksilo-preview-ui", version = "0.7.0" }
+teksilo-theme-material3 = { path = "crates/teksilo-theme-material3", version = "0.7.0" }
+teksilo-theme-macos = { path = "crates/teksilo-theme-macos", version = "0.7.0" }
+teksilo-theme-fluent = { path = "crates/teksilo-theme-fluent", version = "0.7.0" }
 
 # gRPC proto crate — lives in a sibling repo at `../teksilo-collector-proto`
 # so the wire-format spec has its own version stream (and the
@@ -164,7 +164,7 @@ teksilo-theme-fluent = { path = "crates/teksilo-theme-fluent", version = "0.6.2"
 # versions since no other framework crate uses them.
 teksilo-collector-proto = { path = "../teksilo-collector-proto", version = "0.1.0" }
 teksilo-analytics-native = { path = "crates/teksilo-analytics-native", version = "0.7.0" }
-teksilo-telemetry-codegen = { path = "crates/teksilo-telemetry-codegen", version = "0.6.2" }
+teksilo-telemetry-codegen = { path = "crates/teksilo-telemetry-codegen", version = "0.7.0" }
 
 
 [profile.release]
