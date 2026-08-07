@@ -33,11 +33,11 @@ let bell = NotificationCenterButton::new(archive)
 
 ## Builder methods at a glance
 
-`size`, `show_badge_when_zero`, `max_badge_count`, `placement`, `on_action_invoked`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`
+`for_window`, `for_audience`, `size`, `show_badge_when_zero`, `max_badge_count`, `placement`, `on_action_invoked`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/teksilo_widgets/notification/center_button/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/notification/index.html)
 
 ## `pub struct NotificationCenterButton`
 
@@ -55,6 +55,20 @@ pub struct NotificationCenterButton { /* fields */ }
 
 Construct bound to a shared archive. The archive is typically
 held in `app_state` and cloned to every consumer.
+
+#### `pub fn for_window(mut self, window_id: TeksiloWindowId) -> Self`
+
+Scope this bell to window `window_id`: its badge counts unread
+among entries routed to that window (plus any `Broadcast`
+entry), and its popover shows only those. Overrides any
+previous `for_window` / `for_audience` call.
+
+#### `pub fn for_audience(mut self, audience: ToastAudience) -> Self`
+
+Scope this bell to `audience`: its badge counts unread among
+entries routed to that audience (plus any `Broadcast` entry),
+and its popover shows only those. Overrides any previous
+`for_window` / `for_audience` call.
 
 #### `pub fn size(mut self, size: IconButtonSize) -> Self`
 

@@ -95,8 +95,17 @@ pub struct WindowControls { /* fields */ }
 
 ### Methods
 
-#### `pub fn new( host: Rc<dyn PlatformTitleBarHost>, is_maximized: Signal<bool>, close_action: Option<CloseAction>, ) -> Self`
+#### `pub fn new( host: Rc<dyn PlatformTitleBarHost>, show_restore: Signal<bool>, close_action: Option<CloseAction>, ) -> Self`
 
-Build the minimize / maximize / close cluster for the given platform host. `is_maximized`
-drives the maximize ↔ restore glyph swap; `close_action` overrides the default
-`ctx.close_window()` behaviour (e.g. to show a "save before closing?" dialog).
+Build the minimize / maximize / close cluster for the given platform host.
+
+`show_restore` drives the maximize ↔ restore swap: `true` renders the
+**Restore** affordance (a11y name and action), `false` the **Maximize**
+one. It is deliberately not called `is_maximized`: a window is also
+restorable — and must not offer "maximize" — while it is
+`WindowPlacement::Fullscreen`,
+which `WindowPlacement::is_maximized` reports as `false`. See
+`crate::title_bar::TitleBar`'s own derivation.
+
+`close_action` overrides the default `ctx.close_window()` behaviour (e.g.
+to show a "save before closing?" dialog).

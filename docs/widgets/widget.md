@@ -19,7 +19,7 @@ wrapping on — a notes field, a commit message — so the two never drift.
 
 ## Builder methods at a glance
 
-`read_only`, `wrap_mode`, `v_scroll_policy`, `h_scroll_policy`, `overscroll_behavior`, `window_to_clip`, `min_lines`, `max_lines`, `font_family`, `zoom`, `follow_text_scale`, `on_change`, `background`, `text_color`, `caret_color`, `selection_color`, `gutter`, `current_line_highlight`, `indent_style`, `tab_width`, `use_soft_tabs`, `auto_indent`, `bracket_pairs`, `auto_close_brackets`, `bracket_matching`, `line_comment`, `completion_provider`, `auto_complete`, `handle`
+`read_only`, `wrap_mode`, `v_scroll_policy`, `h_scroll_policy`, `overscroll_behavior`, `window_to_clip`, `min_lines`, `max_lines`, `font_family`, `font_size_scale`, `follow_text_scale`, `on_change`, `background`, `text_color`, `caret_color`, `selection_color`, `gutter`, `current_line_highlight`, `indent_style`, `tab_width`, `use_soft_tabs`, `auto_indent`, `bracket_pairs`, `auto_close_brackets`, `bracket_matching`, `line_comment`, `completion_provider`, `auto_complete`, `handle`
 
 ## API reference
 
@@ -96,16 +96,17 @@ Fallback font family for the document's text. `None` (the default) keeps
 the typesetter's registry default; a code editor should pass a monospace
 family so columns line up.
 
-#### `pub fn zoom(self, zoom: f32) -> Self`
+#### `pub fn font_size_scale(self, scale: f32) -> Self`
 
-Display zoom (1.0 = 100 %), a post-layout magnification distinct from the
-global accessibility text scale.
+Per-editor logical font-size multiplier (`1.0` = 100 %), composed with
+the accessibility text scale when `follow_text_scale`
+is on. Sharp — shapes at a larger ppem.
 
 #### `pub fn follow_text_scale(self, follow: bool) -> Self`
 
 Whether the editor grows text with the global accessibility text scale
 (default `true`). Turn off for a WYSIWYG surface whose font sizes are
-document content.
+document content. Composed with `font_size_scale`.
 
 #### `pub fn on_change(self, callback: impl Fn() + 'static) -> Self`
 
@@ -240,6 +241,10 @@ Fallback font family.
 #### `pub fn follow_text_scale(mut self, follow: bool) -> Self`
 
 Whether the editor follows the global accessibility text scale.
+
+#### `pub fn font_size_scale(mut self, scale: f32) -> Self`
+
+Per-editor logical font-size multiplier (`1.0` = 100 %).
 
 #### `pub fn on_change(mut self, callback: impl Fn() + 'static) -> Self`
 

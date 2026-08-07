@@ -47,7 +47,7 @@ everything else is shared by the generic.
 
 ## Builder methods at a glance
 
-`content`, `placement`, `dismiss_behavior`, `fade_duration`, `has_popup_kind`, `show_disclosure_caret`, `on_open`, `on_close`, `open_signal`, `surface`, `bare`, `surface_style`, `surface_name`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`
+`content`, `placement`, `dismiss_behavior`, `fade_duration`, `has_popup_kind`, `show_disclosure_caret`, `on_open`, `on_close`, `open_signal`, `open_action`, `surface`, `bare`, `surface_style`, `surface_name`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`
 
 ## API reference
 
@@ -122,10 +122,40 @@ overlay's dismiss callback runs).
 
 #### `pub fn open_signal(&self) -> Signal<bool>`
 
-Observe-only handle to the popover-open state. Apps can
-`ctx.effect(&pb.open_signal(), ...)` from their composite to react
-with full `EventContext` — `on_open` / `on_close` are
-notification-only (no ctx).
+Observe-only handle to the popover-open state.
+
+**Read-back only — writing this does not open the popover.** Presenting
+an overlay needs an `EventContext` (`show_overlay` + `request_focus`),
+which no signal observer has; this field is the mirror the trigger writes
+after it has done that work. To open the popover from somewhere other
+than its trigger, use `open_action`.
+
+#### `pub fn open_action(mut self, intent: &'static str) -> Self`
+
+Register a **named global action** that toggles this popover, so a menu
+entry, a global shortcut or `ctx.send_intent(...)` can open it — not only
+a click on its own trigger.
+
+Without this a popover is reachable by pointer alone. `on_open` /
+`on_close` are notification-only and `open_signal` is a read-back mirror
+(see its doc), so an app that wanted "Go to… ⌘G" next to its button had
+no way to wire the second half. Action handlers are the one place that
+*does* get an `EventContext`, which is exactly what presenting an overlay
+requires — so the action runs the identical toggle the trigger runs, and
+the two can never drift.
+
+Registered with `register_action_global`, deliberately: intents walk
+source-widget → root, and a menu renders in an **overlay** that is a
+sibling of the popover's own subtree, so a plain `register_action` would
+never be reached from a menu item. Pair it with
+`register_shortcut_global` in the app for the keystroke.
+
+```ignore
+PopoverButton::new(Button::new(tr!(go_to())))
+    .content(palette)
+    .open_action("go.to")
+// elsewhere: MenuEntry::new(tr!(go_to())).intent("go.to").shortcut("go.to")
+```
 
 #### `pub fn surface(mut self, variant: PopoverVariant) -> Self`
 

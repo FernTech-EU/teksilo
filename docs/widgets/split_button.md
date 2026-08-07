@@ -159,6 +159,12 @@ the label (mirrors `Button::icon` with
 is fixed regardless of which item is the current default — use it for a
 stable action affordance (e.g. a "＋" add glyph).
 
+The icon's tint follows the main-region label (the variant/interaction
+cascade, or `text_role` when overridden), so any
+colour set on the passed `IconWidget` is replaced — same contract as
+`Button`. Its size is left alone, so `.icon_size(..)` on the caller's
+widget is honoured.
+
 #### `pub fn style(mut self, style: impl SplitButtonStyle) -> Self`
 
 Override the Tier-3 frame chrome for this instance. Takes precedence

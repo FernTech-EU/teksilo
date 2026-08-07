@@ -38,7 +38,7 @@ ctx.show_toast(
 
 ## Builder methods at a glance
 
-`info`, `success`, `warning`, `error`, `loading`, `body`, `leading`, `action`, `primary_action`, `auto_dismiss_after`, `persistent`, `priority`, `id`, `on_click`, `on_dismiss`, `show_close_button`, `closable_on_escape`, `announcement`, `archive`, `style`, `present`
+`info`, `success`, `warning`, `error`, `loading`, `body`, `leading`, `action`, `primary_action`, `auto_dismiss_after`, `persistent`, `priority`, `id`, `on_click`, `on_dismiss`, `show_close_button`, `closable_on_escape`, `announcement`, `archive`, `style`, `target`, `broadcast`, `present`
 
 ## API reference
 
@@ -70,6 +70,61 @@ pub enum ToastDismissCause { /* variants */ }
 - **`Programmatic`** — `ToastHandle::dismiss` was called from app code.
 - **`HostShutdown`** — The host's window is being torn down.
 - **`SlotPoolFull`** — The host's slot pool was at `max_visible` and this toast was dropped (Normal priority overflow) or was evicted by a higher-priority arrival. Reported synthetically so `on_dismiss` always fires once per toast — apps that track outstanding toasts via the callback don't leak.
+
+## `pub struct ToastAudience`
+
+Opaque per-app routing token. teksilo has no notion of what an
+"audience" means to the host app (a document, a project, a user
+session, …) — it only ever compares and hashes this value. Apps
+mint their own tokens (typically one per open document/window
+group) via `ToastAudience::new` and pass the same value to
+`Toast::target(...)` and `ToastRegistry::set_window_audience(...)`
+to link the two sides of the routing decision.
+
+```rust
+pub struct ToastAudience(u64);
+```
+
+### Methods
+
+#### `pub fn new(id: u64) -> Self`
+
+Construct a token from an app-chosen `u64`. The app owns the
+meaning entirely — teksilo never inspects the value beyond
+equality/hash.
+
+#### `pub fn raw(&self) -> u64`
+
+The raw numeric value, for debugging/serialization by the app.
+
+## `pub enum ToastRoute`
+
+Resolved delivery target for a toast (and, mirrored, its archived
+`NotificationEntry`).
+
+Three levels, from narrowest to widest:
+- `Window` — exactly the window that presented the toast. This is
+  the default when a `Toast` carries no explicit `.target()` /
+  `.broadcast()` and was presented through a real `EventContext`
+  (i.e. `ctx.show_toast(...)` / `toast.present(ctx)` from an actual
+  input handler) — see `EventContextToastExt::show_toast`.
+- `Audience` — every window currently assigned the given
+  `ToastAudience` via `ToastRegistry::set_window_audience`.
+- `Broadcast` — every window, unconditionally. Also the fallback
+  when a toast is enqueued with no window AND no explicit target
+  (e.g. `ToastRegistry::show_settings_write_failed`, which fires
+  from a background `AppEvent` observer with no `EventContext` at
+  all) — an app-wide message with nothing narrower to route by.
+
+```rust
+pub enum ToastRoute { /* variants */ }
+```
+
+### Variants
+
+- **`Window`** — Delivered only to the window with this id. Never publicly constructible from a `Toast` builder — only the framework stamps this, from a real `EventContext::window()` at present time — so an app can't accidentally fabricate a route to a window it doesn't own.
+- **`Audience`** — Delivered to every window currently assigned this audience.
+- **`Broadcast`** — Delivered to every window, unconditionally.
 
 ## `pub enum ToastActionStyle`
 
@@ -253,29 +308,7 @@ completion callback) or replaces it with a success/error toast.
 
 #### `pub fn body(mut self, text: impl Into<LocalizedString>) -> Self`
 
-Optional secondary text below the title.
-
-**Long bodies clamp and disclose.** A title is one line by construction, but a body is
-whatever the app passes — and apps pass error text, which has no length bound. A body
-needing more than `TOAST_BODY_COLLAPSED_LINES` (3) lines is clamped there and grows a
-thin row offering **Show more** and **Copy**:
-
-- *Show more / Show less* unfolds and refolds it. Unfolding also cancels the toast's
-  auto-dismiss timer — asking to see more is a statement that the toast is being read,
-  and a 10-second timer firing mid-sentence is exactly what the disclosure exists to
-  prevent. The close button (and the notification archive) remain the way out.
-- *Copy* puts the **whole** body on the clipboard, not the visible three lines. A clamped
-  body is usually an error chain; pasting its truncation would be worse than useless. The
-  label switches to *Copied* on success, and stays a live link so a second click re-copies.
-  A failed `set_text` (no clipboard, denied access) leaves the label alone rather than
-  claiming a copy that did not happen.
-
-A body short enough to fit gains none of this — no clamp, no row, no extra height. The
-accessibility tree always carries the full text as the alert's description, clamped or
-not, so a screen reader is never given the truncation.
-
-Nothing about this is configurable yet; if you need a different ceiling, say so rather
-than working around it with a pre-truncated string.
+Optional secondary line below the title.
 
 #### `pub fn leading(mut self, widget: impl Widget + 'static) -> Self`
 
@@ -311,9 +344,39 @@ when the slot pool is full; `Urgent` also forces `Live::Assertive` regardless of
 #### `pub fn id(mut self, id: impl Into<String>) -> Self`
 
 Stable identity for the "progress toast updates in place"
-pattern. Two toasts presented with the same id reuse the same
-slot (mutation hooks are not yet implemented; the id is captured
-and archived but each present allocates a new slot).
+pattern. A subsequent `enqueue` whose `Toast` carries the same
+`id` as a still-live entry mutates that entry's fields
+(severity, title/body, route, …) in place instead of appending
+a new toast — see `ToastRegistry::enqueue`'s update-in-place
+merge for the exact behaviour.
+
+# Hazard: this id must be unique per logical operation, not just per call site
+
+The merge matches on `id` ALONE — no route/window/audience
+check — and then OVERWRITES the existing entry's route with
+the new toast's resolved target. That's intentional: it's what
+lets a progress toast whose audience becomes known partway
+through retarget itself in place. But it also means that if
+TWO DIFFERENT windows (or two different audiences) each
+present a toast using the SAME `id` for what are, to the app,
+two DIFFERENT operations, the second `enqueue` finds the
+first window's still-live entry, mutates its text/severity to
+the second operation's, and steals its route out from under
+it — the first window's toast is not dismissed, not
+callback'd, just silently overwritten and gone, while the
+second window's operation ends up displayed under the wrong
+route besides.
+
+teksilo deliberately does NOT make the dedup key route-aware
+(matching on `(id, route)` together) — that would break the
+intentional retargeting case above. So in a multi-window /
+multi-document app, do not reuse one static string id across
+windows for what is conceptually a per-document (or otherwise
+per-audience) operation — export, delete, save, etc. Fold the
+document/audience identity into the id yourself, e.g.
+`format!("export-{work_id}")` rather than a bare `"export"`
+constant, so two windows running the same *kind* of operation
+on two different documents never collide on one entry.
 
 #### `pub fn on_click(mut self, f: impl Fn(&mut EventContext) + 'static) -> Self`
 
@@ -353,6 +416,20 @@ transient notifications like quick "Copied!" feedback.
 
 Override the visual chrome for this toast instance. Takes precedence over the
 theme-wide `style_slots.toast` slot and the built-in `RecipeToastStyle` default.
+
+#### `pub fn target(mut self, audience: ToastAudience) -> Self`
+
+Route this toast to every window currently assigned `audience`
+(via `ToastRegistry::set_window_audience`), instead of the
+default origin-window. Overrides any previous `.target()` /
+`.broadcast()` call — last setter wins.
+
+#### `pub fn broadcast(mut self) -> Self`
+
+Route this toast to every window, unconditionally — for
+genuinely app-wide messages (a data-loss warning, an update
+available notice) rather than one window's concern. Overrides
+any previous `.target()` call — last setter wins.
 
 #### `pub fn present(self, ctx: &mut EventContext) -> ToastHandle`
 

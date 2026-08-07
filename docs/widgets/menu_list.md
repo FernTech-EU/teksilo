@@ -95,9 +95,13 @@ Add a menu item (typically a `MenuItem`).
 
 Add a menu item that is shown only while `visible` is `true`. When the
 gate is `false` the row collapses to zero height (no gap) and keyboard
-navigation skips it — the conditionally-shown menu row. Used e.g. by a
-`Toolbar`'s overflow menu, where each row is present only while its
-inline twin is collapsed.
+navigation skips it — arrows, `Home`/`End`, `Enter`, type-ahead, and
+mnemonic activation all ignore it. Used e.g. by a `Toolbar`'s overflow
+menu, where each row is present only while its inline twin is collapsed.
+
+Because a hidden row never claims its mnemonic letter, two gated rows
+that are mutually exclusive may share one — the letter resolves to
+whichever is visible when it is pressed.
 
 #### `pub fn item_boxed_when( mut self, widget: Box<dyn Widget>, visible: impl Into<teksilo_core::signal::Prop<bool>>, ) -> Self`
 

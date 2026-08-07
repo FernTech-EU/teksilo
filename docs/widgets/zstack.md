@@ -6,11 +6,13 @@
 ZStack — a layout container that layers children on top of each other.
 
 The container sizes itself to the maximum width and maximum height across
-all children (each measured at an unspecified proposal so background rects
-do not inflate the size).  Each child is then offered the full container
-bounds and positioned according to the container-level `Alignment`
-(default: `CENTER`); individual children can override alignment via
-`WidgetTree::set_alignment`.
+all children, measured at an unspecified proposal so background rects do not
+inflate the size. **Height additionally takes a width-bounded query** when the
+parent bound the width, so a wrapping child reports the height it will really
+occupy rather than a single line; see `layout_response` for why that query is
+width-only. Each child is then offered the full container bounds and
+positioned according to the container-level `Alignment` (default: `CENTER`);
+individual children can override alignment via `WidgetTree::set_alignment`.
 
 The primary use-cases are layered UIs — a background `RectWidget` beneath
 a `TextWidget`, a floating badge over a button icon — and card-like

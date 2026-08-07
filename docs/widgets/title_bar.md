@@ -31,7 +31,7 @@ the host from the widget tree:
 
 ## Builder methods at a glance
 
-`height`, `background`, `border`, `leading`, `leading_id`, `center`, `center_id`, `trailing`, `trailing_id`, `close_action`
+`controls_visible`, `height`, `background`, `border`, `leading`, `leading_id`, `center`, `center_id`, `trailing`, `trailing_id`, `close_action`
 
 ## API reference
 
@@ -65,6 +65,20 @@ controls (minimize / maximize / close) are rendered only when the host
 advertises `PlatformTitleBarHost::renders_custom_controls` — i.e. on
 Windows and Wayland but not on macOS.
 
+## This widget builds exactly once
+
+`build` consumes the leading / center / trailing slots with `take()`, so a
+second pass finds them all `None` and produces a bar containing nothing but
+window controls — no menu, no title, no tools. Nothing here may therefore
+carry a `BindingLevel::Rebuild`
+binding. Reactive state on this widget is expressed either as a
+`RepaintOnly` colour prop or, for structure, as dormancy via
+`teksilo_core::BuildContext::visible_when` on an always-built child — which is how
+`controls_visible` works. Memoising the
+resolved slot ids is *not* a workaround: a rebuild replaces the inner row
+and prunes its subtree, so the cached ids dangle and re-adding them yields
+an empty bar just the same.
+
 ```rust
 pub struct TitleBar { /* fields */ }
 ```
@@ -78,6 +92,31 @@ Construct a `TitleBar` bound to the given platform host.
 The maximize/restore glyph follows `WindowState::placement` via
 `ctx.window()` at build time — the host no longer owns the
 maximize signal.
+
+#### `pub fn controls_visible(mut self, visible: impl Into<Prop<bool>>) -> Self`
+
+Show or hide the minimize / maximize / close cluster. Default `true`.
+
+Accepts a plain `bool` or a `Signal<bool>`. Applied through the
+framework's own dormancy (`teksilo_core::BuildContext::visible_when`), so a flip
+costs a relayout and **never a rebuild** of the bar: a dormant node is
+skipped by layout, hit-test, focus and paint, so a hidden cluster takes
+no space and receives no input. A derived (`.map`) signal is fine —
+binding resolves through to the mutable roots and never calls `observe`.
+
+The case this exists for is **fullscreen**.
+`WindowPlacement::Fullscreen`
+is documented as "covers the entire display, title bar and all chrome
+hidden", and every desktop convention agrees: macOS hides the traffic
+lights, Windows fullscreen has no caption buttons, browsers and editors
+hide their chrome outright. Minimize and maximize are meaningless for a
+window with no frame. An app drawing custom chrome
+(`DecorationsMode::CustomChrome`) owns
+that decision itself, because the framework cannot hide a title bar the
+app composed — so it gates it here.
+
+An app that hides these **must** keep some other visible way out of
+fullscreen: a menu item, an on-screen button, or a documented shortcut.
 
 #### `pub fn height(mut self, height: f32) -> Self`
 

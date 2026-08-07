@@ -21,13 +21,25 @@ arena. The host owns the per-frame timer + hover-pause; expired
 entries are removed from the registry's queue, the version signal
 is bumped, the host rebuilds, the surface widgets are destroyed.
 
+Routing: each host filters `live_entry_ids()` down to entries whose
+`ToastRoute` matches its own window id / assigned audience, or that
+are `Broadcast`. Every host binds the SAME
+`ToastRegistry::version_signal` at `BindingLevel::Rebuild` — one
+signal reaches N windows, because each window's `WidgetTree` owns
+its own `BindingRegistry` and that registry remembers the
+generation it last reconciled (see
+`teksilo_core::binding::BindingRegistry`). A host that matches
+nothing in a given rebuild just produces zero new surfaces, which
+is cheap and lets one shared queue serve every window without a
+per-window registry.
+
 ## Builder methods at a glance
 
 `wrapping`
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/teksilo_widgets/toast/host/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/toast/index.html)
 
 ## `pub struct ToastInstallOptions`
 

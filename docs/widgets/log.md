@@ -51,7 +51,7 @@ let log = NotificationLog::new(archive)
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/teksilo_widgets/notification/log/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/notification/index.html)
 
 ## `pub struct NotificationLog`
 
@@ -119,11 +119,11 @@ This is load-bearing for the popover presentation
 (`NotificationCenterButton`):
 the overlay layer measures its content with a fully unbounded
 proposal, and a `StandardListItem` asked for an intrinsic
-width reports only its chrome, so without a preferred width
-the popover inherited whatever the two toolbar buttons
-happened to measure (~248 dp) and elided every title down to a
-few words. Hosts that DO bound the width (a dialog, a side
-panel) ignore this value.
+width reports only its chrome, so without a preferred width the
+popover would size itself to whatever the two toolbar buttons
+happen to measure (~248 dp with the stock labels) and elide
+every title to a stub. Hosts that DO bound the width (a dialog,
+a side panel) ignore this value.
 
 #### `pub fn preferred_height(mut self, height: f32) -> Self`
 

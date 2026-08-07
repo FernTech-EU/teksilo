@@ -32,7 +32,7 @@ let editor = RichTextEditor::editor(doc)
 
 ## Builder methods at a glance
 
-`read_only`, `editor`, `style`, `content_padding`, `content_padding_symmetric`, `content_padding_each`, `content_padding_top`, `content_padding_right`, `content_padding_bottom`, `content_padding_left`, `wrap_mode`, `show_highlights`, `annotation_spans`, `set_highlight_mask`, `typography_defaults`, `background`, `selection_color`, `caret_color`, `text_color`, `v_scroll_policy`, `h_scroll_policy`, `window_to_clip`, `scroll_policy`, `follow_caret_in_page`, `typewriter`, `overscroll_behavior`, `min_lines`, `max_lines`, `follow_text_scale`, `font_size_scale`, `context_menu`, `default_context_menu`, `font_registrar`, `on_change`, `document_version`, `cursor_position`, `cursor_anchor`, `is_composing`, `cursor_position_signal`, `cursor_anchor_signal`, `has_selection`, `can_undo`, `can_redo`, `caret_char_format`, `scroll_y`, `scroll_x`, `context_target_at`, `selected_text`, `select_all`, `deselect`, `insert_text`, `insert_html`, `insert_djot`, `insert_block`, `insert_image`, `delete_selection`, `select_word`, `select_line`, `set_caret_position`, `focused_signal`, `select_range`, `reveal_range`, `set_bold`, `set_italic`, `set_underline`, `set_strikethrough`, `set_font_size`, `set_font_family`, `toggle_bold`, `toggle_italic`, `toggle_underline`, `toggle_strikethrough`, `set_superscript`, `set_subscript`, `set_vertical_alignment`, `get_vertical_alignment`, `is_superscript`, `is_subscript`, `toggle_superscript`, `toggle_subscript`, `apply_block_format`, `apply_text_format`, `set_alignment`, `clear_direction`, `set_direction`, `set_heading_level`, `insert_list`, `create_list`, `indent`, `outdent`, `remove_from_list`, `is_in_blockquote`, `selection_spans_multiple_frames`, `toggle_blockquote`, `increase_blockquote_depth`, `decrease_blockquote_depth`, `insert_table`, `remove_current_table`, `insert_row_above`, `insert_row_below`, `insert_column_before`, `insert_column_after`, `remove_current_row`, `remove_current_column`, `is_in_table`, `is_bold`, `is_italic`, `is_underline`, `is_strikethrough`, `get_heading_level`, `get_alignment`, `get_direction`, `undo`, `redo`, `begin_edit_block`, `end_edit_block`, `edit_block`, `set_default_language`, `default_language`, `handle`, `copy`, `cut`, `paste`, `paste_unformatted`, `can_paste`, `set_font_size_scale`, `get_font_size_scale`, `set_typography_defaults`, `get_typography_defaults`, `set_typewriter`, `get_typewriter`, `set_caret_highlight`, `get_caret_highlight`, `caret_window_rect`, `format_version`, `document_loaded_count`, `on_link_activated`, `on_image_activated`
+`read_only`, `editor`, `style`, `content_padding`, `content_padding_symmetric`, `content_padding_each`, `content_padding_top`, `content_padding_right`, `content_padding_bottom`, `content_padding_left`, `wrap_mode`, `show_highlights`, `annotation_spans`, `set_highlight_mask`, `typography_defaults`, `background`, `selection_color`, `caret_color`, `text_color`, `v_scroll_policy`, `h_scroll_policy`, `window_to_clip`, `scroll_policy`, `follow_caret_in_page`, `typewriter`, `overscroll_behavior`, `min_lines`, `max_lines`, `follow_text_scale`, `font_size_scale`, `context_menu`, `default_context_menu`, `font_registrar`, `on_change`, `document_version`, `cursor_position`, `cursor_anchor`, `is_composing`, `cursor_position_signal`, `cursor_anchor_signal`, `has_selection`, `can_undo`, `can_redo`, `caret_char_format`, `scroll_y`, `scroll_x`, `context_target_at`, `selected_text`, `select_all`, `deselect`, `insert_text`, `insert_html`, `insert_djot`, `insert_block`, `insert_image`, `delete_selection`, `select_word`, `select_line`, `set_caret_position`, `focused_signal`, `select_range`, `reveal_range`, `set_bold`, `set_italic`, `set_underline`, `set_strikethrough`, `set_font_size`, `set_font_family`, `toggle_bold`, `toggle_italic`, `toggle_underline`, `toggle_strikethrough`, `set_superscript`, `set_subscript`, `set_vertical_alignment`, `get_vertical_alignment`, `is_superscript`, `is_subscript`, `toggle_superscript`, `toggle_subscript`, `apply_block_format`, `apply_text_format`, `set_alignment`, `clear_direction`, `set_direction`, `set_heading_level`, `insert_list`, `create_list`, `indent`, `outdent`, `remove_from_list`, `is_in_blockquote`, `selection_spans_multiple_frames`, `toggle_blockquote`, `increase_blockquote_depth`, `decrease_blockquote_depth`, `insert_table`, `remove_current_table`, `insert_row_above`, `insert_row_below`, `insert_column_before`, `insert_column_after`, `remove_current_row`, `remove_current_column`, `is_in_table`, `is_bold`, `is_italic`, `is_underline`, `is_strikethrough`, `get_heading_level`, `get_alignment`, `get_direction`, `undo`, `redo`, `begin_edit_block`, `end_edit_block`, `edit_block`, `set_default_language`, `default_language`, `handle`, `copy`, `cut`, `paste`, `paste_unformatted`, `can_paste`, `set_font_size_scale`, `get_font_size_scale`, `set_typography_defaults`, `get_typography_defaults`, `set_typewriter`, `get_typewriter`, `set_caret_highlight`, `get_caret_highlight`, `caret_window_rect`, `format_version`, `document_loaded_count`, `on_link_activated`, `on_image_missing`, `on_files_dropped`, `on_image_resized`, `on_image_activated`
 
 ## API reference
 
@@ -542,10 +542,15 @@ does produce new blocks rather than literal newlines in one paragraph.
 
 Split the current block at the widget's caret, as pressing Enter does.
 
-#### `pub fn insert_image(&self, name: &str, width: u32, height: u32)`
+#### `pub fn insert_image(&self, name: &str, alt: &str, width: u32, height: u32)`
 
 Insert an inline image by logical resource name. `width` and
 `height` are in logical pixels.
+
+`alt` is the image's accessible description and its export representation. It is
+passed straight through rather than defaulted here: the caller is the only layer
+that knows what the picture shows, and an empty string chosen on its behalf would
+be an accessibility decision made silently by a widget wrapper.
 
 #### `pub fn delete_selection(&self)`
 
@@ -1043,11 +1048,59 @@ The callback replaces any prior link-click callback on this
 builder chain. To stop observing, reconstruct the editor
 without the setter.
 
-#### `pub fn on_image_activated( self, handler: impl Fn(&str, &mut teksilo_core::widget::EventContext) + 'static, ) -> Self`
+#### `pub fn on_image_missing( self, resolve: impl Fn(&str) -> Option<(String, Vec<u8>)> + 'static, ) -> Self`
+
+Supply an image's bytes on demand, when the document has no resource
+under that name.
+
+An inline image references its pixels by name, and those pixels live on
+the *document*. So a name that arrives without them — which is exactly
+what pasting an image into a second editor is, since the interchange
+format carries the reference and not the bytes — lays out at its full
+size and paints nothing.
+
+Rather than make every host re-scan its document after every edit for
+names that have appeared, the editor asks for what it is missing, once,
+at the moment it needs it. The bytes are written onto the document, so
+the answer is permanent and every later reader (a save, an export, a
+second view of the same document) sees them too.
+
+One hook serves paste, drag-and-drop, and an undo that re-inserts a
+deleted image, without any of them knowing it exists.
+
+#### `pub fn on_files_dropped( self, handler: impl Fn(&[std::path::PathBuf], &mut teksilo_core::widget::EventContext) + 'static, ) -> Self`
+
+Install a callback fired when files are dropped on the editor.
+
+The editor places the caret at the drop point and then hands the paths
+over: what a dropped file *means* — a picture to embed, a link to write,
+a document to include — is the host's policy, and a text editor that
+guessed would be wrong for every host but one.
+
+Without this, file drops are declined, and the drag bubbles to whatever
+ancestor claims it.
+
+#### `pub fn on_image_resized( self, handler: impl Fn(&ImageResize, &mut teksilo_core::widget::EventContext) + 'static, ) -> Self`
+
+Install a callback fired when the reader finishes dragging one of a
+selected image's corner grips.
+
+The widget does not resize the picture itself. It cannot: an image's
+display size lives in the host's own document format (an attribute, a
+style, a column of a table), and only the host knows how to write it
+there so it survives a save. So the drag reports a size and the host
+decides what that means — the same division of labour as
+`on_image_activated`.
+
+Fired once, on release. During the drag the widget shows an outline at
+the proposed size, which costs no relayout and keeps one gesture to one
+entry on the host's undo stack.
+
+#### `pub fn on_image_activated( self, handler: impl Fn(&ImageActivation, &mut teksilo_core::widget::EventContext) + 'static, ) -> Self`
 
 Install a callback fired when the user Primary-clicks an inline
-image. The callback receives the image's resource name and the
-active `EventContext`.
+image. The callback receives the activation (see
+`ImageActivation`) and the active `EventContext`.
 
 ## `pub struct EditorHandle`
 
@@ -1122,6 +1175,19 @@ Empty string on a serialisation error, matching `TextDocument::to_djot`'s own
 callers: a command reading an editor has no better answer than "nothing there", and
 propagating a `Result` here would push that decision onto every call site.
 
+#### `pub fn to_plain_text(&self) -> String`
+
+This editor's content as the *addressable* plain text — the view whose
+character offsets are the document's own.
+
+The counterpart to `to_djot` for a caller that has an
+offset (a caret, a selection, a click) and needs to know what is there.
+An inline image appears as its `U+FFFC`, so offsets into this string are
+offsets into the document, character for character — which the `.txt`
+export's view deliberately is not.
+
+Empty string on error, for the same reason `to_djot` returns one.
+
 #### `pub fn is_empty(&self) -> bool`
 
 Whether this editor holds no text at all.
@@ -1169,6 +1235,40 @@ Insert plain text at the caret, replacing any selection. The
 `EditorHandle` counterpart of
 `RichTextEditor::insert_text`, for callers
 that hold only a handle — a toolbar button or a global menu command.
+
+#### `pub fn add_image_resource(&self, name: &str, mime_type: &str, bytes: &[u8]) -> bool`
+
+Register an image's bytes on this editor's document, under `name`.
+
+An inline image stores only a name; the paint pass resolves it to pixels
+through the document's resource table. So an image inserted without this
+lays out and stays blank — and the name is also what a *reload* resolves
+against, which is why a host restoring a document has to register its
+images before the first paint rather than at insertion time only.
+
+On the handle rather than only on the widget because commands operate on
+whichever editor has focus, including ones a list or card grid built that
+the host never mounted itself.
+
+#### `pub fn image_resource_size(&self, name: &str) -> Option<(u32, u32)>`
+
+The natural pixel size of a registered image, decoded from its bytes.
+
+What the file actually is, not what the document asks it to be shown at
+— so a host offering "reset to the original size" restores the picture's
+own dimensions rather than a number remembered from when it was inserted,
+which is wrong the moment the file behind the name is replaced.
+
+Decodes on call. That is deliberate: this answers an explicit, rare
+request, and caching it would mean holding a second copy of every image
+in the document for a question almost nobody asks.
+
+#### `pub fn has_image_resource(&self, name: &str) -> bool`
+
+Whether this editor's document already has an image under `name`.
+
+Registering the same name twice appends a second resource row, so a host
+re-registering on every paint would grow the document without bound.
 
 #### `pub fn insert_djot(&self, djot: &str)`
 
@@ -1668,3 +1768,47 @@ Reactive undo-availability signal (toolbar enable-state source).
 #### `pub fn can_redo(&self) -> Signal<bool>`
 
 Reactive redo-availability signal.
+
+## `pub struct ImageActivation`
+
+An inline image the user clicked.
+
+Carries the offset as well as the name because a document may hold the same
+picture more than once — a name alone cannot say *which* one was clicked, so
+a host acting on the click (selecting it, editing its size, replacing it)
+would be guessing. The offset addresses the image's single `U+FFFC`, so
+`select_range(offset, offset + 1)` selects exactly it.
+
+```rust
+pub struct ImageActivation { /* fields */ }
+```
+
+## `pub struct EditorTextDrag`
+
+Rich text being dragged out of an editor.
+
+The typed fast path for editor-to-editor drags: it carries the
+`DocumentFragment` itself, so formatting, tables and inline images survive a
+move the way they survive a copy/paste — where the `text/plain` MIME
+alternative the drag also advertises (for other applications) could only
+carry the words.
+
+`source` and `range` are what let the drop tell a *move* from a *copy*:
+dropped back into the editor it came from, the original has to be removed,
+and only the source editor can say which range that was.
+
+```rust
+pub struct EditorTextDrag { /* fields */ }
+```
+
+## `pub struct ImageResize`
+
+A resize the reader finished dragging.
+
+Reported once, on release, rather than continuously: the document is the
+durable record and rewriting it on every pointer move would put a hundred
+entries on the undo stack for one gesture.
+
+```rust
+pub struct ImageResize { /* fields */ }
+```

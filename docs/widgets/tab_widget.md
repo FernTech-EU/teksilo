@@ -112,13 +112,24 @@ Enable or disable the whole widget. A disabled `TabWidget` greys out
 and stops accepting focus / selection / keyboard input
 (arena-gated). Distinct from per-tab `TabInfo::enabled`.
 
-#### `pub fn bar_visibility(mut self, visibility: TabBarVisibility) -> Self`
+#### `pub fn bar_visibility(mut self, visibility: impl Into<Prop<TabBarVisibility>>) -> Self`
 
 Set the tab-strip visibility policy (default
 `TabBarVisibility::Always`). Use `TabBarVisibility::WhenMultiple`
 to hide the strip while a single tab is present, or
 `TabBarVisibility::Never` when an external selector (e.g. a
 docking activity rail) drives selection.
+
+Accepts a plain `TabBarVisibility` or a `Signal<TabBarVisibility>`.
+Bound reactively, the strip appears and disappears in place — the
+`TabWidget` itself is never torn down, so per-tab content state
+(caret, scroll offset, focus) survives the flip. That is the point
+of binding rather than swapping two `TabWidget`s in a `Switcher`:
+an app-level "hide the chrome" mode must not cost the user their
+place in the document.
+
+A derived signal (`.map(..)` / `.zip(..)`) is fine here: binding
+resolves through to the mutable roots and never calls `observe`.
 
 #### `pub fn tab_bar_height(mut self, dp: f32) -> Self`
 

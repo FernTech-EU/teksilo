@@ -50,7 +50,7 @@ let _w = ListView::new(model, |_i, item, _selected| {
 
 ## Builder methods at a glance
 
-`from_source`, `from_source_keyed`, `enabled`, `overscroll_behavior`, `smooth_scrolling`, `smooth_scroll_duration`, `scroll_bar_style`, `item_height`, `item_height_fn`, `auto_item_height`, `spacing`, `selection`, `reorderable`, `exportable`, `export_external`, `on_rows_transferred_out`, `accept_foreign_rows`, `on_rows_received`, `on_activate`, `activate_on`, `type_ahead_label`, `type_ahead_timeout`, `show_scrollbar`, `scroll_y_signal`, `max_scroll_y_signal`, `viewport_ratio_y_signal`, `scroll_to_index`, `ensure_index_visible`
+`from_source`, `from_source_keyed`, `enabled`, `overscroll_behavior`, `smooth_scrolling`, `smooth_scroll_duration`, `scroll_bar_style`, `item_height`, `item_height_fn`, `auto_item_height`, `spacing`, `selection`, `reorderable`, `exportable`, `export_external`, `on_rows_transferred_out`, `accept_foreign_rows`, `on_rows_received`, `on_activate`, `activate_on`, `row_tooltip_sticky`, `row_tooltip`, `row_rich_tooltip`, `row_composite_tooltip`, `type_ahead_label`, `type_ahead_timeout`, `show_scrollbar`, `scroll_y_signal`, `max_scroll_y_signal`, `viewport_ratio_y_signal`, `scroll_to_index`, `ensure_index_visible`
 
 ## API reference
 
@@ -241,7 +241,7 @@ Choose single- vs double-click activation (default
 `ActivateOn::DoubleClick`). Enter activates in
 either mode.
 
-#### `pub fn type_ahead_label(mut self, label: impl Fn(&T) -> String + 'static) -> Self`
+#### `pub fn row_tooltip_sticky(mut self, on: bool) -> Self`
 
 Enable **type-ahead** ("type to jump"): with this set, typing a
 printable character while the list has keyboard focus jumps the
@@ -250,6 +250,43 @@ search term, wrapping around (Qt `keyboardSearch` / macOS &
 Windows type-select). `label(&item)` yields the searchable text for
 a row; matching is ASCII-case-insensitive. A pause longer than the
 `type_ahead_timeout` starts a fresh term.
+Whether a composite row tooltip offers dwell-to-sticky promotion.
+Default `true`.
+
+Turn it off for a read-only row card: with nothing to reach into there
+is nothing to pin, so the countdown indicator would promise an
+interaction that does not exist and the surface would outlive the
+pointer for no reason.
+
+#### `pub fn row_tooltip( mut self, f: impl Fn(usize, &T) -> Option<teksilo_i18n::LocalizedString> + 'static, ) -> Self`
+
+Per-row plain tooltip: one line of text for the row under the pointer.
+
+The resolver receives the row's flat index and its item; returning
+`None` leaves that row without a tip. Mutually exclusive with
+`row_rich_tooltip` and
+`row_composite_tooltip` — last setter
+wins, matching the per-widget tooltip matrix.
+
+Opens to the row's trailing side, never below it: rows stack
+vertically, so a tip below would cover the next row.
+
+#### `pub fn row_rich_tooltip( mut self, f: impl Fn(usize, &T) -> Option<crate::tooltip::RichTooltipSource> + 'static, ) -> Self`
+
+Per-row rich tooltip — a registry key or inline
+`TooltipContent`. See
+`row_tooltip` for the shared semantics.
+
+#### `pub fn row_composite_tooltip( mut self, f: impl Fn(usize, &T) -> Option<Box<dyn Widget>> + 'static, ) -> Self`
+
+Per-row composite tooltip — an arbitrary widget tree describing the row.
+
+The body is built for every **realized** row (the virtualization window)
+and rebuilt with it, so keep the resolver cheap and defer anything
+costly to the body's own first paint, which only runs if the tip is
+actually shown. See `row_tooltip` for the rest.
+
+#### `pub fn type_ahead_label(mut self, label: impl Fn(&T) -> String + 'static) -> Self`
 
 #### `pub fn type_ahead_timeout(mut self, timeout: Duration) -> Self`
 

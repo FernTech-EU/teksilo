@@ -133,9 +133,11 @@ precedence when both are set.
 #### `pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self`
 
 Set the enabled state — static or signal-bound. A bound `Signal<bool>`
-enables/disables the item reactively (paint, cursor, and AT all follow),
-so `MenuItem::new(...).enabled(can_save_signal)` greys out live without a
-rebuild.
+enables/disables the item reactively (paint and AT follow), so
+`MenuItem::new(...).enabled(can_save_signal)` greys out live without a
+rebuild. Cursor is always `Pointer` (see `build`); disabled items are
+gated by the arena before hover runs, so a `NotAllowed` cursor cannot
+be applied from a build-time snapshot of this prop either.
 
 #### `pub fn style(mut self, style: impl teksilo_core::styles::MenuItemStyle) -> Self`
 

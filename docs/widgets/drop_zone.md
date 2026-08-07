@@ -43,7 +43,7 @@ announcements plus the Browse fallback are the supported pattern.
 
 ## Builder methods at a glance
 
-`subtitle`, `accept_extensions`, `allow_multiple`, `show_browse_button`, `browse_label`, `icon`, `style`, `on_files_dropped`, `on_text_dropped`, `on_urls_dropped`
+`subtitle`, `accept_extensions`, `allow_multiple`, `show_browse_button`, `starting_dir`, `browse_label`, `icon`, `style`, `on_files_dropped`, `on_text_dropped`, `on_urls_dropped`
 
 ## API reference
 
@@ -89,9 +89,18 @@ Show or hide the keyboard-operable Browse button. Default `true`.
 Keeping it visible is strongly recommended — it is the only
 keyboard-accessible path to the zone's action.
 
-#### `pub fn browse_label(mut self, label: impl Into<LocalizedString>) -> Self`
+#### `pub fn starting_dir(mut self, path: impl Into<PathBuf>) -> Self`
 
 Override the Browse button's label (e.g. `tr!("browse")`).
+Directory the Browse button's dialog opens in. If unset, the OS default is
+used.
+
+The same builder `FilePickerField::starting_dir`
+offers, and for the same reason: an app that remembers where its writer last
+picked files has no way to say so otherwise, because this widget builds its own
+`FileDialogRequest` internally rather than taking one.
+
+#### `pub fn browse_label(mut self, label: impl Into<LocalizedString>) -> Self`
 
 #### `pub fn icon(mut self, icon: impl Widget + 'static) -> Self`
 

@@ -23,13 +23,13 @@ ends:
 FocusScope::new(TraversalScopePolicy::Cycle).child(dialog_body)
 ```
 
-**Do not `Cycle`-wrap a popover, menu or dropdown panel.** Those are non-modal,
-and the framework dismisses a non-modal overlay when keyboard focus leaves it —
-which is what their ARIA patterns (Disclosure, Menu) ask for, and what keeps an
-open panel from sitting over the focus ring that left it (WCAG 2.2 SC 2.4.11,
-Focus Not Obscured). Trapping focus inside one prevents that dismissal from ever
-firing. A centered modal needs no wrapper at all: `cycle_focus` already roots
-traversal at the topmost centered overlay's content.
+**Do not `Cycle`-wrap a popover, menu or dropdown panel.** Those are
+non-modal, and the framework dismisses a non-modal overlay when keyboard
+focus leaves it — which is what their ARIA patterns (Disclosure, Menu) ask
+for, and what keeps an open panel from sitting over the focus ring that
+left it. Trapping focus inside one prevents that dismissal from ever
+firing. A centered modal needs no wrapper at all: `cycle_focus` already
+roots traversal at the topmost centered overlay's content.
 
 ## Layout & accessibility
 
