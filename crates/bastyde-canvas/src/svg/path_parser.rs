@@ -585,8 +585,16 @@ fn arc_segment_to_cubic(
     theta: f32,
     d_theta: f32,
 ) -> (f32, f32, f32, f32, f32, f32) {
-    let alpha =
-        (d_theta / 2.0).sin() * ((4.0 + 3.0 * (d_theta / 2.0).tan().powi(2)).sqrt() - 1.0) / 3.0;
+    // Maisonobe's control-point factor: `sin(Δη)`, **not** `sin(Δη/2)`.
+    //
+    // This read `sin(d_theta / 2.0)` and so produced control points 30% short at
+    // 90° and 50% short below that, which pulls every arc toward its chord: the
+    // midpoint of a quarter circle landed at 0.913r instead of r. Every SVG arc
+    // in every icon was drawn pinched at the middle of each quarter and flat at
+    // the cardinals — round shapes read as rounded squares. `path_atlas`'s own
+    // arc code has always used the equivalent `(4/3)·(1−cos(Δη/2))/sin(Δη/2)`,
+    // so the two implementations disagreed by up to 2×.
+    let alpha = d_theta.sin() * ((4.0 + 3.0 * (d_theta / 2.0).tan().powi(2)).sqrt() - 1.0) / 3.0;
 
     let cos1 = theta.cos();
     let sin1 = theta.sin();
@@ -646,6 +654,100 @@ mod tests {
             p.x,
             p.y
         );
+    }
+
+    /// Walk a parsed path and return every point on the curve, sampled.
+    ///
+    /// Only `MoveTo`/`CubicTo` appear in an arc, which is all this needs.
+    fn sample_curve(commands: &[PathCommand], steps: usize) -> Vec<Point> {
+        let mut out = Vec::new();
+        let mut cur = Point::new(0.0, 0.0);
+        for cmd in commands {
+            match cmd {
+                PathCommand::MoveTo(p) => cur = *p,
+                PathCommand::CubicTo {
+                    control1,
+                    control2,
+                    to,
+                } => {
+                    for i in 0..=steps {
+                        let t = i as f32 / steps as f32;
+                        let u = 1.0 - t;
+                        let x = u * u * u * cur.x
+                            + 3.0 * u * u * t * control1.x
+                            + 3.0 * u * t * t * control2.x
+                            + t * t * t * to.x;
+                        let y = u * u * u * cur.y
+                            + 3.0 * u * u * t * control1.y
+                            + 3.0 * u * t * t * control2.y
+                            + t * t * t * to.y;
+                        out.push(Point::new(x, y));
+                    }
+                    cur = *to;
+                }
+                _ => {}
+            }
+        }
+        out
+    }
+
+    /// **An arc has to be round.**
+    ///
+    /// The property, not the formula: every point of the curve an `A` command
+    /// produces must sit on the circle it claims to be. A cubic approximation of
+    /// a ≤90° arc is good to about 0.03% of the radius, so 0.2% is a generous
+    /// bound that still fails loudly on a real error.
+    ///
+    /// This is the regression it exists for: the control-point factor used
+    /// `sin(Δη/2)` where Maisonobe's formula uses `sin(Δη)`, leaving the control
+    /// points 30% short at 90° and 50% short below. The midpoint of a quarter
+    /// circle came out at 0.913r — an 8.7% dent — so circles across every icon
+    /// in the toolkit read as rounded squares.
+    #[test]
+    fn an_elliptical_arc_stays_on_its_circle() {
+        for (sweep_deg, large, sweep_flag) in [
+            (90.0_f32, "0", "1"),
+            (180.0, "1", "1"),
+            (270.0, "1", "1"),
+            (45.0, "0", "1"),
+            (30.0, "0", "1"),
+        ] {
+            let (cx, cy, r) = (50.0_f32, 50.0_f32, 40.0_f32);
+            let a0 = 0.0_f32;
+            let a1 = sweep_deg.to_radians();
+            let (x0, y0) = (cx + r * a0.cos(), cy + r * a0.sin());
+            let (x1, y1) = (cx + r * a1.cos(), cy + r * a1.sin());
+            let d = format!("M{x0} {y0} A{r} {r} 0 {large} {sweep_flag} {x1} {y1}");
+            let commands = parse_svg_path_data(&d).expect("the arc parses");
+
+            let mut worst = 0.0_f32;
+            for p in sample_curve(&commands, 24) {
+                let dist = ((p.x - cx).powi(2) + (p.y - cy).powi(2)).sqrt();
+                worst = worst.max((dist - r).abs() / r);
+            }
+            assert!(
+                worst < 0.002,
+                "a {sweep_deg}° arc deviates from its circle by {:.2}% of the radius",
+                worst * 100.0,
+            );
+        }
+    }
+
+    /// …and an ellipse is not secretly a circle: the same guarantee, on radii
+    /// that differ, so a fix cannot be one that only happens to work when
+    /// `rx == ry`.
+    #[test]
+    fn an_arc_with_unequal_radii_stays_on_its_ellipse() {
+        let (cx, cy, rx, ry) = (50.0_f32, 50.0_f32, 40.0_f32, 15.0_f32);
+        let d = format!("M{} {cy} A{rx} {ry} 0 1 1 {} {cy}", cx - rx, cx + rx);
+        let commands = parse_svg_path_data(&d).expect("the arc parses");
+        let mut worst = 0.0_f32;
+        for p in sample_curve(&commands, 24) {
+            // On the ellipse ⇔ (dx/rx)² + (dy/ry)² == 1.
+            let v = ((p.x - cx) / rx).powi(2) + ((p.y - cy) / ry).powi(2);
+            worst = worst.max((v - 1.0).abs());
+        }
+        assert!(worst < 0.004, "the ellipse is off by {worst:.4}");
     }
 
     #[test]
