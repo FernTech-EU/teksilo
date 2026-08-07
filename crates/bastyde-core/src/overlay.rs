@@ -243,6 +243,22 @@ pub(crate) struct ActiveOverlay {
     pub fade: Option<OverlayFadeState>,
 }
 
+impl ActiveOverlay {
+    /// Whether this overlay is already on its way out — dismissed, but still
+    /// on the stack while its fade-out tween runs.
+    ///
+    /// Such an overlay still answers every stack query, so anything that
+    /// *targets* an overlay has to step over it: dismissing it a second time
+    /// collapses the tween it is in the middle of, and (for input) spends the
+    /// keystroke on a corpse while leaving whatever sits underneath
+    /// unreachable.
+    pub(crate) fn is_dismissing(&self) -> bool {
+        self.fade
+            .as_ref()
+            .is_some_and(|fade| fade.dismissing_started_real.is_some())
+    }
+}
+
 // Manual Debug impl: `Rc<dyn Fn()>` doesn't derive Debug, but the
 // surrounding systems (tests, logging) want ActiveOverlay to be
 // printable. Skip the callback field and tag it with a placeholder.
@@ -888,11 +904,7 @@ impl OverlayManager {
             // finishes, but it is on its way out and no longer owns the
             // keystroke — targeting it again would spend an Escape on a corpse
             // and leave whatever is underneath unreachable.
-            .filter(|o| {
-                o.fade
-                    .as_ref()
-                    .is_none_or(|f| f.dismissing_started_real.is_none())
-            })
+            .filter(|o| !o.is_dismissing())
             .find_map(|o| match o.dismiss {
                 DismissBehavior::EscapeKey
                 | DismissBehavior::EscapeOrClickOutside

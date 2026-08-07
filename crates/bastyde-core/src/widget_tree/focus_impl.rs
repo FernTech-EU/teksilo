@@ -68,6 +68,16 @@ impl WidgetTree {
         self.update_focus_within_signals(previously_focused, Some(id));
         self.update_view_focus_signals(previously_focused, Some(id));
         self.dispatch_to_widget(id, &WidgetEvent::FocusGained { origin }, &mut *ops);
+        // Non-modal overlays do not contain focus — they follow it out. A menu,
+        // popover or dropdown panel the keyboard has walked out of closes here,
+        // rather than lingering over the focus ring that left it. Runs after
+        // `set_focused` on purpose: `dormant_dismissed_content` re-fires
+        // `FocusLost` and clears focus only for a widget *inside* the subtree it
+        // parks, and the rule below never dismisses the overlay the new target
+        // lives in — so the focus just installed is never disturbed. Running it
+        // before the tooltip pass also means that pass sees already-reset
+        // `self.tooltips` entries instead of chasing a dismissed overlay id.
+        self.dismiss_overlays_left_by_focus(previously_focused, id, &mut *ops);
         // Focus-driven tooltip machinery: close any previously-shown
         // focus-promoted rich tooltip whose scope no longer contains
         // the focus target, then immediately surface+sticky the rich
@@ -1836,5 +1846,362 @@ mod tests_scope {
         }
         assert_ne!(tree.focused(), Some(outside1));
         assert_ne!(tree.focused(), Some(outside2));
+    }
+}
+
+#[cfg(test)]
+mod tests_focus_out_dismissal {
+    //! Non-modal overlays follow focus out instead of trapping it.
+    //!
+    //! Driven against bare `OverlayRequest`s so the rule is exercised with no
+    //! dependency on the widgets crate; the real `MenuBar` / `PopoverButton` /
+    //! `ComboBox` behaviour is pinned over in `bastyde-widgets`.
+
+    use super::*;
+    use crate::overlay::{DismissBehavior, OverlayLayer, OverlayPlacement, OverlayRequest};
+    use crate::test_widgets::{FillWidget, StackWidget};
+
+    fn tab(tree: &mut WidgetTree) {
+        tree.press_key(Key::Tab, Modifiers::NONE);
+    }
+
+    /// Show `content` anchored to `anchor`, the way a popover or menu does.
+    fn show_anchored(
+        tree: &mut WidgetTree,
+        content: WidgetId,
+        anchor: WidgetId,
+        parent: Option<crate::overlay::OverlayId>,
+    ) -> crate::overlay::OverlayId {
+        tree.show_overlay(OverlayRequest {
+            content_id: content,
+            anchor,
+            placement: OverlayPlacement::Below,
+            dismiss: DismissBehavior::EscapeOrClickOutside,
+            layer: OverlayLayer::InTree,
+            parent_overlay: parent,
+            on_dismiss: None,
+            fade_duration: None,
+        })
+    }
+
+    #[test]
+    fn tab_out_of_a_non_modal_overlay_dismisses_it() {
+        let mut tree = WidgetTree::new();
+        let anchor = tree.add(FillWidget::new().focusable());
+        let after = tree.add(FillWidget::new().focusable());
+        let inner = tree.add(FillWidget::new().focusable());
+        let content = tree.add(StackWidget::new().add_child(inner));
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+        show_anchored(&mut tree, content, anchor, None);
+
+        tree.focus(inner);
+        tab(&mut tree);
+
+        assert_ne!(tree.focused(), Some(inner), "focus genuinely left");
+        assert!(
+            tree.active_overlays().is_empty(),
+            "an overlay must not stay open over the focus ring that left it"
+        );
+        assert!(tree.focused() == Some(after) || tree.focused() == Some(anchor));
+    }
+
+    /// The centered modal keeps its trap — that pattern *does* contain focus.
+    #[test]
+    fn a_centered_modal_is_never_dismissed_by_focus_moving() {
+        let mut tree = WidgetTree::new();
+        let outside = tree.add(FillWidget::new().focusable());
+        let m1 = tree.add(FillWidget::new().focusable());
+        let content = tree.add(StackWidget::new().add_child(m1));
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+        tree.show_overlay(OverlayRequest {
+            content_id: content,
+            anchor: outside,
+            placement: OverlayPlacement::Centered,
+            dismiss: DismissBehavior::Manual,
+            layer: OverlayLayer::InTree,
+            parent_overlay: None,
+            on_dismiss: None,
+            fade_duration: None,
+        });
+
+        tree.focus(m1);
+        // Force focus out programmatically — Tab could not do this, but an
+        // AccessKit action or app code can, and the modal must survive it.
+        tree.focus(outside);
+
+        assert_eq!(
+            tree.active_overlays().len(),
+            1,
+            "a modal is the one overlay that legitimately contains focus"
+        );
+    }
+
+    /// The scrim is anchored to whatever opened the modal, so an anchor-aware
+    /// rule could mistake it for a panel orbiting that widget. `FullViewport`
+    /// is what tells it apart.
+    #[test]
+    fn the_modal_scrim_survives_focus_moving_inside_the_modal() {
+        let mut tree = WidgetTree::new();
+        let opener = tree.add(FillWidget::new().focusable());
+        let m1 = tree.add(FillWidget::new().focusable());
+        let m2 = tree.add(FillWidget::new().focusable());
+        let scrim = tree.add(FillWidget::new());
+        let content = tree.add(StackWidget::new().add_child(m1).add_child(m2));
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        tree.show_overlay(OverlayRequest {
+            content_id: scrim,
+            anchor: opener,
+            placement: OverlayPlacement::FullViewport,
+            dismiss: DismissBehavior::Manual,
+            layer: OverlayLayer::InTree,
+            parent_overlay: None,
+            on_dismiss: None,
+            fade_duration: None,
+        });
+        tree.show_overlay(OverlayRequest {
+            content_id: content,
+            anchor: opener,
+            placement: OverlayPlacement::Centered,
+            dismiss: DismissBehavior::Manual,
+            layer: OverlayLayer::InTree,
+            parent_overlay: None,
+            on_dismiss: None,
+            fade_duration: None,
+        });
+
+        tree.focus(opener);
+        tree.focus(m1);
+        tab(&mut tree);
+
+        assert_eq!(
+            tree.active_overlays().len(),
+            2,
+            "scrim and modal both stand while focus moves within the modal"
+        );
+    }
+
+    /// A submenu is a *sibling* arena subtree linked only by `parent_overlay`.
+    /// Ask the arena instead and the parent dies the moment its own child opens.
+    #[test]
+    fn focus_moving_into_a_child_overlay_keeps_the_parent_open() {
+        let mut tree = WidgetTree::new();
+        let anchor = tree.add(FillWidget::new().focusable());
+        let parent_item = tree.add(FillWidget::new().focusable());
+        let parent_content = tree.add(StackWidget::new().add_child(parent_item));
+        let child_item = tree.add(FillWidget::new().focusable());
+        let child_content = tree.add(StackWidget::new().add_child(child_item));
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        let parent = show_anchored(&mut tree, parent_content, anchor, None);
+        show_anchored(&mut tree, child_content, parent_item, Some(parent));
+
+        tree.focus(parent_item);
+        tree.focus(child_item);
+
+        assert_eq!(
+            tree.active_overlays().len(),
+            2,
+            "opening a submenu is not leaving the menu that owns it"
+        );
+    }
+
+    /// Backing out to a shallower level of the same cascade closes only what
+    /// sits below it.
+    #[test]
+    fn focus_back_to_the_parent_overlay_closes_only_the_child() {
+        let mut tree = WidgetTree::new();
+        let anchor = tree.add(FillWidget::new().focusable());
+        let parent_item = tree.add(FillWidget::new().focusable());
+        let parent_content = tree.add(StackWidget::new().add_child(parent_item));
+        let child_item = tree.add(FillWidget::new().focusable());
+        let child_content = tree.add(StackWidget::new().add_child(child_item));
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        let parent = show_anchored(&mut tree, parent_content, anchor, None);
+        show_anchored(&mut tree, child_content, parent_item, Some(parent));
+
+        tree.focus(child_item);
+        tree.focus(parent_item);
+
+        assert_eq!(
+            tree.active_overlays(),
+            vec![parent],
+            "the submenu goes, the menu that owns it stays"
+        );
+    }
+
+    /// Leaving the whole cascade closes every level in one move — APG's
+    /// "closes all menus and submenus", plural and unqualified.
+    #[test]
+    fn leaving_a_nested_cascade_closes_every_level() {
+        let mut tree = WidgetTree::new();
+        let anchor = tree.add(FillWidget::new().focusable());
+        let away = tree.add(FillWidget::new().focusable());
+        let parent_item = tree.add(FillWidget::new().focusable());
+        let parent_content = tree.add(StackWidget::new().add_child(parent_item));
+        let child_item = tree.add(FillWidget::new().focusable());
+        let child_content = tree.add(StackWidget::new().add_child(child_item));
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        let parent = show_anchored(&mut tree, parent_content, anchor, None);
+        show_anchored(&mut tree, child_content, parent_item, Some(parent));
+
+        tree.focus(child_item);
+        tree.focus(away);
+
+        assert!(
+            tree.active_overlays().is_empty(),
+            "one move out of the cascade must leave nothing behind"
+        );
+    }
+
+    /// A dropdown opened *inside a modal* still follows focus out.
+    ///
+    /// The regression this pins: a `ComboBox` keeps focus on its own trigger
+    /// while its panel is up, so the rule has to find that panel through its
+    /// **anchor**. But when the trigger lives inside a modal — Settings, say —
+    /// the by-content lookup succeeds first and answers with the *modal*, whose
+    /// whole point is that it does not follow focus out. That shadowed the
+    /// anchor lookup entirely, and the dropdown was left open over the
+    /// Settings pane after Tab had moved on.
+    #[test]
+    fn a_dropdown_inside_a_modal_still_follows_focus_out() {
+        let mut tree = WidgetTree::new();
+        let opener = tree.add(FillWidget::new().focusable());
+        let trigger = tree.add(FillWidget::new().focusable());
+        let next = tree.add(FillWidget::new().focusable());
+        let modal_content = tree.add(StackWidget::new().add_child(trigger).add_child(next));
+        let panel = tree.add(StackWidget::new());
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        tree.show_overlay(OverlayRequest {
+            content_id: modal_content,
+            anchor: opener,
+            placement: OverlayPlacement::Centered,
+            dismiss: DismissBehavior::Manual,
+            layer: OverlayLayer::InTree,
+            parent_overlay: None,
+            on_dismiss: None,
+            fade_duration: None,
+        });
+        // The dropdown, anchored to a trigger that sits *within* the modal.
+        show_anchored(&mut tree, panel, trigger, None);
+
+        tree.focus(trigger);
+        assert_eq!(
+            tree.active_overlays().len(),
+            2,
+            "precondition: modal + panel"
+        );
+
+        tab(&mut tree);
+
+        assert_eq!(
+            tree.focused(),
+            Some(next),
+            "Tab moves on within the modal, as it should"
+        );
+        assert_eq!(
+            tree.active_overlays().len(),
+            1,
+            "the dropdown must go — only the modal hosting it stays"
+        );
+    }
+
+    /// A snackbar is shown *from* a focused button and leaves that button
+    /// focused — so an anchor-aware rule would tear it down on the user's very
+    /// next keystroke. Its lifetime belongs to its timer, not to the keyboard.
+    ///
+    /// This is why eligibility asks whether an overlay is positioned *at* its
+    /// anchor rather than merely whether it has one: `BottomCenter` is placed
+    /// against the viewport, and its anchor is bookkeeping.
+    #[test]
+    fn a_viewport_placed_notification_ignores_focus_moving() {
+        let mut tree = WidgetTree::new();
+        let trigger = tree.add(FillWidget::new().focusable());
+        let elsewhere = tree.add(FillWidget::new().focusable());
+        let snack = tree.add(StackWidget::new());
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+        tree.show_overlay(OverlayRequest {
+            content_id: snack,
+            anchor: trigger,
+            placement: OverlayPlacement::BottomCenter,
+            dismiss: DismissBehavior::Manual,
+            layer: OverlayLayer::InTree,
+            parent_overlay: None,
+            on_dismiss: None,
+            fade_duration: None,
+        });
+
+        tree.focus(trigger);
+        tab(&mut tree);
+
+        assert_eq!(
+            tree.active_overlays().len(),
+            1,
+            "a snackbar outlives the keystroke that moved focus off its trigger"
+        );
+        assert_ne!(tree.focused(), Some(trigger), "and focus did move");
+        assert_eq!(tree.focused(), Some(elsewhere));
+    }
+
+    /// A menu must never take its host down with it. The upward walk stops at
+    /// a host surface — a hosting dialog, composite tooltip, or revealed
+    /// menubar — so tabbing out of the inner menu closes the menu alone.
+    #[test]
+    fn leaving_a_hosted_menu_spares_the_host() {
+        let mut tree = WidgetTree::new();
+        let opener = tree.add(FillWidget::new().focusable());
+        let away = tree.add(FillWidget::new().focusable());
+        let modal_item = tree.add(FillWidget::new().focusable());
+        let modal_content = tree.add(StackWidget::new().add_child(modal_item));
+        let menu_item = tree.add(FillWidget::new().focusable());
+        let menu_content = tree.add(StackWidget::new().add_child(menu_item));
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        // A centered modal is unconditionally a host surface.
+        let host = tree.show_overlay(OverlayRequest {
+            content_id: modal_content,
+            anchor: opener,
+            placement: OverlayPlacement::Centered,
+            dismiss: DismissBehavior::Manual,
+            layer: OverlayLayer::InTree,
+            parent_overlay: None,
+            on_dismiss: None,
+            fade_duration: None,
+        });
+        show_anchored(&mut tree, menu_content, modal_item, Some(host));
+
+        tree.focus(menu_item);
+        tree.focus(away);
+
+        assert_eq!(
+            tree.active_overlays(),
+            vec![host],
+            "the menu goes; the modal hosting it stays"
+        );
+    }
+
+    /// An overlay whose focus never enters it is still reachable through its
+    /// **anchor** — the non-searchable `ComboBox` / `SearchField` shape, where
+    /// focus stays on the trigger the whole time the panel is up.
+    #[test]
+    fn leaving_the_anchor_dismisses_a_panel_focus_never_entered() {
+        let mut tree = WidgetTree::new();
+        let trigger = tree.add(FillWidget::new().focusable());
+        let after = tree.add(FillWidget::new().focusable());
+        let content = tree.add(StackWidget::new());
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+        show_anchored(&mut tree, content, trigger, None);
+
+        tree.focus(trigger);
+        assert_eq!(tree.active_overlays().len(), 1, "precondition: panel is up");
+
+        tree.focus(after);
+        assert!(
+            tree.active_overlays().is_empty(),
+            "leaving the trigger is leaving the dropdown it owns"
+        );
     }
 }

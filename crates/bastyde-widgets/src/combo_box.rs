@@ -886,25 +886,15 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
                                 EventResponse::Ignored
                             }
                         }
-                        // Tab / Shift+Tab while open: dismiss the dropdown
-                        // and let focus flow naturally. The trigger itself
-                        // receives Tab (focus is on the combo, not inside
-                        // the panel) for non-searchable combos, so the
-                        // panel's own Tab handler wouldn't fire here. In
-                        // searchable mode the panel's handler covers it
-                        // because focus is on the inner TextInputField.
-                        // Consuming the event suppresses the framework's
-                        // built-in cycle so nothing else stole focus while
-                        // the overlay tore down.
-                        WidgetEvent::KeyDown { key: Key::Tab, .. } => {
-                            if is_open.get() {
-                                is_open.set(false);
-                                ctx.dismiss_all_except_hosts();
-                                EventResponse::Handled
-                            } else {
-                                EventResponse::Ignored
-                            }
-                        }
+                        // Tab is deliberately *not* handled here. It used to be:
+                        // the arm consumed the keystroke, closed the dropdown
+                        // and left focus sitting on the trigger, so a second Tab
+                        // was needed to actually move on. The framework now
+                        // dismisses any non-modal overlay the keyboard walks out
+                        // of, which covers this widget too — so letting Tab fall
+                        // through to the ordinary focus cycle both closes the
+                        // popup and advances in one press, the way a combobox is
+                        // supposed to behave as a normal tab stop.
                         WidgetEvent::KeyDown {
                             key: Key::ArrowDown,
                             ..

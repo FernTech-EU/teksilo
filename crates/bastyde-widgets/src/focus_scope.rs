@@ -14,12 +14,20 @@
 //!   scope into the enclosing scope's next member (grouping only). Use for
 //!   logical regions in a continuous Tab order, e.g. dock panels.
 //! - [`Cycle`](TraversalScopePolicy::Cycle) — Tab *wraps* within the scope and
-//!   never leaves via keyboard. Use for modal dialogs and popovers.
+//!   never leaves via keyboard. Use for modal dialogs.
 //!
 //! ```ignore
-//! // A popover whose Tab order is trapped inside it:
-//! FocusScope::new(TraversalScopePolicy::Cycle).child(popover_body)
+//! // A modal dialog whose Tab order is confined to its own content:
+//! FocusScope::new(TraversalScopePolicy::Cycle).child(dialog_body)
 //! ```
+//!
+//! **Do not `Cycle`-wrap a popover, menu or dropdown panel.** Those are
+//! non-modal, and the framework dismisses a non-modal overlay when keyboard
+//! focus leaves it — which is what their ARIA patterns (Disclosure, Menu) ask
+//! for, and what keeps an open panel from sitting over the focus ring that
+//! left it. Trapping focus inside one prevents that dismissal from ever
+//! firing. A centered modal needs no wrapper at all: `cycle_focus` already
+//! roots traversal at the topmost centered overlay's content.
 //!
 //! ## Layout & accessibility
 //!

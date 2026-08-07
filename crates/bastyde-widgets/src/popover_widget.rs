@@ -871,28 +871,38 @@ mod tests {
 
     /// The action *toggles*, sharing one closure with the trigger — so a menu
     /// entry and a click can never disagree about what the popover does.
+    ///
+    /// Fired from **inside** the panel, which is the only place the toggle's
+    /// close branch is still reachable. A sibling cannot reach it: taking focus
+    /// away from an open popover now dismisses it (non-modal overlays follow
+    /// focus out rather than trapping it), so by the time an outside control is
+    /// focused enough to be activated, there is nothing left to close and the
+    /// shared closure correctly takes its *open* branch. That is not new
+    /// asymmetry — the popover's default `EscapeOrClickOutside` already meant a
+    /// real pointer click on that sibling dismissed it before activating. The
+    /// keyboard simply stopped disagreeing with the mouse.
+    /// `open_action_opens_the_popover_from_a_sibling_intent` above still pins
+    /// the global-registration half.
     #[test]
     fn open_action_toggles_rather_than_only_opening() {
-        use crate::primitives::VStack;
         use bastyde_core::intent::Intent;
 
         let mut tree = light_tree();
         let pb = PopoverButton::new(Button::new(lit!("Open")))
-            .content(dummy_content())
+            .content(
+                Button::new(lit!("Fire"))
+                    .on_activate_fn(|ctx| ctx.send_intent(Intent::new("test.toggle"))),
+            )
             .open_action("test.toggle");
         let open_signal = pb.open_signal();
         let pb_id = tree.add(pb);
-        let fire_id = tree.add(
-            Button::new(lit!("Fire"))
-                .on_activate_fn(|ctx| ctx.send_intent(Intent::new("test.toggle"))),
-        );
-        tree.add(VStack::new().add_child(pb_id).add_child(fire_id));
         tree.layout(SizeProposal::exact(300.0, 160.0));
 
-        let fire_btn = tree.first_focusable_descendant(fire_id).unwrap_or(fire_id);
-        tree.focus(fire_btn);
-        let fire = |tree: &mut WidgetTree| {
-            tree.focus(fire_btn);
+        let trigger = tree
+            .first_focusable_descendant(pb_id)
+            .expect("the trigger is the only focusable while closed");
+        tree.focus(trigger);
+        let enter = |tree: &mut WidgetTree| {
             tree.dispatch_event(WidgetEvent::KeyDown {
                 key: Key::Enter,
                 modifiers: Modifiers::NONE,
@@ -904,9 +914,11 @@ mod tests {
             });
         };
 
-        fire(&mut tree);
+        enter(&mut tree);
         assert!(open_signal.get(), "first fire opens");
-        fire(&mut tree);
+        // Opening moved focus into the panel, onto its own Fire button — so the
+        // next Enter runs the same shared closure without focus ever leaving.
+        enter(&mut tree);
         assert!(!open_signal.get(), "second fire closes");
     }
 
@@ -1105,5 +1117,114 @@ mod tests {
             "tooltip should appear on hover"
         );
         assert!(tree.find_by_label("Tip").is_some());
+    }
+
+    #[derive(Debug)]
+    struct FocusableLeaf;
+    impl Widget for FocusableLeaf {
+        fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+            ctx.apply_self_handlers(
+                bastyde_core::widget_builder::HandlerSet::new().focusable(true),
+            );
+            vec![]
+        }
+        fn layout_response(
+            &self,
+            proposal: SizeProposal,
+            _ctx: &LayoutContext,
+        ) -> bastyde_core::widget::LayoutResponse {
+            proposal.resolve(12.0, 12.0).into()
+        }
+    }
+
+    /// Open a popover, Tab past its last control, and it must go.
+    ///
+    /// A popover implements the Disclosure pattern, which mandates no focus
+    /// containment — so Tab genuinely leaves. What must *not* survive that is
+    /// the panel itself: an open popover with the focus ring somewhere behind
+    /// it fails WCAG 2.2 SC 2.4.11 (Focus Not Obscured). Note the content's
+    /// natural Tab slot is already correct — it is built as a child of the
+    /// trigger, so it follows the trigger the way a disclosure's panel follows
+    /// its button. Only the dismissal was missing.
+    #[test]
+    fn tab_out_of_popover_dismisses_it() {
+        let mut tree = light_tree();
+        let pb = PopoverButton::new(Button::new(lit!("Open"))).content(
+            crate::primitives::VStack::new()
+                .child(FocusableLeaf)
+                .child(FocusableLeaf),
+        );
+        let open_signal = pb.open_signal();
+        let id = tree.add(pb);
+        let after = tree.add(FocusableLeaf);
+        tree.layout(SizeProposal::exact(300.0, 400.0));
+        let button_id = tree.first_focusable_descendant(id).expect("inner Button");
+
+        tree.focus(button_id);
+        tree.dispatch_event(WidgetEvent::KeyDown {
+            key: Key::Enter,
+            modifiers: Modifiers::NONE,
+            text: None,
+        });
+        tree.dispatch_event(WidgetEvent::KeyUp {
+            key: Key::Enter,
+            modifiers: Modifiers::NONE,
+        });
+        assert!(open_signal.get(), "precondition: Enter opens the popover");
+        assert_eq!(tree.active_overlays().len(), 1);
+
+        // Tab within the content — two focusables, so the first Tab stays inside
+        // and must NOT dismiss anything.
+        tree.press_key(Key::Tab, Modifiers::NONE);
+        assert_eq!(
+            tree.active_overlays().len(),
+            1,
+            "moving between the popover's own controls is not leaving it"
+        );
+
+        // The next Tab leaves the content for good.
+        tree.press_key(Key::Tab, Modifiers::NONE);
+        assert_eq!(tree.focused(), Some(after), "focus lands past the trigger");
+        assert!(
+            tree.active_overlays().is_empty(),
+            "the popover must not stay open behind the focus ring"
+        );
+        assert!(!open_signal.get(), "and its open signal must follow");
+    }
+
+    /// Shift+Tab off the front of the content leaves it just as surely — and
+    /// lands on the trigger, which is where Escape would have left it.
+    #[test]
+    fn shift_tab_off_the_front_of_a_popover_dismisses_it() {
+        let mut tree = light_tree();
+        let pb = PopoverButton::new(Button::new(lit!("Open"))).content(
+            crate::primitives::VStack::new()
+                .child(FocusableLeaf)
+                .child(FocusableLeaf),
+        );
+        let open_signal = pb.open_signal();
+        let id = tree.add(pb);
+        tree.add(FocusableLeaf);
+        tree.layout(SizeProposal::exact(300.0, 400.0));
+        let button_id = tree.first_focusable_descendant(id).expect("inner Button");
+
+        tree.focus(button_id);
+        tree.dispatch_event(WidgetEvent::KeyDown {
+            key: Key::Enter,
+            modifiers: Modifiers::NONE,
+            text: None,
+        });
+        tree.dispatch_event(WidgetEvent::KeyUp {
+            key: Key::Enter,
+            modifiers: Modifiers::NONE,
+        });
+        assert!(open_signal.get());
+
+        tree.press_key(Key::Tab, Modifiers::SHIFT);
+        assert_eq!(tree.focused(), Some(button_id), "back onto the trigger");
+        assert!(
+            tree.active_overlays().is_empty(),
+            "leaving through the front dismisses it too"
+        );
     }
 }

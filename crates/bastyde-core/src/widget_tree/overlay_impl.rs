@@ -732,6 +732,211 @@ impl WidgetTree {
         }
     }
 
+    /// Whether an overlay is **positioned relative to its anchor** — a panel
+    /// that belongs to a control, rather than to the window.
+    ///
+    /// This is the line between a disclosure and a notification. `Below`,
+    /// `Above`, `TrailingEdge`, `AtPointer`, `NearAnchor` and `BelowPreferred`
+    /// all place content *at* the widget that opened it: the anchor is a real
+    /// relationship, and "focus left that control" is a meaningful thing to say
+    /// about them. The viewport-placed variants are not that — `ViewportCorner`
+    /// and `FullViewport` say outright that anchor bounds are ignored,
+    /// `BottomCenter` is where a snackbar lives, and `Centered` is the modal.
+    /// Their `anchor` field is bookkeeping (whatever widget happened to ask),
+    /// not a disclosure they hang off.
+    ///
+    /// Written as an exhaustive `match` on purpose: a placement variant added
+    /// later must not quietly inherit whichever answer happened to be the
+    /// default, so the compiler makes it a decision.
+    fn overlay_is_anchor_positioned(placement: &crate::overlay::OverlayPlacement) -> bool {
+        use crate::overlay::OverlayPlacement as P;
+        match placement {
+            P::Below
+            | P::Above
+            | P::TrailingEdge
+            | P::AtPointer(_)
+            | P::NearAnchor { .. }
+            | P::BelowPreferred => true,
+            P::Centered | P::BottomCenter | P::ViewportCorner { .. } | P::FullViewport => false,
+        }
+    }
+
+    /// Whether an overlay is one that keyboard focus leaving it should close.
+    ///
+    /// Three exclusions, all structural rather than declared:
+    ///
+    /// * Anything **not positioned at its anchor** (see
+    ///   [`Self::overlay_is_anchor_positioned`]). That covers the modal — the
+    ///   one surface that legitimately *contains* focus (ARIA's Dialog (Modal)
+    ///   pattern), which `cycle_focus` already roots Tab traversal at — its
+    ///   full-viewport scrim, and the notification surfaces. A snackbar is the
+    ///   sharp case: it is shown *from* a focused button and keeps that button
+    ///   focused, so an anchor-aware rule would otherwise tear it down on the
+    ///   user's very next keystroke, overriding both its timer and
+    ///   `.persistent()`. A toast's lifetime belongs to its timer, never to
+    ///   where the keyboard happens to be.
+    /// * An overlay **already fading out**. Dismissing it again collapses the
+    ///   tween it is mid-way through — and a dismissal is usually what moved
+    ///   focus here in the first place, so this is the common case, not a
+    ///   corner.
+    /// * A **tooltip**, owned end-to-end by `tooltip_focus_leave_outside`,
+    ///   which asks a deliberately wider question — it keeps a tip alive while
+    ///   focus rests on its *anchor*, which is the normal state of a
+    ///   focus-promoted tip. Judging it by content alone would kill it the
+    ///   moment it appeared.
+    ///
+    /// Note what is *not* consulted: [`DismissBehavior`](crate::overlay::DismissBehavior).
+    /// That enum picks which of Escape / click-outside / hover-out apply, which
+    /// is an orthogonal axis — a popover that opted out of click-outside did not
+    /// thereby ask to survive being tabbed away from.
+    ///
+    /// Deliberately *not* `overlay_is_host_surface` either: that matches
+    /// `Role::Dialog`, and `PopoverSurface` announces itself as exactly that,
+    /// so host-ness would exempt every popover in the framework — the one
+    /// surface this rule exists for. Host-ness still stops the walk *above*
+    /// the overlay focus left; see `dismiss_overlays_left_by_focus`.
+    fn overlay_follows_focus_out(&self, overlay_id: crate::overlay::OverlayId) -> bool {
+        let Some(overlay) = self.overlay_manager.overlay(overlay_id) else {
+            return false;
+        };
+        if !Self::overlay_is_anchor_positioned(&overlay.placement) {
+            return false;
+        }
+        if overlay.is_dismissing() {
+            return false;
+        }
+        !self
+            .tooltips
+            .iter()
+            .any(|entry| entry.content_id == overlay.content_id)
+    }
+
+    /// The topmost overlay `widget_id` belongs to for focus purposes — either
+    /// because it sits *inside* that overlay's content, or because it is the
+    /// **anchor** the overlay hangs off.
+    ///
+    /// The anchor half is not a nicety. A non-searchable `ComboBox` keeps focus
+    /// on its own trigger the whole time its dropdown is open, and a
+    /// `SearchField` keeps it in the text input while the suggestion list
+    /// floats below — in both cases focus is never inside the overlay at all,
+    /// so a content-only test would decide nothing was ever open and leave the
+    /// panel behind when the user tabbed away. `tooltip_focus_leave_outside`
+    /// reached the same conclusion for tips, for the same reason.
+    ///
+    /// **One pass over the stack, top down, asking both questions at each
+    /// level** — not "by content, else by anchor". Those two orderings differ
+    /// exactly when a widget is inside one overlay and the anchor of another,
+    /// which is the ordinary shape of a dropdown opened inside a modal: a
+    /// content-first lookup answers with the *modal*, whose whole point is that
+    /// it does not follow focus out, and the dropdown anchored to the very
+    /// widget holding focus never gets considered at all. That left a
+    /// `ComboBox` panel open over the Settings dialog after Tab had moved on.
+    /// Scanning top down instead lets the nearer, more specific overlay win,
+    /// because the stack is already ordered by exactly that.
+    fn overlay_orbit_for_widget(&self, widget_id: WidgetId) -> Option<crate::overlay::OverlayId> {
+        self.overlay_manager
+            .stack
+            .iter()
+            .rev()
+            .find(|overlay| {
+                self.is_descendant_of(widget_id, overlay.content_id)
+                    || (self.overlay_follows_focus_out(overlay.id)
+                        && self.is_descendant_of(widget_id, overlay.anchor))
+            })
+            .map(|overlay| overlay.id)
+    }
+
+    /// Close whatever non-modal overlay the keyboard just walked out of.
+    ///
+    /// Non-modal overlays do not trap Tab — menus, popovers and dropdown
+    /// panels implement patterns (Menu, Disclosure, Combobox) that all treat
+    /// Tab as an *exit* gesture, not a navigation one. APG is unqualified
+    /// about menus in particular: Tab "moves focus out of the menu or menubar,
+    /// and closes all menus and submenus". So rather than contain focus, we
+    /// let it go and take the overlay down behind it — which is also what
+    /// keeps an open panel from hiding the focus ring that just left it
+    /// (WCAG 2.2 SC 2.4.11, Focus Not Obscured).
+    ///
+    /// **Ancestry here is two different questions, and they use two
+    /// identically-named helpers.** A submenu's content is `add_detached`, so
+    /// it is never an arena descendant of the menu that opened it — only
+    /// [`OverlayManager::is_descendant_of`](crate::overlay::OverlayManager::is_descendant_of),
+    /// which walks `parent_overlay`, relates the two. Asking
+    /// [`Self::is_descendant_of`] (the arena walk) instead would close a menu
+    /// the instant its own submenu took focus.
+    ///
+    /// Walking *up* the chain and dismissing the outermost eligible level is
+    /// what delivers APG's plural "all menus": `dismiss` already cascades back
+    /// down to every descendant, so one call closes the whole tree.
+    ///
+    /// Unlike every other dismissal path this one must **not** restore focus to
+    /// the overlay's `focus_restore`. The caller has already installed the new
+    /// focus target; re-focusing the trigger here would yank it straight back.
+    pub(super) fn dismiss_overlays_left_by_focus(
+        &mut self,
+        old: Option<WidgetId>,
+        new_focus: WidgetId,
+        ops: &mut dyn crate::window::WindowOps,
+    ) {
+        let Some(old) = old else {
+            return;
+        };
+        let Some(old_overlay) = self.overlay_orbit_for_widget(old) else {
+            return;
+        };
+        // Deliberately the *content*-only lookup, not the orbit: arriving on an
+        // overlay's own anchor is leaving it. That is the trigger — exactly
+        // where Escape would have put you — so Shift+Tab off the front of a
+        // popover closes it rather than parking an open panel under the focus
+        // ring of the button that owns it.
+        let new_overlay = self.overlay_ancestor_for_widget(new_focus);
+
+        // Focus went *deeper* into the same cascade — a submenu opening off its
+        // parent, a picker inside a popover. Nothing was left behind.
+        if let Some(new_overlay) = new_overlay
+            && (new_overlay == old_overlay
+                || self
+                    .overlay_manager
+                    .is_descendant_of(new_overlay, old_overlay))
+        {
+            return;
+        }
+
+        if !self.overlay_follows_focus_out(old_overlay) {
+            return;
+        }
+
+        let mut topmost = old_overlay;
+        let mut current = self
+            .overlay_manager
+            .overlay(old_overlay)
+            .and_then(|overlay| overlay.parent_overlay);
+        while let Some(overlay_id) = current {
+            // Focus backed out to a shallower level of this same cascade (a
+            // submenu handing back to the menu that owns it). That level stays;
+            // only what sits below it goes.
+            if Some(overlay_id) == new_overlay {
+                break;
+            }
+            // Never let a menu take its hosting dialog, composite tooltip or
+            // revealed menubar down with it.
+            if self.overlay_is_host_surface(overlay_id) {
+                break;
+            }
+            if !self.overlay_follows_focus_out(overlay_id) {
+                break;
+            }
+            topmost = overlay_id;
+            current = self
+                .overlay_manager
+                .overlay(overlay_id)
+                .and_then(|overlay| overlay.parent_overlay);
+        }
+
+        let dismissed = self.overlay_manager.dismiss(topmost);
+        self.dormant_dismissed_content(&dismissed, &mut *ops);
+    }
+
     /// Dismiss every overlay whose content's role is *not* a host
     /// surface (`Tooltip` / `Dialog` / `AlertDialog`). Targets stay
     /// stable across the loop because we resolve ids first, then

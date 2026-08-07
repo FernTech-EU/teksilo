@@ -581,10 +581,6 @@ impl<T: Clone + PartialEq + 'static> Widget for DropdownPanel<T> {
         // in searchable mode (non-searchable combos keep focus on the
         // trigger and navigate there). Handles:
         //
-        // - Tab / Shift+Tab: close the popup. `dismiss_top_overlay`
-        //   restores focus to whatever held it before the overlay
-        //   opened (the combo trigger), so the user's next Tab walks
-        //   the main focus order from there.
         // - ArrowDown / ArrowUp / Home / End: navigate the filtered
         //   item list while the search field retains focus, so the
         //   user can type a query then arrow through the matches
@@ -594,8 +590,11 @@ impl<T: Clone + PartialEq + 'static> Widget for DropdownPanel<T> {
         //   the item's own tap handler would duplicate that, so here
         //   we just dismiss.
         //
-        // Returning `Handled` suppresses both the framework's default
-        // focus cycle (Tab) and the `TextInputField`'s downstream key
+        // Tab is deliberately absent: the framework dismisses a non-modal
+        // overlay the keyboard walks out of, so letting Tab reach the ordinary
+        // focus cycle closes this panel *and* advances in one press.
+        //
+        // Returning `Handled` suppresses the `TextInputField`'s downstream key
         // handling (arrows would otherwise fall through as printable-
         // character candidates and be rejected as non-text).
         let source_for_nav = self.source.clone();
@@ -603,7 +602,7 @@ impl<T: Clone + PartialEq + 'static> Widget for DropdownPanel<T> {
         let item_label_for_nav = self.item_label.clone();
         let search_query_for_nav = self.search_query.clone();
         let filter_for_nav = self.filter.clone();
-        let panel_handlers = HandlerSet::new().on_key(move |event, ctx| {
+        let panel_handlers = HandlerSet::new().on_key(move |event, _ctx| {
             // `TextInputField` consumes `Enter`, `Home`, and `End` for
             // its own cursor semantics and never lets them bubble — so
             // Home/End naturally move the caret inside the search
@@ -613,10 +612,6 @@ impl<T: Clone + PartialEq + 'static> Widget for DropdownPanel<T> {
             // text field and reach this handler; we use them to walk
             // the filtered item list.
             let nav_key = match event {
-                WidgetEvent::KeyDown { key: Key::Tab, .. } => {
-                    ctx.dismiss_top_overlay();
-                    return EventResponse::Handled;
-                }
                 WidgetEvent::KeyDown {
                     key: k @ (Key::ArrowDown | Key::ArrowUp),
                     ..

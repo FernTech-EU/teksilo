@@ -546,7 +546,10 @@ impl<'a> BuildContext<'a> {
     ///   — Tab flows out into the enclosing scope's next member (groups
     ///   numbering only).
     /// - [`TraversalScopePolicy::Cycle`](crate::focus::TraversalScopePolicy::Cycle)
-    ///   — Tab wraps within the scope, never exits (for modals / popovers).
+    ///   — Tab wraps within the scope, never exits. For **modal dialogs only**:
+    ///   a popover or menu is non-modal, and the framework closes one the
+    ///   keyboard walks out of rather than containing focus in it. Trapping such
+    ///   an overlay stops that dismissal from ever firing.
     ///
     /// This node is automatically excluded from being a Tab stop itself.
     /// Prefer the `FocusScope` wrapper widget in `bastyde-widgets` over

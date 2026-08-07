@@ -837,10 +837,25 @@ impl Widget for MenuOverlayHost {
         let handler_set = HandlerSet::new()
             .on_focus({
                 let menu_ctx = menu_ctx.clone();
-                move |gained: bool, ctx: &mut EventContext| {
+                move |gained: bool, _ctx: &mut EventContext| {
+                    // Focus left this menu, so it is on its way out — record
+                    // that, and nothing more. The dismissal itself belongs to
+                    // the framework's focus-out rule
+                    // (`dismiss_overlays_left_by_focus`), and the trigger gets
+                    // its focus back from the overlay's own `focus_restore`.
+                    //
+                    // Doing either of those *here* was a race: this handler
+                    // fires from inside the `FocusLost` dispatch, i.e. before
+                    // `focus_with_origin_ops` has installed the new target, so
+                    // the `request_focus(trigger)` it used to queue resolved
+                    // first and was then silently overwritten by the very
+                    // `set_focused` that was still in flight — a focus flash
+                    // onto the trigger that no `FocusLost` ever accounted for.
+                    // Keeping only the signal write leaves this side idempotent
+                    // and lets every dismissal path (Escape, click-outside,
+                    // Tab) converge on the same a11y state.
                     if !gained && menu_ctx.open_index.get() == Some(menu_index) {
-                        // Overlay was dismissed — close the menu and restore focus
-                        menu_ctx.close(ctx);
+                        menu_ctx.open_index.set(None);
                     }
                 }
             })
@@ -1458,6 +1473,7 @@ impl Widget for RevealHeightBox {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::MenuItem;
     use crate::menu_list::MenuList;
     use bastyde_core::accesskit::Role;
     use bastyde_core::widget_id::WidgetId;
@@ -2862,6 +2878,150 @@ mod tests {
                 NativeMenuNode::Item { title, check: NativeCheck::On, .. } if title == "Show Grid"
             )),
             "checkable item reflects the bound signal (On) with stripped title"
+        );
+    }
+
+    /// A bare focusable leaf, so a bar has somewhere to Tab *to*. The menu
+    /// tests need a destination outside the bar to tell "focus moved on" from
+    /// "focus went nowhere".
+    #[derive(Debug)]
+    struct FocusableLeaf;
+    impl Widget for FocusableLeaf {
+        fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+            ctx.apply_self_handlers(HandlerSet::new().focusable(true));
+            vec![]
+        }
+        fn layout_response(
+            &self,
+            proposal: SizeProposal,
+            _ctx: &LayoutContext,
+        ) -> bastyde_core::widget::LayoutResponse {
+            proposal.resolve(12.0, 12.0).into()
+        }
+    }
+
+    /// Tab is an *exit* gesture for a menu, not a navigation one.
+    ///
+    /// ARIA APG's Menu pattern is unqualified about it: Tab "moves focus out
+    /// of the menu or menubar, and closes all menus and submenus". Only the
+    /// arrows navigate within. So one Tab must do two things — close the
+    /// dropdown, and leave focus past the trigger it belongs to. Focus landing
+    /// anywhere *behind* a still-open menu is WCAG 2.2 SC 2.4.11 (Focus Not
+    /// Obscured), and focus landing on an arbitrary widget decided by arena
+    /// insertion order is the same bug wearing a different hat.
+    #[test]
+    fn arrow_down_then_tab_closes_dropdown_and_lands_past_trigger() {
+        let mut t = tree_with_window();
+        let mb = t.add(
+            MenuBar::new()
+                .menu(lit!("&File"), || {
+                    Box::new(
+                        MenuList::new()
+                            .item(MenuItem::new(lit!("New")))
+                            .item(MenuItem::new(lit!("Open"))),
+                    )
+                })
+                .menu(lit!("&Edit"), || {
+                    Box::new(MenuList::new().item(MenuItem::new(lit!("Cut"))))
+                }),
+        );
+        // A sibling root *after* the bar — the honest Tab destination.
+        let after = t.add(FocusableLeaf);
+        t.layout(bastyde_canvas::SizeProposal::exact(800.0, 600.0));
+
+        let triggers = collect_descendants_with_role(&t, mb, Role::MenuItem);
+        assert_eq!(triggers.len(), 2, "two top-level triggers");
+
+        // ArrowDown on a focused trigger opens its dropdown.
+        t.focus(triggers[0]);
+        t.press_key(Key::ArrowDown, Modifiers::NONE);
+        assert!(
+            t.accessibility_node(triggers[0]).is_expanded(),
+            "precondition: ArrowDown opens the File dropdown"
+        );
+        assert_ne!(
+            t.focused(),
+            Some(triggers[0]),
+            "precondition: opening moves focus off the trigger, into the menu"
+        );
+
+        t.press_key(Key::Tab, Modifiers::NONE);
+
+        // The load-bearing assertion. `is_expanded` only reflects
+        // `MenuContext::open_index`, which `MenuOverlayHost`'s blur handler
+        // clears on *any* FocusLost — so it goes false whether or not the
+        // panel itself was actually taken down. Ask the overlay stack, or this
+        // test passes with the focus-out rule entirely disabled and the
+        // dropdown still on screen, which is precisely the WCAG 2.2 SC 2.4.11
+        // failure it exists to catch.
+        assert!(
+            t.active_overlays().is_empty(),
+            "the dropdown panel itself must not survive Tab"
+        );
+        assert!(
+            !t.accessibility_node(triggers[0]).is_expanded(),
+            "and the trigger must stop announcing itself as expanded"
+        );
+        assert_eq!(
+            t.focused(),
+            Some(after),
+            "Tab must land on the first stop past the trigger"
+        );
+    }
+
+    /// Sideways bar navigation keeps exactly one menu up, with focus in it.
+    ///
+    /// `MenuContext::navigate` moves focus to the outgoing trigger and then
+    /// opens the next menu, queueing two `request_focus` calls on one
+    /// `EventContext` — only the last survives the drain — after an
+    /// `EventContext::dismiss_all_except_hosts`. That ordering is why the
+    /// focus-out rule cannot see this transition at all: the dismissal has
+    /// already cleared focus by the time any focus move reaches
+    /// `dismiss_overlays_left_by_focus`.
+    ///
+    /// So this is a **guard, not a probe** — it passes with the focus-out rule
+    /// disabled, and is here to catch a future change that lets the rule reach
+    /// this path and eat the menu `navigate` just opened. Stated plainly so
+    /// nobody reads a green tick here as evidence the mechanism works; the
+    /// tests that actually exercise it are in `focus_impl.rs`'s
+    /// `tests_focus_out_dismissal` and `menu_list.rs`.
+    #[test]
+    fn sideways_navigate_does_not_orphan_focus() {
+        let mut t = tree_with_window();
+        let mb = t.add(
+            MenuBar::new()
+                .menu(lit!("&File"), || {
+                    Box::new(MenuList::new().item(MenuItem::new(lit!("New"))))
+                })
+                .menu(lit!("&Edit"), || {
+                    Box::new(MenuList::new().item(MenuItem::new(lit!("Cut"))))
+                }),
+        );
+        t.layout(bastyde_canvas::SizeProposal::exact(800.0, 600.0));
+        let triggers = collect_descendants_with_role(&t, mb, Role::MenuItem);
+
+        t.focus(triggers[0]);
+        t.press_key(Key::ArrowDown, Modifiers::NONE);
+        assert!(t.accessibility_node(triggers[0]).is_expanded());
+
+        t.press_key(Key::ArrowRight, Modifiers::NONE);
+        assert!(
+            t.accessibility_node(triggers[1]).is_expanded(),
+            "ArrowRight must leave the Edit menu open, not dismissed by the focus-out rule"
+        );
+        assert!(
+            !t.accessibility_node(triggers[0]).is_expanded(),
+            "and must close the File menu it navigated away from"
+        );
+        assert_eq!(
+            t.active_overlays().len(),
+            1,
+            "exactly one menu overlay stays up across sideways navigation"
+        );
+        // The orphan the name warns about: an open menu nobody is standing in.
+        assert!(
+            t.focused().is_some_and(|f| f != triggers[0]),
+            "focus must land in the menu that was just opened, not be left behind"
         );
     }
 }

@@ -1414,17 +1414,43 @@ fn accessibility_searchable_sets_autocomplete() {
     );
 }
 
+/// A bare focusable leaf — Tab needs somewhere to *go* before it can be said
+/// to have left anything.
+#[derive(Debug)]
+struct FocusableLeaf;
+impl bastyde_core::widget::Widget for FocusableLeaf {
+    fn build(
+        &mut self,
+        ctx: &mut bastyde_core::build_context::BuildContext,
+    ) -> Vec<bastyde_core::widget_id::WidgetId> {
+        ctx.apply_self_handlers(bastyde_core::widget_builder::HandlerSet::new().focusable(true));
+        vec![]
+    }
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        _ctx: &bastyde_core::widget::LayoutContext,
+    ) -> bastyde_core::widget::LayoutResponse {
+        proposal.resolve(12.0, 12.0).into()
+    }
+}
+
 #[test]
 fn tab_dismisses_open_simple_dropdown() {
-    // Non-searchable combos have focus on the trigger itself when
-    // the dropdown is open, so the panel-level Tab handler doesn't
-    // get a chance — the trigger's own `on_key` must intercept.
+    // Non-searchable combos keep focus on the trigger itself while the dropdown
+    // is open — focus is never *inside* the overlay. The framework's focus-out
+    // rule still covers them because it treats an overlay's **anchor** as part
+    // of its orbit; leaving the trigger is leaving the dropdown.
+    //
+    // Tab is no longer consumed, so one press both closes the popup and moves
+    // on — a combobox is an ordinary tab stop, not a two-press detour.
     let mut tree = light_tree();
     let selected = Signal::new(None::<String>);
     let cb = tree.add(ComboBox::new(
         vec!["Apple", "Banana", "Cherry"],
         selected.clone(),
     ));
+    let after = tree.add(FocusableLeaf);
     tree.layout(SizeProposal::exact(300.0, 200.0));
     tree.focus(cb);
 
@@ -1438,12 +1464,18 @@ fn tab_dismisses_open_simple_dropdown() {
         tree.active_overlays().is_empty(),
         "Tab must close the non-searchable dropdown too"
     );
+    assert_eq!(
+        tree.focused(),
+        Some(after),
+        "and the same press must move on, not park back on the trigger"
+    );
 }
 
 #[test]
 fn shift_tab_dismisses_open_simple_dropdown() {
     let mut tree = light_tree();
     let selected = Signal::new(None::<String>);
+    let before = tree.add(FocusableLeaf);
     let cb = tree.add(ComboBox::new(
         vec!["Apple", "Banana", "Cherry"],
         selected.clone(),
@@ -1456,6 +1488,7 @@ fn shift_tab_dismisses_open_simple_dropdown() {
     tree.press_key(Key::Tab, bastyde_core::event::Modifiers::SHIFT);
     tree.layout(SizeProposal::exact(300.0, 200.0));
     assert!(tree.active_overlays().is_empty());
+    assert_eq!(tree.focused(), Some(before));
 }
 
 #[test]

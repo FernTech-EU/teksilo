@@ -377,23 +377,47 @@ A scope is declared by wrapping a subtree in the layout-transparent `FocusScope`
 | Policy | At the scope boundary |
 |---|---|
 | `Continue` | Tab flows **out** into the enclosing scope's next member. Groups + scopes `tab_index` numbering without trapping focus — e.g. dock panels in a continuous Tab order. |
-| `Cycle` | Tab **wraps** within the scope and never leaves via keyboard — e.g. modal dialogs and popovers. |
+| `Cycle` | Tab **wraps** within the scope and never leaves via keyboard — modal dialogs only. |
 
 ```rust
-// bati!: a popover whose Tab order is trapped inside it
+// bati!: a modal dialog whose Tab order is confined to its own content
 FocusScope(TraversalScopePolicy::Cycle) {
     Button::new(lit!("OK"))
     Button::new(lit!("Cancel"))
 }
 // builder form
-FocusScope::new(TraversalScopePolicy::Cycle).child(popover_body)
+FocusScope::new(TraversalScopePolicy::Cycle).child(dialog_body)
 ```
+
+**Not for popovers or menus.** A non-modal overlay is dismissed when keyboard
+focus leaves it (see *Overlays follow focus out*, below) — the behaviour ARIA's
+Disclosure and Menu patterns call for, and what stops an open panel from
+covering the focus ring that just left it (WCAG 2.2 SC 2.4.11). `Cycle`-wrapping
+one traps focus so that dismissal never fires.
 
 The root scope is implicitly `Cycle` (whole-tree last↔first wrap, the historical behavior). A **centered modal overlay** folds into the same mechanism: its content subtree becomes the root `Cycle` scope, so Tab is confined to the modal with no special-case code. The `FocusScope` node itself is forced non-focusable (it is a boundary, never a Tab stop). A subtree with no `FocusScope` behaves exactly like the old flat wrapping ring.
 
 > **Not to be confused with `view_focus_*`.** `BuildContext::begin_view_focus` / `view_focus_active` (formerly the `focus_scope` chrome API) is an unrelated build-time mechanism that tracks "does this data view's subtree hold focus" to drive selection chrome and focus rings. It has nothing to do with Tab traversal. Traversal scopes are the `FocusScope` widget + `set_traversal_scope`.
 
 Implemented in [`cycle_focus`](../crates/bastyde-core/src/widget_tree/focus_impl.rs) (the recursive scope-tree walk) and [`set_traversal_scope`](../crates/bastyde-core/src/widget_tree.rs) (the node marker, directly usable from headless tests).
+
+### Overlays follow focus out
+
+A **non-modal overlay is dismissed when keyboard focus leaves it.** Menus, popovers, dropdown panels and suggestion lists do not contain focus; Tab is an exit gesture for all of them, and the panel goes when focus does. Widgets get this for free — there is nothing to wire, and nothing to wrap.
+
+This is what the patterns those surfaces implement actually specify. ARIA APG's Menu pattern is unqualified: Tab "moves focus out of the `menu` or `menubar`, and closes all menus and submenus" — only the arrows navigate within. A popover implements Disclosure, which mandates no containment. The alternative, trapping, is *legal* (WCAG 2.1.2 is satisfied by Escape alone) but unsupported by any of those patterns, and it leaves the real defect in place: an open panel sitting over the focus ring that just left it, which is WCAG 2.2 SC 2.4.11 Focus Not Obscured (Minimum), Level AA.
+
+An overlay is eligible when it is **positioned at its anchor** — `Below`, `Above`, `TrailingEdge`, `AtPointer`, `NearAnchor`, `BelowPreferred`. Those hang off a control, so "focus left that control" means something. The viewport-placed variants are excluded, and deliberately: `Centered` is the modal (the one surface whose pattern *does* contain focus), `FullViewport` is its scrim, and `BottomCenter` / `ViewportCorner` are notifications. A snackbar is shown from a focused button and leaves it focused — an anchor-aware rule that did not exclude it would tear the snackbar down on the user's very next keystroke, overriding both its timer and `.persistent()`. A toast's lifetime belongs to its timer, never to where the keyboard happens to be.
+
+Two further exclusions: an overlay already fading out (dismissing it again collapses the tween it is mid-way through), and tooltips, which `tooltip_focus_leave_outside` owns end-to-end with a deliberately wider test — it keeps a tip alive while focus rests on its *anchor*, the normal state of a focus-promoted tip.
+
+`DismissBehavior` is **not** consulted. It selects which of Escape / click-outside / hover-out apply, an orthogonal axis: a popover that opted out of click-outside did not thereby ask to survive being tabbed away from.
+
+An overlay's **anchor counts as part of it.** A non-searchable `ComboBox` keeps focus on its trigger the whole time its dropdown is open, and a `SearchField` keeps it in the text input while suggestions float below — focus is never inside the overlay, so a content-only test would conclude nothing was ever open. Arriving *on* the anchor still counts as leaving, though, so Shift+Tab off the front of a popover closes it and lands on the trigger, where Escape would have left you.
+
+Nested overlays close as a cascade: the walk goes *up* `parent_overlay` and dismisses the outermost eligible level, which takes every level below it — APG's plural "all menus and submenus" — while stopping at a host surface so a menu never drags its hosting dialog, composite tooltip or revealed menubar down with it.
+
+Implemented in [`dismiss_overlays_left_by_focus`](../crates/bastyde-core/src/widget_tree/overlay_impl.rs), called from `focus_with_origin_ops` — the single funnel every focus change passes through, so Tab, click-to-focus, AccessKit and `ctx.request_focus` are all covered by one mechanism.
 
 ## 6.5 Drag-and-drop lifecycle
 

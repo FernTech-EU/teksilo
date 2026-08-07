@@ -1459,4 +1459,78 @@ mod tests {
     fn _ignore_unused() {
         let _: Option<Signal<bool>> = None;
     }
+
+    #[derive(Debug)]
+    struct FocusableLeaf;
+    impl Widget for FocusableLeaf {
+        fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+            ctx.apply_self_handlers(
+                bastyde_core::widget_builder::HandlerSet::new().focusable(true),
+            );
+            vec![]
+        }
+        fn layout_response(
+            &self,
+            proposal: SizeProposal,
+            _ctx: &LayoutContext,
+        ) -> bastyde_core::widget::LayoutResponse {
+            proposal.resolve(12.0, 12.0).into()
+        }
+    }
+
+    /// Opening a submenu must not be mistaken for leaving the parent menu.
+    ///
+    /// A submenu's content is `add_detached_boxed`, so it is never an arena
+    /// descendant of the menu that owns it — the only thing relating the two is
+    /// the overlay manager's `parent_overlay` graph. A focus-out rule that
+    /// asked the arena instead would close the parent the instant its own
+    /// submenu opened.
+    #[test]
+    fn opening_a_submenu_keeps_the_parent_menu_open() {
+        let mut tree = light_tree();
+        let menu_id = menu_with_submenu(&mut tree);
+        tree.layout(SizeProposal::with_width(300.0));
+        tree.focus(menu_id);
+        tree.press_key(Key::ArrowDown, Modifiers::NONE);
+        tree.press_key(Key::ArrowRight, Modifiers::NONE);
+
+        assert_eq!(
+            tree.active_overlays().len(),
+            1,
+            "the submenu is up and the parent menu is untouched"
+        );
+        assert!(
+            tree.is_active(menu_id),
+            "the parent MenuList must not have been dormanted"
+        );
+    }
+
+    /// Tab out of a submenu closes the whole cascade, not one level.
+    ///
+    /// APG is unqualified and plural about it: Tab "closes all menus and
+    /// submenus". Walking up `parent_overlay` and dismissing the outermost
+    /// level gets that for free — `dismiss_immediate` already cascades back
+    /// down to every descendant.
+    #[test]
+    fn tab_out_of_a_submenu_closes_the_whole_cascade() {
+        let mut tree = light_tree();
+        let menu_id = menu_with_submenu(&mut tree);
+        let after = tree.add(FocusableLeaf);
+        tree.layout(SizeProposal::with_width(300.0));
+        tree.focus(menu_id);
+        tree.press_key(Key::ArrowDown, Modifiers::NONE);
+        tree.press_key(Key::ArrowRight, Modifiers::NONE);
+        assert_eq!(
+            tree.active_overlays().len(),
+            1,
+            "precondition: submenu open"
+        );
+
+        tree.press_key(Key::Tab, Modifiers::NONE);
+        assert_eq!(tree.focused(), Some(after));
+        assert!(
+            tree.active_overlays().is_empty(),
+            "one Tab must leave no menu behind"
+        );
+    }
 }
