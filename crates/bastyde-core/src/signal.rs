@@ -282,7 +282,7 @@ fn coalesced_source(inputs: Rc<dyn Fn() -> Vec<u64>>) -> DerivedSource {
     // closure below owns it, so the address stays valid — and therefore
     // unambiguous — for exactly as long as this source is reachable.
     let token: Rc<()> = Rc::new(());
-    let source_id = Rc::as_ptr(&token) as *const () as usize;
+    let source_id = Rc::as_ptr(&token) as usize;
     let state: Rc<(Cell<u64>, RefCell<Option<Vec<u64>>>)> =
         Rc::new((Cell::new(0), RefCell::new(None)));
     DerivedSource {
@@ -785,11 +785,10 @@ impl<T: 'static> Signal<T> {
     ///
     /// There is deliberately no way to *reset* it. Dirty tracking is
     /// "compare against what I last acted on", and the remembered value
-    /// belongs to the consumer — see
-    /// [`BindingRegistry`](crate::binding::BindingRegistry), which keeps
+    /// belongs to the consumer — see [`BindingRegistry`], which keeps
     /// one per bound source. A resettable flag on the signal itself would
     /// mean N consumers fighting over one slot, which is precisely the bug
-    /// this counter replaced (see [`MutableInner::generation`]).
+    /// this counter replaced (see `MutableInner::generation`).
     ///
     /// For a derived signal this folds every upstream into one number by
     /// summing. That is exact rather than merely convenient: every

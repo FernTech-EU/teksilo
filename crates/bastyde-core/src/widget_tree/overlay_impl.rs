@@ -152,7 +152,7 @@ impl WidgetTree {
     /// Reap the tooltip owned by a widget that is being destroyed.
     ///
     /// The anchor's own teardown never reaches the tooltip content — it is a
-    /// parentless node (see [`retire_tooltips_for_anchor`]) — so a destroyed
+    /// parentless node (see [`Self::retire_tooltips_for_anchor`]) — so a destroyed
     /// widget would otherwise leave its entry and content node behind for the
     /// lifetime of the tree. Called from `destroy_subtree_inner`.
     pub(super) fn retire_tooltips_of_destroyed_anchor(&mut self, anchor_id: WidgetId) {

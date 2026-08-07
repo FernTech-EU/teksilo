@@ -88,7 +88,9 @@ pub(crate) const DWELL_STEP_DURATION: Duration =
 // drift apart — four 490 ms steps would fill the circle 40 ms early and sit
 // full while nothing happened.
 const _: () = assert!(
-    DWELL_PROMOTION.as_millis() % DWELL_STEPS as u128 == 0,
+    DWELL_PROMOTION
+        .as_millis()
+        .is_multiple_of(DWELL_STEPS as u128),
     "DWELL_PROMOTION must divide exactly into DWELL_STEPS"
 );
 const _: () = assert!(

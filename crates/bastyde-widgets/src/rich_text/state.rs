@@ -802,7 +802,7 @@ impl EditorState {
 
     /// Engine `font_scale` for this frame: a11y text scale (if followed) ×
     /// per-editor [`font_size_scale`](Self::font_size_scale). Clamped to the
-    /// same band as [`DocumentFlow::set_font_scale`].
+    /// same band as [`bastyde_text::RichTextEngine::set_font_scale`].
     pub fn effective_font_scale(&self, text_scale: f32) -> f32 {
         let a11y = if self.follow_text_scale {
             text_scale

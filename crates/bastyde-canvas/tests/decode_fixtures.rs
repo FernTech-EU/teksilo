@@ -228,7 +228,7 @@ fn downsample_bounds_the_long_edge_and_keeps_aspect() {
 
 #[test]
 fn downsampling_a_flat_image_does_not_shift_its_colour() {
-    let icon = RasterIcon::from_raw(vec![70u8, 130, 180, 255].repeat(100 * 100), 100, 100);
+    let icon = RasterIcon::from_raw([70u8, 130, 180, 255].repeat(100 * 100), 100, 100);
     let small = icon.downsample_to_max(17).expect("scales");
     assert_eq!((small.width(), small.height()), (17, 17));
     for p in small.pixels().chunks(4) {

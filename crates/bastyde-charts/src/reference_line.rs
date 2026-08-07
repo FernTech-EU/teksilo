@@ -111,6 +111,7 @@ pub(crate) enum ValueAxis {
 /// `to_pixel` maps a value to its pixel on the value axis, so the caller keeps ownership of
 /// the scale it already uses for its own marks — the line and the bars cannot disagree
 /// about where a value sits.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn draw_reference_lines(
     canvas: &mut Canvas,
     theme: &Theme,

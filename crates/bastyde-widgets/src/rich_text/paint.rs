@@ -272,6 +272,63 @@ fn paint_resize_handles(canvas: &mut Canvas, rect: Rect, [r, g, b]: [f32; 3]) {
     }
 }
 
+fn paint_foreground(
+    canvas: &mut Canvas,
+    decorations: &[DecorationRect],
+    ox: f32,
+    oy: f32,
+    draw_caret: bool,
+) {
+    for deco in decorations {
+        let rect = shifted_rect(deco.rect, ox, oy);
+        let color = Color::from_rgba(deco.color[0], deco.color[1], deco.color[2], deco.color[3]);
+
+        match deco.kind {
+            DecorationKind::Cursor if draw_caret => {
+                canvas.fill_rect(rect, color);
+            }
+            DecorationKind::Underline | DecorationKind::Overline | DecorationKind::Strikeout => {
+                let y_mid = rect.y + rect.height * 0.5;
+                let start = Point::new(rect.x, y_mid);
+                let end = Point::new(rect.x + rect.width, y_mid);
+                canvas.draw_line(start, end, color, StrokeStyle::solid(rect.height.max(1.0)));
+            }
+            _ => {}
+        }
+    }
+}
+
+fn shifted_rect(raw: [f32; 4], ox: f32, oy: f32) -> bastyde_canvas::Rect {
+    bastyde_canvas::Rect::new(raw[0] + ox, raw[1] + oy, raw[2], raw[3])
+}
+
+fn stroked_rect(canvas: &mut Canvas, rect: bastyde_canvas::Rect, color: Color) {
+    let stroke = StrokeStyle::solid(1.0);
+    let x0 = rect.x;
+    let y0 = rect.y;
+    let x1 = x0 + rect.width;
+    let y1 = y0 + rect.height;
+    canvas.draw_line(
+        Point::new(x0, y0),
+        Point::new(x1, y0),
+        color,
+        stroke.clone(),
+    );
+    canvas.draw_line(
+        Point::new(x1, y0),
+        Point::new(x1, y1),
+        color,
+        stroke.clone(),
+    );
+    canvas.draw_line(
+        Point::new(x1, y1),
+        Point::new(x0, y1),
+        color,
+        stroke.clone(),
+    );
+    canvas.draw_line(Point::new(x0, y1), Point::new(x0, y0), color, stroke);
+}
+
 #[cfg(test)]
 mod image_paint_tests {
     use super::*;
@@ -706,61 +763,4 @@ mod image_paint_tests {
         assert_eq!(cache.len(), 1);
         assert!(cache.size_of("b.png").is_none());
     }
-}
-
-fn paint_foreground(
-    canvas: &mut Canvas,
-    decorations: &[DecorationRect],
-    ox: f32,
-    oy: f32,
-    draw_caret: bool,
-) {
-    for deco in decorations {
-        let rect = shifted_rect(deco.rect, ox, oy);
-        let color = Color::from_rgba(deco.color[0], deco.color[1], deco.color[2], deco.color[3]);
-
-        match deco.kind {
-            DecorationKind::Cursor if draw_caret => {
-                canvas.fill_rect(rect, color);
-            }
-            DecorationKind::Underline | DecorationKind::Overline | DecorationKind::Strikeout => {
-                let y_mid = rect.y + rect.height * 0.5;
-                let start = Point::new(rect.x, y_mid);
-                let end = Point::new(rect.x + rect.width, y_mid);
-                canvas.draw_line(start, end, color, StrokeStyle::solid(rect.height.max(1.0)));
-            }
-            _ => {}
-        }
-    }
-}
-
-fn shifted_rect(raw: [f32; 4], ox: f32, oy: f32) -> bastyde_canvas::Rect {
-    bastyde_canvas::Rect::new(raw[0] + ox, raw[1] + oy, raw[2], raw[3])
-}
-
-fn stroked_rect(canvas: &mut Canvas, rect: bastyde_canvas::Rect, color: Color) {
-    let stroke = StrokeStyle::solid(1.0);
-    let x0 = rect.x;
-    let y0 = rect.y;
-    let x1 = x0 + rect.width;
-    let y1 = y0 + rect.height;
-    canvas.draw_line(
-        Point::new(x0, y0),
-        Point::new(x1, y0),
-        color,
-        stroke.clone(),
-    );
-    canvas.draw_line(
-        Point::new(x1, y0),
-        Point::new(x1, y1),
-        color,
-        stroke.clone(),
-    );
-    canvas.draw_line(
-        Point::new(x1, y1),
-        Point::new(x0, y1),
-        color,
-        stroke.clone(),
-    );
-    canvas.draw_line(Point::new(x0, y1), Point::new(x0, y0), color, stroke);
 }

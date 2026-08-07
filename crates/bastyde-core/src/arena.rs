@@ -963,7 +963,7 @@ impl WidgetArena {
     /// Set a widget subtree to dormant state (state preserved, not rendered).
     /// Recursively dormants all children.
     ///
-    /// The node named here is marked [self-parked](WidgetNode::self_dormant);
+    /// The node named here is marked self-parked (`WidgetNode::self_dormant`);
     /// the descendants swept along by the recursion are not, since their
     /// dormancy belongs to this ancestor rather than to them. That distinction
     /// is what lets [`activate`](Self::activate) put the subtree back exactly as

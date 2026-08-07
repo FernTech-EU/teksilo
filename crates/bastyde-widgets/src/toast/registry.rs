@@ -18,7 +18,7 @@
 //! Routing: every live entry (and its mirrored archive row) carries a
 //! resolved [`ToastRoute`] — the presenting window by default, or an
 //! explicit audience/broadcast target. `max_visible` admission and
-//! High/Urgent eviction are bucketed per route (see [`enqueue`]) so a
+//! High/Urgent eviction are bucketed per route (see `ToastRegistry::enqueue`) so a
 //! burst of one window's/audience's toasts can never starve another's
 //! slot pool. [`ToastHost`](super::host::ToastHost) does the
 //! complementary filtering on the render side.
@@ -243,7 +243,7 @@ impl ToastRegistry {
         self.window_audience_signal(window_id).set(audience);
     }
 
-    /// Drop `window_id`'s entry from [`Self::window_audiences`].
+    /// Drop `window_id`'s entry from `window_audiences`.
     /// Call this from the app's window-teardown hook — the same place
     /// that tears down the `ToastHost` mounted in that window.
     ///

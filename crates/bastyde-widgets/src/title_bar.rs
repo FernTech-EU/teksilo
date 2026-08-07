@@ -84,7 +84,7 @@ pub type CloseAction = Rc<dyn Fn(&mut EventContext)>;
 /// carry a [`BindingLevel::Rebuild`](bastyde_core::binding::BindingLevel)
 /// binding. Reactive state on this widget is expressed either as a
 /// `RepaintOnly` colour prop or, for structure, as dormancy via
-/// [`BuildContext::visible_when`] on an always-built child — which is how
+/// [`bastyde_core::BuildContext::visible_when`] on an always-built child — which is how
 /// [`controls_visible`](TitleBar::controls_visible) works. Memoising the
 /// resolved slot ids is *not* a workaround: a rebuild replaces the inner row
 /// and prunes its subtree, so the cached ids dangle and re-adding them yields
@@ -111,7 +111,7 @@ pub struct TitleBar {
     /// rendered (macOS, where the OS draws traffic lights).
     controls_layout: Rc<Cell<Option<WindowControlsLayout>>>,
     /// Whether the minimize/maximize/close cluster is shown, statically or
-    /// reactively. Applied with [`BuildContext::visible_when`] — **never** a
+    /// reactively. Applied with [`bastyde_core::BuildContext::visible_when`] — **never** a
     /// `Rebuild`-level binding. See [`TitleBar::controls_visible`] and
     /// [`TitleBar`]'s own "builds once" note.
     controls_visible: Prop<bool>,
@@ -155,7 +155,7 @@ impl TitleBar {
     /// Show or hide the minimize / maximize / close cluster. Default `true`.
     ///
     /// Accepts a plain `bool` or a `Signal<bool>`. Applied through the
-    /// framework's own dormancy ([`BuildContext::visible_when`]), so a flip
+    /// framework's own dormancy ([`bastyde_core::BuildContext::visible_when`]), so a flip
     /// costs a relayout and **never a rebuild** of the bar: a dormant node is
     /// skipped by layout, hit-test, focus and paint, so a hidden cluster takes
     /// no space and receives no input. A derived (`.map`) signal is fine —

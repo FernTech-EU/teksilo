@@ -563,7 +563,7 @@ mod tests {
 
         let archive = Rc::new(NotificationArchiveModel::in_memory());
 
-        let mut window = |_| {
+        let window = |_| {
             let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
             let spacer = tree.add(FixedSize::new().height(500.0).child(Spacer::new()));
             let bell = tree.add(NotificationCenterButton::new(archive.clone()));

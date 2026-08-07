@@ -231,7 +231,7 @@ mod tests {
     #[test]
     fn a_flat_colour_survives_any_ratio() {
         // Area averaging a uniform image must not shift its colour.
-        let src = vec![70u8, 130, 180, 255].repeat(9 * 9);
+        let src = [70u8, 130, 180, 255].repeat(9 * 9);
         let out = resample_area(&src, 9, 9, 4, 4);
         for px in out.chunks(4) {
             assert_eq!(px, &[70, 130, 180, 255]);

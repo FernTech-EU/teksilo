@@ -930,6 +930,7 @@ mod tests {
                 image_name: None,
                 image_width: 0.0,
                 image_height: 0.0,
+                footnote_marker: None,
                 features: Vec::new(),
             }],
             alignment: Alignment::Left,

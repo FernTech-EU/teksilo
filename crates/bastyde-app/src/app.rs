@@ -4051,7 +4051,7 @@ mod tests {
     fn on_external_with_ctx_is_a_slot_of_its_own() {
         use crate::app_event_observers::AppEventObservers;
 
-        let mut builder = BastydeAppBuilder::new()
+        let builder = BastydeAppBuilder::new()
             .on_external_with_ctx(|_payload, _ctx| true)
             .on_app_event(|_event| {})
             .register_app_event_observer(|_event| {});
@@ -4067,8 +4067,7 @@ mod tests {
         assert!(
             builder
                 .app_state_registry
-                .get(&TypeId::of::<AppEventObservers>())
-                .is_some(),
+                .contains_key(&TypeId::of::<AppEventObservers>()),
             "observers must survive on_external_with_ctx"
         );
 

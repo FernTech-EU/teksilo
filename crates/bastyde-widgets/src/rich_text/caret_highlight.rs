@@ -3,7 +3,7 @@
 
 //! An ambient band behind the sentence — or paragraph — the caret is in.
 //!
-//! [`CaretHighlightSession`] owns a **range session** on a [`TextDocument`] (see
+//! `CaretHighlightSession` owns a **range session** on a [`TextDocument`] (see
 //! `add_range_session_with_priority`) holding at most one range: the extent of whatever the
 //! caret is currently inside. It is the writing-comfort counterpart of
 //! [`FindSession`](super::find_session::FindSession) — same registry, same staleness discipline,
@@ -35,7 +35,7 @@
 //! The range is an absolute char offset frozen at push time, and text-document does not
 //! re-anchor a range session the way it re-anchors carets. Like `FindSession` this one
 //! subscribes to its document and marks itself stale on any content edit; the host calls
-//! [`refresh`](CaretHighlightSession::refresh) each frame with the live caret, which is
+//! `CaretHighlightSession::refresh` each frame with the live caret, which is
 //! cheap — a caret that has not moved into a different sentence pushes nothing at all.
 //!
 //! [`HighlightMask`]: bastyde_text::text_document::HighlightMask
@@ -486,8 +486,7 @@ mod tests {
             };
             let at_zero = painted
                 .iter()
-                .filter(|s| s.start <= 0 && 0 < s.start + s.length)
-                .next_back()
+                .rfind(|s| s.start == 0 && 0 < s.start + s.length)
                 .and_then(|s| s.background_color);
             assert_eq!(
                 at_zero,

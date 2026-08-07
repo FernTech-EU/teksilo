@@ -741,7 +741,7 @@ impl AccessNodeBuilder {
     }
 
     /// Push a `Role::Comment` child carrying an annotation's text, and return its
-    /// `NodeId` so the annotated run can point at it via [`push_detail`].
+    /// `NodeId` so the annotated run can point at it via [`Self::push_detail`].
     ///
     /// `group_id` must be the annotation's own durable identity (a comment's uid,
     /// never a store id), so the node keeps the same `NodeId` across rebuilds and

@@ -139,7 +139,7 @@ impl CompositeTooltipWidget {
     /// Turn it **off** for a read-only body — a fact sheet, a data-view row's
     /// card. Three things follow, all of them the point:
     ///
-    /// * no [`DwellIndicator`] is built, so nothing counts down towards an
+    /// * no `DwellIndicator` is built, so nothing counts down towards an
     ///   interaction that does not exist (and the footer disappears with it,
     ///   letting the surface hug its content);
     /// * the entry is registered with no `sticky_after`, so the tip never
@@ -491,7 +491,6 @@ mod tests {
     use super::*;
     use crate::button::Button;
     use crate::primitives::{TextWidget, VStack};
-    use crate::tooltip::attach::attach_composite_tooltip;
     use bastyde_canvas::{MockTextBackend, SizeProposal};
     use bastyde_core::widget_tree::WidgetTree;
     use bastyde_i18n::lit;

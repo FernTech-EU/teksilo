@@ -93,8 +93,8 @@ struct BindingGroup {
     /// silently skipped its binding, permanently. See
     /// `signal::MutableInner::generation`.
     ///
-    /// A `Cell` rather than a plain field so [`flush_all_dirty`] can
-    /// update it while holding only a shared borrow of the map.
+    /// A `Cell` rather than a plain field so [`BindingRegistry::flush_all_dirty`]
+    /// can update it while holding only a shared borrow of the map.
     last_seen: Cell<u64>,
     /// `(widget_id, level)` pairs to flush when this source is dirty.
     /// `AccessibilityOnly` lives in the same Vec as visual levels —
@@ -272,8 +272,8 @@ impl BindingRegistry {
     }
 
     /// Whether any bound source has advanced past what this registry
-    /// last acted on — i.e. whether a [`flush_all_dirty`](Self::flush_all_dirty)
-    /// right now would return anything.
+    /// last acted on — i.e. whether a `flush_all_dirty` right now would
+    /// return anything.
     ///
     /// O(S) `u64` comparisons over unique sources, with no arena walk,
     /// no rebuilds and no layout. Read-only: unlike the flush it does
