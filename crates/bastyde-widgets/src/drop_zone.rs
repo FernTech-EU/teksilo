@@ -73,6 +73,7 @@ pub struct DropZone {
     label: LocalizedString,
     subtitle: Option<LocalizedString>,
     browse_label: LocalizedString,
+    starting_dir: Option<PathBuf>,
     extensions: Vec<String>,
     allow_multiple: bool,
     show_browse_button: bool,
@@ -96,6 +97,7 @@ impl DropZone {
             label: label.into(),
             subtitle: None,
             browse_label: lit!("Browse…"),
+            starting_dir: None,
             extensions: Vec::new(),
             allow_multiple: true,
             show_browse_button: true,
@@ -145,6 +147,19 @@ impl DropZone {
     }
 
     /// Override the Browse button's label (e.g. `tr!("browse")`).
+    /// Directory the Browse button's dialog opens in. If unset, the OS default is
+    /// used.
+    ///
+    /// The same builder [`FilePickerField::starting_dir`](crate::file_picker_field::FilePickerField::starting_dir)
+    /// offers, and for the same reason: an app that remembers where its writer last
+    /// picked files has no way to say so otherwise, because this widget builds its own
+    /// `FileDialogRequest` internally rather than taking one.
+    #[must_use]
+    pub fn starting_dir(mut self, path: impl Into<PathBuf>) -> Self {
+        self.starting_dir = Some(path.into());
+        self
+    }
+
     pub fn browse_label(mut self, label: impl Into<LocalizedString>) -> Self {
         self.browse_label = label.into();
         self
@@ -356,9 +371,13 @@ impl Widget for DropZone {
             let allow_multiple_browse = self.allow_multiple;
             let on_files_browse = on_files.clone();
             let announce_browse = announce.clone();
+            let browse_starting_dir = self.starting_dir.clone();
             let browse = Button::new(self.browse_label.clone()).on_activate_fn(
                 move |ctx: &mut EventContext| {
                     let mut request = FileDialogRequest::pick_file();
+                    if let Some(dir) = &browse_starting_dir {
+                        request = request.starting_dir(dir.clone());
+                    }
                     if !browse_extensions.is_empty() {
                         let exts: Vec<&str> =
                             browse_extensions.iter().map(String::as_str).collect();
@@ -526,6 +545,27 @@ mod tests {
 
     fn tree() -> WidgetTree {
         WidgetTree::new().with_theme(bastyde_core::presets::intui::light())
+    }
+
+    /// The builder must survive to the widget: a starting directory that is accepted
+    /// and then dropped would look identical to one that works, right up until a writer
+    /// noticed the dialog still opening in their home folder.
+    #[test]
+    fn a_starting_directory_reaches_the_built_zone() {
+        let zone = DropZone::new(lit!("Drop files here")).starting_dir("/tmp/somewhere");
+        assert_eq!(
+            zone.starting_dir.as_deref(),
+            Some(std::path::Path::new("/tmp/somewhere"))
+        );
+
+        let mut tree = tree();
+        let id = tree.add(zone);
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        let b = tree.bounds(id);
+        assert!(
+            b.width > 0.0 && b.height > 0.0,
+            "a zone carrying a starting directory still builds"
+        );
     }
 
     #[test]
