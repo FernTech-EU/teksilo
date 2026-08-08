@@ -34,7 +34,7 @@ let _swatch = ColorSwatch::new(Color::new(0.21, 0.52, 0.89, 1.0))
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/teksilo_widgets/color_picker/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/color_picker/swatch/index.html)
 
 ## `pub struct ColorSwatch`
 

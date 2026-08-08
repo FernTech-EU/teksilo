@@ -59,7 +59,7 @@ let panel = PrivacySettings::new()
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/teksilo_widgets/privacy_settings/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/index.html)
 
 ## `pub struct PrivacySettings`
 

@@ -51,7 +51,7 @@ let log = NotificationLog::new(archive)
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/teksilo_widgets/notification/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/notification/log/index.html)
 
 ## `pub struct NotificationLog`
 

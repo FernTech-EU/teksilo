@@ -24,7 +24,7 @@ handed to the legacy delegate — lives in `tree_view.rs`, not here.
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/teksilo_widgets/tree_source/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/index.html)
 
 ## `pub struct TreeRowMeta`
 
