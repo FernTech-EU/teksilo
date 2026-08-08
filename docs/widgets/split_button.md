@@ -180,9 +180,11 @@ Default (unset) is the inner `TextWidget` default — e.g. pass
 
 #### `pub fn text_role(mut self, color: impl Into<teksilo_core::color_prop::ColorProp>) -> Self`
 
-Override the main-region label text color. Accepts `Color`, a role,
-or a `Signal` of either. Default (unset) is the variant/interaction
-cascade; setting this replaces it (loses hover/disabled tint).
+Override the control's text colour — the main-region label, its
+leading `icon`, and the chevron, which the
+variant/interaction cascade tints together. Accepts `Color`, a role,
+or a `Signal` of either. Default (unset) is that cascade; setting this
+replaces it wholesale (loses hover/disabled tint).
 
 #### `pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self`
 

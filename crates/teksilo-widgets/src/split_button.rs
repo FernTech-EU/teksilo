@@ -238,9 +238,11 @@ impl SplitButton {
         self
     }
 
-    /// Override the main-region label text color. Accepts `Color`, a role,
-    /// or a `Signal` of either. Default (unset) is the variant/interaction
-    /// cascade; setting this replaces it (loses hover/disabled tint).
+    /// Override the control's text colour — the main-region label, its
+    /// leading [`icon`](Self::icon), and the chevron, which the
+    /// variant/interaction cascade tints together. Accepts `Color`, a role,
+    /// or a `Signal` of either. Default (unset) is that cascade; setting this
+    /// replaces it wholesale (loses hover/disabled tint).
     pub fn text_role(mut self, color: impl Into<teksilo_core::color_prop::ColorProp>) -> Self {
         self.text_role_override = Some(color.into());
         self
@@ -528,9 +530,11 @@ impl Widget for SplitButton {
 
         // ---- Derived reactive text role (frame bg/border live in the style) ----
         // Text colour stays a widget concern (mirrors Button's
-        // `resolve_text_role`); it tints the default-action label and the
-        // chevron icon. The frame background / border is resolved inside the
-        // active `SplitButtonStyle` from the interaction bools built below.
+        // `resolve_text_role`); it tints the default-action label, its leading
+        // icon, and the chevron — all three go through `label_color` below, so
+        // a `text_role(..)` override replaces the cascade for the whole
+        // control. The frame background / border is resolved inside the active
+        // `SplitButtonStyle` from the interaction bools built below.
         let text_role = interaction.map(move |s| resolve_text_role(variant, *s));
         // The divider is a RectWidget used as a 1-dp vertical rule; role-based
         // so it follows theme changes without an intermediate signal.
@@ -646,8 +650,15 @@ impl Widget for SplitButton {
         );
 
         // ---- Chevron region ----
-        let chevron_icon_id = ctx
-            .add(IconWidget::chevron_down(SPLIT_BUTTON_CHEVRON_ICON_SIZE).color(text_role.clone()));
+        // Tinted with `label_color`, not the raw `text_role` cascade: the
+        // cascade is control-wide (one `interaction` signal fed by
+        // `hover_within` across main region + divider + chevron), so a
+        // `text_role(..)` override that reached only the main region would
+        // split a previously-unified tint — a `.text_role(Error)` Filled
+        // button would paint a red label beside a black chevron.
+        let chevron_icon_id = ctx.add(
+            IconWidget::chevron_down(SPLIT_BUTTON_CHEVRON_ICON_SIZE).color(label_color.clone()),
+        );
         let chevron_centered_id = ctx.add(Center::new().child_id(chevron_icon_id));
 
         let chevron_region = {
