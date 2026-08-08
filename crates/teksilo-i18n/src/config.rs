@@ -121,16 +121,36 @@ impl I18nConfig {
         self
     }
 
+    /// Register compiled-in Fluent resources: per-locale arrays of `.ftl`
+    /// source strings (typically `include_str!` outputs).
+    ///
+    /// **Multiple calls accumulate**, exactly like [`Self::framework_locales`],
+    /// and repeats of the *same* locale are merged into that locale's single
+    /// bundle by [`crate::I18nManager::from_config`]. That is what lets an
+    /// application compose its own catalogue with catalogues supplied by
+    /// plugins, extensions or sibling crates, each shipping its own `.ftl`
+    /// files, without any of them having to know about the others:
+    ///
+    /// ```ignore
+    /// let mut cfg = I18nConfig::new().compile_in(&[("en-US", &[APP_FTL])]);
+    /// for ext in extensions {
+    ///     cfg = cfg.compile_in(ext.locales());   // merged, not clobbered
+    /// }
+    /// ```
+    ///
+    /// Key collisions across merged resources are resolved by Fluent's
+    /// `add_resource`: the **first** registration of a key wins and the
+    /// duplicate is reported on stderr. Contributors should therefore
+    /// namespace their keys (`myext-panel-title`) rather than rely on
+    /// registration order.
     pub fn compile_in(mut self, slice: &[(&str, &[&'static str])]) -> Self {
-        self.compile_in = slice
-            .iter()
-            .map(|(tag, resources)| CompileInEntry {
+        self.compile_in
+            .extend(slice.iter().map(|(tag, resources)| CompileInEntry {
                 locale: tag
                     .parse()
                     .unwrap_or_else(|_| panic!("invalid locale tag in compile_in: {tag}")),
                 resources: resources.to_vec(),
-            })
-            .collect();
+            }));
         self
     }
 
@@ -213,6 +233,20 @@ mod tests {
         assert_eq!(cfg.source_locale.to_string(), "en-US");
         assert_eq!(cfg.fallback_locale.to_string(), "en-US");
         assert!(cfg.auto_detect_os);
+    }
+
+    #[test]
+    fn compile_in_accumulates_across_calls() {
+        // The config half of the extension story: entries pile up rather than
+        // the last call replacing the list. (That they then *merge* per locale
+        // is `I18nManager::from_config`'s half — see
+        // `tests/compile_in_additive.rs`.)
+        const A: &str = "a = A\n";
+        const B: &str = "b = B\n";
+        let cfg = I18nConfig::new()
+            .compile_in(&[("en-US", &[A])])
+            .compile_in(&[("en-US", &[B]), ("fr-FR", &[B])]);
+        assert_eq!(cfg.compile_in.len(), 3);
     }
 
     #[test]

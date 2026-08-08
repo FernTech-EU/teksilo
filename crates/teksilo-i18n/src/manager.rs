@@ -60,9 +60,30 @@ impl I18nManager {
         let mut app_bundles: HashMap<LanguageIdentifier, FluentBundle<FluentResource>> =
             HashMap::new();
 
+        // Merge every `compile_in` registration for a locale into that locale's
+        // *single* bundle. Several independent callers may each contribute a
+        // catalogue for the same locale — the application plus any extension,
+        // plugin or sibling crate shipping its own `.ftl` files — and inserting
+        // once per entry would mean the last registration silently replaced
+        // every earlier one, wiping out the application's whole catalogue the
+        // moment an extension supplied one string.
+        //
+        // A `Vec` rather than a `HashMap`: resource order within a locale has
+        // to be preserved, because Fluent's `add_resource` keeps the *first*
+        // definition of a key. Registration order is therefore the collision
+        // rule, and it must be the order the caller wrote.
+        let mut merged: Vec<(LanguageIdentifier, Vec<&'static str>)> = Vec::new();
         for entry in &cfg.compile_in {
-            let bundle = build_bundle_from_resources(&entry.locale, &entry.resources);
-            app_bundles.insert(entry.locale.clone(), bundle);
+            match merged.iter_mut().find(|(loc, _)| *loc == entry.locale) {
+                Some((_, resources)) => resources.extend_from_slice(&entry.resources),
+                None => merged.push((entry.locale.clone(), entry.resources.clone())),
+            }
+        }
+        for (locale, resources) in &merged {
+            app_bundles.insert(
+                locale.clone(),
+                build_bundle_from_resources(locale, resources),
+            );
         }
 
         for entry in &cfg.test_messages {
