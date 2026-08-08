@@ -92,6 +92,15 @@ Override the "Skip" button label inside the modal. Default: "Skip".
 
 Override the "Cancel" button label inside the modal. Default: "Cancel".
 
-#### `pub fn on_finish( mut self, action: impl Fn(&mut EventContext, &StepperController) + 'static, ) -> Self`
+#### `pub fn on_finish<R: IntoFinishOutcome>( mut self, action: impl Fn(&mut EventContext, &StepperController) -> R + 'static, ) -> Self`
+
+Called when Finish is activated on the last step.
+
+The callback may refuse: its return value goes through
+`IntoFinishOutcome` (`()` always succeeds; `false` / `Err(_)` /
+`FinishOutcome::Rejected` do not). A rejected finish leaves the modal
+**open** on the last step and marks it
+`StepStatus::Error` — the right response to
+a commit that failed.
 
 #### `pub fn trigger(mut self, trigger: impl Widget + 'static) -> Self`

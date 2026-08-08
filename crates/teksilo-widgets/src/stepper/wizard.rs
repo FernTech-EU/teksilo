@@ -24,6 +24,7 @@ use teksilo_i18n::{LocalizedString, lit};
 
 use super::Stepper;
 use super::controller::StepperController;
+use super::nav::{FinishAction, FinishOutcome, IntoFinishOutcome};
 use super::step::Step;
 use crate::button::{Button, ButtonVariant};
 use crate::dialog::ModalContainer;
@@ -31,8 +32,6 @@ use crate::overlay_trigger::OverlayTrigger;
 
 const DEFAULT_WIZARD_WIDTH: u32 = 640;
 const DEFAULT_WIZARD_HEIGHT: u32 = 460;
-
-type FinishAction = Rc<dyn Fn(&mut EventContext, &StepperController)>;
 
 /// The shared, cloneable modal recipe captured by the trigger handlers.
 struct WizardSpec {
@@ -70,11 +69,18 @@ fn present_wizard(spec: &Rc<WizardSpec>, ctx: &mut EventContext) {
                 .finish_label(spec.finish_label.clone())
                 .skip_label(spec.skip_label.clone())
                 .cancel(spec.cancel_label.clone(), |ctx, _ctrl| ctx.dismiss_modal())
+                // Dismiss only on a successful finish: a callback that
+                // returns `Rejected` (a commit that failed) keeps the modal
+                // open on the last step so the user can correct and retry.
                 .on_finish(move |ctx, ctrl| {
-                    if let Some(action) = &finish {
-                        action(ctx, ctrl);
+                    let outcome = match &finish {
+                        Some(action) => action(ctx, ctrl),
+                        None => FinishOutcome::Finished,
+                    };
+                    if outcome == FinishOutcome::Finished {
+                        ctx.dismiss_modal();
                     }
-                    ctx.dismiss_modal();
+                    outcome
                 });
             tree.add(ModalContainer::boxed(Box::new(stepper)))
         })
@@ -204,11 +210,21 @@ impl Wizard {
         self.cancel_label = label.into();
         self
     }
-    pub fn on_finish(
+    /// Called when Finish is activated on the last step.
+    ///
+    /// The callback may refuse: its return value goes through
+    /// [`IntoFinishOutcome`] (`()` always succeeds; `false` / `Err(_)` /
+    /// [`FinishOutcome::Rejected`] do not). A rejected finish leaves the modal
+    /// **open** on the last step and marks it
+    /// [`StepStatus::Error`](super::StepStatus::Error) — the right response to
+    /// a commit that failed.
+    pub fn on_finish<R: IntoFinishOutcome>(
         mut self,
-        action: impl Fn(&mut EventContext, &StepperController) + 'static,
+        action: impl Fn(&mut EventContext, &StepperController) -> R + 'static,
     ) -> Self {
-        self.finish_action = Some(Rc::new(action));
+        self.finish_action = Some(Rc::new(move |ctx, ctrl| {
+            action(ctx, ctrl).into_finish_outcome()
+        }));
         self
     }
     pub fn trigger(mut self, trigger: impl Widget + 'static) -> Self {

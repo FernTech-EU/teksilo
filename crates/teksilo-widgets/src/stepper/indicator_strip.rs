@@ -108,6 +108,11 @@ impl Widget for IndicatorStrip {
                 on_activate,
                 self.panel_ids.clone(),
             ));
+            // A step gated out by `Step::visible_when` drops its marker too —
+            // otherwise the strip advertises a step navigation refuses to
+            // reach. Dormant, so it also leaves the AT tree.
+            let c2 = self.controller.clone();
+            ctx.visible_when(id, version.map(move |_| c2.is_visible(i)));
             indicator_ids.push(id);
         }
         *self.indicator_ids.borrow_mut() = indicator_ids.clone();
@@ -117,7 +122,12 @@ impl Widget for IndicatorStrip {
             let mut row = HStack::new().spacing(8.0);
             for (i, &id) in indicator_ids.iter().enumerate() {
                 if i > 0 {
-                    row = row.child(Spacer::new());
+                    // The separating spacer follows its marker's visibility,
+                    // so hiding a step doesn't leave a double gap.
+                    let spacer_id = ctx.add(Spacer::new());
+                    let c = self.controller.clone();
+                    ctx.visible_when(spacer_id, version.map(move |_| c.is_visible(i)));
+                    row = row.add_child(spacer_id);
                 }
                 row = row.add_child(id);
             }

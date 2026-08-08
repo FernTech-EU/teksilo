@@ -42,7 +42,7 @@ Stepper::new()
 
 ## Builder methods at a glance
 
-`step`, `steps`, `controller`, `orientation`, `vertical`, `non_linear`, `circle_size`, `chrome`, `chrome_position`, `back_label`, `next_label`, `finish_label`, `skip_label`, `help`, `cancel`, `on_finish`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`
+`step`, `steps`, `controller`, `orientation`, `vertical`, `non_linear`, `circle_size`, `chrome`, `chrome_position`, `back_label`, `next_label`, `finish_label`, `skip_label`, `help`, `cancel`, `on_finish`, `enter_advances`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`
 
 ## API reference
 
@@ -127,6 +127,12 @@ Override the marker circle diameter (logical px).
 A generic chrome widget (banner / sidebar) — the modern replacement for
 QWizard's watermark pixmap.
 
+**It lands in the leading column by default**
+(`ChromePosition::Leading`, QWizard's watermark slot), i.e. a full
+height sidebar. For a *title banner* pair it with
+`.chrome_position(ChromePosition::Top)`, or the chrome renders as a
+wide sidebar holding a few words.
+
 #### `pub fn chrome_position(mut self, position: ChromePosition) -> Self`
 
 Choose where the optional chrome widget sits relative to the stepper
@@ -157,11 +163,42 @@ Add a Help button + callback to the footer.
 
 Add a Cancel button + callback to the footer.
 
-#### `pub fn on_finish( mut self, action: impl Fn(&mut EventContext, &StepperController) + 'static, ) -> Self`
+#### `pub fn on_finish<R: IntoFinishOutcome>( mut self, action: impl Fn(&mut EventContext, &StepperController) -> R + 'static, ) -> Self`
 
 Called when Finish is activated on the last step. Receives the event
 context and the controller (for `skipped` / `visited` introspection);
 read collected values from the form signals your steps wrote.
+
+**The callback may refuse.** Its return value goes through the
+`IntoFinishOutcome` bridge — `()` always succeeds, while `false`,
+`Err(_)`, or `FinishOutcome::Rejected` keep the stepper on the last
+step and mark it `StepStatus::Error` (a `Wizard` modal stays
+open). This is the
+Finish counterpart of `Step::validate_on_next` — for the case where
+the commit itself can fail (disk full, name taken, server refused):
+
+```ignore
+.on_finish(move |ctx, _ctrl| match create_project(&name.get()) {
+    Ok(()) => true,
+    Err(e) => { status.set(e.to_string()); false }
+})
+```
+
+#### `pub fn enter_advances(mut self, enter_advances: bool) -> Self`
+
+Whether pressing <kbd>Enter</kbd> activates the footer's primary button
+(Next, or Finish on the last step). Default: `true`.
+
+The key is handled on the **bubble** pass at the stepper root, so a
+focused control that wants Enter for itself — a Button, a multi-line
+editor, a list row — consumes it first and the stepper never sees it.
+A single-line form field lets it through, which is where the "Enter
+means Next" contract is expected. Gates apply exactly as they do to a
+click: a blocked `complete_when` / `validate_on_next` refuses the same
+way.
+
+Turn it off for a step whose body treats Enter as content in a way the
+framework cannot see.
 
 #### `pub fn tooltip(mut self, text: impl Into<LocalizedString>) -> Self`
 

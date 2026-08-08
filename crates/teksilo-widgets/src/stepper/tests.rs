@@ -233,7 +233,255 @@ fn validate_on_next_blocks_then_clears_error_on_pass() {
     assert_eq!(ctrl.status(0), StepStatus::Complete);
 }
 
+#[test]
+fn content_boxed_takes_a_body_whose_type_varies_at_runtime() {
+    // The branching-body case `content` cannot express: `Box<dyn Widget>` is
+    // not itself a `Widget`, so one generic factory cannot return two types.
+    #[derive(Clone, Copy, PartialEq)]
+    enum Purpose {
+        Novel,
+        Import,
+    }
+    let purpose = Signal::new(Purpose::Import);
+
+    let mut t = tree();
+    t.add(
+        Stepper::new().step(Step::new(lit!("Details")).content_boxed({
+            let purpose = purpose.clone();
+            move || -> Box<dyn teksilo_core::widget::Widget> {
+                match purpose.get() {
+                    Purpose::Novel => Box::new(crate::button::Button::new(lit!("novel form"))),
+                    Purpose::Import => Box::new(crate::text_input::TextInput::new(Signal::new(
+                        String::new(),
+                    ))),
+                }
+            }
+        })),
+    );
+    layout(&mut t);
+
+    assert!(
+        t.find_by_label("novel form").is_none(),
+        "the Import branch was selected"
+    );
+}
+
+// ── finish can refuse ──────────────────────────────────────────────────────
+
+#[test]
+fn on_finish_rejection_keeps_the_step_and_marks_it_error() {
+    let ok = Signal::new(false);
+    let attempts = Rc::new(std::cell::Cell::new(0_u32));
+    let ctrl = StepperController::new(2);
+    let mut t = tree();
+    t.add(
+        Stepper::new()
+            .controller(ctrl.clone())
+            .steps(vec![
+                Step::new(lit!("One")).content(|| crate::button::Button::new(lit!("b1"))),
+                Step::new(lit!("Two")).content(|| crate::button::Button::new(lit!("b2"))),
+            ])
+            .on_finish({
+                let ok = ok.clone();
+                let attempts = attempts.clone();
+                move |_ctx, _ctrl| {
+                    attempts.set(attempts.get() + 1);
+                    ok.get() // `false` → FinishOutcome::Rejected
+                }
+            }),
+    );
+    layout(&mut t);
+
+    click_label(&mut t, "Next");
+    assert_eq!(ctrl.current(), 1);
+
+    // The commit failed: stay on the last step, mark it Error.
+    click_label(&mut t, "Finish");
+    assert_eq!(attempts.get(), 1);
+    assert_eq!(ctrl.current(), 1, "a rejected finish does not navigate");
+    assert_eq!(ctrl.status(1), StepStatus::Error);
+
+    // Retry after fixing whatever failed.
+    ok.set(true);
+    click_label(&mut t, "Finish");
+    assert_eq!(attempts.get(), 2);
+    assert_eq!(ctrl.status(1), StepStatus::Complete);
+}
+
+#[test]
+fn on_finish_returning_unit_still_completes() {
+    // The pre-existing `()` signature keeps working through IntoFinishOutcome.
+    let ran = Rc::new(std::cell::Cell::new(false));
+    let ctrl = StepperController::new(1);
+    let mut t = tree();
+    t.add(
+        Stepper::new()
+            .controller(ctrl.clone())
+            .step(Step::new(lit!("Only")).content(|| crate::button::Button::new(lit!("b"))))
+            .on_finish({
+                let ran = ran.clone();
+                move |_ctx, _ctrl| ran.set(true)
+            }),
+    );
+    layout(&mut t);
+
+    click_label(&mut t, "Finish");
+    assert!(ran.get());
+    assert_eq!(ctrl.status(0), StepStatus::Complete);
+}
+
+// ── step visibility (branching flows) ──────────────────────────────────────
+
+/// Three steps where the middle one is gated on `shown`.
+fn branching(shown: &Signal<bool>) -> Vec<Step> {
+    vec![
+        Step::new(lit!("One")).content(|| crate::button::Button::new(lit!("b1"))),
+        Step::new(lit!("Two"))
+            .visible_when(shown.clone())
+            .content(|| crate::button::Button::new(lit!("b2"))),
+        Step::new(lit!("Three")).content(|| crate::button::Button::new(lit!("b3"))),
+    ]
+}
+
+#[test]
+fn hidden_step_is_skipped_forward_and_backward() {
+    let shown = Signal::new(false);
+    let ctrl = StepperController::new(3);
+    let mut t = tree();
+    t.add(
+        Stepper::new()
+            .controller(ctrl.clone())
+            .steps(branching(&shown)),
+    );
+    layout(&mut t);
+
+    click_label(&mut t, "Next");
+    assert_eq!(ctrl.current(), 2, "Next steps over the hidden middle step");
+    click_label(&mut t, "Back");
+    assert_eq!(ctrl.current(), 0, "Back does too");
+}
+
+#[test]
+fn step_visibility_is_reactive() {
+    let shown = Signal::new(false);
+    let ctrl = StepperController::new(3);
+    let mut t = tree();
+    t.add(
+        Stepper::new()
+            .controller(ctrl.clone())
+            .steps(branching(&shown)),
+    );
+    layout(&mut t);
+
+    shown.set(true); // the user's earlier choice now selects this branch
+    layout(&mut t);
+    click_label(&mut t, "Next");
+    assert_eq!(ctrl.current(), 1, "the revealed step joins the flow");
+}
+
+#[test]
+fn hidden_step_leaves_the_indicator_strip() {
+    let shown = Signal::new(false);
+    let mut t = tree();
+    t.add(Stepper::new().non_linear(true).steps(branching(&shown)));
+    layout(&mut t);
+
+    let update = t.sync_accessibility();
+    assert!(
+        node_by_label(&update, "Two").is_none(),
+        "a hidden step must not advertise a marker navigation refuses to reach"
+    );
+    assert!(node_by_label(&update, "Three").is_some());
+}
+
+#[test]
+fn trailing_hidden_steps_turn_next_into_finish() {
+    // Steps 1 and 2 hidden: step 0 is the last reachable one, so the footer
+    // must offer Finish, not Next.
+    let shown = Signal::new(false);
+    let mut t = tree();
+    t.add(Stepper::new().steps(vec![
+            Step::new(lit!("One")).content(|| crate::button::Button::new(lit!("b1"))),
+            Step::new(lit!("Two"))
+                .visible_when(shown.clone())
+                .content(|| crate::button::Button::new(lit!("b2"))),
+            Step::new(lit!("Three"))
+                .visible_when(shown.clone())
+                .content(|| crate::button::Button::new(lit!("b3"))),
+        ]));
+    layout(&mut t);
+
+    assert!(t.find_by_label("Next").is_none());
+    assert!(t.find_by_label("Finish").is_some());
+
+    shown.set(true);
+    layout(&mut t);
+    assert!(t.find_by_label("Next").is_some(), "Next returns with them");
+}
+
+#[test]
+fn disabled_step_is_skipped_by_next() {
+    let ctrl = StepperController::new(3);
+    let mut t = tree();
+    t.add(Stepper::new().controller(ctrl.clone()).steps(three_steps()));
+    layout(&mut t);
+
+    ctrl.set_status(1, StepStatus::Disabled);
+    layout(&mut t);
+    click_label(&mut t, "Next");
+    assert_eq!(ctrl.current(), 2, "next() walks past a Disabled step");
+}
+
+#[test]
+fn go_to_refuses_an_unreachable_step() {
+    let shown = Signal::new(false);
+    let ctrl = StepperController::new(3);
+    let mut t = tree();
+    t.add(
+        Stepper::new()
+            .controller(ctrl.clone())
+            .non_linear(true)
+            .steps(branching(&shown)),
+    );
+    layout(&mut t);
+
+    ctrl.go_to(1);
+    assert_eq!(ctrl.current(), 0, "cannot jump to a hidden step");
+    ctrl.set_status(2, StepStatus::Disabled);
+    ctrl.go_to(2);
+    assert_eq!(ctrl.current(), 0, "nor to a disabled one");
+}
+
 // ── controller ─────────────────────────────────────────────────────────────
+
+#[test]
+fn reset_restores_the_declared_statuses() {
+    let ctrl = StepperController::new(3);
+    let steps = vec![
+        Step::new(lit!("One")).content(|| crate::button::Button::new(lit!("b1"))),
+        Step::new(lit!("Two"))
+            .status(StepStatus::Disabled)
+            .content(|| crate::button::Button::new(lit!("b2"))),
+        Step::new(lit!("Three"))
+            .optional(true)
+            .content(|| crate::button::Button::new(lit!("b3"))),
+    ];
+    let mut t = tree();
+    t.add(Stepper::new().controller(ctrl.clone()).steps(steps));
+    layout(&mut t);
+
+    click_label(&mut t, "Next"); // 0 → 2, stepping over the disabled step
+    assert_eq!(ctrl.current(), 2);
+
+    ctrl.reset();
+    assert_eq!(ctrl.current(), 0);
+    assert_eq!(
+        ctrl.status(1),
+        StepStatus::Disabled,
+        "reset restores the declared status instead of blanket Upcoming"
+    );
+    assert_eq!(ctrl.status(2), StepStatus::Optional);
+}
 
 #[test]
 fn controller_reset_and_go_to() {
@@ -319,6 +567,137 @@ fn finish_reads_form_values_and_skipped_introspection() {
     assert_eq!(got.0, "Ada");
     assert_eq!(got.1, Plan::Pro);
     assert!(!got.2, "step 2 was reached via Next, not skipped");
+}
+
+// ── Enter advances ─────────────────────────────────────────────────────────
+
+fn press_enter(t: &mut WidgetTree) {
+    use teksilo_core::event::{Key, Modifiers};
+    t.dispatch_event(WidgetEvent::KeyDown {
+        key: Key::Enter,
+        modifiers: Modifiers::NONE,
+        text: None,
+    });
+    t.dispatch_event(WidgetEvent::KeyUp {
+        key: Key::Enter,
+        modifiers: Modifiers::NONE,
+    });
+    layout(t);
+}
+
+/// A step body standing in for a form field: focusable, and it does not claim
+/// Enter for itself — so Enter bubbles to the stepper.
+fn form_steps() -> Vec<Step> {
+    use teksilo_core::widget_builder::WidgetBuilder;
+    vec![
+        Step::new(lit!("One"))
+            .content(|| crate::primitives::TextWidget::new(lit!("field one")).focusable(true)),
+        Step::new(lit!("Two"))
+            .content(|| crate::primitives::TextWidget::new(lit!("field two")).focusable(true)),
+    ]
+}
+
+#[test]
+fn enter_in_a_step_form_activates_next() {
+    let ctrl = StepperController::new(2);
+    let mut t = tree();
+    t.add(Stepper::new().controller(ctrl.clone()).steps(form_steps()));
+    layout(&mut t);
+
+    let field = t.find_by_label("field one").expect("focusable field");
+    t.focus(field);
+    press_enter(&mut t);
+    assert_eq!(ctrl.current(), 1, "Enter on a step form means Next");
+}
+
+#[test]
+fn enter_on_the_last_step_finishes() {
+    let finished = Rc::new(std::cell::Cell::new(false));
+    let ctrl = StepperController::new(1);
+    let mut t = tree();
+    t.add(
+        Stepper::new()
+            .controller(ctrl.clone())
+            .step(Step::new(lit!("Only")).content(|| {
+                use teksilo_core::widget_builder::WidgetBuilder;
+                crate::primitives::TextWidget::new(lit!("field")).focusable(true)
+            }))
+            .on_finish({
+                let finished = finished.clone();
+                move |_ctx, _ctrl| finished.set(true)
+            }),
+    );
+    layout(&mut t);
+
+    let field = t.find_by_label("field").unwrap();
+    t.focus(field);
+    press_enter(&mut t);
+    assert!(finished.get(), "Enter on the last step means Finish");
+}
+
+#[test]
+fn enter_respects_the_completion_gate() {
+    use teksilo_core::widget_builder::WidgetBuilder;
+    let gate = Signal::new(false);
+    let ctrl = StepperController::new(2);
+    let mut t = tree();
+    t.add(Stepper::new().controller(ctrl.clone()).steps(vec![
+                Step::new(lit!("One"))
+                    .complete_when(gate.clone())
+                    .content(|| {
+                        crate::primitives::TextWidget::new(lit!("field one")).focusable(true)
+                    }),
+                Step::new(lit!("Two")).content(|| crate::button::Button::new(lit!("b2"))),
+            ]));
+    layout(&mut t);
+
+    let field = t.find_by_label("field one").unwrap();
+    t.focus(field);
+    press_enter(&mut t);
+    assert_eq!(ctrl.current(), 0, "Enter is gated exactly like the button");
+
+    gate.set(true);
+    layout(&mut t);
+    t.focus(field);
+    press_enter(&mut t);
+    assert_eq!(ctrl.current(), 1);
+}
+
+#[test]
+fn enter_is_left_to_a_focused_control_that_claims_it() {
+    // A Button consumes Enter on the way up, so the stepper never sees it —
+    // this is why the handler sits on the bubble pass, not the preview pass.
+    let ctrl = StepperController::new(2);
+    let mut t = tree();
+    t.add(Stepper::new().controller(ctrl.clone()).steps(three_steps()));
+    layout(&mut t);
+
+    let body = t.find_by_label("body 1").expect("step body button");
+    t.focus(body);
+    press_enter(&mut t);
+    assert_eq!(
+        ctrl.current(),
+        0,
+        "the focused button handled Enter; the stepper must not also advance"
+    );
+}
+
+#[test]
+fn enter_advances_can_be_turned_off() {
+    let ctrl = StepperController::new(2);
+    let mut t = tree();
+    t.add(
+        Stepper::new()
+            .controller(ctrl.clone())
+            .enter_advances(false)
+            .steps(form_steps()),
+    );
+    layout(&mut t);
+
+    let field = t.find_by_label("field one").unwrap();
+    t.focus(field);
+    press_enter(&mut t);
+    assert_eq!(ctrl.current(), 0);
 }
 
 // ── accessibility ──────────────────────────────────────────────────────────

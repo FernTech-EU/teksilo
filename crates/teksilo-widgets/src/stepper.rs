@@ -43,6 +43,7 @@ mod controller;
 mod footer;
 mod indicator;
 mod indicator_strip;
+mod nav;
 mod step;
 mod wizard;
 
@@ -55,20 +56,24 @@ use std::rc::Rc;
 use teksilo_canvas::{Rect, SizeProposal};
 use teksilo_core::accessibility::AccessNodeBuilder;
 use teksilo_core::build_context::BuildContext;
+use teksilo_core::event::{EventResponse, Key, WidgetEvent};
 use teksilo_core::widget::{EventContext, LayoutContext, LayoutResponse, Widget, WidgetPlacement};
+use teksilo_core::widget_builder::HandlerSet;
 use teksilo_core::widget_id::WidgetId;
 use teksilo_i18n::{LocalizedString, lit};
 
 use crate::primitives::{Divider, Expand, HStack, Switcher, VStack};
 
 pub use controller::StepperController;
+pub use nav::{FinishOutcome, IntoFinishOutcome};
 pub use step::{Step, StepStatus};
 pub use wizard::Wizard;
 
 use content_pane::StepPane;
-use footer::{FooterStep, StepperFooter};
+use footer::StepperFooter;
 use indicator::DEFAULT_CIRCLE_SIZE;
 use indicator_strip::{IndicatorStrip, StepMeta};
+use nav::{FinishAction, StepNav};
 
 /// Indicator-strip orientation for a [`Stepper`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -91,7 +96,7 @@ pub enum ChromePosition {
     Top,
 }
 
-type StepperFinish = Rc<dyn Fn(&mut EventContext, &StepperController)>;
+type StepperAction = Rc<dyn Fn(&mut EventContext, &StepperController)>;
 
 /// An embeddable multi-step flow widget. See the [module docs](self) for the
 /// data-flow pattern and a usage example.
@@ -108,10 +113,11 @@ pub struct Stepper {
     finish_label: LocalizedString,
     skip_label: LocalizedString,
     help_label: Option<LocalizedString>,
-    help_action: Option<StepperFinish>,
+    help_action: Option<StepperAction>,
     cancel_label: Option<LocalizedString>,
-    cancel_action: Option<StepperFinish>,
-    finish_action: Option<StepperFinish>,
+    cancel_action: Option<StepperAction>,
+    finish_action: Option<FinishAction>,
+    enter_advances: bool,
     root_child_id: Option<WidgetId>,
     tooltip_text: Option<LocalizedString>,
     rich_tooltip_source: Option<crate::tooltip::RichTooltipSource>,
@@ -146,6 +152,7 @@ impl Stepper {
             cancel_label: None,
             cancel_action: None,
             finish_action: None,
+            enter_advances: true,
             root_child_id: None,
             tooltip_text: None,
             rich_tooltip_source: None,
@@ -199,6 +206,12 @@ impl Stepper {
 
     /// A generic chrome widget (banner / sidebar) — the modern replacement for
     /// QWizard's watermark pixmap.
+    ///
+    /// **It lands in the leading column by default**
+    /// ([`ChromePosition::Leading`], QWizard's watermark slot), i.e. a full
+    /// height sidebar. For a *title banner* pair it with
+    /// `.chrome_position(ChromePosition::Top)`, or the chrome renders as a
+    /// wide sidebar holding a few words.
     pub fn chrome(mut self, chrome: impl Widget + 'static) -> Self {
         self.chrome = Some(Box::new(chrome));
         self
@@ -258,11 +271,46 @@ impl Stepper {
     /// Called when Finish is activated on the last step. Receives the event
     /// context and the controller (for `skipped` / `visited` introspection);
     /// read collected values from the form signals your steps wrote.
-    pub fn on_finish(
+    ///
+    /// **The callback may refuse.** Its return value goes through the
+    /// [`IntoFinishOutcome`] bridge — `()` always succeeds, while `false`,
+    /// `Err(_)`, or [`FinishOutcome::Rejected`] keep the stepper on the last
+    /// step and mark it [`StepStatus::Error`] (a [`Wizard`] modal stays
+    /// open). This is the
+    /// Finish counterpart of [`Step::validate_on_next`] — for the case where
+    /// the commit itself can fail (disk full, name taken, server refused):
+    ///
+    /// ```ignore
+    /// .on_finish(move |ctx, _ctrl| match create_project(&name.get()) {
+    ///     Ok(()) => true,
+    ///     Err(e) => { status.set(e.to_string()); false }
+    /// })
+    /// ```
+    pub fn on_finish<R: IntoFinishOutcome>(
         mut self,
-        action: impl Fn(&mut EventContext, &StepperController) + 'static,
+        action: impl Fn(&mut EventContext, &StepperController) -> R + 'static,
     ) -> Self {
-        self.finish_action = Some(Rc::new(action));
+        self.finish_action = Some(Rc::new(move |ctx, ctrl| {
+            action(ctx, ctrl).into_finish_outcome()
+        }));
+        self
+    }
+
+    /// Whether pressing <kbd>Enter</kbd> activates the footer's primary button
+    /// (Next, or Finish on the last step). Default: `true`.
+    ///
+    /// The key is handled on the **bubble** pass at the stepper root, so a
+    /// focused control that wants Enter for itself — a Button, a multi-line
+    /// editor, a list row — consumes it first and the stepper never sees it.
+    /// A single-line form field lets it through, which is where the "Enter
+    /// means Next" contract is expected. Gates apply exactly as they do to a
+    /// click: a blocked `complete_when` / `validate_on_next` refuses the same
+    /// way.
+    ///
+    /// Turn it off for a step whose body treats Enter as content in a way the
+    /// framework cannot see.
+    pub fn enter_advances(mut self, enter_advances: bool) -> Self {
+        self.enter_advances = enter_advances;
         self
     }
 
@@ -329,6 +377,28 @@ impl Widget for Stepper {
             .clone();
         controller.seed_statuses(self.steps.iter().map(|s| s.initial_status).collect());
 
+        // Per-step visibility: seed the controller from each gate's current
+        // value, then keep it in sync. The effect is scoped to this build, so
+        // a rebuild re-registers rather than accumulating observers.
+        for (i, step) in self.steps.iter().enumerate() {
+            let Some(prop) = step.visible.clone() else {
+                continue;
+            };
+            let signal = prop.as_signal();
+            controller.set_visible(i, signal.get());
+            let c = controller.clone();
+            ctx.effect(&signal, move |visible| c.set_visible(i, *visible));
+        }
+
+        // The Next / Finish semantics, shared by the footer buttons and the
+        // Enter key so both run one code path.
+        let nav = Rc::new(StepNav::new(
+            controller.clone(),
+            self.steps.iter().map(|s| s.validate.clone()).collect(),
+            self.steps.iter().map(|s| s.complete.clone()).collect(),
+            self.finish_action.clone(),
+        ));
+
         let panel_ids: Rc<RefCell<Vec<WidgetId>>> = Rc::new(RefCell::new(Vec::new()));
         let indicator_ids: Rc<RefCell<Vec<WidgetId>>> = Rc::new(RefCell::new(Vec::new()));
 
@@ -373,25 +443,20 @@ impl Widget for Stepper {
             panel_ids.clone(),
         ));
 
-        let footer_steps: Vec<FooterStep> = self
+        let optional_flags: Vec<bool> = self
             .steps
             .iter()
-            .map(|s| FooterStep {
-                initial_status: s.initial_status,
-                complete: s.complete.clone(),
-                validate: s.validate.clone(),
-            })
+            .map(|s| s.initial_status == StepStatus::Optional)
             .collect();
         let footer_id = ctx.add(StepperFooter::new(
-            controller.clone(),
-            footer_steps,
+            nav.clone(),
+            optional_flags,
             self.back_label.clone(),
             self.next_label.clone(),
             self.finish_label.clone(),
             self.skip_label.clone(),
             self.help_label.clone(),
             self.cancel_label.clone(),
-            self.finish_action.clone(),
             self.help_action.clone(),
             self.cancel_action.clone(),
         ));
@@ -451,6 +516,33 @@ impl Widget for Stepper {
         };
 
         self.root_child_id = Some(root);
+
+        // Enter activates the primary footer button. Bubble pass (not
+        // preview), so a focused control that owns Enter — a Button, a
+        // multi-line editor — consumes it before the stepper ever sees it;
+        // only an Enter nothing else claimed reaches here.
+        if self.enter_advances {
+            let nav = nav.clone();
+            ctx.apply_self_handlers(HandlerSet::new().on_key(move |event, ctx| match event {
+                WidgetEvent::KeyUp {
+                    key: Key::Enter,
+                    modifiers,
+                } if !modifiers.ctrl() && !modifiers.alt() && !modifiers.super_key() => {
+                    nav.activate_primary(ctx);
+                    EventResponse::Handled
+                }
+                // Swallow the matching KeyDown so it cannot be interpreted
+                // twice by an ancestor (e.g. a Dialog's default button).
+                WidgetEvent::KeyDown {
+                    key: Key::Enter,
+                    modifiers,
+                    ..
+                } if !modifiers.ctrl() && !modifiers.alt() && !modifiers.super_key() => {
+                    EventResponse::Handled
+                }
+                _ => EventResponse::Ignored,
+            }));
+        }
 
         if let Some(content) = self.composite_tooltip_content.take() {
             let delay = ctx.theme().motion.tooltip_delay_heavy;

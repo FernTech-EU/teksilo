@@ -59,6 +59,9 @@ pub struct Step {
     /// Imperative fallback — checked on the Next click; if it returns
     /// `false`, navigation does not advance.
     pub(crate) validate: Option<StepValidator>,
+    /// Reactive visibility gate — when `Some(false)`, the step drops out of
+    /// the flow (navigation skips it, the indicator strip hides it).
+    pub(crate) visible: Option<teksilo_core::signal::Prop<bool>>,
 }
 
 impl Step {
@@ -70,6 +73,7 @@ impl Step {
             initial_status: StepStatus::Upcoming,
             complete: None,
             validate: None,
+            visible: None,
         }
     }
 
@@ -84,7 +88,33 @@ impl Step {
         self
     }
 
+    /// The body shown while this step is active, as a **boxed** widget — the
+    /// escape hatch for a body whose concrete type varies at runtime.
+    ///
+    /// [`content`](Self::content) is generic over one `W: Widget`, and
+    /// `Box<dyn Widget>` does not itself implement `Widget`, so a step whose
+    /// body branches on app state cannot be expressed as a single `content`
+    /// factory. Box each branch instead of duplicating the surrounding
+    /// builder:
+    ///
+    /// ```ignore
+    /// Step::new(lit!("Details")).content_boxed({
+    ///     let purpose = purpose.clone();
+    ///     move || -> Box<dyn Widget> {
+    ///         match purpose.get() {
+    ///             Purpose::Novel => Box::new(novel_form()),
+    ///             Purpose::Import => Box::new(import_form()),
+    ///         }
+    ///     }
+    /// })
+    /// ```
+    pub fn content_boxed(mut self, factory: impl Fn() -> Box<dyn Widget> + 'static) -> Self {
+        self.content_factory = Some(Rc::new(factory));
+        self
+    }
+
     /// A pre-boxed content factory (used by the `Wizard` bridge).
+    #[allow(dead_code)]
     pub(crate) fn content_factory_rc(mut self, factory: StepContentFactory) -> Self {
         self.content_factory = Some(factory);
         self
@@ -126,6 +156,30 @@ impl Step {
     /// where a reactive signal is available.
     pub fn validate_on_next(mut self, f: impl Fn() -> bool + 'static) -> Self {
         self.validate = Some(Rc::new(f));
+        self
+    }
+
+    /// Reactive visibility: while `visible` is `false` this step drops out of
+    /// the flow — Next / Back / indicator clicks skip it, and its marker is
+    /// hidden from the indicator strip (and from AT).
+    ///
+    /// This is how a **branching** wizard is expressed: declare every step
+    /// once and gate the conditional ones on the choice that selects them,
+    /// instead of maintaining one step list per branch.
+    ///
+    /// ```ignore
+    /// let purpose = Signal::new(Purpose::Novel);
+    /// Stepper::new()
+    ///     .step(Step::new(lit!("Purpose")).content(|| purpose_picker()))
+    ///     .step(Step::new(lit!("Import source"))
+    ///         .visible_when(purpose.map(|p| *p == Purpose::Import))
+    ///         .content(|| import_form()))
+    /// ```
+    ///
+    /// Hiding the step the user is *currently on* does not navigate away from
+    /// it — gate steps ahead of the choice, not the one making it.
+    pub fn visible_when(mut self, visible: impl Into<teksilo_core::signal::Prop<bool>>) -> Self {
+        self.visible = Some(visible.into());
         self
     }
 }
