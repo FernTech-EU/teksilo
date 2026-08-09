@@ -3046,11 +3046,22 @@ impl TeksiloAppBuilder {
     ///     ])
     ///     // …
     /// ```
+    ///
+    /// **Multiple calls accumulate**, like [`Self::register_fonts`] and
+    /// [`I18nConfig::compile_in`](teksilo_i18n::I18nConfig::compile_in), so an
+    /// application can compose its own catalogue with catalogues shipped by
+    /// plugins, extensions or sibling crates. Assigning here instead would mean
+    /// a contributor registering one tooltip silently deleted every tooltip the
+    /// application had — the failure has no error and no warning, it just makes
+    /// rich tooltips stop resolving their `[label](:key)` links.
+    ///
+    /// On a duplicate key the **first** registration wins; see
+    /// [`install_tooltip_registry`](teksilo_widgets::tooltip::install_tooltip_registry).
     pub fn register_tooltips(
         mut self,
         contents: Vec<teksilo_widgets::tooltip::TooltipContent>,
     ) -> Self {
-        self.tooltip_contents = contents;
+        self.tooltip_contents.extend(contents);
         self
     }
 

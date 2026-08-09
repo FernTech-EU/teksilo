@@ -186,10 +186,23 @@ thread_local! {
 /// by `TeksiloAppBuilder::register_tooltips` before the first frame
 /// builds. Panics in debug builds on double-install; logs and keeps
 /// the first installation in release.
+///
+/// `contents` may hold several registrations for one key, because
+/// `register_tooltips` accumulates across calls so that plugins,
+/// extensions and sibling crates can each contribute a catalogue.
+/// **The first registration of a key wins**, matching
+/// `I18nConfig::compile_in`: the application registers first, and a
+/// later contributor cannot silently shadow one of its tooltips.
+/// Contributors should namespace their keys (`myext-panel-title`).
 pub fn install_tooltip_registry(contents: Vec<TooltipContent>) {
-    let reg = TooltipRegistry {
-        by_key: contents.into_iter().map(|c| (c.key.clone(), c)).collect(),
-    };
+    let mut by_key: HashMap<String, TooltipContent> = HashMap::new();
+    for c in contents {
+        // `or_insert_with` rather than `insert`: first-wins. A plain
+        // `collect()` here would be last-wins, which is the same
+        // shadowing hazard the additive builder exists to avoid.
+        by_key.entry(c.key.clone()).or_insert(c);
+    }
+    let reg = TooltipRegistry { by_key };
     TOOLTIP_REGISTRY.with(|slot| {
         let mut slot = slot.borrow_mut();
         if slot.is_some() {
@@ -311,4 +324,67 @@ mod tests {
     // with the `command` field. Registry-backed shortcut resolution is
     // exercised in the `RichTooltipWidget` build path (see tooltip/rich.rs),
     // which reads `ctx.effective_shortcut(id)` and binds `shortcut_version`.
+}
+
+#[cfg(test)]
+mod additive_tests {
+    use super::*;
+    use teksilo_i18n::lit;
+
+    fn content(key: &str, body: &str) -> TooltipContent {
+        TooltipContent::new(key, lit!(body))
+    }
+
+    /// Registering the same key twice keeps the **first**.
+    ///
+    /// The app registers its catalogue first and a contributor's comes after,
+    /// so first-wins is what stops an extension shadowing an application
+    /// tooltip. A plain `collect()` into the map — which is what this used to
+    /// be — is last-wins and would let exactly that happen.
+    #[test]
+    fn the_first_registration_of_a_key_wins() {
+        _reset_tooltip_registry();
+        install_tooltip_registry(vec![
+            content("shared", "from the application"),
+            content("shared", "from a contributor"),
+        ]);
+        // Compare the *body*, not the key — both entries carry the same key, so
+        // asserting on it would pass whichever registration survived.
+        let body = with_tooltip_registry(|r| r.get("shared").map(|c| c.text.resolve_now()));
+        assert_eq!(
+            body,
+            Some(Some("from the application".to_string())),
+            "a later contributor must not shadow an application tooltip"
+        );
+        assert_eq!(
+            with_tooltip_registry(|r| r.len()),
+            Some(1),
+            "a duplicate key must collapse to one entry, not two"
+        );
+        _reset_tooltip_registry();
+    }
+
+    /// Several contributors' catalogues all survive into one registry.
+    ///
+    /// This is the shape `TeksiloAppBuilder::register_tooltips` produces now
+    /// that it accumulates: the application's entries plus every extension's,
+    /// concatenated, installed once.
+    #[test]
+    fn catalogues_from_several_contributors_all_resolve() {
+        _reset_tooltip_registry();
+        install_tooltip_registry(vec![
+            content("app-save", "Save the project"),
+            content("app-quit", "Leave"),
+            content("ext-beats", "Structure beats"),
+            content("other-ext-badge", "Drift"),
+        ]);
+        for key in ["app-save", "app-quit", "ext-beats", "other-ext-badge"] {
+            assert_eq!(
+                with_tooltip_registry(|r| r.get(key).is_some()),
+                Some(true),
+                "`{key}` must be reachable after a merged install"
+            );
+        }
+        _reset_tooltip_registry();
+    }
 }
