@@ -312,7 +312,9 @@ fn build_choice(
         sig.set(options.len() - 1);
     }
     if options.len() <= 4 {
-        ctx.add(SegmentedControl::new(sig).segments(options.iter().map(|s| lit!(s.to_string()))))
+        ctx.add(
+            SegmentedControl::indexed(sig).segments(options.iter().map(|s| lit!(s.to_string()))),
+        )
     } else {
         let items: Vec<String> = options.iter().map(|s| s.to_string()).collect();
         let initial = items.get(sig.get()).cloned();

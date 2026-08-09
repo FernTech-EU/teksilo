@@ -144,13 +144,14 @@ impl I18nConfig {
     /// namespace their keys (`myext-panel-title`) rather than rely on
     /// registration order.
     pub fn compile_in(mut self, slice: &[(&str, &[&'static str])]) -> Self {
-        self.compile_in
-            .extend(slice.iter().map(|(tag, resources)| CompileInEntry {
+        self.compile_in.extend(slice.iter().map(|(tag, resources)| {
+            CompileInEntry {
                 locale: tag
                     .parse()
                     .unwrap_or_else(|_| panic!("invalid locale tag in compile_in: {tag}")),
                 resources: resources.to_vec(),
-            }));
+            }
+        }));
         self
     }
 

@@ -64,6 +64,7 @@
 - [Code & plain-text editors](code-editor.md)
 - [Log view (streaming)](log-view.md)
 - [Tab widget](tab-widget.md)
+- [Segmented control](segmented-control.md)
 - [Font picker](font-picker.md)
 - [Charts](charts.md)
 - [Scene viewport](teksilo-scene.md)

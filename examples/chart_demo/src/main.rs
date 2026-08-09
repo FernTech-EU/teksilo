@@ -532,22 +532,26 @@ impl Widget for LiveStripPane {
             .spacing(10.0)
             .child(TextWidget::new(lit!("Feed")).style(TextStyleRole::Small))
             .child(
-                SegmentedControl::new(self.feed_state.clone())
+                SegmentedControl::indexed(self.feed_state.clone())
                     .segments([lit!("Running"), lit!("Paused")]),
             )
             .child(Spacer::new())
             .child(TextWidget::new(lit!("Rollup bucket")).style(TextStyleRole::Small))
-            .child(SegmentedControl::new(self.bucket_idx.clone()).segments([
-                lit!("×2"),
-                lit!("×4"),
-                lit!("×8"),
-            ]))
+            .child(
+                SegmentedControl::indexed(self.bucket_idx.clone()).segments([
+                    lit!("×2"),
+                    lit!("×4"),
+                    lit!("×8"),
+                ]),
+            )
             .child(TextWidget::new(lit!("fn")).style(TextStyleRole::Small))
-            .child(SegmentedControl::new(self.agg_fn_idx.clone()).segments([
-                lit!("Mean"),
-                lit!("Max"),
-                lit!("Min"),
-            ]));
+            .child(
+                SegmentedControl::indexed(self.agg_fn_idx.clone()).segments([
+                    lit!("Mean"),
+                    lit!("Max"),
+                    lit!("Min"),
+                ]),
+            );
 
         let status_label = TextWidget::new(lit!(""))
             .style(TextStyleRole::Small)
@@ -797,12 +801,12 @@ fn main() {
                                 .style(TextStyleRole::Small),
                             );
 
-                    let kind_selector = SegmentedControl::new(chart_kind).segments([
+                    let kind_selector = SegmentedControl::indexed(chart_kind).segments([
                         lit!("Bars"),
                         lit!("Lines"),
                         lit!("Donut"),
                     ]);
-                    let theme_selector = SegmentedControl::new(theme_mode)
+                    let theme_selector = SegmentedControl::indexed(theme_mode)
                         .segments([lit!("Default"), lit!("Gradient theme")]);
 
                     // Live structural mutation: add / remove a series in place.

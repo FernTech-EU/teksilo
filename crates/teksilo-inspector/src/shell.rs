@@ -33,7 +33,7 @@ use teksilo_core::widget_builder::WidgetBuilder;
 use teksilo_core::widget_id::WidgetId;
 use teksilo_i18n::lit;
 use teksilo_widgets::primitives::{Expand, FixedSize, HStack, Padding, VStack, ZStack};
-use teksilo_widgets::{Button, Panel, SegmentedControl, Slider, TabWidget};
+use teksilo_widgets::{Button, Panel, Segment, SegmentId, SegmentedControl, Slider, TabWidget};
 
 use crate::highlight::{BoundsTracker, HighlightLayer};
 use crate::keyboard::PanelShortcutHost;
@@ -302,37 +302,38 @@ fn build_toolbar(state: InspectorState) -> impl Widget + 'static {
             picker_state_for_click.set(next);
         });
 
-    // Bounds-overlay segmented control. `SegmentedControl` is driven
-    // by a `Signal<usize>`. We bridge it to `OverlayMode` via two
-    // observers (one each direction) so toggling either side syncs
-    // the other. The observer handles are attached to the bridge
-    // signal so they live as long as the toolbar.
-    let bounds_index = Signal::new(overlay_mode_to_index(state.overlay_mode.get()));
+    // Bounds-overlay segmented control, keyed straight to `OverlayMode`:
+    // one id per mode, so no positional bridge signal is needed. One
+    // observer follows an `overlay_mode` change made elsewhere (the F12
+    // shortcut, a restored setting); `on_change` carries a click back.
+    // The handle is attached to the selection signal so it lives as long
+    // as the toolbar.
+    let bounds_selected = Signal::new(Some(overlay_mode_to_segment(state.overlay_mode.get())));
     {
-        let bounds_index_target = bounds_index.clone();
+        let selection_target = bounds_selected.clone();
         let h = state.overlay_mode.observe(move |mode| {
-            let new_idx = overlay_mode_to_index(*mode);
-            if bounds_index_target.get() != new_idx {
-                bounds_index_target.set(new_idx);
+            let target = Some(overlay_mode_to_segment(*mode));
+            if selection_target.get() != target {
+                selection_target.set(target);
             }
         });
-        bounds_index.attach_keepalive(h);
+        bounds_selected.attach_keepalive(h);
     }
-    {
-        let mode_target = state.overlay_mode.clone();
-        let h = bounds_index.observe(move |idx| {
-            let new_mode = index_to_overlay_mode(*idx);
-            if mode_target.get() != new_mode {
-                mode_target.set(new_mode);
+    let bounds_seg = SegmentedControl::new(bounds_selected)
+        .segments([
+            Segment::new(teksilo_i18n::lit!("Off")).id(OVERLAY_OFF),
+            Segment::new(teksilo_i18n::lit!("Sel")).id(OVERLAY_SELECTION),
+            Segment::new(teksilo_i18n::lit!("All")).id(OVERLAY_ALL),
+        ])
+        .on_change({
+            let mode_target = state.overlay_mode.clone();
+            move |id, _ctx| {
+                let next = segment_to_overlay_mode(id);
+                if mode_target.get() != next {
+                    mode_target.set(next);
+                }
             }
         });
-        bounds_index.attach_keepalive(h);
-    }
-    let bounds_seg = SegmentedControl::new(bounds_index).segments([
-        teksilo_i18n::lit!("Off"),
-        teksilo_i18n::lit!("Sel"),
-        teksilo_i18n::lit!("All"),
-    ]);
 
     let opacity_slider = FixedSize::new()
         .width(Signal::new(120.0_f32))
@@ -372,19 +373,27 @@ fn build_toolbar(state: InspectorState) -> impl Widget + 'static {
     )
 }
 
-fn overlay_mode_to_index(mode: OverlayMode) -> usize {
+/// Stable segment ids for the bounds-overlay picker, so the control's
+/// selection means "this mode" rather than "the segment at position 1".
+const OVERLAY_OFF: SegmentId = SegmentId::from_u64(1);
+const OVERLAY_SELECTION: SegmentId = SegmentId::from_u64(2);
+const OVERLAY_ALL: SegmentId = SegmentId::from_u64(3);
+
+fn overlay_mode_to_segment(mode: OverlayMode) -> SegmentId {
     match mode {
-        OverlayMode::Off => 0,
-        OverlayMode::SelectionOnly => 1,
-        OverlayMode::AllBounds => 2,
+        OverlayMode::Off => OVERLAY_OFF,
+        OverlayMode::SelectionOnly => OVERLAY_SELECTION,
+        OverlayMode::AllBounds => OVERLAY_ALL,
     }
 }
 
-fn index_to_overlay_mode(idx: usize) -> OverlayMode {
-    match idx {
-        0 => OverlayMode::Off,
-        1 => OverlayMode::SelectionOnly,
-        _ => OverlayMode::AllBounds,
+fn segment_to_overlay_mode(id: SegmentId) -> OverlayMode {
+    if id == OVERLAY_OFF {
+        OverlayMode::Off
+    } else if id == OVERLAY_SELECTION {
+        OverlayMode::SelectionOnly
+    } else {
+        OverlayMode::AllBounds
     }
 }
 

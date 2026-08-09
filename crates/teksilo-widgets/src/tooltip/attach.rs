@@ -532,7 +532,7 @@ mod tests {
             TooltipContent::new("s1", lit!("Seg 1")),
         ]);
         let mut tree = tree_with_backend();
-        let selected = teksilo_core::signal::Signal::new(0usize);
+        let selected = teksilo_core::signal::Signal::new(None);
         let sc = tree.add(
             crate::segmented_control::SegmentedControl::new(selected)
                 .segment(crate::segmented_control::Segment::new(lit!("A")).rich_tooltip("s0"))

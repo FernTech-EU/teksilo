@@ -10,7 +10,7 @@
 
 use teksilo::prelude::*;
 use teksilo::widgets::tooltip::TooltipContent;
-use teksilo::widgets::{CheckState, Panel, TabId};
+use teksilo::widgets::{CheckState, Panel, SegmentId, TabId};
 
 // ── Cascading-tooltip registry keys ───────────────────────────────────
 // Three-deep cascade: each tip's body links into the next via the
@@ -25,6 +25,27 @@ pub const KEY_TIP_C: &str = "tip-c";
 pub const KEY_STAT_FOOD: &str = "stat-food";
 pub const KEY_STAT_TRADE: &str = "stat-trade";
 pub const KEY_STAT_HAPPINESS: &str = "stat-happiness";
+
+// ── SegmentedControl segment ids ──────────────────────────────────────
+// Declared as constants rather than left to `SegmentId::fresh()` so the
+// selection could be persisted and restored, and so another module could
+// name a segment. Small values never collide with framework-allocated
+// ids, which start at 2^48.
+
+pub const SEG_FIRST: SegmentId = SegmentId::from_u64(1);
+pub const SEG_SECOND: SegmentId = SegmentId::from_u64(2);
+pub const SEG_THIRD: SegmentId = SegmentId::from_u64(3);
+
+/// Seven segments for the overflow showcase.
+pub const SEG_OVERFLOW_IDS: [SegmentId; 7] = [
+    SegmentId::from_u64(11),
+    SegmentId::from_u64(12),
+    SegmentId::from_u64(13),
+    SegmentId::from_u64(14),
+    SegmentId::from_u64(15),
+    SegmentId::from_u64(16),
+    SegmentId::from_u64(17),
+];
 
 /// Build the catalog's tooltip registry — every key referenced by a
 /// `.rich_tooltip(KEY_…)` call site or a `[label](:key)` cascade link
@@ -57,7 +78,14 @@ pub struct Signals {
     pub slider_value: Signal<f32>,
     pub slider_v_value: Signal<f32>,
     pub slider_stepped: Signal<f32>,
-    pub segment_selected: Signal<usize>,
+    /// Keyed, like every `SegmentedControl` selection: a `SegmentId`
+    /// keeps meaning the same segment even if one is inserted ahead of it.
+    pub segment_selected: Signal<Option<SegmentId>>,
+    /// Selection for the seven-segment overflow showcase.
+    pub segment_overflow_selected: Signal<Option<SegmentId>>,
+    /// Width the overflow showcase is given, driven by its own slider so
+    /// the behaviour can be seen without resizing the window.
+    pub segment_demo_width: Signal<f32>,
     pub radio_tile_selected: Signal<usize>,
     pub radio_tile_vertical_selected: Signal<usize>,
     pub combo_selected: Signal<Option<String>>,
@@ -98,7 +126,9 @@ impl Signals {
             slider_value: ctx.signal(50.0_f32),
             slider_v_value: ctx.signal(0.3_f32),
             slider_stepped: ctx.signal(25.0_f32),
-            segment_selected: ctx.signal(0_usize),
+            segment_selected: ctx.signal(Some(SEG_FIRST)),
+            segment_overflow_selected: ctx.signal(Some(SEG_OVERFLOW_IDS[0])),
+            segment_demo_width: ctx.signal(720.0_f32),
             radio_tile_selected: ctx.signal(0_usize),
             radio_tile_vertical_selected: ctx.signal(3_usize),
             combo_selected: ctx.signal(None::<String>),

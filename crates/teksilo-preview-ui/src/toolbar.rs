@@ -5,10 +5,10 @@
 //!
 //! Theme picker, background mode, and locale dropdown. Theme and
 //! locale changes are applied via `EventContext::set_theme` /
-//! `set_locale`, which require an event-time call — the toolbar
-//! uses `Button.on_activate_fn` rather than `SegmentedControl` for
-//! those two pickers because activate handlers receive an
-//! `EventContext` while signal-bound controls do not.
+//! `set_locale`, which require an event-time call; the toolbar renders
+//! those two as rows of `Button`s so the active option can carry a
+//! distinct variant. (`SegmentedControl::on_change` also hands over an
+//! `EventContext` these days, so either shape would work.)
 //!
 //! Note: theme and locale apply tree-wide, not to the canvas
 //! sub-tree alone — that requires per-subtree theme scoping which
@@ -125,7 +125,7 @@ fn build_background_picker(ctx: &mut BuildContext, state: &AppState) -> WidgetId
         });
         ctx.own_handle(h);
     }
-    ctx.add(SegmentedControl::new(idx_sig).segments(labels.into_iter().map(|s| lit!(s))))
+    ctx.add(SegmentedControl::indexed(idx_sig).segments(labels.into_iter().map(|s| lit!(s))))
 }
 
 fn build_locale_picker(ctx: &mut BuildContext, state: &AppState) -> WidgetId {

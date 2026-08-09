@@ -56,9 +56,10 @@ use crate::{
     Button, ButtonVariant, Card, Checkbox, ComboBox, FontPicker, GridSizing, GridView, GroupBox,
     GroupHeader, IconButton, IconButtonSize, LanguageSwitcher, Link, ListView, MenuItem, MenuList,
     Orientation, PaneDescriptor, Panel, ProgressBar, RadioButton, RadioGroup, RadioTile,
-    RadioTileGroup, ScrollArea, SegmentedControl, Slider, Snackbar, SplitButton, Splitter,
-    SplitterModel, StandardListItem, StandardTreeItem, StatusBar, TabWidget, TextInput,
-    TextScaleControl, ThemeSwitcher, TileLayout, Toggle, ToolBox, Toolbar, TreeView,
+    RadioTileGroup, ScrollArea, SegmentDisplay, SegmentOverflow, SegmentedControl, Slider,
+    Snackbar, SplitButton, Splitter, SplitterModel, StandardListItem, StandardTreeItem, StatusBar,
+    TabWidget, TextInput, TextScaleControl, ThemeSwitcher, TileLayout, Toggle, ToolBox, Toolbar,
+    TreeView,
 };
 
 // ---------------------------------------------------------------------------
@@ -1149,6 +1150,24 @@ register_widget_catalog_at!("crates/teksilo-widgets/src/link.rs", Link);
 // SegmentedControl
 // ---------------------------------------------------------------------------
 
+/// Maps a `display` enum-knob index to `SegmentDisplay` (declaration order).
+fn segment_display(idx: usize) -> SegmentDisplay {
+    match idx {
+        1 => SegmentDisplay::Text,
+        2 => SegmentDisplay::Icon,
+        3 => SegmentDisplay::IconText,
+        _ => SegmentDisplay::Auto,
+    }
+}
+
+/// Maps an `overflow` enum-knob index to `SegmentOverflow` (declaration order).
+fn segment_overflow(idx: usize) -> SegmentOverflow {
+    match idx {
+        1 => SegmentOverflow::Compress,
+        _ => SegmentOverflow::Menu,
+    }
+}
+
 impl WidgetCatalog for SegmentedControl {
     fn id() -> &'static str {
         "segmented_control"
@@ -1162,19 +1181,32 @@ impl WidgetCatalog for SegmentedControl {
     fn knobs() -> KnobSpec {
         KnobSpec::new()
             .choice("selected", "Selected", &["Day", "Week", "Month"], 0)
+            .choice(
+                "display",
+                "Display",
+                &["Auto", "Text", "Icon", "Icon+Text"],
+                0,
+            )
+            .choice("overflow", "Overflow", &["Menu", "Compress"], 0)
             .bool_("enabled", "Enabled", true)
     }
     fn variants() -> Vec<PreviewVariant> {
         vec![
             PreviewVariant::defaults("default"),
             PreviewVariant::knobs("middle", KnobOverrides::new().choice("selected", 1)),
+            PreviewVariant::knobs("icon-only", KnobOverrides::new().choice("display", 2)),
+            PreviewVariant::knobs("compress", KnobOverrides::new().choice("overflow", 1)),
             PreviewVariant::knobs("disabled", KnobOverrides::new().bool_("enabled", false)),
         ]
     }
     fn build(_variant: &str, knobs: &KnobValues) -> Box<dyn Widget> {
+        // A knob `choice` is positional by construction and the option
+        // list is closed, so the positional binding is the honest one here.
         Box::new(
-            SegmentedControl::new(knobs.choice("selected"))
+            SegmentedControl::indexed(knobs.choice("selected"))
                 .segments([lit!("Day"), lit!("Week"), lit!("Month")])
+                .display(segment_display(knobs.choice("display").get()))
+                .overflow(segment_overflow(knobs.choice("overflow").get()))
                 .enabled(knobs.bool_("enabled").get()),
         )
     }

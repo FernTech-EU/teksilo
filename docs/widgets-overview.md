@@ -144,7 +144,7 @@ Themed framing, sectioning, and window-level structure.
 - [RadioTile](../crates/teksilo-widgets/src/radio_tile.rs) / [RadioTileGroup](../crates/teksilo-widgets/src/radio_tile_group.rs) — "selectable card" radios: icon + title + inline radio + wrapping description. N-ary group with `TileLayout::{Row, Grid, Column, Vertical}` (equal-size cards, adaptive wrapping grid, or a compact settings list with trailing meta), a WAI-ARIA roving radiogroup keyboard, and `Role::RadioGroup` + per-tile `Role::RadioButton`.
 - [Toggle](../crates/teksilo-widgets/src/toggle.rs) — on/off control; four `ToggleVariant`s (Switch / Pill / Square / Inset) via the `ToggleStyle` trait.
 - [Slider](../crates/teksilo-widgets/src/slider.rs) — horizontal or vertical, optional stepping.
-- [SegmentedControl](../crates/teksilo-widgets/src/segmented_control.rs) — `Signal<usize>`-driven segmented chooser; `RadioGroup` AT role.
+- [SegmentedControl](../crates/teksilo-widgets/src/segmented_control.rs) — segmented chooser keyed by `SegmentId` (so a contributed segment can't re-point the selection); segments that don't fit overflow into a chevron menu, with the selected one always visible; `RadioGroup` AT role. See [segmented-control.md](segmented-control.md).
 - [ComboBox](../crates/teksilo-widgets/src/combo_box.rs) — selection-only dropdown; virtualized via `ListView` past `max_visible_items`.
 - [FontPicker](../crates/teksilo-widgets/src/font_picker.rs) — lists/searches/filters all installed fonts with per-row in-font samples; spacing + writing-system filters (off-thread coverage index). See [font-picker.md](font-picker.md).
 - [ProgressBar](../crates/teksilo-widgets/src/progress_bar.rs) — determinate or indeterminate; linear.

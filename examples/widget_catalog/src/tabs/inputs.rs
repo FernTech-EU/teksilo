@@ -6,11 +6,13 @@
 use teksilo::prelude::*;
 use teksilo::tokens::Orientation;
 use teksilo::widgets::{
-    Checkbox, ComboBox, Divider, FixedSize, IconWidget, RadioButton, RadioTile, RadioTileGroup,
-    SegmentedControl, Slider, TextWidget, TileLayout, Toggle, VStack,
+    Checkbox, ComboBox, Divider, FixedSize, HStack, IconWidget, RadioButton, RadioTile,
+    RadioTileGroup, Segment, SegmentedControl, Slider, TextWidget, TileLayout, Toggle, VStack,
 };
 
-use crate::shared::{Signals, section, tab_header};
+use crate::shared::{
+    SEG_FIRST, SEG_OVERFLOW_IDS, SEG_SECOND, SEG_THIRD, Signals, section, tab_header,
+};
 
 // Minimal tintable glyphs for the RadioTile showcase (geometry only).
 const FILE_SVG: &str = "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M6 2h8l4 4v16H6z'/></svg>";
@@ -19,6 +21,98 @@ const BAN_SVG: &str = "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 2
 const LAYERS_SVG: &str = "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M12 3l9 5-9 5-9-5z'/></svg>";
 const NOTE_SVG: &str =
     "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M5 3h14v18H5z'/></svg>";
+
+/// The three-segment control, keyed by [`SegmentId`] so the selection
+/// keeps meaning the same segment across insertions and locale switches.
+fn segmented_basic(sigs: &Signals) -> SegmentedControl {
+    SegmentedControl::new(sigs.segment_selected.clone())
+        .label(lit!("Example choice"))
+        .segments([
+            Segment::new(tr!(inp_segment_first())).id(SEG_FIRST),
+            Segment::new(tr!(inp_segment_second())).id(SEG_SECOND),
+            Segment::new(tr!(inp_segment_third())).id(SEG_THIRD),
+        ])
+}
+
+/// Seven segments in a slider-driven width box, so the overflow
+/// behaviour can be watched without resizing the window — the same shape
+/// as the `collapsible_menu_bar` example's responsive showcase.
+///
+/// The width story `SegmentedControl` previously had no answer for
+/// beyond ellipsising every label at once.
+fn segmented_overflow_demo(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
+    const LABELS: [&str; 7] = [
+        "Overview",
+        "Full Synopsis",
+        "Full Chapter",
+        "Characters",
+        "Locations",
+        "Timeline",
+        "Notes",
+    ];
+    let control = SegmentedControl::new(sigs.segment_overflow_selected.clone())
+        .label(lit!("Document view"))
+        .segments(
+            LABELS
+                .iter()
+                .zip(SEG_OVERFLOW_IDS)
+                .map(|(label, id)| Segment::new(lit!(*label)).id(id)),
+        );
+    // Grab the reactive overflow flag before the control is moved into
+    // the sized box, so the caption below can narrate the current state.
+    let overflowing = control.is_overflowing();
+    let control_id = ctx.add(control);
+    let sized = ctx.add(
+        FixedSize::new()
+            .width(sigs.segment_demo_width.clone())
+            .child_id(control_id),
+    );
+
+    let state = overflowing.map(|over| {
+        if *over {
+            "State: overflowing → the rest are in the ⌄ menu, and the selected \
+             segment holds the last slot"
+                .to_string()
+        } else {
+            "State: everything fits → declaration order, no menu".to_string()
+        }
+    });
+
+    ctx.add(
+        VStack::new()
+            .spacing(8.0)
+            .child(
+                TextWidget::new(lit!(
+                    "Seven segments. Drag the slider to change the width the control is \
+                     given: the ones that stop fitting move into the ⌄ menu, and the \
+                     selected segment is always kept on the strip — pick one from the \
+                     menu and it takes the last slot until another is picked."
+                ))
+                .style(TextStyleRole::Small)
+                .color(TextRole::Secondary),
+            )
+            .child(
+                HStack::new()
+                    .spacing(8.0)
+                    .child(
+                        TextWidget::new(lit!("Width"))
+                            .style(TextStyleRole::Small)
+                            .color(TextRole::Primary),
+                    )
+                    .child(
+                        Slider::new(sigs.segment_demo_width.clone(), 140.0, 900.0)
+                            .label(lit!("Segmented control width")),
+                    ),
+            )
+            .add_child(sized)
+            .child(
+                TextWidget::new(lit!(""))
+                    .text(state)
+                    .style(TextStyleRole::Small)
+                    .color(TextRole::Secondary),
+            ),
+    )
+}
 
 /// A leading tile icon whose tint follows selection.
 fn tile_icon(svg: &'static str, index: usize, selected: &Signal<usize>) -> IconWidget {
@@ -104,14 +198,14 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
                 .label(tr!(inp_slider_vertical())),
         ),
     );
+    let overflow_demo = segmented_overflow_demo(ctx, sigs);
     let segmented = section(
         ctx,
         lit!("SegmentedControl"),
-        SegmentedControl::new(sigs.segment_selected.clone()).segments([
-            tr!(inp_segment_first()),
-            tr!(inp_segment_second()),
-            tr!(inp_segment_third()),
-        ]),
+        VStack::new()
+            .spacing(16.0)
+            .child(segmented_basic(sigs))
+            .add_child(overflow_demo),
     );
     let radio_tile = section(
         ctx,
@@ -200,12 +294,12 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
 pub fn teksu(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
     // SegmentedControl + ComboBox have multi-arg constructors that
     // teksu! ctor syntax can't express on its own — pre-register them.
+    let overflow_demo = segmented_overflow_demo(ctx, sigs);
     let segmented_widget = ctx.add(
-        SegmentedControl::new(sigs.segment_selected.clone()).segments([
-            tr!(inp_segment_first()),
-            tr!(inp_segment_second()),
-            tr!(inp_segment_third()),
-        ]),
+        VStack::new()
+            .spacing(16.0)
+            .child(segmented_basic(sigs))
+            .add_child(overflow_demo),
     );
     // RadioTileGroup's `.tile(...)` chain can't be expressed in teksu! ctor
     // syntax — pre-register it and reference by id.

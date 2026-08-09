@@ -25,6 +25,7 @@ a11y-splitter-expanded = Déployé
 a11y-breadcrumb-current-page-value = page actuelle
 a11y-toolbar-name = Barre d'outils
 toolbar-more = Plus
+segmented-control-more = Plus d'options
 breadcrumb-overflow = Afficher le chemin masqué
 a11y-title-bar-name = Barre de titre de la fenêtre
 a11y-window-controls-name = Contrôles de la fenêtre

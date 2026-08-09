@@ -4,13 +4,13 @@
 //! Default `SegmentedControlStyle` impl driven by paint-recipe data.
 //!
 //! `RecipeSegmentedControlStyle` ports the IntUI segmented-control
-//! chrome exactly: the rounded frame, per-segment hover tint, the
+//! chrome: the rounded frame, per-segment hover tint, the
 //! selected-segment surface + border (accent when focused, inactive
-//! when not), per-segment label rendering via `canvas.draw_text`, and
-//! the keyboard focus ring drawn outside the visual envelope. The
-//! recipe builds a single `SegmentedControlChrome` widget that paints
-//! all of this from the config's state signals — repainting only when
-//! the bindings flip.
+//! when not), a divider before the overflow trigger, and the keyboard
+//! focus ring drawn outside the visual envelope. The recipe builds a
+//! single `SegmentedControlChrome` widget that paints all of this from
+//! the config's state signals and the geometry the widget publishes each
+//! layout pass — repainting only when the bindings flip.
 
 use teksilo_canvas::{Canvas, Rect, Size, SizeProposal};
 use teksilo_core::accessibility::AccessNodeBuilder;
@@ -18,7 +18,7 @@ use teksilo_core::binding::BindingLevel;
 use teksilo_core::build_context::BuildContext;
 use teksilo_core::focus::FocusOrigin;
 use teksilo_core::signal::Signal;
-use teksilo_core::styles::{SegmentedControlStyle, SegmentedControlStyleConfig};
+use teksilo_core::styles::{SegmentSlots, SegmentedControlStyle, SegmentedControlStyleConfig};
 use teksilo_core::widget::{LayoutContext, LayoutResponse, PaintContext, Widget};
 use teksilo_core::widget_id::WidgetId;
 use teksilo_tokens::CornerRadius;
@@ -73,7 +73,7 @@ impl RecipeSegmentedControlStyle {
 impl SegmentedControlStyle for RecipeSegmentedControlStyle {
     fn make_body(&self, cfg: &SegmentedControlStyleConfig, ctx: &mut BuildContext) -> WidgetId {
         ctx.add(SegmentedControlChrome {
-            segment_count: cfg.segment_count,
+            slots: cfg.slots.clone(),
             selected: cfg.selected.clone(),
             hovered_segment: cfg.hovered_segment.clone(),
             focus_origin: cfg.focus_origin.clone(),
@@ -85,11 +85,12 @@ impl SegmentedControlStyle for RecipeSegmentedControlStyle {
 
 /// Internal recipe widget that paints the segmented-control chrome
 /// *behind* the segment cells: the rounded frame, per-segment hover
-/// tint, the selected-segment surface + border, and the keyboard focus
-/// ring. Labels and icons are composed widgets the `SegmentedControl`
-/// places on top — the chrome draws no text or icons.
+/// tint, the selected-segment surface + border, the overflow divider,
+/// and the keyboard focus ring. Labels and icons are composed widgets
+/// the `SegmentedControl` places on top — the chrome draws no text or
+/// icons.
 struct SegmentedControlChrome {
-    segment_count: usize,
+    slots: SegmentSlots,
     selected: Signal<usize>,
     hovered_segment: Signal<Option<usize>>,
     focus_origin: Signal<Option<FocusOrigin>>,
@@ -101,34 +102,8 @@ struct SegmentedControlChrome {
 impl std::fmt::Debug for SegmentedControlChrome {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("SegmentedControlChrome")
-            .field("segments", &self.segment_count)
+            .field("slots", &self.slots.len())
             .finish()
-    }
-}
-
-impl SegmentedControlChrome {
-    fn compute_visual(&self, bounds: Rect, theme: &teksilo_core::Theme) -> Rect {
-        let envelope = theme.shape.focus_ring_offset + theme.shape.focus_ring_width;
-        Rect::new(
-            bounds.x + envelope,
-            bounds.y + envelope,
-            (bounds.width - envelope * 2.0).max(0.0),
-            (bounds.height - envelope * 2.0).max(0.0),
-        )
-    }
-
-    fn compute_inner(visual: Rect, bw: f32) -> Rect {
-        Rect::new(
-            visual.x + bw,
-            visual.y + bw,
-            (visual.width - bw * 2.0).max(0.0),
-            (visual.height - bw * 2.0).max(0.0),
-        )
-    }
-
-    fn segment_rect(index: usize, inner: Rect, n: usize) -> Rect {
-        let w = if n == 0 { 0.0 } else { inner.width / n as f32 };
-        Rect::new(inner.x + index as f32 * w, inner.y, w, inner.height)
     }
 }
 
@@ -138,7 +113,9 @@ impl Widget for SegmentedControlChrome {
         let registry = ctx.binding_registry();
         // Repaint on any state-signal change. The segment cells own their
         // own (reactive) labels/icons, so the chrome binds only the
-        // background-state signals.
+        // background-state signals. The slot geometry needs no binding:
+        // it is republished during the layout pass that precedes every
+        // paint that could have moved it.
         self.selected
             .bind_to(id, registry, BindingLevel::RepaintOnly);
         self.hovered_segment
@@ -164,71 +141,88 @@ impl Widget for SegmentedControlChrome {
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
         let colors = &ctx.theme.colors;
         let shape = &ctx.theme.shape;
-        let n = self.segment_count;
-        if n == 0 {
-            return;
-        }
-
-        let visual = self.compute_visual(bounds, ctx.theme);
         let bw = self.recipe.border_width;
-        let inner = Self::compute_inner(visual, bw);
+        let frame_cr = CornerRadius::uniform(self.recipe.corner_radius);
 
         let selected = self.selected.get();
         let hovered = self.hovered_segment.get();
         let focus_origin = self.focus_origin.get();
         let focused = focus_origin.is_some();
         let keyboard_focused = focus_origin == Some(FocusOrigin::Keyboard);
-        let frame_cr = CornerRadius::uniform(self.recipe.corner_radius);
         // Snapshot the reactive enabled-state once per paint. The
         // chrome subscribed to this signal in build() so a flip
         // re-paints with the new palette.
         let is_enabled = self.is_enabled.get();
 
-        // 1. Outer frame.
-        let frame_border = if !is_enabled {
-            colors.border
-        } else {
-            colors.border_strong
-        };
-        canvas.stroke_rounded_rect(visual, frame_cr, frame_border, bw);
-
-        // 2. Non-selected segments — hover tint only (the cell widget
-        //    draws the label/icon on top).
-        for i in 0..n {
-            if i == selected {
-                continue;
+        self.slots.with(|geometry| {
+            if geometry.segments.is_empty() {
+                // Before the first layout pass, or with every segment
+                // hidden. Nothing to frame.
+                return;
             }
-            if is_enabled && hovered == Some(i) {
-                let rect = Self::segment_rect(i, inner, n);
-                canvas.fill_rounded_rect(rect, frame_cr, colors.surface_hover);
-            }
-        }
 
-        // 3. Selected segment — surface + border, extended by `bw` on all
-        //    sides so the stroke covers the frame border AND any adjacent
-        //    hover tint on middle segments. The label/icon is drawn by the
-        //    cell widget; its tint follows this background reactively
-        //    (OnAccent when focused).
-        if selected < n {
-            let sel_base = Self::segment_rect(selected, inner, n);
-            let sel = Rect::new(
-                sel_base.x - bw,
-                sel_base.y - bw,
-                sel_base.width + bw * 2.0,
-                sel_base.height + bw * 2.0,
-            );
-            let (sel_bg, sel_border) = if !is_enabled {
-                (colors.surface_selected_inactive, colors.border)
-            } else if focused {
-                (colors.accent, colors.accent)
+            // 1. Outer frame.
+            let frame_border = if !is_enabled {
+                colors.border
             } else {
-                (colors.surface_selected_inactive, colors.border_strong)
+                colors.border_strong
             };
-            canvas.fill_rounded_rect(sel, frame_cr, sel_bg);
-            canvas.stroke_rounded_rect(sel, frame_cr, sel_border, bw);
-        }
+            canvas.stroke_rounded_rect(geometry.frame, frame_cr, frame_border, bw);
 
-        // 4. Focus ring — drawn OUTSIDE the visual, inside the reserved envelope.
+            // Resolve the live segment indices carried by the state
+            // signals into slot positions. A segment that overflowed
+            // while hovered resolves to `None` and simply paints nothing.
+            let selected_slot = geometry.order.iter().position(|&s| s == selected);
+            let hovered_slot = hovered.and_then(|h| geometry.order.iter().position(|&s| s == h));
+
+            // 2. Non-selected segments — hover tint only (the cell widget
+            //    draws the label/icon on top).
+            if is_enabled
+                && let Some(slot) = hovered_slot
+                && Some(slot) != selected_slot
+                && let Some(rect) = geometry.segments.get(slot)
+            {
+                canvas.fill_rounded_rect(*rect, frame_cr, colors.surface_hover);
+            }
+
+            // 3. Selected segment — surface + border, extended by `bw` on
+            //    all sides so the stroke covers the frame border AND any
+            //    adjacent hover tint on middle segments. The label/icon is
+            //    drawn by the cell widget; its tint follows this background
+            //    reactively (OnAccent when focused).
+            if let Some(slot) = selected_slot
+                && let Some(base) = geometry.segments.get(slot)
+            {
+                let sel = Rect::new(
+                    base.x - bw,
+                    base.y - bw,
+                    base.width + bw * 2.0,
+                    base.height + bw * 2.0,
+                );
+                let (sel_bg, sel_border) = if !is_enabled {
+                    (colors.surface_selected_inactive, colors.border)
+                } else if focused {
+                    (colors.accent, colors.accent)
+                } else {
+                    (colors.surface_selected_inactive, colors.border_strong)
+                };
+                canvas.fill_rounded_rect(sel, frame_cr, sel_bg);
+                canvas.stroke_rounded_rect(sel, frame_cr, sel_border, bw);
+            }
+
+            // 4. Divider before the overflow trigger, so the chevron reads
+            //    as a slot of the strip rather than a floating button.
+            if let Some(overflow) = geometry.overflow {
+                canvas.fill_rect(
+                    Rect::new(overflow.x, overflow.y, bw, overflow.height),
+                    frame_border,
+                );
+            }
+        });
+
+        // 5. Focus ring — drawn OUTSIDE the visual, inside the reserved
+        //    envelope. Painted whether or not there are segments, so a
+        //    focused empty control still shows where focus is.
         if keyboard_focused {
             let half_stroke = shape.focus_ring_width * 0.5;
             let ring_rect = Rect::new(
@@ -249,25 +243,8 @@ impl Widget for SegmentedControlChrome {
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         // Presentational — the parent `SegmentedControl` emits the
-        // `Role::RadioGroup` and the per-segment `SegmentButton`
-        // children emit `Role::RadioButton`.
+        // `Role::RadioGroup` and the per-segment cells emit
+        // `Role::RadioButton`.
         builder.set_hidden();
     }
-}
-
-/// Compute the natural width the segmented-control should claim from
-/// its parent. Exposed so the widget's `layout_response` can size to
-/// the recipe's fallback-width policy when no explicit width is
-/// proposed (kept here so a custom style that ships its own
-/// width-estimate function can keep both sides in sync).
-pub fn estimate_segmented_width(labels: &[&str], fallback_char_width: f32) -> f32 {
-    let n = labels.len();
-    if n == 0 {
-        return 0.0;
-    }
-    let max_label_width = labels
-        .iter()
-        .map(|l| l.len() as f32 * fallback_char_width)
-        .fold(0.0_f32, f32::max);
-    (max_label_width + SEGMENTED_CONTROL_PADDING_HORIZONTAL * 2.0) * n as f32
 }

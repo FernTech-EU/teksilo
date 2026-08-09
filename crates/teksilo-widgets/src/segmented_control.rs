@@ -4,36 +4,84 @@
 //! SegmentedControl — mutually exclusive segments in a horizontal row.
 //!
 //! Each segment is a real composed widget — a centered icon + label with
-//! a reactive tint — built from a [`Segment`] descriptor. The control
-//! binds a `Signal<usize>` index: reading or writing the signal selects
-//! the corresponding segment without rebuilding the tree. Per-segment
-//! disabling, optional leading icons, and optional hover tooltips are all
-//! first-class; the chrome (rounded frame, hover tint, selected-segment
-//! surface) is delegated to the active [`SegmentedControlStyle`](teksilo_core::styles::SegmentedControlStyle).
+//! a reactive tint — built from a [`Segment`] descriptor. Selection is
+//! bound to a `Signal<Option<SegmentId>>`: **keyed, not positional**, so
+//! inserting or removing a segment never silently re-points the
+//! selection at a different one. The chrome (rounded frame, hover tint,
+//! selected-segment surface) is delegated to the active
+//! [`SegmentedControlStyle`](teksilo_core::styles::SegmentedControlStyle).
+//!
+//! ```ignore
+//! const LIST: SegmentId = SegmentId::from_u64(1);
+//! const GRID: SegmentId = SegmentId::from_u64(2);
+//!
+//! let view = ctx.signal(Some(LIST));
+//! SegmentedControl::new(view.clone())
+//!     .segment(Segment::new(tr!(list_view())).id(LIST).icon(|| IconWidget::list(14.0)))
+//!     .segment(Segment::new(tr!(grid_view())).id(GRID).icon(|| IconWidget::grid(14.0)))
+//!
+//! // Pairing with a Switcher:
+//! Switcher::new(segmented_control::index_signal(&view, &[LIST, GRID]))
+//! ```
 //!
 //! ## When to use
 //!
-//! - Use a `SegmentedControl` when there are 2–5 mutually exclusive modes
-//!   that fit in a compact horizontal strip (e.g. view mode, time period).
-//! - Prefer a `ComboBox` when there are more than five options or labels
-//!   are long.
-//! - Prefer `RadioButton` when the options need more vertical space or
-//!   detailed descriptions.
+//! - Use a `SegmentedControl` for mutually exclusive modes that read
+//!   well as a compact horizontal strip (view mode, time period).
+//! - Prefer a `ComboBox` when the options are many *and* the strip form
+//!   buys nothing — though a segmented control no longer breaks down at
+//!   seven segments, because it overflows (below).
+//! - Prefer `RadioButton` / `RadioTileGroup` when the options need
+//!   vertical space or descriptions.
+//!
+//! ## Width: overflow, not squeeze
+//!
+//! When the segments do not fit, the ones that do not fit move into a
+//! trailing chevron menu rather than all of them compressing into
+//! ellipsised stubs ([`SegmentOverflow::Menu`], the default; opt out with
+//! [`SegmentOverflow::Compress`]).
+//!
+//! Declaration order is stable, with exactly one exception: **the
+//! selected segment is always visible**. If it would have been pushed
+//! into the menu it takes the *last* slot, and it stays there until
+//! another segment is chosen from the menu — so the strip does not
+//! reshuffle under the pointer, and the promotion is forgotten once the
+//! control is wide enough to show everything again.
+//!
+//! ```text
+//! Declared: [A][B][C][D][E][F][G]   fits 4 + chevron
+//!
+//! start, A selected     [A][B][C][D][v]   menu: E F G
+//! pick F from menu      [A][B][C][F][v]   menu: D E G
+//! click A (F stays)     [A][B][C][F][v]   menu: D E G
+//! widen to full fit     [A][B][C][D][E][F][G]
+//! ```
 //!
 //! ## Accessibility
 //!
-//! `Role::RadioGroup` on the control, `Role::RadioButton` per segment.
-//! Arrow keys cycle selection, skipping disabled segments; the entire
-//! control is a single tab stop. `Increment`/`Decrement` AT actions
-//! mirror arrow-key behavior for switch-access users.
+//! `Role::RadioGroup` on the control with `active_descendant` pointing at
+//! the selected segment; `Role::RadioButton` per segment, carrying
+//! "N of M" over the whole segment list — including segments currently in
+//! the overflow menu, which are still reachable. Arrow keys cycle
+//! selection (RTL-aware, resolved at event time) and Home/End jump to the
+//! ends, both skipping disabled segments; stepping onto an overflowed
+//! segment promotes it into view. `Increment`/`Decrement` AT actions
+//! mirror the arrows.
 //!
-//! ```ignore
-//! SegmentedControl::new(selected)
-//!     .segment(Segment::new(tr!(list_view())).icon(|| IconWidget::list(14.0)))
-//!     .segment(Segment::new(tr!(grid_view())).icon(|| IconWidget::grid(14.0)).tooltip(tr!(grid_hint())))
-//!     .segment(Segment::new(tr!(columns())).disabled(true))
-//! ```
+//! The strip is **one** tab stop. While the control is overflowing the
+//! chevron adds a second, because an overflow menu that no keyboard can
+//! reach is not an overflow menu; it cannot join the arrow sequence,
+//! since here arrows move *selection* rather than a roving focus.
 
+mod cell;
+mod id;
+mod overflow;
+
+#[cfg(test)]
+mod tests;
+
+use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
 use std::rc::Rc;
 
 use teksilo_canvas::{Point, Rect, Size, SizeProposal};
@@ -42,63 +90,152 @@ use teksilo_core::build_context::BuildContext;
 use teksilo_core::event::{EventResponse, Key, WidgetEvent};
 use teksilo_core::focus::FocusOrigin;
 use teksilo_core::signal::{Prop, Signal};
-use teksilo_core::styles::{SegmentedControlStyleConfig, SharedSegmentedControlStyle};
-use teksilo_core::widget::{CursorIcon, LayoutContext, LayoutResponse, Widget, WidgetPlacement};
-use teksilo_core::widget_builder::{HandlerSet, WidgetBuilder};
+use teksilo_core::styles::{
+    SegmentSlotGeometry, SegmentSlots, SegmentedControlStyleConfig, SharedSegmentedControlStyle,
+};
+use teksilo_core::widget::{
+    CursorIcon, EventContext, LayoutContext, LayoutResponse, Widget, WidgetPlacement,
+};
+use teksilo_core::widget_builder::HandlerSet;
 use teksilo_core::widget_id::WidgetId;
 use teksilo_i18n::LocalizedString;
-use teksilo_tokens::{TextRole, TextStyleRole};
 
-use crate::primitives::{HStack, IconWidget, TextWidget};
+use crate::primitives::IconWidget;
 use crate::styles::recipe_segmented_control_style::{
     SEGMENTED_CONTROL_BORDER_WIDTH, SEGMENTED_CONTROL_HEIGHT, SEGMENTED_CONTROL_PADDING_HORIZONTAL,
     SEGMENTED_CONTROL_PADDING_VERTICAL,
 };
+use cell::SegmentCell;
+use overflow::Plan;
 
-/// Fallback character width when no text backend is available.
-const FALLBACK_CHAR_WIDTH: f32 = 8.0;
+pub use id::SegmentId;
+
+/// Fallback line height when no text backend is available.
 const FALLBACK_LINE_HEIGHT: f32 = 16.0;
 /// Gap between a segment's icon and its label.
-const SEGMENT_ICON_LABEL_SPACING: f32 = 6.0;
-/// Rough icon-plus-gap allowance used only for intrinsic-width estimation.
-const SEGMENT_ICON_WIDTH_ESTIMATE: f32 = 18.0;
+pub(crate) const SEGMENT_ICON_LABEL_SPACING: f32 = 6.0;
+/// Size of the overflow chevron glyph.
+const OVERFLOW_ICON_SIZE: f32 = 12.0;
 
 /// Factory that builds a segment's leading icon. `Rc` (not `Box`) so a
 /// `Segment` descriptor can be cloned into a fresh cell on every rebuild
 /// without consuming it.
-type IconFactory = Rc<dyn Fn() -> IconWidget>;
+pub(crate) type IconFactory = Rc<dyn Fn() -> IconWidget>;
 
-/// One segment descriptor: a localized label with an optional leading
-/// icon, hover tooltip, and disabled flag.
+/// What a segment paints: its icon, its label, or both.
+///
+/// Set on the control with
+/// [`SegmentedControl::display`](super::SegmentedControl::display); it
+/// applies to every segment. Mirrors `TabWidget`'s `TabDisplayMode`.
+///
+/// Icon-only is the classic compact fallback *before* overflow kicks in:
+/// a bar of icon-only segments fits far more of them, so switching to
+/// [`Icon`](SegmentDisplay::Icon) can be the difference between a
+/// complete strip and a chevron menu.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SegmentDisplay {
+    /// Paint whatever the segment declares — icon *and* label when both
+    /// are present, label alone otherwise. The default, and the
+    /// behaviour of every `SegmentedControl` before this mode existed.
+    #[default]
+    Auto,
+    /// Label only. A declared icon is suppressed.
+    Text,
+    /// Icon only; the label is promoted to the hover tooltip (unless the
+    /// segment already declares one). A segment with **no** icon falls
+    /// back to its label, so the mode is never a silent no-op.
+    Icon,
+    /// Icon and label. Identical to [`Auto`](SegmentDisplay::Auto) for a
+    /// segment that declares both; kept for parity with
+    /// `TabDisplayMode` so a caller can be explicit.
+    IconText,
+}
+
+/// How the visible segments divide the control's width.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SegmentSizing {
+    /// Every visible segment gets the same width — the Apple / IntUI
+    /// look, and the behaviour of every `SegmentedControl` before this
+    /// knob existed. The fit calculation uses the *widest* segment's
+    /// natural width as the unit, so segments never look ragged.
+    #[default]
+    Uniform,
+    /// Every visible segment gets its own natural width, and leftover
+    /// space (when the control fills a wider slot) is shared equally.
+    /// Fits more short segments before overflowing, at the cost of an
+    /// uneven strip.
+    Fit,
+}
+
+/// What the control does when its segments do not fit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SegmentOverflow {
+    /// Move the segments that do not fit into a trailing chevron menu,
+    /// keeping the rest at a legible width. The selected segment is
+    /// always among the visible ones. This is the default.
+    #[default]
+    Menu,
+    /// Keep every segment on the strip and let them compress, truncating
+    /// labels with an ellipsis. The behaviour of every
+    /// `SegmentedControl` before overflow existed — appropriate for two
+    /// or three short segments that will never realistically overflow.
+    Compress,
+}
+
+/// One segment descriptor: a localized label with a stable
+/// [`SegmentId`], an optional leading icon, a hover tooltip, and
+/// reactive disabled / visible flags.
 #[derive(Clone)]
 pub struct Segment {
-    label: LocalizedString,
-    icon: Option<IconFactory>,
+    pub(crate) id: SegmentId,
+    pub(crate) label: LocalizedString,
+    pub(crate) icon: Option<IconFactory>,
     /// Plain-text hover tooltip — mutually exclusive with
     /// `rich_tooltip_source` and `composite_tooltip_factory`.
-    tooltip: Option<LocalizedString>,
+    pub(crate) tooltip: Option<LocalizedString>,
     /// Rich-tooltip source — mutually exclusive with `tooltip` and
     /// `composite_tooltip_factory`. `RichTooltipSource` is `Clone`.
-    rich_tooltip_source: Option<crate::tooltip::RichTooltipSource>,
+    pub(crate) rich_tooltip_source: Option<crate::tooltip::RichTooltipSource>,
     /// Composite-tooltip factory — mutually exclusive with `tooltip` and
     /// `rich_tooltip_source`. Stored as an `Rc<dyn Fn>` (not `Box<dyn
     /// Widget>`) so the `Segment: Clone` derive stays intact.
-    composite_tooltip_factory: Option<Rc<dyn Fn() -> Box<dyn Widget>>>,
-    disabled: bool,
+    pub(crate) composite_tooltip_factory: Option<Rc<dyn Fn() -> Box<dyn Widget>>>,
+    pub(crate) disabled: Prop<bool>,
+    pub(crate) visible: Prop<bool>,
 }
 
 impl Segment {
-    /// A text segment. The label may come from `tr!(...)` (translated —
-    /// follows a live locale switch) or `lit!(...)` (untranslated).
+    /// A text segment with a freshly allocated [`SegmentId`]. The label
+    /// may come from `tr!(...)` (translated — follows a live locale
+    /// switch) or `lit!(...)` (untranslated).
+    ///
+    /// Call [`id`](Self::id) when the segment needs a *stable* identity —
+    /// one that survives a restart, or that another crate can name.
     pub fn new(label: impl Into<LocalizedString>) -> Self {
         Self {
+            id: SegmentId::fresh(),
             label: label.into(),
             icon: None,
             tooltip: None,
             rich_tooltip_source: None,
             composite_tooltip_factory: None,
-            disabled: false,
+            disabled: Prop::Static(false),
+            visible: Prop::Static(true),
         }
+    }
+
+    /// Give this segment an app-chosen stable identity, replacing the
+    /// fresh id [`new`](Self::new) allocated. Use this whenever the
+    /// selection is persisted or the segment is contributed by another
+    /// crate.
+    pub fn id(mut self, id: SegmentId) -> Self {
+        self.id = id;
+        self
+    }
+
+    /// This segment's identity.
+    pub fn segment_id(&self) -> SegmentId {
+        self.id
     }
 
     /// Add a leading icon. The factory is invoked at build time (and on
@@ -165,8 +302,26 @@ impl Segment {
 
     /// Disable this segment: not selectable via click or keyboard,
     /// dimmed, and announced disabled to assistive tech.
-    pub fn disabled(mut self, disabled: bool) -> Self {
-        self.disabled = disabled;
+    ///
+    /// Accepts a `bool` or a `Signal<bool>` — a bound signal flips the
+    /// segment live, with **no rebuild**, and keyboard stepping honours
+    /// the new value immediately (the flags are read at event time, not
+    /// snapshotted at build time).
+    pub fn disabled(mut self, disabled: impl Into<Prop<bool>>) -> Self {
+        self.disabled = disabled.into();
+        self
+    }
+
+    /// Hide this segment entirely: it leaves the strip, the overflow
+    /// menu, the keyboard order, and the accessibility tree, and it is
+    /// excluded from the overflow calculation.
+    ///
+    /// Distinct from *overflowed* — an overflowed segment is still
+    /// reachable from the chevron menu, a hidden one is not there at all.
+    /// Accepts a `bool` or a `Signal<bool>`; a bound signal re-runs the
+    /// overflow plan with no rebuild.
+    pub fn visible(mut self, visible: impl Into<Prop<bool>>) -> Self {
+        self.visible = visible.into();
         self
     }
 }
@@ -182,203 +337,38 @@ impl From<LocalizedString> for Segment {
 impl std::fmt::Debug for Segment {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Segment")
+            .field("id", &self.id)
             .field("label", &self.label)
             .field("has_icon", &self.icon.is_some())
-            .field("disabled", &self.disabled)
+            .field("disabled", &self.disabled.get())
+            .field("visible", &self.visible.get())
             .finish()
     }
 }
 
-/// Internal composed widget for one segment: a centered icon + label
-/// with reactive tint, owning the per-segment click / hover / tooltip /
-/// a11y. Paints no chrome — the SegmentedControl's style leaf paints the
-/// frame + selection / hover background + focus ring behind these cells.
-struct SegmentCell {
-    label: LocalizedString,
-    icon: Option<IconFactory>,
-    tooltip: Option<LocalizedString>,
-    rich_tooltip_source: Option<crate::tooltip::RichTooltipSource>,
-    composite_tooltip_factory: Option<Rc<dyn Fn() -> Box<dyn Widget>>>,
-    label_style: Option<teksilo_core::color_prop::TextStyleProp>,
-    seg_disabled: bool,
-    index: usize,
-    selected: Signal<usize>,
-    hovered_segment: Signal<Option<usize>>,
-    focus_origin: Signal<Option<FocusOrigin>>,
-    content_id: Option<WidgetId>,
+/// Derive a `Switcher`-compatible index from a keyed selection.
+///
+/// `SegmentedControl` is keyed precisely so that a contributed segment
+/// cannot silently re-point the selection, but `Switcher` is index-driven
+/// — this is the adapter between the two. Unknown or absent ids resolve
+/// to `0`, matching `Switcher`'s own out-of-range behaviour.
+///
+/// ```ignore
+/// Switcher::new(segmented_control::index_signal(&view, &[LIST, GRID, COLUMNS]))
+///     .child(list_pane)
+///     .child(grid_pane)
+///     .child(columns_pane)
+/// ```
+pub fn index_signal(selected: &Signal<Option<SegmentId>>, ids: &[SegmentId]) -> Signal<usize> {
+    let ids: Rc<Vec<SegmentId>> = Rc::new(ids.to_vec());
+    selected.map(move |current| {
+        current
+            .and_then(|id| ids.iter().position(|&candidate| candidate == id))
+            .unwrap_or(0)
+    })
 }
 
-impl std::fmt::Debug for SegmentCell {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("SegmentCell")
-            .field("index", &self.index)
-            .field("disabled", &self.seg_disabled)
-            .finish()
-    }
-}
-
-impl Widget for SegmentCell {
-    fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        let self_id = ctx.self_id();
-        // Statically-disabled segments are disabled in the arena: clicks
-        // and hovers are gated and the AT node is announced disabled
-        // automatically by the framework walker.
-        if self.seg_disabled {
-            ctx.enabled_when(self_id, false);
-        }
-        let enabled = ctx.effective_enabled_signal(self_id);
-
-        // Label / icon tint follows (selected, focus, enabled):
-        //   !enabled            -> Disabled
-        //   selected + focused  -> OnAccent (the chrome fills it accent)
-        //   otherwise           -> Primary
-        // `Signal<TextRole>` resolves against the live theme at paint, so
-        // this is theme-reactive too.
-        let idx = self.index;
-        let color = self
-            .selected
-            .zip3(&self.focus_origin, &enabled)
-            .map(move |(sel, foc, en)| {
-                if !*en {
-                    TextRole::Disabled
-                } else if *sel == idx && foc.is_some() {
-                    TextRole::OnAccent
-                } else {
-                    TextRole::Primary
-                }
-            });
-
-        // Borrow (don't consume) the icon factory / tooltip so the cell
-        // stays rebuild-safe.
-        let mut row = HStack::new().spacing(SEGMENT_ICON_LABEL_SPACING);
-        if let Some(icon_factory) = &self.icon {
-            row = row.child(icon_factory().color(color.clone()));
-        }
-        let label_widget = match &self.label_style {
-            Some(style) => TextWidget::new(self.label.clone()).style(style.clone()),
-            None => TextWidget::new(self.label.clone()).style(TextStyleRole::Small),
-        };
-        row = row.child(label_widget.color(color).single_line());
-
-        // The cell node owns the AT RadioButton + name; exclude the inner
-        // content subtree so a screen reader doesn't double-announce the
-        // label (an `access_hidden` flag alone would not prune the
-        // descendant `TextWidget`/icon nodes).
-        //
-        // The row is added *directly* (not wrapped in a `Center`): this cell's
-        // `place_children` measures it at the cell's bounded width and centres
-        // the result, so a `single_line` label truncates with an ellipsis to
-        // fit a narrow cell. A `Center` here would measure the row with an
-        // *unbounded* width — the label would then never see a `max_width`, so
-        // it could not ellipsize and would spill a few px past the (correctly
-        // sized) control whenever the segments are compressed below their
-        // label width.
-        let content_id = ctx.add(row.access_exclude_subtree());
-        self.content_id = Some(content_id);
-
-        // Optional hover tooltip (icon-only segments especially).
-        // Composite > rich > plain, mutually exclusive — last setter wins.
-        if let Some(factory) = &self.composite_tooltip_factory {
-            let content = factory();
-            let delay = ctx.theme().motion.tooltip_delay_heavy;
-            crate::tooltip::attach_composite_tooltip_boxed(ctx, self_id, content, delay);
-        } else if let Some(source) = self.rich_tooltip_source.clone() {
-            let delay = ctx.theme().motion.tooltip_delay;
-            crate::tooltip::attach_rich_tooltip_source(ctx, self_id, source, delay);
-        } else if let Some(tt) = &self.tooltip {
-            let tip = ctx.add(crate::tooltip::TooltipWidget::new(tt.clone()));
-            let delay = ctx.theme().motion.tooltip_delay;
-            ctx.attach_tooltip(self_id, tip, delay);
-        }
-
-        // Click selects (arena gates disabled cells, so no per-cell guard
-        // needed); hover drives the chrome's hover tint. Focus stays on
-        // the parent SegmentedControl (single tab stop).
-        let selected = self.selected.clone();
-        let hovered = self.hovered_segment.clone();
-        let handlers = HandlerSet::new()
-            .cursor(CursorIcon::Pointer)
-            .focusable(false)
-            .on_tap({
-                let selected = selected.clone();
-                move |_pos, _ctx| {
-                    selected.set(idx);
-                }
-            })
-            // The cell advertises `Action::Click` in `accessibility`; the
-            // framework routes an AT / automation click here rather than
-            // synthesizing a pointer tap, so the selection must be driven
-            // explicitly (same shape as Button / Checkbox / RadioButton).
-            .on_access_action(move |action, _ctx| {
-                if action == teksilo_core::accesskit::Action::Click {
-                    selected.set(idx);
-                    EventResponse::Handled
-                } else {
-                    EventResponse::Ignored
-                }
-            })
-            .on_hover(move |entered, _ctx| {
-                if entered {
-                    hovered.set(Some(idx));
-                } else if hovered.get() == Some(idx) {
-                    hovered.set(None);
-                }
-            });
-        ctx.apply_self_handlers(handlers);
-
-        vec![content_id]
-    }
-
-    fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> LayoutResponse {
-        // The parent SegmentedControl assigns exact bounds in
-        // `place_children`; just claim the proposed envelope.
-        Size::new(
-            proposal.width.unwrap_or(0.0),
-            proposal.height.unwrap_or(0.0),
-        )
-        .into()
-    }
-
-    fn place_children(
-        &self,
-        bounds: Rect,
-        _proposal: SizeProposal,
-        children: &mut [WidgetPlacement],
-        ctx: &LayoutContext,
-    ) {
-        if let Some(c) = children.first_mut() {
-            // Measure the label row at the cell's *bounded* width so a
-            // `single_line` label ellipsizes to fit the cell instead of
-            // overflowing it, then centre the hugged result in both axes.
-            // (A `Center` wrapper would measure the row unbounded and let a
-            // too-long label spill past the control — see `build`.)
-            let inner = ctx
-                .child_size(c.id, SizeProposal::with_width(bounds.width))
-                .unwrap_or_else(|| bounds.size());
-            let w = inner.width.min(bounds.width);
-            let h = inner.height.min(bounds.height);
-            c.origin = Point::new(
-                bounds.x + ((bounds.width - w) / 2.0).max(0.0),
-                bounds.y + ((bounds.height - h) / 2.0).max(0.0),
-            );
-            c.size = Size::new(w, h);
-        }
-    }
-
-    fn accessibility(&self, builder: &mut AccessNodeBuilder) {
-        builder.set_role(teksilo_core::accesskit::Role::RadioButton);
-        builder.set_name(self.label.resolve_now());
-        builder.set_selected(self.selected.get() == self.index);
-        // Framework a11y walker sets `set_disabled` from arena state.
-        builder.add_action(teksilo_core::accesskit::Action::Click);
-    }
-
-    fn children(&self) -> Vec<WidgetId> {
-        self.content_id.into_iter().collect()
-    }
-}
-
-/// A segmented control that binds a `Signal<usize>` index to a row of
+/// A segmented control binding a `Signal<Option<SegmentId>>` to a row of
 /// mutually exclusive segments. Build the segment list with
 /// [`segment`](Self::segment) or [`segments`](Self::segments).
 pub struct SegmentedControl {
@@ -386,10 +376,27 @@ pub struct SegmentedControl {
     /// each build) so the control is rebuild-safe and so `layout_response`
     /// / `accessibility` can read labels even when measured while dormant.
     segments: Vec<Segment>,
-    selected: Signal<usize>,
+    /// The public, keyed selection.
+    selected: Signal<Option<SegmentId>>,
+    /// Optional positional mirror installed by [`indexed`](Self::indexed).
+    /// Addresses the **declared** list, so hiding a segment does not
+    /// renumber it under the app's feet.
+    index_mirror: Option<Signal<usize>>,
+    /// Private index mirror over the **live** segment list, kept in
+    /// bidirectional sync with `selected` at build time.
+    ///
+    /// Every internal interactive path — cell taps, AT clicks, arrow
+    /// keys, overflow-menu rows — writes *only* this. `selected` is
+    /// written only by the app and by the index→id effect. A second
+    /// direct writer of `selected` reintroduces the two-writer race the
+    /// `TabBar` bridge exists to avoid.
+    index: Signal<usize>,
     /// Enabled state, static or reactive; forwarded to the arena at
     /// build time.
     enabled: Prop<bool>,
+    /// Accessible name for the group.
+    label: Option<LocalizedString>,
+    /// Live segment index under the pointer, if any.
     hovered_segment: Signal<Option<usize>>,
     /// Raw keyboard/pointer focus (any modality). The keyboard-only focus
     /// ring and the focus-driven selected-segment accent fill are derived
@@ -403,29 +410,109 @@ pub struct SegmentedControl {
     /// stays state-driven (selected → `OnAccent`, disabled → `Disabled`)
     /// and is intentionally not overridable.
     label_style: Option<teksilo_core::color_prop::TextStyleProp>,
-    /// Build-time children — chrome first (back), then one
-    /// `SegmentCell` per segment.
+    display: SegmentDisplay,
+    sizing: SegmentSizing,
+    overflow_mode: SegmentOverflow,
+    fill_width: bool,
+    on_change: Option<Rc<dyn Fn(SegmentId, &mut EventContext)>>,
+
+    // ── Build-time state ────────────────────────────────────────────
+    /// Declaration indices of the segments whose `visible` prop is true,
+    /// resolved once per build.
+    live: Vec<usize>,
+    /// Ids of the live segments, parallel to `live`.
+    live_ids: Vec<SegmentId>,
+    /// One cell per live segment, parallel to `live`.
+    cell_ids: Vec<WidgetId>,
+    /// Currently-active cell ids, for `push_to_radio_group`. Shared with
+    /// the cells and refreshed from `place_children`.
+    group_ids: Rc<RefCell<Vec<WidgetId>>>,
+    /// Per-live-segment overflow flags, published from `place_children`.
+    /// Seeded all-false at build time: the framework polls every
+    /// `visible_when` prop on the *first* pass, before any plan exists.
+    overflowed: Signal<Vec<bool>>,
+    is_overflowing: Signal<bool>,
+    /// Resolved slot geometry handed to the chrome.
+    slots: SegmentSlots,
+    /// Sticky promotion: the segment forced into the last slot. Plain
+    /// `Cell` (not a `Signal`) so mutating it from `place_children`
+    /// dirties nothing.
+    promoted: Cell<Option<SegmentId>>,
+    /// Equality guard for the published plan — without it every layout
+    /// pass would re-dirty the visibility props and the tree would never
+    /// go quiet.
+    last_plan: RefCell<Plan>,
+    chrome_id: Option<WidgetId>,
+    chevron_id: Option<WidgetId>,
+    /// Build-time children — chrome first (back), then one `SegmentCell`
+    /// per live segment, then the overflow trigger.
     children: Vec<WidgetId>,
 }
 
 impl SegmentedControl {
     /// Create an empty segmented control bound to `selected`. Add segments
     /// with [`segment`](Self::segment) or [`segments`](Self::segments).
-    pub fn new(selected: Signal<usize>) -> Self {
+    pub fn new(selected: Signal<Option<SegmentId>>) -> Self {
         Self {
             segments: Vec::new(),
             selected,
+            index_mirror: None,
+            index: Signal::new(0),
             enabled: Prop::Static(true),
+            label: None,
             hovered_segment: Signal::new(None),
             focused: Signal::new(false),
             style_override: None,
             label_style: None,
+            display: SegmentDisplay::default(),
+            sizing: SegmentSizing::default(),
+            overflow_mode: SegmentOverflow::default(),
+            fill_width: true,
+            on_change: None,
+            live: Vec::new(),
+            live_ids: Vec::new(),
+            cell_ids: Vec::new(),
+            group_ids: Rc::new(RefCell::new(Vec::new())),
+            overflowed: Signal::new(Vec::new()),
+            is_overflowing: Signal::new(false),
+            slots: SegmentSlots::new(),
+            promoted: Cell::new(None),
+            last_plan: RefCell::new(Plan::default()),
+            chrome_id: None,
+            chevron_id: None,
             children: Vec::new(),
         }
     }
 
+    /// Bind a **positional** `Signal<usize>` instead of a keyed
+    /// selection, mirrored in both directions.
+    ///
+    /// Use this only when position *is* the meaning and the segment list
+    /// is closed and local — an enum discriminant over a fixed `ALL`
+    /// array, a `Switcher` index, a settings choice. For anything else
+    /// prefer [`new`](Self::new): an index silently stops meaning the
+    /// same thing the moment a segment is inserted ahead of it, which is
+    /// the entire reason selection is keyed. A persisted selection, or
+    /// segments contributed by another crate, are both firmly in
+    /// "anything else".
+    ///
+    /// Positions address the **declared** list, so a segment hidden with
+    /// [`Segment::visible`] does not renumber the others.
+    ///
+    /// ```ignore
+    /// // `bucket_idx` already drives the rollup maths and a Switcher.
+    /// SegmentedControl::indexed(bucket_idx.clone())
+    ///     .segments([lit!("×2"), lit!("×4"), lit!("×8")])
+    /// ```
+    pub fn indexed(index: Signal<usize>) -> Self {
+        let mut control = Self::new(Signal::new(None));
+        control.index_mirror = Some(index);
+        control
+    }
+
     /// Append one segment. Accepts a [`Segment`] or, via
-    /// `From<LocalizedString>`, a bare `tr!(...)` / `lit!(...)` label.
+    /// `From<LocalizedString>`, a bare `tr!(...)` / `lit!(...)` label
+    /// (which gets a freshly allocated [`SegmentId`]).
     pub fn segment(mut self, segment: impl Into<Segment>) -> Self {
         self.segments.push(segment.into());
         self
@@ -433,10 +520,16 @@ impl SegmentedControl {
 
     /// Append several segments. Label-only:
     /// `.segments([tr!(day()), tr!(week())])`; rich:
-    /// `.segments([Segment::new(...).icon(...), ...])`.
+    /// `.segments([Segment::new(...).id(DAY).icon(...), ...])`.
     pub fn segments(mut self, segments: impl IntoIterator<Item = impl Into<Segment>>) -> Self {
         self.segments.extend(segments.into_iter().map(Into::into));
         self
+    }
+
+    /// The ids of the segments added so far, in declaration order.
+    /// Convenient for feeding [`index_signal`] without repeating the list.
+    pub fn segment_ids(&self) -> Vec<SegmentId> {
+        self.segments.iter().map(|s| s.id).collect()
     }
 
     /// Set the enabled state, statically or reactively. Forwarded to
@@ -444,6 +537,28 @@ impl SegmentedControl {
     /// `ctx.enabled_when(segmented_control_id, self.enabled.clone())`.
     pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self {
         self.enabled = enabled.into();
+        self
+    }
+
+    /// Accessible name for the group — e.g. "View mode". Screen readers
+    /// announce it before the selected segment. Matches
+    /// [`RadioGroup::label`](crate::radio_group::RadioGroup::label) and
+    /// [`RadioTileGroup::label`](crate::radio_tile_group::RadioTileGroup::label).
+    pub fn label(mut self, label: impl Into<LocalizedString>) -> Self {
+        self.label = Some(label.into());
+        self
+    }
+
+    /// Called whenever the user changes the selection — by click, arrow
+    /// key, assistive technology, or the overflow menu. Receives the
+    /// newly selected [`SegmentId`] and an `EventContext`, so it can do
+    /// things a bare `Signal` write cannot (`ctx.set_locale(...)`,
+    /// `ctx.send_intent(...)`, opening a window).
+    ///
+    /// Does **not** fire for programmatic writes to the bound signal —
+    /// there is no event in flight to carry. Observe the signal for that.
+    pub fn on_change(mut self, f: impl Fn(SegmentId, &mut EventContext) + 'static) -> Self {
+        self.on_change = Some(Rc::new(f));
         self
     }
 
@@ -462,33 +577,52 @@ impl SegmentedControl {
         self
     }
 
-    /// Estimate the intrinsic width of all segments — used in
-    /// `layout_response` when no width is proposed.
-    fn estimate_width(&self) -> f32 {
-        let n = self.segments.len();
-        if n == 0 {
-            return 0.0;
-        }
-        let max_content = self
-            .segments
-            .iter()
-            .map(|s| {
-                let label_w = s.label.resolve_now().chars().count() as f32 * FALLBACK_CHAR_WIDTH;
-                let icon_w = if s.icon.is_some() {
-                    SEGMENT_ICON_WIDTH_ESTIMATE + SEGMENT_ICON_LABEL_SPACING
-                } else {
-                    0.0
-                };
-                label_w + icon_w
-            })
-            .fold(0.0_f32, f32::max);
-        (max_content + SEGMENTED_CONTROL_PADDING_HORIZONTAL * 2.0) * n as f32
+    /// What each segment paints: its icon, its label, or both. See
+    /// [`SegmentDisplay`]. Icon-only fits far more segments, so it is
+    /// worth reaching for *before* the control starts overflowing.
+    pub fn display(mut self, display: SegmentDisplay) -> Self {
+        self.display = display;
+        self
+    }
+
+    /// How the visible segments divide the width. See [`SegmentSizing`].
+    pub fn sizing(mut self, sizing: SegmentSizing) -> Self {
+        self.sizing = sizing;
+        self
+    }
+
+    /// What to do when the segments do not fit. See [`SegmentOverflow`].
+    pub fn overflow(mut self, mode: SegmentOverflow) -> Self {
+        self.overflow_mode = mode;
+        self
+    }
+
+    /// Reactive "some segments are in the overflow menu right now".
+    ///
+    /// Republished from `place_children` behind an equality guard, so it
+    /// is safe for `RepaintOnly` / `AccessibilityOnly` consumers and for
+    /// `Relayout` consumers that do not feed back into this control's own
+    /// width. Mirrors [`Toolbar::is_overflowing`](crate::toolbar::Toolbar::is_overflowing).
+    pub fn is_overflowing(&self) -> Signal<bool> {
+        self.is_overflowing.clone()
+    }
+
+    /// Whether the control claims all the width offered to it (the
+    /// default, and the behaviour before this knob existed) or hugs its
+    /// segments.
+    ///
+    /// `false` also makes the control *shrinkable*: in an over-constrained
+    /// stack it compresses — and overflows — instead of spilling past its
+    /// bounds.
+    pub fn fill_width(mut self, fill: bool) -> Self {
+        self.fill_width = fill;
+        self
     }
 
     /// Inset-by-focus-ring-envelope bounds — the actual frame /
     /// segment-grid area. Mirrors the recipe's compute_visual so
     /// children land where the chrome paints.
-    fn compute_visual(&self, bounds: Rect, theme: &teksilo_core::Theme) -> Rect {
+    fn compute_visual(bounds: Rect, theme: &teksilo_core::Theme) -> Rect {
         let envelope = theme.shape.focus_ring_offset + theme.shape.focus_ring_width;
         Rect::new(
             bounds.x + envelope,
@@ -498,10 +632,102 @@ impl SegmentedControl {
         )
     }
 
-    /// Next selectable index in `dir` (true = forward), wrapping and
-    /// skipping disabled segments. Returns `current` if no other
-    /// segment is enabled.
-    fn step_selection(current: usize, forward: bool, disabled: &[bool]) -> usize {
+    /// The grid area inside the frame's stroke.
+    fn compute_inner(visual: Rect) -> Rect {
+        let bw = SEGMENTED_CONTROL_BORDER_WIDTH;
+        Rect::new(
+            visual.x + bw,
+            visual.y + bw,
+            (visual.width - bw * 2.0).max(0.0),
+            (visual.height - bw * 2.0).max(0.0),
+        )
+    }
+
+    /// Measure every live cell's intrinsic width, plus the chevron's.
+    ///
+    /// Uses [`LayoutContext::measure_intrinsic`], which measures even
+    /// **dormant** widgets — the segments that overflowed into the menu
+    /// still have to report a width, or the control could never work out
+    /// when they fit again.
+    fn measure(&self, ctx: &LayoutContext) -> (Vec<f32>, f32, f32) {
+        let probe = SizeProposal::unspecified();
+        let mut widths = Vec::with_capacity(self.cell_ids.len());
+        let mut tallest = 0.0_f32;
+        for &id in &self.cell_ids {
+            let size = ctx
+                .measure_intrinsic(id, probe)
+                .unwrap_or(Size::new(0.0, 0.0));
+            widths.push(size.width);
+            tallest = tallest.max(size.height);
+        }
+        let chevron = self
+            .chevron_id
+            .and_then(|id| ctx.measure_intrinsic(id, probe))
+            .map(|s| s.width)
+            .unwrap_or(0.0);
+        (widths, chevron, tallest)
+    }
+
+    /// Run the overflow plan for `inner_width`, applying and maintaining
+    /// the sticky promotion.
+    ///
+    /// Pure apart from `promoted`: the two `plan` calls share one
+    /// measurement pass, and the second only happens when the selection
+    /// would otherwise have been hidden.
+    fn resolve_plan(&self, inner_width: f32, natural: &[f32], chevron: f32) -> Plan {
+        let compress = self.overflow_mode == SegmentOverflow::Compress;
+        let live_count = natural.len();
+        if live_count == 0 {
+            return Plan::default();
+        }
+        let promoted_index = self
+            .promoted
+            .get()
+            .and_then(|id| self.live_ids.iter().position(|&candidate| candidate == id));
+
+        let mut plan = overflow::plan(
+            inner_width,
+            natural,
+            promoted_index,
+            chevron,
+            self.sizing,
+            compress,
+        );
+
+        // The invariant: the selected segment is always on the strip. If
+        // the plan hid it, promote it and re-plan — once; the re-planned
+        // `must` is by construction satisfiable, because `plan` keeps at
+        // least the forced segment.
+        let selected = self.index.get().min(live_count - 1);
+        if !plan.is_visible(selected) {
+            self.promoted.set(Some(self.live_ids[selected]));
+            plan = overflow::plan(
+                inner_width,
+                natural,
+                Some(selected),
+                chevron,
+                self.sizing,
+                compress,
+            );
+        }
+
+        // Forget the promotion once everything fits, so a later, unrelated
+        // narrowing starts from clean declaration order rather than
+        // resurrecting a pick the user made minutes ago.
+        if !plan.show_chevron {
+            self.promoted.set(None);
+        }
+        plan
+    }
+
+    /// Next selectable live index in `dir` (true = forward), wrapping and
+    /// skipping disabled segments. Returns `current` if no other segment
+    /// is enabled.
+    ///
+    /// Reads the disabled flags **live** — they are `Prop<bool>`s that an
+    /// app may flip through a bound signal with no rebuild, so a snapshot
+    /// taken at build time would go stale.
+    fn step_selection(current: usize, forward: bool, disabled: &[Prop<bool>]) -> usize {
         let n = disabled.len();
         if n == 0 {
             return current;
@@ -513,11 +739,25 @@ impl SegmentedControl {
             } else {
                 (i + n - 1) % n
             };
-            if !disabled[i] {
+            if !disabled[i].get() {
                 return i;
             }
         }
         current
+    }
+
+    /// First / last enabled live index, for Home / End.
+    fn edge_selection(current: usize, last: bool, disabled: &[Prop<bool>]) -> usize {
+        let n = disabled.len();
+        if n == 0 {
+            return current;
+        }
+        let found = if last {
+            (0..n).rev().find(|i| !disabled[*i].get())
+        } else {
+            (0..n).find(|i| !disabled[*i].get())
+        };
+        found.unwrap_or(current)
     }
 }
 
@@ -525,29 +765,179 @@ impl std::fmt::Debug for SegmentedControl {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("SegmentedControl")
             .field("segments", &self.segments.len())
+            .field("live", &self.live.len())
+            .field("selected", &self.selected.get())
             .field("enabled", &self.enabled.get())
             .finish()
     }
 }
 
 impl Widget for SegmentedControl {
-    fn build(
-        &mut self,
-        ctx: &mut teksilo_core::build_context::BuildContext,
-    ) -> Vec<teksilo_core::widget_id::WidgetId> {
+    fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let self_id = ctx.self_id();
         // Forward the enabled state to the arena; see IconButton.
         ctx.enabled_when(self_id, self.enabled.clone());
         let effective_enabled = ctx.effective_enabled_signal(self_id);
 
-        let registry = ctx.binding_registry();
-        self.selected.bind_to(
-            self_id,
-            registry,
-            teksilo_core::binding::BindingLevel::RepaintOnly,
-        );
+        // ── Live segment list ───────────────────────────────────────
+        //
+        // Hiding a segment is a *structural* change, not a resize: it
+        // renumbers the live list the index mirror addresses. Bind
+        // `visible` at `Rebuild` so the whole bridge is rebuilt
+        // consistently; the keyed selection survives it, which is
+        // precisely why the public signal is keyed.
+        {
+            let registry = ctx.binding_registry();
+            for segment in &self.segments {
+                segment.visible.register_if_bound(
+                    self_id,
+                    registry,
+                    teksilo_core::binding::BindingLevel::Rebuild,
+                );
+            }
+        }
+        self.live = (0..self.segments.len())
+            .filter(|&i| self.segments[i].visible.get())
+            .collect();
+        self.live_ids = self.live.iter().map(|&i| self.segments[i].id).collect();
+        let live_count = self.live.len();
 
-        let selected = self.selected.clone();
+        // ── Optional positional mirror (`indexed`) ──────────────────
+        //
+        // Seeded before the keyed sync below, so that sync sees an id it
+        // can resolve. Declared positions, not live ones. This is the one
+        // sanctioned second writer of `selected`; every hop is
+        // equality-guarded, so the cycle
+        // mirror → selected → index → selected settles in one round.
+        if let Some(mirror) = self.index_mirror.clone() {
+            let declared: Vec<SegmentId> = self.segments.iter().map(|s| s.id).collect();
+            let from_position = |position: usize| declared.get(position).copied();
+
+            if self.selected.get().is_none_or(|id| !declared.contains(&id)) {
+                self.selected.set(from_position(mirror.get()));
+            }
+
+            {
+                let declared = declared.clone();
+                let selected = self.selected.clone();
+                ctx.effect(&mirror, move |position| {
+                    let target = declared.get(*position).copied();
+                    if target.is_some() && selected.get() != target {
+                        selected.set(target);
+                    }
+                });
+            }
+            {
+                let declared = declared.clone();
+                let mirror = mirror.clone();
+                ctx.effect(&self.selected, move |maybe_id| {
+                    if let Some(id) = maybe_id
+                        && let Some(position) =
+                            declared.iter().position(|&candidate| candidate == *id)
+                        && mirror.get() != position
+                    {
+                        mirror.set(position);
+                    }
+                });
+            }
+        }
+
+        // ── id ↔ index bridge (the TabBar recipe) ───────────────────
+        //
+        // Both directions resolve against the *live* list rebuilt above.
+        // A build-time snapshot in one direction and a live lookup in the
+        // other is what makes the two effects disagree after a reorder and
+        // feed back unboundedly.
+        let id_to_index: HashMap<SegmentId, usize> = self
+            .live_ids
+            .iter()
+            .enumerate()
+            .map(|(i, &id)| (id, i))
+            .collect();
+
+        if live_count > 0 {
+            match self
+                .selected
+                .get()
+                .and_then(|id| id_to_index.get(&id).copied())
+            {
+                Some(target) => {
+                    if self.index.get() != target {
+                        self.index.set(target);
+                    }
+                }
+                None => {
+                    // Stale or absent id: keep the previous *position*
+                    // clamped into range and re-stamp the id that now
+                    // lives there — the "select the neighbour" convention.
+                    let clamped = self.index.get().min(live_count - 1);
+                    if self.index.get() != clamped {
+                        self.index.set(clamped);
+                    }
+                    let resolved = self.live_ids[clamped];
+                    if self.selected.get() != Some(resolved) {
+                        self.selected.set(Some(resolved));
+                    }
+                }
+            }
+        } else if self.selected.get().is_some() {
+            self.selected.set(None);
+        }
+
+        {
+            let map = id_to_index.clone();
+            let index = self.index.clone();
+            ctx.effect(&self.selected, move |maybe_id| {
+                if let Some(id) = maybe_id
+                    && let Some(&target) = map.get(id)
+                    && index.get() != target
+                {
+                    index.set(target);
+                }
+            });
+        }
+        {
+            let ids = self.live_ids.clone();
+            let selected = self.selected.clone();
+            ctx.effect(&self.index, move |i| {
+                let resolved = ids.get(*i).copied();
+                if selected.get() != resolved {
+                    selected.set(resolved);
+                }
+            });
+        }
+
+        // Selection drives three different kinds of work, on three nodes:
+        // the plan (this node, Relayout — promotion can change which
+        // segments are on the strip), the announced `active_descendant`
+        // (this node, AccessibilityOnly — a relayout no longer re-walks
+        // the AT tree), and the chrome's fill (the chrome node, its own
+        // RepaintOnly binding).
+        {
+            let registry = ctx.binding_registry();
+            self.index.bind_to(
+                self_id,
+                registry,
+                teksilo_core::binding::BindingLevel::Relayout,
+            );
+            self.index.bind_to(
+                self_id,
+                registry,
+                teksilo_core::binding::BindingLevel::AccessibilityOnly,
+            );
+        }
+
+        // Seed the overflow flags before anything can read them: the
+        // framework polls every `visible_when` prop on the first layout
+        // pass, which happens before this widget's `place_children` has
+        // ever run.
+        self.overflowed.set(vec![false; live_count]);
+        self.is_overflowing.set(false);
+        *self.last_plan.borrow_mut() = Plan::default();
+        self.slots.publish(SegmentSlotGeometry::default());
+        self.group_ids.borrow_mut().clear();
+
+        let index = self.index.clone();
         let hovered_segment = self.hovered_segment.clone();
         // `:focus-visible`: derive the keyboard/pointer origin live from the
         // input-modality signal (true after a key event, false after
@@ -566,9 +956,25 @@ impl Widget for SegmentedControl {
             }
         });
 
-        let n = self.segments.len();
-        let disabled_flags: Rc<Vec<bool>> =
-            Rc::new(self.segments.iter().map(|s| s.disabled).collect());
+        // One funnel for every internal selection write, so `on_change`
+        // fires exactly once per user-driven change and the index mirror
+        // stays the single write target.
+        let select: Rc<dyn Fn(usize, &mut EventContext)> = {
+            let index = index.clone();
+            let ids = self.live_ids.clone();
+            let on_change = self.on_change.clone();
+            Rc::new(move |target, ctx| {
+                if index.get() == target {
+                    return;
+                }
+                index.set(target);
+                if let Some(callback) = &on_change
+                    && let Some(id) = ids.get(target).copied()
+                {
+                    callback(id, ctx);
+                }
+            })
+        };
 
         // Build chrome leaf first (so it sits at index 0 in `children`
         // and paints behind the segment cells).
@@ -579,37 +985,71 @@ impl Widget for SegmentedControl {
             .unwrap_or_else(|| Rc::new(crate::styles::RecipeSegmentedControlStyle::default()));
         let chrome_id = style.make_body(
             &SegmentedControlStyleConfig {
-                segment_count: n,
-                selected: selected.clone(),
+                slots: self.slots.clone(),
+                selected: index.clone(),
                 hovered_segment: hovered_segment.clone(),
                 focus_origin: focus_origin.clone(),
                 is_enabled: effective_enabled.clone(),
             },
             ctx,
         );
+        self.chrome_id = Some(chrome_id);
 
-        // Build one composed `SegmentCell` per descriptor, grid-placed
-        // over the chrome. Descriptors are cloned (not drained) so a
-        // rebuild reproduces every cell. Each cell disables itself in the
-        // arena when its segment is disabled.
         self.children.clear();
         self.children.push(chrome_id);
-        for index in 0..n {
+        self.cell_ids.clear();
+
+        for (live_index, &segment_index) in self.live.iter().enumerate() {
+            let segment = &self.segments[segment_index];
             let id = ctx.add(SegmentCell {
-                label: self.segments[index].label.clone(),
-                icon: self.segments[index].icon.clone(),
-                tooltip: self.segments[index].tooltip.clone(),
-                rich_tooltip_source: self.segments[index].rich_tooltip_source.clone(),
-                composite_tooltip_factory: self.segments[index].composite_tooltip_factory.clone(),
+                label: segment.label.clone(),
+                icon: segment.icon.clone(),
+                tooltip: segment.tooltip.clone(),
+                rich_tooltip_source: segment.rich_tooltip_source.clone(),
+                composite_tooltip_factory: segment.composite_tooltip_factory.clone(),
                 label_style: self.label_style.clone(),
-                seg_disabled: self.segments[index].disabled,
-                index,
-                selected: selected.clone(),
+                display: self.display,
+                disabled: segment.disabled.clone(),
+                index: live_index,
+                live_count,
+                selected: index.clone(),
                 hovered_segment: hovered_segment.clone(),
                 focus_origin: focus_origin.clone(),
+                group_ids: self.group_ids.clone(),
+                select: select.clone(),
                 content_id: None,
             });
+            self.cell_ids.push(id);
             self.children.push(id);
+        }
+
+        // Gate each cell on "not overflowed". Fail open on a short flag
+        // vector so the very first poll — which happens before any plan
+        // exists — reads as visible rather than panicking.
+        for (live_index, &cell_id) in self.cell_ids.iter().enumerate() {
+            let flags = self.overflowed.clone();
+            let on_strip = flags.map(move |f| f.get(live_index).copied() != Some(true));
+            ctx.visible_when(cell_id, on_strip);
+        }
+
+        // Overflow trigger. Built unconditionally (so it can be measured
+        // while dormant) but only *shown* while something has overflowed,
+        // so it never reserves width it does not need.
+        if live_count > 0 && self.overflow_mode == SegmentOverflow::Menu {
+            let chevron_id = overflow::build_overflow_trigger(
+                ctx,
+                &self.segments,
+                &self.live,
+                &index,
+                &self.overflowed,
+                OVERFLOW_ICON_SIZE,
+                select.clone(),
+            );
+            ctx.visible_when(chevron_id, self.is_overflowing.clone());
+            self.chevron_id = Some(chevron_id);
+            self.children.push(chevron_id);
+        } else {
+            self.chevron_id = None;
         }
 
         // Framework gates events on `arena.is_enabled`; focus walker
@@ -629,32 +1069,59 @@ impl Widget for SegmentedControl {
             });
         }
 
-        // Arrow keys cycle selection, skipping disabled segments. Focus
-        // stays on the parent.
+        // Live disabled flags, in live order. Held as `Prop`s and read at
+        // event time: an app may flip a bound signal with no rebuild, and
+        // a `Vec<bool>` snapshotted here would silently go stale.
+        let disabled: Rc<Vec<Prop<bool>>> = Rc::new(
+            self.live
+                .iter()
+                .map(|&i| self.segments[i].disabled.clone())
+                .collect(),
+        );
+
+        // Arrow keys cycle selection, Home/End jump to the ends, both
+        // skipping disabled segments. Focus stays on the control.
         {
-            let selected = selected.clone();
-            let disabled = disabled_flags.clone();
-            handlers = handlers.on_key(move |event, _ctx| {
-                if n == 0 {
+            let index = index.clone();
+            let disabled = disabled.clone();
+            let select = select.clone();
+            let cell_ids = self.cell_ids.clone();
+            handlers = handlers.on_key(move |event, ctx: &mut EventContext| {
+                if live_count == 0 {
                     return EventResponse::Ignored;
                 }
-                match event {
-                    WidgetEvent::KeyDown {
-                        key: Key::ArrowRight,
-                        ..
-                    } => {
-                        selected.set(Self::step_selection(selected.get(), true, &disabled));
-                        EventResponse::Handled
+                let WidgetEvent::KeyDown { key, .. } = event else {
+                    return EventResponse::Ignored;
+                };
+                // Resolve direction at *event* time, so a locale flip
+                // re-maps the arrows with no rebuild.
+                let (previous, next) = if ctx.is_rtl() {
+                    (Key::ArrowRight, Key::ArrowLeft)
+                } else {
+                    (Key::ArrowLeft, Key::ArrowRight)
+                };
+                let current = index.get().min(live_count - 1);
+                let target = if *key == next {
+                    Self::step_selection(current, true, &disabled)
+                } else if *key == previous {
+                    Self::step_selection(current, false, &disabled)
+                } else if *key == Key::Home {
+                    Self::edge_selection(current, false, &disabled)
+                } else if *key == Key::End {
+                    Self::edge_selection(current, true, &disabled)
+                } else {
+                    return EventResponse::Ignored;
+                };
+                if target != current {
+                    select(target, ctx);
+                    // Reveal the newly selected segment in any enclosing
+                    // scroll area — an AT/keyboard move does not shift
+                    // focus, so the framework's focus-follow cannot.
+                    if let Some(&id) = cell_ids.get(target) {
+                        ctx.ensure_widget_visible(id);
                     }
-                    WidgetEvent::KeyDown {
-                        key: Key::ArrowLeft,
-                        ..
-                    } => {
-                        selected.set(Self::step_selection(selected.get(), false, &disabled));
-                        EventResponse::Handled
-                    }
-                    _ => EventResponse::Ignored,
                 }
+                EventResponse::Handled
             });
         }
 
@@ -673,21 +1140,29 @@ impl Widget for SegmentedControl {
         // Access actions — increment/decrement cycle selection (skipping
         // disabled segments).
         {
-            let selected = selected.clone();
-            let disabled = disabled_flags.clone();
-            handlers = handlers.on_access_action(move |action, _ctx| {
-                if n == 0 {
+            let index = index.clone();
+            let disabled = disabled.clone();
+            let select = select.clone();
+            let cell_ids = self.cell_ids.clone();
+            handlers = handlers.on_access_action(move |action, ctx: &mut EventContext| {
+                if live_count == 0 {
                     return EventResponse::Ignored;
                 }
-                if action == teksilo_core::accesskit::Action::Increment {
-                    selected.set(Self::step_selection(selected.get(), true, &disabled));
-                    EventResponse::Handled
+                let current = index.get().min(live_count - 1);
+                let target = if action == teksilo_core::accesskit::Action::Increment {
+                    Self::step_selection(current, true, &disabled)
                 } else if action == teksilo_core::accesskit::Action::Decrement {
-                    selected.set(Self::step_selection(selected.get(), false, &disabled));
-                    EventResponse::Handled
+                    Self::step_selection(current, false, &disabled)
                 } else {
-                    EventResponse::Ignored
+                    return EventResponse::Ignored;
+                };
+                if target != current {
+                    select(target, ctx);
+                    if let Some(&id) = cell_ids.get(target) {
+                        ctx.ensure_widget_visible(id);
+                    }
                 }
+                EventResponse::Handled
             });
         }
 
@@ -702,12 +1177,40 @@ impl Widget for SegmentedControl {
         ctx: &LayoutContext,
     ) -> teksilo_core::widget::LayoutResponse {
         let envelope = ctx.theme.shape.focus_ring_offset + ctx.theme.shape.focus_ring_width;
-        let width = proposal
-            .width
-            .unwrap_or_else(|| self.estimate_width() + envelope * 2.0);
-        let visual_h = (FALLBACK_LINE_HEIGHT + SEGMENTED_CONTROL_PADDING_VERTICAL * 2.0)
+        let chrome = envelope * 2.0 + SEGMENTED_CONTROL_BORDER_WIDTH * 2.0;
+
+        // Real measurement, not a per-character guess: this is what makes
+        // a control in an `HStack` claim the width its labels actually
+        // need, and what the overflow plan is calibrated against.
+        let (natural, chevron, tallest) = self.measure(ctx);
+        let content_width: f32 = match self.sizing {
+            SegmentSizing::Uniform => {
+                let widest = natural.iter().copied().fold(0.0_f32, f32::max);
+                widest * natural.len() as f32
+            }
+            SegmentSizing::Fit => natural.iter().sum(),
+        };
+        let natural_width = content_width + chrome;
+        // One ellipsized segment plus the chevron: the narrowest the
+        // control can be and still mean something.
+        let min_width = SEGMENTED_CONTROL_PADDING_HORIZONTAL * 2.0 + chevron + chrome;
+
+        // The content height is measured, not assumed, so a 200 % global
+        // text scale grows the control instead of clipping its labels.
+        let visual_height = (tallest.max(FALLBACK_LINE_HEIGHT)
+            + SEGMENTED_CONTROL_PADDING_VERTICAL * 2.0)
             .max(SEGMENTED_CONTROL_HEIGHT);
-        Size::new(width, visual_h + envelope * 2.0).into()
+        let height = visual_height + envelope * 2.0;
+
+        if self.fill_width {
+            Size::new(proposal.width.unwrap_or(natural_width), height).into()
+        } else {
+            LayoutResponse::shrinkable(
+                Size::new(natural_width, height),
+                Size::new(min_width.min(natural_width), height),
+                1.0,
+            )
+        }
     }
 
     fn place_children(
@@ -717,40 +1220,142 @@ impl Widget for SegmentedControl {
         children: &mut [WidgetPlacement],
         ctx: &LayoutContext,
     ) {
-        // children[0] is the chrome leaf — fills the full control bounds
-        // so it paints frame / selection / hover / focus-ring envelope.
-        // children[1..] are the SegmentCells, grid-placed in the inner
-        // (visual minus border) rect.
         if children.is_empty() {
             return;
         }
-        children[0].origin = bounds.origin();
-        children[0].size = bounds.size();
 
-        let n = self.segments.len();
-        if n == 0 || children.len() < n + 1 {
-            return;
+        let visual = Self::compute_visual(bounds, ctx.theme);
+        let inner = Self::compute_inner(visual);
+        let (natural, chevron_width, _) = self.measure(ctx);
+        let plan = self.resolve_plan(inner.width, &natural, chevron_width);
+
+        // Reading-order offsets, mirrored onto the axis afterwards so RTL
+        // needs no separate code path. "Last slot" therefore means last in
+        // *reading* order — next to the chevron — in both directions.
+        let rtl = ctx.is_rtl();
+        let place = |offset: f32, width: f32| -> Rect {
+            let x = if rtl {
+                inner.x + (inner.width - offset - width)
+            } else {
+                inner.x + offset
+            };
+            Rect::new(x, inner.y, width, inner.height)
+        };
+
+        let mut slot_rects = Vec::with_capacity(plan.visible.len());
+        let mut offset = 0.0_f32;
+        for &width in &plan.widths {
+            slot_rects.push(place(offset, width));
+            offset += width;
         }
-        let visual = self.compute_visual(bounds, ctx.theme);
-        let bw = SEGMENTED_CONTROL_BORDER_WIDTH;
-        let inner = Rect::new(
-            visual.x + bw,
-            visual.y + bw,
-            (visual.width - bw * 2.0).max(0.0),
-            (visual.height - bw * 2.0).max(0.0),
-        );
-        let seg_w = inner.width / n as f32;
-        for (i, placement) in children.iter_mut().skip(1).take(n).enumerate() {
-            placement.origin = Point::new(inner.x + i as f32 * seg_w, inner.y);
-            placement.size = Size::new(seg_w, inner.height);
+        let overflow_rect = plan
+            .show_chevron
+            .then(|| place(offset, (inner.width - offset).max(0.0)));
+
+        // Publish the resolved geometry for the chrome. Read during the
+        // paint that follows this very layout pass, so no binding needed.
+        self.slots.publish(SegmentSlotGeometry {
+            frame: visual,
+            segments: slot_rects.clone(),
+            order: plan.visible.clone(),
+            overflow: overflow_rect,
+        });
+
+        // ── Place the children, dispatching by id ───────────────────
+        //
+        // The slice holds only *active* children, so an overflowed (and
+        // therefore dormant) cell has no entry at all and positions do not
+        // line up with `self.children`.
+        let mut active_cells: Vec<WidgetId> = Vec::with_capacity(plan.visible.len());
+        for placement in children.iter_mut() {
+            if Some(placement.id) == self.chrome_id {
+                placement.origin = bounds.origin();
+                placement.size = bounds.size();
+                continue;
+            }
+            if Some(placement.id) == self.chevron_id {
+                let rect = overflow_rect.unwrap_or(Rect::new(inner.right(), inner.y, 0.0, 0.0));
+                placement.origin = rect.origin();
+                placement.size = rect.size();
+                continue;
+            }
+            let Some(live_index) = self.cell_ids.iter().position(|&id| id == placement.id) else {
+                continue;
+            };
+            match plan.slot_of(live_index) {
+                Some(slot) => {
+                    let rect = slot_rects[slot];
+                    placement.origin = rect.origin();
+                    placement.size = rect.size();
+                    active_cells.push(placement.id);
+                }
+                None => {
+                    // Overflowed on *this* pass but not yet dormant (that
+                    // lands next pass). Collapse it so it does not flash
+                    // over the strip in the meantime.
+                    placement.origin = Point::new(inner.x, inner.y);
+                    placement.size = Size::new(0.0, 0.0);
+                }
+            }
+        }
+
+        // Sibling relations for `push_to_radio_group`: only cells that are
+        // actually on the strip, since a dormant cell emits no AccessKit
+        // node and referencing its id would dangle.
+        {
+            let mut group = self.group_ids.borrow_mut();
+            if *group != active_cells {
+                *group = active_cells;
+            }
+        }
+
+        // ── Publish, behind an equality guard ───────────────────────
+        //
+        // These writes dirty the binding registry; `process_state_changes`
+        // translates them into dormancy transitions at the top of the
+        // *next* layout pass. Without the guard every pass would re-dirty
+        // the visibility props and the tree would never settle.
+        if *self.last_plan.borrow() != plan {
+            let mut flags = vec![false; natural.len()];
+            for &index in &plan.overflowed {
+                if let Some(slot) = flags.get_mut(index) {
+                    *slot = true;
+                }
+            }
+            self.overflowed.set(flags);
+            if self.is_overflowing.get() != plan.show_chevron {
+                self.is_overflowing.set(plan.show_chevron);
+            }
+            // A segment that overflows while hovered fires no
+            // `PointerLeave`; its cell clears the shared slot from its own
+            // dormancy hook, but do it here too so the chrome never paints
+            // one stale frame.
+            if let Some(hovered) = self.hovered_segment.get()
+                && !plan.is_visible(hovered)
+            {
+                self.hovered_segment.set(None);
+            }
+            *self.last_plan.borrow_mut() = plan;
         }
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         builder.set_role(teksilo_core::accesskit::Role::RadioGroup);
-        let selected_index = self.selected.get();
-        if let Some(seg) = self.segments.get(selected_index) {
-            builder.set_value(seg.label.resolve_now());
+        if let Some(name) = &self.label {
+            builder.set_name(name.resolve_now());
+        }
+        let selected = self.index.get();
+        if let Some(segment_index) = self.live.get(selected) {
+            builder.set_value(self.segments[*segment_index].label.resolve_now());
+        }
+        // Roving focus: focus stays on the group, which points at the
+        // selected segment. Only meaningful while that cell is on the
+        // strip — an overflowed cell is dormant and has no AT node, but
+        // the plan guarantees the selected one never is.
+        if let Some(&cell) = self.cell_ids.get(selected)
+            && self.group_ids.borrow().contains(&cell)
+        {
+            builder.set_active_descendant(teksilo_core::accessibility::widget_id_to_node_id(cell));
         }
         // Framework a11y walker sets `set_disabled` from arena state.
         builder.add_action(teksilo_core::accesskit::Action::Focus);
@@ -760,313 +1365,5 @@ impl Widget for SegmentedControl {
 
     fn children(&self) -> Vec<WidgetId> {
         self.children.clone()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use teksilo_core::event::Modifiers;
-    use teksilo_core::widget_tree::WidgetTree;
-    use teksilo_i18n::lit;
-
-    fn abc(selected: Signal<usize>) -> SegmentedControl {
-        SegmentedControl::new(selected).segments([lit!("A"), lit!("B"), lit!("C")])
-    }
-
-    #[test]
-    fn click_selects_segment_by_position() {
-        let selected = Signal::new(0_usize);
-        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
-        let sc = tree.add(abc(selected.clone()));
-        tree.layout(SizeProposal::exact(300.0, 60.0));
-        tree.render();
-        tree.click(sc);
-        assert_eq!(selected.get(), 1, "click at center should select segment 1");
-    }
-
-    #[test]
-    fn click_on_each_segment_lands_correctly() {
-        use teksilo_core::event::PointerButton;
-        let selected = Signal::new(0_usize);
-        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
-        let sc = tree.add(abc(selected.clone()));
-        tree.layout(SizeProposal::exact(300.0, 60.0));
-
-        // The control's children are [chrome, segment_0, segment_1,
-        // segment_2]; iterate the segment indices (1..=3).
-        for i in 0..3 {
-            let rect = tree.child_bounds(sc, i + 1);
-            let center = rect.center();
-            tree.pointer_down_button(center, PointerButton::Primary);
-            tree.pointer_up_button(center, PointerButton::Primary);
-            assert_eq!(
-                selected.get(),
-                i,
-                "click on center of segment {} must select it",
-                i
-            );
-        }
-    }
-
-    #[test]
-    fn keyboard_navigation() {
-        let selected = Signal::new(0_usize);
-        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
-        let sc = tree.add(abc(selected.clone()));
-        tree.layout(SizeProposal::exact(300.0, 60.0));
-
-        tree.focus(sc);
-        tree.press_key(Key::ArrowRight, Modifiers::NONE);
-        assert_eq!(selected.get(), 1);
-        tree.press_key(Key::ArrowRight, Modifiers::NONE);
-        assert_eq!(selected.get(), 2);
-        tree.press_key(Key::ArrowLeft, Modifiers::NONE);
-        assert_eq!(selected.get(), 1);
-    }
-
-    #[test]
-    fn keyboard_wraps_around() {
-        let selected = Signal::new(2_usize);
-        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
-        let sc = tree.add(abc(selected.clone()));
-        tree.layout(SizeProposal::exact(300.0, 60.0));
-
-        tree.focus(sc);
-        tree.press_key(Key::ArrowRight, Modifiers::NONE);
-        assert_eq!(selected.get(), 0, "should wrap from last to first");
-        tree.press_key(Key::ArrowLeft, Modifiers::NONE);
-        assert_eq!(selected.get(), 2, "should wrap from first to last");
-    }
-
-    #[test]
-    fn keyboard_skips_disabled_segments() {
-        let selected = Signal::new(0_usize);
-        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
-        let sc = tree.add(SegmentedControl::new(selected.clone()).segments([
-            Segment::new(lit!("A")),
-            Segment::new(lit!("B")).disabled(true),
-            Segment::new(lit!("C")),
-        ]));
-        tree.layout(SizeProposal::exact(300.0, 60.0));
-        tree.focus(sc);
-        // 0 -> (skip disabled 1) -> 2
-        tree.press_key(Key::ArrowRight, Modifiers::NONE);
-        assert_eq!(
-            selected.get(),
-            2,
-            "ArrowRight should skip the disabled middle segment"
-        );
-        // 2 -> wrap -> 0
-        tree.press_key(Key::ArrowRight, Modifiers::NONE);
-        assert_eq!(selected.get(), 0);
-    }
-
-    #[test]
-    fn rebuild_preserves_segments() {
-        // Regression guard: segments are cloned (not drained) into cells,
-        // so a rebuild must reproduce every cell.
-        let selected = Signal::new(0_usize);
-        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
-        let sc = tree.add(abc(selected.clone()));
-        tree.layout(SizeProposal::exact(300.0, 60.0));
-        assert_eq!(tree.children(sc).len(), 4, "chrome + 3 segments");
-        // Force a rebuild of the composite and re-layout.
-        tree.arena_mark_needs_rebuild_for_testing(sc);
-        tree.layout(SizeProposal::exact(300.0, 60.0));
-        assert_eq!(
-            tree.children(sc).len(),
-            4,
-            "rebuild must reproduce chrome + 3 segments, not drop them"
-        );
-    }
-
-    #[test]
-    fn accessibility() {
-        let selected = Signal::new(0_usize);
-        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
-        let sc = tree.add(SegmentedControl::new(selected).segments([lit!("A"), lit!("B")]));
-        tree.layout(SizeProposal::exact(300.0, 60.0));
-        let info = tree.accessibility_node(sc);
-        assert_eq!(info.role(), teksilo_core::accesskit::Role::RadioGroup);
-    }
-
-    #[test]
-    fn paints_selected_segment_with_accent_when_focused() {
-        let selected = Signal::new(1_usize);
-        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
-        let sc = tree.add(abc(selected));
-        tree.layout(SizeProposal::exact(300.0, 60.0));
-        tree.focus(sc);
-        let frame = tree.render();
-        let accent = teksilo_core::presets::intui::light()
-            .colors
-            .accent
-            .to_array();
-        assert!(
-            frame.shapes.iter().any(|s| s.color == accent),
-            "focused selected segment should render with accent color"
-        );
-    }
-
-    #[test]
-    fn unfocused_selected_segment_uses_inactive_surface() {
-        let selected = Signal::new(1_usize);
-        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
-        tree.add(abc(selected));
-        tree.layout(SizeProposal::exact(300.0, 60.0));
-        let frame = tree.render();
-        let accent = teksilo_core::presets::intui::light()
-            .colors
-            .accent
-            .to_array();
-        let inactive = teksilo_core::presets::intui::light()
-            .colors
-            .surface_selected_inactive
-            .to_array();
-        assert!(
-            !frame.shapes.iter().any(|s| s.color == accent),
-            "unfocused selected segment must not use accent color"
-        );
-        assert!(
-            frame.shapes.iter().any(|s| s.color == inactive),
-            "unfocused selected segment should render with surface_selected_inactive"
-        );
-    }
-
-    #[test]
-    fn accessibility_has_actions() {
-        let selected = Signal::new(0_usize);
-        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
-        let sc = tree.add(SegmentedControl::new(selected).segments([lit!("A"), lit!("B")]));
-        tree.layout(SizeProposal::exact(300.0, 60.0));
-        let info = tree.accessibility_node(sc);
-        assert!(
-            info.actions()
-                .contains(&teksilo_core::accesskit::Action::Increment)
-        );
-    }
-
-    #[test]
-    fn access_click_selects_segment() {
-        // A segment advertises `Action::Click`; invoking it (screen reader,
-        // automation bridge) must drive the bound signal, not just a
-        // synthetic pointer tap.
-        let selected = Signal::new(0_usize);
-        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
-        let sc = tree.add(abc(selected.clone()));
-        tree.layout(SizeProposal::exact(300.0, 60.0));
-
-        // children: [chrome, seg0, seg1, seg2]
-        let cells = tree.children(sc);
-        tree.dispatch_event(WidgetEvent::AccessAction {
-            action: teksilo_core::accesskit::Action::Click,
-            target: Some(cells[3]),
-            target_node: teksilo_core::accessibility::root_node_id(),
-            data: None,
-        });
-        assert_eq!(selected.get(), 2, "AT click on segment 2 must select it");
-    }
-
-    #[test]
-    fn access_click_on_disabled_segment_is_ignored() {
-        let selected = Signal::new(0_usize);
-        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
-        let sc = tree.add(SegmentedControl::new(selected.clone()).segments([
-            Segment::new(lit!("A")),
-            Segment::new(lit!("B")).disabled(true),
-            Segment::new(lit!("C")),
-        ]));
-        tree.layout(SizeProposal::exact(300.0, 60.0));
-
-        let cells = tree.children(sc);
-        tree.dispatch_event(WidgetEvent::AccessAction {
-            action: teksilo_core::accesskit::Action::Click,
-            target: Some(cells[2]),
-            target_node: teksilo_core::accessibility::root_node_id(),
-            data: None,
-        });
-        assert_eq!(
-            selected.get(),
-            0,
-            "AT click on a disabled segment must not select it"
-        );
-    }
-
-    #[test]
-    fn tooltip_appears_on_hover() {
-        let selected = Signal::new(0_usize);
-        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
-        // Segment 1 carries a plain-text tooltip; hover over it should
-        // show one overlay after the delay elapses.
-        let sc = tree.add(SegmentedControl::new(selected).segments([
-            Segment::new(lit!("A")),
-            Segment::new(lit!("B")).tooltip(lit!("Tip")),
-            Segment::new(lit!("C")),
-        ]));
-        tree.layout(SizeProposal::exact(300.0, 60.0));
-        // children: [chrome, seg0, seg1, seg2]; hover over seg1 center.
-        let sc_children = tree.children(sc);
-        // sc_children[0] = chrome, [1] = seg0, [2] = seg1, [3] = seg2
-        assert_eq!(sc_children.len(), 4);
-        let seg1_bounds = tree.bounds(sc_children[2]);
-        tree.pointer_move(seg1_bounds.center());
-        tree.advance_time(std::time::Duration::from_secs(1));
-        assert_eq!(
-            tree.active_overlays().len(),
-            1,
-            "tooltip should appear on hover over the tooltipped segment"
-        );
-    }
-
-    #[test]
-    fn narrow_control_keeps_labels_inside_its_bounds() {
-        // Regression: a `SegmentedControl` compressed below its label width
-        // must truncate its single-line labels with an ellipsis so they stay
-        // inside the control — not spill a few px past it. The cells used to
-        // wrap the label in a `Center`, which measures its child with an
-        // *unbounded* width, so the `single_line` label never saw a
-        // `max_width` and could not ellipsize; a too-long label then overflowed
-        // the (correctly sized) control.
-        fn max_right(tree: &WidgetTree, id: WidgetId) -> f32 {
-            let mut r = tree.bounds(id).right();
-            for c in tree.children(id) {
-                r = r.max(max_right(tree, c));
-            }
-            r
-        }
-
-        // A real text backend is required: `single_line` text only reports a
-        // shrink weight (so the stack truncates it) through the real layout
-        // path — the no-backend 8px/char fallback returns a rigid size and
-        // would let the label overflow regardless of the fix.
-        let selected = Signal::new(0_usize);
-        let mut tree = WidgetTree::new()
-            .with_theme(teksilo_core::presets::intui::light())
-            .with_text_backend(std::rc::Rc::new(std::cell::RefCell::new(
-                teksilo_canvas::MockTextBackend::new(),
-            )));
-        let sc = tree.add(SegmentedControl::new(selected).segments([
-            lit!("Full Synopsis"),
-            lit!("Full Chapter"),
-            lit!("Overview"),
-        ]));
-        // 120px across three cells is ~40px each — far narrower than any of
-        // these labels (13 chars ≈ 104px at 8px/char), so every one must
-        // ellipsize.
-        tree.layout(SizeProposal::exact(120.0, 40.0));
-
-        let control_right = tree.bounds(sc).right();
-        assert!(
-            control_right <= 120.5,
-            "the control must bound itself to the 120px window (right={control_right})"
-        );
-        let deepest = max_right(&tree, sc);
-        assert!(
-            deepest <= control_right + 0.5,
-            "a label spilled to x={deepest}, past the control's right edge \
-             {control_right}: single-line segment labels must ellipsize to fit \
-             their cell rather than overflow the control"
-        );
     }
 }

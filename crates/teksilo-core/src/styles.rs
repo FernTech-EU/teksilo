@@ -167,7 +167,8 @@ pub use scroll_bar_style::{
 };
 pub use search_field_style::{SearchFieldStyle, SearchFieldStyleConfig, SharedSearchFieldStyle};
 pub use segmented_control_style::{
-    SegmentedControlStyle, SegmentedControlStyleConfig, SharedSegmentedControlStyle,
+    SegmentSlotGeometry, SegmentSlots, SegmentedControlStyle, SegmentedControlStyleConfig,
+    SharedSegmentedControlStyle,
 };
 pub use slider_style::{
     SharedSliderStyle, SliderOrientation, SliderStyle, SliderStyleConfig, SliderVariant,

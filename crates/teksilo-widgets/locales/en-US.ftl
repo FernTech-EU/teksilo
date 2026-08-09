@@ -38,6 +38,7 @@ a11y-splitter-expanded = Expanded
 a11y-breadcrumb-current-page-value = current page
 a11y-toolbar-name = Toolbar
 toolbar-more = More
+segmented-control-more = More options
 breadcrumb-overflow = Show hidden path
 a11y-title-bar-name = Window title bar
 a11y-window-controls-name = Window controls
