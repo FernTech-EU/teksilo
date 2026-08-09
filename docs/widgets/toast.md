@@ -439,3 +439,149 @@ Submit the toast through the installed
 programmatic control. If `install_toast` was not called the
 returned handle is in the "dropped" state (`is_alive` returns
 `false`) and a one-shot stderr warning fires explaining the omission.
+
+## `pub struct ToastRegistry`
+
+Cheap to clone (`Rc<RefCell<…>>`). All public methods take `&self`
+and use interior mutability.
+
+```rust
+pub struct ToastRegistry { /* fields */ }
+```
+
+### Methods
+
+#### `pub fn new(options: super::host::ToastInstallOptions) -> Self`
+
+Construct a registry with the given options and no archive.
+Used by tests and by apps that don't want notification
+persistence. The install helper in teksilo calls
+`with_archive` instead.
+
+#### `pub fn with_archive( options: super::host::ToastInstallOptions, archive: Rc<NotificationArchiveModel>, ) -> Self`
+
+Construct a registry that mirrors every archived-eligible
+toast push into `archive`. Toasts presented with
+`archive(false)` are NOT mirrored (used for transient
+"Copied!" feedback that shouldn't pollute the log).
+
+#### `pub fn archive(&self) -> Option<Rc<NotificationArchiveModel>>`
+
+Access the underlying notification archive (if configured).
+`NotificationLog` and `NotificationCenterButton` read from
+this directly.
+
+#### `pub fn version_signal(&self) -> &Signal<u64>`
+
+Reactive signal bumped on every queue mutation. Every
+`ToastHost` binds this at `BindingLevel::Rebuild`, in every
+window, and app code may also poll it directly to assert "did
+something change" without going through a widget tree at all.
+
+One signal is enough for N windows. It was not always: dirty
+tracking used to be a `bool` living on the signal that each
+`WidgetTree`'s reconcile pass read *and cleared*, so whichever
+window reconciled first consumed the flag and every other
+window's `ToastHost` silently — and permanently — skipped its
+rebuild. Toast routing was the first feature to need
+shared-state-fanned-out-to-every-window, so it was the first to
+hit that, and it carried a `HashMap<TeksiloWindowId, Signal<u64>>`
+of per-window duplicates plus a fan-out on every bump to work
+around it. `Signal` now tracks a monotone generation and each
+`BindingRegistry` remembers what it last acted on
+(`teksilo_core::binding::BindingGroup::last_seen`), so consumers
+no longer contend and the duplicates are gone.
+
+#### `pub fn hover_count_signal(&self) -> Signal<usize>`
+
+Shared hover-pause refcount. Surfaces increment / decrement
+on hover-enter / leave; the host's frame-tick effect reads it.
+
+#### `pub fn window_audience_signal( &self, window_id: TeksiloWindowId, ) -> Signal<Option<ToastAudience>>`
+
+Get-or-create the audience signal for `window_id`. The first
+call for a given window allocates a fresh `Signal::new(None)`;
+every later call (from that window's `ToastHost`, or from app
+code) returns the SAME signal, so binding to it once and
+mutating it later both work through this one accessor.
+
+#### `pub fn set_window_audience(&self, window_id: TeksiloWindowId, audience: Option<ToastAudience>)`
+
+Assign (or clear, with `None`) the audience for `window_id`.
+Retargets that window's toast host + bell immediately — both
+are bound to this signal at `BindingLevel::Rebuild`. Reached
+exactly like the registry itself: `ctx.app_state::<ToastRegistry>()`.
+Typical call site: a window-activation / active-document-changed
+handler that keeps a window's audience in sync with what it's
+currently showing.
+
+#### `pub fn forget_window(&self, window_id: TeksiloWindowId)`
+
+Drop `window_id`'s entry from `window_audiences`.
+Call this from the app's window-teardown hook — the same place
+that tears down the `ToastHost` mounted in that window.
+
+**`set_window_audience(window_id, None)` is NOT a substitute.**
+That call only overwrites the signal's *value*; the map entry
+(and the `Signal`'s backing `Rc<RefCell<..>>` allocation) stays
+alive. Without a call to `forget_window`, every window ever
+opened for the life of the process leaves one live `Signal` in
+the map behind forever — an unbounded leak in exactly the
+shape a long-running, multi-window app has (open/close windows
+repeatedly across a session).
+
+Safe even if some other code still holds a clone of the
+removed `Signal`: a `Signal` is `Rc<RefCell<..>>` under the
+hood, so dropping the registry's map entry only drops *this*
+reference to it — any clone a still-alive holder kept keeps
+reading/writing exactly as before, unaffected by the map
+removal (`Rc` content doesn't disappear just because one owner
+let go of it). The only real hazard is calling this too early:
+`Self::window_audience_signal` is get-or-create, so if the
+torn-down window's own `ToastHost` (or any other live widget)
+calls it again AFTER `forget_window`, it transparently
+allocates a brand-new `Signal::new(_)` under the same key
+rather than erroring — fine for a window that is genuinely gone
+(nothing is bound to the discarded signal any more, so no
+rebuild is missed), but it means this must be called from
+teardown itself, not from a handler the window's own event loop
+might still reach afterwards.
+
+Idempotent: forgetting a window id that was never registered
+(or was already forgotten) is a safe no-op — `HashMap::remove`
+on a missing key does nothing.
+
+#### `pub fn show_settings_write_failed(`
+
+Enqueue the framework's toast for a permanently-discarded
+`teksilo-settings` write — the write-side counterpart of
+`AppEvent::SettingsWriteFailed` (a `DebouncedWriter` gave up
+after `MAX_WRITE_ATTEMPTS` retries, or was force-flushed still
+failing at process teardown, and its queued patches were
+dropped). This is data loss, not a status blip: `Error` severity
+and persistent (no auto-dismiss), naming the file that failed.
+
+Framework-level and crate-internal to the join point: the
+locale-validated strings can only live in teksilo-widgets
+(`tr_widget!` resolves against *this* crate's own
+`locales/*.ftl`), so the toast is built here rather than at the
+call site. `teksilo::install_toast` (the umbrella crate — the
+one place that sees both `teksilo-app`'s `AppEvent` and this
+`ToastRegistry`) calls this from a
+`TeksiloAppBuilder::register_app_event_observer` closure, so
+every app with toast installed surfaces the loss automatically,
+with no per-app wiring.
+
+No `EventContext` is available at the call site — this fires
+from a background `AppEvent` observer, not a widget event
+handler — so this goes straight to `enqueue` rather than
+through `EventContextToastExt::show_toast`. The only situation
+`enqueue` needs a context for is invoking the slot-pool-overflow
+`on_dismiss` callback; this toast never sets one, so if the pool
+is already full and this arrival evicts/drops an entry, there is
+nothing behind that callback to lose — the overflow result is
+dropped here deliberately, not silently.
+
+#### `pub fn live_count(&self) -> usize {`
+
+Test-only: how many entries are currently live.

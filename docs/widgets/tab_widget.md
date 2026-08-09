@@ -487,3 +487,380 @@ pub enum TabBarVisibility { /* variants */ }
 - **`Always`** — Always render the tab strip (historical default).
 - **`WhenMultiple`** — Show the strip only when two or more tabs are present.
 - **`Never`** — Never render the strip; the content fills the whole area.
+
+## `pub type ContextMenuFactory`
+
+A reusable widget factory the framework calls every time a context
+menu opens. Returns a fresh widget instance each call (the
+framework can't reuse a single widget across multiple openings).
+
+Same shape as the framework's
+`teksilo_core::widget_builder::ContextMenuFactory` — receives the
+click position (in tab-local coords) and a full
+`EventContext`, and returns `Some(menu)` to mount or `None` to
+decline. The `Rc` wrapping is a tab-widget convenience: the
+delegate clones the factory per-tab without reallocating.
+
+```rust
+pub type ContextMenuFactory = Rc<dyn Fn(Point, &mut EventContext) -> Option<Box<dyn Widget>>>;
+```
+
+## `pub enum TabBarOrientation`
+
+Bar orientation. Selects between a horizontal row of tabs (default
+for browser-style document tabs) and a vertical column of pills
+(sidebar / IDE perspective convention).
+
+```rust
+pub enum TabBarOrientation { /* variants */ }
+```
+
+### Variants
+
+- **`Horizontal`** — Tabs flow left-to-right in a horizontal row. Scroll axis is horizontal; a vertical wheel maps to horizontal scroll (Firefox / Chrome convention) when `vertical_wheel_scrolls_horizontally` is on.
+- **`Vertical`** — Tabs flow top-to-bottom in a vertical column. Scroll axis is vertical; vertical wheel scrolls vertically. Pinned tabs render in a non-scrolling strip at the top of the column.
+
+## `pub enum TabSizing`
+
+How wide each tab is: shared across all unpinned tabs, chosen
+per-tab from content, or stretched to fill the bar.
+
+`Shared` and `Independent` size the **layout axis** (width in
+horizontal bars, height in vertical bars); `Fill` sizes the tab's
+**width** in both orientations — see each variant. See the module
+docs of `crate::tab_widget` for how this is applied per
+orientation. In wrap (multi-line horizontal) mode `Independent` is
+forced regardless of this setting — equal-width tabs in a wrapping
+row look like a tile grid and lose the bookmark-bar / pill-strip
+aesthetic.
+
+```rust
+pub enum TabSizing { /* variants */ }
+```
+
+### Variants
+
+- **`Shared`** — All non-pinned tabs share the same extent on the layout axis. The available region is divided equally across the unpinned count, then clamped to `[min_tab_extent, max_tab_extent]`. Below the min, content overflows into scroll. Above the max, slack is left as empty space at the trailing edge.  In a **vertical** bar the layout axis is the pill *height*, so this yields uniform pills whose width fits the widest label (clamped to `[min_tab_width, max_tab_width]`).
+- **`Independent`** — Each tab sizes to its content (icon + label + slots), clamped to `[min_tab_extent, max_tab_extent]`. Truncation via ellipsis when content hits `max`.
+- **`Fill`** — Tabs stretch to the full width the bar is offered — no slack left over, no fit-to-content shrinking. The nav-rail / segmented-control look (VS Code's settings sidebar, a full-bleed tab strip).  - **Horizontal:** the viewport width is divided equally across   the unpinned tabs and `max_tab_width` is *not* applied, so   the strip is filled edge to edge instead of leaving trailing   slack. `min_tab_width` still holds — below it the headers   overflow into scroll rather than squeezing to nothing. - **Vertical:** every pill takes the bar's full proposed width   (the widest-label clamp is bypassed), so the tabs span the   sidebar. Pill height is unchanged (the intrinsic   `editor_tab_height`, or the `tab_bar_height` override).  With no width proposed at all (an unbounded measure — a `Center`, an `HStack` asking for the natural size), there is nothing to fill: a vertical bar falls back to the `Shared` fit-to-widest-label width. Give the bar a bounded width (a `FixedSize`, an `Expand` in a sized parent) for `Fill` to have any effect.
+
+## `pub enum TabDisplayMode`
+
+Bar-level control over what each tab shows — its icon, its label, or both.
+
+Each tab still declares both a title and (optionally) an icon; this mode
+decides which are painted, so a caller can offer a "tab size" toggle
+(VS Code's activity-bar / panel convention) without rebuilding the tabs by
+hand. Icon-only tabs size to their icon (they don't pad out to a text
+width), and the full title is promoted to the hover tooltip.
+
+```rust
+pub enum TabDisplayMode { /* variants */ }
+```
+
+### Variants
+
+- **`Auto`** — Render each tab exactly as its `TabInfo` declares — the title if set, the icon if set. The default; preserves per-tab `no_title()` control.
+- **`Text`** — Title only — icons are hidden even when present.
+- **`Icon`** — Icon only — the title becomes the hover tooltip. A tab with no icon falls back to its title's initial letter so the mode is never blank.
+- **`IconText`** — Icon + title.
+
+## `pub enum TabOverflowButton`
+
+When the trailing "show all tabs" overflow dropdown button appears.
+
+The dropdown is a chevron-down `PopoverIconButton` whose popover lists every
+tab (a jump-to menu for tabs scrolled out of view). This mode governs *when*
+the button itself is shown — independent of whether the tabs actually
+overflow the viewport (which is what drives the scroll arrows).
+
+```rust
+pub enum TabOverflowButton { /* variants */ }
+```
+
+### Variants
+
+- **`Auto`** — Show the button **only when the tab headers overflow** the bar's viewport — i.e. exactly when there is something scrolled out of view, the same condition that auto-reveals the scroll arrows. The default: the button stays out of the way until it is useful.
+- **`Always`** — Always show the button whenever the bar has at least one tab, even when every tab is already visible (a persistent jump-to affordance).
+- **`Never`** — Never show the button.
+
+## `pub struct TabDelegate`
+
+Resolves per-tab UI from a model item.
+
+Required: a `label` callback. Everything else is optional and
+defaults to "no leading icon, no slots, no tooltip, not closable,
+not pinned, enabled".
+
+```rust
+pub struct TabDelegate<T: 'static> { /* fields */ }
+```
+
+### Methods
+
+#### `pub fn new(label: impl Fn(usize, &T) -> LocalizedString + 'static) -> Self`
+
+Construct from the label callback. Every other field defaults
+to its identity behavior.
+
+#### `pub fn icon(mut self, f: impl Fn(usize, &T) -> Option<IconWidget> + 'static) -> Self`
+
+Per-tab leading icon (rendered before the label).
+
+#### `pub fn leading(mut self, f: impl Fn(usize, &T) -> Option<Box<dyn Widget>> + 'static) -> Self`
+
+Per-tab leading slot (between the icon and label, or before
+the label when no icon is present).
+
+#### `pub fn trailing(mut self, f: impl Fn(usize, &T) -> Option<Box<dyn Widget>> + 'static) -> Self`
+
+Per-tab trailing slot (between the label and the close button,
+or at the trailing edge when no close button is present).
+
+#### `pub fn context_menu( mut self, f: impl Fn(usize, &T) -> Option<ContextMenuFactory> + 'static, ) -> Self`
+
+Per-tab context menu factory. Activated by right-click /
+long-press / `accesskit::Action::ShowContextMenu`.
+
+The closure runs once per build and returns an optional
+`ContextMenuFactory`. The factory itself is called every
+time the menu opens, returning a fresh menu widget each call —
+the framework cannot reuse a single widget instance across
+multiple openings.
+
+#### `pub fn closable(mut self, f: impl Fn(usize, &T) -> bool + 'static) -> Self`
+
+Per-tab closable flag. When `true`, the tab gets a trailing
+close button and middle-click / `Ctrl+W` close affordances.
+Pinned tabs suppress the close button regardless of this flag
+(pinned tabs only close via the context menu — Firefox
+convention).
+
+#### `pub fn pinned(mut self, f: impl Fn(usize, &T) -> bool + 'static) -> Self`
+
+Per-tab pinned flag. Pinned tabs render in a leading
+non-scrolling region with a fixed icon-only width.
+
+#### `pub fn enabled(mut self, f: impl Fn(usize, &T) -> bool + 'static) -> Self`
+
+Per-tab enabled flag. Disabled tabs are visible but not
+activatable, skipped by keyboard navigation, and excluded from
+the close / pin / context-menu affordances.
+
+#### `pub fn tooltip(mut self, f: impl Fn(usize, &T) -> Option<LocalizedString> + 'static) -> Self`
+
+Per-tab tooltip text. Shown on hover via the existing
+`WidgetBuilder::tooltip` mechanism.
+
+#### `pub fn rich_tooltip_key(mut self, f: impl Fn(usize, &T) -> Option<String> + 'static) -> Self`
+
+Per-tab rich-tooltip registry key. Returning `Some(key)` makes
+the tab show a rich tooltip resolved against
+`TooltipRegistry`.
+
+#### `pub fn rich_tooltip_content_with( mut self, f: impl Fn(usize, &T) -> Option<TooltipContent> + 'static, ) -> Self`
+
+Per-tab inline rich-tooltip content. Skips the registry — useful
+for tooltips whose body depends on `T`'s state.
+
+#### `pub fn composite_tooltip_with( mut self, f: impl Fn(usize, &T) -> Option<Box<dyn Widget>> + 'static, ) -> Self`
+
+Per-tab composite-tooltip body factory. Returning
+`Some(boxed_widget)` makes the tab show a composite tooltip
+containing that subtree. The closure runs at tab-header build
+time (and on every rebuild after data changes), so the body
+can carry per-tab dynamic state.
+
+## `pub const STATIC_KIND`
+
+Sentinel `kind` reserved for static tabs accumulated via
+`TabWidget::static_tab`.
+Application-level `kind` strings must not collide with this
+value — the framework panics with a clear message at registration
+if `dynamic_tab` is
+called with this name.
+
+```rust
+pub const STATIC_KIND: &str = "__static__";
+```
+
+## `pub struct TabHandle`
+
+One tab's identity, presentation, and state pointer.
+
+`Clone` is cheap: `TabInfo` is shallow (the icon is an
+`Rc<dyn Fn() -> IconWidget>` factory) and `payload` is an
+`Rc<dyn Any>`.
+
+```rust
+pub struct TabHandle { /* fields */ }
+```
+
+### Methods
+
+#### `pub fn dynamic<S: Any + 'static>( id: TabId, kind: &'static str, info: TabInfo, state: S, ) -> Self`
+
+Construct a handle for the dynamic-tab path. The `kind`
+must match a
+`dynamic_tab::<S>`
+registration on the `TabWidget`
+where this handle lands; the framework downcasts
+`payload` to `S` before calling the registered factory and
+panics with a clear message on type mismatch.
+
+#### `pub fn dynamic_shared( id: TabId, kind: &'static str, info: TabInfo, payload: Rc<dyn Any>, ) -> Self`
+
+Construct a handle for the dynamic-tab path with a
+pre-built `Rc<dyn Any>` payload — useful when several
+handles share the same underlying state object.
+
+## `pub struct TabId`
+
+Stable identity of a tab. Cheap to copy; persists across model
+reorders, rebuilds, and reorders triggered by drag-and-drop.
+
+```rust
+pub struct TabId(NonZeroU64);
+```
+
+### Methods
+
+#### `pub fn fresh() -> Self`
+
+Allocate a new, never-before-seen id. Backed by a monotonic
+global counter — overflow is theoretically possible after
+2^64 calls, at which point the universe has had bigger
+problems.
+
+#### `pub fn from_raw(value: NonZeroU64) -> Self`
+
+Wrap an externally-allocated key. Use this when the tab's
+identity comes from an existing app-side store (document
+UUID, file path hash, etc.) — calling `TabId::fresh` would
+allocate a *new* id every restart, breaking session restore.
+
+#### `pub fn raw(self) -> NonZeroU64`
+
+The underlying non-zero `u64`. Useful when persisting tabs
+across sessions: serialize this, restore via `from_raw`.
+
+## `pub type IconFactory`
+
+Reusable factory for an `IconWidget`. Boxed in `Rc` so
+`TabInfo` is `Clone` without forcing `IconWidget: Clone`.
+
+```rust
+pub type IconFactory = Rc<dyn Fn() -> IconWidget>;
+```
+
+## `pub struct TabInfo`
+
+Per-tab presentation metadata. Build with `TabInfo::new` and
+fluent setters.
+
+```rust
+# use teksilo_widgets::tab_widget::TabInfo;
+# use teksilo_widgets::primitives::IconWidget;
+# use teksilo_i18n::lit;
+let _info = TabInfo::new()
+    .title(lit!("Welcome"))
+    .icon(|| IconWidget::checkmark(16.0))
+    .closable(true);
+```
+
+```rust
+pub struct TabInfo { /* fields */ }
+```
+
+### Methods
+
+#### `pub fn new() -> Self`
+
+Empty defaults: no title, no icon, no tooltip, not closable,
+not pinned, enabled.
+
+#### `pub fn context_menu( mut self, f: impl Fn(Point, &mut EventContext) -> Option<Box<dyn Widget>> + 'static, ) -> Self`
+
+Attach a per-tab context menu (right-click the tab header). The
+factory receives the click position (tab-local) and a full
+`EventContext`, and returns `Some(menu)` to mount or `None` to
+decline (falling through to an ancestor). Cloned per header build.
+
+#### `pub fn title(mut self, t: impl Into<LocalizedString>) -> Self`
+
+Set the tab's title. Accepts `tr!(...)`, a literal string,
+or any value implementing `Into<LocalizedString>`.
+`None` means icon-only (the pinned-tab presentation).
+
+#### `pub fn no_title(mut self) -> Self`
+
+Untitled — useful for icon-only tabs even when not pinned.
+
+#### `pub fn icon(mut self, factory: impl Fn() -> IconWidget + 'static) -> Self`
+
+Set the leading icon via a factory closure. The closure is
+called each time the `TabHeader`
+is built — typically once per tab lifetime, plus any rebuild
+triggered by data-source mutations.
+
+#### `pub fn tooltip(mut self, t: impl Into<LocalizedString>) -> Self`
+
+Tooltip text shown on hover. If unset and the tab is
+`pinned`, the framework promotes `title`
+to the tooltip — pinned tabs render icon-only and otherwise
+have no way for the user to identify them.
+
+#### `pub fn rich_tooltip(mut self, key: impl Into<String>) -> Self`
+
+Attach a rich tooltip resolved from the app-wide tooltip
+registry. See `Button::rich_tooltip`.
+
+#### `pub fn rich_tooltip_content(mut self, content: crate::tooltip::TooltipContent) -> Self`
+
+Attach a rich tooltip driven by inline `TooltipContent`.
+
+#### `pub fn composite_tooltip<W>(mut self, factory: impl Fn() -> W + 'static) -> Self where W: Widget + 'static,`
+
+Attach a composite tooltip — third tier, hosting an arbitrary
+widget tree. The `factory` closure is called each time the
+tab's header rebuilds, so the body picks up theme / locale
+changes naturally without retaining state across rebuilds.
+
+#### `pub fn closable(mut self, b: bool) -> Self`
+
+Whether the tab shows a close button + responds to
+middle-click. Default: `false`.
+
+#### `pub fn pinned(mut self, b: bool) -> Self`
+
+Whether the tab renders in the leading pinned strip
+(icon-only, fixed-width, no close button — Firefox / Chrome
+convention). Default: `false`.
+
+#### `pub fn enabled(mut self, enabled: impl Into<teksilo_core::signal::Prop<bool>>) -> Self`
+
+Whether the tab can be activated. Disabled tabs render but
+are skipped by keyboard navigation, can't be clicked, and
+don't get the close button. Default: `true`.
+
+Forwarded to the arena via `ctx.enabled_when(header_id, false)`
+at build time when `false`. Ancestor-driven disable (e.g. a
+disabled `TabBar`) ANDs with this flag automatically.
+
+#### `pub fn focusable_panel(mut self, b: bool) -> Self`
+
+Make the tab's content pane itself focusable, so keyboard users
+can press `Tab` from the selected tab header and land inside
+the panel.
+
+Opt in for panels you know contain no focusable descendants —
+a static text-only "About" tab, a chart-only metrics tab.
+Panels that already host a `Button`, `TextInput`, `ListView`,
+or any other interactive widget don't need this: focus will
+flow naturally into the descendant.
+
+ARIA: this implements the `tabindex="0"` requirement that an
+empty `tabpanel` must be focusable so its content can be read
+by screen readers in browse mode. AccessKit has no `tabindex`
+field; the framework advertises `Action::Focus` on the panel
+node to signal focusability to AT. Default: `false`.

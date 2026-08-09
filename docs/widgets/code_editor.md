@@ -91,3 +91,135 @@ app can read it to drive its own overlay.
 Bumps on every content or format change.
 
 #### `pub fn scroll_y(&self) -> teksilo_core::Signal<f32>`
+
+## `pub struct CompletionItem`
+
+A completion candidate. Build with `CompletionItem::new` and the fluent
+setters; `insert_text` defaults to `label`.
+
+```rust
+pub struct CompletionItem { /* fields */ }
+```
+
+### Methods
+
+#### `pub fn new(label: impl Into<String>) -> Self`
+
+A candidate whose inserted text is its label.
+
+#### `pub fn insert_text(mut self, text: impl Into<String>) -> Self`
+
+Override the text inserted on accept (when it differs from the label).
+
+#### `pub fn detail(mut self, detail: impl Into<String>) -> Self`
+
+Trailing dimmed detail (a type or signature).
+
+#### `pub fn kind(mut self, kind: CompletionKind) -> Self`
+
+The leading badge category.
+
+## `pub enum CompletionKind`
+
+The category of a completion candidate — drives a small leading badge only.
+Deliberately a fixed, language-neutral set: the editor renders a glyph, the
+application decides which candidate is which kind.
+
+```rust
+pub enum CompletionKind { /* variants */ }
+```
+
+### Variants
+
+- **`Text`**
+- **`Keyword`**
+- **`Function`**
+- **`Method`**
+- **`Variable`**
+- **`Field`**
+- **`Type`**
+- **`Module`**
+- **`Constant`**
+- **`Snippet`**
+
+## `pub struct CompletionContext`
+
+What a completion provider is told about the caret when asked for candidates.
+
+```rust
+pub struct CompletionContext<'a> { /* fields */ }
+```
+
+## `pub enum IndentStyle`
+
+How a line's leading indentation is written.
+
+```rust
+pub enum IndentStyle { /* variants */ }
+```
+
+### Variants
+
+- **`Spaces`** — `width` spaces per indent level.
+- **`Tabs`** — One tab character per level, rendered `width` columns wide.
+
+### Methods
+
+#### `pub fn unit(&self) -> String`
+
+The text one indent level inserts.
+
+#### `pub fn width(&self) -> u8`
+
+How many columns one level occupies on screen. Both styles need this:
+spaces to know how many to strip on dedent, tabs to render the stop.
+
+## `pub struct BracketPair`
+
+A pair of characters the editor treats as opening and closing delimiters.
+
+Used for auto-closing and for match highlighting. The application declares
+the set, because the *same* character means different things per language:
+`<` is a bracket in a generic parameter list and a less-than sign in
+arithmetic, and only the caller knows which document this is.
+
+```rust
+pub struct BracketPair { /* fields */ }
+```
+
+### Methods
+
+#### `pub const fn new(open: char, close: char) -> Self`
+
+## `pub const COMMON_BRACKETS`
+
+The three pairs that are structural in essentially every bracketed
+language. A convenience starting point, not a default — an editor with no
+configured pairs simply does no bracket handling, which is correct for
+prose or a log.
+
+```rust
+pub const COMMON_BRACKETS: &[BracketPair] = &[
+    BracketPair::new('(', ')'),
+    BracketPair::new('[', ']'),
+    BracketPair::new('{', '}'),
+];
+```
+
+## `pub struct CodeConfig`
+
+Editing behaviour the code editor applies, all supplied by the application.
+
+```rust
+pub struct CodeConfig { /* fields */ }
+```
+
+### Methods
+
+#### `pub fn closing_for(&self, open: char) -> Option<char>`
+
+The closing partner for `open`, if it is a configured opening delimiter.
+
+#### `pub fn opening_for(&self, close: char) -> Option<char>`
+
+The opening partner for `close`, if it is a configured closing delimiter.

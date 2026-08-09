@@ -334,3 +334,25 @@ to its contents.
 #### `pub fn type_ahead_timeout(mut self, timeout: std::time::Duration) -> Self`
 
 Type-ahead reset timeout (default 500 ms; `ZERO` disables).
+
+## `pub enum GridTabTraversal`
+
+How Tab moves out of (or within) the grid.
+
+```rust
+pub enum GridTabTraversal { /* variants */ }
+```
+
+### Variants
+
+- **`OutOfGrid`** — Tab releases focus to the next focusable widget in the window.
+- **`WithinGrid`** — Tab advances to the next tile (wrapping rows); Shift+Tab the previous.
+
+## `pub struct GroupingSections`
+
+A `SectionProvider` built by partitioning consecutive equal-key runs of
+an (already ordered) model. The titles come from each run's key.
+
+```rust
+pub struct GroupingSections { /* fields */ }
+```

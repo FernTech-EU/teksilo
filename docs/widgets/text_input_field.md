@@ -326,3 +326,50 @@ after build it walks the field's inner state and moves the
 document cursor to `position`, clamped to the document
 length. Used by `DateEdit` / `TimeEdit` segment-stepping to
 keep the caret within its current segment after Up/Down.
+
+## `pub enum ValidationOutcome`
+
+What a validator returns for a given commit attempt.
+
+```rust
+pub enum ValidationOutcome { /* variants */ }
+```
+
+### Variants
+
+- **`Valid`** — Input is valid as typed. The field commits unchanged and the feedback signal flips to `ValidationFeedback::Valid`.
+- **`Corrected`** — Input was accepted after normalization. The field replaces its text with `corrected`, the bound `Signal<String>` observes the new value, and the feedback signal carries `message` for composites to surface as a polite announcement.  Use for clamping, completion, and reformat. Examples: `"12/50/2026"` → `Corrected { corrected: "12/31/2026", … }` for "day clamped to month length"; `"2026"` → `Corrected { corrected: "2026-01-01", … }` for "year-only completed to start of year".
+- **`Invalid`** — Input is rejected. The field reverts its text to the pre-edit value and the feedback signal carries `message` for composites to surface as an assertive error.
+
+## `pub enum ValidationFeedback`
+
+What composites render. Distinct from [`ValidationOutcome`]: the
+outcome is the validator's return value (no time concept); the
+feedback adds a `since` instant so the visual layer can decay an
+auto-correction announcement after a window without re-running the
+validator.
+
+```rust
+pub enum ValidationFeedback { /* variants */ }
+```
+
+### Variants
+
+- **`Pristine`** — No commit has happened yet, or the user is editing again after a previous outcome (typing always clears prior feedback).
+- **`Valid`** — Last commit returned `ValidationOutcome::Valid`. Composites typically render this identically to `Pristine` — the distinction matters for tests and for callers that want to signal "yes, it's confirmed valid" with a checkmark.
+- **`Corrected`** — Last commit returned `ValidationOutcome::Corrected`. `since` is the wall-clock instant the correction was applied; composites use it to decay the visual after `corrected_pulse_duration_ms` from the theme.
+- **`Invalid`** — Last commit returned `ValidationOutcome::Invalid`. Persists until the user edits again or an external `Pristine` reset.
+
+### Methods
+
+#### `pub fn is_invalid(&self) -> bool`
+
+Convenience: is this state currently signalling an error?
+
+#### `pub fn is_corrected(&self) -> bool`
+
+Convenience: was the last commit auto-corrected?
+
+#### `pub fn message(&self) -> Option<String>`
+
+Human-readable message, if any.

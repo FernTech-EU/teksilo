@@ -219,3 +219,239 @@ plain or composite tooltip.
 
 Attach a composite tooltip (arbitrary widget body). Clears any
 previously set plain or rich tooltip.
+
+## `pub struct StepperController`
+
+Shared handle controlling a `Stepper`.
+
+```rust
+pub struct StepperController { /* fields */ }
+```
+
+### Methods
+
+#### `pub fn new(step_count: usize) -> Self`
+
+A controller for a stepper with `step_count` steps, starting at step 0.
+
+#### `pub fn next(&self)`
+
+Advance to the next **reachable** step, recording the current one on
+the back-stack. Invisible (`Step::visible_when`)
+and `StepStatus::Disabled` steps are stepped over; a no-op when none
+remains.
+
+#### `pub fn skip(&self)`
+
+Mark the current (optional) step skipped, then advance like
+`next`.
+
+#### `pub fn back(&self)`
+
+Return to the most recently visited **reachable** step (the back-stack
+top). Entries that became unreachable meanwhile are popped and skipped.
+No-op on an empty stack.
+
+#### `pub fn go_to(&self, idx: usize)`
+
+Jump to step `idx` (non-linear), recording the current step on the
+back-stack so `back` returns here. A no-op when `idx` is
+out of range or not `reachable`.
+
+#### `pub fn reset(&self)`
+
+Reset to the first reachable step: clears the back-stack, restores the
+statuses the stepper was declared with (so a `Disabled` / `Optional`
+step keeps its character), and clears visited/skipped flags. Per-step
+visibility is app-owned and left untouched.
+
+#### `pub fn set_status(&self, idx: usize, status: StepStatus)`
+
+Override a step's `StepStatus` (e.g. mark it `Error` after async
+validation). Setting `StepStatus::Disabled` takes the step out of the
+flow — `next` / `go_to` skip it — but does
+**not** move off it if it is the active step.
+
+#### `pub fn set_visible(&self, idx: usize, visible: bool)`
+
+Show or hide step `idx`. A hidden step is skipped by
+`next` / `back` / `go_to`
+and drops out of the indicator strip — the branching-wizard shape
+("this step only if you chose X") without maintaining two step lists.
+
+Usually driven declaratively by
+`Step::visible_when`; this is the
+imperative twin. Hiding the *active* step does not navigate away from
+it — hide steps the user has not reached yet.
+
+#### `pub fn current(&self) -> usize`
+
+#### `pub fn status(&self, idx: usize) -> StepStatus`
+
+#### `pub fn visited(&self, idx: usize) -> bool`
+
+`true` if step `idx` has ever been the active step.
+
+#### `pub fn skipped(&self, idx: usize) -> bool`
+
+`true` if step `idx` was skipped via `skip`.
+
+#### `pub fn is_visible(&self, idx: usize) -> bool`
+
+`true` if step `idx` is visible (see `set_visible`).
+
+#### `pub fn is_reachable(&self, idx: usize) -> bool`
+
+`true` if step `idx` participates in the flow — visible **and** not
+`StepStatus::Disabled`.
+
+#### `pub fn next_reachable(&self, from: usize) -> Option<usize>`
+
+The next reachable step after `from`, if any.
+
+#### `pub fn has_next(&self) -> bool`
+
+`true` if `next` would move — i.e. the active step is not
+the last reachable one. The footer shows Next when this holds and
+Finish when it does not.
+
+#### `pub fn step_count(&self) -> usize`
+
+#### `pub fn can_back(&self) -> bool`
+
+`true` if there is a previously-visited, still-reachable step to
+return to.
+
+#### `pub fn current_step_signal(&self) -> Signal<usize>`
+
+The active-step signal — the stepper's `Switcher` and indicators bind
+to it.
+
+#### `pub fn version_signal(&self) -> Signal<u64>`
+
+Bumped on every structural mutation; bind at `BindingLevel::Rebuild`.
+
+## `pub enum StepStatus`
+
+Lifecycle state of a single step, surfaced in the indicator strip and
+(for the active step) as `aria-current="step"`.
+
+Mirrors the modern stepper status model (Ant `wait/process/finish/error`,
+Flutter `StepState`): `Upcoming` = not yet reached, `Active` = currently
+shown, `Complete` = validated, `Error` = failed validation, `Disabled` =
+unreachable, `Optional` = reachable but skippable, `Skipped` = an optional
+step the user bypassed.
+
+```rust
+pub enum StepStatus { /* variants */ }
+```
+
+### Variants
+
+- **`Upcoming`**
+- **`Active`**
+- **`Complete`**
+- **`Error`**
+- **`Disabled`**
+- **`Optional`**
+- **`Skipped`**
+
+### Methods
+
+#### `pub fn is_optional(self) -> bool`
+
+`true` for `Optional` — the only status that surfaces a Skip button.
+
+## `pub struct Step`
+
+One page in a `Stepper`.
+
+A step carries a localized `title`, optional `supporting_text`, a content
+factory (the body shown when the step is active), and an optional
+completion gate. The recommended data-flow pattern: the application owns
+its form state as `Signal`s, the content factory binds widgets to those
+signals (write side), and `complete_when` derives
+the Next gate from the same signals.
+
+```rust
+pub struct Step { /* fields */ }
+```
+
+### Methods
+
+#### `pub fn new(title: impl Into<LocalizedString>) -> Self`
+
+#### `pub fn content<W, F>(mut self, factory: F) -> Self where W: Widget + 'static, F: Fn() -> W + 'static,`
+
+The body shown while this step is active. The factory may capture
+clones of the application's form `Signal`s to read/write step input.
+
+#### `pub fn content_boxed(mut self, factory: impl Fn() -> Box<dyn Widget> + 'static) -> Self`
+
+The body shown while this step is active, as a **boxed** widget — the
+escape hatch for a body whose concrete type varies at runtime.
+
+`content` is generic over one `W: Widget`, and
+`Box<dyn Widget>` does not itself implement `Widget`, so a step whose
+body branches on app state cannot be expressed as a single `content`
+factory. Box each branch instead of duplicating the surrounding
+builder:
+
+```ignore
+Step::new(lit!("Details")).content_boxed({
+    let purpose = purpose.clone();
+    move || -> Box<dyn Widget> {
+        match purpose.get() {
+            Purpose::Novel => Box::new(novel_form()),
+            Purpose::Import => Box::new(import_form()),
+        }
+    }
+})
+```
+
+#### `pub fn supporting_text(mut self, text: impl Into<LocalizedString>) -> Self`
+
+Secondary line under the title in the header / indicator.
+
+#### `pub fn status(mut self, status: StepStatus) -> Self`
+
+Set the step's initial `StepStatus`.
+
+#### `pub fn optional(mut self, optional: bool) -> Self`
+
+Mark the step optional (reachable but skippable — surfaces a Skip
+button while active). Equivalent to `.status(StepStatus::Optional)`.
+
+#### `pub fn complete_when(mut self, signal: impl Into<teksilo_core::signal::Prop<bool>>) -> Self`
+
+Reactive Next gate: while this step is active, Next is enabled iff
+`signal` is `true`. Derive it from the same form signals the step's
+content writes — e.g. `name.map(|n| !n.is_empty())`.
+
+#### `pub fn validate_on_next(mut self, f: impl Fn() -> bool + 'static) -> Self`
+
+Imperative validation fallback: checked on the Next click. Returning
+`false` blocks navigation. Prefer `complete_when`
+where a reactive signal is available.
+
+#### `pub fn visible_when(mut self, visible: impl Into<teksilo_core::signal::Prop<bool>>) -> Self`
+
+Reactive visibility: while `visible` is `false` this step drops out of
+the flow — Next / Back / indicator clicks skip it, and its marker is
+hidden from the indicator strip (and from AT).
+
+This is how a **branching** wizard is expressed: declare every step
+once and gate the conditional ones on the choice that selects them,
+instead of maintaining one step list per branch.
+
+```ignore
+let purpose = Signal::new(Purpose::Novel);
+Stepper::new()
+    .step(Step::new(lit!("Purpose")).content(|| purpose_picker()))
+    .step(Step::new(lit!("Import source"))
+        .visible_when(purpose.map(|p| *p == Purpose::Import))
+        .content(|| import_form()))
+```
+
+Hiding the step the user is *currently on* does not navigate away from
+it — gate steps ahead of the choice, not the one making it.

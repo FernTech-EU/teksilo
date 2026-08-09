@@ -489,3 +489,310 @@ Pin or unpin a single column.
 
 Scroll the minimum distance needed to make `row` visible. A no-op
 before the first layout pass, when the viewport height is not yet known.
+
+## `pub enum ColumnWidth`
+
+How a column's width is determined during layout.
+
+```rust
+pub enum ColumnWidth { /* variants */ }
+```
+
+### Variants
+
+- **`Fixed`** — Exact pixel width. Clamped by `min_width` / `max_width`.
+- **`Flex`** — Share of the leftover space proportional to the flex factor — behaves like CSS `flex-grow`. The factor must be `> 0.0`.
+- **`Auto`** — Intrinsic content width (currently approximated by the table's `min_column_width_default` token; refined to probe the header label and visible cells).
+
+## `pub enum PinnedSide`
+
+Whether a column is pinned to one side of the table.
+
+```rust
+pub enum PinnedSide { /* variants */ }
+```
+
+### Variants
+
+- **`Leading`** — Pinned against the leading edge — stays visible during horizontal scroll.
+- **`None`** — Not pinned — scrolls horizontally with the body.
+- **`Trailing`** — Pinned against the trailing edge.
+
+## `pub enum Alignment`
+
+Horizontal alignment of a cell's content within its column.
+
+```rust
+pub enum Alignment { /* variants */ }
+```
+
+### Variants
+
+- **`Leading`**
+- **`Center`**
+- **`Trailing`**
+
+## `pub enum TruncationPolicy`
+
+Strategy when a cell's text overflows its column.
+
+```rust
+pub enum TruncationPolicy { /* variants */ }
+```
+
+### Variants
+
+- **`Ellipsis`** — `…`-elide the trailing portion. **Default.**
+- **`None`** — Don't truncate; let the cell content draw beyond the column edge (the body pane's clip will hide it).
+- **`Fade`** — Fade the trailing portion — gradient mask.
+
+## `pub enum GridLines`
+
+Whether the table draws grid lines between rows / columns.
+
+```rust
+pub enum GridLines { /* variants */ }
+```
+
+### Variants
+
+- **`None`**
+- **`Horizontal`**
+- **`Vertical`**
+- **`Both`**
+
+## `pub enum ColumnResizePolicy`
+
+Whether column resize commits the new width on every drag tick (`Live`)
+or only on `Ended` (`OnRelease`).
+
+```rust
+pub enum ColumnResizePolicy { /* variants */ }
+```
+
+### Variants
+
+- **`Live`**
+- **`OnRelease`**
+
+## `pub enum EditTrigger`
+
+Triggers that cause the table to fire `on_cell_edit_request` on the
+focused cell.
+
+```rust
+pub enum EditTrigger { /* variants */ }
+```
+
+### Variants
+
+- **`F2OrTypeOrDoubleClick`** — All three triggers active. **Default.**
+- **`F2`**
+- **`F2OrType`**
+- **`DoubleClick`**
+- **`None`** — Editing disabled — the table does not fire `on_cell_edit_request`.
+
+## `pub enum TabTraversal`
+
+Tab / Shift-Tab traversal policy across cells of a row.
+
+Regardless of the policy, **Ctrl+Tab / Ctrl+Shift+Tab always move focus
+out of the table** to the next / previous focusable widget — the reliable
+escape from `CellsThenRows`, so keyboard focus is never trapped.
+
+```rust
+pub enum TabTraversal { /* variants */ }
+```
+
+### Variants
+
+- **`CellsThenRows`** — Tab moves to the next cell within the row, then wraps to the first cell of the next row. **Default.** (Ctrl+Tab leaves the table.)
+- **`OutOfTable`** — Tab leaves the table once the focused cell is reached at the row boundary; the focus owner is whatever follows the table in tab order.
+
+## `pub struct CellContext`
+
+Per-cell context handed to a column's cell delegate during build.
+
+```rust
+pub struct CellContext { /* fields */ }
+```
+
+## `pub struct ColumnContext`
+
+Per-column-header context handed to a column's header delegate.
+
+```rust
+pub struct ColumnContext { /* fields */ }
+```
+
+## `pub struct Column`
+
+Single column declaration. Column ids must be **stable, unique strings**
+— they're the persistence key for sort, filter, width, and ordering.
+
+```rust
+pub struct Column<T: 'static> { /* fields */ }
+```
+
+### Methods
+
+#### `pub fn new( id: impl Into<String>, header: impl Into<LocalizedString>, cell: impl Fn(&T, &CellContext) -> Box<dyn Widget> + 'static, ) -> Self`
+
+Create a column with a stable id, a localized header label, and a
+cell builder that takes `&T` plus a `CellContext` and returns a
+boxed widget.
+
+#### `pub fn width(mut self, w: ColumnWidth) -> Self`
+
+#### `pub fn min_width(mut self, px: f32) -> Self`
+
+#### `pub fn max_width(mut self, px: f32) -> Self`
+
+#### `pub fn alignment(mut self, a: Alignment) -> Self`
+
+#### `pub fn resizable(mut self, b: bool) -> Self`
+
+#### `pub fn reorderable(mut self, b: bool) -> Self`
+
+#### `pub fn sortable(mut self, b: bool) -> Self`
+
+#### `pub fn filterable(mut self, b: bool) -> Self`
+
+#### `pub fn editable(mut self, b: bool) -> Self`
+
+Mark the column as editable. Default `false`. F2 / type-to-edit
+only enter edit mode on cells of editable columns; the
+`on_cell_edit_request` hook also fires only for these. Cells of
+non-editable columns continue to render their static delegate
+regardless of `editing_cell`.
+
+#### `pub fn pinned(mut self, side: PinnedSide) -> Self`
+
+#### `pub fn truncation(mut self, p: TruncationPolicy) -> Self`
+
+#### `pub fn header_override( mut self, f: impl Fn(&ColumnContext) -> Box<dyn Widget> + 'static, ) -> Self`
+
+Override the default header rendering (label + sort/filter
+indicators). The closure receives a `ColumnContext` reflecting
+the current sort/filter state.
+
+#### `pub fn id(&self) -> &str`
+
+Stable column id (the persistence key for sort, filter, width,
+and ordering signals).
+
+## `pub enum TableSelectionMode`
+
+Selection mode for a `TableView` or `TreeTableView`.
+
+```rust
+pub enum TableSelectionMode { /* variants */ }
+```
+
+### Variants
+
+- **`None`** — No selection allowed.
+- **`SingleRow`** — At most one row selected at a time.
+- **`MultiRow`** — Multiple rows selectable; Ctrl-click toggles, Shift-click extends. **Default.**
+- **`SingleCell`** — Excel-style: at most one cell selected at a time.
+- **`MultiCell`** — Excel-style: rectangular cell selection.
+
+### Methods
+
+#### `pub fn is_cell_mode(self) -> bool`
+
+Whether the mode operates on cells rather than entire rows.
+
+#### `pub fn is_multi(self) -> bool`
+
+Whether the mode allows more than one entry to be selected.
+
+## `pub struct CellSelectionModel`
+
+Cell-level selection state for `TableSelectionMode::SingleCell` /
+`MultiCell`. Tracks `(row, col)` pairs in visible-index space.
+
+Mirrors `teksilo_data::SelectionModel`'s API surface (signal-backed,
+auto-adjustable on data mutations) but keyed by `(row, col)` instead of
+`row` alone.
+
+```rust
+pub struct CellSelectionModel { /* fields */ }
+```
+
+### Methods
+
+#### `pub fn new(mode: TableSelectionMode) -> Self`
+
+Construct a model. **Panics** if `mode` is not a cell mode —
+callers in row mode should use `teksilo_data::SelectionModel`.
+
+#### `pub fn mode(&self) -> TableSelectionMode`
+
+#### `pub fn selection_signal(&self) -> Signal<BTreeSet<(usize, usize)>>`
+
+#### `pub fn is_selected(&self, row: usize, col: usize) -> bool`
+
+#### `pub fn count(&self) -> usize`
+
+#### `pub fn select(&self, row: usize, col: usize)`
+
+Replace the selection with the single cell `(row, col)` and set
+the anchor.
+
+#### `pub fn toggle(&self, row: usize, col: usize)`
+
+Toggle the cell `(row, col)` (Ctrl-click). In `SingleCell` mode
+this behaves like `select`.
+
+#### `pub fn extend_to(&self, row: usize, col: usize)`
+
+Extend the selection to include the rectangular range from the
+anchor to `(row, col)`. In `SingleCell` mode this falls back to
+`select`.
+
+#### `pub fn select_all(&self, row_count: usize, col_count: usize)`
+
+Select every cell in `0..row_count × 0..col_count`.
+
+#### `pub fn clear(&self)`
+
+#### `pub fn adjust_for_row_insert(&self, at_row: usize, count: usize)`
+
+Adjust selection after `count` rows are inserted starting at
+`at_row`. Existing selections at indices `>= at_row` shift up.
+
+#### `pub fn adjust_for_row_remove(&self, at_row: usize, count: usize)`
+
+Adjust selection after `count` rows starting at `at_row` are
+removed. Selections within the removed range are dropped; later
+rows shift down.
+
+#### `pub fn adjust_for_row_move(&self, from: usize, to: usize, count: usize)`
+
+Adjust selection after a block of `count` rows moved from `from` to
+`to` (a post-removal index, matching `ListModel::move_item`). Selected
+cells follow their rows; columns are untouched.
+
+#### `pub fn adjust_for_column_insert(&self, at_col: usize, count: usize)`
+
+Adjust selection after `count` columns are inserted at `at_col`.
+
+Reserved for future dynamic-column support. `TableView`/`TreeTableView`
+columns are declared once via `.add_column()`/`.columns()` and are
+static for the widget's lifetime — there is no runtime insert/remove
+API today, so nothing calls this. A column *reorder* or pin-toggle
+permutes positions instead (see `remap_columns`),
+which is what the current views actually use. Kept (not removed) as
+public API in case a future dynamic-column feature needs the
+offset-shift semantics this and `adjust_for_column_remove`
+already implement and test.
+
+#### `pub fn adjust_for_column_remove(&self, at_col: usize, count: usize)`
+
+Adjust selection after `count` columns starting at `at_col` are
+removed.
+
+Reserved for future dynamic-column support — see the doc comment on
+`adjust_for_column_insert`; nothing
+calls this today for the same reason.
