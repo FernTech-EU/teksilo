@@ -15,7 +15,7 @@ extend-exclude = [
   "examples/rich_text_editor/src/highlight_controls.rs",
   "examples/rich_text_editor/src/main.rs",
   # Language spec documents an intentional `Buton` typo to illustrate an error.
-  "docs/teksu-language-spec-v3.md",
+  "docs/teksi-language-spec-v3.md",
 ]
 
 [default.extend-words]

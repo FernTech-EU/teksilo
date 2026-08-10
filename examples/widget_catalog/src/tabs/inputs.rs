@@ -22,8 +22,9 @@ const LAYERS_SVG: &str = "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 2
 const NOTE_SVG: &str =
     "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M5 3h14v18H5z'/></svg>";
 
-/// The three-segment control, keyed by [`SegmentId`] so the selection
-/// keeps meaning the same segment across insertions and locale switches.
+/// The three-segment control, keyed by [`SegmentId`](teksilo::widgets::SegmentId)
+/// so the selection keeps meaning the same segment across insertions and
+/// locale switches.
 fn segmented_basic(sigs: &Signals) -> SegmentedControl {
     SegmentedControl::new(sigs.segment_selected.clone())
         .label(lit!("Example choice"))
