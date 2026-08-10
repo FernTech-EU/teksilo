@@ -13,6 +13,13 @@
 //! pass; to center content *within leftover space*, wrap it in an `Expand`:
 //! `Expand::horizontal().child(Center::new().child(w))`.
 //!
+//! The child is measured **under the constraint `Center` received** (a
+//! loose-but-bounded proposal, like Flutter's `Center`): rigid children keep
+//! their natural size and are centered, while adaptive children respond to
+//! the bound — an ellipsis `TextWidget` truncates at the slot width instead
+//! of overflowing symmetrically, and wrapping text reports its real wrapped
+//! height.
+//!
 //! ## When to use
 //!
 //! - Center a small widget inside a bounded slot (e.g., an icon in a fixed
@@ -106,9 +113,16 @@ impl Widget for Center {
         // instead keeps `Center` a well-behaved, non-greedy alignment wrapper
         // (`flex = 0`): it occupies its child on the open axis and fills only
         // axes the parent actually bounded.
+        //
+        // The child is measured at the *incoming* proposal, not `unspecified()`,
+        // so a bounded axis reaches it (Flutter's loose-but-bounded constraint):
+        // an ellipsis `TextWidget` caps itself at the offered width instead of
+        // reporting its full untruncated line, and a wrapping child measured
+        // under a bounded width reports its real wrapped height on the open
+        // axis (height-for-width) rather than a one-line lie.
         let child = self
             .child_id
-            .and_then(|id| ctx.child_size(id, SizeProposal::unspecified()))
+            .and_then(|id| ctx.child_size(id, proposal))
             .unwrap_or(Size::ZERO);
         Size::new(
             proposal.width.unwrap_or(child.width),
@@ -124,9 +138,15 @@ impl Widget for Center {
         children: &mut [WidgetPlacement],
         ctx: &LayoutContext,
     ) {
+        // Offer the resolved bounds so adaptive children (ellipsis text,
+        // wrapping paragraphs) cap themselves at the slot instead of taking
+        // their unbounded natural size and overflowing symmetrically around
+        // the center. Rigid children ignore the proposal and are centered at
+        // their natural size, exactly as before.
+        let child_proposal = SizeProposal::exact(bounds.width, bounds.height);
         for child in children.iter_mut() {
             let child_size = ctx
-                .child_size(child.id, SizeProposal::unspecified())
+                .child_size(child.id, child_proposal)
                 .unwrap_or(bounds.size());
             let dx = (bounds.width - child_size.width) / 2.0;
             let dy = (bounds.height - child_size.height) / 2.0;
@@ -186,6 +206,64 @@ mod tests {
         let cb = tree.bounds(center);
         assert!((cb.width - 200.0).abs() < 0.01);
         assert!((cb.height - 100.0).abs() < 0.01);
+    }
+
+    /// A leaf that caps itself at the proposed width — the shape of an
+    /// ellipsis `TextWidget` (`min(natural, proposal)`).
+    #[derive(Debug)]
+    struct AdaptiveLeaf {
+        natural_width: f32,
+        height: f32,
+    }
+    impl Widget for AdaptiveLeaf {
+        fn layout_response(
+            &self,
+            proposal: SizeProposal,
+            _ctx: &LayoutContext,
+        ) -> teksilo_core::widget::LayoutResponse {
+            let w = match proposal.width {
+                Some(max) => self.natural_width.min(max),
+                None => self.natural_width,
+            };
+            Size::new(w, self.height).into()
+        }
+    }
+
+    /// Regression: `Center` must offer its bounds to the child so an
+    /// adaptive child (ellipsis text) caps itself at the slot instead of
+    /// being placed at its unbounded natural size, overflowing on both
+    /// sides of the center. This is what lets a `single_line()` placeholder
+    /// truncate with a trailing "…" inside a narrow field.
+    #[test]
+    fn caps_adaptive_child_at_bounds() {
+        let mut tree = WidgetTree::new();
+        let child = tree.add(AdaptiveLeaf {
+            natural_width: 300.0,
+            height: 16.0,
+        });
+        let _center = tree.add(Center::new().child_id(child));
+        tree.layout(SizeProposal::exact(100.0, 40.0));
+
+        let cb = tree.bounds(child);
+        assert!(
+            (cb.width - 100.0).abs() < 0.01,
+            "adaptive child must be capped at Center's width (100), got {}",
+            cb.width
+        );
+        assert!((cb.x - 0.0).abs() < 0.01, "capped child fills, x = 0");
+        assert!((cb.y - 12.0).abs() < 0.01, "still vertically centered");
+
+        // A child narrower than the slot stays centered at its natural size.
+        let mut t2 = WidgetTree::new();
+        let small = t2.add(AdaptiveLeaf {
+            natural_width: 40.0,
+            height: 16.0,
+        });
+        let _c2 = t2.add(Center::new().child_id(small));
+        t2.layout(SizeProposal::exact(100.0, 40.0));
+        let sb = t2.bounds(small);
+        assert!((sb.width - 40.0).abs() < 0.01);
+        assert!((sb.x - 30.0).abs() < 0.01, "(100-40)/2");
     }
 
     /// Regression: a bare `Center` inside an `HStack` must **shrink-wrap its

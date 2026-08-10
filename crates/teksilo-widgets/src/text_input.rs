@@ -41,7 +41,7 @@ use teksilo_core::styles::{
 use teksilo_core::widget::{CursorIcon, EventContext, LayoutContext, Widget, WidgetPlacement};
 use teksilo_core::widget_builder::WidgetBuilder;
 use teksilo_core::widget_id::WidgetId;
-use teksilo_tokens::{TextRole, TextStyleRole};
+use teksilo_tokens::{Alignment, TextRole, TextStyleRole};
 
 use crate::button::InteractionState;
 use crate::primitives::text_input_field::{TextInputField, ValidationFeedback};
@@ -584,17 +584,23 @@ impl Widget for TextInput {
                 .color(TextRole::Secondary)
                 .single_line()
                 .a11y_hidden();
-            // Center the placeholder vertically within the column.
+            // Align the placeholder on the column's vertical midline,
+            // pinned to the leading edge where the typed text starts.
             // `Padding(top=padding_vertical, bottom=padding_vertical)`
             // pinned the placeholder to the top of its inset box, but
             // the rich-text engine inside the field paints glyphs with
             // its own line-leading offset, so the two paths drifted
-            // by a few pixels. `Center` aligns purely on the layout
-            // box midline, which matches the engine's frame midline.
+            // by a few pixels; aligning purely on the layout-box midline
+            // matches the engine's frame midline. Align mode measures the
+            // placeholder under the column's bounds, so the `single_line()`
+            // TextWidget caps itself at the available width and truncates
+            // with a trailing "…" when the field is too narrow, instead of
+            // painting its full line past the frame.
             let ph_id = ctx.add(
                 Expand::new()
                     .respect_intrinsic()
-                    .child(crate::primitives::Center::new().child(ph)),
+                    .align_child(Alignment::CENTER_LEADING)
+                    .child(ph),
             );
             let visible = text_signal_for_vis.map(|t| t.is_empty());
             ctx.visible_when(ph_id, visible);

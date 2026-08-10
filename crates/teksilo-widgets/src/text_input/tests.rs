@@ -550,3 +550,100 @@ fn input_purpose_sets_specialised_at_role() {
         "input_purpose(Email) must emit a Role::EmailInput node"
     );
 }
+
+// ── placeholder layout ─────────────────────────────────────────────
+
+/// Find the placeholder `TextWidget`. Structurally it is the only
+/// `TextWidget` whose parent is the align-mode `Expand` overlay in the
+/// field's `ZStack` (the validation strip's `TextWidget` is parented by
+/// `ValidationStrip`).
+fn placeholder_text_widget(
+    tree: &WidgetTree,
+    root: teksilo_core::widget_id::WidgetId,
+) -> teksilo_core::widget_id::WidgetId {
+    fn walk(
+        tree: &WidgetTree,
+        id: teksilo_core::widget_id::WidgetId,
+        found: &mut Vec<teksilo_core::widget_id::WidgetId>,
+    ) {
+        let is_text = tree
+            .widget_type_name(id)
+            .is_some_and(|n| n.ends_with("::TextWidget"));
+        let parent_is_expand = tree
+            .parent(id)
+            .and_then(|p| tree.widget_type_name(p))
+            .is_some_and(|n| n.ends_with("::Expand"));
+        if is_text && parent_is_expand {
+            found.push(id);
+        }
+        for c in tree.children(id) {
+            walk(tree, c, found);
+        }
+    }
+    let mut found = Vec::new();
+    walk(tree, root, &mut found);
+    assert_eq!(
+        found.len(),
+        1,
+        "expected exactly one Expand-parented TextWidget (the placeholder)"
+    );
+    found[0]
+}
+
+/// Regression: a placeholder wider than the field must be capped at the
+/// text column's bounds so paint-time trailing-ellipsis truncation kicks
+/// in (`draw_text` truncates at `bounds.width`), instead of the
+/// placeholder painting its full untruncated line past the field frame.
+#[test]
+fn placeholder_is_capped_at_field_width_for_ellipsis() {
+    let text = Signal::new(String::new());
+    let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+    let id = tree.add(TextInput::new(text).placeholder(lit!("A rather long placeholder sentence")));
+    // 34 chars × 8 px (mock backend) = 272 px natural — far wider than
+    // the 120 px field.
+    tree.layout(SizeProposal::exact(120.0, 40.0));
+
+    let ph = placeholder_text_widget(&tree, id);
+    let pb = tree.bounds(ph);
+    let ob = tree.bounds(id);
+    assert!(
+        pb.x >= ob.x - 0.01 && pb.x + pb.width <= ob.x + ob.width + 0.01,
+        "placeholder must stay inside the field ({pb:?} vs {ob:?})"
+    );
+    assert!(
+        pb.width < 272.0 - 0.01,
+        "placeholder width must be capped below its natural line width, got {}",
+        pb.width
+    );
+}
+
+/// Regression: a short placeholder is pinned to the leading edge (where
+/// the typed text starts), vertically centered — not centered
+/// horizontally in the column.
+#[test]
+fn placeholder_is_leading_aligned() {
+    let text = Signal::new(String::new());
+    let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+    let id = tree.add(TextInput::new(text).placeholder(lit!("Short hint")));
+    tree.layout(SizeProposal::exact(400.0, 40.0));
+
+    let ph = placeholder_text_widget(&tree, id);
+    let pb = tree.bounds(ph);
+    let column = tree.bounds(tree.parent(ph).expect("placeholder has a parent"));
+    assert!(
+        (pb.x - column.x).abs() < 0.01,
+        "placeholder must sit at the column's leading edge (x={}, column.x={})",
+        pb.x,
+        column.x
+    );
+    assert!(
+        pb.width < column.width / 2.0,
+        "precondition: placeholder is much narrower than the column"
+    );
+    let ph_mid = pb.y + pb.height / 2.0;
+    let col_mid = column.y + column.height / 2.0;
+    assert!(
+        (ph_mid - col_mid).abs() < 0.5,
+        "placeholder stays on the column's vertical midline"
+    );
+}

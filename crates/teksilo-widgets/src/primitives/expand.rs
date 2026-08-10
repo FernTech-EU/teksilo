@@ -316,9 +316,15 @@ impl Widget for Expand {
     ) {
         for child in children.iter_mut() {
             if let Some(alignment) = self.child_alignment {
-                // Align mode: child takes its natural size; we position it.
+                // Align mode: child takes its natural size, capped by the
+                // slot; we position it. Offering the bounds (instead of an
+                // unbounded `unspecified()`) lets adaptive children respond —
+                // an ellipsis `TextWidget` truncates at the slot width rather
+                // than being placed at its full untruncated line and
+                // overflowing the slot. Rigid children ignore the proposal
+                // and are aligned at their natural size as before.
                 let child_size = ctx
-                    .child_size(child.id, SizeProposal::unspecified())
+                    .child_size(child.id, SizeProposal::exact(bounds.width, bounds.height))
                     .unwrap_or(bounds.size());
                 let rtl = ctx.is_rtl();
                 let (dx, dy) = alignment.resolve(

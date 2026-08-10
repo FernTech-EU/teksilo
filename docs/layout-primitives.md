@@ -200,6 +200,14 @@ collapsing to zero. To center a child *within the leftover space* of a stack,
 give it flex with `Expand`: `Expand::horizontal { Center { w } }` (the analogue
 of Flutter's `Expanded(child: Center(...))`).
 
+The child is measured **under the constraint `Center` received** (a
+loose-but-bounded proposal, like Flutter's loose constraints): rigid children
+keep their natural size and are centered; adaptive children respond to the
+bound — an ellipsis `TextWidget` truncates at the slot width instead of
+overflowing symmetrically around the center, and wrapping text reports its
+real wrapped height. `Expand`'s `.align_child(...)` mode measures its child
+the same way.
+
 ### 3.4 `Shrinkable` — opt a child into compression
 
 [crates/teksilo-widgets/src/primitives/shrinkable.rs](../crates/teksilo-widgets/src/primitives/shrinkable.rs)

@@ -48,7 +48,7 @@ use teksilo_core::styles::{
 use teksilo_core::widget::{CursorIcon, LayoutContext, LayoutResponse, Widget, WidgetPlacement};
 use teksilo_core::widget_builder::WidgetBuilder;
 use teksilo_core::widget_id::WidgetId;
-use teksilo_tokens::{TextRole, TextStyleRole};
+use teksilo_tokens::{Alignment, TextRole, TextStyleRole};
 
 use crate::icon_button::{BuiltInIcons, IconButton};
 use crate::primitives::text_input_field::{TextInputField, ValidationFeedback, ValidationOutcome};
@@ -460,10 +460,15 @@ impl Widget for PasswordField {
                 .color(TextRole::Secondary)
                 .single_line()
                 .a11y_hidden();
+            // Leading-aligned on the vertical midline; align mode measures
+            // the placeholder under the column's bounds, so the
+            // `single_line()` TextWidget ellipsizes when the field is too
+            // narrow. (Mirrors `TextInput`.)
             let ph_id = ctx.add(
                 Expand::new()
                     .respect_intrinsic()
-                    .child(Center::new().child(ph)),
+                    .align_child(Alignment::CENTER_LEADING)
+                    .child(ph),
             );
             let text_for_vis = self.text.clone();
             let visible = text_for_vis.map(|t| t.is_empty());
