@@ -155,6 +155,13 @@ impl WidgetTree {
             .into_iter()
             .collect();
 
+        // Interactive overlay rects for this frame, handed to
+        // `after_paint` via `WidgetTreeView`. Chrome aggregators
+        // (`TitleBar`) subtract them from the geometry they publish to
+        // the OS — an overlay floats above the caption, so its pixels
+        // must not be reported as draggable chrome.
+        let overlay_rects: Vec<Rect> = self.overlay_manager.interactive_rects();
+
         for root_id in self.arena.roots() {
             // Don't descend into overlay content via its anchor parent — it
             // is painted via the dedicated overlay loop below. Without this,
@@ -172,6 +179,7 @@ impl WidgetTree {
                 &a11y_prefs,
                 paint_epoch,
                 &overlay_skip,
+                &overlay_rects,
                 self.layout_direction,
                 // Root starts enabled; the walker ANDs in each node's
                 // own `enabled_state` as it descends.
@@ -193,6 +201,7 @@ impl WidgetTree {
                 &a11y_prefs,
                 paint_epoch,
                 &overlay_skip,
+                &overlay_rects,
                 self.layout_direction,
                 // Overlays detach from their anchor's enabled-state.
                 // A tooltip / popover stays enabled even if its
@@ -277,6 +286,7 @@ fn paint_widget_cached(
     a11y_prefs: &A11yPaintPrefs,
     paint_epoch: u64,
     overlay_skip: &std::collections::HashSet<WidgetId>,
+    overlay_rects: &[Rect],
     layout_direction: crate::environment::LayoutDirection,
     parent_effective_enabled: bool,
     accumulated_raster_scale: f32,
@@ -545,6 +555,7 @@ fn paint_widget_cached(
             a11y_prefs,
             paint_epoch,
             overlay_skip,
+            overlay_rects,
             layout_direction,
             this_effective_enabled,
             this_raster_scale,
@@ -563,7 +574,7 @@ fn paint_widget_cached(
         if let Some(node) = arena_ref.get(id)
             && node.widget.wants_after_paint()
         {
-            let view = crate::widget::WidgetTreeView::new(arena_ref);
+            let view = crate::widget::WidgetTreeView::new(arena_ref, overlay_rects);
             let resolved_theme = arena_ref.resolve_theme(id, base_theme);
             let ctx = PaintContext {
                 theme: &resolved_theme,

@@ -225,13 +225,22 @@ pub struct HitRegions {
     /// `drag` and answer `HTCLIENT`, or the OS owns those pixels and the widget
     /// underneath never sees a click, a hover, or a cursor change.
     ///
-    /// Published by `TitleBar::after_paint` from the
+    /// Published by `TitleBar::after_paint` from two sources. First, the
     /// [`gesture_dead_zone`](crate::arena::WidgetNode::gesture_dead_zone) nodes
     /// inside its drag region — the same declaration that already stops an
     /// ancestor drag from arming in widget land. One concept, both layers:
     /// wrap an interactive title-bar control in a `DeadZone` and it becomes
     /// clickable on Windows *and* immune to jitter-drag everywhere else.
     /// Teksilo's counterpart of Electron's `-webkit-app-region: no-drag`.
+    ///
+    /// Second, every interactive overlay's intersection with the title bar.
+    /// Overlay content floats above the chrome in widget land, so its pixels
+    /// must return to the client area no matter which published rect lies
+    /// beneath — which is why a backend must test these holes before the
+    /// control-button rects as well as before `drag`. The shipped bug: a
+    /// hamburger `MenuBar`'s revealed bar is an overlay anchored outside the
+    /// drag region, so no dead zone covered it, and on Windows every menu
+    /// title over the caption dragged the window instead of opening.
     pub no_drag: Vec<Rect>,
     pub resize_borders: ResizeBorders,
 }

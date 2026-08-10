@@ -31,7 +31,10 @@
 //!      `HTCAPTION` for the widget's drag region, and (M5) the
 //!      `HTMINBUTTON` / `HTMAXBUTTON` / `HTCLOSE` codes for the
 //!      control-button rects. Returning `HTMAXBUTTON` is what makes
-//!      Win11 show the snap-layout flyout on hover.
+//!      Win11 show the snap-layout flyout on hover. `no_drag` holes
+//!      (dead-zoned in-caption controls + overlays covering the
+//!      caption) are tested first and return `HTCLIENT` — see
+//!      `handle_nchittest`.
 //!    - `WM_DPICHANGED` — re-extend the DWM frame so rounded corners
 //!      survive a DPI change, then fall through so winit can resize.
 //!    - `WM_NCLBUTTONUP` — for the three button hit codes, post a
@@ -607,6 +610,25 @@ fn handle_nchittest(hwnd: HWND, lparam: LPARAM, data: &SubclassData) -> LRESULT 
     if let Ok(regions) = data.hit_regions.try_lock() {
         let pt_canvas = Point::new(pt.x as f32, pt.y as f32);
 
+        // Holes win over EVERY published rect, buttons included: `HTCLIENT`
+        // hands the pixels back to the client area, so winit delivers
+        // `WM_LBUTTONDOWN` / `WM_MOUSEMOVE` normally and the widget tree
+        // hit-tests them like any other widget — clicks, hover styling,
+        // tooltips and cursor shapes all come back. Two kinds of hole share
+        // the list: the interactive controls the app placed inside the title
+        // bar (a `DeadZone`d button, a project switcher — always inside the
+        // drag rect, so for those only the ordering vs `drag` matters), and
+        // any overlay covering the caption (a revealed hamburger menu bar, a
+        // tall modal). An overlay floats above the min/max/close cluster in
+        // widget land, so its holes must be tested before the button rects
+        // too — else a menu title painted over the maximize button would
+        // still return `HTMAXBUTTON` and pop the snap-layout flyout instead
+        // of opening the menu.
+        for hole in &regions.no_drag {
+            if hole.contains(pt_canvas) {
+                return LRESULT(HTCLIENT as isize);
+            }
+        }
         if let Some(r) = regions.minimize {
             if r.contains(pt_canvas) {
                 return LRESULT(HTMINBUTTON as isize);
@@ -623,19 +645,6 @@ fn handle_nchittest(hwnd: HWND, lparam: LPARAM, data: &SubclassData) -> LRESULT 
         if let Some(r) = regions.close {
             if r.contains(pt_canvas) {
                 return LRESULT(HTCLOSE as isize);
-            }
-        }
-        // Dead zones win over the drag region: these are the interactive
-        // controls the app placed inside the title bar (a button, a project
-        // switcher, a search field). `HTCLIENT` hands the pixels back to the
-        // client area, so winit delivers `WM_LBUTTONDOWN` / `WM_MOUSEMOVE`
-        // normally and the widget tree hit-tests them like any other widget —
-        // clicks, hover styling, tooltips and cursor shapes all come back.
-        // Must be tested BEFORE `drag`, which would otherwise claim the same
-        // point as `HTCAPTION` and let the OS swallow the click.
-        for hole in &regions.no_drag {
-            if hole.contains(pt_canvas) {
-                return LRESULT(HTCLIENT as isize);
             }
         }
         for drag in &regions.drag {

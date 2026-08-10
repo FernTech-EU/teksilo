@@ -451,6 +451,27 @@ impl Widget for TitleBar {
             }
         }
 
+        // Overlays float above every widget, chrome included — so wherever
+        // one covers the title bar, the OS must hand the pixels back to the
+        // client area or the overlay is unclickable there. `DeadZone` can't
+        // express this: the dead-zone walk above is scoped to the drag
+        // region's own subtree, and an overlay is anchored anywhere (the
+        // hamburger `MenuBar`'s revealed bar hangs off the leading slot; a
+        // tall modal hangs off nothing in here at all). The shipped bug:
+        // on Windows every revealed menu title over the caption returned
+        // `HTCAPTION` and dragged the window instead of opening its menu.
+        // Clip to the title bar's own strip — every rect this snapshot
+        // publishes lies inside it, so anything outside is already client
+        // area and would only bloat the per-message scan in the wndproc.
+        if let Some(strip_id) = self.root_child_id {
+            let strip = view.bounds(strip_id);
+            for &overlay in view.overlay_rects() {
+                if let Some(hole) = intersect(overlay, strip) {
+                    regions.no_drag.push(hole);
+                }
+            }
+        }
+
         // A hidden cluster publishes no control regions. The sink is populated
         // at build time and survives the cluster going dormant, so without this
         // guard Windows would keep returning `HTMINBUTTON`/`HTMAXBUTTON`/
@@ -1350,6 +1371,95 @@ mod tests {
         assert!(
             regions.no_drag.is_empty(),
             "a passive centred title must not punch a hole in the caption, got {:?}",
+            regions.no_drag
+        );
+    }
+
+    #[test]
+    fn overlay_over_the_caption_is_published_as_a_no_drag_hole() {
+        // Regression (Windows): the hamburger `MenuBar`'s revealed bar is an
+        // *overlay* anchored in the leading slot — outside the drag region —
+        // so no `DeadZone` walk could ever reach it, and every menu title
+        // painted over the caption returned `HTCAPTION`: clicking a menu
+        // dragged the window instead of opening it (except where an
+        // unrelated dead-zoned control happened to sit beneath). Any
+        // interactive overlay must carve its caption overlap out of the
+        // published regions.
+        use teksilo_core::overlay::{
+            DismissBehavior, OverlayLayer, OverlayPlacement, OverlayRequest,
+        };
+
+        let host = Rc::new(TestHost::default());
+        let (mut tree, bar) = build_realistic_tree(host.clone(), |b| b);
+
+        // 200×60 content shown at (100, 20): its top half overlaps the
+        // 40 dp title bar strip, its bottom half hangs below into the
+        // client area.
+        let content = tree.add(FixedSize::new().width(200.0).height(60.0));
+        tree.show_overlay(OverlayRequest {
+            content_id: content,
+            anchor: bar,
+            placement: OverlayPlacement::AtPointer(Point::new(100.0, 20.0)),
+            dismiss: DismissBehavior::Manual,
+            layer: OverlayLayer::InTree,
+            parent_overlay: None,
+            on_dismiss: None,
+            fade_duration: None,
+        });
+        paint_once(&mut tree);
+
+        let regions = host.last_regions.borrow();
+        assert_eq!(regions.drag.len(), 1, "the drag region is still published");
+        assert_eq!(
+            regions.no_drag.len(),
+            1,
+            "the overlay's caption overlap must be published as one no_drag \
+             hole, got {:?}",
+            regions.no_drag
+        );
+        let hole = regions.no_drag[0];
+        assert!(
+            (hole.x - 100.0).abs() < 0.01 && (hole.width - 200.0).abs() < 0.01,
+            "the hole should span the overlay's width at its position, got {hole:?}"
+        );
+        // Clipped to the strip: the overlay reaches y=80 but the title bar
+        // ends at y=40, and everything below is client area already.
+        assert!(
+            (hole.y - 20.0).abs() < 0.01 && (hole.bottom() - 40.0).abs() < 0.01,
+            "the hole must be clipped to the title bar strip, got {hole:?}"
+        );
+    }
+
+    #[test]
+    fn overlay_below_the_caption_punches_no_hole() {
+        // The inverse guard: a dropdown, popover or toast that floats
+        // entirely below the title bar must NOT punch a hole — its rect
+        // never overlaps the published regions, and a spurious hole would
+        // eat the caption's drag under it.
+        use teksilo_core::overlay::{
+            DismissBehavior, OverlayLayer, OverlayPlacement, OverlayRequest,
+        };
+
+        let host = Rc::new(TestHost::default());
+        let (mut tree, bar) = build_realistic_tree(host.clone(), |b| b);
+
+        let content = tree.add(FixedSize::new().width(200.0).height(60.0));
+        tree.show_overlay(OverlayRequest {
+            content_id: content,
+            anchor: bar,
+            placement: OverlayPlacement::AtPointer(Point::new(100.0, 300.0)),
+            dismiss: DismissBehavior::Manual,
+            layer: OverlayLayer::InTree,
+            parent_overlay: None,
+            on_dismiss: None,
+            fade_duration: None,
+        });
+        paint_once(&mut tree);
+
+        let regions = host.last_regions.borrow();
+        assert!(
+            regions.no_drag.is_empty(),
+            "an overlay fully below the caption must not punch a hole, got {:?}",
             regions.no_drag
         );
     }

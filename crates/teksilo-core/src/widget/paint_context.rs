@@ -82,11 +82,17 @@ pub struct PaintContext<'a> {
 /// crate-internal so the contract stays narrow.
 pub struct WidgetTreeView<'a> {
     arena: &'a WidgetArena,
+    /// Screen rects of every interactive (non-fading) overlay this
+    /// frame — see [`overlay_rects`](Self::overlay_rects).
+    overlay_rects: &'a [Rect],
 }
 
 impl<'a> WidgetTreeView<'a> {
-    pub(crate) fn new(arena: &'a WidgetArena) -> Self {
-        Self { arena }
+    pub(crate) fn new(arena: &'a WidgetArena, overlay_rects: &'a [Rect]) -> Self {
+        Self {
+            arena,
+            overlay_rects,
+        }
     }
 
     /// Logical-pixel bounds of `id` after the most recent layout pass.
@@ -117,6 +123,19 @@ impl<'a> WidgetTreeView<'a> {
     /// stale, so callers walking a subtree must skip it.
     pub fn is_active(&self, id: WidgetId) -> bool {
         self.arena.is_active(id)
+    }
+
+    /// Screen rects of every overlay that is interactive this frame —
+    /// open and not fading out, the predicate the overlay manager's own
+    /// pointer routing uses. Overlay content floats *above* the widget
+    /// that anchors it, so an aggregator publishing geometry to the OS
+    /// must treat these rects as covering its own: `TitleBar` subtracts
+    /// them from the caption it publishes, or a revealed hamburger
+    /// `MenuBar` (any overlay over the title bar) would hit-test as
+    /// `HTCAPTION` on Windows and the OS would swallow its clicks as a
+    /// window drag.
+    pub fn overlay_rects(&self) -> &[Rect] {
+        self.overlay_rects
     }
 }
 

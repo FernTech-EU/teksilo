@@ -1030,6 +1030,34 @@ impl OverlayManager {
         self.stack.iter().find(|o| o.id == id).map(|o| o.anchor)
     }
 
+    /// Screen rects of every overlay that is currently *interactive* —
+    /// open and not yet fading out, the same predicate
+    /// [`hit_test`](Self::hit_test) uses to route pointer events.
+    /// Zero-area entries are skipped: an overlay shown this frame has
+    /// not been through its first layout pass yet (`bounds ==
+    /// Rect::ZERO`), and a degenerate rect must not be mistaken for a
+    /// hit at the origin.
+    ///
+    /// Consumed by the paint pass, which hands the list to
+    /// [`Widget::after_paint`](crate::widget::Widget::after_paint) via
+    /// `WidgetTreeView` so chrome aggregators can subtract floating
+    /// content from the regions they publish — `TitleBar` carves these
+    /// out of the OS caption so an overlay above the title bar (the
+    /// hamburger `MenuBar`'s revealed bar, a tall modal) stays
+    /// clickable on Windows instead of dragging the window.
+    pub fn interactive_rects(&self) -> Vec<Rect> {
+        self.stack
+            .iter()
+            .filter(|o| {
+                o.fade
+                    .as_ref()
+                    .is_none_or(|f| f.dismissing_started_real.is_none())
+            })
+            .map(|o| o.bounds)
+            .filter(|r| r.width > 0.0 && r.height > 0.0)
+            .collect()
+    }
+
     /// Get the topmost overlay.
     #[allow(dead_code)] // used for overlay z-ordering and focus management
     pub(crate) fn topmost(&self) -> Option<&ActiveOverlay> {
