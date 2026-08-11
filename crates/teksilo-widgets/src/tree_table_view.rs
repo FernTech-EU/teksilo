@@ -95,7 +95,8 @@ use crate::table_view::column::{
     Column, ColumnResizePolicy, EditTrigger, GridLines, PinnedSide, TabTraversal,
 };
 use crate::table_view::header::{
-    HeaderCell, HeaderRow, ResizeStateHandle, attach_header_reorder_handlers,
+    ColumnResizeInfo, ColumnResizeTable, HeaderCell, HeaderCellSpec, HeaderRow, ResizeStateHandle,
+    attach_header_reorder_handlers,
 };
 use crate::table_view::imperative;
 use crate::table_view::keyboard;
@@ -308,6 +309,15 @@ pub struct TreeTableView<T: 'static> {
     /// [`EventContext::ensure_visible`](teksilo_core::widget::EventContext::ensure_visible).
     body_bounds: Rc<Cell<Rect>>,
     resize_state: ResizeStateHandle,
+    /// Display slot of the column under an active resize drag, or `None`.
+    /// Mirrors `TableView::resize_target` — shared with every `HeaderCell`
+    /// so the *target* column carries the "resizing" chrome even when the
+    /// gesture is anchored on its neighbour's half of the grip.
+    resize_target: Signal<Option<usize>>,
+    /// Window x of the prospective divider during a
+    /// [`ColumnResizePolicy::OnRelease`] drag. Mirrors
+    /// `TableView::resize_preview_x`.
+    resize_preview_x: Signal<Option<f32>>,
     /// Width of the header strip (= the column band) snapshotted by
     /// `place_children`. Mirrors `TableView::header_strip_width` — the
     /// column-reorder drop handler needs it to mirror the drop x under RTL.
@@ -489,6 +499,8 @@ impl<T: 'static> TreeTableView<T> {
             middle_viewport_width: Rc::new(Cell::new(600.0)),
             body_bounds: Rc::new(Cell::new(Rect::ZERO)),
             resize_state: Rc::new(RefCell::new(None)),
+            resize_target: Signal::new(None),
+            resize_preview_x: Signal::new(None),
             header_strip_width: Rc::new(Cell::new(0.0)),
             table_id,
             model_id: ViewId::next(ViewKind::TreeTable),
@@ -1052,23 +1064,20 @@ impl<T: 'static> TreeTableView<T> {
     }
 
     /// Programmatically sort by `col_id` (pass `None` to clear the sort).
+    ///
+    /// Equality-guarded, like every persisted-layout setter here — see
+    /// [`set_column_widths`](Self::set_column_widths).
     pub fn set_sort(&self, col_id: Option<&str>, dir: SortDirection) {
-        self.sort_signal.set(col_id.map(|c| (c.to_string(), dir)));
+        imperative::set_if_changed(&self.sort_signal, col_id.map(|c| (c.to_string(), dir)));
     }
 
     /// Set or clear the filter text for a single column.
     pub fn set_filter(&self, col_id: &str, text: &str) {
-        let mut m = self.filters_signal.get();
-        if text.is_empty() {
-            m.remove(col_id);
-        } else {
-            m.insert(col_id.to_string(), text.to_string());
-        }
-        self.filters_signal.set(m);
+        imperative::set_filter(&self.filters_signal, col_id, text);
     }
 
     pub fn clear_filters(&self) {
-        self.filters_signal.set(HashMap::new());
+        imperative::set_if_changed(&self.filters_signal, HashMap::new());
     }
 
     /// Widget shown when no rows are visible — an empty tree, or a filter
@@ -1080,7 +1089,7 @@ impl<T: 'static> TreeTableView<T> {
 
     /// Clear the active sort.
     pub fn clear_sort(&self) {
-        self.sort_signal.set(None);
+        imperative::set_if_changed(&self.sort_signal, None);
     }
 
     /// Scroll so that `row` is aligned to the top of the viewport. A no-op
@@ -1114,14 +1123,19 @@ impl<T: 'static> TreeTableView<T> {
 
     /// Replace the full width-override map (typically used to restore
     /// a persisted layout).
+    ///
+    /// Equality-guarded for the same reason as
+    /// [`TableView::set_column_widths`](crate::TableView::set_column_widths):
+    /// the documented settings round-trip would otherwise recurse without
+    /// bound on the first tick of a live resize drag.
     pub fn set_column_widths(&self, widths: HashMap<String, f32>) {
-        self.column_widths_signal.set(widths);
+        imperative::set_column_widths(&self.column_widths_signal, widths);
     }
 
     /// Replace the column-order list. Ids not declared on this table
     /// are silently dropped on the next layout pass.
     pub fn set_column_order(&self, order: Vec<String>) {
-        self.column_order_signal.set(order);
+        imperative::set_if_changed(&self.column_order_signal, order);
     }
 
     /// Current column pinning overrides, keyed by column id. Wins over
@@ -1326,6 +1340,29 @@ impl<T: 'static> Widget for TreeTableView<T> {
             ctx.binding_registry(),
             BindingLevel::Relayout,
         );
+        // `OnRelease` resize guide line — paint-only, nothing moves until the
+        // button comes up.
+        self.resize_preview_x.bind_to(
+            ctx.self_id(),
+            ctx.binding_registry(),
+            BindingLevel::RepaintOnly,
+        );
+
+        // Abandon an in-flight resize when the window goes inactive — see
+        // `TableView::build` for why the missing PointerUp would otherwise
+        // leave the column dragging with no button held.
+        {
+            let resize_state = self.resize_state.clone();
+            let resize_target = self.resize_target.clone();
+            let resize_preview_x = self.resize_preview_x.clone();
+            ctx.effect(&ctx.window_active_signal(), move |active| {
+                if !*active && resize_state.borrow().is_some() {
+                    *resize_state.borrow_mut() = None;
+                    resize_target.set(None);
+                    resize_preview_x.set(None);
+                }
+            });
+        }
         self.focused_cell.bind_to(
             ctx.self_id(),
             ctx.binding_registry(),
@@ -1950,6 +1987,28 @@ impl<T: 'static> Widget for TreeTableView<T> {
 
         // Header strip.
         if self.show_header {
+            // See `TableView::build`: a rebuild drops the pointer capture an
+            // in-flight resize rides on, so the shared drag state must go with
+            // it or a later bare PointerMove would resize with no button held.
+            *self.resize_state.borrow_mut() = None;
+            self.resize_target.set(None);
+            self.resize_preview_x.set(None);
+
+            let boundaries = *self.pane_boundaries.borrow();
+            let resize_columns: ColumnResizeTable = Rc::new(
+                display_indices
+                    .iter()
+                    .map(|&i| {
+                        let c = &self.columns[i];
+                        ColumnResizeInfo {
+                            id: c.id.clone(),
+                            min_width: c.min_width.unwrap_or(cp::MIN_COLUMN_WIDTH_DEFAULT),
+                            max_width: c.max_width,
+                            resizable: c.resizable,
+                        }
+                    })
+                    .collect(),
+            );
             let mut cell_ids: Vec<WidgetId> = Vec::with_capacity(display_indices.len());
             let active_sort = self.sort_signal.get();
             for (display_pos, &col_idx) in display_indices.iter().enumerate() {
@@ -1958,27 +2017,29 @@ impl<T: 'static> Widget for TreeTableView<T> {
                     .as_ref()
                     .and_then(|(id, dir)| if id == &col.id { Some(*dir) } else { None });
                 let filter_zone_width = cp::FILTER_INDICATOR_SIZE + cp::CELL_PADDING_HORIZONTAL;
-                let cell = HeaderCell::new(
-                    col.id.clone(),
-                    col.header_label.resolve_now(),
-                    display_pos + 1,
-                    col.sortable,
-                    col.resizable,
-                    col.reorderable,
-                    cp::RESIZE_HANDLE_WIDTH,
-                    current_sort,
-                    self.sort_signal.clone(),
-                    self.column_widths_signal.clone(),
-                    self.column_widths.clone(),
-                    display_pos,
-                    col.min_width.unwrap_or(cp::MIN_COLUMN_WIDTH_DEFAULT),
-                    self.column_resize_policy,
-                    self.resize_state.clone(),
-                    self.table_id,
-                    col.filterable,
+                let cell = HeaderCell::new(HeaderCellSpec {
+                    col_id: col.id.clone(),
+                    label: col.header_label.resolve_now(),
+                    col_index_1based: display_pos + 1,
+                    sortable: col.sortable,
+                    reorderable: col.reorderable,
+                    filterable: col.filterable,
+                    resize_grip: cp::RESIZE_HANDLE_WIDTH,
                     filter_zone_width,
-                    self.filters_signal.clone(),
-                );
+                    current_sort,
+                    width_index: display_pos,
+                    pane_boundaries: boundaries,
+                    resize_columns: resize_columns.clone(),
+                    resize_policy: self.column_resize_policy,
+                    resize_state: self.resize_state.clone(),
+                    resize_target: self.resize_target.clone(),
+                    resize_preview_x: self.resize_preview_x.clone(),
+                    table_id: self.table_id,
+                    sort_signal: self.sort_signal.clone(),
+                    column_widths_signal: self.column_widths_signal.clone(),
+                    column_widths: self.column_widths.clone(),
+                    filters_signal: self.filters_signal.clone(),
+                });
                 cell_ids.push(ctx.add(cell));
             }
             let header_row = HeaderRow::new(
@@ -2546,6 +2607,15 @@ impl<T: 'static> Widget for TreeTableView<T> {
                 (bounds.height - inset * 2.0).max(0.0),
             );
             canvas.stroke_rect(rect, BorderRole::Focused.resolve(colors), 1.5);
+        }
+
+        // `OnRelease` column-resize guide — see `TableView::paint`.
+        if let Some(x) = self.resize_preview_x.get() {
+            let thickness = cp::GRID_LINE_THICKNESS.max(1.5);
+            canvas.fill_rect(
+                Rect::new(x - thickness * 0.5, bounds.y, thickness, bounds.height),
+                BorderRole::Focused.resolve(colors),
+            );
         }
     }
 
@@ -5830,6 +5900,120 @@ mod tests {
                 "c2".to_string()
             ],
             "\"c3\" must land before \"c2\" (scroll-aware), not before \"c0\""
+        );
+    }
+
+    // ── Column resize grip (parity with TableView) ─────────────────────────
+    //
+    // The grip machinery lives in the shared `table_view::header::HeaderCell`,
+    // but `TreeTableView` fills its own `HeaderCellSpec` and owns its own
+    // `resize_state` / `resize_target` / `resize_preview_x` handles — so the
+    // wiring is asserted here too rather than assumed from the TableView side.
+
+    fn tt_resize_table() -> (WidgetTree, WidgetId) {
+        // `name` Flex(1) then `size` Fixed(60) at a 400 px viewport: `name`
+        // spans [0, 340], `size` spans [340, 400], divider at x = 340.
+        let proxy = SortFilterTreeModel::new(sample_tree());
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let id = tree.add(
+            TreeTableView::from_projection(proxy)
+                .add_column(name_col())
+                .add_column(size_col())
+                .row_height(20.0)
+                .show_internal_scrollbars(false),
+        );
+        tree.layout(SizeProposal {
+            width: Some(400.0),
+            height: Some(200.0),
+        });
+        (tree, id)
+    }
+
+    fn tt_overrides(tree: &WidgetTree, id: WidgetId) -> std::collections::HashMap<String, f32> {
+        let any = tree.widget_as_any(id).unwrap();
+        any.downcast_ref::<TreeTableView<&'static str>>()
+            .unwrap()
+            .column_widths_signal()
+            .get()
+    }
+
+    #[test]
+    fn tt_grip_reaches_into_the_next_column() {
+        use teksilo_canvas::Point;
+        use teksilo_core::event::{Modifiers, PointerButton, WidgetEvent};
+        let (mut tree, id) = tt_resize_table();
+        let y = cp::HEADER_HEIGHT * 0.5;
+        // One pixel PAST the name/size divider, i.e. inside `size`.
+        tree.dispatch_event(WidgetEvent::PointerDown {
+            position: Point::new(341.0, y),
+            button: PointerButton::Primary,
+            modifiers: Modifiers::NONE,
+        });
+        tree.dispatch_event(WidgetEvent::PointerMove {
+            position: Point::new(311.0, y),
+        });
+        tree.dispatch_event(WidgetEvent::PointerUp {
+            position: Point::new(311.0, y),
+            button: PointerButton::Primary,
+            modifiers: Modifiers::NONE,
+        });
+        let w = tt_overrides(&tree, id);
+        assert!(
+            (w.get("name").copied().unwrap_or(0.0) - 310.0).abs() < 0.5,
+            "dragging the divider left from `size` must shrink `name` from 340 \
+             to 310; got {w:?}"
+        );
+    }
+
+    #[test]
+    fn tt_header_strip_paints_column_separators() {
+        let (mut tree, _id) = tt_resize_table();
+        let frame = tree.render();
+        let found = frame.decorations.iter().any(|d| {
+            let [x, y, w, h] = d.rect;
+            (x - 339.0).abs() < 0.6
+                && w <= 1.5
+                && y.abs() < 0.6
+                && (h - cp::HEADER_HEIGHT).abs() < 0.6
+        });
+        assert!(
+            found,
+            "expected a header separator at the name/size divider (x≈339); \
+             decorations={:?}",
+            frame.decorations.iter().map(|d| d.rect).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn tree_column_chrome_is_clipped_to_its_column() {
+        // The indent gutter and the twist chevron are rigid: a tree column
+        // dragged narrower than `depth * indent + twist + gap` cannot shrink
+        // to fit, and without a clip the chevron — and the whole label after
+        // it — draws on top of the next column. Clipping the chrome wrapper
+        // is what lets the grip shrink the tree column all the way to its
+        // floor without the row bleeding sideways.
+        let (tree, id) = tt_resize_table();
+        // Find the first body cell of the tree column (column index 1 in the
+        // 1-based AccessKit numbering) and check its chrome wrapper clips.
+        let mut walker = vec![id];
+        let mut checked = false;
+        while let Some(node) = walker.pop() {
+            if tree.accessibility_node(node).role() == Role::Cell {
+                let kids = tree.children(node);
+                if let Some(&wrapper) = kids.first()
+                    && tree.widget_clips_children(wrapper)
+                {
+                    checked = true;
+                    break;
+                }
+            }
+            for c in tree.children(node) {
+                walker.push(c);
+            }
+        }
+        assert!(
+            checked,
+            "the tree column's indent + twist wrapper must clip its children"
         );
     }
 }

@@ -73,14 +73,44 @@ pub(crate) fn ensure_row_visible(
 /// Set or remove a single column's user-resized width override. A non-positive
 /// or non-finite `width` removes the entry, reverting the column to its
 /// declared width policy.
+///
+/// The value is stored verbatim — it is the app stating a preference, not a
+/// drag position — and re-clamped to the column's `[min_width, max_width]`
+/// every time
+/// [`ColumnSolver::resolve_in_order`](super::layout::ColumnSolver::resolve_in_order)
+/// runs. So an override outside those bounds renders clamped while surviving
+/// intact in the signal, ready to take effect if the column's bounds later
+/// widen. (The *drag* path deliberately clamps before writing, so
+/// `column_widths_signal` always mirrors what the user sees the table do.)
 pub(crate) fn set_column_width(signal: &Signal<HashMap<String, f32>>, col_id: &str, width: f32) {
     let mut m = signal.get();
-    if width.is_finite() && width > 0.0 {
-        m.insert(col_id.to_string(), width);
+    let changed = if width.is_finite() && width > 0.0 {
+        m.insert(col_id.to_string(), width) != Some(width)
     } else {
-        m.remove(col_id);
+        m.remove(col_id).is_some()
+    };
+    // Equality-guarded — see `set_column_widths`.
+    if changed {
+        signal.set(m);
     }
-    signal.set(m);
+}
+
+/// Replace the whole width-override map, **only if it actually differs**.
+///
+/// The guard is load-bearing, not an optimisation. The documented persistence
+/// shape (docs/table-view.md, "Persistence") observes the settings signal into
+/// the table and the table's signal back into settings; `Signal::set` carries
+/// no equality check by design, so an unguarded write here closes that pair
+/// into an unbounded mutual recursion — a `NotifyDepthGuard` panic in debug, a
+/// stack overflow in release — on the very first `PointerMove` of a
+/// `ColumnResizePolicy::Live` drag, which writes a width on every tick.
+pub(crate) fn set_column_widths(
+    signal: &Signal<HashMap<String, f32>>,
+    widths: HashMap<String, f32>,
+) {
+    if signal.get() != widths {
+        signal.set(widths);
+    }
 }
 
 /// Pin or unpin a single column. [`PinnedSide::None`] removes the override,
@@ -91,24 +121,42 @@ pub(crate) fn set_column_pinning(
     side: PinnedSide,
 ) {
     let mut m = signal.get();
-    if matches!(side, PinnedSide::None) {
-        m.remove(col_id);
+    let changed = if matches!(side, PinnedSide::None) {
+        m.remove(col_id).is_some()
     } else {
-        m.insert(col_id.to_string(), side);
+        m.insert(col_id.to_string(), side) != Some(side)
+    };
+    // Equality-guarded — see `set_column_widths`.
+    if changed {
+        signal.set(m);
     }
-    signal.set(m);
 }
 
 /// Set or clear the filter text for a single column. An empty `text` removes
 /// the entry.
 pub(crate) fn set_filter(signal: &Signal<HashMap<String, String>>, col_id: &str, text: &str) {
     let mut m = signal.get();
-    if text.is_empty() {
-        m.remove(col_id);
+    let changed = if text.is_empty() {
+        m.remove(col_id).is_some()
     } else {
-        m.insert(col_id.to_string(), text.to_string());
+        m.insert(col_id.to_string(), text.to_string()).as_deref() != Some(text)
+    };
+    // Equality-guarded — see `set_column_widths`.
+    if changed {
+        signal.set(m);
     }
-    signal.set(m);
+}
+
+/// Replace a whole `Signal<T>`-held layout value, **only if it differs**.
+///
+/// The generic sibling of [`set_column_widths`] for the remaining persisted
+/// layout signals (sort, filters, order). Same rationale: the documented
+/// settings round trip observes in both directions, and `Signal::set` has no
+/// equality check of its own.
+pub(crate) fn set_if_changed<T: Clone + PartialEq + 'static>(signal: &Signal<T>, next: T) {
+    if signal.get() != next {
+        signal.set(next);
+    }
 }
 
 /// Resolve `(row, col_id)` to a `(row, display_position)` edit target.

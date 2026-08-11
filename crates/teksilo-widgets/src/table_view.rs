@@ -380,6 +380,16 @@ pub struct TableView<T: 'static> {
     // pointer-capture'd resize delivers PointerMove events back to the
     // active HeaderCell.
     resize_state: header::ResizeStateHandle,
+    /// Display slot of the column under an active resize drag, or `None`.
+    /// Shared with every `HeaderCell` so the *target* column shows the
+    /// "resizing" chrome — which is not always the cell holding the pointer
+    /// capture, since a grip straddles the divider between two cells.
+    resize_target: Signal<Option<usize>>,
+    /// Window x of the prospective divider while a
+    /// [`ColumnResizePolicy::OnRelease`] drag is in flight. Painted as a
+    /// guide line by `paint`; `None` at rest. Under `Live` the columns
+    /// themselves move, so nothing is published here.
+    resize_preview_x: Signal<Option<f32>>,
 
     /// Stable id used by the column-reorder drag payload to disambiguate
     /// inter-table drops. Unrelated to row DnD — a wholly separate
@@ -590,6 +600,8 @@ impl<T: 'static> TableView<T> {
             body_bounds: Rc::new(Cell::new(Rect::ZERO)),
             header_strip_width: Rc::new(Cell::new(0.0)),
             resize_state: Rc::new(std::cell::RefCell::new(None)),
+            resize_target: Signal::new(None),
+            resize_preview_x: Signal::new(None),
             table_id,
             model_id: ViewId::next(ViewKind::Table),
             export: crate::data_views::RowExport::default(),
@@ -1090,7 +1102,7 @@ impl<T: 'static> TableView<T> {
 
     /// Remove all active column filters.
     pub fn clear_filters(&self) {
-        self.filters_signal.set(HashMap::new());
+        imperative::set_if_changed(&self.filters_signal, HashMap::new());
     }
 
     // ── Imperative API ─────────────────────────────────────────────────
@@ -1102,15 +1114,17 @@ impl<T: 'static> TableView<T> {
     }
 
     /// Set the active sort imperatively. Equivalent to writing to
-    /// [`sort_signal`](Self::sort_signal) directly.
+    /// [`sort_signal`](Self::sort_signal) directly, except that an unchanged
+    /// value neither writes nor notifies — see
+    /// [`set_column_widths`](Self::set_column_widths).
     pub fn set_sort(&self, col_id: Option<&str>, dir: SortDirection) {
         let next = col_id.map(|c| (c.to_string(), dir));
-        self.sort_signal.set(next);
+        imperative::set_if_changed(&self.sort_signal, next);
     }
 
     /// Clear the active sort.
     pub fn clear_sort(&self) {
-        self.sort_signal.set(None);
+        imperative::set_if_changed(&self.sort_signal, None);
     }
 
     /// Set or remove a single column's user-resized width override.
@@ -1122,14 +1136,19 @@ impl<T: 'static> TableView<T> {
 
     /// Replace the full width-override map (typically used to restore
     /// a persisted layout).
+    ///
+    /// A no-op when the map is unchanged, so the documented
+    /// settings-round-trip wiring (see docs/table-view.md, "Persistence")
+    /// terminates instead of recursing: `Signal::set` has no equality check of
+    /// its own, and a live resize writes a width on every pointer move.
     pub fn set_column_widths(&self, widths: HashMap<String, f32>) {
-        self.column_widths_signal.set(widths);
+        imperative::set_column_widths(&self.column_widths_signal, widths);
     }
 
     /// Replace the column-order list. Ids not declared on this table
     /// are silently dropped on the next layout pass.
     pub fn set_column_order(&self, order: Vec<String>) {
-        self.column_order_signal.set(order);
+        imperative::set_if_changed(&self.column_order_signal, order);
     }
 
     /// Pin or unpin a single column.
@@ -1315,6 +1334,35 @@ impl<T: 'static> Widget for TableView<T> {
             ctx.binding_registry(),
             BindingLevel::Relayout,
         );
+
+        // `OnRelease` resize guide line — paint-only, nothing moves until the
+        // button comes up.
+        self.resize_preview_x.bind_to(
+            ctx.self_id(),
+            ctx.binding_registry(),
+            BindingLevel::RepaintOnly,
+        );
+
+        // A resize drag that loses the window never gets its PointerUp: the
+        // user Alt-Tabs (or a native dialog steals focus) with the button
+        // down, releases it over another window, and the OS delivers the Up
+        // nowhere. Abandon the gesture on deactivation, or the state outlives
+        // it and the next bare PointerMove drags the column with no button
+        // held. Nothing is committed — an interrupted drag leaves the column
+        // wherever the last delivered move put it, which is what the user last
+        // saw.
+        {
+            let resize_state = self.resize_state.clone();
+            let resize_target = self.resize_target.clone();
+            let resize_preview_x = self.resize_preview_x.clone();
+            ctx.effect(&ctx.window_active_signal(), move |active| {
+                if !*active && resize_state.borrow().is_some() {
+                    *resize_state.borrow_mut() = None;
+                    resize_target.set(None);
+                    resize_preview_x.set(None);
+                }
+            });
+        }
 
         // Column order + pinning: changes require a rebuild because the
         // header cells and row cells must be re-emitted in the new order
@@ -1935,6 +1983,30 @@ impl<T: 'static> Widget for TableView<T> {
         // Header strip: build first so it sits above the body in the
         // child order (place_children iterates in this order).
         if self.show_header {
+            // A rebuild destroys (and re-creates) every header cell, which
+            // drops the pointer capture an in-flight resize depends on. Clear
+            // the shared drag state with it: a `ResizeState` that outlived its
+            // anchor would otherwise let the next bare PointerMove over the
+            // same column resize it with no button held.
+            *self.resize_state.borrow_mut() = None;
+            self.resize_target.set(None);
+            self.resize_preview_x.set(None);
+
+            let boundaries = *self.pane_boundaries.borrow();
+            let resize_columns: header::ColumnResizeTable = Rc::new(
+                display_indices
+                    .iter()
+                    .map(|&i| {
+                        let c = &self.columns[i];
+                        header::ColumnResizeInfo {
+                            id: c.id.clone(),
+                            min_width: c.min_width.unwrap_or(cp::MIN_COLUMN_WIDTH_DEFAULT),
+                            max_width: c.max_width,
+                            resizable: c.resizable,
+                        }
+                    })
+                    .collect(),
+            );
             let mut cell_ids: Vec<WidgetId> = Vec::with_capacity(display_indices.len());
             let active_sort = self.sort_signal.get();
             for (display_pos, &col_idx) in display_indices.iter().enumerate() {
@@ -1946,27 +2018,29 @@ impl<T: 'static> Widget for TableView<T> {
                 // padding for tap tolerance. Mirrors the layout of the
                 // HStack inside HeaderCell::build.
                 let filter_zone_width = cp::FILTER_INDICATOR_SIZE + cp::CELL_PADDING_HORIZONTAL;
-                let cell = header::HeaderCell::new(
-                    col.id.clone(),
-                    col.header_label.resolve_now(),
-                    display_pos + 1,
-                    col.sortable,
-                    col.resizable,
-                    col.reorderable,
-                    cp::RESIZE_HANDLE_WIDTH,
-                    current_sort,
-                    self.sort_signal.clone(),
-                    self.column_widths_signal.clone(),
-                    self.column_widths.clone(),
-                    display_pos,
-                    col.min_width.unwrap_or(cp::MIN_COLUMN_WIDTH_DEFAULT),
-                    self.column_resize_policy,
-                    self.resize_state.clone(),
-                    self.table_id,
-                    col.filterable,
+                let cell = header::HeaderCell::new(header::HeaderCellSpec {
+                    col_id: col.id.clone(),
+                    label: col.header_label.resolve_now(),
+                    col_index_1based: display_pos + 1,
+                    sortable: col.sortable,
+                    reorderable: col.reorderable,
+                    filterable: col.filterable,
+                    resize_grip: cp::RESIZE_HANDLE_WIDTH,
                     filter_zone_width,
-                    self.filters_signal.clone(),
-                );
+                    current_sort,
+                    width_index: display_pos,
+                    pane_boundaries: boundaries,
+                    resize_columns: resize_columns.clone(),
+                    resize_policy: self.column_resize_policy,
+                    resize_state: self.resize_state.clone(),
+                    resize_target: self.resize_target.clone(),
+                    resize_preview_x: self.resize_preview_x.clone(),
+                    table_id: self.table_id,
+                    sort_signal: self.sort_signal.clone(),
+                    column_widths_signal: self.column_widths_signal.clone(),
+                    column_widths: self.column_widths.clone(),
+                    filters_signal: self.filters_signal.clone(),
+                });
                 cell_ids.push(ctx.add(cell));
             }
             let header_row = header::HeaderRow::new(
@@ -2569,6 +2643,17 @@ impl<T: 'static> Widget for TableView<T> {
                 (bounds.height - inset * 2.0).max(0.0),
             );
             canvas.stroke_rect(rect, BorderRole::Focused.resolve(colors), 1.5);
+        }
+
+        // `OnRelease` column-resize guide. Under that policy no column moves
+        // until the button comes up, so this line is the *only* feedback the
+        // gesture has — the same full-height rubber band Qt / Excel draw.
+        if let Some(x) = self.resize_preview_x.get() {
+            let thickness = cp::GRID_LINE_THICKNESS.max(1.5);
+            canvas.fill_rect(
+                Rect::new(x - thickness * 0.5, bounds.y, thickness, bounds.height),
+                BorderRole::Focused.resolve(colors),
+            );
         }
     }
 

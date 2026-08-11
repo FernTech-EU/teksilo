@@ -1525,6 +1525,19 @@ impl WidgetTree {
                 // cancel pending dwells — but leave *sticky* ones, which the
                 // user pinned deliberately and expects to find on return.
                 self.tooltip_window_deactivated();
+                // Same reasoning for a held pointer: a widget that captured
+                // the pointer for a drag (a column-resize grip, a splitter
+                // divider, a scrollbar thumb, a slider) will never see the
+                // matching PointerUp — the user releases the button over the
+                // window that took focus, and this window is told nothing.
+                // Capture is otherwise cleared only by that Up or by the
+                // widget going inactive, so leaving it set strands the whole
+                // window: every subsequent PointerMove is redelivered to the
+                // abandoned widget instead of hit-testing (killing hover,
+                // cursor shapes and tooltips everywhere else), and the next
+                // click's Up is swallowed by it, so the first press on any
+                // release-activated control silently does nothing.
+                self.pointer_captured_by = None;
             }
         }
     }

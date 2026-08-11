@@ -39,8 +39,18 @@ pub const HEADER_HEIGHT: f32 = 32.0;
 pub const CELL_PADDING_HORIZONTAL: f32 = 8.0;
 /// Vertical padding inside each cell.
 pub const CELL_PADDING_VERTICAL: f32 = 4.0;
-/// Width of the right-edge resize hit zone on header cells.
+/// Half-width of a column's resize grip on the header strip.
+///
+/// The grabbable band is centred on the divider and reaches this far into the
+/// cell on **each** side of it — 8 dp total, the same `PM_HeaderGripMargin`
+/// convention `QHeaderView` uses. A one-sided band would leave the outer half
+/// of every divider owned by the neighbouring cell's label, where a grab that
+/// missed by a pixel cycles the sort or starts a column-reorder drag instead.
 pub const RESIZE_HANDLE_WIDTH: f32 = 4.0;
+/// Step, in logical pixels, applied by one assistive-technology
+/// `Increment` / `Decrement` on a resizable column header — the non-pointer
+/// path to the resize grip.
+pub const COLUMN_RESIZE_STEP: f32 = 8.0;
 /// Stroke width of grid lines drawn between rows / columns.
 pub const GRID_LINE_THICKNESS: f32 = 1.0;
 /// Outer-frame corner radius.
@@ -76,7 +86,8 @@ pub struct TableRecipe {
     pub cell_padding_horizontal: f32,
     /// Vertical padding inside each cell.
     pub cell_padding_vertical: f32,
-    /// Width of the right-edge resize hit zone on header cells.
+    /// Half-width of a column's resize grip: the grabbable band reaches this
+    /// far on **each** side of a divider (see [`RESIZE_HANDLE_WIDTH`]).
     pub resize_handle_width: f32,
     /// Stroke width of grid lines drawn between rows / columns.
     pub grid_line_thickness: f32,

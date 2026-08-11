@@ -220,14 +220,18 @@ const TABLE_FILTERS: SettingsKey<HashMap<String,String>> = SettingsKey::new("tab
 const TABLE_WIDTHS:  SettingsKey<HashMap<String,f32>>    = SettingsKey::new("table.widths", HashMap::new);
 const TABLE_ORDER:   SettingsKey<Vec<String>>            = SettingsKey::new("table.order", Vec::new);
 
-let store = ctx.settings();
-store.signal_for(&TABLE_WIDTHS).observe({
+let widths = ctx.settings().signal_for(&TABLE_WIDTHS);   // Signal<HashMap<String, f32>>
+// Restore, then keep both directions in sync. Hold the returned
+// `ObserverHandle`s for as long as the table lives — dropping one
+// unsubscribes it.
+table.set_column_widths(widths.get());
+let restore = widths.observe({
     let table = table.clone();
     move |w| table.set_column_widths(w.clone())
 });
-table.column_widths_signal().observe({
-    let store = store.clone();
-    move |w| store.set(&TABLE_WIDTHS, w.clone())
+let persist = table.column_widths_signal().observe({
+    let widths = widths.clone();
+    move |w| widths.set(w.clone())
 });
 // Repeat for sort / filters / order.
 ```
@@ -235,6 +239,16 @@ table.column_widths_signal().observe({
 The signal API is the persistence boundary on purpose — the widget
 emits, the application persists. There are no `on_*_changed` hooks; an
 `observe` on the signal is the same thing without the typo surface.
+
+Note the shape: two observers pointing at each other. `Signal::set` carries
+**no equality check** by design, so such a pair is an unbounded mutual
+recursion unless one edge guards its write — and a `ColumnResizePolicy::Live`
+resize writes a width on every pointer move, so the loop would fire on the
+first tick of the first drag. `set_column_widths` (and `set_column_width`,
+`set_sort`, `set_column_order`, `set_column_pinning`) are therefore
+**equality-guarded**: an unchanged value neither writes nor notifies, which
+is what makes the round trip settle after one pass. If you route the value
+through a transform of your own, guard your own edge the same way.
 
 ### `SortFilterListModel<T>` vs raw signals
 
@@ -428,20 +442,65 @@ trait — `FlatNavigator` for `TableView`, `TreeNavigator` for
 
 ### Column resize
 
-Each header cell exposes a small hit zone on its trailing edge
-(`RESIZE_HANDLE_WIDTH`, default 4 px). Cursor switches to
-`CursorIcon::ColResize` on hover; PointerDown captures the pointer and
-PointerMove updates `column_widths_signal`. Two policies:
+The grip is **centred on the divider**: it reaches `RESIZE_HANDLE_WIDTH`
+(default 4 px) into the cell on *each* side, the same `PM_HeaderGripMargin`
+convention `QHeaderView` uses. So a header cell owns two grips — the one at
+its reading-order trailing edge, which resizes its own column, and the one at
+its leading edge, which resizes its **predecessor**, whose trailing edge that
+same divider is. Aiming at the seam and landing a pixel late therefore still
+resizes, instead of cycling the sort or starting a reorder drag.
+
+Two exceptions narrow a grip:
+
+- **Pane seams.** The leading grip is suppressed when the predecessor sits in
+  a different pinned pane. Once `scroll_x` is nonzero the column on the far
+  side of a seam is not the one visually adjacent to it, so that boundary is
+  not a column divider.
+- **Very narrow columns.** Each half is capped at a quarter of the cell's
+  width, so a column dragged down to a small `min_width` keeps a central band
+  for click-to-sort and reorder-drag instead of becoming all grip.
+
+The header strip paints a separator at every column boundary,
+**independent of [`GridLines`](#grid-lines)** — in the header the separator
+*is* the affordance (it is the only thing showing where the grip is), which is
+why every desktop table draws header separators unconditionally. `GridLines`
+stays a body decoration.
+
+Cursor switches to `CursorIcon::ColResize` over either grip and is held for
+the whole drag (the pointer is captured and can travel far outside the
+header). PointerDown captures the pointer and records the target column's
+width; PointerMove updates `column_widths_signal`. Two policies:
 
 ```rust
 table.column_resize_policy(ColumnResizePolicy::Live)        // commit on every tick (default)
 table.column_resize_policy(ColumnResizePolicy::OnRelease)   // commit on PointerUp
 ```
 
+Under `OnRelease` nothing moves until the button comes up, so the view paints
+a full-height guide line at the prospective divider for the duration of the
+drag — the same rubber band Qt and Excel show.
+
+The committed width is clamped to the column's `[min_width, max_width]`
+**before** it is written, so `column_widths_signal` — the handle apps read
+back and persist — always mirrors what the table actually renders (the
+solver re-applies the same clamp when it resolves widths).
+
 The handler converts window-space pointer coordinates into cell-local
 coordinates using the cell's window origin, captured in
 `place_children`. Without that translation, the resize zone test would
 misfire from anywhere in any column past the first one.
+
+A drag is abandoned if the window goes inactive mid-gesture: the OS delivers
+no PointerUp to a window that lost focus with the button down, and the stale
+state would otherwise keep dragging the column on the next bare pointer move.
+
+**Accessibility.** A resizable column header advertises AccessKit
+`Increment` / `Decrement`, each stepping the column by `COLUMN_RESIZE_STEP`
+(8 px) with the same clamping as a drag — the non-pointer path for screen
+readers, switch access, and the [automation MCP](automation-mcp.md). No
+numeric value or range is published on the `ColumnHeader` node: it would be
+announced on every ordinary pass over the table, which costs the common case
+to serve a rare one.
 
 ### Column reorder
 

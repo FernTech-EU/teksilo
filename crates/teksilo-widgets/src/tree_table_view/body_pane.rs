@@ -361,9 +361,27 @@ impl<T: 'static> Widget for TreeBodyPane<T> {
                         .add_child(twist)
                         .add_child(inner_id);
                     let twist_label_id = ctx.add(twist_and_label);
-                    ctx.add(
+                    // Clip the indent + twist to the column. Both are rigid
+                    // (a fixed indent per level, a fixed-size chevron), so a
+                    // tree column dragged narrower than `depth * indent +
+                    // twist + gap` cannot shrink to fit and would otherwise
+                    // draw the chevron — and the whole label after it — on top
+                    // of the next column. Cropping at the column edge is what
+                    // Explorer / Finder / VS Code do, and it keeps the resize
+                    // grip free to shrink the column all the way to its floor.
+                    //
+                    // Deliberately narrower than `TruncationPolicy`, which is
+                    // about the *delegate's* content: `TruncationPolicy::None`
+                    // documents that a cell may draw past its column edge, and
+                    // that still holds — only this chrome wrapper clips.
+                    let indent_id = ctx.add(
                         Padding::new(0.0_f32, 0.0_f32, 0.0_f32, indent_px).child_id(twist_label_id),
-                    )
+                    );
+                    ctx.apply_handlers(
+                        indent_id,
+                        teksilo_core::widget_builder::HandlerSet::new().clips_children(true),
+                    );
+                    indent_id
                 } else {
                     inner_id
                 };

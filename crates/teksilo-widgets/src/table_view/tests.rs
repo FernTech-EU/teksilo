@@ -3933,3 +3933,512 @@ fn selection_band_desaturates_when_window_inactive() {
         "reactivated window: vivid band returns, got {bands:?}"
     );
 }
+
+// ── Column resize grip ─────────────────────────────────────────────────────
+//
+// The grip straddles a column divider — `RESIZE_HANDLE_WIDTH` px into the cell
+// on *each* side of it — so a cell owns the resize for its own trailing
+// boundary AND for the one it shares with its predecessor. These tests pin
+// that contract down from both halves, in both directions, plus the clamping
+// and lifecycle rules that used to let a drag decouple from the pointer.
+
+mod resize_grip {
+    use super::*;
+    use crate::styles::recipe_table_style as cp;
+    use crate::table_view::column::{ColumnResizePolicy, PinnedSide};
+    use teksilo_canvas::Point;
+    use teksilo_core::environment::LayoutDirection;
+    use teksilo_core::event::{Modifiers, PointerButton, WidgetEvent};
+
+    fn down(tree: &mut WidgetTree, x: f32, y: f32) {
+        tree.dispatch_event(WidgetEvent::PointerDown {
+            position: Point::new(x, y),
+            button: PointerButton::Primary,
+            modifiers: Modifiers::NONE,
+        });
+    }
+    fn moved(tree: &mut WidgetTree, x: f32, y: f32) {
+        tree.dispatch_event(WidgetEvent::PointerMove {
+            position: Point::new(x, y),
+        });
+    }
+    fn up(tree: &mut WidgetTree, x: f32, y: f32) {
+        tree.dispatch_event(WidgetEvent::PointerUp {
+            position: Point::new(x, y),
+            button: PointerButton::Primary,
+            modifiers: Modifiers::NONE,
+        });
+    }
+
+    fn overrides(tree: &WidgetTree, table: WidgetId) -> std::collections::HashMap<String, f32> {
+        let any = tree.widget_as_any(table).unwrap();
+        any.downcast_ref::<TableView<Row>>()
+            .unwrap()
+            .column_widths_signal()
+            .get()
+    }
+
+    fn relayout(tree: &mut WidgetTree) {
+        tree.layout(SizeProposal {
+            width: Some(400.0),
+            height: Some(200.0),
+        });
+    }
+
+    /// `id` Fixed(60) then `name` Flex(1) at a 400 px viewport with no
+    /// scrollbars: `id` spans `[0, 60]`, `name` spans `[60, 400]`, and their
+    /// divider sits at x = 60.
+    fn two_column_table() -> (WidgetTree, WidgetId) {
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let table = tree.add(
+            TableView::new(rows(5))
+                .add_column(id_col())
+                .add_column(name_col())
+                .row_height(20.0)
+                .show_internal_scrollbars(false),
+        );
+        relayout(&mut tree);
+        (tree, table)
+    }
+
+    #[test]
+    fn grip_reaches_into_the_next_column_so_a_one_pixel_overshoot_still_resizes() {
+        // Regression: the grip used to live entirely inside the cell that owns
+        // the divider (`local_x > cell_w - 4`). Aiming at the seam and landing
+        // one pixel late put the press in the NEXT cell's label region, where
+        // it cycled the sort or started a column-reorder drag — the divider
+        // was only grabbable from one side.
+        let (mut tree, table) = two_column_table();
+        let y = cp::HEADER_HEIGHT * 0.5;
+        // x = 61 is one pixel PAST the id/name divider, i.e. inside `name`.
+        down(&mut tree, 61.0, y);
+        moved(&mut tree, 91.0, y);
+        up(&mut tree, 91.0, y);
+
+        let w = overrides(&tree, table);
+        assert!(
+            (w.get("id").copied().unwrap_or(0.0) - 90.0).abs() < 0.5,
+            "grabbing the divider from the trailing column must widen `id` \
+             from 60 to 90; got {w:?}"
+        );
+        assert!(
+            !w.contains_key("name"),
+            "the pressed cell's own column must not move; got {w:?}"
+        );
+    }
+
+    #[test]
+    fn grip_still_resizes_the_owning_column_from_its_own_trailing_edge() {
+        // The other half of the same divider — unchanged behaviour, asserted
+        // so widening the grip can't silently swap which column moves.
+        let (mut tree, table) = two_column_table();
+        let y = cp::HEADER_HEIGHT * 0.5;
+        down(&mut tree, 59.0, y);
+        moved(&mut tree, 89.0, y);
+        up(&mut tree, 89.0, y);
+
+        let w = overrides(&tree, table);
+        assert!(
+            (w.get("id").copied().unwrap_or(0.0) - 90.0).abs() < 0.5,
+            "got {w:?}"
+        );
+    }
+
+    #[test]
+    fn cursor_turns_to_col_resize_on_the_far_side_of_the_divider_too() {
+        use teksilo_core::widget::CursorIcon;
+        let (mut tree, _table) = two_column_table();
+        let y = cp::HEADER_HEIGHT * 0.5;
+        moved(&mut tree, 61.0, y);
+        assert_eq!(
+            tree.current_cursor(),
+            CursorIcon::ColResize,
+            "the grip's far half must advertise itself like the near half"
+        );
+    }
+
+    #[test]
+    fn drag_clamps_to_max_width_so_the_stored_override_matches_what_renders() {
+        // The solver re-clamps every override to `[min_width, max_width]`, so
+        // a drag that wrote the raw (unclamped) width left
+        // `column_widths_signal` — a public handle apps read back and persist
+        // — holding a width the table never renders.
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let table = tree.add(
+            TableView::new(rows(5))
+                .add_column(id_col())
+                .add_column(name_col().max_width(200.0))
+                .add_column(
+                    Column::<Row>::new("extra", lit!("Extra"), |row, _: &CellContext| {
+                        Box::new(TextWidget::new(lit!(row.name.clone())))
+                    })
+                    .width(ColumnWidth::Flex(1.0)),
+                )
+                .row_height(20.0)
+                .show_internal_scrollbars(false),
+        );
+        relayout(&mut tree);
+        // id 60 fixed; leftover 340 split 1:1 → name 170, extra 170.
+        // name spans [60, 230]; grab its trailing edge.
+        let y = cp::HEADER_HEIGHT * 0.5;
+        down(&mut tree, 229.0, y);
+        moved(&mut tree, 429.0, y);
+        relayout(&mut tree);
+        let w = overrides(&tree, table);
+        assert!(
+            (w.get("name").copied().unwrap_or(0.0) - 200.0).abs() < 0.5,
+            "a drag 200 px past the 200 px cap must store the cap, not the raw \
+             overshoot; got {w:?}"
+        );
+        up(&mut tree, 429.0, y);
+        let w = overrides(&tree, table);
+        assert!(
+            (w.get("name").copied().unwrap_or(0.0) - 200.0).abs() < 0.5,
+            "and the committed value must agree; got {w:?}"
+        );
+    }
+
+    #[test]
+    fn a_column_narrower_than_the_grip_keeps_a_central_band_for_sorting() {
+        // With a fixed 4 dp zone measured from the trailing edge, a 4 px-wide
+        // column was 100 % resize zone: every press anywhere on its header
+        // started a resize, so sort and reorder became unreachable and the
+        // column could never be recovered except through the very gesture that
+        // had swallowed everything.
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let table = tree.add(
+            TableView::new(rows(5))
+                .add_column(
+                    Column::<Row>::new("flag", lit!("Flag"), |_row, _: &CellContext| {
+                        Box::new(TextWidget::new(lit!("!")))
+                    })
+                    .width(ColumnWidth::Fixed(4.0))
+                    .min_width(2.0)
+                    .sortable(true),
+                )
+                .add_column(name_col())
+                .row_height(20.0)
+                .show_internal_scrollbars(false),
+        );
+        relayout(&mut tree);
+        let y = cp::HEADER_HEIGHT * 0.5;
+        // Dead centre of the 4 px column.
+        down(&mut tree, 2.0, y);
+        up(&mut tree, 2.0, y);
+
+        let sort = {
+            let any = tree.widget_as_any(table).unwrap();
+            any.downcast_ref::<TableView<Row>>()
+                .unwrap()
+                .sort_signal()
+                .get()
+        };
+        assert_eq!(
+            sort,
+            Some(("flag".to_string(), SortDirection::Ascending)),
+            "a click in the middle of a very narrow column must still sort it"
+        );
+        assert!(
+            !overrides(&tree, table).contains_key("flag"),
+            "and must not have been swallowed as a resize"
+        );
+    }
+
+    #[test]
+    fn the_grip_does_not_reach_across_a_pane_seam() {
+        // The first Middle-pane column's leading edge abuts the pinned Leading
+        // pane. That boundary is a pane seam, not a column divider: under a
+        // nonzero `scroll_x` the column on its far side is not the one
+        // visually adjacent to it, so the grip must stop there. The pinned
+        // column stays resizable from its OWN edge.
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let table = tree.add(
+            TableView::new(rows(5))
+                .add_column(id_col().pinned(PinnedSide::Leading))
+                .add_column(name_col())
+                .row_height(20.0)
+                .show_internal_scrollbars(false),
+        );
+        relayout(&mut tree);
+        let y = cp::HEADER_HEIGHT * 0.5;
+
+        // One pixel into the Middle pane — must NOT resize the pinned column.
+        down(&mut tree, 61.0, y);
+        moved(&mut tree, 91.0, y);
+        up(&mut tree, 91.0, y);
+        assert!(
+            !overrides(&tree, table).contains_key("id"),
+            "a press across the pane seam must not resize the pinned column"
+        );
+
+        // Its own trailing edge still works.
+        down(&mut tree, 59.0, y);
+        moved(&mut tree, 89.0, y);
+        up(&mut tree, 89.0, y);
+        let w = overrides(&tree, table);
+        assert!(
+            (w.get("id").copied().unwrap_or(0.0) - 90.0).abs() < 0.5,
+            "the pinned column resizes from its own edge; got {w:?}"
+        );
+    }
+
+    #[test]
+    fn rtl_grip_straddles_the_divider_and_drag_direction_inverts() {
+        // Under RTL the display order runs right-to-left, so `id` (display
+        // slot 0) sits at [340, 400] and `name` at [0, 340]; their divider is
+        // at x = 340 and the far half of the grip lives at `name`'s physical
+        // RIGHT edge. Dragging that divider physically LEFT widens `id`.
+        let (mut tree, table) = two_column_table();
+        tree.set_layout_direction(LayoutDirection::RightToLeft);
+        relayout(&mut tree);
+
+        let y = cp::HEADER_HEIGHT * 0.5;
+        down(&mut tree, 339.0, y);
+        moved(&mut tree, 309.0, y);
+        up(&mut tree, 309.0, y);
+
+        let w = overrides(&tree, table);
+        assert!(
+            (w.get("id").copied().unwrap_or(0.0) - 90.0).abs() < 0.5,
+            "RTL: dragging the divider left from the trailing column must \
+             widen `id` from 60 to 90; got {w:?}"
+        );
+    }
+
+    #[test]
+    fn on_release_policy_shows_a_guide_line_and_commits_only_on_pointer_up() {
+        // `OnRelease` moves nothing until the button comes up, so without the
+        // guide line the entire drag had zero positional feedback — the user
+        // could not tell whether the gesture had even been recognised.
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let table = tree.add(
+            TableView::new(rows(5))
+                .add_column(id_col())
+                .add_column(name_col())
+                .row_height(20.0)
+                .column_resize_policy(ColumnResizePolicy::OnRelease)
+                .show_internal_scrollbars(false),
+        );
+        relayout(&mut tree);
+        let y = cp::HEADER_HEIGHT * 0.5;
+
+        down(&mut tree, 398.0, y);
+        moved(&mut tree, 428.0, y);
+
+        let preview = {
+            let any = tree.widget_as_any(table).unwrap();
+            any.downcast_ref::<TableView<Row>>()
+                .unwrap()
+                .resize_preview_x
+                .get()
+        };
+        assert!(
+            preview.is_some_and(|x| (x - 430.0).abs() < 0.5),
+            "the guide must track the prospective divider (400 + 30); got {preview:?}"
+        );
+        assert!(
+            overrides(&tree, table).is_empty(),
+            "OnRelease must not commit mid-drag"
+        );
+
+        up(&mut tree, 428.0, y);
+        let w = overrides(&tree, table);
+        assert!(
+            (w.get("name").copied().unwrap_or(0.0) - 370.0).abs() < 0.5,
+            "commit on release; got {w:?}"
+        );
+        let preview = {
+            let any = tree.widget_as_any(table).unwrap();
+            any.downcast_ref::<TableView<Row>>()
+                .unwrap()
+                .resize_preview_x
+                .get()
+        };
+        assert!(preview.is_none(), "the guide must clear on release");
+    }
+
+    #[test]
+    fn losing_the_window_mid_drag_abandons_the_resize_instead_of_ghost_dragging() {
+        // The OS delivers no PointerUp to a window that lost focus with the
+        // button down. The shared drag state used to outlive the gesture, so
+        // the next bare PointerMove — no button held — kept dragging the
+        // column.
+        let (mut tree, table) = two_column_table();
+        let y = cp::HEADER_HEIGHT * 0.5;
+        down(&mut tree, 398.0, y);
+        moved(&mut tree, 428.0, y);
+        relayout(&mut tree);
+        let during = overrides(&tree, table)
+            .get("name")
+            .copied()
+            .unwrap_or_default();
+        assert!((during - 370.0).abs() < 0.5, "sanity: got {during}");
+
+        tree.set_window_active(false);
+        moved(&mut tree, 528.0, y);
+        relayout(&mut tree);
+        let after = overrides(&tree, table)
+            .get("name")
+            .copied()
+            .unwrap_or_default();
+        assert!(
+            (after - during).abs() < 0.001,
+            "a move after deactivation must not keep resizing; {during} → {after}"
+        );
+    }
+
+    #[test]
+    fn a_resizable_column_header_advertises_increment_and_decrement_to_at() {
+        // Drag-resize is otherwise pointer-only — unreachable by a screen
+        // reader, switch access, or the automation MCP, all of which act
+        // through AccessKit.
+        use teksilo_core::accesskit::Action;
+        let (tree, table) = two_column_table();
+        let mut walker = vec![table];
+        let mut header = None;
+        while let Some(n) = walker.pop() {
+            if tree.accessibility_node(n).role() == Role::ColumnHeader {
+                header = Some(n);
+                break;
+            }
+            for c in tree.children(n) {
+                walker.push(c);
+            }
+        }
+        let header = header.expect("a column header must exist");
+        let node = tree.accessibility_node(header);
+        let actions = node.actions().to_vec();
+        assert!(
+            actions.contains(&Action::Increment) && actions.contains(&Action::Decrement),
+            "a resizable column header must advertise Increment/Decrement; got {actions:?}"
+        );
+    }
+
+    #[test]
+    fn at_increment_widens_the_column_and_respects_its_bounds() {
+        use teksilo_core::accesskit::Action;
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let table = tree.add(
+            TableView::new(rows(5))
+                .add_column(id_col().max_width(70.0))
+                .add_column(name_col())
+                .row_height(20.0)
+                .show_internal_scrollbars(false),
+        );
+        relayout(&mut tree);
+        let header = tree.find_by_label("ID").expect("the ID header cell");
+        // id is Fixed(60) capped at 70; one 8 px step lands at 68.
+        assert!(
+            tree.dispatch_access_action(
+                teksilo_core::accessibility::widget_id_to_node_id(header),
+                Action::Increment,
+                None,
+                &mut teksilo_core::window::ops::NoopWindowOps,
+            ),
+            "the header must handle the Increment it advertised"
+        );
+        relayout(&mut tree);
+        let w = overrides(&tree, table);
+        assert!(
+            (w.get("id").copied().unwrap_or(0.0) - 68.0).abs() < 0.5,
+            "one Increment must step the column by COLUMN_RESIZE_STEP; got {w:?}"
+        );
+        // A second step would reach 76 — clamped to the 70 px cap, matching
+        // what a pointer drag would have stored.
+        assert!(
+            tree.dispatch_access_action(
+                teksilo_core::accessibility::widget_id_to_node_id(header),
+                Action::Increment,
+                None,
+                &mut teksilo_core::window::ops::NoopWindowOps,
+            ),
+            "the header must handle the Increment it advertised"
+        );
+        relayout(&mut tree);
+        let w = overrides(&tree, table);
+        assert!(
+            (w.get("id").copied().unwrap_or(0.0) - 70.0).abs() < 0.5,
+            "the AT path must clamp exactly like the drag path; got {w:?}"
+        );
+    }
+
+    #[test]
+    fn the_documented_settings_round_trip_terminates_instead_of_recursing() {
+        // docs/table-view.md ("Persistence") wires the table's width signal
+        // into a settings signal and the settings signal back into
+        // `set_column_widths`. `Signal::set` carries no equality check by
+        // design, so an unguarded setter closes that pair into an unbounded
+        // mutual recursion — and a `ColumnResizePolicy::Live` drag writes a
+        // width on *every* pointer move, so the very first tick of the very
+        // first resize would blow the notify-depth guard.
+        //
+        // Modelled here on the real `imperative::set_column_widths` (the
+        // guard `TableView`/`TreeTableView` both route through), with the
+        // app-side hop left unguarded exactly as an app would write it.
+        use crate::table_view::imperative;
+        use std::cell::Cell;
+        use std::collections::HashMap;
+        use std::rc::Rc;
+
+        let table_widths: Signal<HashMap<String, f32>> = Signal::new(HashMap::new());
+        let store: Signal<HashMap<String, f32>> = Signal::new(HashMap::new());
+        let notifications = Rc::new(Cell::new(0_u32));
+
+        // table -> store (the app's `observe`, no equality check).
+        let _to_store = table_widths.observe({
+            let store = store.clone();
+            let seen = notifications.clone();
+            move |w| {
+                seen.set(seen.get() + 1);
+                store.set(w.clone());
+            }
+        });
+        // store -> table (the guarded widget setter).
+        let _to_table = store.observe({
+            let table_widths = table_widths.clone();
+            move |w| imperative::set_column_widths(&table_widths, w.clone())
+        });
+
+        // One drag tick. Without the guard this recurses until the
+        // notify-depth guard panics.
+        let mut w = HashMap::new();
+        w.insert("name".to_string(), 370.0);
+        table_widths.set(w.clone());
+
+        assert_eq!(
+            notifications.get(),
+            1,
+            "the round trip must settle after exactly one pass"
+        );
+        assert_eq!(table_widths.get(), w);
+        assert_eq!(store.get(), w);
+
+        // A no-change write is inert on both edges.
+        imperative::set_column_widths(&table_widths, w);
+        assert_eq!(notifications.get(), 1, "an unchanged map must not notify");
+    }
+
+    #[test]
+    fn header_strip_paints_a_separator_at_every_column_boundary() {
+        // The separator IS the resize affordance: it is the only thing that
+        // shows where the grip is. The body's vertical grid lines are gated on
+        // `GridLines` (default `None`) and are clipped to the body anyway, so
+        // the header used to offer no cue at all.
+        let (mut tree, _table) = two_column_table();
+        let frame = tree.render();
+        let found = frame.decorations.iter().any(|d| {
+            let [x, y, w, h] = d.rect;
+            (x - 59.0).abs() < 0.6
+                && w <= 1.5
+                && y.abs() < 0.6
+                && (h - cp::HEADER_HEIGHT).abs() < 0.6
+        });
+        assert!(
+            found,
+            "expected a full-height header separator at the id/name divider \
+             (x≈59, h={}); decorations={:?}",
+            cp::HEADER_HEIGHT,
+            frame.decorations.iter().map(|d| d.rect).collect::<Vec<_>>()
+        );
+    }
+}
