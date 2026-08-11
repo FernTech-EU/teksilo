@@ -227,7 +227,11 @@ impl CaretHighlightSession {
                 .doc
                 .sentence_at(caret, config.content_locale.as_deref()),
             CaretHighlightScope::Paragraph => {
-                let block = self.doc.block_at(caret).ok()?;
+                // `block_at_caret`, not `block_at`: the latter reads its argument as a
+                // character index, where the inter-block separator belongs to the block
+                // *after* it. A caret at the end of a paragraph sits on exactly that index,
+                // so the band lit the next paragraph the moment you finished typing one.
+                let block = self.doc.block_at_caret(caret).ok()?;
                 let (start, len) = (block.start, block.length);
                 (len > 0).then_some((start, start + len))
             }
@@ -494,6 +498,46 @@ mod tests {
                 "the other layer must win (band registered first: {band_first})"
             );
         }
+    }
+
+    /// A caret at the end of a paragraph is still writing in *that* paragraph.
+    ///
+    /// The caret then sits on the character index of the inter-block separator, which
+    /// `block_at` assigns to the following block — correct for a character query, wrong for a
+    /// cursor. Both scopes read that answer, so pressing End (or just typing to the end of a
+    /// paragraph) threw the band forward onto the next one.
+    #[test]
+    fn a_caret_at_the_end_of_a_paragraph_bands_that_paragraph() {
+        let d = doc("One is first.\nTwo is second.");
+        let end_of_first = "One is first.".chars().count();
+
+        let p = live(&d, CaretHighlightScope::Paragraph);
+        p.refresh(end_of_first);
+        assert_eq!(
+            spans(&d, 0),
+            [(0, end_of_first)],
+            "the band belongs to the paragraph the caret is finishing"
+        );
+        assert!(spans(&d, 1).is_empty(), "and not to the one after it");
+        drop(p);
+
+        let s = live(&d, CaretHighlightScope::Sentence);
+        s.refresh(end_of_first);
+        assert_eq!(spans(&d, 0), [(0, end_of_first)]);
+        assert!(spans(&d, 1).is_empty());
+    }
+
+    /// The step past that boundary must still cross: one character further along is the start
+    /// of the next block and belongs to it.
+    #[test]
+    fn the_band_does_cross_once_the_caret_enters_the_next_paragraph() {
+        let d = doc("One is first.\nTwo is second.");
+        let start_of_second = "One is first.\n".chars().count();
+
+        let p = live(&d, CaretHighlightScope::Paragraph);
+        p.refresh(start_of_second);
+        assert!(spans(&d, 0).is_empty(), "left the first paragraph");
+        assert_eq!(spans(&d, 1), [(0, "Two is second.".chars().count())]);
     }
 
     /// An empty block has no sentence and no paragraph extent, and must not push a zero-length
