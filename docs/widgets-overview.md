@@ -49,9 +49,11 @@ were deleted; their IntUI constants now live in the matching
 `teksilo-widgets/src/styles/recipe_*_style.rs` modules. The dimension
 data for non-themable widgets (toolbar, status bar, dialog, accordion,
 badge, progress bar, table, …) lives directly in those same
-`recipe_*_style.rs` modules as `pub const` blocks. Image-
-backed styles, the `ImageTheme` TOML loader, and the sibling preset
-crates are still pending.
+`recipe_*_style.rs` modules as `pub const` blocks. Three sibling preset
+crates ship — Material 3 (`theme-material3`), Fluent / Windows 11
+(`theme-fluent`) and macOS Aqua (`theme-macos`). Image-backed styles,
+the `ImageTheme` TOML loader, and a GTK4-Adwaita preset are still
+pending.
 
 End-to-end demo of the slot bag + per-call override: see
 [`examples/theme_styles/`](../examples/theme_styles/).

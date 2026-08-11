@@ -133,9 +133,9 @@ telemetry = ["teksilo-app/telemetry", "teksilo-widgets?/telemetry"]
 # preset (`teksilo::prelude::intui::{light, dark}`). Each exposes a
 # stable import path (`teksilo::prelude::material3::{light, dark}`,
 # etc.), so an app's call sites never change as a preset fills in.
-# `theme-material3` and `theme-fluent` are complete design languages
-# (colour / shape / typography / motion tokens plus Tier-3 widget
-# chrome); `theme-macos` is still an IntUI-shaped baseline.
+# `theme-material3`, `theme-fluent` and `theme-macos` are all complete
+# design languages: colour / shape / typography / motion tokens plus
+# Tier-3 widget chrome.
 theme-material3 = ["dep:teksilo-theme-material3"]
 theme-macos = ["dep:teksilo-theme-macos"]
 theme-fluent = ["dep:teksilo-theme-fluent"]

@@ -410,14 +410,90 @@ fn resolve_label_role(enabled: bool) -> TextRole {
     }
 }
 
+/// Everything a row's foregrounds need to pick their text role, resolved
+/// **once** per build and shared by the label, the subtitle and the tree
+/// chevron.
+///
+/// The alternative — each of the three resolving the style and rebuilding
+/// the `is_focused AND is_window_active` composite for itself — costs two
+/// extra style lookups and two extra derived signals on every row, and a
+/// virtualized `ListView` realizes and recycles rows constantly.
+struct RowRoles {
+    style: SharedStandardItemStyle,
+    /// The role an *emphasised* row's foregrounds take, per
+    /// [`StandardItemStyle::selected_label_role`]. `None` for a design
+    /// language whose selection is a pale wash (IntUI, Fluent), which is
+    /// also what keeps `emphasised` unbuilt.
+    on_selected: Option<TextRole>,
+    /// Selected **and** view-focused **and** window-active — the same
+    /// condition the chrome uses to pick `SurfaceRole::Selected` over
+    /// `SelectedInactive`. `None` when no style asked for the flip.
+    emphasised: Option<Signal<bool>>,
+}
+
 impl StandardListItem {
+    /// Per-call override > theme slot > the shipped recipe.
+    fn resolve_roles(&self, ctx: &mut BuildContext) -> RowRoles {
+        let style: SharedStandardItemStyle = self
+            .style_override
+            .clone()
+            .or_else(|| ctx.theme().style_slots.standard_item.clone())
+            .unwrap_or_else(|| Rc::new(crate::styles::RecipeStandardItemStyle::default()));
+        let on_selected = style.selected_label_role();
+        let emphasised =
+            on_selected.map(|_| ctx.view_focus_active().and(&ctx.window_active_signal()));
+        RowRoles {
+            style,
+            on_selected,
+            emphasised,
+        }
+    }
+
+    /// The text role a foreground element of this row should paint in.
+    ///
+    /// `rest` is what it reads when the row is not emphasised —
+    /// `TextRole::Primary` for the label, `Secondary` for the subtitle and
+    /// the tree chevron. An emphasised row swaps to
+    /// [`RowRoles::on_selected`] instead, so a solid selection fill and
+    /// the text on it always move together.
+    ///
+    /// Every foreground on the row has to go through this. A label that
+    /// flips while the chevron beside it does not is worse than neither
+    /// flipping — which is exactly the bug `TwistArrow::color` was added
+    /// to fix.
+    fn foreground_role(&self, roles: &RowRoles, rest: TextRole) -> Signal<TextRole> {
+        match (roles.on_selected, &roles.emphasised) {
+            (Some(on_selected), Some(emphasised)) => self
+                .enabled
+                .zip3(&self.selected, emphasised)
+                .map(move |(enabled, selected, emphasised)| {
+                    if !*enabled {
+                        TextRole::Disabled
+                    } else if *selected && *emphasised {
+                        on_selected
+                    } else {
+                        rest
+                    }
+                }),
+            _ => self
+                .enabled
+                .map(move |e| if *e { rest } else { TextRole::Disabled }),
+        }
+    }
+
     /// Build the row content (HStack of slots + label column) and
     /// register it. Returns the WidgetId of the content node (not the
     /// surrounding bg + padding).
-    fn build_content(&mut self, ctx: &mut BuildContext) -> WidgetId {
+    fn build_content(&mut self, ctx: &mut BuildContext, roles: &RowRoles) -> WidgetId {
         use crate::styles::recipe_standard_item_style as si;
 
-        let label_role = self.enabled.map(|e| resolve_label_role(*e));
+        // A style whose selected row is a *solid* fill (macOS's accent
+        // capsule) cannot recolour the label from `make_body` — the label
+        // is already built by then — so it declares the role instead.
+        // Styles whose selection is a pale wash (IntUI, Fluent) declare
+        // nothing and the label keeps `TextRole::Primary` throughout.
+        let label_role = self.foreground_role(roles, resolve_label_role(true));
+        let subtitle_role = self.foreground_role(roles, TextRole::Secondary);
 
         // Label column: either a single TextWidget or a VStack with
         // label on top and subtitle (with its own slots) below.
@@ -440,7 +516,11 @@ impl StandardListItem {
                 .a11y_hidden();
             subtitle_widget = match &self.subtitle_color {
                 Some(c) => subtitle_widget.color(c.clone()),
-                None => subtitle_widget.color(TextRole::Secondary),
+                // Follows the label: on a solid selection capsule a
+                // `Secondary` subtitle would be dark grey on saturated
+                // accent. Under a wash-based style this resolves to
+                // `Secondary` exactly as before.
+                None => subtitle_widget.color(subtitle_role.clone()),
             };
             if let Some(overflow) = self.subtitle_overflow {
                 subtitle_widget = subtitle_widget.overflow(overflow);
@@ -541,7 +621,12 @@ impl StandardListItem {
     /// Shared by `StandardListItem::build` (passing its inner row)
     /// and `StandardTreeItem::build` (passing the row prefixed with
     /// indent + chevron columns).
-    fn build_with_background(&mut self, ctx: &mut BuildContext, content_id: WidgetId) -> WidgetId {
+    fn build_with_background(
+        &mut self,
+        ctx: &mut BuildContext,
+        content_id: WidgetId,
+        roles: &RowRoles,
+    ) -> WidgetId {
         // Derive the cfg's boolean signals from the widget's existing
         // `interaction` + `selected` + `enabled` signals. The recipe
         // re-evaluates the bg role on any source change.
@@ -565,11 +650,7 @@ impl StandardListItem {
         // during keyboard navigation (`:focus-visible`).
         let is_focus_visible = ctx.focus_visible();
 
-        let style: SharedStandardItemStyle = self
-            .style_override
-            .clone()
-            .or_else(|| ctx.theme().style_slots.standard_item.clone())
-            .unwrap_or_else(|| Rc::new(crate::styles::RecipeStandardItemStyle::default()));
+        let style: SharedStandardItemStyle = roles.style.clone();
         let cfg = StandardItemStyleConfig {
             content: content_id,
             is_selected,
@@ -612,8 +693,11 @@ impl Widget for StandardListItem {
         // and external `ctx.enabled_when(item_id, …)` would not
         // override the local Signal.
         ctx.enabled_when(self_id, self.enabled.clone());
-        let content_id = self.build_content(ctx);
-        let root_id = self.build_with_background(ctx, content_id);
+        // Resolved once and shared by the label, the subtitle and (for a
+        // tree row) the chevron — see `RowRoles`.
+        let roles = self.resolve_roles(ctx);
+        let content_id = self.build_content(ctx, &roles);
+        let root_id = self.build_with_background(ctx, content_id, &roles);
         self.root_child_id = Some(root_id);
 
         // Attach tooltip — mutually exclusive slots, composite wins.
@@ -1017,7 +1101,8 @@ impl Widget for StandardTreeItem {
         ctx.enabled_when(self_id, self.inner.enabled.clone());
 
         // 1. Build the StandardListItem's inner row (no bg yet).
-        let inner_content_id = self.inner.build_content(ctx);
+        let roles = self.inner.resolve_roles(ctx);
+        let inner_content_id = self.inner.build_content(ctx, &roles);
 
         // 2. Indent column — empty FixedSize at `depth * step` width.
         let indent_width = self.depth as f32 * si::STANDARD_ITEM_TREE_INDENT_STEP;
@@ -1031,7 +1116,15 @@ impl Widget for StandardTreeItem {
         //    `FixedSize.on_tap`, which routes taps through the column
         //    wrapper and the composed parent chain.
         let chevron_size = si::STANDARD_ITEM_CHEVRON_COLUMN_WIDTH;
-        let mut chevron = TwistArrow::new(chevron_size, self.has_children, self.is_expanded.get());
+        // The chevron is a *foreground* of the row, so it takes the same
+        // role the label does — otherwise a style whose selected row is a
+        // solid accent capsule would flip the label to white and leave the
+        // chevron a grey smudge on the accent, under WCAG 1.4.11's 3:1
+        // floor. Under a wash-based style this resolves to `Secondary`
+        // exactly as before.
+        let chevron_role = self.inner.foreground_role(&roles, TextRole::Secondary);
+        let mut chevron = TwistArrow::new(chevron_size, self.has_children, self.is_expanded.get())
+            .color(chevron_role);
         if self.has_children
             && let Some(cb) = self.on_toggle.clone()
         {
@@ -1051,7 +1144,7 @@ impl Widget for StandardTreeItem {
 
         // 5. Wrap with the rounded selection bg + interaction handler
         //    via the inner's helper.
-        let root_id = self.inner.build_with_background(ctx, outer_row_id);
+        let root_id = self.inner.build_with_background(ctx, outer_row_id, &roles);
 
         self.inner.root_child_id = Some(root_id);
 
@@ -1119,11 +1212,246 @@ mod tests {
     use super::*;
     use teksilo_canvas::SizeProposal;
     use teksilo_core::Theme;
+    use teksilo_core::styles::StandardItemStyle;
     use teksilo_core::widget_tree::WidgetTree;
     use teksilo_i18n::lit;
 
     fn theme() -> Theme {
         teksilo_core::presets::intui::light()
+    }
+
+    /// A theme whose `text_on_accent` is distinguishable from
+    /// `text_primary`.
+    ///
+    /// IntUI's are **both black** — it pairs black labels with its teal
+    /// accent deliberately — so the stock preset cannot tell a flipped
+    /// label from an unflipped one, and a test written against it would
+    /// pass no matter what the hook did.
+    fn discriminating_theme() -> Theme {
+        let mut t = theme();
+        t.colors.text_on_accent = teksilo_tokens::Color::WHITE;
+        assert_ne!(t.colors.text_primary, t.colors.text_on_accent);
+        t
+    }
+
+    /// Every glyph colour a render pass emitted, quantized to 8-bit.
+    fn glyph_colors(tree: &mut WidgetTree) -> Vec<[u8; 4]> {
+        tree.render()
+            .glyphs
+            .iter()
+            .map(|g| {
+                let q = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
+                [q(g.color[0]), q(g.color[1]), q(g.color[2]), q(g.color[3])]
+            })
+            .collect()
+    }
+
+    fn rgba8(c: teksilo_tokens::Color) -> [u8; 4] {
+        let q = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
+        [q(c.r()), q(c.g()), q(c.b()), q(c.a())]
+    }
+
+    /// A style that fills a selected row with a saturated colour has to be
+    /// able to recolour the label on top of it, and it cannot do that from
+    /// `make_body` — the label is built first. `selected_label_role` is
+    /// the hook; this is both halves of it.
+    #[derive(Debug, Default, Clone, Copy)]
+    struct OnAccentSelectionStyle;
+
+    impl StandardItemStyle for OnAccentSelectionStyle {
+        fn make_body(
+            &self,
+            cfg: &StandardItemStyleConfig,
+            ctx: &mut teksilo_core::build_context::BuildContext,
+        ) -> WidgetId {
+            crate::styles::RecipeStandardItemStyle::default().make_body(cfg, ctx)
+        }
+
+        fn selected_label_role(&self) -> Option<TextRole> {
+            Some(TextRole::OnAccent)
+        }
+    }
+
+    /// The default is `None`, and a row under it keeps `TextRole::Primary`
+    /// whether or not it is selected — the behaviour every existing style
+    /// relies on.
+    #[test]
+    fn a_style_without_the_hook_leaves_the_selected_label_alone() {
+        let t = discriminating_theme();
+        let primary = rgba8(t.colors.text_primary);
+        let on_accent = rgba8(t.colors.text_on_accent);
+
+        let mut tree = WidgetTree::new()
+            .with_theme(t)
+            .with_text_backend(std::rc::Rc::new(std::cell::RefCell::new(
+                teksilo_canvas::MockTextBackend::new(),
+            )));
+        tree.add(StandardListItem::new(lit!("Row")).selected(Signal::new(true)));
+        tree.layout(SizeProposal::exact(300.0, 40.0));
+        let colors = glyph_colors(&mut tree);
+        assert!(colors.contains(&primary));
+        assert!(!colors.contains(&on_accent));
+    }
+
+    /// …and a style that declares the hook flips it, but only while the
+    /// row is *emphasised*.
+    #[test]
+    fn the_hook_flips_the_label_of_an_emphasised_row() {
+        let t = discriminating_theme();
+        let on_accent = rgba8(t.colors.text_on_accent);
+
+        let mut tree = WidgetTree::new()
+            .with_theme(t)
+            .with_text_backend(std::rc::Rc::new(std::cell::RefCell::new(
+                teksilo_canvas::MockTextBackend::new(),
+            )));
+        tree.add(
+            StandardListItem::new(lit!("Row"))
+                .selected(Signal::new(true))
+                .style(OnAccentSelectionStyle),
+        );
+        tree.layout(SizeProposal::exact(300.0, 40.0));
+        assert!(glyph_colors(&mut tree).contains(&on_accent));
+    }
+
+    /// An *unselected* row must keep its normal label even under a style
+    /// that declares the hook — otherwise every row in the list would read
+    /// as chosen.
+    #[test]
+    fn the_hook_does_not_touch_an_unselected_row() {
+        let t = discriminating_theme();
+        let primary = rgba8(t.colors.text_primary);
+        let on_accent = rgba8(t.colors.text_on_accent);
+
+        let mut tree = WidgetTree::new()
+            .with_theme(t)
+            .with_text_backend(std::rc::Rc::new(std::cell::RefCell::new(
+                teksilo_canvas::MockTextBackend::new(),
+            )));
+        tree.add(StandardListItem::new(lit!("Row")).style(OnAccentSelectionStyle));
+        tree.layout(SizeProposal::exact(300.0, 40.0));
+        let colors = glyph_colors(&mut tree);
+        assert!(colors.contains(&primary));
+        assert!(!colors.contains(&on_accent));
+    }
+
+    /// Every foreground on a tree row has to flip together.
+    ///
+    /// The chevron is painted by `TwistArrow`, which defaulted to a
+    /// hardcoded `TextRole::Secondary`. Under a style whose selected row
+    /// is a solid accent capsule, the label flipped to white and the
+    /// chevron stayed a grey smudge on the accent — under WCAG 1.4.11's
+    /// 3:1 floor, and visibly wrong beside the flipped label. The chevron
+    /// paints a `Path`, not glyphs, so it shows up in `shapes`.
+    #[test]
+    fn the_hook_flips_a_tree_rows_chevron_with_its_label() {
+        let t = discriminating_theme();
+        let secondary = rgba8(t.colors.text_secondary);
+        let on_accent = rgba8(t.colors.text_on_accent);
+
+        let mut tree = WidgetTree::new()
+            .with_theme(t)
+            .with_text_backend(std::rc::Rc::new(std::cell::RefCell::new(
+                teksilo_canvas::MockTextBackend::new(),
+            )));
+        tree.add(
+            StandardTreeItem::new(lit!("Node"))
+                .has_children(true)
+                .selected(Signal::new(true))
+                .style(OnAccentSelectionStyle),
+        );
+        tree.layout(SizeProposal::exact(300.0, 40.0));
+
+        let shapes: Vec<[u8; 4]> = tree
+            .render()
+            .shapes
+            .iter()
+            .map(|s| {
+                let q = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
+                [q(s.color[0]), q(s.color[1]), q(s.color[2]), q(s.color[3])]
+            })
+            .collect();
+        let paths: Vec<[u8; 4]> = tree
+            .render()
+            .paths
+            .iter()
+            .map(|p| {
+                let q = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
+                [q(p.color[0]), q(p.color[1]), q(p.color[2]), q(p.color[3])]
+            })
+            .collect();
+        let painted: Vec<[u8; 4]> = shapes.into_iter().chain(paths).collect();
+
+        assert!(
+            painted.contains(&on_accent),
+            "the chevron did not flip with the label; painted {painted:?}"
+        );
+        assert!(
+            !painted.contains(&secondary),
+            "the chevron is still painting the muted role on an accent capsule"
+        );
+    }
+
+    /// …and a tree row under a style *without* the hook keeps the muted
+    /// chevron every other theme expects.
+    #[test]
+    fn a_tree_rows_chevron_is_muted_without_the_hook() {
+        let t = discriminating_theme();
+        let secondary = rgba8(t.colors.text_secondary);
+
+        let mut tree = WidgetTree::new()
+            .with_theme(t)
+            .with_text_backend(std::rc::Rc::new(std::cell::RefCell::new(
+                teksilo_canvas::MockTextBackend::new(),
+            )));
+        tree.add(
+            StandardTreeItem::new(lit!("Node"))
+                .has_children(true)
+                .selected(Signal::new(true)),
+        );
+        tree.layout(SizeProposal::exact(300.0, 40.0));
+        let paths: Vec<[u8; 4]> = tree
+            .render()
+            .paths
+            .iter()
+            .map(|p| {
+                let q = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
+                [q(p.color[0]), q(p.color[1]), q(p.color[2]), q(p.color[3])]
+            })
+            .collect();
+        assert!(paths.contains(&secondary), "painted {paths:?}");
+    }
+
+    /// A row whose window has gone inactive falls back to the muted
+    /// `SelectedInactive` capsule, so its label has to fall back too — an
+    /// on-accent label on a neutral grey would be the worst of both.
+    #[test]
+    fn the_hook_reverts_when_the_row_stops_being_emphasised() {
+        let t = discriminating_theme();
+        let primary = rgba8(t.colors.text_primary);
+        let on_accent = rgba8(t.colors.text_on_accent);
+
+        let mut tree = WidgetTree::new()
+            .with_theme(t)
+            .with_text_backend(std::rc::Rc::new(std::cell::RefCell::new(
+                teksilo_canvas::MockTextBackend::new(),
+            )));
+        tree.add(
+            StandardListItem::new(lit!("Row"))
+                .selected(Signal::new(true))
+                .style(OnAccentSelectionStyle),
+        );
+        tree.layout(SizeProposal::exact(300.0, 40.0));
+        assert!(glyph_colors(&mut tree).contains(&on_accent));
+
+        tree.set_window_active(false);
+        tree.layout(SizeProposal::exact(300.0, 40.0));
+        let colors = glyph_colors(&mut tree);
+        assert!(
+            colors.contains(&primary),
+            "an inactive window's selected row kept its on-accent label"
+        );
+        assert!(!colors.contains(&on_accent));
     }
 
     #[test]

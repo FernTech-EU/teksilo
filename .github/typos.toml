@@ -40,6 +40,7 @@ Mis = "Mis"
 # Domain / spec terms
 ALPH = "ALPH"      # WebP container chunk name
 Canva = "Canva"    # design tool referenced in styling docs
+Sur = "Sur"        # "Big Sur" — macOS 11, cited throughout the macOS preset
 Wil = "Wil"        # rich-text engine test fixture string
 PN = "PN"          # substring of PNGs — Portable Network Graphics
 Iin = "Iin"        # git-grep flags `-Iin` (ignore binary + case-insensitive + line numbers)

@@ -13,6 +13,150 @@ by crate for clarity, not because crates version independently.
 
 ## [Unreleased]
 
+### Added — `teksilo-theme-macos`: the macOS (Aqua / Dark Aqua) preset
+
+`teksilo-theme-macos` was a stub returning an IntUI-shaped baseline behind a
+wall of `TODO(macos)` markers. It is now a complete design language, opt-in via
+the umbrella crate's `theme-macos` feature and reachable as
+`teksilo::prelude::macos::{light, dark}`.
+
+**Tokens, with their provenance stated.** Apple attaches a standing disclaimer
+to every colour value it publishes ("the actual color values will fluctuate from
+release to release"), and publishes no table at all for corner radii, control
+heights, focus-ring geometry or animation durations bar one. So every literal in
+the crate is tagged at its definition: **`[HIG]`** (published — the 13-hue system
+colour table and the whole typography ramp), **`[measured]`** (a community
+capture of the private `NSColor` enumeration, or a screen measurement), or
+**`[derived]`** (computed from one of the first two, with the rule given). The
+full AppKit vocabulary — four label grades, two independent selection families,
+the bezel description, the eight System Settings accents — is exposed through
+the **`MacOsPalette`** theme extension.
+
+Geometry is the two measured radii (6 dp in-page, 10 dp floating, with a menu at
+its own measured 9 dp) and a **22 dp** control height — a third shorter than
+Fluent's 32, which is most of why a macOS window fits more. Typography is the
+published text-style ramp (Body 13/16, Callout 12/15, Subheadline 11/14) with
+Apple's **signed tracking**: −0.08 at 13 pt, exactly 0 at 12, +0.06 at 11. It is
+the only Teksilo preset that tracks non-uniformly, and the only one whose
+tracking changes sign. Motion is Core Animation's default 0.25 s on
+`kCAMediaTimingFunctionEaseInEaseOut`, `cubic-bezier(0.42, 0, 0.58, 1)` —
+symmetric, where Fluent's curve is decelerate-only.
+
+**Chrome for 28 style slots.** Eight are real `impl FooStyle` blocks, for the
+controls where AppKit is structurally its own thing:
+
+- the push button's **bezel** — a soft shadow, a faint top-to-bottom face
+  gradient, a hairline, and (in Dark Aqua) a catch-light along the top edge.
+  Pressing it darkens the face and drops the shadow, so the control settles into
+  the surface. The *default* button deliberately gets none of it: a flat accent
+  fill, because doubling the elevation cues is what makes a macOS default button
+  look wrong;
+- a focus ring that **is the accent** — not Fluent's high-contrast neutral
+  outline. Drawn naively that fails WCAG SC 1.4.11 (the accent at the ~50 %
+  alpha the halo appears to have measures 1.86:1 on `windowBackgroundColor`), so
+  it is built as two bands: a 2 dp solid one at full accent that carries the
+  contrast, and a translucent halo outside it that supplies the macOS softness;
+- the `NSSwitch`'s **18 dp knob in a 22 dp track** — a knob that nearly fills its
+  corridor, wearing the same bezel the push button does, where Fluent's is a
+  12 dp dot in a 20 dp track;
+- the 14 dp checkbox and radio (half the size of Fluent's 20 dp box), bezelled
+  while unchecked, with AppKit's forward-leaning tick and its small fixed pip;
+- the field's **accent focus halo** — the whole announcement, where Fluent grows
+  its bottom edge and Material 3 thickens its outline;
+- the slider's plain round bezelled knob, which unlike Fluent's does not resize
+  under the pointer;
+- the menu row's **accent fill with a white label**, where Fluent uses a neutral
+  wash;
+- the list row's **selection capsule** — Big Sur's inset rounded rectangle,
+  accent-filled with `alternateSelectedControlTextColor` on top.
+
+The other twenty are the shipped `Recipe*Style` constructed with AppKit metrics,
+not reimplementations.
+
+**Accent.** `controlAccentColor` is whatever the user picked in System Settings.
+`light()` / `dark()` resolve it against the out-of-box `systemBlue`;
+**`light_with_accent(Color)` / `dark_with_accent(Color)`** rebuild the accent
+family around any other seed, and **`SystemAccent`** carries the eight swatches
+macOS itself offers. `linkColor` deliberately does *not* follow — AppKit keeps
+links a fixed blue whatever accent is chosen. Note that an accent-filled control
+paints `selectedContentBackgroundColor` (a *darkened* accent) rather than the raw
+one: white on the raw `#007AFF` is only 4.02:1, so painting it would have shipped
+an inaccessible default button.
+
+**Four documented deviations from Apple's own numbers**, each with the
+measurement that forced it and a test that pins the premise:
+
+- **The label grades are lifted, and the lift is computed rather than
+  guessed.** `secondaryLabelColor` is 50 % black in Aqua (3.98:1 on
+  `textBackgroundColor`) and 55 % white in Dark Aqua; neither clears WCAG SC
+  1.4.3's 4.5:1 floor on every surface the preset paints. Rather than hand-pick
+  a number per appearance, the projection raises the alpha until it clears the
+  floor on each surface **including the hover and press washes over it** — a
+  press wash moves a surface *toward* the label, and that is where Apple's own
+  value first stops passing. Apple's numbers stay on `MacOsPalette`; the lifted
+  ones are what `ColorTokens` carries.
+- A 45 % `border_strong` where AppKit's control hairline measures 1.25:1
+  against WCAG 1.4.11's 3:1 floor for a control boundary.
+- The *Accessible* variant of each system colour for status foregrounds rather
+  than the Default one (`systemRed` Default is 3.55:1 on white).
+- The IntUI amber kept for the search highlight, because `findHighlightColor` is
+  pure `#FFFF00` in both appearances and AppKit special-cases the text on it to
+  black.
+
+A discrete slider's **tick marks** paint `border_strong` rather than
+`tertiaryLabelColor` for the same reason a checkbox outline does — a tick marks
+a value the slider can actually take, and AppKit's 25 % tertiary label measures
+1.8:1 on the window in Aqua. The slider's *rail* is deliberately left faint:
+there the knob is the control and the rail is the groove behind it, which AppKit
+also keeps subtle. Both are commented at the paint site so the asymmetry is not
+mistaken for an oversight.
+
+**Known limitations, stated rather than deferred.** The OS accent is not read —
+Teksilo's platform layer returns only the light/dark preference on macOS, so
+there is no live `NSColor.controlAccentColor` to bind to. Vibrancy uses each
+material's opaque fallback, which is what macOS itself shows with "Reduce
+transparency" on. The `TableView` / `GridView` selection band is an accent *wash*
+rather than the capsule, because those views paint the shared `surface_selected`
+token behind app-supplied cell widgets this preset cannot retint. San Francisco
+cannot be bundled, so the optional `system-fonts` feature *names* the macOS faces
+and the default build keeps the metric-neutral bundled Inter.
+
+### Added — `teksilo-core`: two defaulted label-role style hooks
+
+`StandardItemStyle::selected_label_role` and
+`MenuItemStyle::highlighted_label_role`, both defaulting to `None`.
+
+A row builds its label before any style's `make_body` runs, so a design language
+whose selection is a **solid** fill could not recolour the text on top of it —
+macOS's accent capsule would have left `labelColor` at roughly 3.5:1. These
+declare the role instead, and the widget composes it into the label's (and the
+menu row's shortcut's) colour signal, gated on the row actually being emphasised
+so an unemphasised or window-inactive row keeps its normal label. Same shape as
+the existing `ButtonStyle::label_text_role`, and defaulted for the same reason:
+IntUI and Fluent use pale washes, need no flip, and are unchanged.
+
+### Fixed — `teksilo-widgets`: a tree row's chevron ignored its row's colour
+
+`TwistArrow` painted a hardcoded `TextRole::Secondary` with no way to override
+it. That was invisible while every theme's selection was a pale wash, and wrong
+the moment one is not: under a style that flips a selected row's label (see
+above), the label turned white and the chevron stayed a grey smudge on the
+accent capsule — roughly 2.5:1, under WCAG SC 1.4.11's 3:1 floor. `MenuItem`'s
+own chevron was already wired to its row's text role; `StandardTreeItem`'s was
+not.
+
+`TwistArrow::color(impl Into<ColorProp>)` now takes any colour, role or signal
+(defaulting to the previous `Secondary`), and `StandardTreeItem` hands it the
+same role its label uses, so the two always move together. Under IntUI and
+Fluent nothing changes.
+
+### Changed — `widget-catalog`: macOS in the theme switcher and `--theme`
+
+The catalog's title-bar `ThemeSwitcher` gains macOS Light / macOS Dark, and
+`--theme` accepts `macos-light` / `macos-dark`. Both are covered by the existing
+persist/restore round-trip test, the failure mode where a new theme persists
+happily and then silently reverts on the next launch.
+
 ### Fixed — `teksilo-widgets` SpinBox: the mouse wheel was inverted
 
 Scrolling **down** over a `SpinBox` increased its value, and scrolling up

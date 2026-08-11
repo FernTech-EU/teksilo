@@ -230,8 +230,9 @@ fn theme_switch_caveat() -> impl Widget + 'static {
             .child(
                 TextWidget::new(lit!(
                     "To see a preset's true chrome, start the catalog with \
-                     --theme fluent-dark (or fluent-light / material3-light / \
-                     material3-dark / intui-light / intui-dark)."
+                     --theme macos-light (or macos-dark / fluent-light / \
+                     fluent-dark / material3-light / material3-dark / \
+                     intui-light / intui-dark)."
                 ))
                 .style(TextStyleRole::Small)
                 .color(TextRole::TooltipText),
@@ -289,14 +290,15 @@ fn build_title_bar(
     // is reachable), so the chosen size persists and restores on restart.
     let scale_ctrl = TextScaleSlot::default();
 
-    // Theme switcher — IntUI Light/Dark plus the Material 3 and Fluent
-    // presets, with the OS-follow "System" entry kept on. Selecting an entry
-    // re-tints the catalog live (colours, focus/scroll preserved). It does NOT
-    // change widget *chrome* at runtime: shapes (M3 pills and switch, Fluent's
-    // elevation edge and selection pill, card radii) are chosen when the UI is
-    // built, so a live family switch keeps the current shapes — start with
-    // `--theme fluent-dark` to see a preset's true chrome. The composite
-    // tooltip below spells this out for the user.
+    // Theme switcher — IntUI Light/Dark plus the Material 3, Fluent and
+    // macOS presets, with the OS-follow "System" entry kept on. Selecting an
+    // entry re-tints the catalog live (colours, focus/scroll preserved). It
+    // does NOT change widget *chrome* at runtime: shapes (M3 pills and switch,
+    // Fluent's elevation edge and selection pill, macOS's bezels and selection
+    // capsule, card radii) are chosen when the UI is built, so a live family
+    // switch keeps the current shapes — start with `--theme macos-light` to
+    // see a preset's true chrome. The composite tooltip below spells this out
+    // for the user.
     let theme_switcher = teksilo::widgets::ThemeSwitcher::new()
         .themes([
             (lit!("IntUI Light"), teksilo::presets::intui::light()),
@@ -308,6 +310,8 @@ fn build_title_bar(
             (lit!("Material 3 Dark"), teksilo::prelude::material3::dark()),
             (lit!("Fluent Light"), teksilo::prelude::fluent::light()),
             (lit!("Fluent Dark"), teksilo::prelude::fluent::dark()),
+            (lit!("macOS Light"), teksilo::prelude::macos::light()),
+            (lit!("macOS Dark"), teksilo::prelude::macos::dark()),
         ])
         .composite_tooltip(theme_switch_caveat());
 
@@ -390,7 +394,7 @@ const THEME_PREF_KEY: &str = "ui.theme";
 
 /// Resolve a `--theme NAME` value to a concrete `Theme`.
 fn theme_from_name(name: &str) -> Option<teksilo::core::Theme> {
-    use teksilo::prelude::{fluent, material3};
+    use teksilo::prelude::{fluent, macos, material3};
     use teksilo::presets::intui;
     match name {
         "intui-light" => Some(intui::light()),
@@ -399,6 +403,8 @@ fn theme_from_name(name: &str) -> Option<teksilo::core::Theme> {
         "material3-dark" | "m3-dark" => Some(material3::dark()),
         "fluent-light" => Some(fluent::light()),
         "fluent-dark" => Some(fluent::dark()),
+        "macos-light" => Some(macos::light()),
+        "macos-dark" => Some(macos::dark()),
         other => {
             eprintln!("--theme: unknown theme `{other}` — using the default");
             None
@@ -414,7 +420,7 @@ fn theme_from_name(name: &str) -> Option<teksilo::core::Theme> {
 /// [`theme_from_name`]. Every preset offered by the switcher must appear
 /// here or picking it persists fine and silently reverts on next launch.
 fn theme_from_id(id: &str) -> Option<teksilo::core::Theme> {
-    use teksilo::prelude::{fluent, material3};
+    use teksilo::prelude::{fluent, macos, material3};
     use teksilo::presets::intui;
     match id {
         "intui.light" => Some(intui::light()),
@@ -423,6 +429,8 @@ fn theme_from_id(id: &str) -> Option<teksilo::core::Theme> {
         "material3.dark" => Some(material3::dark()),
         "fluent.light" => Some(fluent::light()),
         "fluent.dark" => Some(fluent::dark()),
+        "macos.light" => Some(macos::light()),
+        "macos.dark" => Some(macos::dark()),
         // Unknown / custom id: keep the builder default.
         _ => None,
     }
@@ -804,6 +812,8 @@ mod tests {
         ("material3-dark", "material3.dark"),
         ("fluent-light", "fluent.light"),
         ("fluent-dark", "fluent.dark"),
+        ("macos-light", "macos.light"),
+        ("macos-dark", "macos.dark"),
     ];
 
     #[test]

@@ -5,6 +5,8 @@
 
 use std::rc::Rc;
 
+use teksilo_tokens::TextRole;
+
 use crate::build_context::BuildContext;
 use crate::signal::Signal;
 use crate::widget_id::WidgetId;
@@ -26,6 +28,25 @@ pub struct MenuItemStyleConfig {
 
 pub trait MenuItemStyle: 'static {
     fn make_body(&self, cfg: &MenuItemStyleConfig, ctx: &mut BuildContext) -> WidgetId;
+
+    /// The text role a menu row's label and shortcut take while the row is
+    /// **highlighted** — hovered, or reached by keyboard navigation.
+    /// `None` (the default) keeps the row's own mapping.
+    ///
+    /// The row builds its label before a style ever sees it, so a style
+    /// that fills the highlight with a saturated colour cannot recolour
+    /// the text on top of it. macOS fills a highlighted menu row with the
+    /// accent and flips its label to `selectedMenuItemTextColor` (white),
+    /// so its style returns [`TextRole::OnAccent`]; IntUI and Fluent both
+    /// use a neutral wash and leave this `None`.
+    ///
+    /// Same shape as
+    /// [`ButtonStyle::label_text_role`](crate::styles::ButtonStyle::label_text_role),
+    /// and defaulted for the same reason: an existing style needs no
+    /// change.
+    fn highlighted_label_role(&self) -> Option<TextRole> {
+        None
+    }
 }
 
 pub type SharedMenuItemStyle = Rc<dyn MenuItemStyle>;

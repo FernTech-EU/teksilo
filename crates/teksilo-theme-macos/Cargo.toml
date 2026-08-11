@@ -10,6 +10,30 @@ publish.workspace = true
 authors.workspace = true
 repository.workspace = true
 
+[features]
+# Off by default. Switches the theme's typography families to the macOS
+# system stack — "SF Pro Text" for UI text and "SF Mono" for monospace —
+# instead of the metric-neutral bundled Inter / JetBrains Mono.
+#
+# Like Fluent's `system-fonts`, and unlike Material 3's `bundled-fonts`,
+# there is no font to embed: San Francisco is licensed for use *on* Apple
+# platforms only and cannot be redistributed inside a cross-platform
+# binary, so the only honest option is to *name* the faces and let the text
+# engine resolve them from the installed system fonts. On a machine without
+# them the engine falls back to the bundled default, so enabling the feature
+# is never fatal — it simply does nothing off macOS.
+system-fonts = []
+
 [dependencies]
 teksilo-core = { workspace = true }
 teksilo-tokens = { workspace = true }
+# Needed for the Tier-3 widget styles installed in `style_slots` (the
+# `Recipe*Style` defaults + layout primitives live in teksilo-widgets).
+# teksilo-widgets does NOT depend on the theme crates, so this is acyclic.
+teksilo-canvas = { workspace = true }
+teksilo-widgets = { workspace = true }
+
+[dev-dependencies]
+# `tests/mount.rs` builds a real `WidgetTree` per widget; `lit!` supplies
+# the untranslated labels those constructors take.
+teksilo-i18n = { workspace = true }

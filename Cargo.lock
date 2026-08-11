@@ -11126,8 +11126,11 @@ dependencies = [
 name = "teksilo-theme-macos"
 version = "0.7.0"
 dependencies = [
+ "teksilo-canvas",
  "teksilo-core",
+ "teksilo-i18n",
  "teksilo-tokens",
+ "teksilo-widgets",
 ]
 
 [[package]]

@@ -16,6 +16,7 @@ teksilo = { workspace = true, features = [
     "telemetry",
     "theme-material3",
     "theme-fluent",
+    "theme-macos",
 ] }
 teksilo-charts = { workspace = true }
 teksilo-scene = { workspace = true }

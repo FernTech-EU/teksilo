@@ -23,7 +23,9 @@ use std::rc::Rc;
 use teksilo_canvas::{Canvas, Path, Point, Rect, Size, SizeProposal};
 
 use teksilo_core::accessibility::AccessNodeBuilder;
+use teksilo_core::binding::BindingLevel;
 use teksilo_core::build_context::BuildContext;
+use teksilo_core::color_prop::ColorProp;
 use teksilo_core::widget::{
     EventContext, LayoutContext, LayoutResponse, PaintContext, Widget, WidgetPlacement,
 };
@@ -38,6 +40,10 @@ pub struct TwistArrow {
     size: f32,
     has_children: bool,
     expanded: bool,
+    /// Glyph colour. Defaults to [`TextRole::Secondary`] — the muted
+    /// chevron every tree draws — but a row whose selection fills with a
+    /// saturated colour has to move it with the label. See [`Self::color`].
+    color: ColorProp,
     on_click: Option<Rc<dyn Fn(&mut EventContext)>>,
 }
 
@@ -50,8 +56,26 @@ impl TwistArrow {
             size,
             has_children,
             expanded,
+            color: ColorProp::TextRole(TextRole::Secondary),
             on_click: None,
         }
+    }
+
+    /// Override the glyph colour. Accepts a `Color`, a `TextRole`, or a
+    /// `Signal` of either.
+    ///
+    /// The default `TextRole::Secondary` is a muted grey, which is right on
+    /// every row that is not filled. It is *not* right on one that is: a
+    /// design language whose selected row is a solid accent capsule flips
+    /// its label to `TextRole::OnAccent` through
+    /// `StandardItemStyle::selected_label_role`, and a chevron left behind
+    /// at `Secondary` then sits on that capsule at roughly 2.5:1 — under
+    /// WCAG SC 1.4.11's 3:1 floor, and visibly wrong beside a white label.
+    /// `StandardTreeItem` passes the row's own label role here so the two
+    /// always move together.
+    pub fn color(mut self, color: impl Into<ColorProp>) -> Self {
+        self.color = color.into();
+        self
     }
 
     /// Install a tap handler. Receives the firing [`EventContext`]
@@ -69,12 +93,20 @@ impl std::fmt::Debug for TwistArrow {
             .field("size", &self.size)
             .field("has_children", &self.has_children)
             .field("expanded", &self.expanded)
+            .field("color", &self.color)
             .finish()
     }
 }
 
 impl Widget for TwistArrow {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+        // A bound colour has to repaint the glyph when it changes — the
+        // row's label role flips the moment the row becomes selected.
+        self.color.register_if_bound(
+            ctx.self_id(),
+            ctx.binding_registry(),
+            BindingLevel::RepaintOnly,
+        );
         if let Some(cb) = self.on_click.clone() {
             let handlers = HandlerSet::new()
                 .on_tap(move |_pos, ctx| {
@@ -116,7 +148,7 @@ impl Widget for TwistArrow {
         if !self.has_children {
             return;
         }
-        let color = TextRole::Secondary.resolve(&ctx.theme.colors);
+        let color = self.color.resolve(ctx.theme, ctx.effective_enabled);
         let cx = bounds.x + bounds.width / 2.0;
         let cy = bounds.y + bounds.height / 2.0;
         let r = bounds.width.min(bounds.height) * 0.4;

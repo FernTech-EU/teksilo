@@ -601,6 +601,14 @@ fn resolve_shortcut_role(state: MenuItemState) -> TextRole {
     }
 }
 
+/// Whether a state is the row's *highlighted* one — the state a
+/// [`MenuItemStyle::highlighted_label_role`] applies to. Hover and the
+/// keyboard-arrow highlight share `Hovered`; a pressed row is still
+/// highlighted underneath the press.
+fn is_highlight(state: MenuItemState) -> bool {
+    matches!(state, MenuItemState::Hovered | MenuItemState::Pressed)
+}
+
 impl Widget for MenuItem {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         use crate::styles::recipe_menu_item_style as menu;
@@ -617,16 +625,29 @@ impl Widget for MenuItem {
         let interaction = ctx.signal(MenuItemState::Idle);
         self.interaction = interaction.clone();
 
+        // Resolved here rather than at `make_body` because the label is
+        // built long before the chrome, and a style whose highlight is a
+        // *solid* fill (macOS's accent row) has to say so in time to
+        // recolour it. Per-call override > theme slot > shipped recipe.
+        let style: SharedMenuItemStyle = self
+            .style_override
+            .clone()
+            .or_else(|| ctx.theme().style_slots.menu_item.clone())
+            .unwrap_or_else(|| Rc::new(crate::styles::RecipeMenuItemStyle::default()));
+        let highlighted_role = style.highlighted_label_role();
+
         // Combine interaction + effective_enabled so `text_role`
         // resolves to Disabled when disabled. Keeps the icon and label
         // muted on hover-while-disabled too (defense in depth — the
         // leaves' `ColorProp::resolve(theme, ctx.effective_enabled)`
         // would substitute Disabled anyway).
-        let text_role = interaction.zip(&effective_enabled).map(|(s, on)| {
+        let text_role = interaction.zip(&effective_enabled).map(move |(s, on)| {
             if !*on {
                 TextRole::Disabled
             } else {
-                resolve_text_role(*s)
+                highlighted_role
+                    .filter(|_| is_highlight(*s))
+                    .unwrap_or_else(|| resolve_text_role(*s))
             }
         });
 
@@ -815,7 +836,11 @@ impl Widget for MenuItem {
             };
             let has_shortcut = shortcut.is_some();
             if let Some(shortcut) = shortcut {
-                let shortcut_role = interaction.map(|s| resolve_shortcut_role(*s));
+                let shortcut_role = interaction.map(move |s| {
+                    highlighted_role
+                        .filter(|_| is_highlight(*s))
+                        .unwrap_or_else(|| resolve_shortcut_role(*s))
+                });
                 trailing_row = trailing_row.child(
                     shortcut
                         .style(TextStyleRole::Body)
@@ -838,7 +863,11 @@ impl Widget for MenuItem {
                             .width(menu::MENU_ITEM_PADDING_HORIZONTAL),
                     );
                 }
-                let hint_role = interaction.map(|s| resolve_shortcut_role(*s));
+                let hint_role = interaction.map(move |s| {
+                    highlighted_role
+                        .filter(|_| is_highlight(*s))
+                        .unwrap_or_else(|| resolve_shortcut_role(*s))
+                });
                 trailing_row = trailing_row.child(
                     TextWidget::new(hint)
                         .style(TextStyleRole::Body)
@@ -902,11 +931,6 @@ impl Widget for MenuItem {
         let is_focused = ctx.signal(false);
         let is_highlighted = is_hovered.clone();
 
-        let style: SharedMenuItemStyle = self
-            .style_override
-            .clone()
-            .or_else(|| ctx.theme().style_slots.menu_item.clone())
-            .unwrap_or_else(|| Rc::new(crate::styles::RecipeMenuItemStyle::default()));
         let cfg = MenuItemStyleConfig {
             label,
             leading: Some(leading),
@@ -1574,6 +1598,112 @@ mod tests {
 
     fn layout(tree: &mut WidgetTree) {
         tree.layout(SizeProposal::exact(400.0, 300.0));
+    }
+
+    // --- `MenuItemStyle::highlighted_label_role` ---
+
+    /// A style that fills a highlighted row with a saturated colour has to
+    /// be able to recolour the label on top of it, and it cannot do that
+    /// from `make_body` — `MenuItem` builds its label first.
+    #[derive(Debug, Default, Clone, Copy)]
+    struct OnAccentHighlightStyle;
+
+    impl teksilo_core::styles::MenuItemStyle for OnAccentHighlightStyle {
+        fn make_body(
+            &self,
+            cfg: &MenuItemStyleConfig,
+            ctx: &mut teksilo_core::build_context::BuildContext,
+        ) -> WidgetId {
+            crate::styles::RecipeMenuItemStyle::default().make_body(cfg, ctx)
+        }
+
+        fn highlighted_label_role(&self) -> Option<TextRole> {
+            Some(TextRole::OnAccent)
+        }
+    }
+
+    /// A theme whose `text_on_accent` differs from `text_primary`. IntUI's
+    /// are both black — it pairs black labels with its teal accent — so
+    /// the stock preset cannot tell a flipped label from an unflipped one.
+    fn discriminating_theme() -> teksilo_core::Theme {
+        let mut t = teksilo_core::presets::intui::light();
+        t.colors.text_on_accent = teksilo_tokens::Color::WHITE;
+        assert_ne!(t.colors.text_primary, t.colors.text_on_accent);
+        t
+    }
+
+    fn glyph_colors(tree: &mut WidgetTree) -> Vec<[u8; 4]> {
+        tree.render()
+            .glyphs
+            .iter()
+            .map(|g| {
+                let q = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
+                [q(g.color[0]), q(g.color[1]), q(g.color[2]), q(g.color[3])]
+            })
+            .collect()
+    }
+
+    fn rgba8(c: teksilo_tokens::Color) -> [u8; 4] {
+        let q = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
+        [q(c.r()), q(c.g()), q(c.b()), q(c.a())]
+    }
+
+    /// Build a menu row under `theme`, optionally hover it with a real
+    /// pointer move, and report the glyph colours it paints.
+    fn row_glyph_colors(theme: teksilo_core::Theme, hovered: bool, styled: bool) -> Vec<[u8; 4]> {
+        let mut t = WidgetTree::new()
+            .with_theme(theme)
+            .with_text_backend(std::rc::Rc::new(std::cell::RefCell::new(
+                teksilo_canvas::MockTextBackend::new(),
+            )));
+        let mut item = MenuItem::new(lit!("Open"));
+        if styled {
+            item = item.style(OnAccentHighlightStyle);
+        }
+        let id = t.add(item);
+        layout(&mut t);
+        if hovered {
+            // A real pointer move rather than poking the interaction
+            // signal: it exercises the same path the running app takes,
+            // and the signal is private to `build`.
+            t.pointer_move(t.bounds(id).center());
+            layout(&mut t);
+        }
+        glyph_colors(&mut t)
+    }
+
+    /// The default is `None`, and a row under it keeps its own mapping
+    /// however it is highlighted — the behaviour IntUI and Fluent rely on.
+    #[test]
+    fn a_style_without_the_hook_leaves_the_highlighted_label_alone() {
+        let theme = discriminating_theme();
+        let primary = rgba8(theme.colors.text_primary);
+        let on_accent = rgba8(theme.colors.text_on_accent);
+
+        let colors = row_glyph_colors(theme, true, false);
+        assert!(colors.contains(&primary));
+        assert!(!colors.contains(&on_accent));
+    }
+
+    /// …and a style that declares it flips the label while highlighted.
+    #[test]
+    fn the_hook_flips_the_label_of_a_highlighted_row() {
+        let theme = discriminating_theme();
+        let on_accent = rgba8(theme.colors.text_on_accent);
+        assert!(row_glyph_colors(theme, true, true).contains(&on_accent));
+    }
+
+    /// An idle row must keep its normal label even under a style that
+    /// declares the hook, or every row in the menu would read as chosen.
+    #[test]
+    fn the_hook_does_not_touch_an_idle_row() {
+        let theme = discriminating_theme();
+        let primary = rgba8(theme.colors.text_primary);
+        let on_accent = rgba8(theme.colors.text_on_accent);
+
+        let colors = row_glyph_colors(theme, false, true);
+        assert!(colors.contains(&primary));
+        assert!(!colors.contains(&on_accent));
     }
 
     // --- Role coverage ---

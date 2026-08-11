@@ -420,7 +420,7 @@ under `theme_slot_supplies_button_style_when_no_override` /
 | `intui::light` / `intui::dark` | `teksilo_core::presets::intui` | shipped — the default look |
 | `material3::light` / `material3::dark` | `teksilo-theme-material3` crate | shipped — Material 3 |
 | `fluent::light` / `fluent::dark` | `teksilo-theme-fluent` crate | shipped — Windows 11 / WinUI 3 |
-| `macos::light` / `macos::dark` | `teksilo-theme-macos` crate | stub |
+| `macos::light` / `macos::dark` | `teksilo-theme-macos` crate | shipped — macOS Aqua / Dark Aqua |
 | Image-backed themes | `teksilo-image-theme` crate | not yet shipped |
 
 Each preset is just a function returning `Theme`. Apps can write their
@@ -504,8 +504,8 @@ and `PieChart`):
 
 | Widget | Trait | Default impl | Slot |
 | --- | --- | --- | --- |
-| `MenuItem` | `MenuItemStyle` | `RecipeMenuItemStyle` | `style_slots.menu_item` |
-| `StandardListItem` / `StandardTreeItem` | `StandardItemStyle` | `RecipeStandardItemStyle` | `style_slots.standard_item` |
+| `MenuItem` | `MenuItemStyle` ³ | `RecipeMenuItemStyle` | `style_slots.menu_item` |
+| `StandardListItem` / `StandardTreeItem` | `StandardItemStyle` ³ | `RecipeStandardItemStyle` | `style_slots.standard_item` |
 
 **Chrome**
 
@@ -531,6 +531,37 @@ style has to live where its own dependencies already reach. See
 [charts.md §11](charts.md) for the
 full reference.
 
+³ Carries a **defaulted label-role hook** —
+`StandardItemStyle::selected_label_role` and
+`MenuItemStyle::highlighted_label_role`, both `-> Option<TextRole>`,
+both `None` by default.
+
+A row builds its label *before* any style's `make_body` runs, so a
+style cannot recolour the text it is about to paint behind. That is
+fine for a design language whose selection is a pale wash — IntUI and
+Fluent both keep `TextRole::Primary` on top of theirs — and impossible
+for one whose selection is a **solid fill**: macOS's accent capsule
+would leave `labelColor` at roughly 3.5:1. The hook lets the style
+declare the role and the widget compose it into the label's colour
+signal (and, for a menu row, its shortcut's), gated on the row actually
+being emphasised so an unemphasised or window-inactive row keeps its
+normal label.
+
+Same shape as `ButtonStyle::label_text_role`, and defaulted for the
+same reason: every existing style is unchanged.
+
+```rust
+impl StandardItemStyle for MyStyle {
+    fn make_body(&self, cfg: &StandardItemStyleConfig, ctx: &mut BuildContext) -> WidgetId { … }
+
+    // Only needed when `make_body` fills the selection with a colour
+    // the default label cannot read on.
+    fn selected_label_role(&self) -> Option<TextRole> {
+        Some(TextRole::OnAccent)
+    }
+}
+```
+
 The legacy per-widget dimension structs are gone: the 17
 old `teksilo-tokens::components::*Style` structs were deleted and their
 IntUI constants folded into the matching
@@ -552,8 +583,8 @@ sweep, the cross-design-language color roles
 (`TextRole::OnError`, `SurfaceRole::{ErrorContainer, Container,
 ContainerRaised, ContainerSunken}`), `Easing::CubicBezier`,
 `ToggleStyleConfig::is_pressed`, and `TeksiloAppBuilder::register_fonts`
-— are all in place, so the `-fluent` preset below and the future
-`-macos` / GTK4-Adwaita ones follow the same path.
+— are all in place, so the `-fluent` and `-macos` presets below and a
+future GTK4-Adwaita one follow the same path.
 
 The **`teksilo-theme-fluent`** sibling preset is a full Windows 11 /
 WinUI 3 theme, transcribed from WinUI's own `Common_themeresources_any.xaml`
@@ -579,9 +610,60 @@ material is unavailable; Segoe UI Variable cannot be redistributed, so
 the optional `system-fonts` feature names it for the text engine to
 resolve rather than bundling it.
 
+The **`teksilo-theme-macos`** sibling preset is a full macOS **Aqua /
+Dark Aqua** theme. It is the one preset whose source publishes almost
+nothing: Apple attaches a standing disclaimer to every colour value it
+prints, and states no corner radii, no control heights, no focus-ring
+geometry and exactly one animation duration. Every literal in the crate
+is therefore tagged at its definition as `[HIG]` (published — the
+13-hue system-colour table and the whole typography ramp), `[measured]`
+(a capture of the private `NSColor` enumeration, or a screen
+measurement) or `[derived]` (computed, with the rule given). AppKit's
+wider vocabulary — four label grades, two independent selection
+families, the control bezel, the eight System Settings accents — is
+exposed through the `MacOsPalette` theme extension.
+
+Geometry is 6 dp in-page / 10 dp floating (menus at their own measured
+9 dp) on a **22 dp** control height, a third under Fluent's 32.
+Typography is the published SF ramp — Body 13/16, Callout 12/15,
+Subheadline 11/14 — carrying Apple's **signed** tracking: −0.08 pt at
+13, exactly 0 at 12, +0.06 at 11. It is the only Teksilo preset that
+tracks non-uniformly and the only one whose tracking changes sign.
+Motion is Core Animation's default 0.25 s on
+`kCAMediaTimingFunctionEaseInEaseOut` — `cubic-bezier(0.42, 0, 0.58, 1)`,
+symmetric where Fluent's is decelerate-only.
+
+It installs Tier-3 chrome for 28 style slots; eight are real
+`impl FooStyle` blocks: the push button's **bezel** (shadow, face
+gradient, hairline, Dark-Aqua catch-light — dropped on press, and
+deliberately absent from the accent-filled *default* button), a focus
+ring that **is the accent** rather than Fluent's neutral outline, the
+`NSSwitch`'s 18 dp knob in a 22 dp track, the 14 dp bezelled checkbox
+and radio, the field's **accent focus halo**, the slider's plain round
+knob, the menu row's **accent fill with a white label**, and the list
+row's **selection capsule**. `light_with_accent` / `dark_with_accent`
+and the `SystemAccent` enum rebuild the accent family; `linkColor`
+deliberately does not follow, as on macOS.
+
+Four places deviate from Apple's own numbers to clear WCAG, each
+documented at its assignment with the measurement that forced it and
+each pinned by a test that also asserts the *premise* — so if Apple's
+value ever starts passing, the deviation can be reverted rather than
+inherited. Two framework additions came out of it: the defaulted
+label-role hooks described above, without which a solid-accent
+selection cannot recolour the text on top of it.
+
+Known limitations are stated rather than deferred: the OS accent is not
+read (Teksilo's platform layer returns only the light/dark preference
+on macOS), vibrancy resolves to each material's opaque fallback, the
+`TableView` / `GridView` selection band is an accent wash rather than
+the capsule (those views paint the shared `surface_selected` token
+behind app-supplied cells this preset cannot retint), and San Francisco
+is named under the optional `system-fonts` feature rather than bundled.
+
 Still ahead on the styling roadmap: image-backed styles, the
-`ImageTheme` TOML manifest loader, and the `-macos` / GTK4-Adwaita
-sibling preset crates.
+`ImageTheme` TOML manifest loader, and a GTK4-Adwaita sibling preset
+crate.
 
 ### Multi-method styles
 

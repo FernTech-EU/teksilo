@@ -6,6 +6,8 @@
 
 use std::rc::Rc;
 
+use teksilo_tokens::TextRole;
+
 use crate::build_context::BuildContext;
 use crate::signal::Signal;
 use crate::widget_id::WidgetId;
@@ -44,6 +46,27 @@ pub struct StandardItemStyleConfig {
 
 pub trait StandardItemStyle: 'static {
     fn make_body(&self, cfg: &StandardItemStyleConfig, ctx: &mut BuildContext) -> WidgetId;
+
+    /// The text role a row's label takes while the row is **emphasised**
+    /// — selected, with its view focused and its window active. `None`
+    /// (the default) keeps the row's own mapping, `TextRole::Primary`.
+    ///
+    /// The row builds its label before a style ever sees it, so a style
+    /// that fills the selection with a saturated colour cannot recolour
+    /// the text on top of it. Design languages whose selected row is a
+    /// solid accent fill with a light label — macOS's
+    /// `alternateSelectedControlTextColor` is the canonical case — return
+    /// [`TextRole::OnAccent`] here; ones whose selection is a pale wash
+    /// (IntUI, Fluent) leave it `None` and the label keeps its contrast
+    /// against the wash.
+    ///
+    /// Same shape as
+    /// [`ButtonStyle::label_text_role`](crate::styles::ButtonStyle::label_text_role),
+    /// and defaulted for the same reason: an existing style needs no
+    /// change.
+    fn selected_label_role(&self) -> Option<TextRole> {
+        None
+    }
 }
 
 pub type SharedStandardItemStyle = Rc<dyn StandardItemStyle>;
