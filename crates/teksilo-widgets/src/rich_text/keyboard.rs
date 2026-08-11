@@ -77,7 +77,11 @@ pub(super) enum KeyAction {
 /// A no-op under every other filter, so insert sites can call it
 /// unconditionally.
 pub(super) fn collapse_selection_before_insert(state: &EditorState) {
-    if !state.policy.command_filter.collapses_selection_before_insert() {
+    if !state
+        .policy
+        .command_filter
+        .collapses_selection_before_insert()
+    {
         return;
     }
     if !state.cursor.has_selection() {

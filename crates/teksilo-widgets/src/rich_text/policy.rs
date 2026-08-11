@@ -201,7 +201,10 @@ mod tests {
             EditCommandKind::Cut,
             EditCommandKind::Undo,
         ] {
-            assert!(!f.accepts(cmd), "{cmd:?} takes text away and must be rejected");
+            assert!(
+                !f.accepts(cmd),
+                "{cmd:?} takes text away and must be rejected"
+            );
         }
         assert!(
             !f.accepts(EditCommandKind::Redo),
@@ -238,7 +241,10 @@ mod tests {
             EditCommandKind::NavigateTableCell,
             EditCommandKind::NavigateTableCellDown,
         ] {
-            assert!(f.accepts(cmd), "{cmd:?} adds or navigates and must be allowed");
+            assert!(
+                f.accepts(cmd),
+                "{cmd:?} adds or navigates and must be allowed"
+            );
         }
         assert!(
             f.accepts(EditCommandKind::ExitList) && f.accepts(EditCommandKind::ExitFrame),
