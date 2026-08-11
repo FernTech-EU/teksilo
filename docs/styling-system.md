@@ -418,9 +418,9 @@ under `theme_slot_supplies_button_style_when_no_override` /
 | Preset | Where | Status |
 | --- | --- | --- |
 | `intui::light` / `intui::dark` | `teksilo_core::presets::intui` | shipped — the default look |
-| `material3::light` / `material3::dark` | `teksilo-theme-material3` crate | stub |
+| `material3::light` / `material3::dark` | `teksilo-theme-material3` crate | shipped — Material 3 |
+| `fluent::light` / `fluent::dark` | `teksilo-theme-fluent` crate | shipped — Windows 11 / WinUI 3 |
 | `macos::light` / `macos::dark` | `teksilo-theme-macos` crate | stub |
-| `fluent::light` / `fluent::dark` | `teksilo-theme-fluent` crate | stub |
 | Image-backed themes | `teksilo-image-theme` crate | not yet shipped |
 
 Each preset is just a function returning `Theme`. Apps can write their
@@ -552,12 +552,36 @@ sweep, the cross-design-language color roles
 (`TextRole::OnError`, `SurfaceRole::{ErrorContainer, Container,
 ContainerRaised, ContainerSunken}`), `Easing::CubicBezier`,
 `ToggleStyleConfig::is_pressed`, and `TeksiloAppBuilder::register_fonts`
-— are all in place, so the `-macos` / `-fluent` / GTK4-Adwaita presets
-can follow the same path.
+— are all in place, so the `-fluent` preset below and the future
+`-macos` / GTK4-Adwaita ones follow the same path.
+
+The **`teksilo-theme-fluent`** sibling preset is a full Windows 11 /
+WinUI 3 theme, transcribed from WinUI's own `Common_themeresources_any.xaml`
+and the control theme-resource dictionaries: the light and dark colour
+dictionaries (exposed in full through the `FluentPalette` theme
+extension), the two-radius geometry (`ControlCornerRadius` 4 dp /
+`OverlayCornerRadius` 8 dp), the WinUI type ramp at zero tracking, and
+the four `Control*AnimationDuration` steps on
+`ControlFastOutSlowInKeySpline`. It installs Tier-3 chrome for 25 style
+slots: eight are real `impl FooStyle` blocks where the WinUI control is
+structurally its own thing — the button's **elevation edge** (a heavier
+stroke on the bottom edge in light, the top edge in dark, dropped on
+press), the two-tone high-contrast focus ring, the `ToggleSwitch`'s
+off-state outline and morphing knob, the filled unchecked checkbox and
+radio, the field's **accent focus underline**, the slider's two-circle
+thumb, the menu row's neutral hover, and the list row's **selection
+pill** — while the rest are the shipped `Recipe*Style` constructed with
+Fluent metrics. `light_with_accent` / `dark_with_accent` rebuild the
+whole accent family around a caller-supplied seed, the substitution
+Windows performs when the user picks an accent colour. Mica and Acrylic
+resolve to the opaque fallbacks WinUI itself uses when the compositor
+material is unavailable; Segoe UI Variable cannot be redistributed, so
+the optional `system-fonts` feature names it for the text engine to
+resolve rather than bundling it.
 
 Still ahead on the styling roadmap: image-backed styles, the
-`ImageTheme` TOML manifest loader, and the `-macos` / `-fluent` /
-GTK4-Adwaita sibling preset crates.
+`ImageTheme` TOML manifest loader, and the `-macos` / GTK4-Adwaita
+sibling preset crates.
 
 ### Multi-method styles
 

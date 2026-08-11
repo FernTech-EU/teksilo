@@ -13,6 +13,77 @@ by crate for clarity, not because crates version independently.
 
 ## [Unreleased]
 
+### Added — `teksilo-theme-fluent`: the Fluent (Windows 11 / WinUI 3) preset
+
+`teksilo-theme-fluent` was a stub returning an IntUI-shaped baseline behind a
+wall of `TODO(fluent)` markers. It is now a complete design language, opt-in via
+the umbrella crate's `theme-fluent` feature and reachable as
+`teksilo::prelude::fluent::{light, dark}`.
+
+**Tokens, transcribed from primary source.** Every colour comes from WinUI's own
+`Common_themeresources_any.xaml`, written in WinUI's `#AARRGGBB` notation so the
+file diffs against the theme dictionary line by line. The full token set —
+including the graded control fills, the on-accent strokes and the system fills
+that Teksilo's `ColorTokens` has no slot for — is exposed through the
+**`FluentPalette`** theme extension. Geometry is Fluent's two radii
+(`ControlCornerRadius` 4 dp for in-page and bar elements, `OverlayCornerRadius`
+8 dp for anything that floats, with the tooltip as the documented 4 dp
+exception). Typography is the WinUI type ramp — Body 14/20, Caption 12/16 — at
+**zero tracking** on every rung, the opposite of Material 3. Motion is the four
+`Control*AnimationDuration` steps on `ControlFastOutSlowInKeySpline`,
+`cubic-bezier(0, 0, 0, 1)`.
+
+**Chrome for 25 style slots.** Eight are real `impl FooStyle` blocks, for the
+controls where WinUI is structurally its own thing:
+
+- the button's **elevation edge** — a heavier stroke along the bottom edge in
+  light (a cast shadow) and the top edge in dark (a catch-light), dropped on
+  press. WinUI produces it with a gradient border brush anchored to a fixed 3 dp
+  band, flipped in the light dictionary only;
+- a **two-tone, high-contrast focus ring** — 2 dp near-black (light) or white
+  (dark) outside a 1 dp opposite-colour inner ring. Fluent never tints the focus
+  indicator with the accent, so neither does this;
+- the `ToggleSwitch`'s off-state outline, grey knob, and knob that grows on
+  hover and squashes to 17 × 14 under the press;
+- the filled unchecked checkbox and radio (an `ControlAltFill` box inside a
+  `ControlStrongStroke` outline — IntUI's transparent-with-a-hairline box would
+  fail WCAG 1.4.11 on a light Fluent surface);
+- the field's **accent focus underline** — `TextControlBorderThemeThicknessFocused`
+  is literally `1,1,1,2`;
+- the slider's two-circle thumb, whose accent inner dot swells to 14 dp on hover
+  and shrinks to 10 dp while dragging;
+- the menu row's **neutral** hover (`SubtleFillColorSecondary`, not an accent
+  tint);
+- the list row's **selection pill** — the 3 × 16 dp accent bar on the leading
+  edge that makes Windows 11's neutral selection wash legible.
+
+The other seventeen are the shipped `Recipe*Style` constructed with Fluent
+metrics, not reimplementations.
+
+**Accent.** `AccentFillColor*` is not a literal in WinUI — it binds to the ramp
+Windows generates from the user's accent, and the two appearances pull from
+*opposite ends* of it (light fills with a darkened accent and white labels, dark
+with a lightened one and black labels). `light()` / `dark()` resolve it against
+the Windows out-of-box `#0078D4`; **`light_with_accent(Color)` /
+`dark_with_accent(Color)`** rebuild the whole accent family around any other
+seed, leaving every neutral token untouched.
+
+**Known limitations, stated rather than deferred.** Mica and Acrylic are
+compositor materials with no flat-fill equivalent; every surface uses the opaque
+fallback WinUI itself falls back to when the material is unavailable. Segoe UI
+Variable is proprietary and cannot be bundled, so the optional `system-fonts`
+feature *names* the Windows faces for the text engine to resolve and the default
+build keeps the metric-neutral bundled Inter.
+
+### Changed — `widget-catalog`: Fluent in the theme switcher and `--theme`
+
+The catalog's title-bar `ThemeSwitcher` gains Fluent Light / Fluent Dark, and
+`--theme` accepts `fluent-light` / `fluent-dark`. Theme restore-on-launch moved
+from an inline `match` to a named `theme_from_id`, and the example gained its
+first tests — including one that walks every offered preset through a
+persist/restore round trip, the failure mode where a new theme persists happily
+and then silently reverts on the next launch.
+
 ### Added — `teksilo-widgets` docking: rail actions + Strip bar slots
 
 **`DockAction` — dockless command buttons in the activity rail.** A rail item

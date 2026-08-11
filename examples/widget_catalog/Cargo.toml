@@ -15,6 +15,7 @@ teksilo = { workspace = true, features = [
     "system-emoji",
     "telemetry",
     "theme-material3",
+    "theme-fluent",
 ] }
 teksilo-charts = { workspace = true }
 teksilo-scene = { workspace = true }

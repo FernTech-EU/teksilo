@@ -178,12 +178,11 @@ pub mod prelude {
     //   let theme = intui::light();
     pub use teksilo_core::presets::intui;
 
-    // Sibling preset crates — opt-in alternatives to the bundled
-    // IntUI preset. Each is a stub today returning an IntUI-shaped
-    // baseline; per-tier customisation lands incrementally as the
-    // four-tier styling refactor finishes the remaining widget
-    // migrations. Apps opting into a feature get a stable import
-    // path (`material3::light()`, `macos::dark()`, …).
+    // Sibling preset crates — opt-in alternatives to the bundled IntUI
+    // preset, each behind its own Cargo feature and reachable by a stable
+    // path (`material3::light()`, `fluent::dark()`, …). `material3` and
+    // `fluent` are complete design languages (tokens + Tier-3 widget
+    // chrome); `macos` is still an IntUI-shaped baseline.
     #[cfg(feature = "theme-material3")]
     pub use teksilo_theme_material3 as material3;
 

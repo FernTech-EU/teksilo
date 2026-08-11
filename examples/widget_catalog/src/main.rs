@@ -188,18 +188,19 @@ fn main() {
 
 /// Composite-tooltip body for the title-bar `ThemeSwitcher`. Spells out the
 /// one non-obvious thing about runtime theme switching: colours retint live,
-/// but widget *chrome* (shapes) is resolved at build time — so a live IntUI ↔
-/// Material 3 family switch keeps the current shapes. Points the user at the
-/// `--theme` startup flag to see a preset's true chrome. (Demonstrates the new
-/// `ThemeSwitcher::composite_tooltip` setter.)
+/// but widget *chrome* (shapes) is resolved at build time — so a live switch
+/// between the IntUI, Material 3 and Fluent families keeps the current shapes.
+/// Points the user at the `--theme` startup flag to see a preset's true chrome.
+/// (Demonstrates the new `ThemeSwitcher::composite_tooltip` setter.)
 fn theme_switch_caveat() -> impl Widget + 'static {
-    // The tooltip surface is the dark / inverse `tooltip_bg` chip (M3
-    // `inverseSurface`), so the body MUST use the tooltip text roles —
-    // `TooltipText` (full contrast) / `TooltipShortcut` (de-emphasised) —
-    // not normal on-surface roles (`Primary`/`Secondary`/`Accent`), which
-    // would be dark-on-dark (or light-on-light) and unreadable. These two
-    // roles resolve to the theme's `tooltip_text` / `tooltip_shortcut`, so
-    // they track the chip across IntUI and Material 3, light and dark.
+    // The tooltip body MUST use the tooltip text roles — `TooltipText` (full
+    // contrast) / `TooltipShortcut` (de-emphasised) — not normal on-surface
+    // roles (`Primary`/`Secondary`/`Accent`). The chip is a dark inverse
+    // surface under IntUI and Material 3 (`inverseSurface`) and a light
+    // flyout under Fluent, so a fixed on-surface role would be unreadable in
+    // one of them. These two roles resolve to the theme's `tooltip_text` /
+    // `tooltip_shortcut`, so they track the chip across all three families,
+    // light and dark.
     MaxSize::width(360.0).child(
         VStack::new()
             .spacing(6.0)
@@ -218,10 +219,10 @@ fn theme_switch_caveat() -> impl Widget + 'static {
             )
             .child(
                 TextWidget::new(lit!(
-                    "Widget shapes (Material 3's pill buttons, switch, card radii) \
-                     are chosen when the UI is built. Switching theme family \
-                     (IntUI ↔ Material 3) here changes only the colours — the \
-                     shapes stay until the UI is rebuilt."
+                    "Widget shapes (Material 3's pill buttons and switch, Fluent's \
+                     elevation edge and list selection pill, card radii) are chosen \
+                     when the UI is built. Switching theme family here changes only \
+                     the colours — the shapes stay until the UI is rebuilt."
                 ))
                 .style(TextStyleRole::Small)
                 .color(TextRole::TooltipShortcut),
@@ -229,8 +230,8 @@ fn theme_switch_caveat() -> impl Widget + 'static {
             .child(
                 TextWidget::new(lit!(
                     "To see a preset's true chrome, start the catalog with \
-                     --theme material3-dark (or material3-light / intui-light / \
-                     intui-dark)."
+                     --theme fluent-dark (or fluent-light / material3-light / \
+                     material3-dark / intui-light / intui-dark)."
                 ))
                 .style(TextStyleRole::Small)
                 .color(TextRole::TooltipText),
@@ -288,13 +289,14 @@ fn build_title_bar(
     // is reachable), so the chosen size persists and restores on restart.
     let scale_ctrl = TextScaleSlot::default();
 
-    // Theme switcher — IntUI Light/Dark plus the Material 3 preset, with the
-    // OS-follow "System" entry kept on. Selecting an entry re-tints the catalog
-    // live (colours, focus/scroll preserved). It does NOT change widget *chrome*
-    // at runtime: shapes (M3 pills, switch, card radii) are chosen when the UI
-    // is built, so a live IntUI ↔ Material 3 family switch keeps the current
-    // shapes — start with `--theme material3-dark` to see a preset's true
-    // chrome. The composite tooltip below spells this out for the user.
+    // Theme switcher — IntUI Light/Dark plus the Material 3 and Fluent
+    // presets, with the OS-follow "System" entry kept on. Selecting an entry
+    // re-tints the catalog live (colours, focus/scroll preserved). It does NOT
+    // change widget *chrome* at runtime: shapes (M3 pills and switch, Fluent's
+    // elevation edge and selection pill, card radii) are chosen when the UI is
+    // built, so a live family switch keeps the current shapes — start with
+    // `--theme fluent-dark` to see a preset's true chrome. The composite
+    // tooltip below spells this out for the user.
     let theme_switcher = teksilo::widgets::ThemeSwitcher::new()
         .themes([
             (lit!("IntUI Light"), teksilo::presets::intui::light()),
@@ -304,6 +306,8 @@ fn build_title_bar(
                 teksilo::prelude::material3::light(),
             ),
             (lit!("Material 3 Dark"), teksilo::prelude::material3::dark()),
+            (lit!("Fluent Light"), teksilo::prelude::fluent::light()),
+            (lit!("Fluent Dark"), teksilo::prelude::fluent::dark()),
         ])
         .composite_tooltip(theme_switch_caveat());
 
@@ -386,17 +390,41 @@ const THEME_PREF_KEY: &str = "ui.theme";
 
 /// Resolve a `--theme NAME` value to a concrete `Theme`.
 fn theme_from_name(name: &str) -> Option<teksilo::core::Theme> {
-    use teksilo::prelude::material3;
+    use teksilo::prelude::{fluent, material3};
     use teksilo::presets::intui;
     match name {
         "intui-light" => Some(intui::light()),
         "intui-dark" => Some(intui::dark()),
         "material3-light" | "m3-light" => Some(material3::light()),
         "material3-dark" | "m3-dark" => Some(material3::dark()),
+        "fluent-light" => Some(fluent::light()),
+        "fluent-dark" => Some(fluent::dark()),
         other => {
             eprintln!("--theme: unknown theme `{other}` — using the default");
             None
         }
+    }
+}
+
+/// Restore a persisted theme id (`ui.theme`) to a concrete `Theme`.
+///
+/// Keyed by the theme's stable `ThemeId`, which uses dots
+/// (`"fluent.dark"`) where `--theme` uses hyphens — the two namespaces are
+/// deliberately separate, so this is not a duplicate of
+/// [`theme_from_name`]. Every preset offered by the switcher must appear
+/// here or picking it persists fine and silently reverts on next launch.
+fn theme_from_id(id: &str) -> Option<teksilo::core::Theme> {
+    use teksilo::prelude::{fluent, material3};
+    use teksilo::presets::intui;
+    match id {
+        "intui.light" => Some(intui::light()),
+        "intui.dark" => Some(intui::dark()),
+        "material3.light" => Some(material3::light()),
+        "material3.dark" => Some(material3::dark()),
+        "fluent.light" => Some(fluent::light()),
+        "fluent.dark" => Some(fluent::dark()),
+        // Unknown / custom id: keep the builder default.
+        _ => None,
     }
 }
 
@@ -422,14 +450,12 @@ impl Widget for ThemePersistenceSlot {
         // Skipped when `--theme` forced the startup theme.
         let saved = pref.get();
         if !self.skip_restore && !saved.is_empty() {
-            ctx.run_after_mount(move |ectx| match saved.as_str() {
-                "system" => ectx.follow_system_theme(),
-                "intui.dark" => ectx.set_theme(teksilo::presets::intui::dark()),
-                "intui.light" => ectx.set_theme(teksilo::presets::intui::light()),
-                "material3.dark" => ectx.set_theme(teksilo::prelude::material3::dark()),
-                "material3.light" => ectx.set_theme(teksilo::prelude::material3::light()),
-                // Unknown / custom id: keep the builder default.
-                _ => {}
+            ctx.run_after_mount(move |ectx| {
+                if saved == "system" {
+                    ectx.follow_system_theme();
+                } else if let Some(theme) = theme_from_id(&saved) {
+                    ectx.set_theme(theme);
+                }
             });
         }
 
@@ -761,4 +787,98 @@ fn demo_shortcuts() -> Vec<Shortcut> {
             .primary(KeyStroke::new(Key::F1, Modifiers::NONE))
             .build(),
     ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Every preset the title-bar switcher offers, as `(--theme name,
+    /// persisted ThemeId)`. The switcher itself is built inside a
+    /// `BuildContext`, so this list is the testable stand-in — keep it in
+    /// step with `build_title_bar`'s `.themes([...])`.
+    const OFFERED: &[(&str, &str)] = &[
+        ("intui-light", "intui.light"),
+        ("intui-dark", "intui.dark"),
+        ("material3-light", "material3.light"),
+        ("material3-dark", "material3.dark"),
+        ("fluent-light", "fluent.light"),
+        ("fluent-dark", "fluent.dark"),
+    ];
+
+    #[test]
+    fn every_cli_theme_name_resolves() {
+        for (name, _) in OFFERED {
+            assert!(
+                theme_from_name(name).is_some(),
+                "--theme {name} does not resolve"
+            );
+        }
+    }
+
+    #[test]
+    fn cli_names_resolve_to_the_theme_they_name() {
+        for (name, id) in OFFERED {
+            let theme = theme_from_name(name).expect("resolves");
+            assert_eq!(
+                theme.id.as_str(),
+                *id,
+                "--theme {name} resolved to {}",
+                theme.id
+            );
+        }
+    }
+
+    #[test]
+    fn material3_aliases_still_resolve() {
+        assert_eq!(
+            theme_from_name("m3-light").map(|t| t.id.as_str().to_string()),
+            Some("material3.light".to_string())
+        );
+        assert_eq!(
+            theme_from_name("m3-dark").map(|t| t.id.as_str().to_string()),
+            Some("material3.dark".to_string())
+        );
+    }
+
+    #[test]
+    fn unknown_theme_name_falls_back() {
+        assert!(theme_from_name("nope").is_none());
+        assert!(theme_from_name("").is_none());
+    }
+
+    /// The regression this file is most exposed to: a preset added to the
+    /// switcher persists its `ThemeId` generically, but is restored by a
+    /// hand-written match. Miss the arm and the theme silently reverts on
+    /// the next launch — which looks like nothing at all went wrong.
+    #[test]
+    fn every_offered_theme_survives_a_persist_restore_round_trip() {
+        for (name, id) in OFFERED {
+            let persisted = theme_from_name(name).expect("resolves").id;
+            let restored = theme_from_id(persisted.as_str())
+                .unwrap_or_else(|| panic!("`{persisted}` has no restore arm"));
+            assert_eq!(restored.id.as_str(), *id);
+        }
+    }
+
+    #[test]
+    fn unknown_persisted_id_keeps_the_builder_default() {
+        assert!(theme_from_id("custom").is_none());
+        // "system" is handled by the caller as follow-OS, not here.
+        assert!(theme_from_id("system").is_none());
+    }
+
+    #[test]
+    fn light_and_dark_variants_report_their_appearance() {
+        use teksilo::core::styles::ThemeAppearance;
+        for (name, _) in OFFERED {
+            let theme = theme_from_name(name).expect("resolves");
+            let expected = if name.ends_with("-dark") {
+                ThemeAppearance::Dark
+            } else {
+                ThemeAppearance::Light
+            };
+            assert_eq!(theme.appearance, expected, "{name}");
+        }
+    }
 }

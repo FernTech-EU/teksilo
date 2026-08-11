@@ -23,7 +23,8 @@ pub struct CliOptions {
     pub teksi_mode: bool,
     /// Force the startup theme, overriding the persisted selection. One of
     /// `intui-light` / `intui-dark` / `material3-light` / `material3-dark`
-    /// (aliases `m3-light` / `m3-dark`). `None` → restore the saved theme.
+    /// (aliases `m3-light` / `m3-dark`) / `fluent-light` / `fluent-dark`.
+    /// `None` → restore the saved theme.
     pub theme: Option<String>,
 }
 
@@ -98,7 +99,7 @@ pub fn parse(tab_names: &[&str]) -> CliOptions {
                 let Some(value) = iter.next() else {
                     eprintln!(
                         "--theme expects one of: intui-light, intui-dark, \
-                         material3-light, material3-dark"
+                         material3-light, material3-dark, fluent-light, fluent-dark"
                     );
                     continue;
                 };
@@ -140,7 +141,7 @@ fn print_help(tab_names: &[&str]) {
            --mode <classic|teksu>  Initial view mode (default `classic`).\n  \
            --theme <NAME>       Force the startup theme, overriding the saved one.\n  \
                                 intui-light | intui-dark | material3-light | material3-dark\n  \
-                                (aliases m3-light / m3-dark).\n  \
+                                | fluent-light | fluent-dark (aliases m3-light / m3-dark).\n  \
            --help, -h           Show this help and exit.\n\
          \n\
          TABS:\n  \

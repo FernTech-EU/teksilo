@@ -130,14 +130,12 @@ async-std = ["async", "dep:teksilo-async-std"]
 telemetry = ["teksilo-app/telemetry", "teksilo-widgets?/telemetry"]
 
 # Sibling preset crates — opt-in alternatives to the bundled IntUI
-# preset (`teksilo::prelude::intui::{light, dark}`). Each is a
-# stub today that returns an IntUI-shaped baseline with TODO markers;
-# the per-tier customisation work lands incrementally as the
-# four-tier styling refactor finishes the remaining widget
-# migrations. Apps that opt in get a stable import path
-# (`teksilo::prelude::material3::{light, dark}`, etc.) so the
-# refactor's surface stays additive — when the styles fill in,
-# existing code automatically picks them up.
+# preset (`teksilo::prelude::intui::{light, dark}`). Each exposes a
+# stable import path (`teksilo::prelude::material3::{light, dark}`,
+# etc.), so an app's call sites never change as a preset fills in.
+# `theme-material3` and `theme-fluent` are complete design languages
+# (colour / shape / typography / motion tokens plus Tier-3 widget
+# chrome); `theme-macos` is still an IntUI-shaped baseline.
 theme-material3 = ["dep:teksilo-theme-material3"]
 theme-macos = ["dep:teksilo-theme-macos"]
 theme-fluent = ["dep:teksilo-theme-fluent"]

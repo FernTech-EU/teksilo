@@ -10,6 +10,29 @@ publish.workspace = true
 authors.workspace = true
 repository.workspace = true
 
+[features]
+# Off by default. Switches the theme's typography families to the Windows
+# system stack — "Segoe UI Variable Text" for UI text and "Consolas" for
+# monospace — instead of the metric-neutral bundled Inter / JetBrains Mono.
+#
+# Unlike Material 3's `bundled-fonts`, there is no font to embed: Segoe UI
+# Variable is a proprietary Microsoft face with no redistribution licence,
+# so the only honest option is to *name* it and let the text engine resolve
+# it from the installed system fonts. On a machine without those faces the
+# engine falls back to the bundled default, so enabling the feature is
+# never fatal — it just does nothing off Windows.
+system-fonts = []
+
 [dependencies]
 teksilo-core = { workspace = true }
 teksilo-tokens = { workspace = true }
+# Needed for the Tier-3 widget styles installed in `style_slots` (the
+# `Recipe*Style` defaults + layout primitives live in teksilo-widgets).
+# teksilo-widgets does NOT depend on the theme crates, so this is acyclic.
+teksilo-canvas = { workspace = true }
+teksilo-widgets = { workspace = true }
+
+[dev-dependencies]
+# `tests/mount.rs` builds a real `WidgetTree` per widget; `lit!` supplies
+# the untranslated labels those constructors take.
+teksilo-i18n = { workspace = true }
