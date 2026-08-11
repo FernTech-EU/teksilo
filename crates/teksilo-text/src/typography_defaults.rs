@@ -113,11 +113,34 @@ pub(crate) fn apply_to_block(block: &mut BlockSnapshot, d: &EditorTypographyDefa
         }
     }
     if let Some(family) = &d.font_family {
-        for frag in &mut block.fragments {
-            if let FragmentContent::Text { format, .. } = frag
-                && format.font_family.is_none()
-            {
-                format.font_family = Some(family.clone());
+        if block.fragments.is_empty() {
+            // An empty paragraph has no fragment for the family default to
+            // land on, so the typesetter resolved no font at all and fell
+            // back to the registry's default face for the line's metrics —
+            // the empty line measured in the UI font, then snapped to the
+            // prose font on the first keystroke (the caret resized and every
+            // block below shifted). A synthetic empty fragment carries the
+            // default family so the empty line measures in the same face its
+            // first character will use. Snapshot-only, like every fill here:
+            // the live document and the a11y walk never see it.
+            block.fragments.push(FragmentContent::Text {
+                text: String::new(),
+                format: text_document::TextFormat {
+                    font_family: Some(family.clone()),
+                    ..Default::default()
+                },
+                offset: 0,
+                length: 0,
+                element_id: 0,
+                word_starts: Vec::new(),
+            });
+        } else {
+            for frag in &mut block.fragments {
+                if let FragmentContent::Text { format, .. } = frag
+                    && format.font_family.is_none()
+                {
+                    format.font_family = Some(family.clone());
+                }
             }
         }
     }
@@ -288,6 +311,55 @@ mod tests {
             "headings must not get body paragraph spacing"
         );
         assert_eq!(frag_family(&b), Some("Literata"));
+    }
+
+    #[test]
+    fn an_empty_block_gets_a_synthetic_fragment_carrying_the_default_family() {
+        let mut b = block("", TextFormat::default(), BlockFormat::default());
+        b.fragments.clear();
+        apply_to_block(&mut b, &defaults());
+        assert_eq!(
+            b.fragments.len(),
+            1,
+            "a fragment-less block must gain one synthetic fragment, or the \
+             typesetter measures its empty line in the registry default face \
+             and the line resizes on the first keystroke"
+        );
+        let FragmentContent::Text {
+            text,
+            format,
+            length,
+            ..
+        } = &b.fragments[0]
+        else {
+            panic!("expected a text fragment");
+        };
+        assert!(text.is_empty());
+        assert_eq!(*length, 0);
+        assert_eq!(format.font_family.as_deref(), Some("Literata"));
+    }
+
+    #[test]
+    fn no_family_default_synthesizes_no_fragment() {
+        let mut b = block("", TextFormat::default(), BlockFormat::default());
+        b.fragments.clear();
+        let d = EditorTypographyDefaults {
+            first_line_indent: 28.0,
+            ..Default::default()
+        };
+        apply_to_block(&mut b, &d);
+        assert!(
+            b.fragments.is_empty(),
+            "without a family default the synthetic fragment would change \
+             nothing — the fill must stay a no-op"
+        );
+    }
+
+    #[test]
+    fn a_block_with_fragments_gains_no_synthetic_one() {
+        let mut b = block("Hello", TextFormat::default(), BlockFormat::default());
+        apply_to_block(&mut b, &defaults());
+        assert_eq!(b.fragments.len(), 1);
     }
 
     #[test]

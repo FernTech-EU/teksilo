@@ -3494,6 +3494,93 @@ fn widget_runtime_typography_defaults_roundtrip_via_editor_and_handle() {
     assert!(handle.get_font_size_scale() <= 10.0);
 }
 
+/// An empty paragraph must put its caret — and size its line — exactly
+/// where its first character will land.
+///
+/// Both halves of one reported bug. With a first-line indent set, the
+/// caret on an empty paragraph sat flush left and jumped right by the
+/// indent on the first keystroke; and because an empty block carries no
+/// fragment for the default family to land on, the line measured in the
+/// registry's default (UI) face, so that same keystroke also resized the
+/// caret and shifted every paragraph below it.
+#[test]
+fn an_empty_paragraph_carets_where_its_first_character_will_land() {
+    use teksilo_text::{CursorAffinity, EditorTypographyDefaults};
+
+    const INDENT: f32 = 28.0;
+
+    // "JetBrains Mono" is registered by `register_default_font` beside the
+    // default "Inter", so this is a real family switch with real metric
+    // differences — not a request that silently falls back to the default.
+    let defaults = EditorTypographyDefaults {
+        font_family: Some("JetBrains Mono".into()),
+        first_line_indent: INDENT,
+        ..EditorTypographyDefaults::default()
+    };
+
+    // Two paragraphs: the first empty (the caret sits there), the second
+    // holding prose, so a metrics change is also a visible shift below.
+    let doc = TextDocument::new();
+    doc.set_plain_text("\nsecond paragraph").unwrap();
+    let editor = RichTextEditor::editor(doc.clone());
+    editor.set_typography_defaults(defaults);
+    let state = editor.state_handle();
+
+    let mut tree = WidgetTree::new();
+    let id = tree.add(editor);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    focus_editor(&mut tree, id);
+    for _ in 0..4 {
+        tick_once(&mut tree);
+    }
+
+    let (empty_caret, second_para_y) = {
+        let st = state.borrow();
+        (
+            st.engine.caret_rect(0, CursorAffinity::Downstream),
+            st.engine.caret_rect(1, CursorAffinity::Downstream)[1],
+        )
+    };
+
+    assert!(
+        (empty_caret[0] - INDENT).abs() < 0.5,
+        "an empty paragraph's caret must sit at the first-line indent \
+         ({INDENT}), not flush left; got x = {}",
+        empty_caret[0]
+    );
+
+    // Type the first character; the caret keeps its place and its size,
+    // and the paragraph below does not move.
+    press_char(&mut tree, 'A');
+    tick_past_debounce(&mut tree);
+
+    let (typed_caret, typed_second_para_y) = {
+        let st = state.borrow();
+        (
+            st.engine.caret_rect(0, CursorAffinity::Downstream),
+            st.engine.caret_rect(2, CursorAffinity::Downstream)[1],
+        )
+    };
+
+    assert!(
+        (typed_caret[0] - empty_caret[0]).abs() < 0.5,
+        "the first keystroke must not move the caret: {} -> {}",
+        empty_caret[0],
+        typed_caret[0]
+    );
+    assert!(
+        (typed_caret[3] - empty_caret[3]).abs() < 0.5,
+        "the first keystroke must not resize the caret: {} -> {}",
+        empty_caret[3],
+        typed_caret[3]
+    );
+    assert!(
+        (typed_second_para_y - second_para_y).abs() < 0.5,
+        "the first keystroke must not shift the paragraphs below it: {second_para_y} \
+         -> {typed_second_para_y}"
+    );
+}
+
 #[test]
 fn editor_ctrl_enter_always_inserts_block_in_table() {
     // Ctrl+Enter inside a table cell inserts a new block (same cell)
