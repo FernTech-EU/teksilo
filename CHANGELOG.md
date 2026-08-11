@@ -13,6 +13,21 @@ by crate for clarity, not because crates version independently.
 
 ## [Unreleased]
 
+### Fixed — `teksilo-widgets` SpinBox: the mouse wheel was inverted
+
+Scrolling **down** over a `SpinBox` increased its value, and scrolling up
+decreased it — the opposite of `QAbstractSpinBox`, `GtkSpinButton` and WinUI's
+`NumberBox`, and the opposite of the widget's own ArrowDown key. Independent of
+the theme.
+
+`ScrollDelta` is not winit's raw wheel reading: `translate_mouse_wheel` negates
+it so that **positive y increases a scroll offset** — which is why `ScrollArea`,
+every data view and the `TabBar`'s wheel-to-horizontal remap all add it straight
+to their scroll position. `SpinBox` was the one consumer mapping a wheel notch
+to a *value* rather than an offset, and it read positive y as "the user scrolled
+up". Now `y > 0` steps down. The wheel path had no test coverage at all; it has
+three now, including one that pins the wheel against the arrow keys.
+
 ### Added — `teksilo-theme-fluent`: the Fluent (Windows 11 / WinUI 3) preset
 
 `teksilo-theme-fluent` was a stub returning an IntUI-shaped baseline behind a

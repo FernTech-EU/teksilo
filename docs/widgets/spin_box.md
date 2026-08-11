@@ -30,7 +30,9 @@ are a synthesis of Qt's `QSpinBox` / `QDoubleSpinBox`, WinUI 3's
     (default: `10 × single_step`)
   - `Enter` → commit (stays focused)
   - `Home` / `End` stay bound to the text cursor (Qt-compatible).
-- **Mouse wheel**: adjusts by `single_step`; gated by
+- **Mouse wheel**: adjusts by `single_step` — wheel **down**
+  decreases, wheel **up** increases, matching `QAbstractSpinBox`,
+  `GtkSpinButton` and WinUI's `NumberBox`. Gated by
   `wheel_mode` (default: only when
   focused, to avoid accidental scroll changes).
 - **Buttons**: up/down buttons stack to the right of the field

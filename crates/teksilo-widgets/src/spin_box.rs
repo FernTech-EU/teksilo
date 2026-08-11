@@ -28,7 +28,9 @@
 //!     (default: `10 × single_step`)
 //!   - `Enter` → commit (stays focused)
 //!   - `Home` / `End` stay bound to the text cursor (Qt-compatible).
-//! - **Mouse wheel**: adjusts by `single_step`; gated by
+//! - **Mouse wheel**: adjusts by `single_step` — wheel **down**
+//!   decreases, wheel **up** increases, matching `QAbstractSpinBox`,
+//!   `GtkSpinButton` and WinUI's `NumberBox`. Gated by
 //!   [`wheel_mode`](SpinBox::wheel_mode) (default: only when
 //!   focused, to avoid accidental scroll changes).
 //! - **Buttons**: up/down buttons stack to the right of the field
@@ -1205,9 +1207,15 @@ impl<T: SpinValue> Widget for SpinBox<T> {
                     if y == 0.0 {
                         return EventResponse::Ignored;
                     }
-                    // Positive delta_y means scrolling up on most
-                    // systems; step up by one unit per tick.
-                    let dir = if y > 0.0 { 1 } else { -1 };
+                    // Teksilo's `ScrollDelta` is a *scroll offset* delta, not
+                    // a raw wheel reading: `translate_mouse_wheel` negates
+                    // winit's natural sign so that **positive y scrolls
+                    // down** (the offset grows, content moves up) — which is
+                    // what `ScrollArea` and every data view add straight to
+                    // their scroll position. So a wheel-down notch arrives
+                    // as `y > 0` and must *decrement*, matching every other
+                    // stepper on the platform.
+                    let dir = if y > 0.0 { -1 } else { 1 };
                     (step_for_wheel)(dir, false, ctx);
                     EventResponse::Handled
                 }

@@ -625,3 +625,100 @@ fn spin_box_dims_inside_a_disabled_ancestor() {
     let (fill, _) = frame_colors(&mut tree, spin);
     assert_color(fill, theme.colors.surface_disabled, "fill");
 }
+
+// ── Mouse wheel ─────────────────────────────────────────────────────
+
+/// Dispatch one wheel notch over `spin_id`.
+///
+/// `lines` is in Teksilo's own `ScrollDelta` sign, which is a *scroll
+/// offset* delta rather than a raw wheel reading: `translate_mouse_wheel`
+/// negates winit's natural sign, so a physical wheel-**down** notch arrives
+/// here as `+3.0` (one notch × `LINES_PER_NOTCH`).
+fn wheel(tree: &mut WidgetTree, spin_id: teksilo_core::widget_id::WidgetId, lines: f32) {
+    use teksilo_canvas::Point;
+    use teksilo_core::event::{ScrollDelta, WidgetEvent};
+
+    // Scroll routes to the hovered widget, so park the pointer first.
+    let b = tree.bounds(spin_id);
+    tree.dispatch_event(WidgetEvent::PointerMove {
+        position: Point::new(b.x + b.width * 0.5, b.y + b.height * 0.5),
+    });
+    tree.dispatch_event(WidgetEvent::Scroll {
+        delta: ScrollDelta::Lines { x: 0.0, y: lines },
+        modifiers: Modifiers::NONE,
+    });
+    tick(tree);
+}
+
+fn hover_wheel_spin(initial: i32) -> (WidgetTree, Signal<i32>, teksilo_core::widget_id::WidgetId) {
+    let value = Signal::new(initial);
+    let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+    let id = tree.add(
+        SpinBox::new(value.clone(), 0, 100)
+            .single_step(1)
+            .wheel_mode(super::WheelMode::Hover),
+    );
+    tree.layout(SizeProposal::exact(300.0, 60.0));
+    tick(&mut tree);
+    (tree, value, id)
+}
+
+/// Wheel **down** must decrease the value, as it does in every desktop
+/// stepper (Qt's `QAbstractSpinBox`, GTK's `GtkSpinButton`, WinUI's
+/// `NumberBox`).
+///
+/// The trap this guards is the sign convention. `ScrollDelta` is not winit's
+/// raw wheel reading — the platform layer negates it so that positive y
+/// *increases a scroll offset*, i.e. scrolls down, which is why `ScrollArea`
+/// and every data view add it straight to their scroll position. Reading
+/// positive y as "the user scrolled up" therefore inverts the control, and
+/// does so identically under every theme.
+#[test]
+fn wheel_down_decrements_and_wheel_up_increments() {
+    let (mut tree, value, id) = hover_wheel_spin(50);
+
+    // One physical wheel-down notch.
+    wheel(&mut tree, id, 3.0);
+    assert_eq!(value.get(), 49, "wheel down must decrease the value");
+
+    // …and back up.
+    wheel(&mut tree, id, -3.0);
+    assert_eq!(value.get(), 50, "wheel up must increase the value");
+}
+
+/// The wheel must agree with the arrow keys: both are "one step", so
+/// scrolling down and pressing ArrowDown have to move the same way.
+#[test]
+fn the_wheel_agrees_with_the_arrow_keys() {
+    let (mut tree, value, id) = hover_wheel_spin(10);
+
+    wheel(&mut tree, id, 3.0);
+    assert_eq!(value.get(), 9, "one wheel-down notch is one step down");
+
+    focus_field(&mut tree, id);
+    tree.press_key(Key::ArrowDown, Modifiers::NONE);
+    tick(&mut tree);
+    assert_eq!(
+        value.get(),
+        8,
+        "ArrowDown must move the same direction as wheel down"
+    );
+}
+
+/// `WheelMode::Disabled` lets the notch bubble to a surrounding scroll
+/// container instead of quietly changing a value the user was scrolling past.
+#[test]
+fn wheel_mode_disabled_ignores_the_notch() {
+    let value = Signal::new(50_i32);
+    let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+    let id = tree.add(
+        SpinBox::new(value.clone(), 0, 100)
+            .single_step(1)
+            .wheel_mode(super::WheelMode::Disabled),
+    );
+    tree.layout(SizeProposal::exact(300.0, 60.0));
+    tick(&mut tree);
+
+    wheel(&mut tree, id, 3.0);
+    assert_eq!(value.get(), 50);
+}
