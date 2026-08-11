@@ -192,8 +192,25 @@ pub(super) fn apply_text_drop(
 
     if !same_editor {
         let st = state.borrow();
+        super::keyboard::collapse_selection_before_insert(&st);
         let _ = st.cursor.insert_fragment(&drag.fragment);
         return true;
+    }
+
+    // A same-editor drop is a *move*: the passage is removed from where it was.
+    // That is a deletion by mouse, so it answers to the same filter Backspace
+    // does — otherwise a forward-only surface could still be emptied out one
+    // dragged phrase at a time. Refuse rather than degrade to a copy: silently
+    // duplicating the passage would be a stranger outcome than nothing
+    // happening. (Dragging *between* editors above is a copy and stays allowed:
+    // the source keeps its text.)
+    if !state
+        .borrow()
+        .policy
+        .command_filter
+        .accepts(super::policy::EditCommandKind::Cut)
+    {
+        return false;
     }
 
     // Dropped inside the very text being dragged: there is no move to make, and

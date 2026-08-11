@@ -40,7 +40,10 @@ pub(crate) fn tick(state: &mut EditorState, delta: f32) -> bool {
         // Replacing an active selection with typed input is the
         // expected editor behaviour (QTextEdit / every major editor).
         // `insert_text` already removes the selection first when
-        // one exists.
+        // one exists — which is precisely why a forward-only filter has
+        // to collapse the selection here first, one layer above the
+        // insert that would otherwise swallow it.
+        super::keyboard::collapse_selection_before_insert(state);
         let _ = state.cursor.insert_text(&batch);
         state.pending_text_changed = true;
     }

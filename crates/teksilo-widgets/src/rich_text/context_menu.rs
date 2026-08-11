@@ -102,10 +102,7 @@ pub const INTENT_SELECT_ALL: &str = "teksilo.rich_text.select_all";
 /// menu subtree. That freshness matters: each invocation recomputes
 /// item enabled-state from the live editor state + live clipboard at
 /// the instant the user right-clicks, so greyed entries never lie.
-pub(super) fn default_factory(
-    state: SharedState,
-    policy: PolicyBundle,
-) -> RichTextContextMenuFactory {
+pub(super) fn default_factory(state: SharedState) -> RichTextContextMenuFactory {
     // The closure is called each right-click. `state` is captured
     // once and cloned for each menu item's action closure; the
     // `Rc<RefCell<...>>` behind `SharedState` makes that cheap. The
@@ -121,14 +118,20 @@ pub(super) fn default_factory(
         // last was, and Paste inserted there instead of under the cursor.
         super::mouse::reposition_caret_for_context_menu(&state, pos);
         let state_for_build = state.clone();
-        Some(Box::new(build_menu(state_for_build, policy)) as Box<dyn Widget>)
+        Some(Box::new(build_menu(state_for_build)) as Box<dyn Widget>)
     })
 }
 
 /// Construct the `MenuList` for the current editor / policy state.
 /// Called from the factory on every right-click.
-fn build_menu(state: SharedState, policy: PolicyBundle) -> MenuList {
+fn build_menu(state: SharedState) -> MenuList {
     let mut list = MenuList::new();
+
+    // Read the policy **now**, not at build time: the command filter is
+    // swappable on a mounted editor (`RichTextEditor::set_command_filter`), and
+    // a menu built from a stale snapshot would keep offering Cut after the host
+    // switched the surface to forward-only drafting.
+    let policy: PolicyBundle = state.borrow().policy;
 
     let has_selection = state.borrow().cursor.has_selection();
     let doc_non_empty = !state
@@ -139,7 +142,13 @@ fn build_menu(state: SharedState, policy: PolicyBundle) -> MenuList {
         .is_empty();
 
     // --- Cut -----------------------------------------------------
-    if policy.clipboard_policy.allows_cut() {
+    // Two independent gates, and both are load-bearing: `ClipboardPolicy`
+    // answers "does this surface have a clipboard at all", while the command
+    // filter answers "may this surface take text away". A forward-only editor
+    // says yes to the first and no to the second — checking only the clipboard
+    // policy would leave a working Cut in the menu of an editor whose Ctrl+X is
+    // blocked.
+    if policy.clipboard_policy.allows_cut() && policy.command_filter.accepts(EditCommandKind::Cut) {
         let state_for_cut = state.clone();
         list = list.item(
             MenuItem::new(tr_widget!(menu_cut()))
@@ -290,13 +299,12 @@ pub(super) fn resolve_factory(
     user_factory: Option<RichTextContextMenuFactory>,
     default_enabled: bool,
     state: SharedState,
-    policy: PolicyBundle,
 ) -> Option<RichTextContextMenuFactory> {
     if let Some(user) = user_factory {
         return Some(user);
     }
     if default_enabled {
-        return Some(default_factory(state, policy));
+        return Some(default_factory(state));
     }
     None
 }

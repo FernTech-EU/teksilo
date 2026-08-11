@@ -137,6 +137,11 @@ pub(crate) fn paste(state: &mut EditorState, ctx: &EventContext) {
         return;
     };
 
+    // Every branch below inserts, and each insertion primitive removes the
+    // selected range first. Collapse once, up here, so a forward-only surface
+    // pastes *after* the selection rather than over it.
+    super::keyboard::collapse_selection_before_insert(state);
+
     // 1. Self-round-trip rich fragment. Inspect the HTML payload for
     //    our marker rather than comparing plain text, which is
     //    ambiguous across apps.
@@ -198,6 +203,9 @@ pub(crate) fn paste_unformatted(state: &mut EditorState, ctx: &EventContext) {
     if text.is_empty() {
         return;
     }
+    // As in `paste`: append after the selection rather than over it when the
+    // filter forbids taking text away.
+    super::keyboard::collapse_selection_before_insert(state);
     insert_multiline_plain(state, &text);
     state.cursor.clear_selection();
     state.pending_text_changed = true;

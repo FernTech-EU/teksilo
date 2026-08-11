@@ -1731,6 +1731,28 @@ impl RichTextEditor {
         self.state.borrow().typewriter
     }
 
+    /// Narrow (or restore) what the keyboard may do on this mounted editor.
+    ///
+    /// The other three policy dimensions — caret, accessibility role, clipboard
+    /// surface — describe what *kind* of surface this is and are fixed at
+    /// construction; only the command filter is a mode the host can change
+    /// while the writer is looking at it. Swapping in
+    /// [`CommandFilter::ForwardOnly`] gives a forward-only drafting mode;
+    /// [`CommandFilter::All`] restores ordinary editing.
+    ///
+    /// Every gate reads the filter live — the keyboard dispatch, the default
+    /// context menu, and drag-and-drop — so this takes effect on the next
+    /// event without rebuilding the widget.
+    pub fn set_command_filter(&self, filter: policy::CommandFilter) {
+        self.state.borrow_mut().policy.command_filter = filter;
+    }
+
+    /// The filter currently in force (see
+    /// [`set_command_filter`](Self::set_command_filter)).
+    pub fn command_filter(&self) -> policy::CommandFilter {
+        self.state.borrow().policy.command_filter
+    }
+
     /// Draw an ambient band behind the sentence — or paragraph — the caret is in.
     ///
     /// `None` (the default) draws nothing and registers no session on the document. The band
@@ -2457,6 +2479,19 @@ impl EditorHandle {
     /// Current typewriter anchor.
     pub fn get_typewriter(&self) -> Option<f32> {
         self.state.borrow().typewriter
+    }
+
+    /// Narrow (or restore) what the keyboard may do — the [`EditorHandle`]
+    /// counterpart of [`RichTextEditor::set_command_filter`], for hosts that
+    /// drive a drafting mode from a settings or session effect after the editor
+    /// is mounted.
+    pub fn set_command_filter(&self, filter: policy::CommandFilter) {
+        self.state.borrow_mut().policy.command_filter = filter;
+    }
+
+    /// The filter currently in force on this editor.
+    pub fn command_filter(&self) -> policy::CommandFilter {
+        self.state.borrow().policy.command_filter
     }
 
     /// Draw an ambient band behind the caret's sentence or paragraph — the [`EditorHandle`]
@@ -4070,8 +4105,12 @@ impl Widget for RichTextEditor {
             // offered it.
             .on_drag_hover({
                 let state = self.state.clone();
-                let read_only = self.state.borrow().policy.is_read_only();
                 move |payload, pos, ctx| {
+                    // Read the policy live rather than snapshotting it here: the
+                    // command filter is swappable on a mounted editor
+                    // (`set_command_filter`), and a value captured at build time
+                    // would keep promising a drop the drop handler then refuses.
+                    let read_only = state.borrow().policy.is_read_only();
                     if read_only || !droppable(payload) {
                         // `NoFeedback` rather than a reject visual: the drag
                         // must keep bubbling so an ancestor that does want this
@@ -4102,9 +4141,10 @@ impl Widget for RichTextEditor {
             })
             .on_drop({
                 let state = self.state.clone();
-                let read_only = self.state.borrow().policy.is_read_only();
                 move |payload, pos, ctx| {
                     self::mouse::clear_drop_caret(&state);
+                    // Live, for the same reason as `on_drag_hover` above.
+                    let read_only = state.borrow().policy.is_read_only();
                     if read_only || !droppable(&payload) {
                         return false;
                     }
@@ -4230,13 +4270,12 @@ impl Widget for RichTextEditor {
             });
 
         // Context-menu factory — same shape as before, just hosted on
-        // the wrapper.
-        let policy_snapshot = self.state.borrow().policy;
+        // the wrapper. The factory reads the policy from the shared state on
+        // each right-click, so a filter swapped in after mount is honoured.
         if let Some(factory) = context_menu::resolve_factory(
             self.custom_context_menu.take(),
             self.default_context_menu_enabled,
             self.state.clone(),
-            policy_snapshot,
         ) {
             handlers = handlers.context_menu(move |pos, ctx| factory(pos, ctx));
         }
@@ -4684,7 +4723,15 @@ fn handle_access_action_request(
         }
         (Action::SetValue, Some(ActionData::Value(value))) => {
             let filter = state.borrow().policy.command_filter;
-            if !filter.accepts(EditCommandKind::InsertChar) {
+            // `SetValue` swaps the *whole document* for the supplied string, so
+            // accepting `InsertChar` is not enough on its own: under a
+            // forward-only filter this is the single most destructive edit
+            // available, however additive the incoming text looks. Dictation
+            // that wants to add rather than replace arrives as
+            // `ReplaceSelectedText` below.
+            if !filter.accepts(EditCommandKind::InsertChar)
+                || !filter.allows_wholesale_replacement()
+            {
                 return EventResponse::Ignored;
             }
             let st = state.borrow();
@@ -4706,6 +4753,7 @@ fn handle_access_action_request(
                 return EventResponse::Ignored;
             }
             let st = state.borrow();
+            self::keyboard::collapse_selection_before_insert(&st);
             let _ = st.cursor.insert_text(value.as_ref());
             drop(st);
             sync_cursor_signals(state);

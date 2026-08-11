@@ -73,6 +73,23 @@ pub trait EditorCommand: Copy {
     /// Whether this command modifies the document. Navigation, selection, and
     /// copy never do.
     fn mutates_document(&self) -> bool;
+
+    /// Whether this command can take away text the document already holds —
+    /// removing it, replacing it, or reverting it to an earlier state.
+    ///
+    /// The question [`CommandFilter::ForwardOnly`] needs answered, and a
+    /// strictly narrower set than [`mutates_document`](Self::mutates_document):
+    /// typing a character mutates without ever being regressive, while a
+    /// delete, a cut and an undo are all regressive. Structure commands that
+    /// re-shape a block without dropping any of its characters (leaving a list,
+    /// popping out of a blockquote, changing indent) are **not** regressive —
+    /// blocking them would trap a writer inside a list with no way out.
+    ///
+    /// Implemented as an exhaustive `matches!` over the surface's own command
+    /// enum rather than defaulted here, so adding a command is a compile-time
+    /// prompt to classify it. A forgotten command silently defaulting to
+    /// "harmless" is exactly how a forward-only mode grows a hole.
+    fn is_regressive(&self) -> bool;
 }
 
 /// Command filter consulted before any cursor call in a surface's keyboard
@@ -88,6 +105,23 @@ pub enum CommandFilter {
     /// Mutating commands rejected; navigation and copy/select-all accepted
     /// (read-only preset).
     ReadOnly,
+    /// Additive editing only: the document may grow anywhere, but nothing the
+    /// writer already committed can be taken away from the keyboard.
+    ///
+    /// Deletes, word-deletes, cut and undo/redo are rejected; typing, pasting,
+    /// splitting blocks, formatting and every navigation command are accepted.
+    /// Unlike [`ReadOnly`](Self::ReadOnly) the surface is still a real editor —
+    /// caret, accessibility role and clipboard stay editable — so a host
+    /// swapping this in at runtime changes what the keyboard may do and nothing
+    /// else.
+    ///
+    /// ⚠ Rejecting commands is only half of the guarantee. Inserting over a
+    /// selection deletes it one layer below any command vocabulary (in
+    /// `TextCursor::insert_text`), so a surface honouring this filter must also
+    /// collapse the selection before inserting —
+    /// [`collapses_selection_before_insert`](Self::collapses_selection_before_insert)
+    /// is that question, and `RichTextEditor` answers it at every insert site.
+    ForwardOnly,
 }
 
 impl CommandFilter {
@@ -97,7 +131,33 @@ impl CommandFilter {
             // Everything that doesn't touch the document is fair game: a
             // read-only surface still navigates, selects, and copies.
             Self::ReadOnly => !cmd.mutates_document(),
+            // Everything that doesn't take text away: the draft only grows.
+            Self::ForwardOnly => !cmd.is_regressive(),
         }
+    }
+
+    /// Whether an insertion must first collapse the selection instead of
+    /// replacing it.
+    ///
+    /// True only for [`ForwardOnly`](Self::ForwardOnly). Type-over is a
+    /// *delete* that never passes through a command filter, so the insert sites
+    /// themselves ask this question and move the caret to the end of the
+    /// selection first — the typed text lands after the selected passage rather
+    /// than in place of it, and the keystroke is neither lost nor destructive.
+    pub fn collapses_selection_before_insert(&self) -> bool {
+        matches!(self, Self::ForwardOnly)
+    }
+
+    /// Whether a command may replace document content wholesale (an
+    /// assistive-technology `SetValue`, which swaps the entire document for a
+    /// new string).
+    ///
+    /// Only [`All`](Self::All) permits it: under `ReadOnly` nothing may be
+    /// written, and under `ForwardOnly` a whole-document replacement is the
+    /// single most regressive edit there is, however additive the text arriving
+    /// with it looks.
+    pub fn allows_wholesale_replacement(&self) -> bool {
+        matches!(self, Self::All)
     }
 }
 
@@ -169,6 +229,20 @@ pub struct PolicyBundle {
 impl PolicyBundle {
     pub const fn is_read_only(&self) -> bool {
         matches!(self.access_role, AccessibilityRole::Document)
+    }
+
+    /// This bundle with a different command filter, every other dimension
+    /// untouched.
+    ///
+    /// The only supported way to build a restricted-but-still-editable preset:
+    /// caret, accessibility role and clipboard describe *what kind of surface
+    /// this is*, and a mode that merely narrows what the keyboard may do must
+    /// not quietly turn an editor into a document.
+    pub const fn with_command_filter(self, command_filter: CommandFilter) -> Self {
+        Self {
+            command_filter,
+            ..self
+        }
     }
 }
 

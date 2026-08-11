@@ -94,6 +94,29 @@ pub enum CodeCommand {
 }
 
 impl EditorCommand for CodeCommand {
+    /// True for commands that can take text away.
+    ///
+    /// `CommandFilter::ForwardOnly` is a prose-drafting mode and no code
+    /// surface uses it today, but the classification is exhaustive anyway so
+    /// the two vocabularies cannot drift: a command added here has to answer
+    /// the question rather than inherit a permissive default. The line-motion
+    /// commands count as regressive because each removes a line from where it
+    /// was, and `DuplicateSelection` does not because it only adds.
+    fn is_regressive(&self) -> bool {
+        matches!(
+            self,
+            Self::DeletePrev
+                | Self::DeleteNext
+                | Self::DeleteWordLeft
+                | Self::DeleteWordRight
+                | Self::Cut
+                | Self::Undo
+                | Self::Redo
+                | Self::MoveLineUp
+                | Self::MoveLineDown
+        )
+    }
+
     fn mutates_document(&self) -> bool {
         matches!(
             self,

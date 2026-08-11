@@ -63,6 +63,30 @@ pub(super) enum KeyAction {
     Unhandled,
 }
 
+/// Under a filter that forbids taking text away, move the caret to the end of
+/// the selection instead of letting the imminent insertion replace it.
+///
+/// Every insertion path in text-document removes the selected range first
+/// (`TextCursor::insert_text` / `insert_fragment` do it internally, below any
+/// command vocabulary), so a filter that accepts `InsertChar` while rejecting
+/// `DeletePrev` would still let a writer select three paragraphs and type over
+/// them. Collapsing first turns that into an append at the end of the
+/// selection: nothing is lost, and the keystroke still lands — dropping it
+/// instead would make the mode feel like a broken keyboard.
+///
+/// A no-op under every other filter, so insert sites can call it
+/// unconditionally.
+pub(super) fn collapse_selection_before_insert(state: &EditorState) {
+    if !state.policy.command_filter.collapses_selection_before_insert() {
+        return;
+    }
+    if !state.cursor.has_selection() {
+        return;
+    }
+    let end = state.cursor.position().max(state.cursor.anchor());
+    state.cursor.set_position(end, MoveMode::MoveAnchor);
+}
+
 pub(super) fn handle_key(
     state: &SharedState,
     event: &WidgetEvent,
@@ -317,6 +341,7 @@ pub(super) fn handle_key(
                 // Ctrl+Enter: always insert a new block, bypassing
                 // table-cell navigation. Matches godot
                 // rich_text_edit.rs:559-563.
+                collapse_selection_before_insert(&st);
                 let _ = st.cursor.insert_block();
                 KeyAction::ClearPreferredX
             }
@@ -347,6 +372,7 @@ pub(super) fn handle_key(
                     // intuitive way out.
                     let _ = st.cursor.unwrap_current_block_from_blockquote();
                 } else {
+                    collapse_selection_before_insert(&st);
                     let _ = st.cursor.insert_block();
                 }
                 KeyAction::ClearPreferredX
@@ -414,6 +440,7 @@ pub(super) fn handle_key(
                     // a list-inside-quote scenario.
                     let _ = st.cursor.increase_blockquote_depth();
                 } else if filter.accepts(EditCommandKind::InsertTab) {
+                    collapse_selection_before_insert(&st);
                     let _ = st.cursor.insert_text("\t");
                 }
                 KeyAction::ClearPreferredX
@@ -919,6 +946,10 @@ fn handle_ime_composition(
             }
         }
         if !clean.is_empty() {
+            // A composition starting while a selection is live would replace it.
+            // (A no-op when a preedit range was just removed above: that path
+            // leaves the cursor collapsed at the range start.)
+            collapse_selection_before_insert(&st);
             let start = st.cursor.position();
             let _ = st.cursor.insert_text(&clean);
             let end = st.cursor.position();

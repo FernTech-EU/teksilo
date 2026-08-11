@@ -7694,3 +7694,174 @@ fn drop_caret_shows_without_focus() {
         "and stop showing it once the drag leaves, rather than burning it in"
     );
 }
+
+// ── Forward-only drafting (CommandFilter::ForwardOnly) ───────────────
+//
+// The behavioural half of the filter. `policy.rs`'s unit tests pin which
+// commands are accepted; these drive a mounted editor to prove the two ways
+// prose can leave a document *without* passing a command filter — type-over and
+// a same-editor drag-move — are closed as well.
+
+/// Mount an editor over `text`, focus it, and swap in the forward-only filter
+/// the way a host does at runtime.
+fn forward_only_editor(text: &str) -> (TextDocument, crate::rich_text::EditorHandle, WidgetTree) {
+    let doc = TextDocument::new();
+    doc.set_plain_text(text).unwrap();
+    let editor = RichTextEditor::editor(doc.clone());
+    let handle = editor.handle();
+    let mut tree = WidgetTree::new();
+    let _ = ctx_with_memory_clipboard(&mut tree);
+    let id = tree.add(editor);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    focus_editor(&mut tree, id);
+    handle.set_command_filter(super::policy::CommandFilter::ForwardOnly);
+    (doc, handle, tree)
+}
+
+#[test]
+fn forward_only_swallows_backspace_and_delete() {
+    use teksilo_core::event::{Key, Modifiers};
+    let (doc, handle, mut tree) = forward_only_editor("Hemingway");
+    handle.select_range(9, 9);
+
+    press_key(&mut tree, Key::Backspace, Modifiers::NONE);
+    tick_past_debounce(&mut tree);
+    assert_eq!(
+        doc.to_plain_text().unwrap_or_default(),
+        "Hemingway",
+        "backspace must not remove a character"
+    );
+
+    handle.select_range(0, 0);
+    press_key(&mut tree, Key::Delete, Modifiers::NONE);
+    tick_past_debounce(&mut tree);
+    assert_eq!(doc.to_plain_text().unwrap_or_default(), "Hemingway");
+
+    // Word-scale deletion is the same command family through a modifier.
+    handle.select_range(9, 9);
+    press_key(&mut tree, Key::Backspace, Modifiers::CTRL);
+    tick_past_debounce(&mut tree);
+    assert_eq!(doc.to_plain_text().unwrap_or_default(), "Hemingway");
+}
+
+#[test]
+fn forward_only_typing_over_a_selection_appends_instead_of_replacing() {
+    // The trap the command filter alone cannot close: `insert_text` removes the
+    // selected range *inside* text-document, so accepting InsertChar while
+    // rejecting DeletePrev would still let a writer select everything and type
+    // over it. The keystroke must land — after the selection, not instead of it.
+    let (doc, handle, mut tree) = forward_only_editor("keep this");
+    handle.select_range(0, 9);
+    assert!(
+        handle.has_selection().get(),
+        "precondition: the whole line is selected"
+    );
+
+    press_char(&mut tree, '!');
+    tick_past_debounce(&mut tree);
+
+    assert_eq!(
+        doc.to_plain_text().unwrap_or_default(),
+        "keep this!",
+        "the selected passage survives and the typed character is appended after it"
+    );
+}
+
+#[test]
+fn ordinary_editing_still_types_over_a_selection() {
+    // The counterpart: the collapse is scoped to the forward-only filter and
+    // must not change how a normal editor behaves.
+    let doc = TextDocument::new();
+    doc.set_plain_text("keep this").unwrap();
+    let editor = RichTextEditor::editor(doc.clone());
+    let handle = editor.handle();
+    let mut tree = WidgetTree::new();
+    let _ = ctx_with_memory_clipboard(&mut tree);
+    let id = tree.add(editor);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    focus_editor(&mut tree, id);
+
+    handle.select_range(0, 9);
+    press_char(&mut tree, '!');
+    tick_past_debounce(&mut tree);
+
+    assert_eq!(
+        doc.to_plain_text().unwrap_or_default(),
+        "!",
+        "an unrestricted editor replaces the selection, as every editor does"
+    );
+}
+
+#[test]
+fn forward_only_ime_composition_does_not_eat_a_selection() {
+    // Dead keys and CJK candidates arrive on a path that never reaches the key
+    // match, so the collapse has to be installed there too.
+    use teksilo_core::event::WidgetEvent;
+    let (doc, handle, mut tree) = forward_only_editor("garder");
+    handle.select_range(0, 6);
+
+    tree.dispatch_event(WidgetEvent::ImeComposition {
+        text: "n".to_string(),
+        cursor: None,
+    });
+    tree.tick_animations(std::time::Duration::from_millis(16));
+    tree.dispatch_event(WidgetEvent::ImeCommit {
+        text: "你".to_string(),
+    });
+    tick_past_debounce(&mut tree);
+
+    assert_eq!(
+        doc.to_plain_text().unwrap_or_default(),
+        "garder你",
+        "composition appends after the selection instead of replacing it"
+    );
+}
+
+#[test]
+fn forward_only_undo_is_blocked_but_history_survives_the_mode() {
+    // Blocking Ctrl+Z must not *discard* history: everything written during a
+    // forward-only session is undoable again the moment the mode ends.
+    use teksilo_core::event::{Key, Modifiers};
+    let (doc, handle, mut tree) = forward_only_editor("start");
+    handle.select_range(5, 5);
+    press_char(&mut tree, '!');
+    tick_past_debounce(&mut tree);
+    assert_eq!(doc.to_plain_text().unwrap_or_default(), "start!");
+
+    press_key(&mut tree, Key::Z, Modifiers::CTRL);
+    tick_past_debounce(&mut tree);
+    assert_eq!(
+        doc.to_plain_text().unwrap_or_default(),
+        "start!",
+        "undo is refused while the mode is on"
+    );
+
+    handle.set_command_filter(super::policy::CommandFilter::All);
+    press_key(&mut tree, Key::Z, Modifiers::CTRL);
+    tick_past_debounce(&mut tree);
+    assert_eq!(
+        doc.to_plain_text().unwrap_or_default(),
+        "start",
+        "and works again as soon as it is off — the history was kept, not dropped"
+    );
+}
+
+#[test]
+fn the_filter_swap_takes_effect_without_rebuilding_the_widget() {
+    use teksilo_core::event::{Key, Modifiers};
+    let (doc, handle, mut tree) = forward_only_editor("abc");
+    handle.select_range(3, 3);
+
+    press_key(&mut tree, Key::Backspace, Modifiers::NONE);
+    tick_past_debounce(&mut tree);
+    assert_eq!(doc.to_plain_text().unwrap_or_default(), "abc");
+
+    handle.set_command_filter(super::policy::CommandFilter::All);
+    press_key(&mut tree, Key::Backspace, Modifiers::NONE);
+    tick_past_debounce(&mut tree);
+    assert_eq!(
+        doc.to_plain_text().unwrap_or_default(),
+        "ab",
+        "the same mounted editor honours the new filter on the very next key"
+    );
+}
