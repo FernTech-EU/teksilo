@@ -385,6 +385,21 @@ pub enum AutomationOp {
         dx: f32,
         #[serde(default)]
         dy: f32,
+        // Modifiers held during the wheel, mirroring `InjectKey`'s. They default
+        // to none, so every existing caller keeps the plain-wheel behaviour.
+        //
+        // A modifier is not decoration on a scroll: `WidgetEvent::Scroll` carries
+        // them precisely so an app can implement Ctrl-wheel-to-zoom, and until
+        // this existed no probe could reach that gesture at all — the one input
+        // the bridge could describe but not perform.
+        #[serde(default)]
+        ctrl: bool,
+        #[serde(default)]
+        shift: bool,
+        #[serde(default)]
+        alt: bool,
+        #[serde(default)]
+        meta: bool,
     },
     // ---- Synthetic input ----
     InjectPointer {

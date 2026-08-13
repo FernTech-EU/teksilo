@@ -138,6 +138,14 @@ pub struct ScrollParams {
     pub node: u64,
     pub dx: Option<f32>,
     pub dy: Option<f32>,
+    /// Modifiers held during the wheel, as for `inject_key`. A modifier-held
+    /// wheel is its own gesture — Ctrl+wheel to zoom is why
+    /// `WidgetEvent::Scroll` carries modifiers at all — so a probe needs to be
+    /// able to send one. All default to false, i.e. a plain wheel.
+    pub ctrl: Option<bool>,
+    pub shift: Option<bool>,
+    pub alt: Option<bool>,
+    pub meta: Option<bool>,
     pub settle: Option<SettleArg>,
 }
 
@@ -437,7 +445,11 @@ impl AutomationServer {
             .await
     }
 
-    #[tool(description = "Scroll the widget under a node by a pixel delta.")]
+    #[tool(
+        description = "Scroll the widget under a node by a pixel delta, with optional modifiers \
+                       (ctrl/shift/alt/meta) — a modifier-held wheel is its own gesture, e.g. \
+                       Ctrl+wheel to zoom."
+    )]
     pub(crate) async fn scroll(
         &self,
         Parameters(p): Parameters<ScrollParams>,
@@ -449,6 +461,10 @@ impl AutomationServer {
                 node: p.node,
                 dx: p.dx.unwrap_or(0.0),
                 dy: p.dy.unwrap_or(0.0),
+                ctrl: p.ctrl.unwrap_or(false),
+                shift: p.shift.unwrap_or(false),
+                alt: p.alt.unwrap_or(false),
+                meta: p.meta.unwrap_or(false),
             },
             settle,
         )

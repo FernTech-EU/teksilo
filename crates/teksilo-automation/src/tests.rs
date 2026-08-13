@@ -51,6 +51,10 @@ struct Probe {
     /// Each received KeyDown, tagged `named:<Display>` or `char:<c>` so a test
     /// can tell `Key::S` (a named variant) from `Key::Character('s')`.
     received: Signal<Vec<String>>,
+    /// Each received `Scroll`, as `<dx>,<dy>,<mods>` — so a test can prove the
+    /// modifiers a caller asked for actually reached the widget, and not just
+    /// the delta.
+    scrolls: Signal<Vec<String>>,
 }
 
 impl std::fmt::Debug for Probe {
@@ -84,6 +88,7 @@ impl Probe {
             taps: Signal::new(0),
             typed: Signal::new(String::new()),
             received: Signal::new(Vec::new()),
+            scrolls: Signal::new(Vec::new()),
         }
     }
     fn value(mut self, v: Signal<String>) -> Self {
@@ -143,6 +148,7 @@ impl Widget for Probe {
         let taps = self.taps.clone();
         let typed = self.typed.clone();
         let received = self.received.clone();
+        let scrolls = self.scrolls.clone();
 
         let mut handlers = HandlerSet::new();
         if self.focusable {
@@ -195,6 +201,36 @@ impl Widget for Probe {
                         s.push(*ch);
                         typed.set(s);
                     }
+                    return EventResponse::Handled;
+                }
+                EventResponse::Ignored
+            })
+            .on_scroll(move |event, _ctx| {
+                if let WidgetEvent::Scroll { delta, modifiers } = event {
+                    let (dx, dy) = match delta {
+                        teksilo_core::event::ScrollDelta::Pixels { x, y }
+                        | teksilo_core::event::ScrollDelta::Lines { x, y } => (*x, *y),
+                    };
+                    let mut mods = String::new();
+                    for (on, tag) in [
+                        (modifiers.ctrl(), "ctrl"),
+                        (modifiers.shift(), "shift"),
+                        (modifiers.alt(), "alt"),
+                        (modifiers.super_key(), "meta"),
+                    ] {
+                        if on {
+                            if !mods.is_empty() {
+                                mods.push('+');
+                            }
+                            mods.push_str(tag);
+                        }
+                    }
+                    if mods.is_empty() {
+                        mods.push_str("none");
+                    }
+                    let mut log = scrolls.get();
+                    log.push(format!("{dx},{dy},{mods}"));
+                    scrolls.set(log);
                     return EventResponse::Handled;
                 }
                 EventResponse::Ignored
@@ -755,6 +791,88 @@ fn assert_toggled_false_fails_on_mixed() {
         );
         assert!(res.detail.unwrap().contains("mixed"));
     }
+}
+
+/// A modifier-held wheel is a *different gesture* from a plain one, and
+/// `WidgetEvent::Scroll` carries modifiers precisely so an app can tell them
+/// apart (Ctrl-wheel-to-zoom is the motivating case named in its own doc).
+/// The op hardcoded `Modifiers::NONE`, so it was the one input the bridge could
+/// describe but not perform: a probe could confirm that a plain wheel scrolls
+/// and never that Ctrl+wheel zooms.
+#[test]
+fn scroll_carries_the_modifiers_it_was_given() {
+    let probe = Probe::new(accesskit::Role::GenericContainer, "S");
+    let scrolls = probe.scrolls.clone();
+    let (mut tree, id) = laid_out(probe);
+    let mut ops = RecordingWindowOps::new();
+    let node = node_ref(id);
+
+    let mk = |ctrl, shift, alt, meta| AutomationOp::Scroll {
+        node,
+        dx: 0.0,
+        dy: -48.0,
+        ctrl,
+        shift,
+        alt,
+        meta,
+    };
+    execute(
+        &mut tree,
+        &mut ops,
+        &mk(true, false, false, false),
+        &default_settle(),
+    );
+    execute(
+        &mut tree,
+        &mut ops,
+        &mk(false, true, false, false),
+        &default_settle(),
+    );
+    execute(
+        &mut tree,
+        &mut ops,
+        &mk(false, false, true, true),
+        &default_settle(),
+    );
+
+    let log = scrolls.get();
+    assert_eq!(
+        log,
+        vec![
+            "0,-48,ctrl".to_string(),
+            "0,-48,shift".to_string(),
+            "0,-48,alt+meta".to_string(),
+        ],
+        "each modifier must reach the widget as asked, got {log:?}"
+    );
+}
+
+/// The default stays a bare wheel, so every existing probe keeps working
+/// unchanged — the fields are `#[serde(default)]` for exactly this.
+#[test]
+fn scroll_without_modifiers_is_still_a_plain_wheel() {
+    let probe = Probe::new(accesskit::Role::GenericContainer, "S");
+    let scrolls = probe.scrolls.clone();
+    let (mut tree, id) = laid_out(probe);
+    let mut ops = RecordingWindowOps::new();
+    let node = node_ref(id);
+
+    execute(
+        &mut tree,
+        &mut ops,
+        &AutomationOp::Scroll {
+            node,
+            dx: 0.0,
+            dy: 120.0,
+            ctrl: false,
+            shift: false,
+            alt: false,
+            meta: false,
+        },
+        &default_settle(),
+    );
+
+    assert_eq!(scrolls.get(), vec!["0,120,none".to_string()]);
 }
 
 #[test]

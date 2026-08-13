@@ -13,6 +13,22 @@ by crate for clarity, not because crates version independently.
 
 ## [Unreleased]
 
+### Added — `teksilo-automation`: `scroll` carries modifiers
+
+The `scroll` op hardcoded `Modifiers::NONE`, so it could only ever deliver a
+bare wheel. It now takes `ctrl` / `shift` / `alt` / `meta` alongside `dx` / `dy`,
+mirroring `inject_key`; all default to false, so every existing caller is
+unchanged.
+
+A modifier-held wheel is a distinct gesture, not a decorated one —
+`WidgetEvent::Scroll` carries a `modifiers` field precisely so an app can
+implement Ctrl-wheel-to-zoom, and its own doc comment says as much. Until now
+that was the one input the bridge could *describe* but not *perform*: a probe
+could assert that a plain wheel scrolls and never that Ctrl+wheel does anything
+else, which is exactly backwards for a feature whose whole risk is the two being
+confused. Two tests pin it — that each modifier reaches the widget as asked, and
+that the no-modifier default is still a plain wheel.
+
 ### Added — `teksilo-theme-macos`: the macOS (Aqua / Dark Aqua) preset
 
 `teksilo-theme-macos` was a stub returning an IntUI-shaped baseline behind a

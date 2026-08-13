@@ -112,7 +112,15 @@ pub fn execute(
         AutomationOp::Collapse { node } => {
             dispatch_action_and_settle(tree, ops, settle, *node, accesskit::Action::Collapse, None)
         }
-        AutomationOp::Scroll { node, dx, dy } => {
+        AutomationOp::Scroll {
+            node,
+            dx,
+            dy,
+            ctrl,
+            shift,
+            alt,
+            meta,
+        } => {
             let update = tree.sync_accessibility();
             let Some(widget) = resolve_widget(tree, &update, *node) else {
                 return AutomationReply::err(codes::NOT_FOUND, format!("no node {node}"));
@@ -124,7 +132,11 @@ pub fn execute(
             tree.dispatch_event_with_ops(
                 WidgetEvent::Scroll {
                     delta: ScrollDelta::Pixels { x: *dx, y: *dy },
-                    modifiers: Modifiers::NONE,
+                    // Carried, not hardcoded to `NONE`: a modifier-held wheel is
+                    // a distinct gesture (Ctrl-wheel-to-zoom is why
+                    // `WidgetEvent::Scroll` has this field at all), and a probe
+                    // that could only send a bare wheel could not reach it.
+                    modifiers: modifiers(*ctrl, *shift, *alt, *meta),
                 },
                 ops,
             );

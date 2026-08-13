@@ -89,7 +89,9 @@ pub const TOOL_CATALOG: &[ToolDescriptor] = &[
     },
     ToolDescriptor {
         name: "scroll",
-        description: "Scroll the widget under a node by a pixel delta.",
+        description: "Scroll the widget under a node by a pixel delta, with optional modifiers \
+                      (ctrl/shift/alt/meta) — a modifier-held wheel is its own gesture, e.g. \
+                      Ctrl+wheel to zoom.",
         mutating: true,
     },
     // ---- Synthetic input ----

@@ -125,6 +125,12 @@ carries the usual label fragility) rather than reuse a possibly-stale id.
 **Drive (AT actions)** — `invoke_action`, `focus_node`, `set_value`,
 `expand`, `collapse`, `scroll`
 
+`scroll` takes `ctrl` / `shift` / `alt` / `meta` alongside `dx` / `dy`, all
+defaulting to false. A modifier-held wheel is a *different gesture* from a
+plain one — `WidgetEvent::Scroll` carries modifiers precisely so an app can
+implement Ctrl-wheel-to-zoom — so a probe for such a feature must be able to
+send one, not merely a bare wheel.
+
 **Synthetic input** — `inject_pointer`, `right_click`, `inject_key`,
 `type_text`, `type_ime`, `drag_node`
 
