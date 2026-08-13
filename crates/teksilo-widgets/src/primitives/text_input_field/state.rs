@@ -438,7 +438,13 @@ impl TextInputState {
                 DocumentEvent::UndoRedoChanged { can_undo, can_redo } => {
                     self.pending_undo_redo = Some((can_undo, can_redo));
                 }
-                DocumentEvent::ModificationChanged(_)
+                // `TextInserted` is attribution, not layout: it says which
+                // channel some text arrived through, alongside the
+                // `ContentsChanged` that already told this state everything it
+                // needs in order to relay out. Reacting to it as well would
+                // relayout twice for one edit.
+                DocumentEvent::TextInserted { .. }
+                | DocumentEvent::ModificationChanged(_)
                 | DocumentEvent::LongOperationProgress { .. }
                 | DocumentEvent::LongOperationFinished { .. } => {}
             }

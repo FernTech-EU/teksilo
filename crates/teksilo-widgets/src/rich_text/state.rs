@@ -1024,7 +1024,15 @@ impl EditorState {
                 DocumentEvent::LongOperationFinished { .. } => {
                     document_loaded_pulses += 1;
                 }
-                DocumentEvent::ModificationChanged(_)
+                // `TextInserted` is attribution, not layout: it says which
+                // channel some text arrived through, alongside the
+                // `ContentsChanged` that already told this state everything it
+                // needs. This widget reports arrivals through its own
+                // [`EditSource`](crate::rich_text::EditSource) callback, which
+                // knows the channel at the point of the keystroke rather than
+                // inferring it from a document event.
+                DocumentEvent::TextInserted { .. }
+                | DocumentEvent::ModificationChanged(_)
                 | DocumentEvent::LongOperationProgress { .. } => {}
             }
         }
