@@ -74,7 +74,7 @@ use teksilo_core::widget::{CursorIcon, LayoutContext, PaintContext, Widget, Widg
 use teksilo_core::widget_builder::HandlerSet;
 use teksilo_core::widget_id::WidgetId;
 use teksilo_text::text_document::{
-    Alignment, BlockFormat, CharVerticalAlignment, ListStyle, MoveMode, ResourceType,
+    Alignment, BlockFormat, CharVerticalAlignment, LinkExtent, ListStyle, MoveMode, ResourceType,
     SelectionType, TextDirection, TextDocument, TextFormat,
 };
 use teksilo_text::{
@@ -1462,6 +1462,49 @@ impl RichTextEditor {
         self.caret_char_format().font_italic.unwrap_or(false)
     }
 
+    // ── Hyperlinks ───────────────────────────────────────────────
+    //
+    // A link is a character format, not an object: applying one merges a
+    // destination onto a range, so any bold or italic already there survives
+    // and no markup has to be escaped. What it does not get for free is
+    // removal — every field of a merge means "leave this alone" when unset —
+    // hence `clear_link` rather than "set the destination to nothing".
+
+    /// Point the selection at `href`.
+    ///
+    /// Merges, so formatting already on the range is kept. A collapsed
+    /// selection formats nothing (as everywhere else), so a caller linking
+    /// existing text should select it first — see [`link_at_caret`](Self::
+    /// link_at_caret) for the range of a link already there.
+    pub fn set_link(&self, href: &str) {
+        self.apply_char_format(TextFormat {
+            anchor_href: Some(href.to_string()),
+            ..Default::default()
+        });
+    }
+
+    /// Take the link off the selection, leaving its text.
+    pub fn clear_link(&self) {
+        self.apply_char_format(TextFormat {
+            clear_link: true,
+            ..Default::default()
+        });
+    }
+
+    /// The link the caret is in, and how far it reaches.
+    ///
+    /// Coalesced across the runs an inner mark splits a link into, so the
+    /// range covers the whole link rather than the piece under the caret.
+    /// `None` when the caret is not on a link.
+    pub fn link_at_caret(&self) -> Option<LinkExtent> {
+        self.state.borrow().cursor.link_at_caret()
+    }
+
+    /// Whether the caret / selection sits on a link.
+    pub fn is_link(&self) -> bool {
+        self.caret_char_format().is_anchor.unwrap_or(false)
+    }
+
     /// Whether underline.
     pub fn is_underline(&self) -> bool {
         self.caret_char_format().font_underline.unwrap_or(false)
@@ -2272,6 +2315,19 @@ impl EditorHandle {
         (st.cursor.anchor(), st.cursor.position())
     }
 
+    /// The selected text, or an empty string when nothing is selected.
+    ///
+    /// O(selection), not O(document). Pairs with [`selection`](Self::selection)
+    /// for a caller that needs the range *and* what is in it — a link dialog
+    /// pre-filling its display name from what the writer highlighted, say.
+    pub fn selected_text(&self) -> String {
+        self.state
+            .borrow()
+            .cursor
+            .selected_text()
+            .unwrap_or_default()
+    }
+
     /// The **window-space** rectangle enclosing the character range `[start, end)`.
     ///
     /// The inverse of [`offset_at_point`](Self::offset_at_point): that maps a point
@@ -2556,6 +2612,49 @@ impl EditorHandle {
     /// Whether italic.
     pub fn is_italic(&self) -> bool {
         self.caret_char_format().font_italic.unwrap_or(false)
+    }
+
+    // ── Hyperlinks ───────────────────────────────────────────────
+    //
+    // A link is a character format, not an object: applying one merges a
+    // destination onto a range, so any bold or italic already there survives
+    // and no markup has to be escaped. What it does not get for free is
+    // removal — every field of a merge means "leave this alone" when unset —
+    // hence `clear_link` rather than "set the destination to nothing".
+
+    /// Point the selection at `href`.
+    ///
+    /// Merges, so formatting already on the range is kept. A collapsed
+    /// selection formats nothing (as everywhere else), so a caller linking
+    /// existing text should select it first — see [`link_at_caret`](Self::
+    /// link_at_caret) for the range of a link already there.
+    pub fn set_link(&self, href: &str) {
+        self.apply_char_format(TextFormat {
+            anchor_href: Some(href.to_string()),
+            ..Default::default()
+        });
+    }
+
+    /// Take the link off the selection, leaving its text.
+    pub fn clear_link(&self) {
+        self.apply_char_format(TextFormat {
+            clear_link: true,
+            ..Default::default()
+        });
+    }
+
+    /// The link the caret is in, and how far it reaches.
+    ///
+    /// Coalesced across the runs an inner mark splits a link into, so the
+    /// range covers the whole link rather than the piece under the caret.
+    /// `None` when the caret is not on a link.
+    pub fn link_at_caret(&self) -> Option<LinkExtent> {
+        self.state.borrow().cursor.link_at_caret()
+    }
+
+    /// Whether the caret / selection sits on a link.
+    pub fn is_link(&self) -> bool {
+        self.caret_char_format().is_anchor.unwrap_or(false)
     }
 
     /// Whether underline.
@@ -3341,6 +3440,19 @@ impl Widget for RichTextEditorBody {
         if st.last_code_block_bg != Some(new_code_bg) || st.last_code_block_fg != new_code_fg {
             st.last_code_block_bg = Some(new_code_bg);
             st.last_code_block_fg = new_code_fg;
+            st.needs_full_layout = true;
+            st.pending_full_render = true;
+        }
+
+        // Link colour rides the same path, and for the same reason: it is
+        // baked into the shaped runs at layout time, so a theme swap needs a
+        // full re-layout rather than a repaint. Sharing `TextRole::Link` with
+        // every other link in the app is the point — a hyperlink in prose and
+        // one in a panel should not be two different blues.
+        let new_link_fg = Some(ctx.theme.colors.text_link.to_array());
+        st.engine.set_link_foreground(new_link_fg);
+        if st.last_link_fg != new_link_fg {
+            st.last_link_fg = new_link_fg;
             st.needs_full_layout = true;
             st.pending_full_render = true;
         }

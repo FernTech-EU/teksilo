@@ -305,13 +305,23 @@ pub(super) fn handle_pointer_event(
                 return EventResponse::Ignored;
             };
             match &hit.region {
-                teksilo_text::HitRegion::Link { href } => {
-                    // Link click: do not move the caret. Dispatch to
-                    // the widget's installed `on_link_activated`
-                    // callback (if any) so applications can open the
-                    // link / route to their router. Clone the `Rc`
-                    // out of the state borrow before invoking so the
-                    // handler can mutate widget state if it wants.
+                teksilo_text::HitRegion::Link { href }
+                    if modifiers.ctrl() || modifiers.super_key() =>
+                {
+                    // Ctrl(⌘)+click follows the link: do not move the caret.
+                    // Dispatch to the widget's installed `on_link_activated`
+                    // callback (if any) so applications can open the link /
+                    // route to their router. Clone the `Rc` out of the state
+                    // borrow before invoking so the handler can mutate widget
+                    // state if it wants.
+                    //
+                    // A *plain* click deliberately falls through to ordinary
+                    // caret placement below. This is an editor: the writer who
+                    // clicks their own link is far more often trying to edit
+                    // its text than to leave the document, and intercepting
+                    // every click left the text inside a link unreachable by
+                    // pointer entirely. Browsers can afford the opposite
+                    // default because their text is not editable.
                     let callback = state.borrow().on_link_activated.clone();
                     if let Some(cb) = callback {
                         cb(href.as_str(), ctx);

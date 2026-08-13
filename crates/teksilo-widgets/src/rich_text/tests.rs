@@ -7865,3 +7865,215 @@ fn the_filter_swap_takes_effect_without_rebuilding_the_widget() {
         "the same mounted editor honours the new filter on the very next key"
     );
 }
+
+// ── Hyperlinks ──────────────────────────────────────────────────
+//
+// A link is a character format, so applying one goes through the same
+// `merge_char_format` path bold does. What is specific to links is the
+// *extent* query (a link is a stretch of runs, not an object) and the click
+// rule (a writer must be able to get a caret inside their own link).
+
+#[test]
+fn setting_a_link_over_a_selection_lands_on_the_run() {
+    let doc = TextDocument::new();
+    doc.set_plain_text("Read the manual").unwrap();
+    let editor = RichTextEditor::editor(doc.clone());
+    let handle = editor.handle();
+
+    handle.select_range(9, 15);
+    handle.set_link("https://example.com");
+
+    handle.select_range(9, 15);
+    assert_eq!(
+        handle.caret_char_format().anchor_href.as_deref(),
+        Some("https://example.com")
+    );
+    assert!(handle.is_link());
+}
+
+#[test]
+fn a_link_survives_being_written_out_as_djot() {
+    // The whole point of applying a link as a format: it reaches the file in
+    // the format the document is actually saved in.
+    let doc = TextDocument::new();
+    doc.set_plain_text("Read the manual").unwrap();
+    let editor = RichTextEditor::editor(doc.clone());
+    let handle = editor.handle();
+
+    handle.select_range(9, 15);
+    handle.set_link("https://example.com");
+
+    assert_eq!(
+        handle.to_djot().trim(),
+        "Read the [manual](https://example.com)"
+    );
+}
+
+#[test]
+fn clearing_a_link_leaves_its_text_behind() {
+    let doc = TextDocument::new();
+    doc.set_djot("Read the [manual](https://example.com)")
+        .unwrap()
+        .wait()
+        .unwrap();
+    let editor = RichTextEditor::editor(doc.clone());
+    let handle = editor.handle();
+
+    handle.select_range(11, 11);
+    let extent = handle
+        .link_at_caret()
+        .expect("the caret is inside the link");
+    handle.select_range(extent.start, extent.end);
+    handle.clear_link();
+
+    assert_eq!(handle.to_djot().trim(), "Read the manual");
+}
+
+#[test]
+fn link_at_caret_reports_the_whole_link_not_the_run_under_the_caret() {
+    // An inner mark splits the link into several runs. Reporting only the one
+    // under the caret would make "Edit link" rewrite a fragment of the
+    // writer's text and leave the rest still linked.
+    let doc = TextDocument::new();
+    doc.set_djot("[a _stormy_ night](https://example.com)")
+        .unwrap()
+        .wait()
+        .unwrap();
+    let editor = RichTextEditor::editor(doc.clone());
+    let handle = editor.handle();
+
+    handle.select_range(5, 5);
+    let extent = handle.link_at_caret().expect("caret is inside the link");
+    assert_eq!(extent.start, 0);
+    assert_eq!(extent.end, 14);
+    assert_eq!(extent.href, "https://example.com");
+}
+
+#[test]
+fn a_plain_click_on_a_link_places_the_caret_and_does_not_follow_it() {
+    // The behaviour that made links unusable in an editor: every click was
+    // swallowed, so the text inside a link could not be reached by pointer at
+    // all. A writer clicking their own link is usually trying to edit it.
+    use teksilo_core::event::{Modifiers, PointerButton, WidgetEvent};
+
+    let doc = TextDocument::new();
+    doc.set_djot("[a fairly long link label](https://example.com)")
+        .unwrap()
+        .wait()
+        .unwrap();
+    let followed = Rc::new(Cell::new(0u32));
+    let probe = followed.clone();
+    let editor = RichTextEditor::editor(doc.clone())
+        .on_link_activated(move |_href, _ctx| probe.set(probe.get() + 1));
+    let handle = editor.handle();
+
+    let mut tree = WidgetTree::new();
+    let id = tree.add(editor);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    let _ = tree.render();
+    focus_editor(&mut tree, id);
+
+    tree.dispatch_event(WidgetEvent::PointerDown {
+        position: Point::new(60.0, 20.0),
+        button: PointerButton::Primary,
+        modifiers: Modifiers::NONE,
+    });
+
+    assert_eq!(followed.get(), 0, "a plain click must not follow the link");
+    assert!(
+        handle.cursor_position() > 0,
+        "a plain click must put the caret in the link's text"
+    );
+}
+
+#[test]
+fn ctrl_click_on_a_link_follows_it() {
+    use teksilo_core::event::{Modifiers, PointerButton, WidgetEvent};
+
+    let doc = TextDocument::new();
+    doc.set_djot("[a fairly long link label](https://example.com)")
+        .unwrap()
+        .wait()
+        .unwrap();
+    let seen = Rc::new(std::cell::RefCell::new(String::new()));
+    let probe = seen.clone();
+    let editor = RichTextEditor::editor(doc.clone())
+        .on_link_activated(move |href, _ctx| *probe.borrow_mut() = href.to_string());
+
+    let mut tree = WidgetTree::new();
+    let id = tree.add(editor);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    let _ = tree.render();
+    focus_editor(&mut tree, id);
+
+    tree.dispatch_event(WidgetEvent::PointerDown {
+        position: Point::new(60.0, 20.0),
+        button: PointerButton::Primary,
+        modifiers: Modifiers::CTRL,
+    });
+
+    assert_eq!(seen.borrow().as_str(), "https://example.com");
+}
+
+#[test]
+fn editor_on_change_fires_for_a_format_only_edit() {
+    // The bug this guards: `on_change` is what a host wires "unsaved changes"
+    // to, and a formatting edit never reached it. Bolding a word and closing
+    // the app lost the bold with no prompt.
+    let doc = TextDocument::new();
+    doc.set_plain_text("abc").unwrap();
+    let (editor, fired) = with_on_change_probe(RichTextEditor::editor(doc.clone()));
+    let handle = editor.handle();
+
+    let mut tree = WidgetTree::new();
+    let _id = tree.add(editor);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    for _ in 0..2 {
+        tick_once(&mut tree);
+    }
+    fired.set(0);
+
+    handle.select_range(0, 3);
+    handle.set_bold(true);
+    for _ in 0..3 {
+        tick_once(&mut tree);
+    }
+
+    assert!(
+        fired.get() > 0,
+        "a formatting edit is the writer's work and must count as a change"
+    );
+}
+
+#[test]
+fn editor_on_change_stays_silent_for_a_load_that_carries_formatting() {
+    // The risk the fix has to not introduce. A load applies formatting as it
+    // parses, so widening the gate to formatting could have made every
+    // `set_djot` look like an edit — which would mark a freshly-opened
+    // project dirty before the writer touched it.
+    let doc = TextDocument::new();
+    doc.set_plain_text("first").unwrap();
+    let (editor, fired) = with_on_change_probe(RichTextEditor::editor(doc.clone()));
+
+    let mut tree = WidgetTree::new();
+    let _id = tree.add(editor);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    for _ in 0..2 {
+        tick_once(&mut tree);
+    }
+    fired.set(0);
+
+    doc.set_djot("a *bold* word and [a link](https://example.com)")
+        .unwrap()
+        .wait()
+        .unwrap();
+    for _ in 0..3 {
+        tick_once(&mut tree);
+    }
+
+    assert_eq!(
+        fired.get(),
+        0,
+        "loading a formatted document must not look like an edit"
+    );
+}

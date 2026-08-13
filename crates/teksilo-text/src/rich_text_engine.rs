@@ -229,6 +229,14 @@ impl RichTextEngine {
         self.flow.set_code_block_foreground(color);
     }
 
+    /// Set the foreground used for hyperlink runs that carry no explicit
+    /// `foreground_color`. `None` falls back to the engine's `text_color`,
+    /// which leaves links looking exactly like prose. Wired from
+    /// `TextRole::Link` alongside the code-block colours.
+    pub fn set_link_foreground(&mut self, color: Option<[f32; 4]>) {
+        self.flow.set_link_foreground(color);
+    }
+
     /// Set the echo / masking character for secure (password) fields.
     ///
     /// When `Some(c)`, every character is replaced with `c` before
@@ -404,6 +412,7 @@ impl RichTextEngine {
         let opts = text_typeset::bridge::BridgeOptions {
             code_block_background: self.flow.code_block_background(),
             code_block_foreground: self.flow.code_block_foreground(),
+            link_foreground: self.flow.link_foreground(),
             echo_char: self.flow.echo_char(),
             hyphenate_justified: self.flow.hyphenate_justified(),
         };

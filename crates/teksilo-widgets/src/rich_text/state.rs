@@ -242,6 +242,10 @@ pub(crate) struct EditorState {
     /// rationale as `last_code_block_bg` — fragment foregrounds are
     /// baked into the layout's shaped runs.
     pub last_code_block_fg: Option<[f32; 4]>,
+    /// Last link foreground pushed to the engine, so a theme swap can be
+    /// told from a no-op repaint. Same reason as `last_code_block_fg`: the
+    /// colour is baked in at layout time.
+    pub last_link_fg: Option<[f32; 4]>,
 
     // Focus — mirrored from `on_focus` so paint can gate the caret.
     pub has_focus: bool,
@@ -711,6 +715,7 @@ impl EditorState {
             background_prop: None,
             last_code_block_bg: None,
             last_code_block_fg: None,
+            last_link_fg: None,
             has_focus: false,
             drop_caret: false,
             follow_caret_in_page: true,
@@ -999,7 +1004,7 @@ impl EditorState {
                 .set(self.document_version.get().wrapping_add(1));
         }
 
-        // Fire the user edit callback only for genuine content edits — not for
+        // Fire the user edit callback only for genuine user edits — not for
         // a programmatic load/reset (`set_djot`/`set_markdown` repopulate), and
         // not while an IME composition is still in progress: each intermediate
         // preedit keystroke (every CJK/Kana candidate change) mutates the
@@ -1008,7 +1013,21 @@ impl EditorState {
         // commits (`clear_ime_preedit` runs before the commit's own insert) or
         // is cancelled to empty, so gating on it fires `on_change` exactly once
         // for the final, real result.
-        if saw_content_change
+        //
+        // **A formatting change counts.** It was omitted for as long as this
+        // callback existed, and the omission was not visible from here: a host
+        // typically wires `on_change` to "the document has unsaved changes", so
+        // bolding a word — or linking one, or setting a heading — left the app
+        // believing nothing had happened. No autosave was scheduled and no
+        // close guard fired, and the edit survived only if the writer happened
+        // to type something afterwards. `FormatChanged` is as much the writer's
+        // work as a keystroke is.
+        //
+        // A load is still suppressed, and by the same guard rather than a new
+        // one: `DocumentReset` lands in the same drained batch as any
+        // formatting the load applies, so `saw_reset_or_load` covers this arm
+        // exactly as it already covered content.
+        if (saw_content_change || saw_format_change)
             && !saw_reset_or_load
             && self.ime_preedit.is_none()
             && let Some(cb) = self.on_change.clone()
