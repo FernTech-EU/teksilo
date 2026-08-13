@@ -492,6 +492,7 @@ pub(super) fn handle_key(
                     if filter.accepts(EditCommandKind::InsertChar) {
                         let clean: String = t.chars().filter(|c| !c.is_control()).collect();
                         if !clean.is_empty() {
+                            st.pending_typed_chars += clean.chars().count();
                             st.pending_chars.push_str(&clean);
                             KeyAction::ClearPreferredX
                         } else {
@@ -1015,6 +1016,11 @@ fn push_pending_chars(state: &SharedState, ctx: &mut EventContext, text: &str) -
     }
     {
         let mut st = state.borrow_mut();
+        // The **only** caller is the `ImeCommit` arm above, so what lands here
+        // is a settled composition rather than a keystroke: the characters that
+        // arrive are not the keys that were pressed, and counting them as typed
+        // would be wrong about every writer of a language with an input method.
+        st.pending_ime_chars += clean.chars().count();
         st.pending_chars.push_str(&clean);
         st.preferred_x = None;
         // Typing always lands the caret at a logical position; any

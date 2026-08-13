@@ -73,6 +73,18 @@ pub(crate) struct EditorState {
     /// [`RichTextEditor::on_change`](super::RichTextEditor::on_change); runs on
     /// the UI thread, so it may touch `Signal`s (e.g. flip a dirty flag).
     pub on_change: Option<Rc<dyn Fn()>>,
+    /// Optional user callback fired **at each insertion**, with where the text
+    /// came from and how many characters it was. Set via
+    /// [`RichTextEditor::on_text_inserted`](super::RichTextEditor::on_text_inserted).
+    ///
+    /// Deliberately not folded into [`Self::on_change`]: that one fires once per
+    /// drain batch and says only *that* something changed, which is the right
+    /// shape for a dirty flag and the wrong one for counting. A batch can carry
+    /// a typed run and a paste, and after the fact nothing can separate them.
+    pub on_text_inserted: Option<Rc<dyn Fn(super::EditSource, usize)>>,
+    // NOTE: `report_inserted` below is the only correct way to fire it. Calling
+    // the callback directly from an insertion site would fire it for an empty
+    // string, which is not text arriving.
     pub has_selection: Signal<bool>,
     pub caret_visible: Signal<bool>,
     pub cursor_position: Signal<usize>,
@@ -362,6 +374,18 @@ pub(crate) struct EditorState {
     /// and debounced `text_changed` emission stay O(burst) instead of
     /// O(keystrokes).
     pub pending_chars: String,
+    /// How many of [`Self::pending_chars`] were typed, and how many were the
+    /// settled result of an IME composition.
+    ///
+    /// Two counters rather than one label on the batch, because both routes push
+    /// into the same string and the frame loop flushes it as a unit. A single
+    /// label would have to pick one for a mixed batch — and while mixing is
+    /// vanishingly unlikely (an active IME swallows the raw keys), a count that
+    /// is exact costs two `usize`s and never has to be reasoned about again.
+    ///
+    /// Reset with the batch. See [`Self::report_inserted_chars`].
+    pub pending_typed_chars: usize,
+    pub pending_ime_chars: usize,
 
     /// Active IME preedit text — the unfinalised string the input
     /// method renders while the user is composing (CJK, Korean,
@@ -635,6 +659,32 @@ pub struct SelectedImageRect {
 }
 
 impl EditorState {
+    /// Tell whoever is listening that `text` just arrived through `source`.
+    ///
+    /// **Call this beside the insertion, with the string that was inserted.**
+    /// Not afterwards from a position delta: an insertion that replaces a
+    /// selection moves the caret by a different number than it wrote, and a
+    /// consumer counting characters wants the second.
+    ///
+    /// Empty insertions report nothing — there is no such thing as zero
+    /// characters arriving, and a consumer would have to filter them out again.
+    pub fn report_inserted(&self, source: super::EditSource, text: &str) {
+        self.report_inserted_chars(source, text.chars().count());
+    }
+
+    /// As [`Self::report_inserted`], for a caller that counted as it went.
+    ///
+    /// Zero reports nothing — there is no such thing as zero characters
+    /// arriving, and a consumer would only have to filter it out again.
+    pub fn report_inserted_chars(&self, source: super::EditSource, chars: usize) {
+        if chars == 0 {
+            return;
+        }
+        if let Some(callback) = self.on_text_inserted.as_ref() {
+            callback(source, chars);
+        }
+    }
+
     pub fn new(
         document: TextDocument,
         engine: RichTextEngine,
@@ -675,6 +725,7 @@ impl EditorState {
             format_version: Signal::new(0),
             document_loaded_count: Signal::new(0),
             on_change: None,
+            on_text_inserted: None,
             has_selection: Signal::new(false),
             caret_visible,
             cursor_position: Signal::new(0),
@@ -731,6 +782,8 @@ impl EditorState {
             frame_request: None,
             frame_wake_at: None,
             pending_chars: String::new(),
+            pending_typed_chars: 0,
+            pending_ime_chars: 0,
             ime_preedit: None,
             ime_preedit_range: None,
             last_chase_pos: None,

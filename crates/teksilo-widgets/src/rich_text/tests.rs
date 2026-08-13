@@ -8077,3 +8077,165 @@ fn editor_on_change_stays_silent_for_a_load_that_carries_formatting() {
         "loading a formatted document must not look like an edit"
     );
 }
+
+use super::EditSource;
+
+// ── Where text came from ────────────────────────────────────────────────────
+//
+// `on_text_inserted` reports the channel and the character count at each
+// insertion. What matters in every test below is that the count is of what was
+// *written*, not of how far the caret moved — those are different numbers the
+// moment an insertion replaces a selection, and the second is the one a caller
+// counting arrivals is never asking for.
+
+/// Collects everything an editor reports, for assertions.
+#[derive(Clone, Default)]
+struct Arrivals(std::rc::Rc<std::cell::RefCell<Vec<(EditSource, usize)>>>);
+
+impl Arrivals {
+    fn seen(&self) -> Vec<(EditSource, usize)> {
+        self.0.borrow().clone()
+    }
+
+    fn chars_from(&self, source: EditSource) -> usize {
+        self.0
+            .borrow()
+            .iter()
+            .filter(|(s, _)| *s == source)
+            .map(|(_, n)| n)
+            .sum()
+    }
+}
+
+#[test]
+fn typing_reports_the_characters_that_were_typed() {
+    let doc = TextDocument::new();
+    doc.set_plain_text("abc").unwrap();
+    let arrivals = Arrivals::default();
+    let editor = RichTextEditor::editor(doc.clone()).on_text_inserted({
+        let arrivals = arrivals.clone();
+        move |source, chars| arrivals.0.borrow_mut().push((source, chars))
+    });
+
+    let mut tree = WidgetTree::new();
+    let id = tree.add(editor);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    focus_editor(&mut tree, id);
+    press_key(
+        &mut tree,
+        teksilo_core::event::Key::End,
+        teksilo_core::event::Modifiers::CTRL,
+    );
+
+    for ch in [' ', 'd', 'e', 'f'] {
+        press_char(&mut tree, ch);
+    }
+    for _ in 0..3 {
+        tick_once(&mut tree);
+    }
+
+    assert_eq!(
+        arrivals.seen(),
+        vec![(EditSource::Keyboard, 4)],
+        "one report per flushed batch, counting the characters in it"
+    );
+}
+
+/// **The count is of what was written, not of how far the caret moved.** Typing
+/// over a selection removes it first, so a position delta would report four
+/// characters as one — or as a negative, if the selection were longer.
+#[test]
+fn typing_over_a_selection_counts_what_was_typed_not_the_net_change() {
+    let doc = TextDocument::new();
+    doc.set_plain_text("abcdefghij").unwrap();
+    let arrivals = Arrivals::default();
+    let editor = RichTextEditor::editor(doc.clone()).on_text_inserted({
+        let arrivals = arrivals.clone();
+        move |source, chars| arrivals.0.borrow_mut().push((source, chars))
+    });
+
+    let mut tree = WidgetTree::new();
+    let id = tree.add(editor);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    focus_editor(&mut tree, id);
+    press_key(
+        &mut tree,
+        teksilo_core::event::Key::A,
+        teksilo_core::event::Modifiers::CTRL,
+    );
+
+    for ch in ['h', 'i'] {
+        press_char(&mut tree, ch);
+    }
+    for _ in 0..3 {
+        tick_once(&mut tree);
+    }
+
+    assert_eq!(
+        doc.to_plain_text().unwrap_or_default(),
+        "hi",
+        "ten characters were replaced by two"
+    );
+    assert_eq!(
+        arrivals.chars_from(EditSource::Keyboard),
+        2,
+        "two characters were written; the document is eight shorter, which is a \
+         different question and not the one being asked"
+    );
+}
+
+/// Nothing is reported for a programmatic load, for undo, or for a format-only
+/// change: none of them is text arriving.
+#[test]
+fn a_programmatic_load_reports_nothing() {
+    let doc = TextDocument::new();
+    let arrivals = Arrivals::default();
+    let editor = RichTextEditor::editor(doc.clone()).on_text_inserted({
+        let arrivals = arrivals.clone();
+        move |source, chars| arrivals.0.borrow_mut().push((source, chars))
+    });
+
+    let mut tree = WidgetTree::new();
+    let id = tree.add(editor);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    focus_editor(&mut tree, id);
+
+    doc.set_plain_text("a whole manuscript, loaded from a file")
+        .unwrap();
+    for _ in 0..3 {
+        tick_once(&mut tree);
+    }
+
+    assert!(
+        arrivals.seen().is_empty(),
+        "opening a document is not somebody writing in it: {:?}",
+        arrivals.seen()
+    );
+}
+
+/// An editor nobody asked is an editor that counts nothing — the callback is
+/// what turns the measuring on, so a build with no consumer pays nothing.
+#[test]
+fn an_editor_with_no_callback_is_undisturbed() {
+    let doc = TextDocument::new();
+    doc.set_plain_text("abc").unwrap();
+    let editor = RichTextEditor::editor(doc.clone());
+
+    let mut tree = WidgetTree::new();
+    let id = tree.add(editor);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    focus_editor(&mut tree, id);
+    press_key(
+        &mut tree,
+        teksilo_core::event::Key::End,
+        teksilo_core::event::Modifiers::CTRL,
+    );
+    for ch in ['d', 'e', 'f'] {
+        press_char(&mut tree, ch);
+    }
+    for _ in 0..3 {
+        tick_once(&mut tree);
+    }
+
+    assert_eq!(doc.to_plain_text().unwrap_or_default(), "abcdef");
+}

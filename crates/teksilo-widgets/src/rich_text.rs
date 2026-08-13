@@ -100,6 +100,42 @@ pub enum ScrollPolicy {
     AlwaysOff,
 }
 
+/// How a piece of text reached the document — the **channel**, not the author.
+///
+/// Deliberately framework-generic, and deliberately small. These are the routes
+/// a toolkit can actually observe: which input path the characters came down.
+/// What that *means* is the application's to decide, and every application will
+/// decide differently — a writing tool cares that dictation is not typing, a
+/// code editor cares that a snippet is not either, and a form cares about none
+/// of it. Teksilo says what it saw; it does not interpret.
+///
+/// ⚠ **Not evidence of who wrote anything.** Text typed one character at a time
+/// was typed one character at a time, and that is the entire claim. Anything
+/// further — who, or whether a person at all — is an inference this cannot make
+/// and no consumer of it should pretend to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum EditSource {
+    /// Typed, one key at a time.
+    Keyboard,
+    /// The settled result of an IME composition — CJK/Kana candidate selection,
+    /// a dead-key accent. Separate from [`Self::Keyboard`] because the
+    /// characters that land are not the keys that were pressed.
+    Ime,
+    /// Pasted, as plain text or as HTML.
+    Clipboard,
+    /// Arrived through an assistive technology: AccessKit's `SetValue` or
+    /// `ReplaceSelectedText`, which is how dictation and a braille display
+    /// write.
+    ///
+    /// **Never folded into [`Self::Keyboard`].** For some people this *is*
+    /// typing, and a toolkit that reported it as something else — or as nothing
+    /// — would be quietly erasing how they work.
+    Accessibility,
+    /// Inserted by the application itself rather than by anything the person at
+    /// the keyboard did: a template, a substitution, a completion.
+    Programmatic,
+}
+
 /// The main rich text widget. Construct via [`RichTextEditor::read_only`]
 /// (view/select only) or [`RichTextEditor::editor`] (full editing).
 pub use self::state::TextAnnotationSpan;
@@ -697,6 +733,40 @@ impl RichTextEditor {
     /// [`document_version`](Self::document_version) instead.
     pub fn on_change(self, f: impl Fn() + 'static) -> Self {
         self.state.borrow_mut().on_change = Some(Rc::new(f));
+        self
+    }
+
+    /// Install a callback fired **at each insertion**, with the
+    /// [`EditSource`] the text came through and how many characters it was.
+    ///
+    /// Additive to [`on_change`](Self::on_change) rather than a replacement for
+    /// it, because they answer different questions. `on_change` fires once per
+    /// drain batch and says *that* the document changed — the right shape for a
+    /// dirty flag and a debounced autosave, and the wrong one for counting: a
+    /// batch can carry a typed run and a paste, and after the fact nothing can
+    /// tell them apart.
+    ///
+    /// **Reported where the text is, not derived afterwards.** Every site below
+    /// holds the literal `&str` about to be inserted, so the count is what was
+    /// actually written rather than a position delta — which is a different
+    /// number the moment an insertion replaces a selection.
+    ///
+    /// Fires for text arriving through:
+    ///
+    /// - the keyboard, once per batched run of typed characters;
+    /// - an IME commit, once for the settled result and never for the
+    ///   intermediate composition states;
+    /// - a paste, of plain text or HTML;
+    /// - an assistive technology, through AccessKit's `SetValue` and
+    ///   `ReplaceSelectedText`.
+    ///
+    /// It does **not** fire for a programmatic `set_djot` / `set_markdown` /
+    /// `set_html` load, for undo or redo, or for a format-only change: none of
+    /// those is text arriving.
+    ///
+    /// Replaces any prior callback on this editor. Runs on the UI thread.
+    pub fn on_text_inserted(self, f: impl Fn(EditSource, usize) + 'static) -> Self {
+        self.state.borrow_mut().on_text_inserted = Some(Rc::new(f));
         self
     }
 
@@ -1474,8 +1544,9 @@ impl RichTextEditor {
     ///
     /// Merges, so formatting already on the range is kept. A collapsed
     /// selection formats nothing (as everywhere else), so a caller linking
-    /// existing text should select it first — see [`link_at_caret`](Self::
-    /// link_at_caret) for the range of a link already there.
+    /// existing text should select it first — see
+    /// [`link_at_caret`](Self::link_at_caret) for the range of a link already
+    /// there.
     pub fn set_link(&self, href: &str) {
         self.apply_char_format(TextFormat {
             anchor_href: Some(href.to_string()),
@@ -2626,8 +2697,9 @@ impl EditorHandle {
     ///
     /// Merges, so formatting already on the range is kept. A collapsed
     /// selection formats nothing (as everywhere else), so a caller linking
-    /// existing text should select it first — see [`link_at_caret`](Self::
-    /// link_at_caret) for the range of a link already there.
+    /// existing text should select it first — see
+    /// [`link_at_caret`](Self::link_at_caret) for the range of a link already
+    /// there.
     pub fn set_link(&self, href: &str) {
         self.apply_char_format(TextFormat {
             anchor_href: Some(href.to_string()),
@@ -4849,6 +4921,12 @@ fn handle_access_action_request(
             let st = state.borrow();
             st.cursor.select(SelectionType::Document);
             let _ = st.cursor.insert_text(value.as_ref());
+            // For some people this **is** typing — dictation, a braille display —
+            // and it is reported as itself rather than as `Keyboard` or as
+            // nothing at all. A toolkit that folded it into typing would erase
+            // how they work; one that reported nothing would leave anything
+            // counting arrivals silently short for exactly those writers.
+            st.report_inserted(EditSource::Accessibility, value.as_ref());
             drop(st);
             sync_cursor_signals(state);
             ctx.request_frame();
@@ -4867,6 +4945,9 @@ fn handle_access_action_request(
             let st = state.borrow();
             self::keyboard::collapse_selection_before_insert(&st);
             let _ = st.cursor.insert_text(value.as_ref());
+            // The AT-SPI / UIA insertion path, which is how a braille keyboard
+            // and most dictation write. Same reason as `SetValue` above.
+            st.report_inserted(EditSource::Accessibility, value.as_ref());
             drop(st);
             sync_cursor_signals(state);
             ctx.request_frame();

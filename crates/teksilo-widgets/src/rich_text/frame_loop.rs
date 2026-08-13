@@ -43,8 +43,16 @@ pub(crate) fn tick(state: &mut EditorState, delta: f32) -> bool {
         // one exists — which is precisely why a forward-only filter has
         // to collapse the selection here first, one layer above the
         // insert that would otherwise swallow it.
+        let typed = std::mem::take(&mut state.pending_typed_chars);
+        let composed = std::mem::take(&mut state.pending_ime_chars);
         super::keyboard::collapse_selection_before_insert(state);
         let _ = state.cursor.insert_text(&batch);
+        // Counted as the characters went in, which is what was written. A caret
+        // delta would be a different number whenever the insert above replaced a
+        // selection, and the two routes are reported apart because a settled IME
+        // composition is not a keystroke.
+        state.report_inserted_chars(super::EditSource::Keyboard, typed);
+        state.report_inserted_chars(super::EditSource::Ime, composed);
         state.pending_text_changed = true;
     }
 

@@ -156,7 +156,10 @@ pub(crate) fn paste(state: &mut EditorState, ctx: &EventContext) {
     ) && payload_marker(html).is_some_and(|m| m == stored_marker)
         && let Some(frag) = state.rich_clipboard_fragment.as_ref()
     {
-        let _ = state.cursor.insert_fragment(&frag.clone());
+        let frag = frag.clone();
+        report_measured(state, |st| {
+            let _ = st.cursor.insert_fragment(&frag);
+        });
         state.cursor.clear_selection();
         state.pending_text_changed = true;
         return;
@@ -168,7 +171,7 @@ pub(crate) fn paste(state: &mut EditorState, ctx: &EventContext) {
     //    `DocumentFragment` (via text-document's
     //    `DocumentFragment::from_html`) and inserts it at the caret.
     if let Some(html) = html_payload.as_deref()
-        && state.cursor.insert_html(html).is_ok()
+        && report_measured(state, |st| st.cursor.insert_html(html)).is_ok()
     {
         state.cursor.clear_selection();
         state.pending_text_changed = true;
@@ -240,6 +243,12 @@ pub(crate) fn can_paste(ctx: &EventContext) -> bool {
 /// Windows- and classic-Mac clipboards round-trip cleanly.
 fn insert_multiline_plain(state: &mut EditorState, text: &str) {
     let normalised = text.replace("\r\n", "\n").replace('\r', "\n");
+    // Counted from the payload rather than measured afterwards, because this is
+    // the one paste path where the text itself is in hand. The newlines count:
+    // a pasted paragraph break is text that arrived, and dropping it would make
+    // a five-paragraph paste report four characters short for no reason a reader
+    // could see.
+    state.report_inserted(super::EditSource::Clipboard, &normalised);
     let mut lines = normalised.split('\n');
     if let Some(first) = lines.next() {
         let _ = state.cursor.insert_text(first);
@@ -250,4 +259,39 @@ fn insert_multiline_plain(state: &mut EditorState, text: &str) {
             let _ = state.cursor.insert_text(line);
         }
     }
+}
+
+/// How many characters an insertion actually added, measured around it.
+///
+/// For the two rich paste paths, where what goes in is a fragment or a parsed
+/// HTML tree and the plain-text length is not in hand. A bare before/after delta
+/// would **undercount every paste over a selection** — the insert removes the
+/// selection first, so the delta is what arrived minus what went — which is the
+/// common case rather than a corner. Adding the replaced length back makes it
+/// exact:
+///
+/// ```text
+/// after = before - replaced + arrived   ⇒   arrived = after - before + replaced
+/// ```
+fn report_measured<R>(state: &mut EditorState, insert: impl FnOnce(&mut EditorState) -> R) -> R {
+    let measuring = state.on_text_inserted.is_some();
+    // Nothing is listening, so nothing is measured: two `character_count()`
+    // walks per paste is not a cost a build with no consumer should pay.
+    if !measuring {
+        return insert(state);
+    }
+    // An unreadable selection counts as none: undercounting a paste is a smaller
+    // wrong than refusing to report it, and this cannot fail in practice — the
+    // selection is the caret's own range in a document already in memory.
+    let replaced = state
+        .cursor
+        .selected_text()
+        .map(|s| s.chars().count())
+        .unwrap_or(0);
+    let before = state.document.character_count();
+    let out = insert(state);
+    let after = state.document.character_count();
+    let arrived = (after + replaced).saturating_sub(before);
+    state.report_inserted_chars(super::EditSource::Clipboard, arrived);
+    out
 }
