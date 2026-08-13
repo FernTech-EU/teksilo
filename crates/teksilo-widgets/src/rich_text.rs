@@ -2254,6 +2254,24 @@ impl EditorHandle {
     /// instead would mutate the document behind the widget's back, leaving the
     /// caret decoupled from the edit — use this.
     pub fn replace_range(&self, start: usize, end: usize, text: &str) {
+        self.replace_range_from(start, end, text, EditSource::Programmatic);
+    }
+
+    /// As [`replace_range`](Self::replace_range), saying which channel the text
+    /// came through for [`on_text_inserted`](RichTextEditor::on_text_inserted).
+    ///
+    /// `replace_range` itself reports [`EditSource::Programmatic`], which is
+    /// what a handle-driven edit is by default: a toolbar, a menu command, a
+    /// substitution the application made. **An application that knows better
+    /// should say so here rather than let the default stand.** The distinction
+    /// that matters most is an edit which merely puts back what the person
+    /// typed — undoing an autocorrect, say. Those characters were typed, they
+    /// are being typed again, and reporting them as the application's own work
+    /// would credit the application with the writer's words.
+    ///
+    /// One call rather than an insert plus a separate report, so the two cannot
+    /// drift apart at a call site that later grows a second early return.
+    pub fn replace_range_from(&self, start: usize, end: usize, text: &str, source: EditSource) {
         // Select, then insert over the selection — each step in its own borrow
         // scope, mirroring `select_range` / `RichTextEditor::insert_text`. The
         // insert must not run while a `borrow_mut` is held: it notifies document
@@ -2262,6 +2280,7 @@ impl EditorHandle {
         {
             let st = self.state.borrow();
             let _ = st.cursor.insert_text(text);
+            st.report_inserted(source, text);
         }
         sync_cursor_signals(&self.state);
     }
