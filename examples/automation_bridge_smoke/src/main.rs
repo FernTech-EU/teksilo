@@ -12,7 +12,8 @@
 //! failure).
 //!
 //! Run (needs a display for the window):
-//! `cargo run --example automation_bridge_smoke --features automation`
+//! `cargo run -p automation_bridge_smoke` (its own manifest already enables
+//! the `automation` feature; it is a workspace package, not a cargo example)
 
 use teksilo::automation::dto::{AutomationOp, AutomationReply, AutomationRequest, SettleSpec};
 use teksilo::prelude::*;

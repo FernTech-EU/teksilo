@@ -68,18 +68,20 @@ TeksiloAppBuilder::new()
     .run();
 ```
 
-On startup it prints the socket path and token to stderr:
+Once the socket is bound and listening it prints its path and the token to
+stderr — the announcement follows the bind, so the path is connectable the
+instant it appears and a client needs no wait-for-socket loop:
 
 ```text
-teksilo-automation: bridge socket = /run/user/1000/teksilo-automation-12345.sock
+teksilo-automation: bridge socket = /run/user/1000/teksilo-automation-12345/sock
 TEKSILO_AUTOMATION_TOKEN=8f3c…
-teksilo-automation: connect with `teksilo-automation-mcp --connect /run/user/1000/teksilo-automation-12345.sock --token 8f3c…`
+teksilo-automation: connect with `teksilo-automation-mcp --connect /run/user/1000/teksilo-automation-12345/sock --token 8f3c…`
 ```
 
 Then point the server at it:
 
 ```text
-teksilo-automation-mcp --connect /run/user/1000/teksilo-automation-12345.sock --token 8f3c…
+teksilo-automation-mcp --connect /run/user/1000/teksilo-automation-12345/sock --token 8f3c…
 ```
 
 Each rmcp tool handler writes the op to the Unix socket and reads one reply;
@@ -274,8 +276,8 @@ The threat model is a *trusted local user with a non-shared `$XDG_RUNTIME_DIR`*
 stderr, so anyone who can read the app's stderr (or `/proc/<pid>/environ` when
 it's pinned) can drive the UI; this is a dev-tool stance, kept out of
 production by the debug gate above. **Regression guard:** the debug-only banner
-string only exists in the gated `install`, so a release binary with the feature
-on must not contain it — a CI canary:
+string only exists in the gated `spawn_bridge_thread`, so a release binary with
+the feature on must not contain it — a CI canary:
 
 ```sh
 cargo build --release -p widget-catalog          # has the bridge wired + feature

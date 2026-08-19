@@ -25,10 +25,12 @@ use crate::TeksiloAppBuilder;
 /// Adds [`install_automation_bridge_in_debug`](Self::install_automation_bridge_in_debug)
 /// to [`TeksiloAppBuilder`]. Mirrors `TeksiloAppBuilderInspectorExt`.
 pub trait TeksiloAppBuilderAutomationExt {
-    /// In a **debug** build: generate a per-process token, bind a private
-    /// `0600` Unix socket, print its path + `TEKSILO_AUTOMATION_TOKEN=<uuid>`
-    /// to stderr, and spawn the bridge thread on `on_ready`. In a **release**
-    /// build (or on a non-Unix target): a no-op returning `self`.
+    /// In a **debug** build: generate a per-process token, then on `on_ready`
+    /// bind a private `0600` Unix socket, print its path +
+    /// `TEKSILO_AUTOMATION_TOKEN=<uuid>` to stderr, and spawn the bridge
+    /// thread. The announcement follows the bind, so the printed path is
+    /// connectable the instant it appears. In a **release** build (or on a
+    /// non-Unix target): a no-op returning `self`.
     fn install_automation_bridge_in_debug(self) -> Self;
 }
 
@@ -116,12 +118,9 @@ fn install(builder: TeksiloAppBuilder) -> TeksiloAppBuilder {
     // up-front; otherwise generate a fresh per-process one.
     let token = std::env::var("TEKSILO_AUTOMATION_TOKEN")
         .unwrap_or_else(|_| uuid::Uuid::new_v4().to_string());
-    let path = socket_path();
-    eprintln!("teksilo-automation: bridge socket = {path}");
-    eprintln!("TEKSILO_AUTOMATION_TOKEN={token}");
-    eprintln!(
-        "teksilo-automation: connect with `teksilo-automation-mcp --connect {path} --token {token}`"
-    );
+    // The announcement belongs to `spawn_bridge_thread`, after the bind — see
+    // the comment there. Printing it here, at builder time, is what made the
+    // path a promise the process could not yet keep.
     builder.on_ready(move |proxy| {
         if let Err(e) = spawn_bridge_thread(proxy, token) {
             eprintln!("teksilo-automation: bridge failed to start: {e}");
@@ -148,6 +147,9 @@ pub fn spawn_bridge_thread(proxy: crate::app::AppEventProxy, token: String) -> s
     // Belt + suspenders (the 0700 dir already gates access).
     std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
 
+    // The thread below takes the token; keep a copy to announce with.
+    let announce = token.clone();
+
     std::thread::Builder::new()
         .name("teksilo-automation-bridge".into())
         .spawn(move || {
@@ -172,6 +174,24 @@ pub fn spawn_bridge_thread(proxy: crate::app::AppEventProxy, token: String) -> s
                 }
             }
         })?;
+
+    // Announce only now — after the bind AND after the accept thread exists.
+    // A client acts on this path the moment it reads it, so every failure has to
+    // happen first: printing at builder time (where this used to live) left
+    // every client racing the bind, and `teksilo-automation-mcp --connect` loses
+    // that race with ENOENT and `exit(1)` without speaking a byte of MCP, since
+    // it never retries. Printing merely after the bind would still be wrong for
+    // a rarer case — a failed `spawn` (thread limit) leaves a socket that is
+    // bound, so `connect` succeeds, but that nobody will ever `accept`, and the
+    // client has no read timeout to rescue it: it would hang rather than fail.
+    // `UnixListener::bind` has already called `listen`, so the kernel queues a
+    // connection arriving before the thread is scheduled. Clients therefore need
+    // no wait-for-socket loop; reading this line is enough.
+    eprintln!("teksilo-automation: bridge socket = {path}");
+    eprintln!("TEKSILO_AUTOMATION_TOKEN={announce}");
+    eprintln!(
+        "teksilo-automation: connect with `teksilo-automation-mcp --connect {path} --token {announce}`"
+    );
     Ok(())
 }
 

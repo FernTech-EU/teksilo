@@ -93,36 +93,38 @@ class Driver:
             self.die("no bridge socket announced within 30s (is this a debug build?)")
         print(f"bridge up: {sock}")
 
-        # The bridge announces the socket path *before* binding it, so an
-        # immediate connect can race and the server dies with ENOENT. Wait for
-        # the socket to exist, then retry connect+initialize until it answers.
-        deadline = time.time() + 20
-        init = None
-        while time.time() < deadline and init is None:
-            while not os.path.exists(sock) and time.time() < deadline:
-                time.sleep(0.05)
-            self.mcp = subprocess.Popen(
-                [str(self.mcp_bin), "--connect", sock, "--token", tok],
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=open(self.mcp_err, "w"),
-                text=True,
-                bufsize=1,
+        # The bridge binds, spawns its accept thread, and only then announces —
+        # so the path is connectable the moment it is printed, and one connect
+        # is enough. This used to be a wait-for-the-file plus
+        # relaunch-until-initialize-answers loop, because the announcement came
+        # first and `--connect` loses that race with ENOENT and exit(1).
+        # Asserting the guarantee is what replaces the loop: if it ever fires,
+        # the announcement has drifted back ahead of the bind in teksilo-app's
+        # `automation_bridge::spawn_bridge_thread`.
+        if not os.path.exists(sock):
+            self.die(
+                f"the bridge announced {sock} before binding it — the "
+                "announce-before-bind race is back (see "
+                "teksilo-app automation_bridge::spawn_bridge_thread)"
             )
-            self.send(
-                "initialize",
-                {
-                    "protocolVersion": "2024-11-05",
-                    "capabilities": {},
-                    "clientInfo": {"name": "automation_chart_demo", "version": "1"},
-                },
-            )
-            init = self.recv(timeout=4, fatal=False)
-            if init is None and self.mcp.poll() is None:
-                self.mcp.terminate()
-                time.sleep(0.3)
-        if init is None:
-            self.die("could not connect the MCP server (socket never became reachable)")
+        self.mcp = subprocess.Popen(
+            [str(self.mcp_bin), "--connect", sock, "--token", tok],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=open(self.mcp_err, "w"),
+            text=True,
+            bufsize=1,
+        )
+        self.send(
+            "initialize",
+            {
+                "protocolVersion": "2024-11-05",
+                "capabilities": {},
+                "clientInfo": {"name": "automation_chart_demo", "version": "1"},
+            },
+        )
+        if self.recv(timeout=20, fatal=False) is None:
+            self.die("could not connect the MCP server")
         self.send("notifications/initialized", notif=True)
 
     def stop(self) -> None:
