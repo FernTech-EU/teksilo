@@ -13,6 +13,8 @@ use teksilo_platform::clipboard::ClipboardHandle;
 use teksilo_text::CursorAffinity;
 use teksilo_text::text_document::{MoveMode, MoveOperation, SelectionType};
 
+use crate::common::text_nav::{CaretStep, caret_step, deletes_word};
+
 use super::state::{SharedState, TextInputState, sync_cursor_signals};
 
 /// Report the caret's window-space rectangle to the platform so the OS IME
@@ -92,20 +94,23 @@ pub(crate) fn handle_key(
         let mut st = state.borrow_mut();
         match key {
             // ── Navigation ──────────────────────────────────────────
+            // Word-jump rides ⌥ on macOS and Ctrl elsewhere, and ⌘←/→ reach
+            // the field's edges — the single-line reading of "line edge". See
+            // `common::text_nav`.
             Key::ArrowLeft => {
-                let op = if ctrl {
-                    MoveOperation::WordLeft
-                } else {
-                    MoveOperation::Left
+                let op = match caret_step(*modifiers) {
+                    CaretStep::Character => MoveOperation::Left,
+                    CaretStep::Word => MoveOperation::WordLeft,
+                    CaretStep::LineEdge => MoveOperation::Start,
                 };
                 st.cursor.move_position(op, mode, 1);
                 true
             }
             Key::ArrowRight => {
-                let op = if ctrl {
-                    MoveOperation::WordRight
-                } else {
-                    MoveOperation::Right
+                let op = match caret_step(*modifiers) {
+                    CaretStep::Character => MoveOperation::Right,
+                    CaretStep::Word => MoveOperation::WordRight,
+                    CaretStep::LineEdge => MoveOperation::End,
                 };
                 st.cursor.move_position(op, mode, 1);
                 true
@@ -143,7 +148,7 @@ pub(crate) fn handle_key(
 
             // ── Editing (gated on !read_only) ───────────────────────
             Key::Backspace if !read_only => {
-                if ctrl {
+                if deletes_word(*modifiers) {
                     if !st.cursor.has_selection() {
                         st.cursor
                             .move_position(MoveOperation::WordLeft, MoveMode::KeepAnchor, 1);
@@ -157,7 +162,7 @@ pub(crate) fn handle_key(
                 true
             }
             Key::Delete if !read_only => {
-                if ctrl {
+                if deletes_word(*modifiers) {
                     if !st.cursor.has_selection() {
                         st.cursor
                             .move_position(MoveOperation::WordRight, MoveMode::KeepAnchor, 1);

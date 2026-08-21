@@ -110,6 +110,32 @@ is driven by injected configuration and is a single atomic undo step:
   at the pointer; typing goes to every caret at once, in one undo step. The
   accessibility tree reports only the primary caret.
 
+### Caret motion follows the platform
+
+Word-jump, the line edge and the document edge sit on different modifiers on
+macOS than they do elsewhere, and the difference is not a simple substitution —
+so the chords are read through
+[`common::text_nav`](../crates/teksilo-widgets/src/common/text_nav.rs) rather
+than from an "is the accelerator held?" flag:
+
+| motion | Windows / Linux | macOS |
+| --- | --- | --- |
+| character | `←` `→` | `←` `→` |
+| word | `Ctrl+←/→` | `⌥←/→` |
+| line edge | `Home` `End` | `⌘←/→`, `Home` `End` |
+| document edge | `Ctrl+Home/End` | `⌘↑/↓`, `⌘Home/End` |
+| delete word | `Ctrl+⌫` `Ctrl+⌦` | `⌥⌫` `⌥⌦` |
+
+`Alt+↑/↓` stays on move-line here on every platform, macOS included — that is
+the binding every code editor ships, and it takes precedence over the
+paragraph motion the rich-text editor puts there. `⌘⌫` means delete-to-line-start
+on macOS, which is not implemented; it falls through to a plain single-character
+delete rather than removing more than was asked for.
+
+`Shift` extends the selection over any of them, and the policy filter is asked
+about the motion that actually runs — a `MoveWordLeft` veto bites on `⌥←`
+exactly as it bites on `Ctrl+←`.
+
 ## Completion
 
 Supply candidates with `completion_provider(Fn(&CompletionContext) -> Vec<CompletionItem>)`;

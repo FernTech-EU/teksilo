@@ -35,6 +35,7 @@ use super::semantics;
 use super::state::{CodeEditorState, SharedState};
 use super::sync_cursor_signals;
 use crate::common::editor_runtime::CaretPolicy;
+use crate::common::text_nav::{CaretStep, LineStep, caret_step, deletes_word, line_step};
 
 /// What the dispatch decided, so the epilogue knows what to preserve.
 #[derive(Copy, Clone, PartialEq, Eq)]
@@ -195,26 +196,48 @@ pub(super) fn handle_key(
             }
 
             // --- Horizontal ---
-            Key::ArrowLeft if filter.accepts(nav_or_word(ctrl, CodeCommand::MoveLeft)) => {
-                let op = if ctrl {
-                    MoveOperation::WordLeft
-                } else {
-                    MoveOperation::Left
-                };
-                move_every_caret(&mut st, op, mode);
+            // The motion comes from `common::text_nav`, not from a bare "is
+            // the accelerator held?": on macOS word-jump is ⌥←/→ and ⌘←/→
+            // reaches the line edge, which no single boolean can say.
+            Key::ArrowLeft if filter.accepts(horizontal_command(caret_step(*modifiers), false)) => {
+                match caret_step(*modifiers) {
+                    CaretStep::LineEdge => smart_home(&mut st, mode),
+                    CaretStep::Word => move_every_caret(&mut st, MoveOperation::WordLeft, mode),
+                    CaretStep::Character => move_every_caret(&mut st, MoveOperation::Left, mode),
+                }
                 KeyAction::ClearPreferredX
             }
-            Key::ArrowRight if filter.accepts(nav_or_word(ctrl, CodeCommand::MoveRight)) => {
-                let op = if ctrl {
-                    MoveOperation::WordRight
-                } else {
-                    MoveOperation::Right
+            Key::ArrowRight if filter.accepts(horizontal_command(caret_step(*modifiers), true)) => {
+                let op = match caret_step(*modifiers) {
+                    CaretStep::LineEdge => MoveOperation::EndOfLine,
+                    CaretStep::Word => MoveOperation::WordRight,
+                    CaretStep::Character => MoveOperation::Right,
                 };
                 move_every_caret(&mut st, op, mode);
                 KeyAction::ClearPreferredX
             }
 
             // --- Vertical ---
+            // ⌘↑/↓ reaches the document edges on macOS. ⌥↑/↓ stays on
+            // move-line here rather than becoming a paragraph motion: that is
+            // the binding every code editor ships, on macOS too, and it is
+            // matched below.
+            Key::ArrowUp
+                if matches!(line_step(*modifiers), LineStep::Document)
+                    && filter.accepts(CodeCommand::MoveDocStart) =>
+            {
+                st.clear_extra_carets();
+                st.cursor.move_position(MoveOperation::Start, mode, 1);
+                KeyAction::ClearPreferredX
+            }
+            Key::ArrowDown
+                if matches!(line_step(*modifiers), LineStep::Document)
+                    && filter.accepts(CodeCommand::MoveDocEnd) =>
+            {
+                st.clear_extra_carets();
+                st.cursor.move_position(MoveOperation::End, mode, 1);
+                KeyAction::ClearPreferredX
+            }
             Key::ArrowUp if filter.accepts(CodeCommand::MoveUp) => {
                 move_every_caret(&mut st, MoveOperation::Up, mode);
                 KeyAction::KeepPreferredX
@@ -276,16 +299,17 @@ pub(super) fn handle_key(
             Key::Backspace if filter.accepts(CodeCommand::DeletePrev) => {
                 // Backspace between an empty auto-closed pair (`(|)`) deletes
                 // both in one keystroke; otherwise the ordinary delete runs.
-                // Never on a word-delete (Ctrl held), which is a different verb.
-                if !ctrl && semantics::try_pair_backspace(&mut st) {
+                // Never on a word-delete, which is a different verb.
+                let word = deletes_word(*modifiers);
+                if !word && semantics::try_pair_backspace(&mut st) {
                     KeyAction::ClearPreferredX
                 } else {
-                    delete_at_every_caret(&mut st, Direction::Backward, ctrl);
+                    delete_at_every_caret(&mut st, Direction::Backward, word);
                     KeyAction::ClearPreferredX
                 }
             }
             Key::Delete if filter.accepts(CodeCommand::DeleteNext) => {
-                delete_at_every_caret(&mut st, Direction::Forward, ctrl);
+                delete_at_every_caret(&mut st, Direction::Forward, deletes_word(*modifiers));
                 KeyAction::ClearPreferredX
             }
 
@@ -401,15 +425,20 @@ fn completion_trigger(key: &Key, ctrl: bool) -> Option<Trigger> {
     })
 }
 
-/// The word-variant of a horizontal command when Ctrl is held.
-fn nav_or_word(ctrl: bool, plain: CodeCommand) -> CodeCommand {
-    if !ctrl {
-        return plain;
-    }
-    match plain {
-        CodeCommand::MoveLeft => CodeCommand::MoveWordLeft,
-        CodeCommand::MoveRight => CodeCommand::MoveWordRight,
-        other => other,
+/// The command a horizontal arrow resolves to, so the policy filter is asked
+/// about the motion that will actually run — a `MoveWordLeft` veto has to bite
+/// on ⌥← the same way it bites on Ctrl+←.
+///
+/// Split from the chord-reading so the table stays testable on any host; only
+/// [`caret_step`] itself is platform-dependent.
+fn horizontal_command(step: CaretStep, forward: bool) -> CodeCommand {
+    match (step, forward) {
+        (CaretStep::Character, false) => CodeCommand::MoveLeft,
+        (CaretStep::Character, true) => CodeCommand::MoveRight,
+        (CaretStep::Word, false) => CodeCommand::MoveWordLeft,
+        (CaretStep::Word, true) => CodeCommand::MoveWordRight,
+        (CaretStep::LineEdge, false) => CodeCommand::MoveLineStart,
+        (CaretStep::LineEdge, true) => CodeCommand::MoveLineEnd,
     }
 }
 
@@ -782,4 +811,61 @@ pub(super) fn window_rect_at(st: &CodeEditorState, pos: usize) -> Option<teksilo
 pub(super) fn smart_home_for_test(state: &SharedState) {
     let mut st = state.borrow_mut();
     smart_home(&mut st, MoveMode::MoveAnchor);
+}
+
+#[cfg(test)]
+mod motion_tests {
+    use super::*;
+
+    // The chord → motion reading is covered in `common::text_nav`; what
+    // matters here is that each motion reaches the command the policy filter
+    // is asked about. On a Linux host `CaretStep::LineEdge` never arises from
+    // a real chord, so the mapping is only ever exercised by naming the step
+    // directly — which is the point of taking one.
+
+    #[test]
+    fn every_caret_step_maps_to_its_own_command() {
+        assert_eq!(
+            horizontal_command(CaretStep::Character, false),
+            CodeCommand::MoveLeft
+        );
+        assert_eq!(
+            horizontal_command(CaretStep::Character, true),
+            CodeCommand::MoveRight
+        );
+        assert_eq!(
+            horizontal_command(CaretStep::Word, false),
+            CodeCommand::MoveWordLeft
+        );
+        assert_eq!(
+            horizontal_command(CaretStep::Word, true),
+            CodeCommand::MoveWordRight
+        );
+        assert_eq!(
+            horizontal_command(CaretStep::LineEdge, false),
+            CodeCommand::MoveLineStart
+        );
+        assert_eq!(
+            horizontal_command(CaretStep::LineEdge, true),
+            CodeCommand::MoveLineEnd
+        );
+    }
+
+    #[test]
+    fn the_command_a_step_reports_is_the_one_that_runs() {
+        // A policy that forbids word motion must veto ⌥← on macOS exactly as
+        // it vetoes Ctrl+← elsewhere. That only holds while the filter is
+        // asked about the resolved motion rather than about `MoveLeft`.
+        for forward in [false, true] {
+            assert_ne!(
+                horizontal_command(CaretStep::Word, forward),
+                horizontal_command(CaretStep::Character, forward),
+                "a word motion must not be filtered as a character motion"
+            );
+            assert_ne!(
+                horizontal_command(CaretStep::LineEdge, forward),
+                horizontal_command(CaretStep::Character, forward),
+            );
+        }
+    }
 }

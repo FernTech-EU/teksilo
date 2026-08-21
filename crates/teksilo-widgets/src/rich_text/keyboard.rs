@@ -21,6 +21,8 @@ use teksilo_text::text_document::{
 };
 use teksilo_text::{CursorAffinity, TextDirection};
 
+use crate::common::text_nav::{self, CaretStep, LineStep};
+
 use super::clipboard;
 use super::policy::EditCommandKind;
 use super::state::{EditorState, SharedState};
@@ -128,6 +130,12 @@ pub(super) fn handle_key(
     // elsewhere. Testing both would make the Win key act as Ctrl on Linux and
     // leave ⌃C doing Copy on macOS, where Control belongs to the text system.
     let ctrl = modifiers.command();
+    // Which motion the arrow keys mean here. Not derivable from `ctrl`: on
+    // macOS word-jump is ⌥←/→ while ⌘←/→ reaches the line edge and ⌘↑/↓ the
+    // document, a three-way split no single accelerator flag can express.
+    // See `common::text_nav`.
+    let caret_motion = text_nav::caret_step(*modifiers);
+    let line_motion = text_nav::line_step(*modifiers);
     // Tab's escape hatch is the exception, and it needs physical Control too.
     // Ctrl+Tab hands focus to the next widget on every platform, macOS
     // included (⌘⇥ is the application switcher and never arrives), so the Tab
@@ -168,8 +176,12 @@ pub(super) fn handle_key(
                 // selection.
                 if shift && try_extend_cell_selection(&mut st, -1, 0) {
                     KeyAction::ClearPreferredX
+                } else if caret_motion == CaretStep::LineEdge {
+                    let edge = visual_line_edge(&st, VisualDirection::Left);
+                    move_cursor_to_line_edge(&mut st, edge, mode);
+                    KeyAction::LineEdgeMotion
                 } else {
-                    let op = visual_move(&st, VisualDirection::Left, ctrl);
+                    let op = visual_move(&st, VisualDirection::Left, caret_motion);
                     st.cursor.move_position(op, mode, 1);
                     settle_affinity_at_seam(&mut st, VisualDirection::Left);
                     KeyAction::LineEdgeMotion
@@ -178,8 +190,12 @@ pub(super) fn handle_key(
             Key::ArrowRight if filter.accepts(EditCommandKind::MoveRight) => {
                 if shift && try_extend_cell_selection(&mut st, 1, 0) {
                     KeyAction::ClearPreferredX
+                } else if caret_motion == CaretStep::LineEdge {
+                    let edge = visual_line_edge(&st, VisualDirection::Right);
+                    move_cursor_to_line_edge(&mut st, edge, mode);
+                    KeyAction::LineEdgeMotion
                 } else {
-                    let op = visual_move(&st, VisualDirection::Right, ctrl);
+                    let op = visual_move(&st, VisualDirection::Right, caret_motion);
                     st.cursor.move_position(op, mode, 1);
                     settle_affinity_at_seam(&mut st, VisualDirection::Right);
                     KeyAction::LineEdgeMotion
@@ -189,16 +205,32 @@ pub(super) fn handle_key(
                 if shift && try_extend_cell_selection(&mut st, 0, -1) {
                     KeyAction::ClearPreferredX
                 } else {
-                    move_cursor_vertical(&mut st, -1, mode);
-                    KeyAction::KeepPreferredX
+                    match vertical_op(line_motion, false) {
+                        Some(op) => {
+                            st.cursor.move_position(op, mode, 1);
+                            KeyAction::ClearPreferredX
+                        }
+                        None => {
+                            move_cursor_vertical(&mut st, -1, mode);
+                            KeyAction::KeepPreferredX
+                        }
+                    }
                 }
             }
             Key::ArrowDown if filter.accepts(EditCommandKind::MoveDown) => {
                 if shift && try_extend_cell_selection(&mut st, 0, 1) {
                     KeyAction::ClearPreferredX
                 } else {
-                    move_cursor_vertical(&mut st, 1, mode);
-                    KeyAction::KeepPreferredX
+                    match vertical_op(line_motion, true) {
+                        Some(op) => {
+                            st.cursor.move_position(op, mode, 1);
+                            KeyAction::ClearPreferredX
+                        }
+                        None => {
+                            move_cursor_vertical(&mut st, 1, mode);
+                            KeyAction::KeepPreferredX
+                        }
+                    }
                 }
             }
             Key::PageUp if filter.accepts(EditCommandKind::PageUp) => {
@@ -272,8 +304,8 @@ pub(super) fn handle_key(
             }
             // --- Editor-preset mutating commands ---
             Key::Backspace if filter.accepts(EditCommandKind::DeletePrev) => {
-                if ctrl {
-                    // Ctrl+Backspace = delete word to the left.
+                if text_nav::deletes_word(*modifiers) {
+                    // Delete the word to the left — Ctrl+⌫, ⌥⌫ on macOS.
                     // Select the word, then delete the selection —
                     // matches godot rich_text_edit.rs:580 (there is
                     // no dedicated delete-word API on TextCursor).
@@ -328,7 +360,7 @@ pub(super) fn handle_key(
                 KeyAction::ClearPreferredX
             }
             Key::Delete if filter.accepts(EditCommandKind::DeleteNext) => {
-                if ctrl {
+                if text_nav::deletes_word(*modifiers) {
                     if !st.cursor.has_selection() {
                         st.cursor
                             .move_position(MoveOperation::WordRight, MoveMode::KeepAnchor, 1);
@@ -1120,7 +1152,7 @@ fn ensure_caret_h_visible_locked(st: &mut EditorState) {
     st.scroll_x.set(new_x.clamp(0.0, max_x));
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 enum LineEdge {
     Start,
     End,
@@ -1147,17 +1179,72 @@ enum VisualDirection {
 /// `resolve_move` stays pure logical stepping; choosing *which* logical
 /// primitive to invoke is the widget layer's job, because only it knows
 /// how the text was laid out.
-fn visual_move(st: &EditorState, pressed: VisualDirection, word: bool) -> MoveOperation {
+fn visual_move(st: &EditorState, pressed: VisualDirection, step: CaretStep) -> MoveOperation {
+    horizontal_op(moves_forward(st, pressed), step)
+}
+
+/// The stepping primitive for a horizontal motion already resolved to a
+/// direction. Split from [`visual_move`] so the table is testable without an
+/// `EditorState` — and, more to the point, on a host whose platform never
+/// produces `CaretStep::LineEdge`.
+fn horizontal_op(forward: bool, step: CaretStep) -> MoveOperation {
+    match (forward, step) {
+        (true, CaretStep::Word) => MoveOperation::WordRight,
+        (false, CaretStep::Word) => MoveOperation::WordLeft,
+        // `LineEdge` never reaches here — the caller routes it to
+        // `move_cursor_to_line_edge`, which needs the line's extent rather
+        // than a stepping primitive. Treat it as a character step so a future
+        // caller that forgets still moves the caret somewhere sane.
+        (true, _) => MoveOperation::Right,
+        (false, _) => MoveOperation::Left,
+    }
+}
+
+/// The whole-document / whole-block move a vertical arrow resolves to, or
+/// `None` when it is the ordinary one-visual-line step (which needs the
+/// typesetter, not a logical primitive).
+fn vertical_op(step: LineStep, downward: bool) -> Option<MoveOperation> {
+    match (step, downward) {
+        (LineStep::Document, false) => Some(MoveOperation::Start),
+        (LineStep::Document, true) => Some(MoveOperation::End),
+        (LineStep::Paragraph, false) => Some(MoveOperation::StartOfBlock),
+        (LineStep::Paragraph, true) => Some(MoveOperation::EndOfBlock),
+        (LineStep::Line, _) => None,
+    }
+}
+
+/// Which *logical* line edge the user pressed towards.
+///
+/// `move_cursor_to_line_edge` speaks in logical edges, deliberately, so Home
+/// and End land on their own ends in right-to-left text. macOS's ⌘←/⌘→ are
+/// visual (`moveToLeftEndOfLine:`), so the pressed direction has to be folded
+/// through the caret's direction the same way [`visual_move`] folds character
+/// and word steps — otherwise ⌘← and the ← next to it would disagree about
+/// which way "left" is inside an Arabic paragraph.
+fn visual_line_edge(st: &EditorState, pressed: VisualDirection) -> LineEdge {
+    line_edge_op(moves_forward(st, pressed))
+}
+
+/// The logical line edge reached by a horizontal motion already resolved to a
+/// direction. Split for the same reason as [`horizontal_op`].
+fn line_edge_op(forward: bool) -> LineEdge {
+    if forward {
+        LineEdge::End
+    } else {
+        LineEdge::Start
+    }
+}
+
+/// Whether a press in `pressed` walks *forward* through the text, given the
+/// direction of the run the caret sits in.
+///
+/// Taken at the caret rather than from the paragraph, so an English quotation
+/// inside Arabic prose steps the way it reads.
+fn moves_forward(st: &EditorState, pressed: VisualDirection) -> bool {
     let rtl = st.engine.direction_at(st.cursor.position()) == TextDirection::RightToLeft;
-    let forward = match pressed {
+    match pressed {
         VisualDirection::Right => !rtl,
         VisualDirection::Left => rtl,
-    };
-    match (forward, word) {
-        (true, false) => MoveOperation::Right,
-        (true, true) => MoveOperation::WordRight,
-        (false, false) => MoveOperation::Left,
-        (false, true) => MoveOperation::WordLeft,
     }
 }
 
@@ -1693,4 +1780,86 @@ pub(super) fn try_extend_cell_selection(st: &mut EditorState, dcol: i32, drow: i
         column.max(target_col),
     );
     true
+}
+
+#[cfg(test)]
+mod motion_tests {
+    use super::*;
+
+    // The chord → motion reading lives in `common::text_nav` and is tested
+    // there against both conventions. These cover the other half: that each
+    // motion, once resolved, reaches the right primitive — including the two
+    // (`LineEdge`, `Document`, `Paragraph`) that no chord on a Linux host can
+    // produce, and that a macOS run would otherwise be the first to exercise.
+
+    #[test]
+    fn a_word_step_walks_words_and_a_character_step_walks_characters() {
+        assert_eq!(
+            horizontal_op(true, CaretStep::Word),
+            MoveOperation::WordRight
+        );
+        assert_eq!(
+            horizontal_op(false, CaretStep::Word),
+            MoveOperation::WordLeft
+        );
+        assert_eq!(
+            horizontal_op(true, CaretStep::Character),
+            MoveOperation::Right
+        );
+        assert_eq!(
+            horizontal_op(false, CaretStep::Character),
+            MoveOperation::Left
+        );
+    }
+
+    #[test]
+    fn the_line_edge_follows_the_direction_pressed() {
+        // ⌘← is visual on macOS, so in right-to-left text — where `forward` is
+        // false for a press to the *right* — it must reach the logical end.
+        assert_eq!(line_edge_op(false), LineEdge::Start);
+        assert_eq!(line_edge_op(true), LineEdge::End);
+    }
+
+    #[test]
+    fn a_line_edge_step_never_becomes_a_stepping_primitive() {
+        // The caller routes `LineEdge` away before `horizontal_op` sees it.
+        // If that ever changes, the caret must still move by one character
+        // rather than silently jumping a word.
+        assert_eq!(
+            horizontal_op(true, CaretStep::LineEdge),
+            MoveOperation::Right
+        );
+        assert_eq!(
+            horizontal_op(false, CaretStep::LineEdge),
+            MoveOperation::Left
+        );
+    }
+
+    #[test]
+    fn vertical_document_and_paragraph_steps_reach_their_edges() {
+        assert_eq!(
+            vertical_op(LineStep::Document, false),
+            Some(MoveOperation::Start)
+        );
+        assert_eq!(
+            vertical_op(LineStep::Document, true),
+            Some(MoveOperation::End)
+        );
+        assert_eq!(
+            vertical_op(LineStep::Paragraph, false),
+            Some(MoveOperation::StartOfBlock)
+        );
+        assert_eq!(
+            vertical_op(LineStep::Paragraph, true),
+            Some(MoveOperation::EndOfBlock)
+        );
+    }
+
+    #[test]
+    fn an_ordinary_line_step_is_left_to_the_typesetter() {
+        // One visual line is not a logical primitive — a wrapped paragraph has
+        // many, and only the typesetter knows where. `None` says "not mine".
+        assert_eq!(vertical_op(LineStep::Line, false), None);
+        assert_eq!(vertical_op(LineStep::Line, true), None);
+    }
 }

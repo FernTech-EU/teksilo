@@ -13,6 +13,34 @@ by crate for clarity, not because crates version independently.
 
 ## [Unreleased]
 
+### Fixed — `teksilo-widgets`: caret motion follows the platform's own layout
+
+Word-jump, the line edge and the document edge do not merely sit on a different
+modifier on macOS — they are laid out differently. Windows and Linux put word
+on `Ctrl+←/→` and the line edges on bare `Home`/`End`; macOS spreads the same
+motions across three modifiers on the arrows themselves: `⌥←/→` word, `⌘←/→`
+line edge, `⌘↑/↓` document, `⌥↑/↓` paragraph.
+
+Every text surface read a single "is the accelerator held?" flag, so on macOS
+`⌘←` jumped a word (it should reach the start of the line), `⌘↑` moved one line
+(it should reach the top of the document), and `⌥←` did nothing at all. Reading
+the chords through the new `common::text_nav` fixes `RichTextEditor`,
+`CodeEditor`, and `TextInput` / `SearchField` / `PasswordField` / `SpinBox` /
+`DateEdit` through the shared `TextInputField`. Word-delete moves with them —
+`⌥⌫` on macOS, `Ctrl+⌫` elsewhere. `LogView` is untouched: it scrolls a
+read-only view and has no caret to move.
+
+Windows and Linux are unchanged. `Alt+↑/↓` keeps move-line in the code editor
+on every platform (the binding every code editor ships, macOS included), so
+only the rich-text editor reads `⌥↑/↓` as a paragraph motion. `⌘⌫` means
+delete-to-line-start on macOS, which is not implemented; it falls through to a
+plain single-character delete rather than removing more than was asked for.
+
+`⌘←/→` folds through the caret's text direction the same way character and word
+steps already do, so all three horizontal motions agree about which way "left"
+is inside an Arabic paragraph.
+
+
 ### Changed — `teksilo-core`: a declared `Ctrl` shortcut now fires on ⌘ on macOS
 
 **Behaviour change on macOS.** A `Shortcut` whose declared default is a `Ctrl`

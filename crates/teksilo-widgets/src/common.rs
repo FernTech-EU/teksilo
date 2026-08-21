@@ -16,6 +16,7 @@ pub(crate) mod editor_runtime;
 pub(crate) mod row_metrics;
 pub(crate) mod row_offsets;
 pub(crate) mod scroll;
+pub(crate) mod text_nav;
 #[cfg(test)]
 pub(crate) mod thumb_drag_test;
 pub(crate) mod type_ahead;

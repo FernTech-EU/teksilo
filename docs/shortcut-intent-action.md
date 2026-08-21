@@ -105,6 +105,17 @@ Shortcut::new("view.next_tab")
     .build()
 ```
 
+### Caret motion is a separate question
+
+Inside a text surface the accelerator is not the whole story. macOS lays the
+caret motions out across *three* modifiers — `⌥←/→` for word, `⌘←/→` for the
+line edge, `⌘↑/↓` for the document — where Windows and Linux use `Ctrl+←/→`
+plus bare `Home`/`End`. No single "is the accelerator held?" flag can express
+that, so `RichTextEditor`, `CodeEditor` and every field built on
+`TextInputField` read their arrows through
+[`common::text_nav`](../crates/teksilo-widgets/src/common/text_nav.rs) instead.
+That is internal to the widgets; app-declared `Shortcut`s are unaffected.
+
 ---
 
 ## `Shortcut`
