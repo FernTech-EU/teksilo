@@ -207,6 +207,37 @@ MenuModel::new()
 - **Help** is a localized titled submenu registered as the help menu. Custom Help
   items beyond that are best declared as a normal `.menu(...)`.
 
+### ⚠ Quit, and apps with something to lose
+
+The App menu's **Quit** is bound to AppKit's `terminate:` by default. That is
+what makes ⌘Q work with no wiring at all — but `terminate:` exits the process
+directly: it does not run winit's exit path, so no `LoopExiting` hook, no
+close guard, nothing the app registered.
+
+An in-app ⌘Q shortcut does **not** save you. AppKit dispatches main-menu key
+equivalents *before* the responder chain, so the App menu's item wins and the
+app's own shortcut never sees the keystroke — the app looks wired up and is not.
+The same is true of a Quit row the app puts in its own File menu.
+
+So an app that must ask before exiting — unsaved work to confirm, a session to
+flush, a job to stop — routes the item instead:
+
+```rust
+MenuModel::new().standard_menu(
+    StandardMenu::app()
+        .title(tr!(app_name()))
+        .quit(tr!(quit()))
+        .quit_intent("app.quit"),   // the app's own guarded action
+);
+```
+
+Quit then becomes an ordinary routed item — same ⌘Q, same
+`Intent`/`Action` pipeline as every other menu item, `IntentSource::Menu` — and
+**the app owns the exit from that point on**: nothing terminates on its behalf.
+Leave `quit_intent` unset and the platform behaviour is unchanged, which is also
+what the auto-injected default App menu uses (a model that declares no App menu
+has declared no quit handler to route to either).
+
 ## Architecture
 
 | layer | type | crate |

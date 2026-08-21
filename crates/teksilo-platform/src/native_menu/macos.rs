@@ -228,12 +228,14 @@ fn build_root_menu(
             NativeMenuNode::Standard {
                 role: StandardMenuRole::App,
                 labels,
+                quit_item,
             } => {
-                bar.addItem(&app_menu_item(mtm, labels));
+                bar.addItem(&app_menu_item(mtm, labels, *quit_item, target, items));
             }
             NativeMenuNode::Standard {
                 role: StandardMenuRole::Window,
                 labels,
+                ..
             } => {
                 let item = top_level_item(mtm, &labels.title);
                 let sub = NSMenu::initWithTitle(
@@ -258,6 +260,7 @@ fn build_root_menu(
             NativeMenuNode::Standard {
                 role: StandardMenuRole::Help,
                 labels,
+                ..
             } => {
                 let item = top_level_item(mtm, &labels.title);
                 let sub = NSMenu::initWithTitle(
@@ -396,9 +399,22 @@ fn control_state(check: NativeCheck) -> NSControlStateValue {
 }
 
 /// Build the conventional macOS application menu (About / Hide / Quit) from
-/// localized `labels`. Items target the standard responder-chain selectors, so
-/// they work without any app wiring.
-fn app_menu_item(mtm: MainThreadMarker, labels: &StandardLabels) -> Retained<NSMenuItem> {
+/// localized `labels`. About and Hide target the standard responder-chain
+/// selectors, so they work without any app wiring.
+///
+/// Quit has two shapes. With `quit_item` `None` it is `terminate:` like its
+/// neighbours — the behaviour every app gets for free, including one that
+/// declares no menu model at all. With `Some(id)` it becomes an ordinary routed
+/// item under that id, keeping ⌘Q, so an app that must ask before exiting hears
+/// about it; see `NativeMenuNode::Standard::quit_item` for why an app-side ⌘Q
+/// shortcut cannot do that job itself.
+fn app_menu_item(
+    mtm: MainThreadMarker,
+    labels: &StandardLabels,
+    quit_item: Option<MenuItemId>,
+    target: &TeksiloMenuTarget,
+    items: &mut HashMap<MenuItemId, Retained<NSMenuItem>>,
+) -> Retained<NSMenuItem> {
     let bar_item = top_level_item(mtm, &labels.title);
     let menu = NSMenu::initWithTitle(mtm.alloc::<NSMenu>(), &NSString::from_str(&labels.title));
     menu.setAutoenablesItems(false);
@@ -412,7 +428,31 @@ fn app_menu_item(mtm: MainThreadMarker, labels: &StandardLabels) -> Retained<NSM
     menu.addItem(&NSMenuItem::separatorItem(mtm));
     menu.addItem(&standard_item(mtm, &labels.hide, sel!(hide:), "h"));
     menu.addItem(&NSMenuItem::separatorItem(mtm));
-    menu.addItem(&standard_item(mtm, &labels.quit, sel!(terminate:), "q"));
+    match quit_item {
+        None => menu.addItem(&standard_item(mtm, &labels.quit, sel!(terminate:), "q")),
+        Some(id) => {
+            let item = leaf_item(mtm, &labels.quit, target);
+            item.setTag(id.raw() as isize);
+            // `setAutoenablesItems(false)` above means nothing enables this for
+            // us — an item left disabled would swallow ⌘Q silently, which is the
+            // one failure this whole path exists to rule out.
+            item.setEnabled(true);
+            apply_key_equiv(
+                &item,
+                Some(&NativeKeyEquivalent {
+                    key: "q".to_string(),
+                    command: true,
+                    shift: false,
+                    alt: false,
+                    control: false,
+                }),
+            );
+            menu.addItem(&item);
+            // Registered like any routed item so a later `update_item` — a
+            // relabel on a locale change, say — can still find it.
+            items.insert(id, item);
+        }
+    }
 
     bar_item.setSubmenu(Some(&menu));
     bar_item

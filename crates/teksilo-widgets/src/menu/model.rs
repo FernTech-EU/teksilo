@@ -203,6 +203,11 @@ pub struct StandardMenu {
     quit: LocalizedString,
     minimize: LocalizedString,
     zoom: LocalizedString,
+    /// Set by [`quit_intent`](Self::quit_intent): the intent to fire, paired
+    /// with the id the native item is built under. Minted once here rather than
+    /// per install, so the id an activation is recorded against survives every
+    /// rebuild of the model.
+    quit_route: Option<(&'static str, MenuItemId)>,
 }
 
 impl StandardMenu {
@@ -217,6 +222,7 @@ impl StandardMenu {
             quit: LocalizedString::literal("Quit"),
             minimize: LocalizedString::literal(""),
             zoom: LocalizedString::literal(""),
+            quit_route: None,
         }
     }
 
@@ -230,6 +236,7 @@ impl StandardMenu {
             quit: LocalizedString::literal(""),
             minimize: LocalizedString::literal("Minimize"),
             zoom: LocalizedString::literal("Zoom"),
+            quit_route: None,
         }
     }
 
@@ -243,6 +250,7 @@ impl StandardMenu {
             quit: LocalizedString::literal(""),
             minimize: LocalizedString::literal(""),
             zoom: LocalizedString::literal(""),
+            quit_route: None,
         }
     }
 
@@ -289,6 +297,52 @@ impl StandardMenu {
     pub fn zoom(mut self, label: impl Into<LocalizedString>) -> Self {
         self.zoom = label.into();
         self
+    }
+
+    /// Route the App menu's **Quit** through `intent` instead of the platform's
+    /// terminate selector, keeping its ⌘Q key equivalent.
+    ///
+    /// Set this whenever quitting has to pass through the app first — unsaved
+    /// work to confirm, a session to write out, a background job to stop. By
+    /// default the item is the platform's own (`terminate:` on macOS), which
+    /// exits immediately: it never reaches winit's exit path, so no
+    /// `LoopExiting` hook and nothing the app registered runs.
+    ///
+    /// An in-app ⌘Q shortcut is **not** a substitute. AppKit dispatches
+    /// main-menu key equivalents before the responder chain, so the App menu's
+    /// item wins and the app's own shortcut never sees the keystroke — the app
+    /// looks wired up and is not. Routing the item is the only place that
+    /// decision can be taken.
+    ///
+    /// Whatever `intent` resolves to now owns the exit — nothing terminates on
+    /// the app's behalf once this is set.
+    ///
+    /// ```ignore
+    /// StandardMenu::app()
+    ///     .title(tr!(app_name()))
+    ///     .quit(tr!(quit()))
+    ///     .quit_intent("app.quit")   // the guarded action, same as File ▸ Quit
+    /// ```
+    pub fn quit_intent(mut self, intent: &'static str) -> Self {
+        self.quit_route = Some((intent, MenuItemId::next()));
+        self
+    }
+
+    /// The intent [`quit_intent`](Self::quit_intent) installed, or `None` if
+    /// Quit is still the platform's own terminate selector.
+    ///
+    /// Public so an app can *test* that its Quit is guarded. Everything the
+    /// routing does happens on macOS, where a downstream test suite generally
+    /// does not run, so without a getter the difference between a guarded ⌘Q and
+    /// an unguarded one is invisible from the app's side — which is the same
+    /// blind spot that let the unrouted default ship in the first place.
+    pub fn quit_intent_name(&self) -> Option<&'static str> {
+        self.quit_route.map(|(intent, _)| intent)
+    }
+
+    /// The intent + item id [`quit_intent`](Self::quit_intent) installed, if any.
+    pub(crate) fn quit_route(&self) -> Option<(&'static str, MenuItemId)> {
+        self.quit_route
     }
 
     /// Resolve to the platform's localized-label struct (widget-layer i18n

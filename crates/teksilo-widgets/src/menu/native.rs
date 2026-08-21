@@ -101,6 +101,10 @@ pub(crate) fn install(model: &MenuModel, ctx: &BuildContext) -> Option<NativeMen
             NativeMenuNode::Standard {
                 role: StandardMenuRole::App,
                 labels: StandardMenu::app().resolve_labels(),
+                // Deliberately unrouted: a model that declares no App menu has
+                // declared no quit handler either, so `terminate:` is the only
+                // thing that can still make ⌘Q work here.
+                quit_item: None,
             },
         );
     }
@@ -184,10 +188,7 @@ fn resolve_node(
 ) -> Option<NativeMenuNode> {
     match node {
         MenuNode::Separator => Some(NativeMenuNode::Separator),
-        MenuNode::Standard(sm) => Some(NativeMenuNode::Standard {
-            role: sm.role(),
-            labels: sm.resolve_labels(),
-        }),
+        MenuNode::Standard(sm) => Some(resolve_standard(sm, activations)),
         MenuNode::Submenu {
             title, children, ..
         } => Some(NativeMenuNode::Submenu {
@@ -246,6 +247,37 @@ fn resolve_node(
                 check,
             })
         }
+    }
+}
+
+/// Resolve one platform-standard menu into its boundary node.
+///
+/// Split out of [`resolve_node`] because it needs no [`BuildContext`]: a
+/// standard menu carries labels and, optionally, a routed Quit, and the
+/// platform fills in the rest. That makes it the one part of the native bridge
+/// a test can exercise on any OS — everything around it is behind the macOS
+/// gate in `MenuBar::build`, so a routing bug would otherwise only be
+/// observable on the platform it breaks.
+fn resolve_standard(
+    sm: &StandardMenu,
+    activations: &mut HashMap<MenuItemId, NativeMenuActivation>,
+) -> NativeMenuNode {
+    // A routed Quit is an ordinary activation under an id the model minted
+    // once, so it survives every rebuild — unlike the rest of a standard menu,
+    // which the platform fills in from labels alone.
+    if let Some((intent, id)) = sm.quit_route() {
+        activations.insert(
+            id,
+            NativeMenuActivation {
+                intent: Some(intent),
+                action: None,
+            },
+        );
+    }
+    NativeMenuNode::Standard {
+        role: sm.role(),
+        labels: sm.resolve_labels(),
+        quit_item: sm.quit_route().map(|(_, id)| id),
     }
 }
 
@@ -316,4 +348,106 @@ fn key_to_equiv(key: Key) -> String {
         other => return other.to_char().map(|c| c.to_string()).unwrap_or_default(),
     };
     special.to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use teksilo_i18n::LocalizedString;
+
+    fn labels_of(node: &NativeMenuNode) -> &teksilo_platform::native_menu::StandardLabels {
+        match node {
+            NativeMenuNode::Standard { labels, .. } => labels,
+            _ => panic!("expected a standard menu node"),
+        }
+    }
+
+    fn quit_item_of(node: &NativeMenuNode) -> Option<MenuItemId> {
+        match node {
+            NativeMenuNode::Standard { quit_item, .. } => *quit_item,
+            _ => panic!("expected a standard menu node"),
+        }
+    }
+
+    /// The default is the platform's own Quit. An app that declared no handler
+    /// still gets a working ⌘Q out of `terminate:`, and that guarantee is what
+    /// the auto-injected App menu rests on.
+    #[test]
+    fn a_standard_app_menu_routes_nothing_by_default() {
+        let mut activations = HashMap::new();
+        let node = resolve_standard(&StandardMenu::app(), &mut activations);
+        assert_eq!(quit_item_of(&node), None);
+        assert!(
+            activations.is_empty(),
+            "an unrouted standard menu owns no activation"
+        );
+    }
+
+    /// With a quit intent the item carries an id, and that id resolves to the
+    /// intent — the whole point being that ⌘Q reaches the app instead of
+    /// terminating past it.
+    #[test]
+    fn a_quit_intent_becomes_a_routed_item_with_an_activation() {
+        let mut activations = HashMap::new();
+        let node = resolve_standard(
+            &StandardMenu::app().quit_intent("app.quit"),
+            &mut activations,
+        );
+        let id = quit_item_of(&node).expect("a routed quit carries an item id");
+        let activation = activations
+            .get(&id)
+            .expect("the routed id resolves to an activation");
+        assert_eq!(activation.intent, Some("app.quit"));
+        assert!(
+            activation.action.is_none(),
+            "routing by name only — no closure to run on the side"
+        );
+    }
+
+    /// The id is minted with the model, not with the snapshot. A fresh one per
+    /// install would still route (the map is rebuilt alongside it), but any
+    /// `update_item` delta held from an earlier build would address a menu item
+    /// that no longer exists.
+    #[test]
+    fn the_routed_quit_id_is_stable_across_installs() {
+        let menu = StandardMenu::app().quit_intent("app.quit");
+        let mut first = HashMap::new();
+        let mut second = HashMap::new();
+        assert_eq!(
+            quit_item_of(&resolve_standard(&menu, &mut first)),
+            quit_item_of(&resolve_standard(&menu, &mut second)),
+        );
+    }
+
+    /// Two App menus — one per window, as a multi-window app builds them — must
+    /// not share an id, or the second window's activation map overwrites the
+    /// first's and closing either window unroutes both.
+    #[test]
+    fn two_app_menus_get_distinct_routed_ids() {
+        let mut activations = HashMap::new();
+        let a = resolve_standard(
+            &StandardMenu::app().quit_intent("app.quit"),
+            &mut activations,
+        );
+        let b = resolve_standard(
+            &StandardMenu::app().quit_intent("app.quit"),
+            &mut activations,
+        );
+        assert_ne!(quit_item_of(&a), quit_item_of(&b));
+        assert_eq!(activations.len(), 2);
+    }
+
+    /// Routing changes what Quit *does*, never what it says: the label still
+    /// comes from the app's i18n layer, as every other standard label does.
+    #[test]
+    fn routing_leaves_the_localized_labels_alone() {
+        let mut activations = HashMap::new();
+        let node = resolve_standard(
+            &StandardMenu::app()
+                .quit(LocalizedString::literal("Quitter"))
+                .quit_intent("app.quit"),
+            &mut activations,
+        );
+        assert_eq!(labels_of(&node).quit, "Quitter");
+    }
 }

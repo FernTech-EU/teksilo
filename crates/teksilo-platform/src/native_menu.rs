@@ -156,6 +156,22 @@ pub enum NativeMenuNode {
         role: StandardMenuRole,
         /// Localized display strings (supplied by the widget layer).
         labels: StandardLabels,
+        /// App menu only: route **Quit** back to the app under this id instead
+        /// of firing the platform's own terminate selector.
+        ///
+        /// `None` — the default — keeps the system behaviour: on macOS the item
+        /// is bound to `terminate:`, which works with no app wiring at all and
+        /// is why ⌘Q is live even for an app that declares no menus.
+        ///
+        /// `Some(id)` builds Quit as an ordinary routed item — same id → the
+        /// activation recorded for it, same ⌘Q key equivalent — so choosing it
+        /// (or pressing ⌘Q) reaches the app's own handler. **An app with
+        /// anything to lose on exit must set this**: a main-menu key equivalent
+        /// is dispatched by the platform before the responder chain, and
+        /// `terminate:` does not run winit's exit path, so an in-app quit
+        /// shortcut is shadowed rather than merely duplicated. Whatever the app
+        /// routes to then owes the exit itself — nothing here terminates.
+        quit_item: Option<MenuItemId>,
     },
 }
 

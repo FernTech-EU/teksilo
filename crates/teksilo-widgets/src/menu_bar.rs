@@ -2846,14 +2846,18 @@ mod tests {
             .menu_for(TeksiloWindowId::new(1))
             .expect("native snapshot recorded for the window");
 
-        // App menu is first, with the localized Quit label (not "Quit").
+        // App menu is first, with the localized Quit label (not "Quit"), and an
+        // unrouted Quit — this model set no quit intent, so the item stays on
+        // the platform's `terminate:` selector.
         match &snap.roots[0] {
             NativeMenuNode::Standard {
                 role: StandardMenuRole::App,
                 labels,
+                quit_item,
             } => {
                 assert_eq!(labels.quit, "Quitter", "Quit label routes through i18n");
                 assert_eq!(labels.about, "About", "default About label resolved");
+                assert_eq!(*quit_item, None, "no quit intent declared, no routing");
             }
             other => panic!("expected leading App menu, got {other:?}"),
         }
