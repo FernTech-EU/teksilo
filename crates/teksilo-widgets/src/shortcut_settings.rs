@@ -674,13 +674,13 @@ mod tests {
         tree.shortcut_registry_mut().register(
             Shortcut::new("app.save")
                 .name("Save")
-                .primary(KeyStroke::ctrl(Key::S))
+                .primary(KeyStroke::command(Key::S))
                 .build(),
         );
         tree.shortcut_registry_mut().register(
             Shortcut::new("app.open")
                 .name("Open")
-                .primary(KeyStroke::ctrl(Key::O))
+                .primary(KeyStroke::command(Key::O))
                 .build(),
         );
         let settings = tree.add(ShortcutSettings::new());
@@ -694,7 +694,7 @@ mod tests {
         let mut reg = teksilo_core::shortcut::ShortcutRegistry::new();
         reg.register(
             Shortcut::new("app.save")
-                .primary(KeyStroke::ctrl(Key::S))
+                .primary(KeyStroke::command(Key::S))
                 .build(),
         );
         // Delete with no modifiers during capture → primary = None.
@@ -712,7 +712,7 @@ mod tests {
         let mut reg = teksilo_core::shortcut::ShortcutRegistry::new();
         reg.register(
             Shortcut::new("app.save")
-                .primary(KeyStroke::ctrl(Key::S))
+                .primary(KeyStroke::command(Key::S))
                 .build(),
         );
         apply_capture(
@@ -724,7 +724,7 @@ mod tests {
         // Still the default — escape must not mutate anything.
         assert_eq!(
             reg.effective("app.save").unwrap().primary,
-            Some(KeyStroke::ctrl(Key::S))
+            Some(KeyStroke::command(Key::S))
         );
     }
 
@@ -733,24 +733,24 @@ mod tests {
         let mut reg = teksilo_core::shortcut::ShortcutRegistry::new();
         reg.register(
             Shortcut::new("app.save")
-                .primary(KeyStroke::ctrl(Key::S))
+                .primary(KeyStroke::command(Key::S))
                 .build(),
         );
         reg.register(
             Shortcut::new("app.sync")
-                .primary(KeyStroke::ctrl(Key::K))
+                .primary(KeyStroke::command(Key::K))
                 .build(),
         );
         // User rebinds app.sync to Ctrl+S (which app.save owns).
         apply_capture(
             &mut reg,
-            KeyStroke::ctrl(Key::S),
+            KeyStroke::command(Key::S),
             "app.sync",
             SlotKind::Primary,
         );
         assert_eq!(
             reg.effective("app.sync").unwrap().primary,
-            Some(KeyStroke::ctrl(Key::S)),
+            Some(KeyStroke::command(Key::S)),
             "sync takes the new chord"
         );
         assert_eq!(
@@ -765,7 +765,7 @@ mod tests {
         let mut reg = teksilo_core::shortcut::ShortcutRegistry::new();
         reg.register(
             Shortcut::new("edit.undo")
-                .primary(KeyStroke::ctrl(Key::Z))
+                .primary(KeyStroke::command(Key::Z))
                 .secondary(KeyStroke::alt(Key::Backspace))
                 .build(),
         );
@@ -783,7 +783,7 @@ mod tests {
             Some(KeyStroke::alt(Key::Backspace))
         );
         let undo = reg.effective("edit.undo").unwrap();
-        assert_eq!(undo.primary, Some(KeyStroke::ctrl(Key::Z)));
+        assert_eq!(undo.primary, Some(KeyStroke::command(Key::Z)));
         assert_eq!(
             undo.secondary, None,
             "the conflicting secondary slot is the one auto-unbound"
@@ -796,19 +796,19 @@ mod tests {
         reg.register(
             Shortcut::new("app.save")
                 .name("Save")
-                .primary(KeyStroke::ctrl(Key::S))
+                .primary(KeyStroke::command(Key::S))
                 .build(),
         );
         reg.register(
             Shortcut::new("app.sync")
-                .primary(KeyStroke::ctrl(Key::K))
+                .primary(KeyStroke::command(Key::K))
                 .build(),
         );
         let pending: Signal<Option<PendingRebind>> = Signal::new(None);
         // Confirm mode: rebinding app.sync to Ctrl+S must NOT mutate the
         // registry; it parks a pending conflict instead.
         handle_capture_event(
-            KeyStroke::ctrl(Key::S),
+            KeyStroke::command(Key::S),
             &mut reg,
             "app.sync",
             SlotKind::Primary,
@@ -818,12 +818,12 @@ mod tests {
         );
         assert_eq!(
             reg.effective("app.save").unwrap().primary,
-            Some(KeyStroke::ctrl(Key::S)),
+            Some(KeyStroke::command(Key::S)),
             "save keeps its binding until the user confirms"
         );
         assert_eq!(
             reg.effective("app.sync").unwrap().primary,
-            Some(KeyStroke::ctrl(Key::K)),
+            Some(KeyStroke::command(Key::K)),
             "sync is unchanged until the user confirms"
         );
         let p = pending.get().expect("a pending rebind is parked");
@@ -839,12 +839,12 @@ mod tests {
         reg.register(
             Shortcut::new("app.save")
                 .name("Save")
-                .primary(KeyStroke::ctrl(Key::S))
+                .primary(KeyStroke::command(Key::S))
                 .build(),
         );
         reg.register(
             Shortcut::new("app.sync")
-                .primary(KeyStroke::ctrl(Key::K))
+                .primary(KeyStroke::command(Key::K))
                 .build(),
         );
         let seen: Rc<RefCell<Option<ShortcutConflict>>> = Rc::new(RefCell::new(None));
@@ -854,7 +854,7 @@ mod tests {
         let pending: Signal<Option<PendingRebind>> = Signal::new(None);
         // Immediate mode (confirm = false): callback still fires.
         handle_capture_event(
-            KeyStroke::ctrl(Key::S),
+            KeyStroke::command(Key::S),
             &mut reg,
             "app.sync",
             SlotKind::Primary,
@@ -865,12 +865,12 @@ mod tests {
         let c = seen.borrow().clone().expect("callback fired");
         assert_eq!(c.displaced_id, "app.save");
         assert_eq!(c.displaced_name, "Save");
-        assert_eq!(c.keystroke, KeyStroke::ctrl(Key::S));
+        assert_eq!(c.keystroke, KeyStroke::command(Key::S));
         // And the immediate rebind still happened.
         assert_eq!(reg.effective("app.save").unwrap().primary, None);
         assert_eq!(
             reg.effective("app.sync").unwrap().primary,
-            Some(KeyStroke::ctrl(Key::S))
+            Some(KeyStroke::command(Key::S))
         );
     }
 
@@ -881,21 +881,21 @@ mod tests {
             Shortcut::new("app.save")
                 .name("Save")
                 .category("File")
-                .primary(KeyStroke::ctrl(Key::S))
+                .primary(KeyStroke::command(Key::S))
                 .build(),
         );
         tree.shortcut_registry_mut().register(
             Shortcut::new("edit.bold")
                 .name("Bold")
                 .category("Format")
-                .primary(KeyStroke::ctrl(Key::B))
+                .primary(KeyStroke::command(Key::B))
                 .build(),
         );
         tree.shortcut_registry_mut().register(
             Shortcut::new("edit.italic")
                 .name("Italic")
                 .category("Format")
-                .primary(KeyStroke::ctrl(Key::I))
+                .primary(KeyStroke::command(Key::I))
                 .build(),
         );
 
@@ -928,7 +928,7 @@ mod tests {
         tree.shortcut_registry_mut().register(
             Shortcut::new("app.save")
                 .name("Save")
-                .primary(KeyStroke::ctrl(Key::S))
+                .primary(KeyStroke::command(Key::S))
                 .build(),
         );
         let _settings = tree.add(ShortcutSettings::new());
@@ -940,7 +940,7 @@ mod tests {
         // leak the handle through `_h = ManuallyDrop::new(...)` — actually
         // we keep it alive by not dropping it explicitly at end of scope.
         let h = _h;
-        tree.press_key(Key::B, Modifiers::CTRL | Modifiers::SHIFT);
+        tree.press_key(Key::B, Modifiers::COMMAND | Modifiers::SHIFT);
         drop(h);
 
         assert_eq!(
@@ -948,7 +948,7 @@ mod tests {
                 .effective("app.save")
                 .unwrap()
                 .primary,
-            Some(KeyStroke::ctrl_shift(Key::B))
+            Some(KeyStroke::command_shift(Key::B))
         );
     }
 }

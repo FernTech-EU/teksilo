@@ -622,7 +622,8 @@ pub(crate) fn handle_log_key(
     let WidgetEvent::KeyDown { key, modifiers, .. } = event else {
         return EventResponse::Ignored;
     };
-    let ctrl = modifiers.ctrl() || modifiers.super_key();
+    // The platform accelerator — ⌘ on macOS, Ctrl elsewhere.
+    let ctrl = modifiers.command();
 
     enum Act {
         Scroll,

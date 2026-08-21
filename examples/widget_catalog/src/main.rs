@@ -495,7 +495,7 @@ fn build_menu_bar() -> impl Widget + 'static {
             Box::new(
                 MenuList::new().item(
                     MenuItem::new(tr!(app_menu_quit()))
-                        .shortcut_label(format_keystroke(KeyStroke::ctrl(Key::Q)))
+                        .shortcut_label(format_keystroke(KeyStroke::command(Key::Q)))
                         .on_activate_fn(|ctx| ctx.close_window()),
                 ),
             )

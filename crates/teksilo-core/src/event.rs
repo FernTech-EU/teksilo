@@ -271,6 +271,30 @@ impl Modifiers {
     pub const ALT: Modifiers = Modifiers { bits: 4 };
     pub const SUPER: Modifiers = Modifiers { bits: 8 };
 
+    /// The **primary accelerator** modifier for this platform: [`SUPER`]
+    /// (Command, ⌘) on macOS, [`CTRL`] everywhere else.
+    ///
+    /// Desktop platforms disagree about which physical key carries application
+    /// accelerators, and on macOS the disagreement is not cosmetic: Control is
+    /// reserved there for the text system and for the secondary click, while ⌘
+    /// is what a user presses for Save, Copy or Find. Code that hard-codes
+    /// [`CTRL`] to mean "the accelerator" therefore listens to the wrong key on
+    /// one of the three desktop platforms.
+    ///
+    /// Compare against this constant (or call [`Modifiers::command`]) and the
+    /// same code means Ctrl+A on Windows and Linux and ⌘A on macOS. This
+    /// mirrors Qt's `Qt::CTRL`, which likewise resolves to ⌘ on macOS, and the
+    /// convention the native menu bar already applies when it turns a declared
+    /// chord into an `NSMenuItem` key equivalent.
+    ///
+    /// [`SUPER`]: Modifiers::SUPER
+    /// [`CTRL`]: Modifiers::CTRL
+    pub const COMMAND: Modifiers = if cfg!(target_os = "macos") {
+        Self::SUPER
+    } else {
+        Self::CTRL
+    };
+
     pub fn empty() -> Self {
         Self::NONE
     }
@@ -289,6 +313,56 @@ impl Modifiers {
 
     pub fn super_key(self) -> bool {
         self.bits & 8 != 0
+    }
+
+    /// Whether the platform's primary accelerator modifier
+    /// ([`Modifiers::COMMAND`]) is held: Command (⌘) on macOS, Control
+    /// everywhere else.
+    ///
+    /// Use this instead of [`ctrl`](Self::ctrl) wherever the chord means "the
+    /// accelerator" — select-all, the discontiguous-selection click, jump to
+    /// the end of a list. Keep [`ctrl`](Self::ctrl) for the chords that really
+    /// are Control on every platform, macOS included: Ctrl+Tab cycles tabs
+    /// there too (⌘Tab belongs to the application switcher and never reaches
+    /// an app).
+    pub fn command(self) -> bool {
+        self.contains(Self::COMMAND)
+    }
+
+    /// Whether every modifier in `other` is held.
+    pub fn contains(self, other: Modifiers) -> bool {
+        self.bits & other.bits == other.bits
+    }
+
+    /// These modifiers with `other` removed.
+    pub fn without(self, other: Modifiers) -> Modifiers {
+        Modifiers {
+            bits: self.bits & !other.bits,
+        }
+    }
+
+    /// These modifiers with a declared `CTRL` reinterpreted as the platform's
+    /// primary accelerator — see [`Modifiers::COMMAND`] and
+    /// [`KeyStroke::with_command_convention`](crate::shortcut::KeyStroke::with_command_convention),
+    /// which is where this is applied.
+    ///
+    /// A no-op off macOS (where `COMMAND` *is* `CTRL`), and a no-op for a chord
+    /// that already names `SUPER` explicitly: `Ctrl+Super` stays ⌃⌘, a genuine
+    /// two-modifier chord, rather than collapsing to one.
+    pub fn with_command_convention(self) -> Modifiers {
+        self.with_command_convention_using(Self::COMMAND)
+    }
+
+    /// The platform-parameterised core of
+    /// [`with_command_convention`](Self::with_command_convention). Split out so
+    /// the macOS branch is exercised by tests running on any host — the whole
+    /// point of the convention is behaviour a Linux CI cannot otherwise see.
+    fn with_command_convention_using(self, command: Modifiers) -> Modifiers {
+        if self.ctrl() && !self.super_key() {
+            self.without(Self::CTRL) | command
+        } else {
+            self
+        }
     }
 }
 
@@ -378,7 +452,15 @@ impl std::fmt::Display for Modifiers {
             f.write_str("Shift+")?;
         }
         if self.super_key() {
-            f.write_str("Super+")?;
+            // Named for the key the user is looking at. This string reaches
+            // assistive tech through the accessibility tree's
+            // `keyboard_shortcut`, and a Mac screen-reader user announced
+            // "Super+S" for ⌘S has been told the wrong key.
+            f.write_str(if cfg!(target_os = "macos") {
+                "Cmd+"
+            } else {
+                "Super+"
+            })?;
         }
         Ok(())
     }
@@ -561,4 +643,100 @@ pub enum EventResponse {
     Handled,
     /// The event was not handled; let it bubble.
     Ignored,
+}
+
+#[cfg(test)]
+mod modifier_tests {
+    use super::*;
+
+    // The convention itself, exercised on both platform settings from any host.
+    // `Modifiers::COMMAND` resolves at compile time, so a Linux CI would
+    // otherwise only ever see half of what this rule does — and the half it
+    // cannot see is the one the rule exists for.
+
+    #[test]
+    fn command_convention_rewrites_a_bare_ctrl_on_macos() {
+        let mac = Modifiers::CTRL.with_command_convention_using(Modifiers::SUPER);
+        assert_eq!(mac, Modifiers::SUPER);
+
+        let mac =
+            (Modifiers::CTRL | Modifiers::SHIFT).with_command_convention_using(Modifiers::SUPER);
+        assert_eq!(mac, Modifiers::SUPER | Modifiers::SHIFT);
+    }
+
+    #[test]
+    fn command_convention_is_a_no_op_where_command_is_ctrl() {
+        for m in [
+            Modifiers::CTRL,
+            Modifiers::CTRL | Modifiers::SHIFT,
+            Modifiers::ALT,
+            Modifiers::NONE,
+            Modifiers::SUPER,
+        ] {
+            assert_eq!(m.with_command_convention_using(Modifiers::CTRL), m);
+        }
+    }
+
+    #[test]
+    fn command_convention_leaves_an_explicit_super_alone() {
+        // A chord that already names Super is a deliberate ⌘ chord, and
+        // `Ctrl+Super` is a genuine two-modifier chord — neither collapses.
+        assert_eq!(
+            Modifiers::SUPER.with_command_convention_using(Modifiers::SUPER),
+            Modifiers::SUPER
+        );
+        let both = Modifiers::CTRL | Modifiers::SUPER;
+        assert_eq!(both.with_command_convention_using(Modifiers::SUPER), both);
+    }
+
+    #[test]
+    fn command_convention_is_idempotent() {
+        for command in [Modifiers::CTRL, Modifiers::SUPER] {
+            for m in [
+                Modifiers::CTRL,
+                Modifiers::CTRL | Modifiers::SHIFT | Modifiers::ALT,
+                Modifiers::SUPER,
+                Modifiers::NONE,
+            ] {
+                let once = m.with_command_convention_using(command);
+                assert_eq!(once.with_command_convention_using(command), once);
+            }
+        }
+    }
+
+    #[test]
+    fn command_predicate_follows_the_platform() {
+        // Whichever platform this runs on, `COMMAND` is one of the two, and
+        // `command()` tracks exactly it.
+        assert!(Modifiers::COMMAND.command());
+        assert!(!Modifiers::ALT.command());
+        assert!((Modifiers::COMMAND | Modifiers::SHIFT).command());
+
+        if cfg!(target_os = "macos") {
+            assert_eq!(Modifiers::COMMAND, Modifiers::SUPER);
+            assert!(!Modifiers::CTRL.command());
+        } else {
+            assert_eq!(Modifiers::COMMAND, Modifiers::CTRL);
+            assert!(!Modifiers::SUPER.command());
+        }
+    }
+
+    #[test]
+    fn contains_requires_every_named_modifier() {
+        let cs = Modifiers::CTRL | Modifiers::SHIFT;
+        assert!(cs.contains(Modifiers::CTRL));
+        assert!(cs.contains(cs));
+        assert!(!cs.contains(Modifiers::CTRL | Modifiers::ALT));
+        assert!(cs.contains(Modifiers::NONE));
+    }
+
+    #[test]
+    fn without_clears_only_the_named_modifiers() {
+        let all = Modifiers::CTRL | Modifiers::SHIFT | Modifiers::SUPER;
+        assert_eq!(
+            all.without(Modifiers::SUPER),
+            Modifiers::CTRL | Modifiers::SHIFT
+        );
+        assert_eq!(all.without(Modifiers::ALT), all);
+    }
 }

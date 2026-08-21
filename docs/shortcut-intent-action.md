@@ -53,6 +53,8 @@ A single chord — one `Key` plus its `Modifiers`:
 KeyStroke::new(Key::S, Modifiers::CTRL)
 KeyStroke::ctrl(Key::S)                        // same thing
 KeyStroke::ctrl_shift(Key::S)
+KeyStroke::command(Key::S)                     // ⌘S on macOS, Ctrl+S elsewhere
+KeyStroke::command_shift(Key::S)
 KeyStroke::alt(Key::Enter)
 KeyStroke::new(Key::PageUp, Modifiers::NONE)   // plain PageUp
 ```
@@ -62,6 +64,46 @@ should call `teksilo_widgets::keystroke_format::format_keystroke()` which handle
 platform-specific symbols (⌘ on macOS) and locale-aware modifier names via
 `tr_widget!` (e.g., "Strg" in German). `Serialize`/`Deserialize` are derived
 so user overrides can be persisted.
+
+### `Ctrl` means ⌘ on macOS
+
+Desktop platforms disagree about which key carries application accelerators, and
+on macOS the disagreement is not cosmetic: Control there belongs to the text
+system and to the secondary click, while ⌘ is what a user presses for Save or
+Find. So a **declared** shortcut default written with `Ctrl` is read as *the
+platform's primary accelerator* and resolves to ⌘ on macOS — the convention Qt
+spells `Qt::CTRL`, and the one Teksilo's native menu bar has always applied to
+its key equivalents. Write the chord once:
+
+```rust
+Shortcut::new("editor.find").primary(KeyStroke::ctrl(Key::F)).build()
+// Ctrl+F on Windows and Linux, ⌘F on macOS — one declaration, no cfg branching.
+```
+
+`KeyStroke::command(Key::F)` is the same chord with the intent stated outright;
+prefer it for chords built **outside** the registry, such as the labels a
+context menu renders for itself. `Modifiers::COMMAND` and `Modifiers::command()`
+are the raw forms, for widgets testing a live `Modifiers` value.
+
+Three consequences worth knowing:
+
+- **User overrides are literal.** A chord captured in a settings UI is taken
+  exactly as pressed, so physical ⌃F stays bindable on macOS. Only *declared*
+  defaults go through the convention.
+- **A chord that names `Super` explicitly is left alone**, so `Ctrl+Super`
+  survives as the genuine ⌃⌘ two-modifier chord.
+- **Some chords really are Control everywhere.** Ctrl+Tab cycles tabs on macOS
+  too (⌘⇥ belongs to the application switcher and never reaches an app), and the
+  ⌘ form of Space, H or Q is taken by the system. Declare those with
+  `ShortcutBuilder::literal_modifiers()` and no rewriting happens on any
+  platform:
+
+```rust
+Shortcut::new("view.next_tab")
+    .literal_modifiers()
+    .primary(KeyStroke::ctrl(Key::Tab))
+    .build()
+```
 
 ---
 

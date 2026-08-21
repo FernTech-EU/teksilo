@@ -71,8 +71,9 @@ pub(super) fn handle_key(
     };
 
     let shift = modifiers.shift();
-    // Treat Super as Ctrl so ⌘-chords work on macOS without a second table.
-    let ctrl = modifiers.ctrl() || modifiers.super_key();
+    // The platform accelerator — ⌘ on macOS, Ctrl elsewhere — so one chord
+    // table serves every platform.
+    let ctrl = modifiers.command();
     let alt = modifiers.alt();
     let mode = if shift {
         MoveMode::KeepAnchor
@@ -80,8 +81,11 @@ pub(super) fn handle_key(
         MoveMode::MoveAnchor
     };
 
-    // Ctrl+Space always requests completion, open or not.
-    if ctrl && matches!(key, Key::Space) {
+    // Ctrl+Space always requests completion, open or not. Physical Control is
+    // accepted here on every platform: ⌘Space belongs to Spotlight and never
+    // reaches an app, so the accelerator form alone would leave forced
+    // completion unreachable on macOS.
+    if (ctrl || modifiers.ctrl()) && matches!(key, Key::Space) {
         completion::react(state, ctx, Trigger::Forced);
         return EventResponse::Handled;
     }
@@ -112,7 +116,10 @@ pub(super) fn handle_key(
                 ctx.request_frame();
                 return EventResponse::Handled;
             }
-            Key::Enter | Key::Tab if !shift && !ctrl => {
+            // `modifiers.ctrl()` as well as the accelerator: a ⌃-modified Tab
+            // belongs to focus navigation on every platform, macOS included, so
+            // the popup must not swallow it.
+            Key::Enter | Key::Tab if !shift && !ctrl && !modifiers.ctrl() => {
                 completion::accept_selected(state, ctx);
                 return EventResponse::Handled;
             }

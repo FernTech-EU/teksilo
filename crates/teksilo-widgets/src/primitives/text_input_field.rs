@@ -1837,7 +1837,7 @@ fn build_context_menu_widget(state: &SharedState) -> Box<dyn Widget> {
         MenuList::new()
             .item(
                 MenuItem::new(tr_widget!(menu_cut()))
-                    .shortcut_label(format_keystroke(KeyStroke::ctrl(Key::X)))
+                    .shortcut_label(format_keystroke(KeyStroke::command(Key::X)))
                     .enabled(has_selection && copy_allowed)
                     .on_activate_fn(move |ctx| {
                         {
@@ -1850,7 +1850,7 @@ fn build_context_menu_widget(state: &SharedState) -> Box<dyn Widget> {
             )
             .item(
                 MenuItem::new(tr_widget!(menu_copy()))
-                    .shortcut_label(format_keystroke(KeyStroke::ctrl(Key::C)))
+                    .shortcut_label(format_keystroke(KeyStroke::command(Key::C)))
                     .enabled(has_selection && copy_allowed)
                     .on_activate_fn(move |ctx| {
                         let mut st = state_copy.borrow_mut();
@@ -1859,7 +1859,7 @@ fn build_context_menu_widget(state: &SharedState) -> Box<dyn Widget> {
             )
             .item(
                 MenuItem::new(tr_widget!(menu_paste()))
-                    .shortcut_label(format_keystroke(KeyStroke::ctrl(Key::V)))
+                    .shortcut_label(format_keystroke(KeyStroke::command(Key::V)))
                     .on_activate_fn(move |ctx| {
                         {
                             let mut st = state_paste.borrow_mut();
@@ -1872,7 +1872,7 @@ fn build_context_menu_widget(state: &SharedState) -> Box<dyn Widget> {
             .item(MenuSeparator)
             .item(
                 MenuItem::new(tr_widget!(menu_select_all()))
-                    .shortcut_label(format_keystroke(KeyStroke::ctrl(Key::A)))
+                    .shortcut_label(format_keystroke(KeyStroke::command(Key::A)))
                     .enabled(doc_non_empty)
                     .on_activate_fn(move |ctx| {
                         {

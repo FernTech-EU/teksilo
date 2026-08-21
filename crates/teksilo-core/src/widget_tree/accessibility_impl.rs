@@ -1630,7 +1630,7 @@ mod tests {
         tree.shortcut_registry_mut().register(
             Shortcut::new("app.save")
                 .name("Save")
-                .primary(KeyStroke::ctrl(Key::S))
+                .primary(KeyStroke::command(Key::S))
                 .build(),
         );
         let id = tree.add(ClickableWidget.access_shortcut_id("app.save"));
@@ -1643,7 +1643,7 @@ mod tests {
 
         // Simulate a user rebind: the AT announcement should track it.
         tree.shortcut_registry_mut()
-            .rebind_primary("app.save", Some(KeyStroke::ctrl(Key::Q)));
+            .rebind_primary("app.save", Some(KeyStroke::command(Key::Q)));
         let update = tree.sync_accessibility();
         let node = find_node(&update, id).unwrap();
         assert_eq!(node.keyboard_shortcut(), Some("Ctrl+Q"));

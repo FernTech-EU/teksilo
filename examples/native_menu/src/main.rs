@@ -85,6 +85,13 @@ impl Widget for Root {
             );
         }
         ctx.register_action(Action::new("app.quit").on_invoke(|_, ctx| ctx.close_window()));
+        {
+            let status = status.clone();
+            ctx.register_action(
+                Action::new("app.settings")
+                    .on_invoke(move |_, _| status.set("Settings chosen".to_string())),
+            );
+        }
 
         // One declarative model, shared by the in-window bar and the OS menu.
         let model = MenuModel::new()
@@ -132,7 +139,16 @@ impl Widget for Root {
             // Standard macOS menus — labels go through i18n (pass `tr!` for a
             // localized app); the framework wires the system selectors. The
             // App menu is auto-injected, but declaring it lets us localize it.
-            .standard_menu(StandardMenu::app().title(lit!("Native Menu")))
+            // `settings_intent` puts a Settings… row in the macOS App menu on
+            // ⌘, — placement and chord an ordinary MenuEntry cannot reach.
+            // Unlike Quit it has no system fallback, so an unrouted slot would
+            // only render a dead row: leaving it unset omits the item.
+            .standard_menu(
+                StandardMenu::app()
+                    .title(lit!("Native Menu"))
+                    .settings(lit!("Settings…"))
+                    .settings_intent("app.settings"),
+            )
             .standard_menu(StandardMenu::window());
 
         // Keep a handle so window buttons can mutate the menu at runtime.

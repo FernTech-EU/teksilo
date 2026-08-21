@@ -13,6 +13,80 @@ by crate for clarity, not because crates version independently.
 
 ## [Unreleased]
 
+### Changed — `teksilo-core`: a declared `Ctrl` shortcut now fires on ⌘ on macOS
+
+**Behaviour change on macOS.** A `Shortcut` whose declared default is a `Ctrl`
+chord is now read as *the platform's primary accelerator* and resolves to ⌘
+there — the convention Qt spells `Qt::CTRL`, and the one Teksilo's native menu
+bar has always applied when building `NSMenuItem` key equivalents. So
+`Shortcut::new("editor.find").primary(KeyStroke::ctrl(Key::F))` fires on ⌘F on
+macOS and on Ctrl+F everywhere else, from one declaration.
+
+Until now the registry matched chords by exact modifier equality while the
+native menu row advertised ⌘, so on macOS a command that appeared on a menu
+worked (AppKit dispatched the key equivalent) and an identical command that did
+not appear on one silently required physical ⌃. Three places in the framework
+answered the Ctrl-vs-Command question independently and the one that dispatches
+keystrokes was the one that did not.
+
+The corollary is that a declared `Ctrl` chord **no longer fires on physical ⌃**
+on macOS, where Control belongs to the text system and to the secondary click.
+
+**If you have a chord that really is Control on every platform** — Ctrl+Tab
+cycles tabs on macOS too, and the ⌘ form of Space, H or Q is taken by the
+system — declare it with the new opt-out:
+
+```rust
+Shortcut::new("view.next_tab")
+    .literal_modifiers()
+    .primary(KeyStroke::ctrl(Key::Tab))
+    .build()
+```
+
+Worth auditing your declarations for that shape; nothing else needs changing.
+User overrides are deliberately left literal, so a chord captured in a settings
+UI still means exactly the keys that were pressed and physical ⌃F stays
+bindable on macOS.
+
+New API: `Modifiers::COMMAND` / `Modifiers::command()` (the platform's primary
+accelerator, for widgets testing a live `Modifiers`), `KeyStroke::command()` /
+`command_shift()` (the same intent stated outright, for chords built outside the
+registry), `KeyStroke::with_command_convention()`, `Shortcut::declared_keystrokes()`,
+`ShortcutBuilder::literal_modifiers()`.
+
+### Fixed — `teksilo-widgets`: accelerator chords across the widget catalog
+
+The same gap, widget-side. Select-all, the discontiguous-selection click, the
+marquee's additive modifier and Ctrl+Home / Ctrl+End were all testing physical
+Control, so on macOS ⌘A did not select all and ⌘-click did not extend a
+selection — while ⌃-click, which macOS treats as the secondary click, did.
+`ListView`, `TreeView`, `TableView`, `TreeTableView`, `GridView`, `Calendar` and
+the colour picker's swatch grid now test `Modifiers::command()` for those.
+
+The text surfaces (`RichTextEditor`, `TextInputField` and everything built on
+it, `CodeEditor`, `LogView`) tested `ctrl() || super_key()`, which worked on
+macOS but also made the Win key act as Ctrl on Windows and Linux; they now test
+the accelerator too. The Explorer-style cursor pair (Ctrl+Space / Ctrl+Arrow),
+Ctrl+Tab's focus escape, Ctrl+Space forced completion and the terminal's control
+codes deliberately stay on literal Control — each says so at its site.
+
+Context-menu labels are fixed with them: the built-in Cut / Copy / Paste /
+Select All rows built their accelerator text from hard-coded `Ctrl` literals, so
+on macOS a right-click in any text field read "Copy ⌃C" while the menu bar
+showed ⌘C for the same command.
+
+### Added — `teksilo-widgets`: `Settings…` in the macOS App menu
+
+`StandardMenu::settings_intent("app.settings")` puts a **Settings…** row in the
+application menu, under About, on ⌘, — placement and chord that an ordinary
+`MenuEntry` cannot reach, since the App menu is filled in by the platform.
+Pair it with `.settings(tr!(settings()))` for the label.
+
+Unlike Quit there is no system fallback — no platform opens an arbitrary app's
+settings on its own — so leaving `settings_intent` unset omits the row rather
+than rendering a dead one.
+
+
 ### Added — `teksilo-automation`: `scroll` carries modifiers
 
 The `scroll` op hardcoded `Modifiers::NONE`, so it could only ever deliver a

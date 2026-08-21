@@ -373,7 +373,11 @@ impl<T: Clone + std::fmt::Display + 'static> Widget for PieChart<T> {
                         .and_then(|idx| marks.borrow().get(idx).map(|m| (m.series_id, m.point_idx)))
                     {
                         Some((sid, idx)) => {
-                            if tap.modifiers.ctrl() || tap.modifiers.super_key() {
+                            // The accelerator-click that adds one mark to a
+                            // discontiguous selection: Ctrl+click on Windows
+                            // and Linux, ⌘-click on macOS — where ⌃-click is
+                            // the secondary click.
+                            if tap.modifiers.command() {
                                 selection.toggle_point(sid, idx);
                             } else {
                                 selection.select_point(sid, idx);

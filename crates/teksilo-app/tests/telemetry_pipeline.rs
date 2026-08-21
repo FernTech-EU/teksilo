@@ -38,7 +38,7 @@ impl Widget for ProbeWidget {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         ctx.register_shortcut_global(
             Shortcut::new("test.fire")
-                .primary(KeyStroke::ctrl(Key::B))
+                .primary(KeyStroke::command(Key::B))
                 .build(),
         );
         ctx.register_action(
@@ -95,7 +95,7 @@ fn shortcut_keydown_emits_intent_dispatched_through_tap() {
     // enqueue → drain → dispatch_intent → telemetry tap.
     app.tree.dispatch_event(WidgetEvent::KeyDown {
         key: Key::B,
-        modifiers: Modifiers::CTRL,
+        modifiers: Modifiers::COMMAND,
         text: None,
     });
 
@@ -134,7 +134,7 @@ fn no_telemetry_means_no_emission() {
     // Dispatching shouldn't panic even though no reporter is wired.
     app.tree.dispatch_event(WidgetEvent::KeyDown {
         key: Key::B,
-        modifiers: Modifiers::CTRL,
+        modifiers: Modifiers::COMMAND,
         text: None,
     });
 }
@@ -163,7 +163,7 @@ fn consent_gate_drops_events_until_granted() {
     app.tree.layout(SizeProposal::exact(100.0, 100.0));
     app.tree.dispatch_event(WidgetEvent::KeyDown {
         key: Key::B,
-        modifiers: Modifiers::CTRL,
+        modifiers: Modifiers::COMMAND,
         text: None,
     });
     assert_eq!(stub_handle.recorded_count(), 0);
@@ -181,7 +181,7 @@ fn consent_gate_drops_events_until_granted() {
 
     app.tree.dispatch_event(WidgetEvent::KeyDown {
         key: Key::B,
-        modifiers: Modifiers::CTRL,
+        modifiers: Modifiers::COMMAND,
         text: None,
     });
     assert_eq!(stub_handle.recorded_count(), 1);

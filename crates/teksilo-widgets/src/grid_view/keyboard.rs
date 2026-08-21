@@ -124,8 +124,8 @@ pub(crate) fn build_grid_key_handler(
         let current = cursor.unwrap_or(0);
         let col = current % cols;
 
-        // Select-all.
-        if modifiers.ctrl() && *key == Key::A {
+        // Select-all — Ctrl+A, ⌘A on macOS.
+        if modifiers.command() && *key == Key::A {
             if let Some(ref sel) = cfg.selection {
                 sel.select_all(n);
             }
@@ -230,8 +230,10 @@ pub(crate) fn build_grid_key_handler(
                         None
                     }
                 }
-                Key::Home if modifiers.ctrl() => Some(0),
-                Key::End if modifiers.ctrl() => Some(n - 1),
+                // Accelerator + Home / End (⌘ on macOS) jumps to the first /
+                // last tile; plain Home / End stay within the row.
+                Key::Home if modifiers.command() => Some(0),
+                Key::End if modifiers.command() => Some(n - 1),
                 Key::Home => Some(current - col), // first item in this row
                 Key::End => Some((current - col + cols - 1).min(n - 1)),
                 Key::PageDown => {
@@ -272,6 +274,12 @@ pub(crate) fn build_grid_key_handler(
                     // Ctrl+Arrow's cursor-only move so a user can walk the
                     // cursor without disturbing the existing selection,
                     // then Ctrl+Space to add tiles one at a time.
+                    //
+                    // Both halves stay on literal `ctrl()`, macOS included:
+                    // ⌘Space is Spotlight and never reaches an app, and ⌘↑/⌘↓
+                    // already mean something else in a Finder list. This
+                    // Explorer-style cursor pair has no ⌘ counterpart, so
+                    // Control keeps it reachable and out of the platform's way.
                     if let Some(ref sel) = cfg.selection {
                         sel.toggle(current);
                     }
@@ -302,6 +310,7 @@ pub(crate) fn build_grid_key_handler(
         // leaving the selection untouched. Checked against
         // `logical_next`/`logical_prev` (already RTL-swapped above) plus
         // the raw vertical keys, so the chord follows the visual arrow.
+        // Literal `ctrl()` — see the Ctrl+Space arm above.
         let cursor_only = modifiers.ctrl()
             && !modifiers.shift()
             && !modifiers.alt()

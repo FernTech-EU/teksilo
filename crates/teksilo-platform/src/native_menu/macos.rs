@@ -229,8 +229,16 @@ fn build_root_menu(
                 role: StandardMenuRole::App,
                 labels,
                 quit_item,
+                settings_item,
             } => {
-                bar.addItem(&app_menu_item(mtm, labels, *quit_item, target, items));
+                bar.addItem(&app_menu_item(
+                    mtm,
+                    labels,
+                    *quit_item,
+                    *settings_item,
+                    target,
+                    items,
+                ));
             }
             NativeMenuNode::Standard {
                 role: StandardMenuRole::Window,
@@ -412,6 +420,7 @@ fn app_menu_item(
     mtm: MainThreadMarker,
     labels: &StandardLabels,
     quit_item: Option<MenuItemId>,
+    settings_item: Option<MenuItemId>,
     target: &TeksiloMenuTarget,
     items: &mut HashMap<MenuItemId, Retained<NSMenuItem>>,
 ) -> Retained<NSMenuItem> {
@@ -425,6 +434,29 @@ fn app_menu_item(
         sel!(orderFrontStandardAboutPanel:),
         "",
     ));
+    // Settings sits directly under About in its own group — the placement every
+    // Mac app shares, and the one users reach for without looking. Routed or
+    // absent: AppKit has no selector that opens an arbitrary app's settings, so
+    // an unrouted slot could only ever render a dead row.
+    if let Some(id) = settings_item {
+        menu.addItem(&NSMenuItem::separatorItem(mtm));
+        let item = leaf_item(mtm, &labels.settings, target);
+        item.setTag(id.raw() as isize);
+        // `setAutoenablesItems(false)` above means nothing enables this for us.
+        item.setEnabled(true);
+        apply_key_equiv(
+            &item,
+            Some(&NativeKeyEquivalent {
+                key: ",".to_string(),
+                command: true,
+                shift: false,
+                alt: false,
+                control: false,
+            }),
+        );
+        menu.addItem(&item);
+        items.insert(id, item);
+    }
     menu.addItem(&NSMenuItem::separatorItem(mtm));
     menu.addItem(&standard_item(mtm, &labels.hide, sel!(hide:), "h"));
     menu.addItem(&NSMenuItem::separatorItem(mtm));

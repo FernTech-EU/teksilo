@@ -115,6 +115,10 @@ pub struct StandardLabels {
     pub title: String,
     /// "About …" (App).
     pub about: String,
+    /// "Settings…" / "Preferences…" (App). Only rendered when the snapshot
+    /// also carries a `settings_item` — the platform has no default action
+    /// for it, unlike About / Hide / Quit.
+    pub settings: String,
     /// "Hide …" (App).
     pub hide: String,
     /// "Quit …" (App).
@@ -172,6 +176,16 @@ pub enum NativeMenuNode {
         /// shortcut is shadowed rather than merely duplicated. Whatever the app
         /// routes to then owes the exit itself — nothing here terminates.
         quit_item: Option<MenuItemId>,
+        /// App menu only: build a **Settings…** item under this id, placed where
+        /// the platform expects it (on macOS: after About, with the ⌘, key
+        /// equivalent).
+        ///
+        /// Unlike Quit there is no `None` fallback that still does something —
+        /// no platform ships a default action for opening an app's settings —
+        /// so `None` simply omits the item. An app that has a settings window
+        /// routes it; one that has none leaves the slot empty rather than
+        /// showing a row that does nothing.
+        settings_item: Option<MenuItemId>,
     },
 }
 

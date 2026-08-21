@@ -77,7 +77,9 @@ pub(crate) fn handle_key(
     };
 
     let shift = modifiers.shift();
-    let ctrl = modifiers.ctrl() || modifiers.super_key();
+    // The platform accelerator — ⌘ on macOS, Ctrl elsewhere. See the
+    // rich-text sibling for why this is not `ctrl() || super_key()`.
+    let ctrl = modifiers.command();
     let mode = if shift {
         MoveMode::KeepAnchor
     } else {

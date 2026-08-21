@@ -2854,6 +2854,7 @@ mod tests {
                 role: StandardMenuRole::App,
                 labels,
                 quit_item,
+                ..
             } => {
                 assert_eq!(labels.quit, "Quitter", "Quit label routes through i18n");
                 assert_eq!(labels.about, "About", "default About label resolved");

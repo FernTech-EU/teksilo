@@ -1060,7 +1060,10 @@ pub(crate) mod deferred_select {
             pending.set(false);
             return false;
         }
-        if modifiers.ctrl() {
+        // The accelerator-click that adds one row to a discontiguous selection:
+        // Ctrl+click on Windows and Linux, ⌘-click on macOS — where ⌃-click is
+        // the secondary click and would open a context menu instead.
+        if modifiers.command() {
             sel.toggle(index);
             pending.set(false);
         } else if modifiers.shift() {

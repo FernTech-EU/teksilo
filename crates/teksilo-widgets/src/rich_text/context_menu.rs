@@ -152,7 +152,7 @@ fn build_menu(state: SharedState) -> MenuList {
         let state_for_cut = state.clone();
         list = list.item(
             MenuItem::new(tr_widget!(menu_cut()))
-                .shortcut_label(format_keystroke(KeyStroke::ctrl(Key::X)))
+                .shortcut_label(format_keystroke(KeyStroke::command(Key::X)))
                 .enabled(has_selection)
                 .on_activate_fn(move |evt_ctx| {
                     let mut st = state_for_cut.borrow_mut();
@@ -170,7 +170,7 @@ fn build_menu(state: SharedState) -> MenuList {
         let state_for_copy = state.clone();
         list = list.item(
             MenuItem::new(tr_widget!(menu_copy()))
-                .shortcut_label(format_keystroke(KeyStroke::ctrl(Key::C)))
+                .shortcut_label(format_keystroke(KeyStroke::command(Key::C)))
                 .enabled(has_selection)
                 .on_activate_fn(move |evt_ctx| {
                     let mut st = state_for_copy.borrow_mut();
@@ -193,7 +193,7 @@ fn build_menu(state: SharedState) -> MenuList {
         let state_for_paste = state.clone();
         list = list.item(
             MenuItem::new(tr_widget!(menu_paste()))
-                .shortcut_label(format_keystroke(KeyStroke::ctrl(Key::V)))
+                .shortcut_label(format_keystroke(KeyStroke::command(Key::V)))
                 .on_activate_fn(move |evt_ctx| {
                     let mut st = state_for_paste.borrow_mut();
                     rt_clipboard::paste(&mut st, evt_ctx);
@@ -210,7 +210,7 @@ fn build_menu(state: SharedState) -> MenuList {
         let state_for_pu = state.clone();
         list = list.item(
             MenuItem::new(tr_widget!(menu_paste_unformatted()))
-                .shortcut_label(format_keystroke(KeyStroke::ctrl_shift(Key::V)))
+                .shortcut_label(format_keystroke(KeyStroke::command_shift(Key::V)))
                 .on_activate_fn(move |evt_ctx| {
                     let mut st = state_for_pu.borrow_mut();
                     rt_clipboard::paste_unformatted(&mut st, evt_ctx);
@@ -263,7 +263,7 @@ fn build_menu(state: SharedState) -> MenuList {
         let state_for_sa = state.clone();
         list = list.item(
             MenuItem::new(tr_widget!(menu_select_all()))
-                .shortcut_label(format_keystroke(KeyStroke::ctrl(Key::A)))
+                .shortcut_label(format_keystroke(KeyStroke::command(Key::A)))
                 .enabled(doc_non_empty)
                 .on_activate_fn(move |evt_ctx| {
                     {

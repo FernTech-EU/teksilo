@@ -14,7 +14,7 @@ use std::collections::HashMap;
 use teksilo_core::MenuItemId;
 use teksilo_core::ObserverHandle;
 use teksilo_core::build_context::BuildContext;
-use teksilo_core::event::Key;
+use teksilo_core::event::{Key, Modifiers};
 use teksilo_core::shortcut::KeyStroke;
 use teksilo_core::signal::Prop;
 use teksilo_data::CheckState;
@@ -105,6 +105,10 @@ pub(crate) fn install(model: &MenuModel, ctx: &BuildContext) -> Option<NativeMen
                 // declared no quit handler either, so `terminate:` is the only
                 // thing that can still make ⌘Q work here.
                 quit_item: None,
+                // Likewise no Settings row: with no App menu declared there is
+                // no intent to route it to, and an unrouted one would do
+                // nothing.
+                settings_item: None,
             },
         );
     }
@@ -274,10 +278,22 @@ fn resolve_standard(
             },
         );
     }
+    // Settings is routed the same way, and only ever routed — the platform has
+    // no selector of its own to fall back on.
+    if let Some((intent, id)) = sm.settings_route() {
+        activations.insert(
+            id,
+            NativeMenuActivation {
+                intent: Some(intent),
+                action: None,
+            },
+        );
+    }
     NativeMenuNode::Standard {
         role: sm.role(),
         labels: sm.resolve_labels(),
         quit_item: sm.quit_route().map(|(_, id)| id),
+        settings_item: sm.settings_route().map(|(_, id)| id),
     }
 }
 
@@ -302,17 +318,23 @@ fn strip_title(raw: &str) -> String {
 
 /// Map a Teksilo [`KeyStroke`] to a platform key equivalent.
 ///
-/// Modifier convention (matches Qt's `Qt::CTRL` → ⌘ on macOS): the primary
-/// accelerator modifier — `Ctrl` *or* `Super` in a Teksilo shortcut — maps to
-/// the platform's Command flag, so an app that writes `KeyStroke::ctrl(Key::S)`
-/// gets ⌘S in the native menu. `Alt`/`Shift` map straight through.
+/// The chord arrives already resolved by the registry, which has applied the
+/// primary-accelerator convention (Qt's `Qt::CTRL` → ⌘) to the declared
+/// default: an app that writes `KeyStroke::ctrl(Key::S)` gets ⌘S here.
+///
+/// So the Command flag takes the accelerator, and any **leftover** literal
+/// `Ctrl` goes to Control rather than being folded into Command — otherwise a
+/// deliberately literal ⌃ chord (a user's own rebind, or a `literal_modifiers`
+/// Ctrl+Tab) would be advertised on the wrong key. `Super` maps to Command
+/// unconditionally: [`NativeKeyEquivalent`] has no Super flag, and on the one
+/// backend that consumes this today ⌘ *is* Super.
 fn native_key_equiv(ks: KeyStroke) -> NativeKeyEquivalent {
     NativeKeyEquivalent {
         key: key_to_equiv(ks.key),
-        command: ks.modifiers.super_key() || ks.modifiers.ctrl(),
+        command: ks.modifiers.command() || ks.modifiers.super_key(),
         shift: ks.modifiers.shift(),
         alt: ks.modifiers.alt(),
-        control: false,
+        control: ks.modifiers.without(Modifiers::COMMAND).ctrl(),
     }
 }
 
@@ -367,6 +389,83 @@ mod tests {
             NativeMenuNode::Standard { quit_item, .. } => *quit_item,
             _ => panic!("expected a standard menu node"),
         }
+    }
+
+    fn settings_item_of(node: &NativeMenuNode) -> Option<MenuItemId> {
+        match node {
+            NativeMenuNode::Standard { settings_item, .. } => *settings_item,
+            _ => panic!("expected a standard menu node"),
+        }
+    }
+
+    /// Settings has no `terminate:`-style fallback: no platform opens an
+    /// arbitrary app's settings on its own. So an unset route must omit the row
+    /// rather than render one that does nothing when chosen.
+    #[test]
+    fn a_standard_app_menu_has_no_settings_row_by_default() {
+        let mut activations = HashMap::new();
+        let node = resolve_standard(&StandardMenu::app(), &mut activations);
+        assert_eq!(settings_item_of(&node), None);
+    }
+
+    /// A settings intent mints an id and routes it, exactly like a quit intent.
+    #[test]
+    fn a_settings_intent_becomes_a_routed_item_with_an_activation() {
+        let mut activations = HashMap::new();
+        let node = resolve_standard(
+            &StandardMenu::app().settings_intent("app.settings"),
+            &mut activations,
+        );
+        let id = settings_item_of(&node).expect("a routed settings carries an item id");
+        assert_eq!(
+            activations.get(&id).map(|a| a.intent),
+            Some(Some("app.settings"))
+        );
+    }
+
+    /// Both slots on one App menu must get distinct ids, or choosing Settings
+    /// would fire Quit.
+    #[test]
+    fn quit_and_settings_are_routed_under_distinct_ids() {
+        let mut activations = HashMap::new();
+        let node = resolve_standard(
+            &StandardMenu::app()
+                .quit_intent("app.quit")
+                .settings_intent("app.settings"),
+            &mut activations,
+        );
+        let quit = quit_item_of(&node).expect("quit id");
+        let settings = settings_item_of(&node).expect("settings id");
+        assert_ne!(quit, settings);
+        assert_eq!(activations.len(), 2);
+        assert_eq!(activations[&quit].intent, Some("app.quit"));
+        assert_eq!(activations[&settings].intent, Some("app.settings"));
+    }
+
+    /// Same stability guarantee as the quit id: minted with the model, so a
+    /// later `update_item` delta still addresses a live menu item.
+    #[test]
+    fn the_routed_settings_id_is_stable_across_installs() {
+        let menu = StandardMenu::app().settings_intent("app.settings");
+        let mut first = HashMap::new();
+        let mut second = HashMap::new();
+        assert_eq!(
+            settings_item_of(&resolve_standard(&menu, &mut first)),
+            settings_item_of(&resolve_standard(&menu, &mut second)),
+        );
+    }
+
+    /// The label rides the same i18n path as the rest of the App menu chrome,
+    /// so the platform crate never sees an English literal it did not get from
+    /// the widget layer.
+    #[test]
+    fn the_settings_label_resolves_through_the_widget_layer() {
+        let mut activations = HashMap::new();
+        let node = resolve_standard(
+            &StandardMenu::app().settings(LocalizedString::literal("Réglages…")),
+            &mut activations,
+        );
+        assert_eq!(labels_of(&node).settings, "Réglages…");
     }
 
     /// The default is the platform's own Quit. An app that declared no handler

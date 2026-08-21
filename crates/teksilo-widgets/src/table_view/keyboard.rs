@@ -232,10 +232,12 @@ pub(crate) fn build_key_handler(
                     }
                 }
             }
-            Key::Home if !modifiers.ctrl() => Some((row, 0)),
-            Key::End if !modifiers.ctrl() => Some((row, cfg.col_count - 1)),
-            Key::Home if modifiers.ctrl() => cfg.navigator.first_row().map(|r| (r, 0)),
-            Key::End if modifiers.ctrl() => {
+            // Plain Home / End move within the row; with the accelerator
+            // (Ctrl, ⌘ on macOS) they jump to the first / last row of the table.
+            Key::Home if !modifiers.command() => Some((row, 0)),
+            Key::End if !modifiers.command() => Some((row, cfg.col_count - 1)),
+            Key::Home if modifiers.command() => cfg.navigator.first_row().map(|r| (r, 0)),
+            Key::End if modifiers.command() => {
                 cfg.navigator.last_row().map(|r| (r, cfg.col_count - 1))
             }
             Key::PageUp => {
@@ -276,6 +278,10 @@ pub(crate) fn build_key_handler(
             // Plain Tab still navigates cells (the `CellsThenRows` trap), but
             // this gives keyboard users a reliable way out — the same un-trap
             // affordance `RichTextEditor` leaves to OS focus navigation.
+            //
+            // Literal `ctrl()`, not `command()`: Ctrl+Tab is Ctrl+Tab on macOS
+            // too — ⌘⇥ belongs to the application switcher and never reaches an
+            // app at all.
             Key::Tab if modifiers.ctrl() => return EventResponse::Ignored,
             Key::Tab => {
                 if modifiers.shift() {
@@ -386,7 +392,8 @@ pub(crate) fn build_key_handler(
                 }
                 return EventResponse::Ignored;
             }
-            Key::A if modifiers.ctrl() => {
+            // Select all — Ctrl+A, ⌘A on macOS.
+            Key::A if modifiers.command() => {
                 select_all(&cfg, row_count);
                 return EventResponse::Handled;
             }
@@ -415,6 +422,9 @@ pub(crate) fn build_key_handler(
                 key,
                 Key::ArrowUp | Key::ArrowDown | Key::ArrowLeft | Key::ArrowRight
             );
+            // Literal `ctrl()`, macOS included: ⌘↑/⌘↓ already mean something
+            // else in a Finder list, and this Explorer-style cursor pair has no
+            // ⌘ counterpart — Control keeps it reachable and out of the way.
             let move_cursor_only = is_arrow && modifiers.ctrl() && !modifiers.shift();
             if !move_cursor_only {
                 apply_selection_extension(&cfg, nr, nc, modifiers.shift());

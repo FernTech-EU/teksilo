@@ -199,6 +199,7 @@ pub struct StandardMenu {
     role: StandardMenuRole,
     title: LocalizedString,
     about: LocalizedString,
+    settings: LocalizedString,
     hide: LocalizedString,
     quit: LocalizedString,
     minimize: LocalizedString,
@@ -208,6 +209,10 @@ pub struct StandardMenu {
     /// per install, so the id an activation is recorded against survives every
     /// rebuild of the model.
     quit_route: Option<(&'static str, MenuItemId)>,
+    /// Set by [`settings_intent`](Self::settings_intent), same shape as
+    /// `quit_route`. `None` omits the item entirely — there is no platform
+    /// default to fall back on.
+    settings_route: Option<(&'static str, MenuItemId)>,
 }
 
 impl StandardMenu {
@@ -218,11 +223,13 @@ impl StandardMenu {
             role: StandardMenuRole::App,
             title: LocalizedString::literal("App"),
             about: LocalizedString::literal("About"),
+            settings: LocalizedString::literal("Settings…"),
             hide: LocalizedString::literal("Hide"),
             quit: LocalizedString::literal("Quit"),
             minimize: LocalizedString::literal(""),
             zoom: LocalizedString::literal(""),
             quit_route: None,
+            settings_route: None,
         }
     }
 
@@ -232,11 +239,13 @@ impl StandardMenu {
             role: StandardMenuRole::Window,
             title: LocalizedString::literal("Window"),
             about: LocalizedString::literal(""),
+            settings: LocalizedString::literal(""),
             hide: LocalizedString::literal(""),
             quit: LocalizedString::literal(""),
             minimize: LocalizedString::literal("Minimize"),
             zoom: LocalizedString::literal("Zoom"),
             quit_route: None,
+            settings_route: None,
         }
     }
 
@@ -246,11 +255,13 @@ impl StandardMenu {
             role: StandardMenuRole::Help,
             title: LocalizedString::literal("Help"),
             about: LocalizedString::literal(""),
+            settings: LocalizedString::literal(""),
             hide: LocalizedString::literal(""),
             quit: LocalizedString::literal(""),
             minimize: LocalizedString::literal(""),
             zoom: LocalizedString::literal(""),
             quit_route: None,
+            settings_route: None,
         }
     }
 
@@ -276,6 +287,15 @@ impl StandardMenu {
     /// "About …" label (App).
     pub fn about(mut self, label: impl Into<LocalizedString>) -> Self {
         self.about = label.into();
+        self
+    }
+    /// "Settings…" label (App). macOS 13+ says "Settings…"; older releases said
+    /// "Preferences…" — pass whichever your app targets, localized.
+    ///
+    /// The label alone does not create the item: pair it with
+    /// [`settings_intent`](Self::settings_intent).
+    pub fn settings(mut self, label: impl Into<LocalizedString>) -> Self {
+        self.settings = label.into();
         self
     }
     /// "Hide …" label (App).
@@ -345,12 +365,55 @@ impl StandardMenu {
         self.quit_route
     }
 
+    /// Put **Settings…** in the App menu, routed through `intent`, with the
+    /// platform's own placement and key equivalent (⌘, on macOS).
+    ///
+    /// macOS keeps app settings in the application menu, not in File or Edit,
+    /// and ⌘, is the only chord users try. Neither is reachable from a plain
+    /// `MenuEntry`: the App menu is filled in by the platform, so an entry the
+    /// model declares lands in some other menu instead.
+    ///
+    /// Unlike [`quit_intent`](Self::quit_intent) this is the *only* way to get
+    /// the item at all — no platform opens an app's settings on its own, so
+    /// leaving it unset omits the row rather than falling back to a system
+    /// behaviour. Route it to the same intent your in-window "Settings" command
+    /// fires, and the two stay one command.
+    ///
+    /// ```ignore
+    /// StandardMenu::app()
+    ///     .title(tr!(app_name()))
+    ///     .settings(tr!(settings()))
+    ///     .settings_intent("app.settings")
+    /// ```
+    pub fn settings_intent(mut self, intent: &'static str) -> Self {
+        self.settings_route = Some((intent, MenuItemId::next()));
+        self
+    }
+
+    /// The intent [`settings_intent`](Self::settings_intent) installed, or
+    /// `None` if the App menu carries no Settings item.
+    ///
+    /// Public for the same reason as
+    /// [`quit_intent_name`](Self::quit_intent_name): the wiring only takes
+    /// effect on macOS, where an app's test suite generally does not run, so
+    /// without a getter a missing route is invisible from the app's side.
+    pub fn settings_intent_name(&self) -> Option<&'static str> {
+        self.settings_route.map(|(intent, _)| intent)
+    }
+
+    /// The intent + item id [`settings_intent`](Self::settings_intent)
+    /// installed, if any.
+    pub(crate) fn settings_route(&self) -> Option<(&'static str, MenuItemId)> {
+        self.settings_route
+    }
+
     /// Resolve to the platform's localized-label struct (widget-layer i18n
     /// resolution happens here, so the platform never hardcodes English).
     pub(crate) fn resolve_labels(&self) -> teksilo_platform::native_menu::StandardLabels {
         teksilo_platform::native_menu::StandardLabels {
             title: self.title.resolve_now(),
             about: self.about.resolve_now(),
+            settings: self.settings.resolve_now(),
             hide: self.hide.resolve_now(),
             quit: self.quit.resolve_now(),
             minimize: self.minimize.resolve_now(),

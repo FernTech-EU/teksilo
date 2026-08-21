@@ -285,8 +285,8 @@ impl<T: 'static> Widget for TreeView<T> {
                         new_scroll
                     };
 
-                    // Ctrl+A: select all visible rows (Multi only).
-                    if modifiers.ctrl() && matches!(key, Key::A) {
+                    // Select all visible rows — Ctrl+A, ⌘A on macOS (Multi only).
+                    if modifiers.command() && matches!(key, Key::A) {
                         if let Some(ref sel) = sel_for_key
                             && sel.mode() == teksilo_data::SelectionMode::Multi
                         {
@@ -456,6 +456,13 @@ impl<T: 'static> Widget for TreeView<T> {
                             // walk the cursor without disturbing the existing
                             // selection, then Ctrl+Space to add rows one at a
                             // time.
+                            //
+                            // Both halves stay on literal `ctrl()`, macOS
+                            // included: ⌘Space is Spotlight and never reaches
+                            // an app, and ⌘↑/⌘↓ already mean something else in
+                            // a Finder list. This Explorer-style cursor pair
+                            // has no ⌘ counterpart, so Control keeps it
+                            // reachable and out of the platform's way.
                             if let Some(ref sel) = sel_for_key {
                                 sel.toggle(current);
                             }
@@ -485,7 +492,8 @@ impl<T: 'static> Widget for TreeView<T> {
                         // only, leaving the selection untouched — see the
                         // `ListView` sibling implementation for the full
                         // rationale. Only the arrows opt in; Home/End/
-                        // PageUp/PageDown keep selecting under Ctrl.
+                        // PageUp/PageDown keep selecting under Ctrl. Literal
+                        // `ctrl()` — see the Ctrl+Space arm above.
                         let cursor_only = modifiers.ctrl()
                             && !modifiers.shift()
                             && matches!(key, Key::ArrowUp | Key::ArrowDown);

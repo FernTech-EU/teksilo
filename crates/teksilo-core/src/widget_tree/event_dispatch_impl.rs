@@ -2728,14 +2728,14 @@ mod tests {
         );
         tree.shortcut_registry_mut().register(
             Shortcut::new("app.save")
-                .primary(KeyStroke::ctrl(Key::S))
+                .primary(KeyStroke::command(Key::S))
                 .build(),
         );
 
         tree.layout(SizeProposal::exact(100.0, 50.0));
         tree.focus(widget);
 
-        tree.press_key(Key::S, Modifiers::CTRL);
+        tree.press_key(Key::S, Modifiers::COMMAND);
         assert!(fired.get(), "matching action must fire on KeyDown");
     }
 
@@ -2762,14 +2762,14 @@ mod tests {
         );
         tree.shortcut_registry_mut().register(
             Shortcut::new("app.save")
-                .primary(KeyStroke::ctrl(Key::S))
+                .primary(KeyStroke::command(Key::S))
                 .build(),
         );
 
         tree.layout(SizeProposal::exact(100.0, 50.0));
         // Deliberately no focus() call.
 
-        tree.press_key(Key::S, Modifiers::CTRL);
+        tree.press_key(Key::S, Modifiers::COMMAND);
         assert!(
             fired.get(),
             "global shortcut must fire without a focused widget"
@@ -2801,7 +2801,7 @@ mod tests {
         );
         tree.shortcut_registry_mut().register(
             Shortcut::new("app.save")
-                .primary(KeyStroke::ctrl(Key::S))
+                .primary(KeyStroke::command(Key::S))
                 .build(),
         );
 
@@ -2814,7 +2814,7 @@ mod tests {
         tree.destroy_subtree(focusable);
         assert_eq!(tree.focused(), None, "focus must clear when destroyed");
 
-        tree.press_key(Key::S, Modifiers::CTRL);
+        tree.press_key(Key::S, Modifiers::COMMAND);
         assert!(
             fired.get(),
             "global shortcut must still fire after the focused widget is destroyed"
@@ -2844,7 +2844,7 @@ mod tests {
         );
         tree.shortcut_registry_mut().register(
             Shortcut::new("editor.find")
-                .primary(KeyStroke::ctrl(Key::F))
+                .primary(KeyStroke::command(Key::F))
                 .scope(ShortcutScope::Scoped(scope_root))
                 .build(),
         );
@@ -2853,7 +2853,7 @@ mod tests {
 
         // Focus outside the scope: the shortcut does NOT activate.
         tree.focus(outside);
-        tree.press_key(Key::F, Modifiers::CTRL);
+        tree.press_key(Key::F, Modifiers::COMMAND);
         assert_eq!(
             fired.get(),
             0,
@@ -2862,7 +2862,7 @@ mod tests {
 
         // Focus inside the scope: it fires.
         tree.focus(inside);
-        tree.press_key(Key::F, Modifiers::CTRL);
+        tree.press_key(Key::F, Modifiers::COMMAND);
         assert_eq!(
             fired.get(),
             1,
@@ -2903,19 +2903,19 @@ mod tests {
         );
         tree.shortcut_registry_mut().register(
             Shortcut::new("editor.saveBlock")
-                .primary(KeyStroke::ctrl(Key::S))
+                .primary(KeyStroke::command(Key::S))
                 .scope(ShortcutScope::Scoped(editor))
                 .build(),
         );
         tree.shortcut_registry_mut().register(
             Shortcut::new("zzz.global.save")
-                .primary(KeyStroke::ctrl(Key::S))
+                .primary(KeyStroke::command(Key::S))
                 .build(),
         );
 
         tree.layout(SizeProposal::exact(200.0, 100.0));
         tree.focus(sidebar);
-        tree.press_key(Key::S, Modifiers::CTRL);
+        tree.press_key(Key::S, Modifiers::COMMAND);
 
         assert_eq!(global_fired.get(), 1, "applicable global must fire");
         assert_eq!(
@@ -2957,12 +2957,12 @@ mod tests {
         );
         tree.shortcut_registry_mut().register(
             Shortcut::new("app.save")
-                .primary(KeyStroke::ctrl(Key::S))
+                .primary(KeyStroke::command(Key::S))
                 .build(),
         );
         tree.shortcut_registry_mut().register(
             Shortcut::new("editor.saveBlock")
-                .primary(KeyStroke::ctrl(Key::S))
+                .primary(KeyStroke::command(Key::S))
                 .scope(ShortcutScope::Scoped(editor))
                 .build(),
         );
@@ -2971,7 +2971,7 @@ mod tests {
 
         // Focus inside the editor: the scoped binding wins over global.
         tree.focus(editor_inner);
-        tree.press_key(Key::S, Modifiers::CTRL);
+        tree.press_key(Key::S, Modifiers::COMMAND);
         assert_eq!(
             scoped_fired.get(),
             1,
@@ -2985,7 +2985,7 @@ mod tests {
 
         // Focus outside the editor: global reclaims the chord.
         tree.focus(sidebar);
-        tree.press_key(Key::S, Modifiers::CTRL);
+        tree.press_key(Key::S, Modifiers::COMMAND);
         assert_eq!(scoped_fired.get(), 1, "scoped stays put outside its scope");
         assert_eq!(
             global_fired.get(),
@@ -3027,14 +3027,14 @@ mod tests {
         );
         tree.shortcut_registry_mut().register(
             Shortcut::new("app.save")
-                .primary(KeyStroke::ctrl(Key::S))
+                .primary(KeyStroke::command(Key::S))
                 .build(),
         );
 
         tree.layout(SizeProposal::exact(100.0, 50.0));
         tree.focus(inner);
 
-        tree.press_key(Key::S, Modifiers::CTRL);
+        tree.press_key(Key::S, Modifiers::COMMAND);
         assert!(inner_seen.get(), "inner action observed the intent");
         assert!(outer_seen.get(), "outer action reached after Propagated");
     }
@@ -3069,14 +3069,14 @@ mod tests {
         );
         tree.shortcut_registry_mut().register(
             Shortcut::new("app.save")
-                .primary(KeyStroke::ctrl(Key::S))
+                .primary(KeyStroke::command(Key::S))
                 .build(),
         );
 
         tree.layout(SizeProposal::exact(100.0, 50.0));
         tree.focus(inner);
 
-        tree.press_key(Key::S, Modifiers::CTRL);
+        tree.press_key(Key::S, Modifiers::COMMAND);
         assert!(inner_seen.get());
         assert!(!outer_seen.get(), "Handled at inner must stop propagation");
     }
@@ -3115,14 +3115,14 @@ mod tests {
         );
         tree.shortcut_registry_mut().register(
             Shortcut::new("app.save")
-                .primary(KeyStroke::ctrl(Key::S))
+                .primary(KeyStroke::command(Key::S))
                 .build(),
         );
 
         tree.layout(SizeProposal::exact(100.0, 50.0));
         tree.focus(inner);
 
-        tree.press_key(Key::S, Modifiers::CTRL);
+        tree.press_key(Key::S, Modifiers::COMMAND);
         assert!(!inner_seen.get(), "disabled inner must not run");
         assert!(
             outer_seen.get(),
@@ -3164,7 +3164,7 @@ mod tests {
         );
         tree.shortcut_registry_mut().register(
             Shortcut::new("app.save")
-                .primary(KeyStroke::ctrl(Key::S))
+                .primary(KeyStroke::command(Key::S))
                 .propagate_when_disabled(false)
                 .build(),
         );
@@ -3172,7 +3172,7 @@ mod tests {
         tree.layout(SizeProposal::exact(100.0, 50.0));
         tree.focus(inner);
 
-        tree.press_key(Key::S, Modifiers::CTRL);
+        tree.press_key(Key::S, Modifiers::COMMAND);
         assert!(!inner_seen.get(), "disabled inner still does not run");
         assert!(
             !outer_seen.get(),
@@ -3352,7 +3352,7 @@ mod tests {
         );
         tree.shortcut_registry_mut().register(
             Shortcut::new("app.save")
-                .primary(KeyStroke::ctrl(Key::S))
+                .primary(KeyStroke::command(Key::S))
                 .enabled_when(enabled.clone())
                 .build(),
         );
@@ -3361,7 +3361,7 @@ mod tests {
         tree.focus(widget);
 
         // Disabled: keystroke falls through to on_key.
-        tree.press_key(Key::S, Modifiers::CTRL);
+        tree.press_key(Key::S, Modifiers::COMMAND);
         assert!(
             !action_fired.get(),
             "disabled shortcut must not invoke its action"
@@ -3374,7 +3374,7 @@ mod tests {
         // Re-enable → action fires, on_key does not.
         on_key_fired.set(false);
         enabled.set(true);
-        tree.press_key(Key::S, Modifiers::CTRL);
+        tree.press_key(Key::S, Modifiers::COMMAND);
         assert!(action_fired.get(), "re-enabled shortcut must dispatch");
         assert!(
             !on_key_fired.get(),
@@ -3421,13 +3421,13 @@ mod tests {
             );
             tree.shortcut_registry_mut().register(
                 Shortcut::new("app.save")
-                    .primary(KeyStroke::ctrl(Key::S))
+                    .primary(KeyStroke::command(Key::S))
                     .build(),
             );
 
             tree.layout(SizeProposal::exact(100.0, 50.0));
             tree.focus(widget);
-            tree.press_key(Key::S, Modifiers::CTRL);
+            tree.press_key(Key::S, Modifiers::COMMAND);
             (action_fired.get(), on_key_fired.get())
         }
 
@@ -3466,7 +3466,7 @@ mod tests {
 
         tree.shortcut_registry_mut().register(
             Shortcut::new("editor.find")
-                .primary(KeyStroke::ctrl(Key::F))
+                .primary(KeyStroke::command(Key::F))
                 .scope(ShortcutScope::Scoped(scope_root))
                 .on_activate(move |_ks, _ctx| {
                     activated_flag.set(true);
@@ -3478,7 +3478,7 @@ mod tests {
         tree.layout(SizeProposal::exact(200.0, 100.0));
         tree.focus(outside);
 
-        tree.press_key(Key::F, Modifiers::CTRL);
+        tree.press_key(Key::F, Modifiers::COMMAND);
         assert!(
             !activated.get(),
             "on_activate must not run when focus is outside the shortcut's scope"
@@ -3505,7 +3505,7 @@ mod tests {
         );
         tree.shortcut_registry_mut().register(
             Shortcut::new("app.save")
-                .primary(KeyStroke::ctrl(Key::S))
+                .primary(KeyStroke::command(Key::S))
                 .build(),
         );
 
@@ -3515,10 +3515,10 @@ mod tests {
         let handle = tree.begin_key_capture(move |ks, _reg, _ctx| cf.set(Some(ks)));
         assert!(tree.is_capturing_keys());
 
-        tree.press_key(Key::S, Modifiers::CTRL);
+        tree.press_key(Key::S, Modifiers::COMMAND);
         assert_eq!(
             captured.get(),
-            Some(KeyStroke::ctrl(Key::S)),
+            Some(KeyStroke::command(Key::S)),
             "capture callback must receive the chord"
         );
         assert!(
@@ -3540,7 +3540,7 @@ mod tests {
         let widget = tree.add(FillWidget::new().focusable());
         tree.shortcut_registry_mut().register(
             Shortcut::new("app.save")
-                .primary(KeyStroke::ctrl(Key::S))
+                .primary(KeyStroke::command(Key::S))
                 .build(),
         );
 
@@ -3552,13 +3552,13 @@ mod tests {
             reg.rebind_primary("app.save", Some(ks));
         });
 
-        tree.press_key(Key::B, Modifiers::CTRL | Modifiers::SHIFT);
+        tree.press_key(Key::B, Modifiers::COMMAND | Modifiers::SHIFT);
         assert_eq!(
             tree.shortcut_registry()
                 .effective("app.save")
                 .unwrap()
                 .primary,
-            Some(KeyStroke::ctrl_shift(Key::B))
+            Some(KeyStroke::command_shift(Key::B))
         );
     }
 
@@ -3581,7 +3581,7 @@ mod tests {
         );
         tree.shortcut_registry_mut().register(
             Shortcut::new("app.save")
-                .primary(KeyStroke::ctrl(Key::S))
+                .primary(KeyStroke::command(Key::S))
                 .build(),
         );
         tree.layout(SizeProposal::exact(100.0, 50.0));
@@ -3600,7 +3600,7 @@ mod tests {
             "dropping the handle must cancel the capture"
         );
 
-        tree.press_key(Key::S, Modifiers::CTRL);
+        tree.press_key(Key::S, Modifiers::COMMAND);
         assert!(!capture_fired.get(), "cancelled capture must not fire");
         assert!(
             action_fired.get(),
@@ -3636,7 +3636,7 @@ mod tests {
             tree.is_capturing_keys(),
             "dropping the older handle must not cancel the active capture"
         );
-        tree.press_key(Key::K, Modifiers::CTRL);
+        tree.press_key(Key::K, Modifiers::COMMAND);
         assert!(!first.get());
         assert!(second.get(), "newest capture wins");
     }
@@ -3664,7 +3664,7 @@ mod tests {
         let _h = tree.begin_key_capture(|_ks, _reg, ctx| {
             ctx.send_intent(Intent::new("app.save"));
         });
-        tree.press_key(Key::X, Modifiers::CTRL);
+        tree.press_key(Key::X, Modifiers::COMMAND);
         assert!(
             ran.get(),
             "intent queued from capture callback must dispatch"
@@ -3811,7 +3811,7 @@ mod tests {
         let mut tree = WidgetTree::new();
         tree.shortcut_registry_mut().register(
             Shortcut::new("app.save")
-                .primary(KeyStroke::ctrl(Key::S))
+                .primary(KeyStroke::command(Key::S))
                 .build(),
         );
         tree.shortcut_registry_mut()
@@ -3827,7 +3827,7 @@ mod tests {
                 .effective("app.save")
                 .unwrap()
                 .primary,
-            Some(KeyStroke::ctrl(Key::S))
+            Some(KeyStroke::command(Key::S))
         );
     }
 
@@ -3838,7 +3838,7 @@ mod tests {
         let mut tree = WidgetTree::new();
         tree.shortcut_registry_mut().register(
             Shortcut::new("app.save")
-                .primary(KeyStroke::ctrl(Key::S))
+                .primary(KeyStroke::command(Key::S))
                 .build(),
         );
         let source = tree.add(FillWidget::new());
@@ -3865,7 +3865,7 @@ mod tests {
         let widget_owner = widget;
         tree.shortcut_registry_mut().register_owned(
             Shortcut::new("scoped.thing")
-                .primary(KeyStroke::ctrl(Key::K))
+                .primary(KeyStroke::command(Key::K))
                 .build(),
             widget_owner,
         );

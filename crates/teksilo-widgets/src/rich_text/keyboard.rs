@@ -124,7 +124,17 @@ pub(super) fn handle_key(
     };
 
     let shift = modifiers.shift();
-    let ctrl = modifiers.ctrl() || modifiers.super_key();
+    // The platform accelerator, not physical Control: ⌘ on macOS, Ctrl
+    // elsewhere. Testing both would make the Win key act as Ctrl on Linux and
+    // leave ⌃C doing Copy on macOS, where Control belongs to the text system.
+    let ctrl = modifiers.command();
+    // Tab's escape hatch is the exception, and it needs physical Control too.
+    // Ctrl+Tab hands focus to the next widget on every platform, macOS
+    // included (⌘⇥ is the application switcher and never arrives), so the Tab
+    // arms below must decline a ⌃-modified Tab even where ⌃ is not the
+    // accelerator — otherwise the editor swallows the one chord that gets a
+    // keyboard user out of a table.
+    let tab_escape = ctrl || modifiers.ctrl();
     let mode = if shift {
         MoveMode::KeepAnchor
     } else {
@@ -381,7 +391,9 @@ pub(super) fn handle_key(
                 }
                 KeyAction::ClearPreferredX
             }
-            Key::Tab if !ctrl && shift && filter.accepts(EditCommandKind::NavigateTableCell) => {
+            Key::Tab
+                if !tab_escape && shift && filter.accepts(EditCommandKind::NavigateTableCell) =>
+            {
                 // Shift+Tab (no Ctrl): previous table cell when
                 // inside a table; dedent the current list item when
                 // the caret sits anywhere inside it (matches standard
@@ -413,7 +425,9 @@ pub(super) fn handle_key(
                 }
                 KeyAction::ClearPreferredX
             }
-            Key::Tab if !ctrl && !shift && filter.accepts(EditCommandKind::NavigateTableCell) => {
+            Key::Tab
+                if !tab_escape && !shift && filter.accepts(EditCommandKind::NavigateTableCell) =>
+            {
                 // Tab (no Ctrl, no Shift):
                 //  * Inside a table cell → next cell (wraps to next row;
                 //    at last cell, insert a new row below).

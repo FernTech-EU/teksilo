@@ -486,7 +486,7 @@ impl<T: 'static> Widget for TreeBodyPane<T> {
                         };
                         let col = focused_for_click.get().map(|(_, c)| c).unwrap_or(0);
                         focused_for_click.set(Some((row_index_for_click, col)));
-                        if modifiers.ctrl() && sel_for_click.mode() == SelectionMode::Multi {
+                        if modifiers.command() && sel_for_click.mode() == SelectionMode::Multi {
                             sel_for_click.toggle(row_index_for_click);
                             pending_collapse.set(false);
                         } else if modifiers.shift() && sel_for_click.mode() == SelectionMode::Multi

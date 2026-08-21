@@ -166,11 +166,13 @@ impl Widget for SwatchGrid {
                             idx += columns_for_keys;
                         }
                     }
+                    // The accelerator (Ctrl, ⌘ on macOS) widens Home / End
+                    // from the current row to the whole grid.
                     Key::Home => {
-                        idx = if modifiers.ctrl() { 0 } else { row_start };
+                        idx = if modifiers.command() { 0 } else { row_start };
                     }
                     Key::End => {
-                        idx = if modifiers.ctrl() { last } else { row_end };
+                        idx = if modifiers.command() { last } else { row_end };
                     }
                     Key::Enter | Key::Space => {
                         let list = swatches_for_keys.get();

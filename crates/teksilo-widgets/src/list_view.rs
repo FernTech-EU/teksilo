@@ -973,9 +973,9 @@ impl<T: 'static> Widget for ListView<T> {
                         return teksilo_core::event::EventResponse::Ignored;
                     }
 
-                    // Ctrl+A: select all (Multi selection only — a no-op for
-                    // Single / None, matching every list control).
-                    if modifiers.ctrl() && matches!(key, Key::A) {
+                    // Select all — Ctrl+A, ⌘A on macOS (Multi selection only;
+                    // a no-op for Single / None, matching every list control).
+                    if modifiers.command() && matches!(key, Key::A) {
                         if let Some(ref sel) = sel_for_key
                             && sel.mode() == teksilo_data::SelectionMode::Multi
                         {
@@ -1179,6 +1179,13 @@ impl<T: 'static> Widget for ListView<T> {
                             // walk the cursor without disturbing the existing
                             // selection, then Ctrl+Space to add rows one at a
                             // time.
+                            //
+                            // Both halves stay on literal `ctrl()`, macOS
+                            // included: ⌘Space is Spotlight and never reaches
+                            // an app, and ⌘↑/⌘↓ already mean something else in
+                            // a Finder list. This Explorer-style cursor pair
+                            // has no ⌘ counterpart, so Control keeps it
+                            // reachable and out of the platform's way.
                             if let Some(ref sel) = sel_for_key {
                                 sel.toggle(current);
                             }
@@ -1211,7 +1218,9 @@ impl<T: 'static> Widget for ListView<T> {
                         // replacing it. Every other nav key keeps the
                         // existing select-follow behavior (Home/End/PageUp/
                         // PageDown are unaffected by Ctrl; only the arrows
-                        // opt into cursor-only movement).
+                        // opt into cursor-only movement). Literal `ctrl()` —
+                        // see the Ctrl+Space arm above for why this pair does
+                        // not follow the platform accelerator.
                         let cursor_only = modifiers.ctrl()
                             && !modifiers.shift()
                             && matches!(key, Key::ArrowUp | Key::ArrowDown);

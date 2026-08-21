@@ -43,6 +43,16 @@ impl KeyStroke {
         Self { key, modifiers }
     }
 
+    /// A chord on `Ctrl`.
+    ///
+    /// Read as a *declared* shortcut default this carries the cross-platform
+    /// primary-accelerator convention: see
+    /// [`with_command_convention`](Self::with_command_convention) for what the
+    /// registry does with it on macOS. Use [`command`](Self::command) when you
+    /// want that intent stated outright, and
+    /// [`new`](Self::new) with [`Modifiers::CTRL`] plus
+    /// [`ShortcutBuilder::literal_modifiers`] when you mean physical Control on
+    /// every platform.
     pub fn ctrl(key: Key) -> Self {
         Self::new(key, Modifiers::CTRL)
     }
@@ -51,13 +61,52 @@ impl KeyStroke {
         Self::new(key, Modifiers::CTRL | Modifiers::SHIFT)
     }
 
+    /// A chord on the platform's **primary accelerator**: ⌘S on macOS, Ctrl+S
+    /// on Windows and Linux. See [`Modifiers::COMMAND`].
+    ///
+    /// Equivalent to [`ctrl`](Self::ctrl) once a declared shortcut has been
+    /// resolved, but it says so at the call site — which matters for the chords
+    /// built outside the registry, like the copy/paste labels a context menu
+    /// renders for itself.
+    pub fn command(key: Key) -> Self {
+        Self::new(key, Modifiers::COMMAND)
+    }
+
+    /// A chord on the platform's primary accelerator plus `Shift`: ⇧⌘Z on
+    /// macOS, Ctrl+Shift+Z on Windows and Linux.
+    pub fn command_shift(key: Key) -> Self {
+        Self::new(key, Modifiers::COMMAND | Modifiers::SHIFT)
+    }
+
     pub fn alt(key: Key) -> Self {
         Self::new(key, Modifiers::ALT)
+    }
+
+    /// This chord with a declared `Ctrl` reinterpreted as the platform's
+    /// primary accelerator ([`Modifiers::COMMAND`]) — ⌘ on macOS, unchanged
+    /// everywhere else.
+    ///
+    /// This is the convention Qt spells `Qt::CTRL` and the one Teksilo's native
+    /// menu bar has always applied when turning a declared chord into an
+    /// `NSMenuItem` key equivalent. [`ShortcutRegistry`] applies it to every
+    /// **declared** default, so an app that writes `KeyStroke::ctrl(Key::F)`
+    /// once gets Ctrl+F on Windows and Linux and ⌘F on macOS — the same chord
+    /// the menu row already advertised.
+    ///
+    /// It is deliberately *not* applied to a **user override**: a chord the
+    /// user captured in a settings UI is a literal statement of intent, and
+    /// rewriting it would make physical ⌃F unbindable on macOS.
+    ///
+    /// Idempotent, and a no-op for a chord that already names `Super`, so
+    /// `Ctrl+Super` survives as the genuine ⌃⌘ two-modifier chord.
+    pub fn with_command_convention(self) -> Self {
+        Self::new(self.key, self.modifiers.with_command_convention())
     }
 }
 
 impl fmt::Display for KeyStroke {
-    // Plain "Ctrl+S" form. Widgets that display shortcuts to users should
+    // Plain "Ctrl+S" form ("Cmd+S" for a Super chord on macOS, where the key
+    // is named Command). Widgets that display shortcuts to users should
     // use `teksilo_widgets::keystroke_format::format_keystroke()` instead,
     // which handles platform-specific symbols (⌘ on macOS) and locale-
     // aware modifier names ("Strg" in German) via teksilo-i18n.
@@ -227,6 +276,10 @@ pub struct Shortcut {
     /// the keystroke falls through to the focused widget's normal
     /// `on_key` dispatch and `on_activate` is **not** invoked.
     pub enabled_when: Option<Prop<bool>>,
+    /// Take the declared chords literally instead of applying the
+    /// primary-accelerator convention — see
+    /// [`ShortcutBuilder::literal_modifiers`].
+    pub literal_modifiers: bool,
 }
 
 impl fmt::Debug for Shortcut {
@@ -246,6 +299,7 @@ impl fmt::Debug for Shortcut {
             .field("scope", &self.scope)
             .field("propagate_when_disabled", &self.propagate_when_disabled)
             .field("enabled_when", &self.enabled_when.is_some())
+            .field("literal_modifiers", &self.literal_modifiers)
             .finish()
     }
 }
@@ -267,6 +321,7 @@ impl Shortcut {
                 scope: ShortcutScope::Global,
                 propagate_when_disabled: true,
                 enabled_when: None,
+                literal_modifiers: false,
             },
         }
     }
@@ -287,8 +342,32 @@ impl Shortcut {
     /// secondary default. The registry uses the **effective**
     /// keystrokes (defaults merged with overrides) during live
     /// lookups instead of this.
+    ///
+    /// Compares against the *resolved* defaults, so on macOS a chord
+    /// declared `Ctrl+S` matches a pressed ⌘S — see
+    /// [`declared_keystrokes`](Self::declared_keystrokes).
     pub fn matches_default(&self, keystroke: KeyStroke) -> bool {
-        self.primary == Some(keystroke) || self.secondary == Some(keystroke)
+        let (primary, secondary) = self.declared_keystrokes();
+        primary == Some(keystroke) || secondary == Some(keystroke)
+    }
+
+    /// This shortcut's declared chords as the platform actually reads
+    /// them: unchanged when [`literal_modifiers`](Self::literal_modifiers)
+    /// is set, otherwise passed through
+    /// [`KeyStroke::with_command_convention`] so a declared `Ctrl` means ⌘
+    /// on macOS.
+    ///
+    /// The registry layers user overrides on top of these; an override is
+    /// never rewritten.
+    pub fn declared_keystrokes(&self) -> (Option<KeyStroke>, Option<KeyStroke>) {
+        if self.literal_modifiers {
+            (self.primary, self.secondary)
+        } else {
+            (
+                self.primary.map(KeyStroke::with_command_convention),
+                self.secondary.map(KeyStroke::with_command_convention),
+            )
+        }
     }
 }
 
@@ -310,6 +389,27 @@ impl ShortcutBuilder {
 
     pub fn category(mut self, category: &'static str) -> Self {
         self.inner.category = Some(category);
+        self
+    }
+
+    /// Take the declared chords **literally** — no primary-accelerator
+    /// convention, on any platform.
+    ///
+    /// By default a declared `Ctrl` chord is read as "the platform's
+    /// accelerator" and becomes ⌘ on macOS (see
+    /// [`KeyStroke::with_command_convention`]), which is what almost every
+    /// command wants. A few chords are genuinely Control on macOS too, and for
+    /// those the rewrite would be wrong or fatal:
+    ///
+    /// - **Ctrl+Tab** cycles tabs on macOS as well; ⌘Tab belongs to the
+    ///   application switcher and never reaches an app at all.
+    /// - Chords whose ⌘ form the system takes first — ⌘Space (Spotlight),
+    ///   ⌘⇥, ⌘H, ⌘Q — where the rewritten chord would simply never arrive.
+    ///
+    /// Declaring those with `literal_modifiers` keeps them on Control
+    /// everywhere, including macOS.
+    pub fn literal_modifiers(mut self) -> Self {
+        self.inner.literal_modifiers = true;
         self
     }
 
@@ -907,10 +1007,13 @@ impl ShortcutRegistry {
         shortcut: &Shortcut,
     ) -> (Option<KeyStroke>, Option<KeyStroke>) {
         let ov = self.overrides.get(id).copied().unwrap_or_default();
-        (
-            ov.primary.resolve(shortcut.primary),
-            ov.secondary.resolve(shortcut.secondary),
-        )
+        // Declared defaults go through the primary-accelerator convention
+        // (`Ctrl` → ⌘ on macOS); user overrides do not. An app author writes
+        // one chord for three platforms and means "the accelerator"; a user
+        // who captured a chord in a settings UI pressed the keys they meant,
+        // and rewriting those would put physical ⌃F out of reach on macOS.
+        let (primary, secondary) = shortcut.declared_keystrokes();
+        (ov.primary.resolve(primary), ov.secondary.resolve(secondary))
     }
 
     fn bump_version(&self) {
@@ -1007,12 +1110,12 @@ mod tests {
     #[test]
     fn shortcut_matches_default_primary_and_secondary() {
         let s = Shortcut::new("edit.undo")
-            .primary(KeyStroke::ctrl(Key::Z))
+            .primary(KeyStroke::command(Key::Z))
             .secondary(KeyStroke::alt(Key::Backspace))
             .build();
-        assert!(s.matches_default(KeyStroke::ctrl(Key::Z)));
+        assert!(s.matches_default(KeyStroke::command(Key::Z)));
         assert!(s.matches_default(KeyStroke::alt(Key::Backspace)));
-        assert!(!s.matches_default(KeyStroke::ctrl(Key::Y)));
+        assert!(!s.matches_default(KeyStroke::command(Key::Y)));
     }
 
     // --- Registry: upsert preserves user overrides ---------------------
@@ -1023,15 +1126,15 @@ mod tests {
         reg.register(
             Shortcut::new("app.save")
                 .name("Save")
-                .primary(KeyStroke::ctrl(Key::S))
+                .primary(KeyStroke::command(Key::S))
                 .build(),
         );
 
         // User rebinds Ctrl+S → Ctrl+Shift+S.
-        reg.rebind_primary("app.save", Some(KeyStroke::ctrl_shift(Key::S)));
+        reg.rebind_primary("app.save", Some(KeyStroke::command_shift(Key::S)));
         assert_eq!(
             reg.effective("app.save").unwrap().primary,
-            Some(KeyStroke::ctrl_shift(Key::S))
+            Some(KeyStroke::command_shift(Key::S))
         );
 
         // Widget rebuilds, re-registers with the same defaults. The
@@ -1039,12 +1142,12 @@ mod tests {
         reg.register(
             Shortcut::new("app.save")
                 .name("Save")
-                .primary(KeyStroke::ctrl(Key::S))
+                .primary(KeyStroke::command(Key::S))
                 .build(),
         );
         assert_eq!(
             reg.effective("app.save").unwrap().primary,
-            Some(KeyStroke::ctrl_shift(Key::S))
+            Some(KeyStroke::command_shift(Key::S))
         );
 
         // Defaults change (rename + new default keystroke) but the
@@ -1056,7 +1159,7 @@ mod tests {
                 .build(),
         );
         let eff = reg.effective("app.save").unwrap();
-        assert_eq!(eff.primary, Some(KeyStroke::ctrl_shift(Key::S)));
+        assert_eq!(eff.primary, Some(KeyStroke::command_shift(Key::S)));
         assert_eq!(eff.shortcut.name.get(), "Save (renamed)");
     }
 
@@ -1065,14 +1168,14 @@ mod tests {
         let mut reg = ShortcutRegistry::new();
         reg.register(
             Shortcut::new("app.save")
-                .primary(KeyStroke::ctrl(Key::S))
+                .primary(KeyStroke::command(Key::S))
                 .build(),
         );
-        reg.rebind_primary("app.save", Some(KeyStroke::ctrl_shift(Key::S)));
+        reg.rebind_primary("app.save", Some(KeyStroke::command_shift(Key::S)));
         reg.clear_override("app.save");
         assert_eq!(
             reg.effective("app.save").unwrap().primary,
-            Some(KeyStroke::ctrl(Key::S))
+            Some(KeyStroke::command(Key::S))
         );
     }
 
@@ -1083,26 +1186,26 @@ mod tests {
         let mut reg = ShortcutRegistry::new();
         reg.register(
             Shortcut::new("editor.format.bold")
-                .primary(KeyStroke::ctrl(Key::B))
+                .primary(KeyStroke::command(Key::B))
                 .build(),
         );
-        reg.rebind_primary("editor.format.bold", Some(KeyStroke::ctrl_shift(Key::B)));
+        reg.rebind_primary("editor.format.bold", Some(KeyStroke::command_shift(Key::B)));
 
         reg.unregister("editor.format.bold");
         assert!(reg.effective("editor.format.bold").is_none());
         assert_eq!(
             reg.override_for("editor.format.bold").unwrap().primary,
-            SlotOverride::Bound(KeyStroke::ctrl_shift(Key::B))
+            SlotOverride::Bound(KeyStroke::command_shift(Key::B))
         );
 
         reg.register(
             Shortcut::new("editor.format.bold")
-                .primary(KeyStroke::ctrl(Key::B))
+                .primary(KeyStroke::command(Key::B))
                 .build(),
         );
         assert_eq!(
             reg.effective("editor.format.bold").unwrap().primary,
-            Some(KeyStroke::ctrl_shift(Key::B))
+            Some(KeyStroke::command_shift(Key::B))
         );
     }
 
@@ -1117,7 +1220,7 @@ mod tests {
         let v1 = reg.version().get();
         assert!(v1 > v0);
 
-        reg.rebind_primary("a", Some(KeyStroke::ctrl(Key::A)));
+        reg.rebind_primary("a", Some(KeyStroke::command(Key::A)));
         let v2 = reg.version().get();
         assert!(v2 > v1);
 
@@ -1144,13 +1247,13 @@ mod tests {
         let mut reg = ShortcutRegistry::new();
         reg.register(
             Shortcut::new("work.new")
-                .primary(KeyStroke::ctrl(Key::N))
+                .primary(KeyStroke::command(Key::N))
                 .build(),
         );
 
         // Seeded with the current effective primary.
         let sig = reg.effective_primary_signal("work.new");
-        assert_eq!(sig.get(), Some(KeyStroke::ctrl(Key::N)));
+        assert_eq!(sig.get(), Some(KeyStroke::command(Key::N)));
 
         // Count notifications to prove *isolation* from unrelated churn.
         let hits = Rc::new(Cell::new(0usize));
@@ -1164,7 +1267,7 @@ mod tests {
         // other widget's build() no longer disturbs this menu item.
         reg.register(
             Shortcut::new("outline.open_to_side")
-                .primary(KeyStroke::ctrl(Key::Enter))
+                .primary(KeyStroke::command(Key::Enter))
                 .build(),
         );
         reg.unregister("outline.open_to_side");
@@ -1173,11 +1276,11 @@ mod tests {
             0,
             "unrelated shortcut churn must not notify a per-id observer"
         );
-        assert_eq!(sig.get(), Some(KeyStroke::ctrl(Key::N)));
+        assert_eq!(sig.get(), Some(KeyStroke::command(Key::N)));
 
         // Rebinding OUR id updates the signal (and notifies exactly once).
-        reg.rebind_primary("work.new", Some(KeyStroke::ctrl_shift(Key::N)));
-        assert_eq!(sig.get(), Some(KeyStroke::ctrl_shift(Key::N)));
+        reg.rebind_primary("work.new", Some(KeyStroke::command_shift(Key::N)));
+        assert_eq!(sig.get(), Some(KeyStroke::command_shift(Key::N)));
         assert_eq!(hits.get(), 1);
 
         // Unregistering OUR id resolves to None.
@@ -1198,14 +1301,14 @@ mod tests {
 
         reg.register(
             Shortcut::new("late.cmd")
-                .primary(KeyStroke::ctrl(Key::S))
+                .primary(KeyStroke::command(Key::S))
                 .build(),
         );
-        assert_eq!(sig.get(), Some(KeyStroke::ctrl(Key::S)));
+        assert_eq!(sig.get(), Some(KeyStroke::command(Key::S)));
 
         // A user override on top is reflected too.
-        reg.rebind_primary("late.cmd", Some(KeyStroke::ctrl_shift(Key::S)));
-        assert_eq!(sig.get(), Some(KeyStroke::ctrl_shift(Key::S)));
+        reg.rebind_primary("late.cmd", Some(KeyStroke::command_shift(Key::S)));
+        assert_eq!(sig.get(), Some(KeyStroke::command_shift(Key::S)));
     }
 
     // --- Registry: find_by_keystroke honors overrides -----------------
@@ -1215,20 +1318,20 @@ mod tests {
         let mut reg = ShortcutRegistry::new();
         reg.register(
             Shortcut::new("app.save")
-                .primary(KeyStroke::ctrl(Key::S))
+                .primary(KeyStroke::command(Key::S))
                 .build(),
         );
         assert_eq!(
-            reg.find_by_keystroke(KeyStroke::ctrl(Key::S))
+            reg.find_by_keystroke(KeyStroke::command(Key::S))
                 .map(|s| s.shortcut.id),
             Some("app.save")
         );
 
-        reg.rebind_primary("app.save", Some(KeyStroke::ctrl_shift(Key::S)));
+        reg.rebind_primary("app.save", Some(KeyStroke::command_shift(Key::S)));
 
-        assert!(reg.find_by_keystroke(KeyStroke::ctrl(Key::S)).is_none());
+        assert!(reg.find_by_keystroke(KeyStroke::command(Key::S)).is_none());
         assert_eq!(
-            reg.find_by_keystroke(KeyStroke::ctrl_shift(Key::S))
+            reg.find_by_keystroke(KeyStroke::command_shift(Key::S))
                 .map(|s| s.shortcut.id),
             Some("app.save")
         );
@@ -1245,19 +1348,19 @@ mod tests {
         let mut reg = ShortcutRegistry::new();
         reg.register_owned(
             Shortcut::new("editor.format.bold")
-                .primary(KeyStroke::ctrl(Key::B))
+                .primary(KeyStroke::command(Key::B))
                 .build(),
             editor,
         );
         reg.register_owned(
             Shortcut::new("editor.format.italic")
-                .primary(KeyStroke::ctrl(Key::I))
+                .primary(KeyStroke::command(Key::I))
                 .build(),
             editor,
         );
         reg.register_owned(
             Shortcut::new("app.save")
-                .primary(KeyStroke::ctrl(Key::S))
+                .primary(KeyStroke::command(Key::S))
                 .build(),
             other,
         );
@@ -1330,17 +1433,17 @@ mod tests {
         let mut reg = ShortcutRegistry::new();
         reg.register(
             Shortcut::new("app.save")
-                .primary(KeyStroke::ctrl(Key::S))
+                .primary(KeyStroke::command(Key::S))
                 .enabled_when(enabled.clone())
                 .build(),
         );
         // Disabled → invisible to dispatch.
-        assert!(reg.find_by_keystroke(KeyStroke::ctrl(Key::S)).is_none());
+        assert!(reg.find_by_keystroke(KeyStroke::command(Key::S)).is_none());
 
         // Enable → dispatch sees it.
         enabled.set(true);
         assert_eq!(
-            reg.find_by_keystroke(KeyStroke::ctrl(Key::S))
+            reg.find_by_keystroke(KeyStroke::command(Key::S))
                 .map(|s| s.shortcut.id),
             Some("app.save")
         );
@@ -1351,10 +1454,10 @@ mod tests {
         let mut reg = ShortcutRegistry::new();
         reg.register(
             Shortcut::new("app.save")
-                .primary(KeyStroke::ctrl(Key::S))
+                .primary(KeyStroke::command(Key::S))
                 .build(),
         );
-        reg.rebind_primary("app.save", Some(KeyStroke::ctrl_shift(Key::S)));
+        reg.rebind_primary("app.save", Some(KeyStroke::command_shift(Key::S)));
 
         let snapshot = reg.export_overrides();
         assert_eq!(snapshot.len(), 1);
@@ -1363,37 +1466,45 @@ mod tests {
         let mut reg2 = ShortcutRegistry::new();
         reg2.register(
             Shortcut::new("app.save")
-                .primary(KeyStroke::ctrl(Key::S))
+                .primary(KeyStroke::command(Key::S))
                 .build(),
         );
         assert_eq!(
             reg2.effective("app.save").unwrap().primary,
-            Some(KeyStroke::ctrl(Key::S))
+            Some(KeyStroke::command(Key::S))
         );
 
         reg2.import_overrides(snapshot);
         assert_eq!(
             reg2.effective("app.save").unwrap().primary,
-            Some(KeyStroke::ctrl_shift(Key::S))
+            Some(KeyStroke::command_shift(Key::S))
         );
     }
 
     #[test]
     fn clear_all_overrides_restores_every_default() {
         let mut reg = ShortcutRegistry::new();
-        reg.register(Shortcut::new("a").primary(KeyStroke::ctrl(Key::A)).build());
-        reg.register(Shortcut::new("b").primary(KeyStroke::ctrl(Key::B)).build());
+        reg.register(
+            Shortcut::new("a")
+                .primary(KeyStroke::command(Key::A))
+                .build(),
+        );
+        reg.register(
+            Shortcut::new("b")
+                .primary(KeyStroke::command(Key::B))
+                .build(),
+        );
         reg.rebind_primary("a", Some(KeyStroke::alt(Key::A)));
         reg.rebind_primary("b", Some(KeyStroke::alt(Key::B)));
 
         reg.clear_all_overrides();
         assert_eq!(
             reg.effective("a").unwrap().primary,
-            Some(KeyStroke::ctrl(Key::A))
+            Some(KeyStroke::command(Key::A))
         );
         assert_eq!(
             reg.effective("b").unwrap().primary,
-            Some(KeyStroke::ctrl(Key::B))
+            Some(KeyStroke::command(Key::B))
         );
     }
 
@@ -1407,24 +1518,24 @@ mod tests {
         let mut reg = ShortcutRegistry::new();
         reg.register(
             Shortcut::new("foo")
-                .primary(KeyStroke::ctrl(Key::S))
+                .primary(KeyStroke::command(Key::S))
                 .build(),
         );
 
-        reg.rebind_primary("foo", Some(KeyStroke::ctrl_shift(Key::S)));
+        reg.rebind_primary("foo", Some(KeyStroke::command_shift(Key::S)));
 
         // Widget re-registers with a NEW default secondary. The
         // untouched secondary slot must pick this up — that is the
         // whole point of per-slot Default delegation.
         reg.register(
             Shortcut::new("foo")
-                .primary(KeyStroke::ctrl(Key::S))
+                .primary(KeyStroke::command(Key::S))
                 .secondary(KeyStroke::alt(Key::S))
                 .build(),
         );
 
         let eff = reg.effective("foo").unwrap();
-        assert_eq!(eff.primary, Some(KeyStroke::ctrl_shift(Key::S)));
+        assert_eq!(eff.primary, Some(KeyStroke::command_shift(Key::S)));
         assert_eq!(
             eff.secondary,
             Some(KeyStroke::alt(Key::S)),
@@ -1441,7 +1552,7 @@ mod tests {
         let mut reg = ShortcutRegistry::new();
         reg.register(
             Shortcut::new("foo")
-                .primary(KeyStroke::ctrl(Key::S))
+                .primary(KeyStroke::command(Key::S))
                 .build(),
         );
         reg.rebind_primary("foo", None);
@@ -1451,32 +1562,46 @@ mod tests {
         reg.clear_override("foo");
         assert_eq!(
             reg.effective("foo").unwrap().primary,
-            Some(KeyStroke::ctrl(Key::S))
+            Some(KeyStroke::command(Key::S))
         );
     }
 
     #[test]
     fn find_conflict_skips_excluded_id_and_respects_overrides() {
         let mut reg = ShortcutRegistry::new();
-        reg.register(Shortcut::new("a").primary(KeyStroke::ctrl(Key::X)).build());
-        reg.register(Shortcut::new("b").primary(KeyStroke::ctrl(Key::Y)).build());
+        reg.register(
+            Shortcut::new("a")
+                .primary(KeyStroke::command(Key::X))
+                .build(),
+        );
+        reg.register(
+            Shortcut::new("b")
+                .primary(KeyStroke::command(Key::Y))
+                .build(),
+        );
 
         // Ctrl+X is bound to "a"; looking for it while excluding "a"
         // returns None, including it returns Some("a").
-        assert_eq!(reg.find_conflict(KeyStroke::ctrl(Key::X), Some("a")), None);
-        assert_eq!(reg.find_conflict(KeyStroke::ctrl(Key::X), None), Some("a"));
+        assert_eq!(
+            reg.find_conflict(KeyStroke::command(Key::X), Some("a")),
+            None
+        );
+        assert_eq!(
+            reg.find_conflict(KeyStroke::command(Key::X), None),
+            Some("a")
+        );
         // Ctrl+Z is bound to nothing.
-        assert_eq!(reg.find_conflict(KeyStroke::ctrl(Key::Z), None), None);
+        assert_eq!(reg.find_conflict(KeyStroke::command(Key::Z), None), None);
 
         // User rebinds "b" to Ctrl+X — that becomes the new conflict
         // for Ctrl+X (overrides outrank defaults).
-        reg.rebind_primary("b", Some(KeyStroke::ctrl(Key::X)));
+        reg.rebind_primary("b", Some(KeyStroke::command(Key::X)));
         assert_eq!(
-            reg.find_conflict(KeyStroke::ctrl(Key::X), Some("b")),
+            reg.find_conflict(KeyStroke::command(Key::X), Some("b")),
             Some("a")
         );
         assert_eq!(
-            reg.find_conflict(KeyStroke::ctrl(Key::X), Some("a")),
+            reg.find_conflict(KeyStroke::command(Key::X), Some("a")),
             Some("b")
         );
     }
@@ -1572,7 +1697,7 @@ mod tests {
         let mut reg = ShortcutRegistry::new();
         reg.register(
             Shortcut::new("app.save")
-                .primary(KeyStroke::ctrl(Key::S))
+                .primary(KeyStroke::command(Key::S))
                 .enabled_when(enabled.clone())
                 .build(),
         );
@@ -1590,7 +1715,7 @@ mod tests {
         let mut reg = ShortcutRegistry::new();
         reg.register(
             Shortcut::new("edit.undo")
-                .primary(KeyStroke::ctrl(Key::Z))
+                .primary(KeyStroke::command(Key::Z))
                 .secondary(KeyStroke::alt(Key::Backspace))
                 .build(),
         );
@@ -1599,5 +1724,130 @@ mod tests {
                 .map(|s| s.shortcut.id),
             Some("edit.undo")
         );
+    }
+
+    // --- The primary-accelerator convention -----------------------------
+    //
+    // `Modifiers::COMMAND` resolves at compile time, so these assert the rule
+    // in terms of `KeyStroke::command`, which resolves the same way — true on
+    // every host, and on macOS the statement that ⌘F fires a `Ctrl+F`
+    // declaration. The platform-parameterised half of the rule (the actual
+    // Ctrl→⌘ rewrite, testable from a Linux CI) lives in `event::modifier_tests`.
+
+    #[test]
+    fn a_declared_ctrl_chord_resolves_to_the_platform_accelerator() {
+        let mut reg = ShortcutRegistry::new();
+        reg.register(
+            Shortcut::new("editor.find")
+                .primary(KeyStroke::ctrl(Key::F))
+                .secondary(KeyStroke::ctrl_shift(Key::F))
+                .build(),
+        );
+        let eff = reg.effective("editor.find").unwrap();
+        assert_eq!(eff.primary, Some(KeyStroke::command(Key::F)));
+        assert_eq!(eff.secondary, Some(KeyStroke::command_shift(Key::F)));
+
+        // The whole point: the accelerator chord dispatches.
+        assert!(
+            reg.find_by_keystroke(KeyStroke::command(Key::F)).is_some(),
+            "the platform's accelerator must fire a Ctrl-declared shortcut"
+        );
+    }
+
+    #[test]
+    fn literal_modifiers_pins_a_declaration_to_physical_control() {
+        let mut reg = ShortcutRegistry::new();
+        reg.register(
+            Shortcut::new("view.next_tab")
+                .literal_modifiers()
+                .primary(KeyStroke::ctrl(Key::Tab))
+                .build(),
+        );
+        assert_eq!(
+            reg.effective("view.next_tab").unwrap().primary,
+            Some(KeyStroke::new(Key::Tab, Modifiers::CTRL)),
+            "Ctrl+Tab must stay Ctrl+Tab — ⌘⇥ is the macOS application switcher"
+        );
+    }
+
+    #[test]
+    fn a_declared_super_chord_is_left_alone() {
+        let mut reg = ShortcutRegistry::new();
+        reg.register(
+            Shortcut::new("a")
+                .primary(KeyStroke::new(Key::S, Modifiers::SUPER))
+                .build(),
+        );
+        reg.register(
+            Shortcut::new("b")
+                .primary(KeyStroke::new(Key::B, Modifiers::CTRL | Modifiers::SUPER))
+                .build(),
+        );
+        assert_eq!(
+            reg.effective("a").unwrap().primary,
+            Some(KeyStroke::new(Key::S, Modifiers::SUPER))
+        );
+        assert_eq!(
+            reg.effective("b").unwrap().primary,
+            Some(KeyStroke::new(Key::B, Modifiers::CTRL | Modifiers::SUPER)),
+            "Ctrl+Super is a genuine two-modifier chord, not a Ctrl to rewrite"
+        );
+    }
+
+    #[test]
+    fn a_user_override_is_taken_literally() {
+        // A chord captured in a settings UI is a statement of intent. Rewriting
+        // it would make physical Control unbindable on macOS — and would mean
+        // the row the user is looking at fires a chord they did not press.
+        let mut reg = ShortcutRegistry::new();
+        reg.register(
+            Shortcut::new("editor.find")
+                .primary(KeyStroke::ctrl(Key::F))
+                .build(),
+        );
+        let literal_control = KeyStroke::new(Key::G, Modifiers::CTRL);
+        reg.rebind_primary("editor.find", Some(literal_control));
+        assert_eq!(
+            reg.effective("editor.find").unwrap().primary,
+            Some(literal_control)
+        );
+
+        // Clearing it hands the slot back to the declared default, convention
+        // and all.
+        reg.clear_override("editor.find");
+        assert_eq!(
+            reg.effective("editor.find").unwrap().primary,
+            Some(KeyStroke::command(Key::F))
+        );
+    }
+
+    #[test]
+    fn find_conflict_sees_the_resolved_chord() {
+        // The settings UI hands `find_conflict` the chord the user just
+        // pressed. It must recognise that an accelerator chord collides with a
+        // Ctrl-declared default — otherwise a second shortcut can be bound to
+        // it silently and both would fire.
+        let mut reg = ShortcutRegistry::new();
+        reg.register(
+            Shortcut::new("editor.find")
+                .primary(KeyStroke::ctrl(Key::F))
+                .build(),
+        );
+        assert_eq!(
+            reg.find_conflict(KeyStroke::command(Key::F), None),
+            Some("editor.find")
+        );
+    }
+
+    #[test]
+    fn matches_default_follows_the_convention_and_its_opt_out() {
+        let converted = Shortcut::new("a").primary(KeyStroke::ctrl(Key::F)).build();
+        assert!(converted.matches_default(KeyStroke::command(Key::F)));
+
+        let literal = Shortcut::new("b")
+            .literal_modifiers()
+            .primary(KeyStroke::ctrl(Key::Tab))
+            .build();
+        assert!(literal.matches_default(KeyStroke::new(Key::Tab, Modifiers::CTRL)));
     }
 }

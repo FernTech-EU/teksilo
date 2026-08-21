@@ -1146,7 +1146,7 @@ impl<T: 'static> Widget for GridView<T> {
                 let mods = additive_mods.clone();
                 handlers = handlers.on_pointer_event(move |event, _ctx| {
                     if let WidgetEvent::PointerDown { modifiers, .. } = event {
-                        mods.set(modifiers.ctrl() || modifiers.shift());
+                        mods.set(modifiers.command() || modifiers.shift());
                     }
                     EventResponse::Ignored
                 });

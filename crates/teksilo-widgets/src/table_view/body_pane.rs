@@ -367,7 +367,7 @@ impl<T: 'static> Widget for BodyPane<T> {
                                         TableSelectionMode::MultiCell => {
                                             if modifiers.shift() {
                                                 cs.extend_to(row_for_cell, col_for_cell);
-                                            } else if modifiers.ctrl() {
+                                            } else if modifiers.command() {
                                                 cs.toggle(row_for_cell, col_for_cell);
                                             } else {
                                                 cs.select(row_for_cell, col_for_cell);
@@ -461,7 +461,7 @@ impl<T: 'static> Widget for BodyPane<T> {
                             // cell click in every mode — so a row click here already
                             // moves the arrow-nav origin. (TreeTableView has no such
                             // per-cell handler, so it syncs in its row handler.)
-                            if modifiers.ctrl() && sel_for_click.mode() == SelectionMode::Multi {
+                            if modifiers.command() && sel_for_click.mode() == SelectionMode::Multi {
                                 sel_for_click.toggle(row_index_for_click);
                                 pending_collapse.set(false);
                             } else if modifiers.shift()

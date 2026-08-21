@@ -64,10 +64,14 @@ impl Widget for PanelShortcutHost {
                 .build(),
             Shortcut::new("__teksilo_inspector.tab_next")
                 .name("Next Tab")
+                // Literal: ⌘⇥ is the macOS application switcher, so the
+                // convention's rewrite would put this chord out of reach.
+                .literal_modifiers()
                 .primary(KeyStroke::ctrl(Key::Tab))
                 .build(),
             Shortcut::new("__teksilo_inspector.tab_prev")
                 .name("Previous Tab")
+                .literal_modifiers()
                 .primary(KeyStroke::ctrl_shift(Key::Tab))
                 .build(),
             Shortcut::new("__teksilo_inspector.escape")
@@ -109,6 +113,9 @@ impl Widget for PanelShortcutHost {
         ctx.register_shortcut(
             Shortcut::new("__teksilo_inspector.tab_next")
                 .name("Next Tab")
+                // Literal: ⌘⇥ is the macOS application switcher, so the
+                // convention's rewrite would put this chord out of reach.
+                .literal_modifiers()
                 .primary(KeyStroke::ctrl(Key::Tab))
                 .on_activate(move |_ks, _c| {
                     let cur = st.active_tab.get();
@@ -123,6 +130,7 @@ impl Widget for PanelShortcutHost {
         ctx.register_shortcut(
             Shortcut::new("__teksilo_inspector.tab_prev")
                 .name("Previous Tab")
+                .literal_modifiers()
                 .primary(KeyStroke::ctrl_shift(Key::Tab))
                 .on_activate(move |_ks, _c| {
                     let cur = st.active_tab.get();

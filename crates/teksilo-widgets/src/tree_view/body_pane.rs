@@ -391,9 +391,10 @@ impl<T: 'static> Widget for TreeViewBodyPane<T> {
                                     // activation — suppress open/commit so a
                                     // multi-select click doesn't also fire the
                                     // activate callback. Mirrors the PointerDown
-                                    // selection condition (`ctrl` toggles, `shift`
-                                    // extends) so the two stay in lock-step.
-                                    if tap.modifiers.ctrl() || tap.modifiers.shift() {
+                                    // selection condition (the accelerator
+                                    // toggles, `shift` extends) so the two stay
+                                    // in lock-step.
+                                    if tap.modifiers.command() || tap.modifiers.shift() {
                                         return;
                                     }
                                     if let Some(cur) = a.index() {

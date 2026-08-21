@@ -1103,11 +1103,13 @@ fn build_keyboard_handler(
             Key::ArrowRight => new_focus = step_focus(cur, 1),
             Key::ArrowUp => new_focus = step_focus(cur, -7),
             Key::ArrowDown => new_focus = step_focus(cur, 7),
-            Key::Home if modifiers.ctrl() => {
+            // Accelerator + Home / End (⌘ on macOS) jumps to the first / last
+            // day of the month; plain Home / End stay within the week.
+            Key::Home if modifiers.command() => {
                 let ym = YearMonth::from_date(cur);
                 new_focus = Some(ym.first_day());
             }
-            Key::End if modifiers.ctrl() => {
+            Key::End if modifiers.command() => {
                 let ym = YearMonth::from_date(cur);
                 new_focus = Some(ym.last_day());
             }

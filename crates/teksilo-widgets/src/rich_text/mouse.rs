@@ -305,9 +305,7 @@ pub(super) fn handle_pointer_event(
                 return EventResponse::Ignored;
             };
             match &hit.region {
-                teksilo_text::HitRegion::Link { href }
-                    if modifiers.ctrl() || modifiers.super_key() =>
-                {
+                teksilo_text::HitRegion::Link { href } if modifiers.command() => {
                     // Ctrl(⌘)+click follows the link: do not move the caret.
                     // Dispatch to the widget's installed `on_link_activated`
                     // callback (if any) so applications can open the link /

@@ -166,8 +166,14 @@ directly** — the keystroke never reaches the widget tree, so there is no
 double-fire with the in-app shortcut dispatcher.
 
 Modifier mapping follows the cross-platform convention (as in Qt's `Qt::CTRL`):
-the primary accelerator modifier — `Ctrl` *or* `Super` in a Teksilo shortcut —
-maps to ⌘ on macOS. So `KeyStroke::ctrl(Key::S)` shows as ⌘S. `Alt`→⌥, `Shift`→⇧.
+a declared `Ctrl` is the primary accelerator modifier and resolves to ⌘ on
+macOS, so `KeyStroke::ctrl(Key::S)` shows as ⌘S. `Alt`→⌥, `Shift`→⇧.
+
+The rewriting happens once, in the registry — see
+[Shortcuts, Intents and Actions](shortcut-intent-action.md#ctrl-means--on-macos)
+— so the menu row and the in-app dispatcher advertise and fire the *same* chord.
+A shortcut declared `literal_modifiers()`, or a chord the user rebound to
+physical ⌃, arrives here untouched and gets ⌃ as its key equivalent.
 
 ## Multi-window
 
@@ -191,6 +197,8 @@ MenuModel::new()
     .standard_menu(StandardMenu::app()
         .title(tr!(app_name()))       // bold app-name submenu
         .about(tr!(about()))
+        .settings(tr!(settings()))    // "Settings…" — needs settings_intent too
+        .settings_intent("app.settings")
         .hide(tr!(hide()))
         .quit(tr!(quit())))           // e.g. "Quitter" on a French system
     .menu(tr!(file()), |m| …)
@@ -206,6 +214,24 @@ MenuModel::new()
   and registers the menu with AppKit so the live window list appears.
 - **Help** is a localized titled submenu registered as the help menu. Custom Help
   items beyond that are best declared as a normal `.menu(...)`.
+
+### Settings…
+
+macOS keeps app settings in the application menu, under About, on ⌘, — and
+neither the placement nor the chord is reachable from an ordinary `MenuEntry`,
+since the App menu is filled in by the platform. `StandardMenu::settings_intent`
+puts the row there:
+
+```rust
+StandardMenu::app()
+    .settings(tr!(settings()))          // "Settings…" (macOS 13+; "Preferences…" before)
+    .settings_intent("app.settings")    // same intent the in-window command fires
+```
+
+Unlike Quit there is no system fallback — no platform opens an arbitrary app's
+settings on its own — so leaving `settings_intent` unset omits the row rather
+than rendering one that does nothing. Route it to the same intent your in-window
+Settings command uses and the two stay one command.
 
 ### ⚠ Quit, and apps with something to lose
 
