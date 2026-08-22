@@ -146,6 +146,13 @@ pub struct ScrollArea {
     /// in absolute tree coords) into content-relative coordinates.
     /// Shared via `Rc` for the same reason as `viewport_size`.
     viewport_origin: Rc<Cell<Point>>,
+
+    // --- one-shot restore ---
+    /// A vertical offset waiting for a range long enough to hold it. See
+    /// [`Self::restore_scroll_y`]. Shared via `Rc` because the scroll handler
+    /// stands it down when the reader takes over, and that closure cannot borrow
+    /// `self`.
+    pending_restore_y: Rc<Cell<Option<f32>>>,
 }
 
 impl Default for ScrollArea {
@@ -198,6 +205,7 @@ impl ScrollArea {
             content_size: Cell::new(Size::ZERO),
             viewport_size: Rc::new(Cell::new(Size::ZERO)),
             viewport_origin: Rc::new(Cell::new(Point::ZERO)),
+            pending_restore_y: Rc::new(Cell::new(None)),
         }
     }
 
@@ -373,6 +381,36 @@ impl ScrollArea {
     /// scrollable); [`OverscrollBehavior::Contain`] absorbs it instead.
     pub fn overscroll_behavior(mut self, behavior: OverscrollBehavior) -> Self {
         self.overscroll_behavior = behavior;
+        self
+    }
+
+    /// Land `offset` on the first layout pass at which this area has a real
+    /// scrollable range, then forget it.
+    ///
+    /// `max_scroll_y` is `0.0` until the content has been measured, so an
+    /// offset a host writes before that first measurement is clamped away to
+    /// zero and the page paints at the top for a frame before jumping to
+    /// where it should have started. This stores the offset instead and
+    /// applies it itself, inside layout, as soon as `max_scroll_y` becomes
+    /// nonzero, before the ordinary clamp would otherwise discard it, so the
+    /// very first frame the content is measured on is already laid out at
+    /// the restored position, with no visible jump.
+    ///
+    /// It is a one-shot: once applied, it is dropped, so a later reflow (a
+    /// wider window, an edit that lengthens the document) never yanks the
+    /// reader back to where they came in. The offset is still clamped to the
+    /// real range when it lands: past the end it lands at the end, negative
+    /// it lands at zero.
+    ///
+    /// `offset <= 0.0` is a no-op: there is nothing to restore, and it clears
+    /// any previously armed offset rather than leaving it pending.
+    ///
+    /// An area that never calls this behaves exactly as it always has.
+    pub fn restore_scroll_y(self, offset: f32) -> Self {
+        // Set through the existing cell rather than replacing it: the scroll handler
+        // captured this `Rc` when the area was constructed, and handing it a fresh
+        // one would leave it standing down a slot nothing reads.
+        self.pending_restore_y.set((offset > 0.0).then_some(offset));
         self
     }
 
@@ -578,8 +616,15 @@ impl Widget for ScrollArea {
             let max_scroll_x = max_scroll_x.clone();
             let viewport_size = viewport_size.clone();
             let viewport_origin = viewport_origin.clone();
+            // Anything that scrolls this area on purpose outranks a restore that has
+            // not landed yet: a reader who has started scrolling, or a caret being
+            // revealed, has said where they want to be. Without this, a pending
+            // offset the content is still too short to honour would be re-asserted
+            // on every layout pass and fight them for it.
+            let pending_restore_y = self.pending_restore_y.clone();
             handlers = handlers.on_scroll(move |event, _ctx| match event {
                 WidgetEvent::Scroll { delta, .. } => {
+                    pending_restore_y.set(None);
                     let max_y = max_scroll_y.get();
                     let max_x = max_scroll_x.get();
                     let cur_y = scroll_y.get();
@@ -621,6 +666,7 @@ impl Widget for ScrollArea {
                     motion,
                     applied_scroll,
                 } => {
+                    pending_restore_y.set(None);
                     // `target_bounds` is in absolute tree coordinates (the
                     // arena stores screen-space rects). Convert to the
                     // content's local frame by subtracting the viewport's
@@ -961,6 +1007,32 @@ impl Widget for ScrollArea {
         set_if_changed(&self.viewport_ratio_y, ratio_y);
         set_if_changed(&self.viewport_ratio_x, ratio_x);
 
+        // A pending `restore_scroll_y` lands here, ahead of the ordinary clamp
+        // below, which is what keeps the restored position from ever being
+        // visible as a jump from the top.
+        //
+        // **It is honoured only once the range is long enough to hold it**, and
+        // re-applied on every pass until then. A first nonzero range is not the
+        // same thing as a measured one: a rich text editor reports its
+        // `min_lines` height until its own content has been typeset, so a page
+        // holding a long document grows through several passes, and taking the
+        // offset on the first of them lands it clamped against a document that
+        // is not there yet. That is not a near miss. Restoring 11560 into a
+        // range that has reached 500 puts the reader back at the top of a
+        // chapter they were at the end of, which is indistinguishable from the
+        // restore never having happened.
+        if let Some(pending) = self.pending_restore_y.get()
+            && max_y > 0.0
+        {
+            let landed = pending.min(max_y);
+            if (landed - self.scroll_y.get()).abs() > f32::EPSILON {
+                self.scroll_y.set(landed);
+            }
+            if max_y >= pending {
+                self.pending_restore_y.set(None);
+            }
+        }
+
         self.clamp_and_set_scroll();
         let scroll_y = self.scroll_y.get();
         let scroll_x = self.scroll_x.get();
@@ -1117,6 +1189,36 @@ mod tests {
             Size::new(
                 proposal.width.unwrap_or(self.width),
                 proposal.height.unwrap_or(self.height),
+            )
+            .into()
+        }
+    }
+
+    /// A leaf whose intrinsic height can change between layout passes, standing in
+    /// for a rich text editor: one reports its `min_lines` height until its own
+    /// content has been typeset, so a page holding a long document grows through
+    /// several passes rather than arriving at its full height on the first.
+    #[derive(Debug)]
+    struct GrowingLeaf {
+        width: f32,
+        height: Rc<Cell<f32>>,
+    }
+
+    impl GrowingLeaf {
+        fn new(w: f32, height: Rc<Cell<f32>>) -> Self {
+            Self { width: w, height }
+        }
+    }
+
+    impl Widget for GrowingLeaf {
+        fn layout_response(
+            &self,
+            proposal: SizeProposal,
+            _ctx: &LayoutContext,
+        ) -> teksilo_core::widget::LayoutResponse {
+            Size::new(
+                proposal.width.unwrap_or(self.width),
+                proposal.height.unwrap_or(self.height.get()),
             )
             .into()
         }
@@ -2480,6 +2582,254 @@ mod tests {
             "the 4th cell must be reachable by horizontal scrolling; got x={} w={}",
             b.x,
             b.width
+        );
+    }
+
+    // --- restore_scroll_y: landing a caret-restore offset before the first
+    // --- clamp would otherwise destroy it -----------------------------------
+
+    #[test]
+    fn restore_scroll_y_lands_on_the_first_measured_layout() {
+        // 500px of content in a 100px viewport: max_scroll_y ends up 400.
+        let mut tree = WidgetTree::new();
+        let sa = ScrollArea::new()
+            .child(TallLeaf::new(200.0, 500.0))
+            .smooth_scrolling(false)
+            .restore_scroll_y(150.0);
+        let scroll_y = sa.scroll_y_signal().clone();
+        let max_scroll_y = sa.max_scroll_y_signal().clone();
+        let _scroll = tree.add(sa);
+
+        // The very first layout pass is also the first at which the content
+        // is measured, so the restore must already have landed by the time
+        // this call returns; there is no earlier frame to have painted at 0.
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        assert_eq!(max_scroll_y.get(), 400.0);
+        assert_eq!(
+            scroll_y.get(),
+            150.0,
+            "the restored offset must land on the first laid-out frame"
+        );
+    }
+
+    #[test]
+    fn restore_scroll_y_is_not_re_applied_after_a_later_reflow() {
+        let mut tree = WidgetTree::new();
+        let sa = ScrollArea::new()
+            .child(TallLeaf::new(200.0, 500.0))
+            .smooth_scrolling(false)
+            .restore_scroll_y(150.0);
+        let scroll_y = sa.scroll_y_signal().clone();
+        let _scroll = tree.add(sa);
+
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+        assert_eq!(scroll_y.get(), 150.0, "precondition: restore landed once");
+
+        // The writer scrolls elsewhere, then something forces a reflow (a
+        // window resize, an edit that changes the content's measured size).
+        scroll_y.set(70.0);
+        tree.layout(SizeProposal::exact(200.0, 120.0));
+
+        assert_eq!(
+            scroll_y.get(),
+            70.0,
+            "a one-shot restore must not re-arm itself on a later reflow"
+        );
+    }
+
+    #[test]
+    fn restore_scroll_y_past_the_range_never_lets_an_observer_see_the_overshoot() {
+        // The landing clamps the pending offset itself, which looks redundant beside
+        // the `clamp_and_set_scroll` that runs immediately afterwards and would
+        // settle on the same final value. It is not redundant, and asserting the
+        // final value alone cannot tell the two apart. Writing the raw offset first
+        // and correcting it after would publish the overshoot through `scroll_y`, so
+        // anything bound to it, a scroll bar's thumb above all, sees a position the
+        // content never had. Watch every value the signal takes, not just the last.
+        let mut tree = WidgetTree::new();
+        let sa = ScrollArea::new()
+            .child(TallLeaf::new(200.0, 500.0))
+            .smooth_scrolling(false)
+            .restore_scroll_y(9999.0);
+        let scroll_y = sa.scroll_y_signal().clone();
+        let max_scroll_y = sa.max_scroll_y_signal().clone();
+
+        let seen: Rc<std::cell::RefCell<Vec<f32>>> = Rc::new(std::cell::RefCell::new(Vec::new()));
+        let recorder = seen.clone();
+        let _observer = scroll_y.observe(move |v: &f32| recorder.borrow_mut().push(*v));
+
+        let _scroll = tree.add(sa);
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        assert_eq!(
+            scroll_y.get(),
+            400.0,
+            "it must settle at the end of the range"
+        );
+        assert_eq!(scroll_y.get(), max_scroll_y.get());
+        let overshoot: Vec<f32> = seen
+            .borrow()
+            .iter()
+            .copied()
+            .filter(|v| *v > max_scroll_y.get())
+            .collect();
+        assert!(
+            overshoot.is_empty(),
+            "an observer saw an offset past the end of the content: {overshoot:?}"
+        );
+    }
+
+    #[test]
+    fn restore_scroll_y_waits_for_a_range_long_enough_to_hold_it() {
+        // The bug this exists for, found by driving the real app rather than by any
+        // headless test: a page holding a long chapter reported a few hundred pixels
+        // of content on its first laid-out pass and its true height only later. A
+        // restore taken on the first nonzero range landed clamped against the short
+        // one, which put the writer back at the top of a chapter they had left the
+        // end of, and looked exactly like the restore never happening.
+        let height = Rc::new(Cell::new(500.0_f32));
+        let mut tree = WidgetTree::new();
+        let sa = ScrollArea::new()
+            .child(GrowingLeaf::new(200.0, height.clone()))
+            .smooth_scrolling(false)
+            .restore_scroll_y(11560.0);
+        let scroll_y = sa.scroll_y_signal().clone();
+        let max_scroll_y = sa.max_scroll_y_signal().clone();
+        let _scroll = tree.add(sa);
+
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+        assert_eq!(
+            max_scroll_y.get(),
+            400.0,
+            "precondition: a short first pass"
+        );
+        assert_eq!(
+            scroll_y.get(),
+            400.0,
+            "as far down as the content so far allows, so the page is never at the top"
+        );
+
+        height.set(12000.0);
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+        assert_eq!(
+            scroll_y.get(),
+            11560.0,
+            "once the content is long enough, the offset must land in full"
+        );
+
+        // And having landed it, it is spent: growing further must not move the page.
+        scroll_y.set(60.0);
+        height.set(20000.0);
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+        assert_eq!(
+            scroll_y.get(),
+            60.0,
+            "a restore already honoured must not re-assert itself on a later reflow"
+        );
+    }
+
+    #[test]
+    fn a_reader_scrolling_stands_down_a_restore_that_has_not_landed() {
+        // While the content is still too short to hold the remembered offset, the
+        // restore is re-applied on every pass. That must not turn into a fight with
+        // someone who has started reading: a real scroll says where they want to be,
+        // and outranks a position they left on a previous run.
+        let height = Rc::new(Cell::new(500.0_f32));
+        let mut tree = WidgetTree::new();
+        let sa = ScrollArea::new()
+            .child(GrowingLeaf::new(200.0, height.clone()))
+            .smooth_scrolling(false)
+            .restore_scroll_y(11560.0);
+        let scroll_y = sa.scroll_y_signal().clone();
+        let _scroll = tree.add(sa);
+
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+        assert_eq!(scroll_y.get(), 400.0, "precondition: still pending");
+
+        tree.pointer_move(Point::new(50.0, 40.0));
+        tree.dispatch_event(WidgetEvent::Scroll {
+            delta: ScrollDelta::Pixels { x: 0.0, y: 100.0 },
+            modifiers: Default::default(),
+        });
+        let after_reader = scroll_y.get();
+
+        height.set(12000.0);
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+        assert_eq!(
+            scroll_y.get(),
+            after_reader,
+            "the content growing must not yank a reader who has already scrolled"
+        );
+    }
+
+    #[test]
+    fn without_restore_scroll_y_behaviour_is_unchanged() {
+        // Purely additive: an area that never calls `restore_scroll_y` must
+        // stay at 0 through layout, exactly as it did before this existed.
+        let mut tree = WidgetTree::new();
+        let sa = ScrollArea::new()
+            .child(TallLeaf::new(200.0, 500.0))
+            .smooth_scrolling(false);
+        let scroll_y = sa.scroll_y_signal().clone();
+        let _scroll = tree.add(sa);
+
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+        assert_eq!(scroll_y.get(), 0.0);
+
+        // A later reflow must not conjure an offset out of nowhere either.
+        tree.layout(SizeProposal::exact(200.0, 120.0));
+        assert_eq!(scroll_y.get(), 0.0);
+    }
+
+    #[test]
+    fn restore_scroll_y_of_zero_arms_nothing_and_leaves_a_host_write_alone() {
+        // Arming `Some(0.0)` and refusing to arm at all reach the same resting
+        // position, so asserting the final offset proves nothing about the guard.
+        // What separates them is a host that writes the offset itself between
+        // construction and the first layout: an armed zero lands on top of that
+        // write and wipes it, an unarmed one leaves it standing.
+        let mut tree = WidgetTree::new();
+        let sa = ScrollArea::new()
+            .child(TallLeaf::new(200.0, 500.0))
+            .smooth_scrolling(false)
+            .restore_scroll_y(0.0);
+        let scroll_y = sa.scroll_y_signal().clone();
+        let _scroll = tree.add(sa);
+
+        scroll_y.set(120.0);
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        assert_eq!(
+            scroll_y.get(),
+            120.0,
+            "restore_scroll_y(0.0) armed a restore and overwrote the host's own offset"
+        );
+    }
+
+    #[test]
+    fn restore_scroll_y_of_zero_disarms_a_previously_armed_offset() {
+        // `restore_scroll_y(0.0)` must not merely refuse to arm itself: called after
+        // a nonzero call it must clear that earlier value too, or the "no-op" call
+        // would silently leave a stale restore pending. Asserted against a host write
+        // for the same reason as the test above, so that a still-armed 150.0 and a
+        // still-armed 0.0 are both distinguishable from nothing armed at all.
+        let mut tree = WidgetTree::new();
+        let sa = ScrollArea::new()
+            .child(TallLeaf::new(200.0, 500.0))
+            .smooth_scrolling(false)
+            .restore_scroll_y(150.0)
+            .restore_scroll_y(0.0);
+        let scroll_y = sa.scroll_y_signal().clone();
+        let _scroll = tree.add(sa);
+
+        scroll_y.set(120.0);
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        assert_eq!(
+            scroll_y.get(),
+            120.0,
+            "a later restore_scroll_y(0.0) must disarm the earlier pending offset"
         );
     }
 }
