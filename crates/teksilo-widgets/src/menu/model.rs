@@ -213,6 +213,11 @@ pub struct StandardMenu {
     /// `quit_route`. `None` omits the item entirely — there is no platform
     /// default to fall back on.
     settings_route: Option<(&'static str, MenuItemId)>,
+    /// Shortcut ids for the two routed rows, if the app named one. Unset, the
+    /// row falls back to the platform's conventional chord — see
+    /// [`quit_shortcut`](Self::quit_shortcut).
+    quit_shortcut: Option<&'static str>,
+    settings_shortcut: Option<&'static str>,
 }
 
 impl StandardMenu {
@@ -230,6 +235,8 @@ impl StandardMenu {
             zoom: LocalizedString::literal(""),
             quit_route: None,
             settings_route: None,
+            quit_shortcut: None,
+            settings_shortcut: None,
         }
     }
 
@@ -246,6 +253,8 @@ impl StandardMenu {
             zoom: LocalizedString::literal("Zoom"),
             quit_route: None,
             settings_route: None,
+            quit_shortcut: None,
+            settings_shortcut: None,
         }
     }
 
@@ -262,6 +271,8 @@ impl StandardMenu {
             zoom: LocalizedString::literal(""),
             quit_route: None,
             settings_route: None,
+            quit_shortcut: None,
+            settings_shortcut: None,
         }
     }
 
@@ -403,6 +414,41 @@ impl StandardMenu {
 
     /// The intent + item id [`settings_intent`](Self::settings_intent)
     /// installed, if any.
+    /// Advertise the registered shortcut `id` on the routed **Quit** row,
+    /// instead of the platform's conventional chord (⌘Q on macOS).
+    ///
+    /// Worth naming whenever the app registers a quit shortcut of its own —
+    /// which is to say whenever [`quit_intent`](Self::quit_intent) is set, since
+    /// the intent has to be reachable somehow. The chord then comes from the
+    /// `ShortcutRegistry` like every other menu row's: it follows the
+    /// primary-accelerator convention, and it follows a user's rebind. Left
+    /// unset, this row is the one place in the app advertising a chord nothing
+    /// registered — still live after the user moved the command elsewhere, and
+    /// shadowing the chord they moved it to, because the platform dispatches a
+    /// main-menu key equivalent before the responder chain.
+    pub fn quit_shortcut(mut self, id: &'static str) -> Self {
+        self.quit_shortcut = Some(id);
+        self
+    }
+
+    /// Advertise the registered shortcut `id` on the routed **Settings…** row,
+    /// instead of the platform's conventional chord (⌘, on macOS). Same
+    /// reasoning as [`quit_shortcut`](Self::quit_shortcut).
+    pub fn settings_shortcut(mut self, id: &'static str) -> Self {
+        self.settings_shortcut = Some(id);
+        self
+    }
+
+    /// The shortcut id named for the Quit row, if any.
+    pub fn quit_shortcut_id(&self) -> Option<&'static str> {
+        self.quit_shortcut
+    }
+
+    /// The shortcut id named for the Settings row, if any.
+    pub fn settings_shortcut_id(&self) -> Option<&'static str> {
+        self.settings_shortcut
+    }
+
     pub(crate) fn settings_route(&self) -> Option<(&'static str, MenuItemId)> {
         self.settings_route
     }

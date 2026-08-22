@@ -2858,7 +2858,7 @@ mod tests {
             } => {
                 assert_eq!(labels.quit, "Quitter", "Quit label routes through i18n");
                 assert_eq!(labels.about, "About", "default About label resolved");
-                assert_eq!(*quit_item, None, "no quit intent declared, no routing");
+                assert!(quit_item.is_none(), "no quit intent declared, no routing");
             }
             other => panic!("expected leading App menu, got {other:?}"),
         }

@@ -20,7 +20,7 @@ use teksilo_core::signal::Prop;
 use teksilo_data::CheckState;
 use teksilo_platform::native_menu::{
     MenuItemDelta, NativeCheck, NativeKeyEquivalent, NativeMenuActivation, NativeMenuHandle,
-    NativeMenuNode, NativeMenuSnapshot, StandardMenuRole,
+    NativeMenuNode, NativeMenuSnapshot, StandardMenuRole, StandardRoutedItem,
 };
 
 use crate::menu_item::parse_mnemonic;
@@ -192,7 +192,9 @@ fn resolve_node(
 ) -> Option<NativeMenuNode> {
     match node {
         MenuNode::Separator => Some(NativeMenuNode::Separator),
-        MenuNode::Standard(sm) => Some(resolve_standard(sm, activations)),
+        MenuNode::Standard(sm) => Some(resolve_standard(sm, activations, |id| {
+            ctx.effective_shortcut(id).and_then(|eff| eff.primary)
+        })),
         MenuNode::Submenu {
             title, children, ..
         } => Some(NativeMenuNode::Submenu {
@@ -254,22 +256,47 @@ fn resolve_node(
     }
 }
 
+/// The conventional chord for a routed standard row when the app named no
+/// shortcut of its own — ⌘Q for Quit, ⌘, for Settings, which is what a Mac user
+/// reaches for whatever the app calls the command.
+///
+/// A fallback, never an override: an app that registers a quit shortcut should
+/// name it (see [`StandardMenu::quit_shortcut`]) so the row follows a rebind.
+fn conventional_chord(key: &str) -> NativeKeyEquivalent {
+    NativeKeyEquivalent {
+        key: key.to_string(),
+        command: true,
+        shift: false,
+        alt: false,
+        control: false,
+    }
+}
+
 /// Resolve one platform-standard menu into its boundary node.
 ///
-/// Split out of [`resolve_node`] because it needs no [`BuildContext`]: a
-/// standard menu carries labels and, optionally, a routed Quit, and the
-/// platform fills in the rest. That makes it the one part of the native bridge
-/// a test can exercise on any OS — everything around it is behind the macOS
-/// gate in `MenuBar::build`, so a routing bug would otherwise only be
-/// observable on the platform it breaks.
+/// Split out of [`resolve_node`] because it needs no [`BuildContext`], only a
+/// way to look a shortcut up: a standard menu carries labels and, optionally,
+/// routed Quit / Settings rows, and the platform fills in the rest. That makes
+/// it the one part of the native bridge a test can exercise on any OS —
+/// everything around it is behind the macOS gate in `MenuBar::build`, so a
+/// routing bug would otherwise only be observable on the platform it breaks.
+///
+/// `shortcut` is the registry lookup, threaded rather than reached for so a test
+/// can hand over a stub: the chords these rows advertise are otherwise the one
+/// thing about them nothing off macOS can check.
 fn resolve_standard(
     sm: &StandardMenu,
     activations: &mut HashMap<MenuItemId, NativeMenuActivation>,
+    shortcut: impl Fn(&str) -> Option<KeyStroke>,
 ) -> NativeMenuNode {
-    // A routed Quit is an ordinary activation under an id the model minted
-    // once, so it survives every rebuild — unlike the rest of a standard menu,
-    // which the platform fills in from labels alone.
-    if let Some((intent, id)) = sm.quit_route() {
+    // A routed row is an ordinary activation under an id the model minted once,
+    // so it survives every rebuild — unlike the rest of a standard menu, which
+    // the platform fills in from labels alone.
+    let mut route = |entry: Option<(&'static str, MenuItemId)>,
+                     shortcut_id: Option<&'static str>,
+                     fallback: &str|
+     -> Option<StandardRoutedItem> {
+        let (intent, id) = entry?;
         activations.insert(
             id,
             NativeMenuActivation {
@@ -277,23 +304,29 @@ fn resolve_standard(
                 action: None,
             },
         );
-    }
+        // The registry's answer, resolved through the primary-accelerator
+        // convention exactly as `MenuEntry`'s chord is — so this row cannot
+        // advertise one chord while the dispatcher fires another. An id that
+        // resolves to nothing (unregistered, or unbound by the user) leaves the
+        // row with no key equivalent rather than resurrecting the convention:
+        // the app said where the chord comes from, and it currently says none.
+        let key_equiv = match shortcut_id {
+            Some(sid) => shortcut(sid).map(native_key_equiv),
+            None => Some(conventional_chord(fallback)),
+        };
+        Some(StandardRoutedItem { id, key_equiv })
+    };
+
+    let quit_item = route(sm.quit_route(), sm.quit_shortcut_id(), "q");
     // Settings is routed the same way, and only ever routed — the platform has
     // no selector of its own to fall back on.
-    if let Some((intent, id)) = sm.settings_route() {
-        activations.insert(
-            id,
-            NativeMenuActivation {
-                intent: Some(intent),
-                action: None,
-            },
-        );
-    }
+    let settings_item = route(sm.settings_route(), sm.settings_shortcut_id(), ",");
+
     NativeMenuNode::Standard {
         role: sm.role(),
         labels: sm.resolve_labels(),
-        quit_item: sm.quit_route().map(|(_, id)| id),
-        settings_item: sm.settings_route().map(|(_, id)| id),
+        quit_item,
+        settings_item,
     }
 }
 
@@ -384,18 +417,44 @@ mod tests {
         }
     }
 
-    fn quit_item_of(node: &NativeMenuNode) -> Option<MenuItemId> {
+    fn quit_of(node: &NativeMenuNode) -> Option<&StandardRoutedItem> {
         match node {
-            NativeMenuNode::Standard { quit_item, .. } => *quit_item,
+            NativeMenuNode::Standard { quit_item, .. } => quit_item.as_ref(),
             _ => panic!("expected a standard menu node"),
         }
     }
 
-    fn settings_item_of(node: &NativeMenuNode) -> Option<MenuItemId> {
+    fn settings_of(node: &NativeMenuNode) -> Option<&StandardRoutedItem> {
         match node {
-            NativeMenuNode::Standard { settings_item, .. } => *settings_item,
+            NativeMenuNode::Standard { settings_item, .. } => settings_item.as_ref(),
             _ => panic!("expected a standard menu node"),
         }
+    }
+
+    fn quit_item_of(node: &NativeMenuNode) -> Option<MenuItemId> {
+        quit_of(node).map(|r| r.id)
+    }
+
+    fn settings_item_of(node: &NativeMenuNode) -> Option<MenuItemId> {
+        settings_of(node).map(|r| r.id)
+    }
+
+    /// An app that registered no shortcuts at all.
+    fn no_shortcuts(_: &str) -> Option<KeyStroke> {
+        None
+    }
+
+    /// A registry holding exactly one chord, under `id`.
+    fn only(id: &'static str, ks: KeyStroke) -> impl Fn(&str) -> Option<KeyStroke> {
+        move |asked| (asked == id).then_some(ks)
+    }
+
+    /// A chord as the platform would advertise it: `(key, command, shift)`.
+    fn chord(item: Option<&StandardRoutedItem>) -> Option<(String, bool, bool)> {
+        item?
+            .key_equiv
+            .as_ref()
+            .map(|k| (k.key.clone(), k.command, k.shift))
     }
 
     /// Settings has no `terminate:`-style fallback: no platform opens an
@@ -404,7 +463,7 @@ mod tests {
     #[test]
     fn a_standard_app_menu_has_no_settings_row_by_default() {
         let mut activations = HashMap::new();
-        let node = resolve_standard(&StandardMenu::app(), &mut activations);
+        let node = resolve_standard(&StandardMenu::app(), &mut activations, no_shortcuts);
         assert_eq!(settings_item_of(&node), None);
     }
 
@@ -415,6 +474,7 @@ mod tests {
         let node = resolve_standard(
             &StandardMenu::app().settings_intent("app.settings"),
             &mut activations,
+            no_shortcuts,
         );
         let id = settings_item_of(&node).expect("a routed settings carries an item id");
         assert_eq!(
@@ -433,6 +493,7 @@ mod tests {
                 .quit_intent("app.quit")
                 .settings_intent("app.settings"),
             &mut activations,
+            no_shortcuts,
         );
         let quit = quit_item_of(&node).expect("quit id");
         let settings = settings_item_of(&node).expect("settings id");
@@ -450,8 +511,8 @@ mod tests {
         let mut first = HashMap::new();
         let mut second = HashMap::new();
         assert_eq!(
-            settings_item_of(&resolve_standard(&menu, &mut first)),
-            settings_item_of(&resolve_standard(&menu, &mut second)),
+            settings_item_of(&resolve_standard(&menu, &mut first, no_shortcuts)),
+            settings_item_of(&resolve_standard(&menu, &mut second, no_shortcuts)),
         );
     }
 
@@ -464,6 +525,7 @@ mod tests {
         let node = resolve_standard(
             &StandardMenu::app().settings(LocalizedString::literal("Réglages…")),
             &mut activations,
+            no_shortcuts,
         );
         assert_eq!(labels_of(&node).settings, "Réglages…");
     }
@@ -474,7 +536,7 @@ mod tests {
     #[test]
     fn a_standard_app_menu_routes_nothing_by_default() {
         let mut activations = HashMap::new();
-        let node = resolve_standard(&StandardMenu::app(), &mut activations);
+        let node = resolve_standard(&StandardMenu::app(), &mut activations, no_shortcuts);
         assert_eq!(quit_item_of(&node), None);
         assert!(
             activations.is_empty(),
@@ -491,6 +553,7 @@ mod tests {
         let node = resolve_standard(
             &StandardMenu::app().quit_intent("app.quit"),
             &mut activations,
+            no_shortcuts,
         );
         let id = quit_item_of(&node).expect("a routed quit carries an item id");
         let activation = activations
@@ -513,8 +576,8 @@ mod tests {
         let mut first = HashMap::new();
         let mut second = HashMap::new();
         assert_eq!(
-            quit_item_of(&resolve_standard(&menu, &mut first)),
-            quit_item_of(&resolve_standard(&menu, &mut second)),
+            quit_item_of(&resolve_standard(&menu, &mut first, no_shortcuts)),
+            quit_item_of(&resolve_standard(&menu, &mut second, no_shortcuts)),
         );
     }
 
@@ -527,10 +590,12 @@ mod tests {
         let a = resolve_standard(
             &StandardMenu::app().quit_intent("app.quit"),
             &mut activations,
+            no_shortcuts,
         );
         let b = resolve_standard(
             &StandardMenu::app().quit_intent("app.quit"),
             &mut activations,
+            no_shortcuts,
         );
         assert_ne!(quit_item_of(&a), quit_item_of(&b));
         assert_eq!(activations.len(), 2);
@@ -546,7 +611,100 @@ mod tests {
                 .quit(LocalizedString::literal("Quitter"))
                 .quit_intent("app.quit"),
             &mut activations,
+            no_shortcuts,
         );
         assert_eq!(labels_of(&node).quit, "Quitter");
+    }
+
+    // ── The chord a routed row advertises ───────────────────────────────
+
+    /// With no shortcut named, the row falls back to the chord a Mac user
+    /// reaches for. This is the case every app gets without thinking about it,
+    /// so it has to be the conventional one.
+    #[test]
+    fn an_unnamed_shortcut_falls_back_to_the_conventional_chord() {
+        let mut activations = HashMap::new();
+        let node = resolve_standard(
+            &StandardMenu::app()
+                .quit_intent("app.quit")
+                .settings_intent("app.settings"),
+            &mut activations,
+            no_shortcuts,
+        );
+        assert_eq!(chord(quit_of(&node)), Some(("q".into(), true, false)));
+        assert_eq!(chord(settings_of(&node)), Some((",".into(), true, false)));
+    }
+
+    /// Named, the chord comes from the registry — which is the whole point.
+    /// A `Ctrl` declaration has already been rewritten to the primary
+    /// accelerator by the time it reaches here, so it arrives as ⌘.
+    #[test]
+    fn a_named_shortcut_supplies_the_chord() {
+        let mut activations = HashMap::new();
+        let node = resolve_standard(
+            &StandardMenu::app()
+                .quit_intent("app.quit")
+                .quit_shortcut("app.quit"),
+            &mut activations,
+            only("app.quit", KeyStroke::command(Key::Q)),
+        );
+        assert_eq!(chord(quit_of(&node)), Some(("q".into(), true, false)));
+    }
+
+    /// The case the fallback cannot serve: a user who rebound Quit. The row
+    /// must advertise — and therefore fire — the new chord, not the old one.
+    /// Left hardcoded, ⌘Q stays live after the user moved the command away from
+    /// it, *and* shadows wherever they moved it to, since the platform
+    /// dispatches a main-menu key equivalent before the responder chain.
+    #[test]
+    fn a_rebound_shortcut_moves_the_rows_chord_with_it() {
+        let mut activations = HashMap::new();
+        let node = resolve_standard(
+            &StandardMenu::app()
+                .quit_intent("app.quit")
+                .quit_shortcut("app.quit"),
+            &mut activations,
+            only("app.quit", KeyStroke::command_shift(Key::Q)),
+        );
+        assert_eq!(
+            chord(quit_of(&node)),
+            Some(("q".into(), true, true)),
+            "the row follows the rebind rather than keeping the convention"
+        );
+    }
+
+    /// Naming a shortcut that resolves to nothing — unregistered, or unbound by
+    /// the user — leaves the row with no key equivalent. Falling back to the
+    /// convention here would resurrect a chord the user deliberately cleared,
+    /// which is the same defect as never having read the registry.
+    #[test]
+    fn a_named_but_unbound_shortcut_leaves_the_row_chordless() {
+        let mut activations = HashMap::new();
+        let node = resolve_standard(
+            &StandardMenu::app()
+                .quit_intent("app.quit")
+                .quit_shortcut("app.quit"),
+            &mut activations,
+            no_shortcuts,
+        );
+        assert!(quit_of(&node).is_some(), "the row is still there");
+        assert_eq!(chord(quit_of(&node)), None, "it just has no chord");
+    }
+
+    /// The two rows read their own ids, not each other's.
+    #[test]
+    fn each_row_reads_its_own_shortcut() {
+        let mut activations = HashMap::new();
+        let node = resolve_standard(
+            &StandardMenu::app()
+                .quit_intent("app.quit")
+                .quit_shortcut("app.quit")
+                .settings_intent("app.settings")
+                .settings_shortcut("app.settings"),
+            &mut activations,
+            only("app.settings", KeyStroke::command(Key::Character(','))),
+        );
+        assert_eq!(chord(quit_of(&node)), None, "quit's id resolves to nothing");
+        assert_eq!(chord(settings_of(&node)), Some((",".into(), true, false)));
     }
 }

@@ -129,6 +129,24 @@ pub struct StandardLabels {
     pub zoom: String,
 }
 
+/// A row inside a platform-standard menu that the app routes rather than the
+/// platform selects — Quit and Settings today.
+///
+/// Carries the key equivalent alongside the id because the widget layer is the
+/// only place that knows it. Every other item's chord comes from the
+/// `ShortcutRegistry` there, resolved through the primary-accelerator
+/// convention; if the platform layer picked one for these two it would be the
+/// one surface in the app advertising a chord nobody registered — live even
+/// after the user rebound the command, and immune to the rewriting the registry
+/// does for everything else. `None` means no key equivalent at all.
+#[derive(Debug, Clone)]
+pub struct StandardRoutedItem {
+    /// Correlates the native item back to the logical one on activation.
+    pub id: MenuItemId,
+    /// Key equivalent to advertise, already resolved.
+    pub key_equiv: Option<NativeKeyEquivalent>,
+}
+
 /// One node of a native menu tree.
 #[derive(Debug, Clone)]
 pub enum NativeMenuNode {
@@ -160,22 +178,22 @@ pub enum NativeMenuNode {
         role: StandardMenuRole,
         /// Localized display strings (supplied by the widget layer).
         labels: StandardLabels,
-        /// App menu only: route **Quit** back to the app under this id instead
-        /// of firing the platform's own terminate selector.
+        /// App menu only: route **Quit** back to the app under this item
+        /// instead of firing the platform's own terminate selector.
         ///
         /// `None` — the default — keeps the system behaviour: on macOS the item
         /// is bound to `terminate:`, which works with no app wiring at all and
         /// is why ⌘Q is live even for an app that declares no menus.
         ///
-        /// `Some(id)` builds Quit as an ordinary routed item — same id → the
-        /// activation recorded for it, same ⌘Q key equivalent — so choosing it
-        /// (or pressing ⌘Q) reaches the app's own handler. **An app with
-        /// anything to lose on exit must set this**: a main-menu key equivalent
-        /// is dispatched by the platform before the responder chain, and
-        /// `terminate:` does not run winit's exit path, so an in-app quit
-        /// shortcut is shadowed rather than merely duplicated. Whatever the app
-        /// routes to then owes the exit itself — nothing here terminates.
-        quit_item: Option<MenuItemId>,
+        /// `Some(..)` builds Quit as an ordinary routed item — same id → the
+        /// activation recorded for it, and the key equivalent the widget layer
+        /// resolved. **An app with anything to lose on exit must set this**: a
+        /// main-menu key equivalent is dispatched by the platform before the
+        /// responder chain, and `terminate:` does not run winit's exit path, so
+        /// an in-app quit shortcut is shadowed rather than merely duplicated.
+        /// Whatever the app routes to then owes the exit itself — nothing here
+        /// terminates.
+        quit_item: Option<StandardRoutedItem>,
         /// App menu only: build a **Settings…** item under this id, placed where
         /// the platform expects it (on macOS: after About, with the ⌘, key
         /// equivalent).
@@ -185,7 +203,7 @@ pub enum NativeMenuNode {
         /// so `None` simply omits the item. An app that has a settings window
         /// routes it; one that has none leaves the slot empty rather than
         /// showing a row that does nothing.
-        settings_item: Option<MenuItemId>,
+        settings_item: Option<StandardRoutedItem>,
     },
 }
 

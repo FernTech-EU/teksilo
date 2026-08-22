@@ -224,8 +224,9 @@ puts the row there:
 
 ```rust
 StandardMenu::app()
-    .settings(tr!(settings()))          // "Settings…" (macOS 13+; "Preferences…" before)
-    .settings_intent("app.settings")    // same intent the in-window command fires
+    .settings(tr!(settings()))            // "Settings…" (macOS 13+; "Preferences…" before)
+    .settings_intent("app.settings")      // same intent the in-window command fires
+    .settings_shortcut("app.settings")    // …and the same registered chord
 ```
 
 Unlike Quit there is no system fallback — no platform opens an arbitrary app's
@@ -253,7 +254,8 @@ MenuModel::new().standard_menu(
     StandardMenu::app()
         .title(tr!(app_name()))
         .quit(tr!(quit()))
-        .quit_intent("app.quit"),   // the app's own guarded action
+        .quit_intent("app.quit")      // the app's own guarded action
+        .quit_shortcut("app.quit"),   // …advertised at the chord the registry holds
 );
 ```
 
@@ -263,6 +265,22 @@ Quit then becomes an ordinary routed item — same ⌘Q, same
 Leave `quit_intent` unset and the platform behaviour is unchanged, which is also
 what the auto-injected default App menu uses (a model that declares no App menu
 has declared no quit handler to route to either).
+
+### Chords on the two routed rows
+
+Quit and Settings are the only rows the platform places for you, so they are the
+only ones that cannot carry a `MenuEntry::shortcut`. Name the registered
+shortcut with `quit_shortcut` / `settings_shortcut` instead, and the chord is
+resolved from the `ShortcutRegistry` exactly as every other row's is — same
+primary-accelerator convention, same response to a user's rebind.
+
+Unset, the row falls back to the platform convention (⌘Q, ⌘,) — right for an app
+that registered no such shortcut, and wrong the moment one exists: a hardcoded
+⌘Q stays live after the user moves Quit elsewhere *and* shadows wherever they
+moved it to, because the platform dispatches a main-menu key equivalent before
+the responder chain. Naming a shortcut that currently resolves to nothing leaves
+the row with no key equivalent rather than resurrecting the convention — the app
+said where the chord comes from, and it says none right now.
 
 ## Architecture
 

@@ -33,7 +33,7 @@ use objc2_foundation::{NSString, ns_string};
 
 use super::{
     MenuItemDelta, NativeCheck, NativeKeyEquivalent, NativeMenuBackend, NativeMenuEventPayload,
-    NativeMenuNode, NativeMenuSnapshot, StandardLabels, StandardMenuRole,
+    NativeMenuNode, NativeMenuSnapshot, StandardLabels, StandardMenuRole, StandardRoutedItem,
 };
 
 // ============================================================
@@ -234,8 +234,8 @@ fn build_root_menu(
                 bar.addItem(&app_menu_item(
                     mtm,
                     labels,
-                    *quit_item,
-                    *settings_item,
+                    quit_item.as_ref(),
+                    settings_item.as_ref(),
                     target,
                     items,
                 ));
@@ -419,8 +419,8 @@ fn control_state(check: NativeCheck) -> NSControlStateValue {
 fn app_menu_item(
     mtm: MainThreadMarker,
     labels: &StandardLabels,
-    quit_item: Option<MenuItemId>,
-    settings_item: Option<MenuItemId>,
+    quit_item: Option<&StandardRoutedItem>,
+    settings_item: Option<&StandardRoutedItem>,
     target: &TeksiloMenuTarget,
     items: &mut HashMap<MenuItemId, Retained<NSMenuItem>>,
 ) -> Retained<NSMenuItem> {
@@ -438,56 +438,47 @@ fn app_menu_item(
     // Mac app shares, and the one users reach for without looking. Routed or
     // absent: AppKit has no selector that opens an arbitrary app's settings, so
     // an unrouted slot could only ever render a dead row.
-    if let Some(id) = settings_item {
+    if let Some(routed) = settings_item {
         menu.addItem(&NSMenuItem::separatorItem(mtm));
-        let item = leaf_item(mtm, &labels.settings, target);
-        item.setTag(id.raw() as isize);
-        // `setAutoenablesItems(false)` above means nothing enables this for us.
-        item.setEnabled(true);
-        apply_key_equiv(
-            &item,
-            Some(&NativeKeyEquivalent {
-                key: ",".to_string(),
-                command: true,
-                shift: false,
-                alt: false,
-                control: false,
-            }),
-        );
-        menu.addItem(&item);
-        items.insert(id, item);
+        menu.addItem(&routed_item(mtm, &labels.settings, routed, target, items));
     }
     menu.addItem(&NSMenuItem::separatorItem(mtm));
     menu.addItem(&standard_item(mtm, &labels.hide, sel!(hide:), "h"));
     menu.addItem(&NSMenuItem::separatorItem(mtm));
     match quit_item {
         None => menu.addItem(&standard_item(mtm, &labels.quit, sel!(terminate:), "q")),
-        Some(id) => {
-            let item = leaf_item(mtm, &labels.quit, target);
-            item.setTag(id.raw() as isize);
-            // `setAutoenablesItems(false)` above means nothing enables this for
-            // us — an item left disabled would swallow ⌘Q silently, which is the
-            // one failure this whole path exists to rule out.
-            item.setEnabled(true);
-            apply_key_equiv(
-                &item,
-                Some(&NativeKeyEquivalent {
-                    key: "q".to_string(),
-                    command: true,
-                    shift: false,
-                    alt: false,
-                    control: false,
-                }),
-            );
-            menu.addItem(&item);
-            // Registered like any routed item so a later `update_item` — a
-            // relabel on a locale change, say — can still find it.
-            items.insert(id, item);
-        }
+        Some(routed) => menu.addItem(&routed_item(mtm, &labels.quit, routed, target, items)),
     }
 
     bar_item.setSubmenu(Some(&menu));
     bar_item
+}
+
+/// A row inside a standard menu that the app routes: the window's action
+/// receiver, the logical id on the tag, and whatever key equivalent the widget
+/// layer resolved.
+///
+/// Shared by Quit and Settings, which differ only in label and placement — as
+/// two hand-written copies they had already drifted into hardcoding a chord
+/// each, which is the one thing a routed row must not do.
+fn routed_item(
+    mtm: MainThreadMarker,
+    title: &str,
+    routed: &StandardRoutedItem,
+    target: &TeksiloMenuTarget,
+    items: &mut HashMap<MenuItemId, Retained<NSMenuItem>>,
+) -> Retained<NSMenuItem> {
+    let item = leaf_item(mtm, title, target);
+    item.setTag(routed.id.raw() as isize);
+    // `setAutoenablesItems(false)` on the enclosing menu means nothing enables
+    // this for us — a disabled Quit would swallow ⌘Q silently, which is the one
+    // failure this whole path exists to rule out.
+    item.setEnabled(true);
+    apply_key_equiv(&item, routed.key_equiv.as_ref());
+    // Registered like any routed item so a later `update_item` — a relabel on a
+    // locale change, say — can still find it.
+    items.insert(routed.id, item.clone());
+    item
 }
 
 /// A leaf item bound to a standard responder-chain selector (target nil so the
