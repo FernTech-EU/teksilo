@@ -401,3 +401,9 @@ toast-show-more = Show more
 toast-show-less = Show less
 toast-copy-body = Copy
 toast-body-copied = Copied
+
+# CommandPalette. The palette lists whatever an application registered in its
+# ShortcutRegistry, so these are the only strings the widget itself contributes.
+# See crates/teksilo-widgets/src/command_palette.rs.
+command-palette-placeholder = Type a command
+command-palette-empty = No matching command

@@ -369,3 +369,8 @@ toast-show-more = Afficher plus
 toast-show-less = Afficher moins
 toast-copy-body = Copier
 toast-body-copied = Copié
+
+# Palette de commandes. Voir en-US.ftl pour le contexte complet et
+# crates/teksilo-widgets/src/command_palette.rs.
+command-palette-placeholder = Saisissez une commande
+command-palette-empty = Aucune commande correspondante

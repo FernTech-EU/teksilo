@@ -106,6 +106,7 @@
 - [ColumnFlow](widgets/column_flow.md)
 - [ComboBox](widgets/combo_box.md)
 - [CommandLinkButton](widgets/command_link_button.md)
+- [CommandPalette](widgets/command_palette.md)
 - [Crossfade](widgets/crossfade.md)
 - [Cycle](widgets/cycle.md)
 - [DateEdit](widgets/date_edit.md)
