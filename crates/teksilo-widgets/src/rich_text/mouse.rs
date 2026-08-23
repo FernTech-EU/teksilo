@@ -24,7 +24,7 @@ use std::rc::Rc;
 
 use teksilo_canvas::{Point, Rect};
 use teksilo_core::event::{EventResponse, PointerButton, ScrollDelta, WidgetEvent};
-use teksilo_core::widget::EventContext;
+use teksilo_core::widget::{CursorIcon, EventContext};
 use teksilo_text::text_document::{MoveMode, SelectionType};
 
 use super::hit_test;
@@ -304,22 +304,35 @@ pub(super) fn handle_pointer_event(
                 // need every press to progress their state machines.
                 return EventResponse::Ignored;
             };
+            // A viewer follows a link on a plain click; an editor still asks for
+            // Ctrl(⌘). See the arm below for why the two differ.
+            let read_only = state.borrow().policy.is_read_only();
             match &hit.region {
-                teksilo_text::HitRegion::Link { href } if modifiers.command() => {
-                    // Ctrl(⌘)+click follows the link: do not move the caret.
-                    // Dispatch to the widget's installed `on_link_activated`
-                    // callback (if any) so applications can open the link /
-                    // route to their router. Clone the `Rc` out of the state
-                    // borrow before invoking so the handler can mutate widget
-                    // state if it wants.
+                teksilo_text::HitRegion::Link { href } if modifiers.command() || read_only => {
+                    // Follow the link: do not move the caret. Dispatch to the
+                    // widget's installed `on_link_activated` callback (if any)
+                    // so applications can open the link / route to their
+                    // router. Clone the `Rc` out of the state borrow before
+                    // invoking so the handler can mutate widget state if it
+                    // wants.
                     //
-                    // A *plain* click deliberately falls through to ordinary
-                    // caret placement below. This is an editor: the writer who
-                    // clicks their own link is far more often trying to edit
-                    // its text than to leave the document, and intercepting
-                    // every click left the text inside a link unreachable by
-                    // pointer entirely. Browsers can afford the opposite
-                    // default because their text is not editable.
+                    // Which clicks qualify depends on what kind of surface this
+                    // is, which is exactly what `PolicyBundle::is_read_only`
+                    // answers:
+                    //
+                    // * **Editable.** Ctrl(⌘)+click only; a *plain* click falls
+                    //   through to ordinary caret placement below. The writer
+                    //   who clicks their own link is far more often trying to
+                    //   edit its text than to leave the document, and
+                    //   intercepting every click left the text inside a link
+                    //   unreachable by pointer entirely.
+                    // * **Read-only.** A plain click follows it. The rationale
+                    //   above is an *authoring* rationale and simply does not
+                    //   apply: there is no caret to place and no text to edit,
+                    //   so a link the reader cannot follow by clicking it is a
+                    //   link that reads as broken. This is the browser default,
+                    //   and a viewer can afford it for the same reason a browser
+                    //   can — its text is not editable.
                     let callback = state.borrow().on_link_activated.clone();
                     if let Some(cb) = callback {
                         cb(href.as_str(), ctx);
@@ -464,6 +477,25 @@ pub(super) fn handle_pointer_event(
                 return EventResponse::Handled;
             }
             if !is_dragging {
+                // Not a drag, so this is a plain hover. In a viewer a plain
+                // click follows a link (see the press arm), and a link that
+                // acts like a link has to *look* like one under the pointer —
+                // without this the reader gets an I-beam over the one thing on
+                // the page that is not text to select. Editable surfaces are
+                // left alone: there the click places a caret, so an I-beam is
+                // the truthful cursor.
+                if state.borrow().policy.is_read_only() {
+                    let local = to_engine_local(state, position);
+                    let over_link = {
+                        let st = state.borrow();
+                        hit_test::hit_test_at(&st.engine, local, 0.0, 0.0).is_some_and(|hit| {
+                            matches!(hit.region, teksilo_text::HitRegion::Link { .. })
+                        })
+                    };
+                    if over_link {
+                        ctx.set_cursor(CursorIcon::Pointer);
+                    }
+                }
                 return EventResponse::Ignored;
             }
             let local = to_engine_local(state, position);

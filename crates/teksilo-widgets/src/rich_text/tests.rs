@@ -8239,3 +8239,112 @@ fn an_editor_with_no_callback_is_undisturbed() {
 
     assert_eq!(doc.to_plain_text().unwrap_or_default(), "abcdef");
 }
+
+// ── Following a link: a viewer takes a plain click, an editor asks for Ctrl ──
+//
+// The two surfaces disagree on purpose (see `mouse.rs`'s press arm). These
+// four tests pin both halves, because getting either one wrong is invisible
+// until a user complains: a viewer whose links need Ctrl reads as broken, and
+// an editor that follows links on a plain click makes the text inside a link
+// unreachable by pointer.
+
+/// A document whose entire first line is one link, plus the click position
+/// that lands inside it. `(2, 2)` is inside the first glyph run under the
+/// mock text backend, which lays out deterministically.
+fn link_only_doc() -> TextDocument {
+    let doc = TextDocument::new();
+    doc.set_html(r#"<p><a href="https://example.com/x">linklinklink</a></p>"#)
+        .unwrap();
+    doc
+}
+
+/// Click once inside the link with `modifiers` on a tree holding `editor`, and
+/// report every href the widget dispatched.
+///
+/// `content_padding(0.0)` is not cosmetic here: the editor preset carries
+/// TextInput-style insets and the read-only one carries none, so without it the
+/// same click lands on text in one surface and in the padding of the other —
+/// and the editor tests would pass by missing the link entirely rather than by
+/// declining to follow it.
+fn hrefs_after_click(
+    editor: RichTextEditor,
+    modifiers: teksilo_core::event::Modifiers,
+) -> Vec<String> {
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    let seen = Rc::new(RefCell::new(Vec::<String>::new()));
+    let seen_clone = seen.clone();
+    let editor = editor
+        .content_padding(0.0)
+        .on_link_activated(move |href, _ctx| {
+            seen_clone.borrow_mut().push(href.to_string());
+        });
+
+    let mut tree = WidgetTree::new();
+    let _ = tree.add(editor);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    let _ = tree.render();
+    tree.dispatch_event(teksilo_core::event::WidgetEvent::PointerDown {
+        position: Point::new(2.0, 2.0),
+        button: teksilo_core::event::PointerButton::Primary,
+        modifiers,
+    });
+
+    seen.borrow().clone()
+}
+
+#[test]
+fn read_only_follows_a_link_on_a_plain_click() {
+    let hrefs = hrefs_after_click(
+        RichTextEditor::read_only(link_only_doc()),
+        teksilo_core::event::Modifiers::NONE,
+    );
+    assert_eq!(
+        hrefs,
+        vec!["https://example.com/x".to_string()],
+        "a read-only viewer must follow a link on an ordinary click — there is no caret to place, \
+         so a link that ignores a plain click reads as broken"
+    );
+}
+
+#[test]
+fn an_editor_ignores_a_plain_click_on_a_link() {
+    let hrefs = hrefs_after_click(
+        RichTextEditor::editor(link_only_doc()),
+        teksilo_core::event::Modifiers::NONE,
+    );
+    assert!(
+        hrefs.is_empty(),
+        "an editable surface must NOT follow a link on a plain click: that click places the caret, \
+         and intercepting it leaves the text inside a link unreachable by pointer — got {hrefs:?}"
+    );
+}
+
+#[test]
+fn an_editor_follows_a_link_on_ctrl_click() {
+    let hrefs = hrefs_after_click(
+        RichTextEditor::editor(link_only_doc()),
+        teksilo_core::event::Modifiers::CTRL,
+    );
+    assert_eq!(
+        hrefs,
+        vec!["https://example.com/x".to_string()],
+        "Ctrl(Cmd)+click remains the editor's way to follow a link"
+    );
+}
+
+#[test]
+fn read_only_still_follows_a_link_on_ctrl_click() {
+    // The viewer's plain-click rule *widens* the gate; it must not replace it.
+    // A reader who has learned Ctrl+click elsewhere should not find it dead here.
+    let hrefs = hrefs_after_click(
+        RichTextEditor::read_only(link_only_doc()),
+        teksilo_core::event::Modifiers::CTRL,
+    );
+    assert_eq!(
+        hrefs,
+        vec!["https://example.com/x".to_string()],
+        "the read-only rule must widen the gate, not replace it"
+    );
+}
