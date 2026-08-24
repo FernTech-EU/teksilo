@@ -83,12 +83,51 @@ pub struct TreeRow<K, T> {
     pub item: T,
     /// Indent level; `0` is a root.
     pub depth: usize,
+    /// **Declares that this row has children the source has not emitted.**
+    ///
+    /// Unset (`None`) is the ordinary case and the historical behaviour: whether a
+    /// row has children is derived structurally, from whether any row in the stream
+    /// names it as parent. That is right for a source that always hands over the
+    /// whole tree, which is what most of them do.
+    ///
+    /// It is a deadlock for a source that wants to materialise a branch only when it
+    /// is opened. Such a source emits no children until the row is expanded, so the
+    /// row is derived childless, so no chevron is drawn, so there is nothing to
+    /// click, so it is never expanded. `StandardTreeItem::on_toggle` exists to hang
+    /// exactly that kind of load off, and without this the callback can never fire.
+    ///
+    /// Set it to `Some(true)` to promise children that are not there yet: the row
+    /// draws its chevron, the toggle reaches the app, and the app re-sources with the
+    /// branch filled in. `Some(false)` promises the opposite — a leaf, even if the
+    /// stream happens to contain rows beneath it.
+    ///
+    /// ⚠ It is a **promise, not a projection**. A row that claims children and then
+    /// produces none on expand opens onto nothing, and the tree cannot detect that
+    /// for you.
+    pub has_children: Option<bool>,
 }
 
 impl<K, T> TreeRow<K, T> {
-    /// Convenience constructor.
+    /// Convenience constructor, leaving `has_children` to be derived from the
+    /// stream — see the field, and [`with_children`](Self::with_children) for the
+    /// case where it cannot be.
     pub fn new(key: K, item: T, depth: usize) -> Self {
-        Self { key, item, depth }
+        Self {
+            key,
+            item,
+            depth,
+            has_children: None,
+        }
+    }
+
+    /// Declare whether this row has children, rather than letting the stream say.
+    ///
+    /// For a source that materialises a branch on expand. See
+    /// [`has_children`](Self::has_children) for why a lazy source cannot work
+    /// without it.
+    pub fn with_children(mut self, has_children: bool) -> Self {
+        self.has_children = Some(has_children);
+        self
     }
 }
 
@@ -122,6 +161,9 @@ struct Row<K, T> {
     depth: usize,
     parent: Option<K>,
     has_children: bool,
+    /// Whether [`has_children`](Self::has_children) came from the source rather than
+    /// from the shape of the stream. Kept so the structural pass leaves it alone.
+    declared: bool,
 }
 
 /// The freshly-built structure + projection, staged before commit.
@@ -631,7 +673,9 @@ impl<K: ItemKey, T> TreeDataSlice<K, T> {
                 item: tr.item,
                 depth: struct_depth,
                 parent,
-                has_children: false,
+                // Filled in below for every row that did not declare it.
+                has_children: tr.has_children.unwrap_or(false),
+                declared: tr.has_children.is_some(),
             });
             stack.push((tr.depth, key, idx));
         }
@@ -647,8 +691,14 @@ impl<K: ItemKey, T> TreeDataSlice<K, T> {
                 None => roots.push(i),
             }
         }
+        // Structural derivation, for every row that did not declare an answer. A row
+        // that did keeps it: that is the whole point of the declaration, and a lazy
+        // source's unopened branch would otherwise be derived childless and could
+        // never be opened.
         for r in rows.iter_mut() {
-            r.has_children = children.get(&r.key).is_some_and(|v| !v.is_empty());
+            if !r.declared {
+                r.has_children = children.get(&r.key).is_some_and(|v| !v.is_empty());
+            }
         }
 
         // 3. Seed the expand + seen sets from the current ones.
@@ -993,6 +1043,91 @@ mod tests {
         slice
     }
 
+    /// **A row may promise children the stream has not delivered.**
+    ///
+    /// This is what a source that materialises a branch on expand needs, and
+    /// without it such a source deadlocks: no children emitted, so the row derives
+    /// childless, so no chevron is drawn, so the toggle it wanted to load from can
+    /// never fire.
+    #[test]
+    fn a_declared_parent_keeps_its_chevron_with_no_children_in_the_stream() {
+        let slice = TreeDataSlice::from_rows(vec![
+            TreeRow::new(1, "Scene one", 0).with_children(true),
+            TreeRow::new(2, "Scene two", 0).with_children(true),
+        ]);
+        assert_eq!(slice.visible_count(), 2);
+        for i in 0..2 {
+            slice.with_entry(i, |_, e| {
+                assert!(e.has_children, "a promise the stream cannot corroborate");
+            });
+        }
+    }
+
+    /// The declaration overrides the stream in **both** directions, so a source can
+    /// also say "leaf" about a row that happens to have rows under it.
+    #[test]
+    fn a_declared_leaf_stays_a_leaf() {
+        let slice = TreeDataSlice::from_rows(vec![
+            TreeRow::new(1, "Parent", 0).with_children(false),
+            TreeRow::new(2, "Child", 1),
+        ]);
+        slice.set_expanded_keys(&[1]);
+        slice.with_entry(0, |_, e| assert!(!e.has_children));
+    }
+
+    /// **Silence still means "derive it".** Every existing source hands over the
+    /// whole tree and says nothing, and must keep getting the structural answer.
+    #[test]
+    fn an_undeclared_row_is_still_derived_from_the_stream() {
+        let slice = TreeDataSlice::from_rows(sample());
+        slice.with_entry(0, |item, e| {
+            assert_eq!(*item, "M");
+            assert!(e.has_children, "M has Book and Ch2 beneath it");
+        });
+        slice.with_entry(2, |item, e| {
+            assert_eq!(*item, "Opening");
+            assert!(!e.has_children, "Opening has nothing beneath it");
+        });
+    }
+
+    /// The promise survives the reload a lazy source performs when it fills a
+    /// branch in, and the row keeps its expand state across it — which is the whole
+    /// sequence: declare, expand, re-source with children, stay open.
+    #[test]
+    fn a_declared_parent_can_be_expanded_and_then_filled_in() {
+        let filled = std::rc::Rc::new(std::cell::Cell::new(false));
+        let slice = TreeDataSlice::new();
+        slice.set_source({
+            let filled = filled.clone();
+            move || {
+                let mut rows = vec![TreeRow::new(1, "Scene one", 0).with_children(true)];
+                if filled.get() {
+                    rows.push(TreeRow::new(11, "hit at 42", 1));
+                    rows.push(TreeRow::new(12, "hit at 91", 1));
+                }
+                rows
+            }
+        });
+        slice.reload();
+        slice.with_entry(0, |_, e| assert!(e.has_children));
+        assert_eq!(slice.visible_count(), 1);
+
+        slice.set_expanded_keys(&[1]);
+        assert!(slice.is_expanded(&1));
+        // Still nothing under it: the app has not loaded the branch yet.
+        assert_eq!(slice.visible_count(), 1);
+
+        filled.set(true);
+        slice.reload();
+        assert!(slice.is_expanded(&1), "the expand survived the reload");
+        assert_eq!(
+            slice.visible_count(),
+            3,
+            "and the branch is now really there"
+        );
+        slice.with_entry(0, |_, e| assert!(e.has_children));
+    }
+
     #[test]
     fn structure_derivation() {
         let slice = TreeDataSlice::from_rows(sample());
@@ -1319,11 +1454,7 @@ mod tests {
         let reentrant = slice.clone();
         slice.set_source(move || {
             reentrant.set_source(Vec::new);
-            vec![TreeRow {
-                key: 1,
-                item: "root",
-                depth: 0,
-            }]
+            vec![TreeRow::new(1, "root", 0)]
         });
         slice.reload();
         assert_eq!(slice.visible_count(), 1);

@@ -522,32 +522,14 @@ mod drag_identity_tests {
     fn slice_of(keys: &[u64]) -> TreeDataSlice<u64, u64> {
         let slice = TreeDataSlice::<u64, u64>::new();
         let owned: Vec<u64> = keys.to_vec();
-        slice.set_source(move || {
-            owned
-                .iter()
-                .map(|k| TreeRow {
-                    key: *k,
-                    item: *k,
-                    depth: 0,
-                })
-                .collect()
-        });
+        slice.set_source(move || owned.iter().map(|k| TreeRow::new(*k, *k, 0)).collect());
         slice.reload();
         slice
     }
 
     fn reshape(slice: &TreeDataSlice<u64, u64>, keys: &[u64]) {
         let owned: Vec<u64> = keys.to_vec();
-        slice.set_source(move || {
-            owned
-                .iter()
-                .map(|k| TreeRow {
-                    key: *k,
-                    item: *k,
-                    depth: 0,
-                })
-                .collect()
-        });
+        slice.set_source(move || owned.iter().map(|k| TreeRow::new(*k, *k, 0)).collect());
         slice.reload();
     }
 
@@ -633,16 +615,7 @@ mod anchor_tests {
     fn slice_of(keys: &[u64]) -> TreeDataSlice<u64, u64> {
         let slice = TreeDataSlice::<u64, u64>::new();
         let owned: Vec<u64> = keys.to_vec();
-        slice.set_source(move || {
-            owned
-                .iter()
-                .map(|k| TreeRow {
-                    key: *k,
-                    item: *k,
-                    depth: 0,
-                })
-                .collect()
-        });
+        slice.set_source(move || owned.iter().map(|k| TreeRow::new(*k, *k, 0)).collect());
         slice.reload();
         slice
     }
@@ -658,16 +631,7 @@ mod anchor_tests {
         assert_eq!(anchor.index(), Some(2));
 
         let shifted: Vec<u64> = vec![1, 2, 10, 20, 30];
-        slice.set_source(move || {
-            shifted
-                .iter()
-                .map(|k| TreeRow {
-                    key: *k,
-                    item: *k,
-                    depth: 0,
-                })
-                .collect()
-        });
+        slice.set_source(move || shifted.iter().map(|k| TreeRow::new(*k, *k, 0)).collect());
         slice.reload();
 
         assert_eq!(
@@ -686,16 +650,7 @@ mod anchor_tests {
         let anchor = src.anchor(1); // row 20
 
         let remaining: Vec<u64> = vec![10, 30];
-        slice.set_source(move || {
-            remaining
-                .iter()
-                .map(|k| TreeRow {
-                    key: *k,
-                    item: *k,
-                    depth: 0,
-                })
-                .collect()
-        });
+        slice.set_source(move || remaining.iter().map(|k| TreeRow::new(*k, *k, 0)).collect());
         slice.reload();
 
         assert_eq!(anchor.index(), None, "row 20 is gone");
@@ -732,16 +687,7 @@ mod anchor_tests {
 
         // Row 30 moves to index 4.
         let shifted: Vec<u64> = vec![1, 2, 10, 20, 30];
-        slice.set_source(move || {
-            shifted
-                .iter()
-                .map(|k| TreeRow {
-                    key: *k,
-                    item: *k,
-                    depth: 0,
-                })
-                .collect()
-        });
+        slice.set_source(move || shifted.iter().map(|k| TreeRow::new(*k, *k, 0)).collect());
         slice.reload();
 
         crate::data_views::reconcile_editing_row(&editing, &slot, &anchor_of);

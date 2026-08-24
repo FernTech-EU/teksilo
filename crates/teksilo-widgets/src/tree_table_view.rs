@@ -3025,26 +3025,10 @@ mod tests {
     fn slice_rows() -> Vec<teksilo_data::TreeRow<u64, &'static str>> {
         use teksilo_data::TreeRow;
         vec![
-            TreeRow {
-                key: 1,
-                item: "docs",
-                depth: 0,
-            },
-            TreeRow {
-                key: 2,
-                item: "readme",
-                depth: 1,
-            },
-            TreeRow {
-                key: 3,
-                item: "guide",
-                depth: 1,
-            },
-            TreeRow {
-                key: 4,
-                item: "src",
-                depth: 0,
-            },
+            TreeRow::new(1, "docs", 0),
+            TreeRow::new(2, "readme", 1),
+            TreeRow::new(3, "guide", 1),
+            TreeRow::new(4, "src", 0),
         ]
     }
 
@@ -3133,11 +3117,7 @@ mod tests {
                 order
                     .borrow()
                     .iter()
-                    .map(|k| teksilo_data::TreeRow {
-                        key: *k,
-                        item: names[k],
-                        depth: 0,
-                    })
+                    .map(|k| teksilo_data::TreeRow::new(*k, names[k], 0))
                     .collect()
             });
         }
@@ -3208,11 +3188,7 @@ mod tests {
                 order
                     .borrow()
                     .iter()
-                    .map(|k| teksilo_data::TreeRow {
-                        key: *k,
-                        item: names[k],
-                        depth: 0,
-                    })
+                    .map(|k| teksilo_data::TreeRow::new(*k, names[k], 0))
                     .collect()
             });
         }
@@ -3364,11 +3340,7 @@ mod tests {
             let names: std::collections::HashMap<u64, &'static str> =
                 [(1, "one"), (2, "two"), (3, "three")].into_iter().collect();
             all.iter()
-                .map(|k| teksilo_data::TreeRow {
-                    key: *k,
-                    item: names[k],
-                    depth: 0,
-                })
+                .map(|k| teksilo_data::TreeRow::new(*k, names[k], 0))
                 .collect()
         });
         slice.reload();
@@ -3401,11 +3373,7 @@ mod tests {
                 [(2, "two"), (3, "three")].into_iter().collect();
             fewer
                 .iter()
-                .map(|k| teksilo_data::TreeRow {
-                    key: *k,
-                    item: names[k],
-                    depth: 0,
-                })
+                .map(|k| teksilo_data::TreeRow::new(*k, names[k], 0))
                 .collect()
         });
         slice.reload();
@@ -3424,11 +3392,7 @@ mod tests {
         let last: Vec<u64> = vec![2];
         slice.set_source(move || {
             last.iter()
-                .map(|k| teksilo_data::TreeRow {
-                    key: *k,
-                    item: "two",
-                    depth: 0,
-                })
+                .map(|k| teksilo_data::TreeRow::new(*k, "two", 0))
                 .collect()
         });
         slice.reload();
