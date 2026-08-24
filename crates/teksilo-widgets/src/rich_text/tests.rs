@@ -9255,3 +9255,188 @@ mod regression_clipboard_external {
         );
     }
 }
+
+/// Two edits in one frame used to leave the document and the typesetter
+/// disagreeing about where every later block starts.
+#[cfg(test)]
+mod regression_block_position_desync {
+    use super::*;
+    use teksilo_text::text_document::MoveMode;
+
+    /// Click the far-left edge of every block's first line and report each one
+    /// whose hit-test disagrees with the block's true start. A disagreement
+    /// means the laid-out `position` has drifted from the document's, which is
+    /// what makes a click land on the wrong character and a selection paint in
+    /// the wrong place.
+    ///
+    /// The far-left edge specifically, not the block's own reported x: a block
+    /// whose position has drifted reports a caret rect for its first character
+    /// several characters into the line — so hit-testing *there* asks the two
+    /// broken mappings to agree with each other, which they always do. Only an
+    /// absolute coordinate catches the drift.
+    ///
+    /// Which is why table cells are skipped rather than probed: a cell has its
+    /// own left origin (column 1 sits at x = 200), so the document's left edge
+    /// lands in column 0 and the probe would report a drift that is entirely
+    /// its own doing.
+    fn desynced_blocks(doc: &TextDocument, state: &crate::rich_text::SharedState) -> Vec<String> {
+        let st = state.borrow();
+        let mut bad = Vec::new();
+        for b in doc.blocks() {
+            if st.engine.is_block_in_table(b.id()) {
+                continue;
+            }
+            let pos = b.position();
+            let r = st
+                .engine
+                .caret_rect(pos, teksilo_text::CursorAffinity::Downstream);
+            let hit = st
+                .engine
+                .hit_test(0.5, r[1] + r[3] * 0.5)
+                .map(|h| h.position);
+            if hit != Some(pos) {
+                bad.push(format!(
+                    "{:?} starts at {pos} but its left edge hit-tests to {hit:?}",
+                    b.text().chars().take(20).collect::<String>()
+                ));
+            }
+        }
+        bad
+    }
+
+    fn editor_with(text: &str) -> (TextDocument, WidgetTree, crate::rich_text::SharedState) {
+        let doc = TextDocument::new();
+        doc.set_plain_text(text).unwrap();
+        let editor = RichTextEditor::editor(doc.clone());
+        let state = editor.state_handle();
+        let mut tree = WidgetTree::new();
+        let id = tree.add(editor);
+        tree.layout(SizeProposal::exact(420.0, 400.0));
+        focus_editor(&mut tree, id);
+        tick_past_debounce(&mut tree);
+        let _ = tree.render();
+        (doc, tree, state)
+    }
+
+    fn insert_at(doc: &TextDocument, at: usize, text: &str) {
+        let c = doc.cursor_at(at);
+        c.set_position(at, MoveMode::MoveAnchor);
+        let _ = c.insert_text(text);
+    }
+
+    /// **Two single-block edits arriving in one frame.**
+    ///
+    /// `drain_events` reports at most one block position for the incremental
+    /// relayout, and it used to keep whichever `ContentsChanged` arrived last.
+    /// The other edit was then never laid out — and the character-position
+    /// shift that runs after a relayout, which moves every following block's
+    /// `position` by the edit's length, never ran for it either. From then on
+    /// the typesetter placed every later block N characters earlier than the
+    /// document did.
+    ///
+    /// What that looks like to a writer, with N = 4: the first four characters
+    /// of the next paragraph cannot be clicked (the caret lands on the fourth),
+    /// selecting the word just typed paints a phantom highlight of the same
+    /// width at the start of the paragraph below, and selections in that
+    /// paragraph are drawn four characters to the left of the words they cover.
+    #[test]
+    fn two_edits_in_one_frame_keep_the_layout_and_the_document_agreeing() {
+        let (doc, mut tree, state) =
+            editor_with("Premier paragraphe ici.\nDeuxieme paragraphe ici.\nTroisieme ici.");
+        assert!(
+            desynced_blocks(&doc, &state).is_empty(),
+            "precondition: a freshly laid-out document agrees with itself"
+        );
+
+        let blocks = doc.blocks();
+        let (first, third) = (blocks[0].position(), blocks[2].position());
+        // No tick between them, so both events land in one drain.
+        insert_at(&doc, first, "AAAA");
+        insert_at(&doc, third + 4, "BB");
+        tick_past_debounce(&mut tree);
+        let _ = tree.render();
+
+        let bad = desynced_blocks(&doc, &state);
+        assert!(bad.is_empty(), "after two edits in one frame: {bad:?}");
+    }
+
+    /// Two edits at the *same* position still take the incremental path — they
+    /// describe one block, and one relayout from the final document is exactly
+    /// right. Pinned so the fix above cannot quietly become "any second event
+    /// forces a full layout", which would put a whole-document relayout on the
+    /// typing path.
+    #[test]
+    fn two_edits_at_one_position_still_relayout_incrementally() {
+        let (doc, mut tree, state) =
+            editor_with("Premier paragraphe ici.\nDeuxieme paragraphe ici.");
+        let at = doc.blocks()[0].position();
+        insert_at(&doc, at, "AA");
+        insert_at(&doc, at, "BB");
+        tick_past_debounce(&mut tree);
+        let _ = tree.render();
+
+        assert_eq!(
+            doc.to_plain_text().unwrap(),
+            "BBAAPremier paragraphe ici.\nDeuxieme paragraphe ici."
+        );
+        assert!(
+            !state.borrow().needs_full_layout,
+            "one block, one relayout — no full layout on the typing path"
+        );
+        let bad = desynced_blocks(&doc, &state);
+        assert!(bad.is_empty(), "{bad:?}");
+    }
+
+    /// A table in the document disqualifies the rope fast path that resolves an
+    /// edit position to its block, so typing near a paragraph boundary takes a
+    /// different lookup. Probe it too.
+    #[test]
+    fn typing_after_a_table_keeps_the_following_paragraphs_clickable() {
+        let (doc, mut tree, state) =
+            editor_with("Avant le tableau.\nApres le tableau.\nEncore un paragraphe.");
+        {
+            let c = doc.cursor_at(0);
+            c.set_position(0, MoveMode::MoveAnchor);
+            let _ = c.insert_table(2, 2);
+        }
+        tick_past_debounce(&mut tree);
+        let _ = tree.render();
+        let bad = desynced_blocks(&doc, &state);
+        assert!(
+            bad.is_empty(),
+            "precondition after inserting a table: {bad:?}"
+        );
+
+        let plain = doc.to_plain_text().unwrap();
+        let at = plain.find("Apres le tableau.").expect("second paragraph")
+            + "Apres le tableau.".chars().count();
+        insert_at(&doc, at, "test");
+        tick_past_debounce(&mut tree);
+        let _ = tree.render();
+
+        let bad = desynced_blocks(&doc, &state);
+        assert!(
+            bad.is_empty(),
+            "after typing at a paragraph end past a table: {bad:?}"
+        );
+    }
+
+    /// The ordinary path the writer takes: type a word at the end of a
+    /// paragraph and click into the next one. This always worked; it is here so
+    /// the fix is not mistaken for the whole story.
+    #[test]
+    fn typing_a_word_at_a_paragraph_end_leaves_the_next_paragraph_clickable() {
+        let long = "Elle avait longtemps vecu dans une petite ville tranquille pres \
+                    du fleuve, loin de tout, quelque part au Canada.";
+        let (doc, mut tree, state) = editor_with(&format!(
+            "{long}\nQuelqu'un s'approcha d'elle par derriere."
+        ));
+        let end_of_first = long.chars().count();
+        insert_at(&doc, end_of_first, "test");
+        tick_past_debounce(&mut tree);
+        let _ = tree.render();
+
+        let bad = desynced_blocks(&doc, &state);
+        assert!(bad.is_empty(), "{bad:?}");
+    }
+}

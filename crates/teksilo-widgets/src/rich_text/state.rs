@@ -976,11 +976,31 @@ impl EditorState {
                     self.pending_text_changed = true;
                     a11y_snapshot_dirty = true;
                     saw_content_change = true;
-                    if blocks_affected <= 1 && !self.needs_full_layout {
-                        single_pos = Some(position);
-                    } else {
+                    if blocks_affected > 1 || self.needs_full_layout {
                         self.needs_full_layout = true;
                         single_pos = None;
+                    } else if single_pos.is_some_and(|p| p != position) {
+                        // A second single-block edit, somewhere else, in the same
+                        // frame. Only one position can be relayouted incrementally
+                        // and this loop used to keep whichever arrived last — which
+                        // left the other block holding stale text and, worse, never
+                        // ran the character-position shift for the blocks after it.
+                        // Every later block then sat off by the dropped edit's
+                        // length: clicking near the start of the next paragraph
+                        // could not reach its first characters, and selecting the
+                        // word just typed painted a phantom highlight of the same
+                        // width in the paragraph below.
+                        //
+                        // Two events at the *same* position still coalesce — one
+                        // relayout from the final document is exactly right. Only a
+                        // genuine second site falls back, and a frame carrying two
+                        // of those is rare enough not to matter: typing batches to
+                        // one event per frame, and a multi-block edit already took
+                        // the branch above.
+                        self.needs_full_layout = true;
+                        single_pos = None;
+                    } else {
+                        single_pos = Some(position);
                     }
                 }
                 DocumentEvent::FormatChanged { .. } => {

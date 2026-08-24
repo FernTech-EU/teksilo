@@ -659,6 +659,17 @@ impl RichTextEngine {
         self.flow.block_visual_info(block_id)
     }
 
+    /// Whether `block_id` is laid out inside a table cell rather than in the
+    /// document's own column.
+    ///
+    /// A cell's block has its own left origin, so anything reasoning about a
+    /// block's position on screen — a decoration in the margin, a probe that
+    /// hit-tests the start of a line — has to ask first: the document's left
+    /// edge is not that block's left edge.
+    pub fn is_block_in_table(&self, block_id: usize) -> bool {
+        self.flow.is_block_in_table(block_id)
+    }
+
     // --- Hit testing / caret geometry ------------------------------------
 
     pub fn hit_test(&self, x: f32, y: f32) -> Option<HitTestResult> {
