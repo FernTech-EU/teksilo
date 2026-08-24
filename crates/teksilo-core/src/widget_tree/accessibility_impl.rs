@@ -221,12 +221,18 @@ impl WidgetTree {
         }
         nodes.push((root_node_id(), root));
 
+        // One pass, one set: a tooltip is placed once, on the first node that
+        // may have it, and the walk order makes that the owner rather than the
+        // anchor.
+        let mut handled_tooltips: std::collections::HashSet<WidgetId> =
+            std::collections::HashSet::new();
         for &root_id in &roots {
             self.build_accessibility_recursive(
                 root_id,
                 &mut nodes,
                 &mut synthetic_parents,
                 &mut seen_children,
+                &mut handled_tooltips,
             );
         }
 
@@ -439,6 +445,12 @@ impl WidgetTree {
         nodes: &mut Vec<(accesskit::NodeId, accesskit::Node)>,
         synthetic_parents: &mut std::collections::HashMap<accesskit::NodeId, WidgetId>,
         seen_children: &mut std::collections::HashMap<accesskit::NodeId, WidgetId>,
+        // Tooltips whose text has already been placed on a node this pass.
+        // One tooltip describes one control, so once an owner has taken it the
+        // anchor further down must not take it again -- a description announced
+        // twice on the way into a control is worse than one announced in the
+        // wrong place.
+        handled_tooltips: &mut std::collections::HashSet<WidgetId>,
     ) {
         use crate::accessibility::widget_id_to_node_id;
         use crate::widget_builder::AccessSubtreeMode;
@@ -564,22 +576,49 @@ impl WidgetTree {
             builder.set_disabled();
         }
 
-        if let Some(tooltip) = self.tooltips.iter().find(|t| t.anchor_id == id) {
-            if tooltip.overlay_id.is_some() {
+        // ── the tooltip's text, onto the node that will be read ───────────
+        //
+        // Not necessarily the node the overlay hangs off. A composing control
+        // anchors the tooltip on an inner chrome node -- the thing with the
+        // right bounds to open against -- and keeps its role, its name and its
+        // focusability on its own outer node. Emitting on the anchor put the
+        // description on an unnamed box beside the control: present in the
+        // tree, attached to nothing anyone reads. Since a plain tooltip is
+        // never auto-shown on focus (see `docs/tooltips.md`), that description
+        // IS the whole non-pointer path for the tier, and it reached nobody.
+        //
+        // So a tooltip names an owner, and the owner is honoured here -- but
+        // only where exactly ONE tooltip claims it. `BuildContext` records the
+        // widget that was building, and one build can attach many tooltips: a
+        // list body pane attaches one per visible row, all of them naming the
+        // pane. Granting that would put one row's text on the pane and lose
+        // every other row's entirely. A contested claim is no claim, and each
+        // of those tooltips falls back to its own anchor, which is where they
+        // already were.
+        if let Some(content_id) =
+            self.tooltip_description_target(id, handled_tooltips, &mut builder)
+        {
+            if self
+                .tooltips
+                .iter()
+                .any(|t| t.content_id == content_id && t.overlay_id.is_some())
+            {
                 // Shown: the content node is live in the AT tree, so the
                 // richer `described_by` relation can point straight at it.
                 builder
                     .inner_mut()
-                    .push_described_by(widget_id_to_node_id(tooltip.content_id));
-            } else if let Some(text) = self.tooltip_access_description(tooltip.content_id) {
+                    .push_described_by(widget_id_to_node_id(content_id));
+                handled_tooltips.insert(content_id);
+            } else if let Some(text) = self.tooltip_access_description(content_id) {
                 // Not shown. `described_by` cannot be used — the content is a
                 // dormant node and absent from the AT tree — and a *plain*
                 // tooltip is never auto-shown on focus, so gating the relation
                 // on `overlay_id` left the whole tier (the majority of call
                 // sites) with no screen-reader path at all. Copy the text onto
-                // the anchor as a static description instead, which is what a
+                // the control as a static description instead, which is what a
                 // keyboard-only or screen-reader user actually reaches.
                 builder.set_description(text);
+                handled_tooltips.insert(content_id);
             }
         }
 
@@ -604,6 +643,7 @@ impl WidgetTree {
                     nodes,
                     synthetic_parents,
                     seen_children,
+                    handled_tooltips,
                 );
             }
         }
@@ -650,6 +690,65 @@ impl WidgetTree {
     /// when the widget has `access_subtree(Merge)`, the merged
     /// descendant state. Centralized so `accessibility_node`,
     /// `text_content`, and the recursive walker stay in sync.
+    /// Which tooltip's text this node should carry, if any.
+    ///
+    /// Two ways a node can come to own a tooltip's description, tried in that
+    /// order:
+    ///
+    ///   * **as the claimed owner** -- the widget that was building when the
+    ///     tooltip was attached. This is the case the whole mechanism exists
+    ///     for: `Button` and the two dozen controls shaped like it hang the
+    ///     overlay off an inner chrome node while their role and name live
+    ///     out here. Granted only when this node is *unambiguously* the
+    ///     owner: exactly one tooltip may claim it, and the node must be
+    ///     something an assistive technology would actually stop on rather
+    ///     than an anonymous box.
+    ///
+    ///   * **as the anchor** -- the historic behaviour, and still correct for
+    ///     a widget that anchors its tooltip on itself. Also the fallback for
+    ///     everything the first case declines, so declining is always safe:
+    ///     the worst it can do is leave the description exactly where it was
+    ///     before any of this existed.
+    ///
+    /// The order matters and only works because of the walk's order. An
+    /// anchor is always a descendant of the widget that built it, and parents
+    /// are visited first, so an owner has already taken its tooltip (and said
+    /// so in `handled`) by the time the anchor is reached. Reverse the walk
+    /// and both would take it.
+    fn tooltip_description_target(
+        &self,
+        id: WidgetId,
+        handled: &std::collections::HashSet<WidgetId>,
+        builder: &mut AccessNodeBuilder,
+    ) -> Option<WidgetId> {
+        let mut claims = self
+            .tooltips
+            .iter()
+            .filter(|t| t.description_owner_id == id && !handled.contains(&t.content_id));
+        // `next()` twice rather than `count()`: one claim is the answer, two is
+        // a refusal, and there is nothing to learn from a third.
+        if let (Some(only), None) = (claims.next(), claims.next())
+            && only.anchor_id != id
+            // An anonymous container is not a place a description can be read
+            // from, and a widget whose own `accessibility()` leaves it one
+            // (`TextInput` says so out loud, keeping the real role on an inner
+            // field) is not the control being described either. Nothing is
+            // lost by declining: the anchor still takes it below.
+            && !is_presentational_container(builder.inner_mut())
+            // A description the widget wrote itself is the widget's own words
+            // about itself; a tooltip's is supplementary. Both land in the one
+            // scalar field, so the specific one wins. `MenuItem::trailing_hint`
+            // is the case that made this reachable.
+            && builder.inner_mut().description().is_none()
+        {
+            return Some(only.content_id);
+        }
+        self.tooltips
+            .iter()
+            .find(|t| t.anchor_id == id && !handled.contains(&t.content_id))
+            .map(|t| t.content_id)
+    }
+
     /// Announce the context menu a widget owns, before any override runs.
     ///
     /// The dispatcher has always *serviced* `Action::ShowContextMenu` by falling

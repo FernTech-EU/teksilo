@@ -203,6 +203,10 @@ impl WidgetTree {
         self.tooltips.push(TooltipEntry {
             anchor_id,
             content_id,
+            // The historic placement, and the right one for a widget that
+            // anchors its tooltip on itself. `BuildContext` overwrites it
+            // immediately after for everything else.
+            description_owner_id: anchor_id,
             delay,
             hover_start: None,
             real_hover_start: None,
@@ -218,6 +222,38 @@ impl WidgetTree {
             suppressed_until_focus_leaves: false,
             placement,
         });
+    }
+
+    /// Record which widget's accessibility node should carry a tooltip's
+    /// description, when that is not the node the overlay hangs off.
+    ///
+    /// Called by every `BuildContext::attach_tooltip*` wrapper with the widget
+    /// that was building, so a composing control gets the right node without a
+    /// line in `button.rs`, `toggle.rs` or the two dozen others like them.
+    ///
+    /// **A claim, not an instruction.** One `build()` can attach many tooltips
+    /// -- a list body pane attaches one per visible row -- and `self_id()` is
+    /// the same for all of them, so an owner naming itself here may be naming
+    /// itself for a dozen rows at once. Which of those claims is honoured is
+    /// settled where the whole set can be seen at once, in the accessibility
+    /// walk; nothing is resolved at attach time, because at attach time the
+    /// second row has not been attached yet.
+    ///
+    /// Only the accessibility walk reads this. Overlay placement, hover
+    /// hit-testing, dwell, focus promotion and retirement all go on reading
+    /// `anchor_id`, which is still where the tooltip actually opens.
+    pub(crate) fn set_tooltip_description_owner(
+        &mut self,
+        anchor_id: WidgetId,
+        owner_id: WidgetId,
+    ) {
+        if let Some(entry) = self
+            .tooltips
+            .iter_mut()
+            .find(|entry| entry.anchor_id == anchor_id)
+        {
+            entry.description_owner_id = owner_id;
+        }
     }
 
     /// Resolve a [`TooltipPlacement`](crate::overlay::TooltipPlacement) to

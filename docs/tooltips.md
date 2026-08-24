@@ -531,9 +531,44 @@ root but keep focus on the outer node, so the check accepts an
 ancestor-or-descendant relationship).
 
 Plain tooltips are deliberately **not** auto-shown on focus — their text
-reaches assistive tech through the anchor's accessible **description**,
-wired in the AccessKit pass, which is the W3C-recommended pattern for
-supplementary hints.
+reaches assistive tech through the described control's accessible
+**description**, wired in the AccessKit pass, which is the W3C-recommended
+pattern for supplementary hints. That is the whole of what makes the
+asymmetry acceptable, so it has to actually land on the control.
+
+### Which node the description lands on
+
+Not necessarily the anchor. A composing control (`Button`, `Toggle`, and
+the two dozen widgets shaped like them) hangs the tooltip *overlay* off an
+inner chrome node — the thing with the right bounds to open against — while
+its role, its name and its focusability stay on its own outer node.
+Emitting the description on the anchor put it on an unnamed box beside the
+control: present in the tree, attached to nothing anyone reads. Since a
+plain tooltip is never auto-shown on focus, that description **is** the
+entire non-pointer path for the tier, and it reached nobody.
+
+So every `BuildContext::attach_tooltip*` records the widget that was
+building as the tooltip's `description_owner_id`, and the AccessKit pass
+honours it — but only where that node is *unambiguously* the one being
+described. Three ways a claim is declined, each falling back to the anchor,
+which is where the description sat before any of this and so is always safe:
+
+- **Contested.** One `build()` can attach many tooltips, and `self_id()` is
+  the same for all of them: a list body pane attaches one per visible row,
+  every one naming the pane. Granting that would put one row's text on the
+  pane and lose every other row's outright. A contested claim is no claim.
+  `SplitButton`, which tooltips its main region and its chevron separately,
+  declines for the same reason and keeps both on their own regions.
+- **Anonymous.** A widget whose own `accessibility()` leaves it a
+  content-free `GenericContainer` is not a node a description can be read
+  from — `TextInput` says so out loud, keeping the real role on an inner
+  field — so it does not get to hold one.
+- **Already spoken for.** A description the widget wrote itself
+  (`MenuItem::trailing_hint`) is specific where a tooltip's is
+  supplementary, and both land in the one scalar field. The specific wins.
+
+Overlay placement, hover hit-testing, dwell, focus promotion and retirement
+all go on reading `anchor_id`. Only the accessibility walk reads the owner.
 
 The AccessKit pass emits one of two forms, depending on whether the tooltip
 is currently on screen:

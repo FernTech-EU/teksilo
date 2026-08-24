@@ -282,6 +282,225 @@ mod tests {
         WidgetTree::new().with_text_backend(Rc::new(RefCell::new(MockTextBackend::new())))
     }
 
+    /// **A plain tooltip's text must reach the control it describes.**
+    ///
+    /// Plain tooltips are deliberately not shown on focus (see `docs/tooltips.md`,
+    /// "Keyboard / a11y promotion"), and the whole of what makes that acceptable is
+    /// the other half of the bargain: the text is copied onto the anchoring control
+    /// as its accessible description, which is the W3C pattern for a supplementary
+    /// hint. Landing anywhere else leaves the tier reaching a pointer and nothing
+    /// else.
+    ///
+    /// Asserted on the node an assistive technology actually lands on -- the one
+    /// carrying the control's own role -- not merely "somewhere in the subtree",
+    /// because a description on an unnamed box beside the control is a description
+    /// nobody hears. Composing controls keep their role and focus on an outer node
+    /// while anchoring the tooltip on an inner body root, which is exactly the
+    /// arrangement this has to survive.
+    #[test]
+    fn a_plain_tooltips_text_lands_on_the_control_it_describes() {
+        fn described(
+            update: &teksilo_core::accesskit::TreeUpdate,
+            id: teksilo_core::WidgetId,
+        ) -> Option<String> {
+            let nid = teksilo_core::accessibility::widget_id_to_node_id(id);
+            update
+                .nodes
+                .iter()
+                .find(|(node_id, _)| *node_id == nid)
+                .and_then(|(_, n)| n.description().map(str::to_owned))
+        }
+
+        // Button: role and focus on the outer node, tooltip on the style body root.
+        let mut tree = tree_with_backend();
+        let button = tree.add(Button::new(lit!("Export")).tooltip(lit!("Save a copy")));
+        tree.layout(SizeProposal::exact(300.0, 40.0));
+        let update = tree.sync_accessibility();
+        assert_eq!(
+            described(&update, button).as_deref(),
+            Some("Save a copy"),
+            "a Button's hint must be on the Button, not on the box inside it"
+        );
+
+        // Toggle: same shape, with the tooltip on the switch+label HStack.
+        let mut tree = tree_with_backend();
+        let toggle = tree.add(
+            crate::toggle::Toggle::new(teksilo_core::signal::Signal::new(true))
+                .label(lit!("Comments"))
+                .tooltip(lit!("Where a note is attached")),
+        );
+        tree.layout(SizeProposal::exact(300.0, 40.0));
+        let update = tree.sync_accessibility();
+        assert_eq!(
+            described(&update, toggle).as_deref(),
+            Some("Where a note is attached"),
+            "a Toggle's hint must be on the Toggle"
+        );
+
+        // And on exactly one node. A description repeated down a nest is announced
+        // twice, which is worse than announcing it once in the wrong place.
+        let carriers = update
+            .nodes
+            .iter()
+            .filter(|(_, n)| n.description() == Some("Where a note is attached"))
+            .count();
+        assert_eq!(carriers, 1, "exactly one node may carry the hint");
+    }
+
+    /// **A build that attaches many tooltips claims none of them.**
+    ///
+    /// The owner a tooltip records is the widget that was building, and one
+    /// build can attach a great many: a list body pane attaches one per visible
+    /// row, every one of them naming the pane. Granting that would put one
+    /// row's text on the pane and lose every other row's outright -- a fix that
+    /// destroys more than it repairs, on the widget where most tooltips in a
+    /// real application actually live.
+    ///
+    /// So a contested claim is no claim, and each tooltip stays on its own
+    /// anchor, which is where it already was.
+    #[test]
+    fn tooltips_attached_to_many_children_in_one_build_stay_on_their_own_rows() {
+        /// A pane shaped like a virtualized row host: several row widgets, a
+        /// tooltip on each, all attached from this one build.
+        #[derive(Debug)]
+        struct RowPane {
+            rows: Vec<WidgetId>,
+        }
+
+        impl teksilo_core::widget::Widget for RowPane {
+            fn build(
+                &mut self,
+                ctx: &mut teksilo_core::build_context::BuildContext,
+            ) -> Vec<WidgetId> {
+                self.rows.clear();
+                for label in ["Alpha", "Beta"] {
+                    let row = ctx.add(Button::new(lit!(String::from(label))));
+                    let tip = ctx.add(TooltipWidget::new(lit!(String::from("about ") + label)));
+                    ctx.attach_tooltip(row, tip, Duration::from_millis(10));
+                    self.rows.push(row);
+                }
+                self.rows.clone()
+            }
+
+            fn layout_response(
+                &self,
+                proposal: teksilo_canvas::SizeProposal,
+                _ctx: &teksilo_core::widget::LayoutContext,
+            ) -> teksilo_core::widget::LayoutResponse {
+                proposal.resolve(200.0, 40.0).into()
+            }
+
+            fn accessibility(&self, builder: &mut teksilo_core::accessibility::AccessNodeBuilder) {
+                // Role::Group, like ListBodyPane: emphatically not a
+                // presentational container, so nothing else disqualifies it
+                // from claiming. Only the contest does.
+                builder.set_role(teksilo_core::accesskit::Role::Group);
+            }
+        }
+
+        let mut tree = tree_with_backend();
+        let pane = tree.add(RowPane { rows: Vec::new() });
+        tree.layout(SizeProposal::exact(200.0, 40.0));
+        let update = tree.sync_accessibility();
+
+        let described: Vec<String> = update
+            .nodes
+            .iter()
+            .filter_map(|(_, n)| n.description().map(str::to_owned))
+            .collect();
+        assert_eq!(
+            described.len(),
+            2,
+            "both rows keep their own hint: {described:?}"
+        );
+        assert!(described.iter().any(|d| d == "about Alpha"));
+        assert!(described.iter().any(|d| d == "about Beta"));
+
+        // And emphatically not on the pane, which claimed both and got neither.
+        let pane_node = update
+            .nodes
+            .iter()
+            .find(|(nid, _)| *nid == teksilo_core::accessibility::widget_id_to_node_id(pane))
+            .map(|(_, n)| n);
+        assert_eq!(
+            pane_node.and_then(|n| n.description()),
+            None,
+            "a pane that claimed one hint per row must be given none of them"
+        );
+    }
+
+    /// **A control's own words about itself are not overwritten by a tooltip's.**
+    ///
+    /// Both land in the one scalar AccessKit description field, and until the
+    /// owner rule existed they could not collide -- the explicit one went on
+    /// the control, the tooltip's went on the inner box. Now they aim at the
+    /// same node, so which wins has to be decided rather than discovered.
+    /// `MenuItem::trailing_hint` is the case that made this reachable.
+    ///
+    /// The specific beats the supplementary, and the tooltip falls back to its
+    /// anchor -- exactly where it sat before any of this, so a control that
+    /// describes itself is no worse off than it was.
+    #[test]
+    fn a_widgets_own_description_is_not_overwritten_by_its_tooltips() {
+        #[derive(Debug)]
+        struct SelfDescribing {
+            inner: Option<WidgetId>,
+        }
+
+        impl teksilo_core::widget::Widget for SelfDescribing {
+            fn build(
+                &mut self,
+                ctx: &mut teksilo_core::build_context::BuildContext,
+            ) -> Vec<WidgetId> {
+                let body = ctx.add(Button::new(lit!("Save")));
+                let tip = ctx.add(TooltipWidget::new(lit!("supplementary")));
+                ctx.attach_tooltip(body, tip, Duration::from_millis(10));
+                self.inner = Some(body);
+                vec![body]
+            }
+
+            fn layout_response(
+                &self,
+                proposal: teksilo_canvas::SizeProposal,
+                _ctx: &teksilo_core::widget::LayoutContext,
+            ) -> teksilo_core::widget::LayoutResponse {
+                proposal.resolve(120.0, 30.0).into()
+            }
+
+            fn accessibility(&self, builder: &mut teksilo_core::accessibility::AccessNodeBuilder) {
+                builder.set_role(teksilo_core::accesskit::Role::Button);
+                builder.set_name("Save");
+                builder.set_description("Ctrl+S");
+            }
+        }
+
+        let mut tree = tree_with_backend();
+        let id = tree.add(SelfDescribing { inner: None });
+        tree.layout(SizeProposal::exact(120.0, 30.0));
+        let update = tree.sync_accessibility();
+
+        let own = update
+            .nodes
+            .iter()
+            .find(|(nid, _)| *nid == teksilo_core::accessibility::widget_id_to_node_id(id))
+            .map(|(_, n)| n)
+            .expect("the control emits a node");
+        assert_eq!(
+            own.description(),
+            Some("Ctrl+S"),
+            "the widget's own description must survive its tooltip"
+        );
+        assert_eq!(
+            update
+                .nodes
+                .iter()
+                .filter(|(_, n)| n.description() == Some("supplementary"))
+                .count(),
+            1,
+            "and the tooltip's text is still emitted, on its anchor as before"
+        );
+    }
+
     #[test]
     fn button_rich_tooltip_appears_after_hover_delay() {
         _reset_tooltip_registry();

@@ -567,6 +567,7 @@ impl<'a> BuildContext<'a> {
         delay: std::time::Duration,
     ) {
         self.tree.attach_tooltip(anchor_id, content_id, delay);
+        self.claim_tooltip_description(anchor_id);
     }
 
     /// Attach a tooltip with an explicit
@@ -583,6 +584,7 @@ impl<'a> BuildContext<'a> {
     ) {
         self.tree
             .attach_tooltip_with_placement(anchor_id, content_id, delay, placement);
+        self.claim_tooltip_description(anchor_id);
     }
 
     /// Attach a tooltip that auto-promotes to sticky after a dwell
@@ -599,6 +601,7 @@ impl<'a> BuildContext<'a> {
     ) {
         self.tree
             .attach_tooltip_with_sticky(anchor_id, content_id, delay, sticky_after);
+        self.claim_tooltip_description(anchor_id);
     }
 
     /// Variant of [`attach_tooltip_with_sticky`](Self::attach_tooltip_with_sticky)
@@ -621,6 +624,7 @@ impl<'a> BuildContext<'a> {
             sticky_after,
             shown_at_sink,
         );
+        self.claim_tooltip_description(anchor_id);
     }
 
     /// Variant of [`attach_tooltip_with_sticky_sink`](Self::attach_tooltip_with_sticky_sink)
@@ -644,6 +648,28 @@ impl<'a> BuildContext<'a> {
             shown_at_sink,
             placement,
         );
+        self.claim_tooltip_description(anchor_id);
+    }
+
+    /// Name this widget as the one the tooltip just attached describes.
+    ///
+    /// Every `attach_tooltip*` wrapper ends with this, so a composing control
+    /// gets it for free: `Button`, `Toggle` and the two dozen widgets shaped
+    /// like them hang the overlay off an inner chrome node -- the thing with
+    /// the right bounds to open against -- while their role, their name and
+    /// their focusability sit on their own outer node, which is the node an
+    /// assistive technology lands on and therefore the node a description has
+    /// to be on.
+    ///
+    /// A widget anchoring its tooltip on itself claims itself, which is what
+    /// it already had. A widget attaching *many* tooltips in one build -- a
+    /// list body pane, one per visible row -- claims itself for every one of
+    /// them, which is a claim that cannot be granted; the accessibility walk
+    /// is where that is noticed, because it is the only place the whole set
+    /// is visible at once.
+    fn claim_tooltip_description(&mut self, anchor_id: WidgetId) {
+        let owner = self.self_id();
+        self.tree.set_tooltip_description_owner(anchor_id, owner);
     }
 
     /// Promote a shown tooltip to "sticky": removes its auto-dismiss

@@ -508,6 +508,24 @@ const TOOLTIP_STATIONARY_SLOP: f32 = 4.0;
 struct TooltipEntry {
     anchor_id: WidgetId,
     content_id: WidgetId,
+    /// The widget whose accessibility node should carry this tooltip's
+    /// description, which is not always the node the overlay hangs off.
+    ///
+    /// A composing control anchors the *overlay* on an inner chrome node it
+    /// built -- the thing with the right bounds to open a tooltip against --
+    /// while its role, its name and its focusability live on its own outer
+    /// node. A description on the inner one is a description an assistive
+    /// technology never reads, because it never lands there.
+    ///
+    /// Recorded by `BuildContext`'s `attach_tooltip*` wrappers as the widget
+    /// that was building at the time. Defaults to `anchor_id`, which is both
+    /// the historic behaviour and the right answer for a widget that anchors
+    /// its tooltip on itself.
+    ///
+    /// Naming an owner is a *claim*, not a guarantee: the accessibility walk
+    /// honours it only where exactly one tooltip claims that node. See
+    /// `WidgetTree::build_accessibility_recursive`.
+    description_owner_id: WidgetId,
     delay: std::time::Duration,
     /// Simulated hover start (for deterministic tests via advance_time).
     hover_start: Option<std::time::Instant>,

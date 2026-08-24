@@ -430,6 +430,7 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
+
     use teksilo_core::event::Modifiers;
     use teksilo_core::widget_tree::WidgetTree;
     use teksilo_i18n::lit;
@@ -612,6 +613,34 @@ mod tests {
         assert!(
             info.actions()
                 .contains(&teksilo_core::accesskit::Action::Click)
+        );
+    }
+
+    /// The **rich** tier, on a Toggle, opens the same way the plain one does.
+    ///
+    /// Its own case beside `tooltip_appears_on_hover` because the two tiers take
+    /// different attach paths out of `build` — `attach_rich_tooltip_source`
+    /// against `ctx.attach_tooltip` — and only the plain one was pinned. A
+    /// settings page that moved its explanations onto its switches is the first
+    /// caller to depend on the rich one here.
+    #[test]
+    fn a_rich_tooltip_appears_on_hover_too() {
+        let mut tree = WidgetTree::new();
+        let id = tree.add(
+            Toggle::new(Signal::new(false))
+                .label(lit!("Wi-Fi"))
+                .rich_tooltip_content(crate::tooltip::TooltipContent::new(
+                    "toggle.rich",
+                    lit!("What this switch does"),
+                )),
+        );
+        tree.layout(SizeProposal::exact(300.0, 200.0));
+        tree.pointer_move(tree.bounds(id).center());
+        tree.advance_time(std::time::Duration::from_secs(1));
+        assert_eq!(
+            tree.active_overlays().len(),
+            1,
+            "a rich tooltip on a Toggle must open under the pointer"
         );
     }
 
