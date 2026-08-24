@@ -1223,14 +1223,34 @@ impl DockingModel {
         let loc = self.0.borrow().locations.get(&id).copied();
         match loc {
             Some(loc) => {
-                {
+                // **Silent when there is nothing to reveal.** Notifying anyway
+                // rebuilds every dock's content, and a dock's content is where a
+                // view's own state lives -- a list's scroll position, a tree's.
+                // Revealing an already-revealed dock is the common case, not the
+                // rare one: it is what every "show me this result" does on the
+                // second and every subsequent result, and each one was sending the
+                // panel back to the top.
+                let changed = {
                     let mut inner = self.0.borrow_mut();
-                    if let Some(st) = inner.sides.get_mut(&loc.side) {
-                        st.visible = true;
-                        st.selected_tab = loc.tab_idx.min(st.tabs.len().saturating_sub(1));
+                    let tabs = inner
+                        .sides
+                        .get(&loc.side)
+                        .map_or(0, |st| st.tabs.len())
+                        .saturating_sub(1);
+                    match inner.sides.get_mut(&loc.side) {
+                        Some(st) => {
+                            let tab = loc.tab_idx.min(tabs);
+                            let changed = !st.visible || st.selected_tab != tab;
+                            st.visible = true;
+                            st.selected_tab = tab;
+                            changed
+                        }
+                        None => false,
                     }
+                };
+                if changed {
+                    self.notify();
                 }
-                self.notify();
             }
             None => {
                 let default = self.0.borrow().docks.get(&id).map(|m| m.default);
@@ -1811,6 +1831,46 @@ mod tests {
         m.reveal_dock(id);
         assert!(m.is_dock_open(id));
         assert_eq!(m.dock_location(id).unwrap().side, DockSide::Bottom);
+    }
+
+    /// **Revealing an already-revealed dock changes nothing, and says so.**
+    ///
+    /// The version drives every dock's content rebuild, and a view's own state —
+    /// a list's scroll position, a tree's — lives in that content. A "show me
+    /// this" that reveals an already-visible dock is the common case, not the rare
+    /// one: it is what every result activation after the first one does, and each
+    /// gratuitous notify sent the panel it came from back to the top.
+    #[test]
+    fn revealing_an_already_revealed_dock_does_not_notify() {
+        let m = model();
+        let id = reg(&m, DockSide::Bottom);
+        m.reveal_dock(id);
+        assert!(m.is_dock_open(id));
+
+        let settled = m.version().get();
+        m.reveal_dock(id);
+        assert_eq!(
+            m.version().get(),
+            settled,
+            "nothing changed, so nothing downstream should be rebuilt"
+        );
+    }
+
+    /// It still notifies when it really does reveal something.
+    #[test]
+    fn revealing_a_hidden_dock_notifies() {
+        let m = model();
+        let id = reg(&m, DockSide::Bottom);
+        m.reveal_dock(id);
+        m.set_side_visible(DockSide::Bottom, false);
+
+        let settled = m.version().get();
+        m.reveal_dock(id);
+        assert_ne!(
+            m.version().get(),
+            settled,
+            "it was hidden, so this is a change"
+        );
     }
 
     #[test]
