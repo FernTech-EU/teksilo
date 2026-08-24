@@ -241,6 +241,27 @@ impl<T: 'static> TreeView<T> {
     /// How the scroll bar is displayed (default `Permanent`). `Overlay`
     /// and `Thin` float the bar over the content instead of reserving a
     /// layout column for it, mirroring `ScrollArea::scroll_bar_style`.
+    /// **Scroll from a signal the caller owns**, so the position survives the
+    /// view.
+    ///
+    /// A `TreeView` mints its own by default, which is right for a tree whose
+    /// lifetime is the writer's: it is created once and scrolls until they leave.
+    /// It is wrong for one inside a dock, whose content is torn down and rebuilt
+    /// whenever the layout changes -- opening a panel beside it, or the first
+    /// reveal of the band a result previews into. The tree comes back at the top,
+    /// and the row the writer was reading is somewhere above it.
+    ///
+    /// Hold the signal wherever the *model* lives and the position outlives the
+    /// widget, as the expand set already does.
+    ///
+    /// ⚠ Pass an **animated** signal (`Signal::new_animated`) unless smooth
+    /// scrolling is off: the view animates this one, and a plain signal makes
+    /// every wheel notch a jump.
+    pub fn scroll_signal(mut self, scroll: Signal<f32>) -> Self {
+        self.scroll_y = scroll;
+        self
+    }
+
     pub fn scroll_bar_style(mut self, style: ScrollBarMode) -> Self {
         self.scroll_bar_style = style;
         self

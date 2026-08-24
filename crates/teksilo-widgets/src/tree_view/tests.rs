@@ -380,6 +380,51 @@ fn flat_tree_view(
     (wtree, tv, selection)
 }
 
+/// **A caller-owned scroll signal survives the view.**
+///
+/// A tree inside a dock is torn down and rebuilt whenever the layout changes, and
+/// its own scroll offset goes with it -- the writer lands back at the top of a
+/// result they had scrolled halfway through. Holding the signal where the model
+/// lives is what keeps the position, exactly as the expand set is already kept.
+#[test]
+fn a_caller_owned_scroll_signal_outlives_the_view() {
+    let scroll = Signal::new_animated(0.0_f32);
+
+    let build = |scroll: Signal<f32>| {
+        let tree = TreeModel::new();
+        for i in 0..100usize {
+            tree.insert_root(i, format!("Node {i}"));
+        }
+        let mut wtree = WidgetTree::new();
+        wtree.add(
+            TreeView::new(tree, |_i, _e, _s| Box::new(FixedLeaf(120.0, 20.0)))
+                .item_height(20.0)
+                .smooth_scrolling(false)
+                .scroll_signal(scroll),
+        );
+        wtree
+    };
+
+    let mut first = build(scroll.clone());
+    first.layout(SizeProposal::exact(200.0, 200.0));
+    let _ = first.render();
+    scroll.set(340.0);
+    first.layout(SizeProposal::exact(200.0, 200.0));
+    let _ = first.render();
+    assert!((scroll.get() - 340.0).abs() < 0.5);
+
+    // The view is gone; the writer's position is not.
+    drop(first);
+    let mut rebuilt = build(scroll.clone());
+    rebuilt.layout(SizeProposal::exact(200.0, 200.0));
+    let _ = rebuilt.render();
+    assert!(
+        (scroll.get() - 340.0).abs() < 0.5,
+        "a rebuilt tree came back at {} instead of where it was left",
+        scroll.get()
+    );
+}
+
 #[test]
 fn first_arrow_lands_on_an_end_row_instead_of_skipping_it() {
     // "No cursor yet" is not "cursor on row 0": the very first ArrowDown must
