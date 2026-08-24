@@ -3434,6 +3434,7 @@ fn estimated_content_height(
     let line_h = font_line_h * typography.line_height.max(0.1);
     let per_block = typography.paragraph_spacing_before + typography.paragraph_spacing_after;
     let h = lines * line_h + blocks * per_block.max(0.0);
+    #[cfg(feature = "debug-traces")]
     if height_debug() {
         eprintln!(
             "HEIGHT-EST chars={chars:.0} blocks={blocks:.0} width={width:.1} \
@@ -3446,14 +3447,21 @@ fn estimated_content_height(
 
 /// Whether to print what the height guess and the real layout each came up with.
 ///
-/// `TEKSILO_HEIGHT_DEBUG=1`. Read once — this sits in a layout pass, and an
-/// environment lookup per measurement would be a real cost for a diagnostic that is
-/// off for everyone.
+/// `TEKSILO_HEIGHT_DEBUG=1`, and only in a build with the `debug-traces` feature.
+/// Read once — this sits in a layout pass, and an environment lookup per
+/// measurement would be a real cost for a diagnostic that is off for everyone.
 ///
 /// It earns its place: the guess above was wrong three separate ways before anyone
 /// could see it, and the one that mattered most — being asked to measure at 76 px
 /// when the text wraps at 447 — was invisible to every test and obvious in one line
 /// of this output.
+///
+/// Behind a feature as well as a variable, and the traces are `#[cfg]` out rather
+/// than merely switched off: a runtime `false` still leaves every format string in
+/// the binary, which is measurable. A diagnostic nobody can switch on has no
+/// business being reachable in a release, and an environment variable is reachable
+/// by anyone.
+#[cfg(feature = "debug-traces")]
 fn height_debug() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *ON.get_or_init(|| std::env::var_os("TEKSILO_HEIGHT_DEBUG").is_some())
@@ -3849,6 +3857,7 @@ impl Widget for RichTextEditorBody {
             st.engine.layout_full(&flow);
             st.needs_full_layout = false;
             st.content_dirty = true;
+            #[cfg(feature = "debug-traces")]
             if height_debug() {
                 eprintln!(
                     "HEIGHT-REAL chars={} blocks={} width={:.1} -> {:.1}",

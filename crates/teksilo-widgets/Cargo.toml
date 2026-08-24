@@ -11,6 +11,13 @@ authors.workspace = true
 repository.workspace = true
 
 [features]
+# Diagnostic traces, compiled out unless asked for. Each is additionally gated on
+# its own environment variable at runtime (`TEKSILO_HEIGHT_DEBUG`), so enabling
+# the feature makes them *available*, not loud. Off by default because a shipped
+# build should carry neither the formatting nor the environment lookup: a
+# diagnostic nobody can switch on has no business being reachable in a release,
+# and an environment variable is reachable by anyone.
+debug-traces = []
 # Preview catalog impls — opt-in `WidgetCatalog` implementations
 # alongside each widget, registered with the `inventory` crate so the
 # `teksilo-preview-ui` previewer GUI discovers them at link time. Off by

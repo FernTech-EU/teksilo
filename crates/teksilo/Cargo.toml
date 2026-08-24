@@ -30,6 +30,10 @@ default = [
 ]
 
 widgets = ["dep:teksilo-widgets"]
+# Forward the toolkit's diagnostic traces. See `teksilo-widgets`' own note: the
+# feature makes them available, an environment variable makes them loud, and a
+# shipped build carries neither.
+debug-traces = ["teksilo-widgets?/debug-traces"]
 text = ["dep:teksilo-text", "teksilo-app/text"]
 i18n = ["dep:teksilo-i18n"]
 # Debug-only in-app inspector (`F12`, picker, AllBounds overlay,
