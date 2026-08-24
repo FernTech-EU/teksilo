@@ -45,14 +45,16 @@ pub(super) enum KeyAction {
     /// choose a side of a direction seam. The handler already set
     /// `cursor_affinity` itself, so the post-processing must NOT
     /// clobber it. Clears the sticky column. Covers non-Ctrl Home/End
-    /// and the arrow keys.
+    /// and the Left/Right arrows.
     LineEdgeMotion,
-    /// Vertical motion (Up/Down/PageUp/PageDown): the sticky column
-    /// must be preserved so repeated vertical presses land on the
-    /// same visual column. The helpers also set `cursor_affinity`
-    /// from hit-test, so post-processing must NOT clobber it. Ctrl+A
-    /// also lives here since it leaves the caret position unchanged
-    /// and any current affinity is still valid.
+    /// Vertical motion (Up/Down): the sticky column must be preserved
+    /// so repeated vertical presses land on the same visual column.
+    /// The helpers also set `cursor_affinity` from hit-test, so
+    /// post-processing must NOT clobber it. Ctrl+A also lives here
+    /// since it leaves the caret position unchanged and any current
+    /// affinity is still valid. PageUp/PageDown want the same
+    /// treatment but carry [`KeyAction::PageMotion`], which says so
+    /// separately.
     KeepPreferredX,
     /// PageUp/PageDown. Behaves exactly like [`KeyAction::KeepPreferredX`] —
     /// the helper set affinity, the sticky column must survive — but is kept
@@ -327,8 +329,8 @@ pub(super) fn handle_key(
                     //    indent).
                     //  * Indent 0 → remove the block from the list
                     //    entirely (converts it back to a regular
-                    //    paragraph). Matches godot rich_text_edit.rs:
-                    //    566-584.
+                    //    paragraph). Matches the godot reference's
+                    //    backspace-in-a-list rule.
                     if let Ok(fmt) = st.cursor.block_format() {
                         let level = fmt.indent.unwrap_or(0);
                         if level > 0 {
@@ -385,8 +387,8 @@ pub(super) fn handle_key(
             }
             Key::Enter if ctrl && filter.accepts(EditCommandKind::InsertBlockForced) => {
                 // Ctrl+Enter: always insert a new block, bypassing
-                // table-cell navigation. Matches godot
-                // rich_text_edit.rs:559-563.
+                // table-cell navigation. Matches the godot reference's
+                // forced-block-insert branch.
                 collapse_selection_before_insert(&st);
                 let _ = st.cursor.insert_block();
                 KeyAction::ClearPreferredX
@@ -580,9 +582,9 @@ pub(super) fn handle_key(
             caret_moved_epilogue(state, ctx)
         }
         KeyAction::KeepPreferredX => {
-            // Up/Down/PageUp/PageDown's helpers already set affinity
-            // from hit-test; Ctrl+A didn't move the caret. Preserve
-            // both `preferred_x` and `cursor_affinity` unchanged.
+            // Up/Down's helper already set affinity from hit-test; Ctrl+A
+            // didn't move the caret. Preserve both `preferred_x` and
+            // `cursor_affinity` unchanged.
             caret_moved_epilogue(state, ctx)
         }
         KeyAction::PageMotion => {
@@ -623,11 +625,17 @@ fn caret_moved_epilogue_with(
 /// The caret's rectangle in **absolute window (tree) coordinates**, or `None`
 /// when the editor is unfocused or the engine has not been laid out yet.
 ///
-/// `caret_rect` returns engine/content-local coordinates; add the body's
-/// window origin (`viewport_origin`) and subtract the current scroll offset to
-/// land in the same absolute space the arena stores bounds in — matching what
-/// `paint` does for the on-screen caret. Shared by the OS-IME cursor report
-/// and the enclosing-scroll-area follow so both track the exact same rect.
+/// [`RichTextEngine::caret_rect`](teksilo_text::RichTextEngine::caret_rect)
+/// answers in two spaces at once: `y` already has the engine's scroll offset
+/// subtracted — it is where the caret paints — while `x` does not, because the
+/// engine has no horizontal scroll to apply. So the window rect adds the body's
+/// window origin to both and subtracts the horizontal scroll from `x` alone.
+/// Taking the vertical offset off a second time, which is what this did, put
+/// the rect a whole viewport out of place in any scrolled editor — and this
+/// rect steers the OS-IME candidate window, the enclosing-scroll-area follow
+/// and the typewriter pin.
+///
+/// See [`vertical_scroll_slip`] for the one thing `y` still needs.
 pub(super) fn caret_window_rect(st: &EditorState) -> Option<teksilo_canvas::Rect> {
     if !st.has_focus || !st.engine.has_full_layout() {
         return None;
@@ -637,19 +645,24 @@ pub(super) fn caret_window_rect(st: &EditorState) -> Option<teksilo_canvas::Rect
         .caret_rect(st.cursor.position(), st.cursor_affinity);
     Some(teksilo_canvas::Rect::new(
         st.viewport_origin.x + caret[0] - st.scroll_x.get(),
-        st.viewport_origin.y + caret[1] - st.scroll_y.get(),
+        st.viewport_origin.y + caret[1] + vertical_scroll_slip(st),
         caret[2].max(1.0),
         caret[3],
     ))
 }
 
-/// The **window-space** rectangle enclosing an arbitrary character range `[start, end)` — the
-/// union of the caret rects at its two ends, transformed into the same absolute space
-/// [`caret_window_rect`] uses (`viewport_origin` + engine-local − scroll).
+/// How far the engine's idea of the scroll offset lags the widget's.
 ///
-/// Unlike [`caret_window_rect`], this takes explicit offsets (not the live cursor) and does
-/// **not** require focus — it exists so a search match can be scrolled into view whether or
-/// not the editor is focused. `None` before the first full layout.
+/// The engine subtracts the offset it was last *given*, which the widget hands
+/// it at paint. A scroll that has happened since — a wheel event this frame, a
+/// programmatic `scroll_y.set` before the next render — has not reached it, so
+/// a screen-space `y` straight out of the engine is stale by exactly this much.
+/// Zero on any settled frame, which is why it went unnoticed until a query ran
+/// between a scroll and a repaint.
+fn vertical_scroll_slip(st: &EditorState) -> f32 {
+    (st.engine.scroll_offset() - st.scroll_y.get()) * st.engine.zoom()
+}
+
 /// The **content-space** rectangle enclosing `[start, end)` — y = 0 at the top of
 /// the laid-out text, unaffected by scrolling and by where the editor sits in the
 /// window.
@@ -673,8 +686,17 @@ pub(super) fn range_content_rect(
     // reason: these are arbitrary offsets unrelated to the caret, so reading the live
     // `cursor_affinity` would put the rect on the wrong side of a soft-wrap boundary
     // depending on where the caret happens to sit.
-    let a = st.engine.caret_rect(start, CursorAffinity::Downstream);
-    let b = st.engine.caret_rect(end, CursorAffinity::Downstream);
+    //
+    // `caret_rect_content`, not `caret_rect`: the plain form answers in screen
+    // space, so building this rect from it made the "scroll-free" half of the
+    // pair move with every scroll tick — and an overview lane dividing it by
+    // `content_height` drew its mark somewhere else on every frame.
+    let a = st
+        .engine
+        .caret_rect_content(start, CursorAffinity::Downstream);
+    let b = st
+        .engine
+        .caret_rect_content(end, CursorAffinity::Downstream);
     let (ay, ah) = (a[1], a[3].max(1.0));
     let (by, bh) = (b[1], b[3].max(1.0));
 
@@ -690,6 +712,17 @@ pub(super) fn range_content_rect(
     ))
 }
 
+/// The **window-space** rectangle enclosing an arbitrary character range
+/// `[start, end)` — the union of the caret rects at its two ends, in the same
+/// absolute space [`caret_window_rect`] answers in.
+///
+/// (This paragraph used to sit above [`range_content_rect`], which has its own:
+/// two doc comments in a row, the first one describing the function below the
+/// second.)
+///
+/// Unlike [`caret_window_rect`], this takes explicit offsets (not the live cursor) and does
+/// **not** require focus — it exists so a search match can be scrolled into view whether or
+/// not the editor is focused. `None` before the first full layout.
 pub(super) fn range_window_rect(
     st: &EditorState,
     start: usize,
@@ -698,10 +731,13 @@ pub(super) fn range_window_rect(
     if !st.engine.has_full_layout() {
         return None;
     }
+    // As in `caret_window_rect`: the engine's `y` is already screen-space and
+    // its `x` is not, so only `x` takes a scroll subtraction here.
+    let slip = vertical_scroll_slip(st);
     let to_window = |c: [f32; 4]| {
         (
             st.viewport_origin.x + c[0] - st.scroll_x.get(),
-            st.viewport_origin.y + c[1] - st.scroll_y.get(),
+            st.viewport_origin.y + c[1] + slip,
             c[3].max(1.0),
         )
     };
@@ -1140,13 +1176,19 @@ fn ensure_caret_visible(state: &SharedState) {
     // is, not where it was at last paint.
     let current = st.scroll_y.get();
     st.engine.set_scroll_offset(current);
-    if let Some(new_off) = st.engine.ensure_caret_visible() {
+    // Name the position rather than letting the engine read its own cached
+    // cursor: that cache is refreshed at paint, so inside a key handler it still
+    // holds the caret from *before* the keystroke. Correcting against it revealed
+    // the old caret and left the new one outside the viewport until the next key
+    // press — which is what made walking with the arrows lurch a line behind.
+    let pos = st.cursor.position();
+    let affinity = st.cursor_affinity;
+    if let Some(new_off) = st.engine.ensure_position_visible(pos, affinity) {
         st.scroll_y.set(new_off);
     }
-    // Horizontal caret visibility — matches godot's
-    // `ensure_caret_h_visible` (rich_text_edit.rs:1935-1959). Margin
-    // is 20 logical pixels on each side so the caret doesn't sit
-    // flush against the viewport edge.
+    // Horizontal caret visibility — matches godot's `ensure_caret_h_visible`.
+    // Margin is 20 logical pixels on each side so the caret doesn't sit flush
+    // against the viewport edge.
     ensure_caret_h_visible_locked(&mut st);
 }
 
@@ -1175,7 +1217,11 @@ fn ensure_caret_h_visible_locked(st: &mut EditorState) {
 
     let pos = st.cursor.position();
     let caret = st.engine.caret_rect(pos, st.cursor_affinity);
-    let caret_x = caret[0]; // engine returns screen-space x
+    // The engine's `x` is content-space — it applies no horizontal scroll of its
+    // own — so the viewport-relative position is this minus the widget's own
+    // `scroll_x`. (Its `y`, confusingly, *is* screen-space; see
+    // `RichTextEngine::caret_rect`.)
+    let caret_x = caret[0];
     let current_x = st.scroll_x.get();
     // Margin: 20 px on each side, matching godot's
     // `ensure_caret_h_visible`.
@@ -1478,7 +1524,16 @@ fn move_cursor_vertical(st: &mut EditorState, direction: i32, mode: MoveMode) {
     let Some(target_y) = neighbour_line_center_y(st, pos, direction, caret) else {
         return;
     };
-    if target_y < 0.0 || target_y > st.engine.content_height() {
+    // Both ends of this comparison have to be in the space `caret_rect` and
+    // `hit_test` speak — which is screen space, scroll already subtracted.
+    // `content_height()` is the document's own height, measured from the top of
+    // the text with no scrolling, so testing against it directly held only
+    // while the editor was scrolled to the top: below that, the line above the
+    // caret has a negative screen y and the guard threw away an ordinary
+    // ArrowUp, and a caret the reader had scrolled off the top could not be
+    // brought back with ArrowDown at all.
+    let (content_top, content_bottom) = st.engine.content_band_screen();
+    if target_y < content_top || target_y > content_bottom {
         return;
     }
 
@@ -1621,8 +1676,8 @@ pub(super) fn dedent_current_block(st: &mut EditorState) {
 /// Navigate to the next / previous table cell by `direction` (+1 or
 /// -1). Wraps from end-of-row to start-of-next-row; at the last cell
 /// of the last row with `direction = +1`, inserts a new row below
-/// and moves into its first cell. Matches godot rich_text_edit.rs:
-/// 1471-1512.
+/// and moves into its first cell. Matches the godot reference's
+/// `navigate_table_cell`.
 fn navigate_table_cell(
     st: &mut EditorState,
     table_id: usize,
@@ -1656,7 +1711,7 @@ fn navigate_table_cell(
 
 /// Enter inside a table cell: move to the cell in the same column one
 /// row down; on the last row, step out of the table to the first
-/// block that follows. Matches godot rich_text_edit.rs:1515-1535.
+/// block that follows. Matches the godot reference's `navigate_table_cell_down`.
 fn navigate_table_cell_down(
     st: &mut EditorState,
     table_id: usize,

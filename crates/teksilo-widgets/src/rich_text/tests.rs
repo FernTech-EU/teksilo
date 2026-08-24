@@ -3585,7 +3585,7 @@ fn an_empty_paragraph_carets_where_its_first_character_will_land() {
 fn editor_ctrl_enter_always_inserts_block_in_table() {
     // Ctrl+Enter inside a table cell inserts a new block (same cell)
     // — bypasses the Enter-navigates-to-next-cell-row behaviour.
-    // Godot parity: rich_text_edit.rs:559-563.
+    // Godot parity: its forced-block-insert branch.
     let doc = TextDocument::new();
     doc.set_plain_text("").unwrap();
     let editor = RichTextEditor::editor(doc.clone());
@@ -8686,4 +8686,274 @@ fn read_only_still_follows_a_link_on_ctrl_click() {
         vec!["https://example.com/x".to_string()],
         "the read-only rule must widen the gate, not replace it"
     );
+}
+
+// ===========================================================================
+// Regressions — RichTextEditor vertical caret motion.
+//
+// Each test here pins one defect that shipped, and its doc comment says what
+// the code used to do. They are grouped rather than scattered because they
+// share one root cause: the engine answers caret geometry in two coordinate
+// spaces at once, and three call sites each read that wrong differently.
+// ===========================================================================
+
+/// Vertical caret motion: `move_cursor_vertical`'s range guard compares a
+/// **screen-space** y against a **document-space** height.
+#[cfg(test)]
+mod regression_vertical {
+    use super::*;
+    use teksilo_core::event::{Key, Modifiers, WidgetEvent};
+
+    const W: f32 = 400.0;
+    const H: f32 = 130.0;
+
+    fn settle(tree: &mut WidgetTree) {
+        for _ in 0..3 {
+            tree.request_frame();
+            tree.tick_animations(std::time::Duration::from_millis(16));
+            tree.layout(SizeProposal::exact(W, H));
+        }
+        let _ = tree.render();
+    }
+
+    fn press(tree: &mut WidgetTree, key: Key) {
+        tree.dispatch_event(WidgetEvent::KeyDown {
+            key,
+            modifiers: Modifiers::NONE,
+            text: None,
+        });
+        settle(tree);
+    }
+
+    struct Fixture {
+        tree: WidgetTree,
+        handle: crate::rich_text::EditorHandle,
+        state: crate::rich_text::SharedState,
+        scroll_y: teksilo_core::signal::Signal<f32>,
+    }
+
+    /// A self-scrolling editor: 120 px viewport over a document many times
+    /// taller — the shape the `rich_text_editor` demo puts the editor in
+    /// (a `Splitter` pane, no enclosing `ScrollArea`).
+    fn fixture(text: &str) -> Fixture {
+        let doc = TextDocument::new();
+        doc.set_plain_text(text).unwrap();
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let editor = RichTextEditor::editor(doc);
+        let handle = editor.handle();
+        let state = editor.state_handle();
+        let scroll_y = state.borrow().scroll_y.clone();
+        {
+            let mut s = state.borrow_mut();
+            s.viewport_width = 380.0;
+            s.viewport_height = 120.0;
+            s.engine.set_viewport(380.0, 120.0);
+            s.needs_full_layout = true;
+        }
+        let editor_id = tree.add(editor);
+        let _box_id = tree.add(
+            crate::primitives::FixedSize::new()
+                .width(380.0)
+                .height(120.0)
+                .child_id(editor_id),
+        );
+        tree.layout(SizeProposal::exact(W, H));
+        tree.focus(editor_id);
+        settle(&mut tree);
+        Fixture {
+            tree,
+            handle,
+            state,
+            scroll_y,
+        }
+    }
+
+    fn numbered(n: usize) -> String {
+        (0..n)
+            .map(|i| format!("line {i:02} aaa"))
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    /// **ArrowUp stalls on every second press once the editor has scrolled.**
+    ///
+    /// `move_cursor_vertical` guards with
+    /// `if target_y < 0.0 || target_y > st.engine.content_height() { return; }`.
+    /// `target_y` comes from `engine.caret_rect`, which text-typeset documents
+    /// as *screen-space* — `render/hit_test.rs::caret_rect_in_block` computes
+    /// `caret_y = ... - scroll_offset`. `content_height()` is the document's
+    /// total height, scroll-free. So once the editor is scrolled, the line
+    /// above the caret has a **negative** screen y and the guard rejects a
+    /// perfectly legal move.
+    ///
+    /// Trace (position, scroll_y) for successive ArrowUp presses:
+    /// `408,582 → 408,565 → 396,565 → 396,549 → 384,549 …` — the caret only
+    /// advances on alternate presses.
+    #[test]
+    fn arrow_up_advances_on_every_press_in_a_scrolled_editor() {
+        let mut f = fixture(&numbered(60));
+        f.handle.select_range(0, 0);
+        settle(&mut f.tree);
+        for _ in 0..40 {
+            press(&mut f.tree, Key::ArrowDown);
+        }
+        let mut trace = Vec::new();
+        for _ in 0..40 {
+            press(&mut f.tree, Key::ArrowUp);
+            trace.push(f.handle.cursor_position());
+        }
+        let stalls: Vec<usize> = trace
+            .windows(2)
+            .enumerate()
+            .filter(|(_, w)| w[0] == w[1])
+            .map(|(i, _)| i)
+            .collect();
+        assert!(
+            stalls.is_empty(),
+            "ArrowUp stalled at steps {stalls:?}; trace = {trace:?}"
+        );
+        assert_eq!(
+            f.handle.cursor_position(),
+            0,
+            "40 downs then 40 ups must return to the top (scroll_y = {})",
+            f.scroll_y.get()
+        );
+    }
+
+    /// **The first ArrowDown after wheel-scrolling the caret out of view is
+    /// swallowed.** Same guard, same coordinate-space mix-up: with the caret
+    /// scrolled above the viewport its screen y is negative, so `target_y`
+    /// (one line further down, still negative) trips `target_y < 0.0`.
+    ///
+    /// User-visible as "the down arrow doesn't move the caret".
+    #[test]
+    fn arrow_down_works_after_scrolling_the_caret_out_of_view() {
+        let mut f = fixture(&numbered(60));
+        f.handle.select_range(0, 0);
+        settle(&mut f.tree);
+        // Exactly what `mouse::handle_scroll` does for a wheel event.
+        f.scroll_y.set(600.0);
+        settle(&mut f.tree);
+        let before = f.handle.cursor_position();
+        press(&mut f.tree, Key::ArrowDown);
+        assert!(
+            f.handle.cursor_position() > before,
+            "ArrowDown must move the caret even when the caret has been \
+             scrolled out of view (stayed at {before})"
+        );
+    }
+
+    /// **`caret_window_rect` subtracts the scroll offset twice.**
+    ///
+    /// `engine.caret_rect` already returns screen space, but
+    /// `keyboard::caret_window_rect` does `viewport_origin.y + caret[1] -
+    /// scroll_y`. Its own doc comment asserts the opposite ("`caret_rect`
+    /// returns engine/content-local coordinates"). The rect feeds the OS IME
+    /// candidate window, `chase_caret_into_view` (the enclosing-ScrollArea
+    /// follow) and the typewriter pin — all off by `scroll_y`.
+    ///
+    /// Measured: `scroll_y = 400`, raw caret y = `-400`, reported window y =
+    /// `-796`, actual painted y = `-396`.
+    #[test]
+    fn caret_window_rect_matches_the_painted_caret() {
+        let mut f = fixture(&numbered(60));
+        f.handle.select_range(0, 0);
+        settle(&mut f.tree);
+        f.scroll_y.set(400.0);
+        settle(&mut f.tree);
+
+        let st = f.state.borrow();
+        let win = crate::rich_text::keyboard::caret_window_rect(&st).expect("focused, laid out");
+        // The caret sits at document y = 0, so it paints at
+        // `viewport_origin.y - scroll_y`.
+        let expected = st.viewport_origin.y - f.scroll_y.get();
+        assert!(
+            (win.y - expected).abs() < 1.0,
+            "caret_window_rect reported y = {} but the caret paints at {} \
+             (scroll_y = {})",
+            win.y,
+            expected,
+            f.scroll_y.get()
+        );
+    }
+
+    /// **The scroll-follow is computed from a one-keystroke-old caret.**
+    ///
+    /// `ensure_caret_visible` → `DocumentFlow::ensure_caret_visible` reads
+    /// `self.cursors[0].position`, a cache written only by
+    /// `DocumentFlow::set_cursor`. The widget calls `engine.set_cursor` in
+    /// exactly two places — `frame_loop.rs` `tick()` and `rich_text.rs`
+    /// `paint()` — and neither runs inside the key handler, so the correction
+    /// keeps the *previous* caret in view and leaves the new one outside it.
+    /// The frame loop deliberately does not re-run the follow, so the caret
+    /// stays out of view until the next keystroke.
+    ///
+    /// Walking down a 120 px viewport with 16.9 px lines: press 6 puts the
+    /// caret on line 7 (screen y 118.6, bottom 135.5 — below the fold) while
+    /// `scroll_y` is still 0; press 7 finally scrolls, and by 23.5 px — the
+    /// correction for **line 7**, not for the line 8 the caret is now on.
+    #[test]
+    fn arrow_down_keeps_the_caret_inside_the_viewport_on_every_press() {
+        let mut f = fixture(&numbered(60));
+        f.handle.select_range(0, 0);
+        settle(&mut f.tree);
+
+        for step in 0..12 {
+            press(&mut f.tree, Key::ArrowDown);
+            let (caret, vh, scroll) = {
+                let st = f.state.borrow();
+                (
+                    st.engine
+                        .caret_rect(st.cursor.position(), st.cursor_affinity),
+                    st.viewport_height,
+                    f.scroll_y.get(),
+                )
+            };
+            assert!(
+                caret[1] >= 0.0 && caret[1] + caret[3] <= vh + 0.5,
+                "press {step}: after ArrowDown the caret spans screen y \
+                 {}..{} but the viewport is 0..{vh} (scroll_y = {scroll}) — \
+                 the scroll correction is a keystroke behind",
+                caret[1],
+                caret[1] + caret[3]
+            );
+        }
+    }
+
+    /// **`range_content_rect` is documented as scroll-free and is not.**
+    ///
+    /// `RichTextEditor::range_content_rect` promises "y = 0 at the top of the
+    /// laid-out text, unaffected by scrolling", and its doc names the use case:
+    /// divide by `content_height()` to get the fraction an overview strip
+    /// draws against. But `keyboard::range_content_rect` builds the rect from
+    /// `engine.caret_rect`, which has the scroll offset already subtracted — so
+    /// the fraction moves as the reader scrolls.
+    ///
+    /// (`range_rect` / `offset_rect` have the mirror-image defect: they
+    /// subtract the scroll a *second* time — see
+    /// [`caret_window_rect_matches_the_painted_caret`].)
+    #[test]
+    fn range_content_rect_does_not_move_when_the_editor_scrolls() {
+        let mut f = fixture(&numbered(60));
+        settle(&mut f.tree);
+
+        let at_top = {
+            let st = f.state.borrow();
+            crate::rich_text::keyboard::range_content_rect(&st, 0, 5).expect("laid out")
+        };
+        f.scroll_y.set(400.0);
+        settle(&mut f.tree);
+        let scrolled = {
+            let st = f.state.borrow();
+            crate::rich_text::keyboard::range_content_rect(&st, 0, 5).expect("laid out")
+        };
+        assert!(
+            (at_top.y - scrolled.y).abs() < 0.5,
+            "content-space y for offsets 0..5 moved from {} to {} when the \
+             editor scrolled — an overview strip would draw the mark in the \
+             wrong place",
+            at_top.y,
+            scrolled.y
+        );
+    }
 }

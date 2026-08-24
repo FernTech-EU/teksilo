@@ -180,6 +180,20 @@ impl RichTextEngine {
         self.flow.set_scroll_offset(offset);
     }
 
+    /// The scroll offset the engine's screen-space geometry is measured
+    /// against — the value [`caret_rect`](Self::caret_rect) subtracts and
+    /// [`hit_test`](Self::hit_test) adds back.
+    ///
+    /// This is the engine's own copy, set by
+    /// [`set_scroll_offset`](Self::set_scroll_offset), which a widget
+    /// typically refreshes at paint. A caller converting a rect between the
+    /// engine's two spaces must use *this* value, not whatever its own scroll
+    /// signal currently holds: between a wheel event and the next paint the
+    /// two disagree, and the rect was measured against this one.
+    pub fn scroll_offset(&self) -> f32 {
+        self.flow.scroll_offset()
+    }
+
     /// Restrict render culling to the content-space band `[top, top + height]`
     /// instead of the viewport-derived window, without moving glyph positions or
     /// hit-testing. `None` restores the default. See
@@ -651,12 +665,69 @@ impl RichTextEngine {
         self.flow.hit_test(x, y)
     }
 
-    /// Screen-space caret rectangle at a document position with the
-    /// given affinity. Affinity only changes the result at soft-wrap
-    /// boundaries; at every other position the two affinities return
-    /// the same rect. See [`text_typeset::CursorAffinity`].
+    /// Caret rectangle at a document position with the given affinity, as
+    /// `[x, y, width, height]`. Affinity only changes the result at soft-wrap
+    /// boundaries; at every other position the two affinities return the same
+    /// rect. See [`text_typeset::CursorAffinity`].
+    ///
+    /// **The two coordinates are not in the same space.** `y` is screen-space:
+    /// the engine has already subtracted [`scroll_offset`](Self::scroll_offset),
+    /// so it is where the caret paints, and it goes negative once the caret
+    /// scrolls off the top. `x` is content-space: the engine has no horizontal
+    /// scroll to apply, so a caller that keeps one must subtract it itself.
+    ///
+    /// The asymmetry is the trap. Adding a widget's scroll offset to `y`
+    /// "to reach screen space" subtracts it twice; comparing `y` against
+    /// [`content_height`](Self::content_height), which is measured from the top
+    /// of the text with no scrolling, compares two different spaces. Use
+    /// [`content_band_screen`](Self::content_band_screen) for that comparison
+    /// and [`caret_rect_content`](Self::caret_rect_content) when the question
+    /// is *where in the document* rather than *where on screen*.
     pub fn caret_rect(&self, position: usize, affinity: text_typeset::CursorAffinity) -> [f32; 4] {
         self.flow.caret_rect(position, affinity)
+    }
+
+    /// [`caret_rect`](Self::caret_rect) in **content space**: measured from the
+    /// top-left of the laid-out text, unaffected by scrolling and by the
+    /// display zoom, in the units [`content_height`](Self::content_height) is
+    /// in.
+    ///
+    /// What an overview strip or a scrollbar annotation wants: those ask what
+    /// *proportion* of the document an offset sits at, which is a question
+    /// screen space cannot answer for an offset the reader has scrolled past.
+    pub fn caret_rect_content(
+        &self,
+        position: usize,
+        affinity: text_typeset::CursorAffinity,
+    ) -> [f32; 4] {
+        let zoom = self.flow.zoom();
+        let r = self.flow.caret_rect(position, affinity);
+        [
+            r[0] / zoom,
+            r[1] / zoom + self.flow.scroll_offset(),
+            r[2] / zoom,
+            r[3] / zoom,
+        ]
+    }
+
+    /// Display zoom (`1.0` = 100 %). The factor between content units and the
+    /// screen units [`caret_rect`](Self::caret_rect) answers in.
+    pub fn zoom(&self) -> f32 {
+        self.flow.zoom()
+    }
+
+    /// The vertical band the laid-out text occupies, in the same screen space
+    /// [`caret_rect`](Self::caret_rect) and [`hit_test`](Self::hit_test) speak,
+    /// as `(top, bottom)`.
+    ///
+    /// [`content_height`](Self::content_height) alone cannot bound a caret `y`:
+    /// it is the document's own height, scroll-free and zoom-free, so testing a
+    /// screen-space `y` against it silently changes meaning as soon as the view
+    /// scrolls or zooms — rejecting perfectly ordinary caret motion.
+    pub fn content_band_screen(&self) -> (f32, f32) {
+        let zoom = self.flow.zoom();
+        let top = -self.flow.scroll_offset() * zoom;
+        (top, top + self.flow.content_height() * zoom)
     }
 
     /// Per-character `(position, width)` for a character range
@@ -719,6 +790,23 @@ impl RichTextEngine {
 
     pub fn ensure_caret_visible(&mut self) -> Option<f32> {
         self.flow.ensure_caret_visible()
+    }
+
+    /// Scroll the minimum amount needed to reveal `position`. Returns the new
+    /// offset when the view moved.
+    ///
+    /// The explicit-position form of
+    /// [`ensure_caret_visible`](Self::ensure_caret_visible), which reads the
+    /// cursor last handed to [`set_cursor`](Self::set_cursor) — a value a
+    /// widget refreshes once a frame, so inside a key handler it is the caret
+    /// from *before* the keystroke. Correcting against that keeps the old caret
+    /// in view and leaves the new one outside it.
+    pub fn ensure_position_visible(
+        &mut self,
+        position: usize,
+        affinity: text_typeset::CursorAffinity,
+    ) -> Option<f32> {
+        self.flow.ensure_position_visible(position, affinity)
     }
 }
 
