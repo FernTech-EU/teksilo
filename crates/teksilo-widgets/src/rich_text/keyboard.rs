@@ -987,9 +987,9 @@ enum FormatBit {
 }
 
 /// Toggle a single character-format bit at the caret, mirroring the
-/// godot reference's `try_extend_cell_selection`: the decision to
-/// turn a format on or off is read from the current caret format
-/// (`char_format()`), not from a selection-wide consensus.
+/// godot reference's `toggle_bold` / `toggle_italic` / `toggle_underline`:
+/// the decision to turn a format on or off is read from the current caret
+/// format (`char_format()`), not from a selection-wide consensus.
 ///
 /// **Read-position subtlety**: `TextCursor::char_format()` reads
 /// the inline element at `position()`. After a select-all the
