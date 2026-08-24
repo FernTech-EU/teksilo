@@ -29,6 +29,29 @@ use crate::recording_ops::RecordingWindowOps;
 // regions, typed text, taps, and an optional window-opening action.
 // ---------------------------------------------------------------------------
 
+/// Held modifiers as `ctrl+shift`, or `none`. One formatter, so a press and a
+/// scroll cannot describe the same modifiers two different ways.
+fn mods_tag(modifiers: &teksilo_core::event::Modifiers) -> String {
+    let mut out = String::new();
+    for (on, tag) in [
+        (modifiers.ctrl(), "ctrl"),
+        (modifiers.shift(), "shift"),
+        (modifiers.alt(), "alt"),
+        (modifiers.super_key(), "meta"),
+    ] {
+        if on {
+            if !out.is_empty() {
+                out.push('+');
+            }
+            out.push_str(tag);
+        }
+    }
+    if out.is_empty() {
+        out.push_str("none");
+    }
+    out
+}
+
 struct Probe {
     role: accesskit::Role,
     label: Signal<String>,
@@ -55,6 +78,10 @@ struct Probe {
     /// modifiers a caller asked for actually reached the widget, and not just
     /// the delta.
     scrolls: Signal<Vec<String>>,
+    /// The modifiers on each `PointerDown`, same formatting as `scrolls`, for
+    /// the same reason: a Ctrl-click is its own gesture and a probe that cannot
+    /// prove the Ctrl arrived is asserting against a plain click.
+    presses: Signal<Vec<String>>,
 }
 
 impl std::fmt::Debug for Probe {
@@ -89,6 +116,7 @@ impl Probe {
             typed: Signal::new(String::new()),
             received: Signal::new(Vec::new()),
             scrolls: Signal::new(Vec::new()),
+            presses: Signal::new(Vec::new()),
         }
     }
     fn value(mut self, v: Signal<String>) -> Self {
@@ -149,6 +177,7 @@ impl Widget for Probe {
         let typed = self.typed.clone();
         let received = self.received.clone();
         let scrolls = self.scrolls.clone();
+        let presses = self.presses.clone();
 
         let mut handlers = HandlerSet::new();
         if self.focusable {
@@ -205,29 +234,21 @@ impl Widget for Probe {
                 }
                 EventResponse::Ignored
             })
+            .on_pointer_event(move |event, _ctx| {
+                if let WidgetEvent::PointerDown { modifiers, .. } = event {
+                    let mut log = presses.get();
+                    log.push(mods_tag(modifiers));
+                    presses.set(log);
+                }
+                EventResponse::Ignored
+            })
             .on_scroll(move |event, _ctx| {
                 if let WidgetEvent::Scroll { delta, modifiers } = event {
                     let (dx, dy) = match delta {
                         teksilo_core::event::ScrollDelta::Pixels { x, y }
                         | teksilo_core::event::ScrollDelta::Lines { x, y } => (*x, *y),
                     };
-                    let mut mods = String::new();
-                    for (on, tag) in [
-                        (modifiers.ctrl(), "ctrl"),
-                        (modifiers.shift(), "shift"),
-                        (modifiers.alt(), "alt"),
-                        (modifiers.super_key(), "meta"),
-                    ] {
-                        if on {
-                            if !mods.is_empty() {
-                                mods.push('+');
-                            }
-                            mods.push_str(tag);
-                        }
-                    }
-                    if mods.is_empty() {
-                        mods.push_str("none");
-                    }
+                    let mods = mods_tag(modifiers);
                     let mut log = scrolls.get();
                     log.push(format!("{dx},{dy},{mods}"));
                     scrolls.set(log);
@@ -708,6 +729,105 @@ fn focus_then_type_text_routes_to_target() {
     assert_eq!(typed.get(), "hi");
 }
 
+/// **A misspelled argument is refused, not quietly reinterpreted.**
+///
+/// serde's default is to ignore a field it does not recognise and take the
+/// `#[serde(default)]` for the one that was meant. On `InjectPointer` that
+/// default is `Click`, so `{"x":.., "y":.., "kind":"move"}` -- `kind` where
+/// `action` was meant -- asked to hover and clicked instead, on every control
+/// it pointed at. It toggled real settings in a real config while a probe
+/// reported nothing wrong, because from serde's side nothing was.
+#[test]
+fn an_unknown_argument_is_refused_rather_than_defaulted() {
+    let good = serde_json::json!({
+        "InjectPointer": { "x": 1.0, "y": 2.0, "action": "move" }
+    });
+    let parsed: AutomationOp = serde_json::from_value(good).expect("a well-formed op parses");
+    assert!(matches!(
+        parsed,
+        AutomationOp::InjectPointer {
+            action: PointerAction::Move,
+            ..
+        }
+    ));
+
+    let typo = serde_json::json!({
+        "InjectPointer": { "x": 1.0, "y": 2.0, "kind": "move" }
+    });
+    let err = serde_json::from_value::<AutomationOp>(typo)
+        .expect_err("a field nobody declared must not be silently dropped");
+    assert!(
+        err.to_string().contains("kind"),
+        "and the error must name the offending field, got: {err}"
+    );
+}
+
+/// A double-click is one op, because two `Click` ops cannot be one: the round
+/// trip and the settle between them are longer than the recogniser's window.
+#[test]
+fn inject_pointer_double_click_is_seen_as_a_double_tap() {
+    let probe = Probe::new(accesskit::Role::Button, "Tappable");
+    let taps = probe.taps.clone();
+    let (mut tree, id) = laid_out(probe);
+    let bounds = tree.bounds(id);
+    let mut ops = RecordingWindowOps::new();
+    let reply = execute(
+        &mut tree,
+        &mut ops,
+        &AutomationOp::InjectPointer {
+            x: bounds.x + bounds.width * 0.5,
+            y: bounds.y + bounds.height * 0.5,
+            action: PointerAction::DoubleClick,
+            button: PointerButtonDto::Primary,
+            ctrl: false,
+            shift: false,
+            alt: false,
+            meta: false,
+        },
+        &default_settle(),
+    );
+    assert!(reply.is_ok(), "double click ok: {reply:?}");
+    assert_eq!(
+        taps.get(),
+        2,
+        "both presses must reach the widget, back to back"
+    );
+}
+
+/// Modifiers reach the synthesised press. Ctrl-click to extend a selection is
+/// its own gesture, and the corkboard probe spent its life passing an
+/// undeclared `modifiers` field that serde dropped on the floor -- asserting
+/// against a plain click while believing it held Ctrl.
+#[test]
+fn inject_pointer_carries_its_modifiers() {
+    let probe = Probe::new(accesskit::Role::Button, "Tappable");
+    let presses = probe.presses.clone();
+    let (mut tree, id) = laid_out(probe);
+    let bounds = tree.bounds(id);
+    let mut ops = RecordingWindowOps::new();
+    let reply = execute(
+        &mut tree,
+        &mut ops,
+        &AutomationOp::InjectPointer {
+            x: bounds.x + bounds.width * 0.5,
+            y: bounds.y + bounds.height * 0.5,
+            action: PointerAction::Click,
+            button: PointerButtonDto::Primary,
+            ctrl: true,
+            shift: false,
+            alt: false,
+            meta: false,
+        },
+        &default_settle(),
+    );
+    assert!(reply.is_ok(), "ctrl-click ok: {reply:?}");
+    assert_eq!(
+        presses.get(),
+        vec!["ctrl".to_string()],
+        "the press must carry Ctrl"
+    );
+}
+
 #[test]
 fn inject_pointer_click_taps_widget() {
     let probe = Probe::new(accesskit::Role::Button, "Tappable");
@@ -727,6 +847,10 @@ fn inject_pointer_click_taps_widget() {
             y: cy,
             action: PointerAction::Click,
             button: PointerButtonDto::Primary,
+            ctrl: false,
+            shift: false,
+            alt: false,
+            meta: false,
         },
         &default_settle(),
     );
@@ -1106,6 +1230,10 @@ fn an_injected_click_reaches_the_callers_window_ops() {
             y: bounds.center().y,
             action: PointerAction::Click,
             button: Default::default(),
+            ctrl: false,
+            shift: false,
+            alt: false,
+            meta: false,
         },
         &default_settle(),
     );

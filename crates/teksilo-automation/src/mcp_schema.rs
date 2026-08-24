@@ -97,7 +97,7 @@ pub const TOOL_CATALOG: &[ToolDescriptor] = &[
     // ---- Synthetic input ----
     ToolDescriptor {
         name: "inject_pointer",
-        description: "Inject a pointer event (click/down/up/move) at a point.",
+        description: "Inject a pointer event at a point: action = click (default), double_click, down, up or move; button = primary (default), secondary, middle, back, forward; with optional ctrl/shift/alt/meta held for the press and release. Unknown names and unknown fields are refused rather than defaulted.",
         mutating: true,
     },
     ToolDescriptor {

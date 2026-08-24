@@ -38,6 +38,18 @@ pub struct SemanticNode {
     /// The node's value, if any (e.g. a text-field's content).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub value: Option<String>,
+    /// The node's accessible **description** — the supplementary sentence an
+    /// assistive technology reads after the name.
+    ///
+    /// Carried because it is where a whole tier of the tooltip system lives: a
+    /// plain tooltip is never auto-shown on focus, so its text reaches a screen
+    /// reader only as the described control's description. Without this field a
+    /// probe could see a control's name and role and had no way to ask whether
+    /// its hint had reached it at all — which is exactly how a bug that put
+    /// every plain tooltip's text on an unnamed box beside its control survived
+    /// a live probe suite.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
     /// Toggle state for checkboxes / toggles: `"true"`, `"false"`, or
     /// `"mixed"`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -184,6 +196,13 @@ pub enum PointerAction {
     /// Press + release at the point (a full click). The default.
     #[default]
     Click,
+    /// Two press+release pairs at the point, with nothing in between, so the
+    /// gesture recogniser reads them as one double-click.
+    ///
+    /// Not the same as sending `Click` twice from a client: the two arrive as
+    /// separate ops with a network round trip and a settle between them, which
+    /// is exactly the gap a double-click must not have.
+    DoubleClick,
     /// A single pointer-down.
     Down,
     /// A single pointer-up.
@@ -278,6 +297,7 @@ pub enum WaitCondition {
 /// How a mutating op should settle the tree after dispatch, before it
 /// re-syncs and returns.
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct SettleSpec {
     /// Advance the simulation clock by this many milliseconds first
     /// (drives tooltip / overlay timers). Default `0`.
@@ -324,7 +344,19 @@ impl Default for SettleSpec {
 /// One automation operation — exactly one per MCP tool. Externally tagged
 /// so the socket JSON is unambiguous; the MCP server constructs these
 /// directly from each tool's typed parameters.
+///
+/// **Unknown fields are refused, here and on every tool's parameters.** An op
+/// is a client's *instruction*, and serde's default is to ignore a field it
+/// does not recognise and take the `#[serde(default)]` for the one that was
+/// meant — so a misspelled argument does not fail, it silently performs a
+/// different action. `{"x": .., "y": .., "kind": "move"}` against `InjectPointer`
+/// took the default `action`, which is `Click`: a probe that asked to hover
+/// clicked every control it pointed at, quietly toggling real settings, and
+/// nothing anywhere said so. Replies are deliberately *not* strict, for the
+/// opposite reason: a client reading a newer app's richer output should keep
+/// working.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub enum AutomationOp {
     // ---- Query ----
     SnapshotTree {
@@ -409,6 +441,20 @@ pub enum AutomationOp {
         action: PointerAction,
         #[serde(default)]
         button: PointerButtonDto,
+        // Modifiers held for the press and the release, mirroring `Scroll`'s
+        // and `InjectKey`'s. A modifier is not decoration on a click: Ctrl-click
+        // to extend a selection is its own gesture, and until this existed no
+        // probe could perform it -- the corkboard's multi-select check passed an
+        // undeclared `modifiers` field, which serde dropped, so it asserted
+        // against a plain click while believing otherwise.
+        #[serde(default)]
+        ctrl: bool,
+        #[serde(default)]
+        shift: bool,
+        #[serde(default)]
+        alt: bool,
+        #[serde(default)]
+        meta: bool,
     },
     /// Right-click a node: a synthetic Secondary press+release at the node's
     /// point, which drives the framework's context-menu machinery
@@ -522,6 +568,7 @@ impl AutomationReply {
 /// The envelope marshaled over the live in-app bridge socket: which window
 /// to route to, the op, and how to settle.
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(deny_unknown_fields)]
 pub struct AutomationRequest {
     /// Target window (`TeksiloWindowId` raw). `None` → the focused window,
     /// else the primary. Ignored in headless mode (single tree).

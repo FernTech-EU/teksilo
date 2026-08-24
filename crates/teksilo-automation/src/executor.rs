@@ -149,17 +149,32 @@ pub fn execute(
             y,
             action,
             button,
+            ctrl,
+            shift,
+            alt,
+            meta,
         } => {
             use crate::dto::PointerAction as PA;
             let p = Point::new(*x, *y);
             let btn = button.to_core();
+            let m = modifiers(*ctrl, *shift, *alt, *meta);
             match action {
                 PA::Move => pointer_move(tree, ops, p),
-                PA::Down => pointer_down(tree, ops, p, btn),
-                PA::Up => pointer_up(tree, ops, p, btn),
+                PA::Down => pointer_down(tree, ops, p, btn, m),
+                PA::Up => pointer_up(tree, ops, p, btn, m),
                 PA::Click => {
-                    pointer_down(tree, ops, p, btn);
-                    pointer_up(tree, ops, p, btn);
+                    pointer_down(tree, ops, p, btn, m);
+                    pointer_up(tree, ops, p, btn, m);
+                }
+                PA::DoubleClick => {
+                    // Both pairs in one op, with no settle between them: a
+                    // client sending two `Click` ops cannot make a double-click,
+                    // because the round trip between them is longer than the
+                    // recogniser's window.
+                    pointer_down(tree, ops, p, btn, m);
+                    pointer_up(tree, ops, p, btn, m);
+                    pointer_down(tree, ops, p, btn, m);
+                    pointer_up(tree, ops, p, btn, m);
                 }
             }
             finish_settle(tree, ops, settle)
@@ -175,8 +190,20 @@ pub fn execute(
             let Some(p) = node_point(tree, &update, *node) else {
                 return AutomationReply::err(codes::NOT_FOUND, format!("no node {node}"));
             };
-            pointer_down(tree, ops, p, teksilo_core::PointerButton::Secondary);
-            pointer_up(tree, ops, p, teksilo_core::PointerButton::Secondary);
+            pointer_down(
+                tree,
+                ops,
+                p,
+                teksilo_core::PointerButton::Secondary,
+                Modifiers::NONE,
+            );
+            pointer_up(
+                tree,
+                ops,
+                p,
+                teksilo_core::PointerButton::Secondary,
+                Modifiers::NONE,
+            );
             finish_settle(tree, ops, settle)
         }
         AutomationOp::InjectKey {
@@ -354,12 +381,13 @@ fn pointer_down(
     ops: &mut dyn WindowOps,
     position: Point,
     button: teksilo_core::PointerButton,
+    modifiers: Modifiers,
 ) {
     tree.dispatch_event_with_ops(
         WidgetEvent::PointerDown {
             position,
             button,
-            modifiers: Modifiers::NONE,
+            modifiers,
         },
         ops,
     );
@@ -370,12 +398,13 @@ fn pointer_up(
     ops: &mut dyn WindowOps,
     position: Point,
     button: teksilo_core::PointerButton,
+    modifiers: Modifiers,
 ) {
     tree.dispatch_event_with_ops(
         WidgetEvent::PointerUp {
             position,
             button,
-            modifiers: Modifiers::NONE,
+            modifiers,
         },
         ops,
     );
@@ -411,9 +440,21 @@ fn type_text(tree: &mut WidgetTree, ops: &mut dyn WindowOps, text: &str) {
 }
 
 fn drag(tree: &mut WidgetTree, ops: &mut dyn WindowOps, from: Point, to: Point) {
-    pointer_down(tree, ops, from, teksilo_core::PointerButton::Primary);
+    pointer_down(
+        tree,
+        ops,
+        from,
+        teksilo_core::PointerButton::Primary,
+        Modifiers::NONE,
+    );
     pointer_move(tree, ops, to);
-    pointer_up(tree, ops, to, teksilo_core::PointerButton::Primary);
+    pointer_up(
+        tree,
+        ops,
+        to,
+        teksilo_core::PointerButton::Primary,
+        Modifiers::NONE,
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -638,6 +679,7 @@ fn semantic_node(
         role: format!("{:?}", node.role()),
         label: node.label().map(|s| s.to_string()),
         value: node.value().map(|s| s.to_string()),
+        description: node.description().map(|s| s.to_string()),
         toggled,
         expanded: node.is_expanded(),
         selected: node.is_selected(),

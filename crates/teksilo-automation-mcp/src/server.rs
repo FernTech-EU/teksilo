@@ -36,6 +36,7 @@ pub struct AutomationServer {
 
 /// Optional settle policy, accepted by every mutating tool.
 #[derive(Debug, Default, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct SettleArg {
     pub clock_millis: Option<u64>,
     pub max_anim_frames: Option<u32>,
@@ -57,6 +58,7 @@ fn settle_spec(arg: &Option<SettleArg>) -> SettleSpec {
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct SnapshotParams {
     pub window_id: Option<u64>,
     /// Optional depth limit from the root (omit for the whole tree).
@@ -64,12 +66,14 @@ pub struct SnapshotParams {
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct ReadParams {
     pub window_id: Option<u64>,
     pub node: u64,
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct LayoutTreeParams {
     pub window_id: Option<u64>,
     /// Optional depth limit from the roots (omit for the whole tree).
@@ -80,12 +84,14 @@ pub struct LayoutTreeParams {
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct InspectParams {
     pub window_id: Option<u64>,
     pub node: u64,
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct NodeParams {
     pub window_id: Option<u64>,
     pub node: u64,
@@ -93,6 +99,7 @@ pub struct NodeParams {
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct FindParams {
     pub window_id: Option<u64>,
     pub role: Option<String>,
@@ -100,6 +107,7 @@ pub struct FindParams {
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct AssertParams {
     pub window_id: Option<u64>,
     pub node: u64,
@@ -113,6 +121,7 @@ pub struct AssertParams {
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct InvokeParams {
     pub window_id: Option<u64>,
     pub node: u64,
@@ -125,6 +134,7 @@ pub struct InvokeParams {
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct SetValueParams {
     pub window_id: Option<u64>,
     pub node: u64,
@@ -133,6 +143,7 @@ pub struct SetValueParams {
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct ScrollParams {
     pub window_id: Option<u64>,
     pub node: u64,
@@ -150,12 +161,19 @@ pub struct ScrollParams {
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct InjectPointerParams {
     pub window_id: Option<u64>,
     pub x: f32,
     pub y: f32,
-    /// click (default), down, up, or move.
+    /// click (default), double_click, down, up, or move.
     pub action: Option<String>,
+    /// Modifiers held for the press and the release. Ctrl-click to extend a
+    /// selection is its own gesture, not a click with decoration.
+    pub ctrl: Option<bool>,
+    pub shift: Option<bool>,
+    pub alt: Option<bool>,
+    pub meta: Option<bool>,
     /// primary (default), secondary, middle, back, forward. `secondary` is a
     /// right-click (opens a context menu); prefer the node-based `right_click`
     /// tool for that so you don't have to compute a point.
@@ -164,6 +182,7 @@ pub struct InjectPointerParams {
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct InjectKeyParams {
     pub window_id: Option<u64>,
     /// Key name (Enter, Escape, Tab, F1.., arrows) or a single character.
@@ -176,6 +195,7 @@ pub struct InjectKeyParams {
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct TypeTextParams {
     pub window_id: Option<u64>,
     pub node: u64,
@@ -184,6 +204,7 @@ pub struct TypeTextParams {
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct TypeImeParams {
     pub window_id: Option<u64>,
     pub node: u64,
@@ -193,6 +214,7 @@ pub struct TypeImeParams {
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct DragParams {
     pub window_id: Option<u64>,
     pub node: u64,
@@ -203,29 +225,34 @@ pub struct DragParams {
 }
 
 #[derive(Debug, Default, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct WindowOnlyParams {
     pub window_id: Option<u64>,
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct PullParams {
     pub window_id: Option<u64>,
     pub since_seq: Option<u64>,
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct AdvanceParams {
     pub window_id: Option<u64>,
     pub millis: u64,
 }
 
 #[derive(Debug, Default, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct SettleParams {
     pub window_id: Option<u64>,
     pub settle: Option<SettleArg>,
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct WaitParams {
     pub window_id: Option<u64>,
     /// One of: node_exists, node_value, node_gone, at_version_at_least.
@@ -239,6 +266,7 @@ pub struct WaitParams {
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct ScreenshotParams {
     pub window_id: Option<u64>,
     /// Crop to this node's bounds (omit to capture the whole window).
@@ -471,7 +499,9 @@ impl AutomationServer {
         .await
     }
 
-    #[tool(description = "Inject a pointer event (click/down/up/move) at a point.")]
+    #[tool(
+        description = "Inject a pointer event at a point: action = click (default), double_click, down, up or move; button = primary (default), secondary, middle, back, forward; with optional ctrl/shift/alt/meta held for the press and release. Unknown names and unknown fields are refused rather than defaulted."
+    )]
     pub(crate) async fn inject_pointer(
         &self,
         Parameters(p): Parameters<InjectPointerParams>,
@@ -482,8 +512,12 @@ impl AutomationServer {
             AutomationOp::InjectPointer {
                 x: p.x,
                 y: p.y,
-                action: pointer_action(&p.action),
-                button: pointer_button(&p.button),
+                action: pointer_action(&p.action)?,
+                button: pointer_button(&p.button)?,
+                ctrl: p.ctrl.unwrap_or(false),
+                shift: p.shift.unwrap_or(false),
+                alt: p.alt.unwrap_or(false),
+                meta: p.meta.unwrap_or(false),
             },
             settle,
         )
@@ -889,21 +923,45 @@ fn build_condition(p: &WaitParams) -> Result<WaitCondition, McpError> {
     })
 }
 
-fn pointer_action(s: &Option<String>) -> PointerAction {
-    match s.as_deref().map(str::to_ascii_lowercase).as_deref() {
+/// A name a caller asked for, or an error naming what it could have said.
+///
+/// Falling back to a default here is the same failure the DTOs now refuse one
+/// layer up: an unrecognised name is a caller who meant something, and quietly
+/// doing the default instead performs an action nobody asked for while
+/// reporting success. `"double_click"` used to arrive here and leave as a
+/// single click.
+fn pointer_action(s: &Option<String>) -> Result<PointerAction, McpError> {
+    Ok(match s.as_deref().map(str::to_ascii_lowercase).as_deref() {
+        None | Some("click") => PointerAction::Click,
+        Some("double_click") => PointerAction::DoubleClick,
         Some("down") => PointerAction::Down,
         Some("up") => PointerAction::Up,
         Some("move") => PointerAction::Move,
-        _ => PointerAction::Click,
-    }
+        Some(other) => {
+            return Err(McpError::invalid_params(
+                format!(
+                    "unknown pointer action '{other}'                          (click, double_click, down, up, move)"
+                ),
+                None,
+            ));
+        }
+    })
 }
 
-fn pointer_button(s: &Option<String>) -> PointerButtonDto {
-    match s.as_deref().map(str::to_ascii_lowercase).as_deref() {
+fn pointer_button(s: &Option<String>) -> Result<PointerButtonDto, McpError> {
+    Ok(match s.as_deref().map(str::to_ascii_lowercase).as_deref() {
+        None | Some("primary") => PointerButtonDto::Primary,
         Some("secondary") => PointerButtonDto::Secondary,
         Some("middle") => PointerButtonDto::Middle,
         Some("back") => PointerButtonDto::Back,
         Some("forward") => PointerButtonDto::Forward,
-        _ => PointerButtonDto::Primary,
-    }
+        Some(other) => {
+            return Err(McpError::invalid_params(
+                format!(
+                    "unknown pointer button '{other}'                          (primary, secondary, middle, back, forward)"
+                ),
+                None,
+            ));
+        }
+    })
 }
