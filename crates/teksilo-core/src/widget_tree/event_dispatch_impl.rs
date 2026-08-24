@@ -1107,7 +1107,23 @@ impl WidgetTree {
                 } else {
                     self.arena.mark_needs_paint(id);
                 }
-                return true;
+                // **Hover transitions are notifications, and every ancestor is
+                // entitled to one.** Stopping the bubble here left a container
+                // stuck hovered whenever the pointer left it *through* an
+                // interactive child: the child's own `on_hover` handled the
+                // `PointerLeave`, the bubble stopped, and the row went on believing
+                // the pointer was still over it. A search result whose controls
+                // appear on hover then kept them after the pointer had gone.
+                //
+                // The preview pass already refuses to let an ancestor swallow a
+                // descendant's Enter/Leave; this is that rule in the other
+                // direction, and it is what makes a container's hover mean "the
+                // pointer is somewhere inside me" rather than "the pointer is on my
+                // own background". Every other event still stops at its handler,
+                // which is what makes handling one mean anything.
+                if !matches!(event, WidgetEvent::PointerEnter | WidgetEvent::PointerLeave) {
+                    return true;
+                }
             }
             is_target = false;
             current = self.arena.parent(id);
@@ -2429,6 +2445,44 @@ mod tests {
         assert!(
             !hovered.get(),
             "PointerLeave must likewise reach the child despite the ancestor"
+        );
+    }
+
+    /// **The other direction: a child must not swallow its ancestor's hover.**
+    ///
+    /// A row that reveals controls on hover puts interactive children inside
+    /// itself, and the pointer leaves the row *through* one of them. The child's
+    /// own `on_hover` used to handle the `PointerLeave` and stop the bubble there,
+    /// so the row went on believing the pointer was still over it and kept its
+    /// controls showing after the pointer had gone.
+    #[test]
+    fn a_child_hover_handler_does_not_swallow_its_ancestors() {
+        use crate::test_widgets::StackWidget;
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        let (row, button) = (Rc::new(Cell::new(false)), Rc::new(Cell::new(false)));
+        let (r, b) = (row.clone(), button.clone());
+
+        let mut tree = WidgetTree::new();
+        let child = tree.add(FillWidget::new().on_hover(move |entered, _ctx| b.set(entered)));
+        tree.add(
+            StackWidget::new()
+                .add_child(child)
+                .on_hover(move |entered, _ctx| r.set(entered)),
+        );
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+
+        tree.pointer_move(Point::new(50.0, 25.0));
+        assert!(button.get(), "the child is hovered");
+        assert!(row.get(), "and so is the row it is inside");
+
+        tree.pointer_move(Point::new(500.0, 500.0));
+        assert!(!button.get(), "the child heard the leave");
+        assert!(
+            !row.get(),
+            "and so did the row — a container is not still hovered because the \
+             pointer left it through a button"
         );
     }
 
