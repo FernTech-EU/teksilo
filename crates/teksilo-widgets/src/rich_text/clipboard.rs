@@ -4,8 +4,11 @@
 //! System clipboard integration for the rich text editor.
 //!
 //! Three free functions — `copy`, `cut`, `paste` — implement the
-//! godot reference's in-process rich fragment preservation pattern at
-//! [rich_text_edit.rs:2048-2087](../../../../godot-rich-text/src/rich_text_edit.rs#L2048-L2087).
+//! in-process rich fragment preservation pattern of the godot reference's
+//! `copy_rich` / `paste_rich` / `cut_rich` (`godot-rich-text/src/rich_text_edit.rs`).
+//! The reference is cited by symbol throughout this module rather than by
+//! line: it is a sibling checkout that moves on its own, and every line number
+//! ever written down here had drifted onto unrelated code.
 //!
 //! The functions talk to a `ClipboardHandle` retrieved via
 //! `EventContext::app_state::<ClipboardHandle>()`. In headless tests

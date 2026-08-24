@@ -502,7 +502,7 @@ pub(super) fn handle_pointer_event(
             // Clamp y into [2.0, viewport_height - 2.0] before
             // hit-testing so a drag that leaves the viewport still
             // resolves to a valid position on the edge line
-            // (matches godot rich_text_edit.rs:1830).
+            // (matches the godot reference's `handle_drag_select`).
             let clamped = Point::new(
                 local.x,
                 local.y.clamp(2.0, (viewport_height - 2.0).max(2.0)),
@@ -523,7 +523,7 @@ pub(super) fn handle_pointer_event(
             // 20 px margin and 60 px/frame max (normalized to
             // 60 * 60 = 3600 px/s so delta scaling matches the
             // reference without depending on refresh rate) come
-            // from godot rich_text_edit.rs:1812-1845.
+            // from the godot reference's `compute_drag_velocity`.
             {
                 let mut st = state.borrow_mut();
                 let v = if local.y < 20.0 {
@@ -672,7 +672,7 @@ pub(super) fn handle_double_tap(state: &SharedState, pos: Point, ctx: &mut Event
 }
 
 /// Select block under the caret on triple-click. Matches godot
-/// rich_text_edit.rs:782.
+/// the godot reference's own word-selection rule.
 pub(super) fn handle_triple_tap(state: &SharedState, pos: Point, ctx: &mut EventContext) {
     tap_select(state, pos, SelectionType::BlockUnderCursor);
     super::keyboard::chase_caret_into_view(state, ctx);

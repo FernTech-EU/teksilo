@@ -269,7 +269,7 @@ pub(crate) fn tick(state: &mut EditorState, delta: f32) -> bool {
     // top or bottom viewport edge, `mouse::handle_pointer_event`
     // stores a per-second velocity on `drag_state`; the frame loop
     // applies it each tick so scrolling continues without requiring
-    // further mouse motion. Matches godot rich_text_edit.rs:1812-1845.
+    // further mouse motion. Matches the godot reference's drag auto-scroll.
     //
     // `drag_active` drives whether we keep the frame loop pumping.
     // We only return true when velocity is actually non-zero — a

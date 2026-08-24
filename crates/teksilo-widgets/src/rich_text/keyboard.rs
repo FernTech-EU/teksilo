@@ -160,7 +160,7 @@ pub(super) fn handle_key(
     // observers see the post-move value.
     // Ctrl+A is the only key that preserves `select_all_level`; every
     // other key resets it so a follow-up Ctrl+A starts at level 1.
-    // Matches godot rich_text_edit.rs:520-521.
+    // Matches the godot reference's own `select_all_level` reset.
     let is_select_all = matches!(key, Key::A) && ctrl;
     let action: KeyAction = {
         let mut st = state.borrow_mut();
@@ -309,7 +309,7 @@ pub(super) fn handle_key(
                 if text_nav::deletes_word(*modifiers) {
                     // Delete the word to the left — Ctrl+⌫, ⌥⌫ on macOS.
                     // Select the word, then delete the selection —
-                    // matches godot rich_text_edit.rs:580 (there is
+                    // matches the godot reference's delete-word (there is
                     // no dedicated delete-word API on TextCursor).
                     if !st.cursor.has_selection() {
                         st.cursor
@@ -906,7 +906,7 @@ pub(super) fn chase_caret_into_view_with(
     }
 }
 
-/// Ctrl+A escalation ladder. Mirrors godot rich_text_edit.rs:690-727.
+/// Ctrl+A escalation ladder. Mirrors the godot reference's `select_all`.
 /// When the caret sits inside a table cell, four consecutive presses
 /// widen the selection: paragraph → cell → table → document, then
 /// wrap back to paragraph on the fifth. Outside a table Ctrl+A is
@@ -987,7 +987,7 @@ enum FormatBit {
 }
 
 /// Toggle a single character-format bit at the caret, mirroring the
-/// godot reference (rich_text_edit.rs:2089-2117): the decision to
+/// godot reference's `try_extend_cell_selection`: the decision to
 /// turn a format on or off is read from the current caret format
 /// (`char_format()`), not from a selection-wide consensus.
 ///
@@ -1806,7 +1806,7 @@ fn find_table_by_id(
 /// path); returns `false` when the caret isn't at a cell boundary
 /// eligible to start/extend a cell selection.
 ///
-/// Mirrors godot rich_text_edit.rs:1755-1824. The widget's
+/// Mirrors the godot reference's IME preedit handling. The widget's
 /// `selected_cell_range` state survives across calls so repeated
 /// Shift+Arrow presses keep extending the rectangle.
 pub(super) fn try_extend_cell_selection(st: &mut EditorState, dcol: i32, drow: i32) -> bool {
