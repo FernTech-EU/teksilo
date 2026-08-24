@@ -499,6 +499,33 @@ impl RichTextEditor {
     /// is computed relative to the editor's own scroll offset as well, so enabling
     /// it on a self-scroller degrades to a correct-but-redundant cull rather than
     /// rendering the wrong rows.)
+    /// Guess this editor's height from its text until something has laid it out.
+    ///
+    /// `content_height()` is `0` until `layout_full` has run, and that waits for the
+    /// editor to have been through a frame on screen. The zero falls through to the
+    /// `min_lines` floor, so an editor that has never been shown claims the same few
+    /// lines whatever it holds.
+    ///
+    /// For an editor that **is** on screen that is invisible — it lays out on the
+    /// first frame and the floor never shows. Turn this on for one that may not be:
+    /// a row of a long column, most of which is below the fold. There the page's
+    /// height is the sum of its rows' claims, so the scroll extent starts wrong by an
+    /// order of magnitude and settles a row at a time as the reader arrives — and
+    /// anything drawing that extent draws the settling.
+    ///
+    /// Off by default, deliberately. The estimate is crude by construction, and an
+    /// editor that lays out immediately gains nothing from it while every consumer of
+    /// its first-frame size pays for the guess — including the windowed-render path,
+    /// whose culling is derived from the editor's own bounds.
+    ///
+    /// Never a floor: it goes through the same clamp a real height does, so
+    /// `max_lines` still caps it and an over-estimate corrects downwards when the
+    /// layout lands.
+    pub fn estimate_height_before_layout(self, on: bool) -> Self {
+        self.state.borrow_mut().estimate_height_before_layout = on;
+        self
+    }
+
     pub fn window_to_clip(self, on: bool) -> Self {
         self.state.borrow_mut().window_to_clip = on;
         self
@@ -2444,6 +2471,59 @@ impl EditorHandle {
         self.range_rect(offset, offset)
     }
 
+    /// The **content-space** rectangle enclosing `[start, end)` — y = 0 at the top
+    /// of the laid-out text, unaffected by scrolling and by where the editor sits
+    /// in the window.
+    ///
+    /// The scroll-free counterpart to [`range_rect`](Self::range_rect), and the one
+    /// to reach for when the question is *what proportion of the document is this*
+    /// rather than *where is this on screen*. Divided by
+    /// [`content_height`](Self::content_height) it gives a fraction an overview
+    /// strip can draw against, for offsets the writer has long scrolled past —
+    /// which window space cannot express at all, since it reports those relative to
+    /// a viewport they are nowhere near.
+    ///
+    /// `None` before the first full layout. Focus is not required.
+    pub fn range_content_rect(&self, start: usize, end: usize) -> Option<Rect> {
+        let st = self.state.borrow();
+        keyboard::range_content_rect(&st, start, end)
+    }
+
+    /// The **content-space** caret rectangle at one offset — a zero-width
+    /// [`range_content_rect`](Self::range_content_rect).
+    pub fn offset_content_rect(&self, offset: usize) -> Option<Rect> {
+        self.range_content_rect(offset, offset)
+    }
+
+    /// Reactive counter that bumps on every document change — the handle mirror of
+    /// [`RichTextEditor::document_version`].
+    ///
+    /// The change token a decoration drawn *outside* the editor binds, so it
+    /// re-derives when the text moves under it. Without it such a widget has only
+    /// the scroll metrics to go on, and those move on a reflow but not on an edit
+    /// that leaves the height alone — which is most edits, and exactly the ones that
+    /// shift the offsets a mark is anchored to.
+    pub fn document_version(&self) -> Signal<u64> {
+        self.state.borrow().document_version.clone()
+    }
+
+    /// Height of the laid-out text, in the same space
+    /// [`range_content_rect`](Self::range_content_rect) reports.
+    ///
+    /// The denominator that turns a content rect into a fraction of the document.
+    /// `None` before the first full layout — the same gate the rect queries use, so
+    /// a caller that has one has the other and the division is never against a
+    /// stale height.
+    ///
+    /// This is the *text's* height, not the widget's: an editor laid out taller
+    /// than its content (a short scene in a tall pane) reports the text.
+    pub fn content_height(&self) -> Option<f32> {
+        let st = self.state.borrow();
+        st.engine
+            .has_full_layout()
+            .then(|| st.engine.content_height())
+    }
+
     /// Hit-test a point — **in window coordinates**, as a
     /// [`context_menu`](RichTextEditor::context_menu) factory receives it — to a
     /// document character offset. `None` when the point resolves to no text
@@ -3285,6 +3365,100 @@ impl std::fmt::Debug for RichTextEditorBody {
     }
 }
 
+/// How tall this text is likely to be, before anything has laid it out.
+///
+/// See the call site in [`RichTextEditorBody::layout_response`] for why a guess
+/// beats the zero it replaces. Two O(1) document reads and some arithmetic; no
+/// shaping, no glyph cache, nothing that could be slow enough to matter in a
+/// layout pass.
+///
+/// **The typography is the half that decides whether this is useful.** A first cut
+/// counted bare lines at the font's natural height and came out well under the
+/// truth for manuscript prose, which is set with a line-height multiplier and space
+/// between paragraphs — the estimate was missing a third of the page and the rows it
+/// sized still visibly grew when they finally laid out. So:
+///
+/// * lines are counted at the font's own advance, since that is what decides how
+///   many characters fit on one, and
+/// * each line is then given the **multiplied** height, and each block the space
+///   above and below it that a body paragraph gets.
+///
+/// The mean advance is taken as half the font's line height. That is roughly right
+/// for proportional Latin text at ordinary sizes and roughly wrong for everything
+/// else, which is acceptable for a number whose only competition is a constant and
+/// whose lifetime is one frame.
+/// Mean glyph advance as a fraction of the font's natural line height.
+///
+/// **Measured, not derived.** Thirty-two real manuscript scenes were laid out in a
+/// running window and compared against what this function claimed for each, at a
+/// 447 px measure in Literata at 1.6 line height:
+///
+/// | scene | guess | real | ratio |
+/// |---|---|---|---|
+/// | 23 443 chars | 19 586 | 17 768 | 1.10 |
+/// | 20 798 chars | 17 028 | 15 578 | 1.09 |
+/// | 16 493 chars | 13 860 | 12 827 | 1.08 |
+///
+/// The bias was 1.06–1.12 across a 1.4× range of scene sizes: a scale error, not
+/// noise, and 0.37 solved back to 0.335 on every one of them. Two earlier values
+/// were reasoned about rather than measured — 0.5 from "half the font size", then
+/// 0.37 from dividing that by a nominal line height — and both were wrong by more
+/// than this whole correction.
+///
+/// It is a *typical* value, and it is font-dependent: a wider or narrower face moves
+/// it, which is why the accuracy test allows ±25% rather than pretending otherwise.
+/// If that stops being good enough, the answer is to learn it from the first real
+/// layout the process performs rather than to tune the constant again.
+const MEAN_ADVANCE_OVER_LINE_HEIGHT: f32 = 0.335;
+
+fn estimated_content_height(
+    document: &teksilo_text::text_document::TextDocument,
+    width: f32,
+    font_line_h: f32,
+    typography: &teksilo_text::EditorTypographyDefaults,
+) -> f32 {
+    if width <= 0.0 || font_line_h <= 0.0 {
+        return 0.0;
+    }
+    // Characters per line from the **font's** line height: the multiplier below
+    // spaces lines further apart, it does not make the glyphs wider.
+    let per_line = (width / (font_line_h * MEAN_ADVANCE_OVER_LINE_HEIGHT)).max(1.0);
+    let chars = document.character_count() as f32;
+    let blocks = document.block_count().max(1) as f32;
+    // Wrapped lines, plus **half** a line per block for the ragged last one of each.
+    // Half rather than one: a block takes `ceil(chars / per_line)` lines, which
+    // averages half a line more than the division, and charging a whole one over-
+    // counted a scene of many short paragraphs by more than the wrapping itself.
+    // Floored at one line per block, because an empty paragraph still takes a line.
+    let lines = (chars / per_line + blocks * 0.5).max(blocks);
+    let line_h = font_line_h * typography.line_height.max(0.1);
+    let per_block = typography.paragraph_spacing_before + typography.paragraph_spacing_after;
+    let h = lines * line_h + blocks * per_block.max(0.0);
+    if height_debug() {
+        eprintln!(
+            "HEIGHT-EST chars={chars:.0} blocks={blocks:.0} width={width:.1} \
+             font_lh={font_line_h:.2} mult={:.2} per_line={per_line:.1} -> {h:.1}",
+            typography.line_height
+        );
+    }
+    h
+}
+
+/// Whether to print what the height guess and the real layout each came up with.
+///
+/// `TEKSILO_HEIGHT_DEBUG=1`. Read once — this sits in a layout pass, and an
+/// environment lookup per measurement would be a real cost for a diagnostic that is
+/// off for everyone.
+///
+/// It earns its place: the guess above was wrong three separate ways before anyone
+/// could see it, and the one that mattered most — being asked to measure at 76 px
+/// when the text wraps at 447 — was invisible to every test and obvious in one line
+/// of this output.
+fn height_debug() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("TEKSILO_HEIGHT_DEBUG").is_some())
+}
+
 impl Widget for RichTextEditorBody {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         // Bind `caret_visible` to the framework's repaint tracker so
@@ -3410,6 +3584,16 @@ impl Widget for RichTextEditorBody {
         // where each bound is `n * line_height`. The clamp is a
         // hard cap — we ignore the proposal's height and let the
         // vertical scroll bar take over past `max_lines`.
+        // Remember the widest measure anything has asked for, before reading the
+        // state below — see where it is used for why the widest and not this pass's.
+        {
+            let mut st = self.state.borrow_mut();
+            if let Some(w) = proposal.width
+                && w > st.widest_measured_width
+            {
+                st.widest_measured_width = w;
+            }
+        }
         let st = self.state.borrow();
         // `default_line_height()` is the *unscaled* line height (its standalone
         // shaper path uses font_scale = 1.0), but `content_height()` carries the
@@ -3418,7 +3602,79 @@ impl Widget for RichTextEditorBody {
         // `min_lines`.
         let line_scale = st.effective_font_scale(ctx.text_scale);
         let line_h = st.engine.default_line_height() * line_scale;
-        let content_h = st.engine.content_height();
+        // **An estimate rather than a zero before the text has been laid out.**
+        //
+        // `content_height()` is `0` until `layout_full` has run, and that does not
+        // happen until the editor has been through a frame on screen. A zero then
+        // falls through to the `min_lines` floor below, so *every* unlaid-out editor
+        // claims the same ten lines whatever it holds — a three-thousand-word scene
+        // and an empty one measure identically.
+        //
+        // On a single editor that is invisible: it is on screen, so it lays out.
+        // Down a **stream** it is not. A Full Book is a column of editors, most of
+        // them below the fold, and the page's height is the sum of their claims —
+        // so the scroll extent is wrong by an order of magnitude and settles, a row
+        // at a time, as the writer reads. Anything drawing that extent draws the
+        // settling: a margin lane gives each row a slice to match the claim, then
+        // watches it grow tenfold the moment the row is reached.
+        //
+        // The estimate is deliberately crude — a mean advance of half the line
+        // height, one extra line per block for the ragged last line of each — and
+        // being crude is the point. It is thrown away the instant a real layout
+        // exists, so its only job is to be closer than a constant, which is not a
+        // demanding standard. It is **not** a floor: an over-estimate corrects
+        // downwards when the layout lands, where a too-large `min_lines` would
+        // leave blank space under short text for the life of the widget.
+        //
+        // ⚠ **Only when the width is actually known.** `w` above falls back to 200
+        // for a proposal that carries none, which is fine for a width but ruinous
+        // for a line count: `CenterColumnFlowing` measures its child width-only, and
+        // estimating against the fallback made a scene wrap at a quarter of its real
+        // measure and claim nearly twice its real height. An unbounded measure gets
+        // the old answer — the floor — because without a measure there is genuinely
+        // no way to know how many lines the text takes.
+        let content_h = match (st.engine.has_full_layout(), proposal.width) {
+            (true, _) => st.engine.content_height(),
+            // **At the width the text will actually wrap at**, which is the viewport
+            // the body was last *placed* at — not the width of whichever measurement
+            // pass happens to be asking.
+            //
+            // Measured in a real window those are not the same number, and the
+            // difference is not small: a stream row was asked to measure at 76 px
+            // during an early pass, estimated eight characters to a line and so six
+            // times its true height, while the layout that followed wrapped it at
+            // 447. A guess taken at the wrong measure is worse than no guess — it is
+            // the same jump it was meant to remove, pointing the other way.
+            //
+            // Zero before the body has ever been placed, and then the proposal is the
+            // only thing on offer; after the first placement the viewport is the
+            // truth. `w` above is deliberately not reused: its 200 px fallback is a
+            // sane default for a width and a ruinous one for a line count.
+            (false, _) if st.estimate_height_before_layout => {
+                // The viewport if this body has been placed, else the **widest**
+                // width anything has asked it to measure at.
+                //
+                // Not the width of the pass that happens to be asking: a real window
+                // proposes 76 px to a stream row whose text wraps at 447, and
+                // guessing against that claimed six times the true height. Nor the
+                // viewport alone, which was tried and is worse — a stream's rows are
+                // rebuilt often enough that it is almost always still zero, so the
+                // guess simply never ran and every row fell back to the floor it was
+                // meant to replace.
+                let width = st.viewport_width.max(st.widest_measured_width);
+                if width > 0.0 {
+                    estimated_content_height(
+                        &st.document,
+                        width,
+                        line_h,
+                        st.engine.typography_defaults(),
+                    )
+                } else {
+                    0.0
+                }
+            }
+            (false, _) => 0.0,
+        };
         drop(st);
 
         let min_h = self.min_lines.map(|n| n as f32 * line_h).unwrap_or(0.0);
@@ -3593,6 +3849,15 @@ impl Widget for RichTextEditorBody {
             st.engine.layout_full(&flow);
             st.needs_full_layout = false;
             st.content_dirty = true;
+            if height_debug() {
+                eprintln!(
+                    "HEIGHT-REAL chars={} blocks={} width={:.1} -> {:.1}",
+                    st.document.character_count(),
+                    st.document.block_count(),
+                    st.engine.layout_width(),
+                    st.engine.content_height()
+                );
+            }
         }
 
         // Update the cursor display every paint so selection

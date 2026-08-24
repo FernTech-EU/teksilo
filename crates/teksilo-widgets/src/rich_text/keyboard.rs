@@ -650,6 +650,46 @@ pub(super) fn caret_window_rect(st: &EditorState) -> Option<teksilo_canvas::Rect
 /// Unlike [`caret_window_rect`], this takes explicit offsets (not the live cursor) and does
 /// **not** require focus — it exists so a search match can be scrolled into view whether or
 /// not the editor is focused. `None` before the first full layout.
+/// The **content-space** rectangle enclosing `[start, end)` — y = 0 at the top of
+/// the laid-out text, unaffected by scrolling and by where the editor sits in the
+/// window.
+///
+/// The scroll-free half of [`range_window_rect`]. A decoration drawn *beside* the
+/// text (a comment's leader, a bracket) wants window space, because it has to line
+/// itself up with a rect the arena also stores. Anything that maps a document onto
+/// a **proportion** of itself — an overview lane, a scrollbar annotation — wants
+/// this instead: window space answers "where is this on screen right now", which
+/// changes with every scroll tick and is meaningless for an offset the writer has
+/// scrolled past.
+pub(super) fn range_content_rect(
+    st: &EditorState,
+    start: usize,
+    end: usize,
+) -> Option<teksilo_canvas::Rect> {
+    if !st.engine.has_full_layout() {
+        return None;
+    }
+    // The same fixed Downstream affinity `range_window_rect` uses, and for the same
+    // reason: these are arbitrary offsets unrelated to the caret, so reading the live
+    // `cursor_affinity` would put the rect on the wrong side of a soft-wrap boundary
+    // depending on where the caret happens to sit.
+    let a = st.engine.caret_rect(start, CursorAffinity::Downstream);
+    let b = st.engine.caret_rect(end, CursorAffinity::Downstream);
+    let (ay, ah) = (a[1], a[3].max(1.0));
+    let (by, bh) = (b[1], b[3].max(1.0));
+
+    let x0 = a[0].min(b[0]);
+    let x1 = a[0].max(b[0]);
+    let y0 = ay.min(by);
+    let y1 = (ay + ah).max(by + bh);
+    Some(teksilo_canvas::Rect::new(
+        x0,
+        y0,
+        (x1 - x0).max(1.0),
+        (y1 - y0).max(ah.max(bh)),
+    ))
+}
+
 pub(super) fn range_window_rect(
     st: &EditorState,
     start: usize,

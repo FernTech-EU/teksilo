@@ -189,6 +189,35 @@ pub(crate) struct EditorState {
     /// `engine.set_render_window`. See
     /// [`RichTextEditor::window_to_clip`](crate::rich_text::RichTextEditor::window_to_clip).
     pub window_to_clip: bool,
+    /// Whether this editor guesses its height from its text before anything has
+    /// laid it out. See
+    /// [`RichTextEditor::estimate_height_before_layout`](crate::rich_text::RichTextEditor::estimate_height_before_layout).
+    pub estimate_height_before_layout: bool,
+    /// The widest width this body has ever been asked to measure at.
+    ///
+    /// Only read by the height guess, and only until a real layout exists.
+    ///
+    /// A measurement pass may carry any width, and one of them carries a width that
+    /// is not a measure at all. `linear_layout::negotiate` opens with an **intrinsic
+    /// probe** — every child asked at `width: None`, meaning "how big do you want to
+    /// be". Skribisto's writing column resolves that `None` to `0.0`, floors it at
+    /// its own `MIN_COLUMN_WIDTH` of 100, and its editor's 12 px content padding
+    /// takes 24 off: **76**, every time, for a column whose text wraps at 447. A
+    /// guess made against it claimed six times the true height.
+    ///
+    /// By the time the number arrives here it is an ordinary `Some(76.0)` and
+    /// nothing distinguishes it from a genuinely narrow placement — the intent is
+    /// destroyed two layers up. The widest is then the honest predictor: 76 is the
+    /// floor of that whole chain, so any real measurement beats it, and a narrow
+    /// proposal is a minimum-size question while the layout that follows uses the
+    /// generous one.
+    ///
+    /// ⚠ It only grows. An editor that is measured wide, never laid out, and then
+    /// **permanently** narrowed — the writer opens the Inspector on a Full Book —
+    /// keeps guessing against the stale width until it is scrolled to. Bounded in
+    /// practice because a stream's rows are short-lived, and the failure is one
+    /// under-estimate rather than the sixfold over-estimate it replaces.
+    pub widest_measured_width: f32,
 
     /// Which highlight sessions THIS view renders (`show_highlights` is the master switch
     /// above it: `false` suppresses everything regardless of this mask). Default is
@@ -753,6 +782,8 @@ impl EditorState {
             wrap_mode,
             show_highlights: true,
             window_to_clip: false,
+            estimate_height_before_layout: false,
+            widest_measured_width: 0.0,
             highlight_mask: HighlightMask::all(),
             last_text_color: None,
             follow_text_scale: true,

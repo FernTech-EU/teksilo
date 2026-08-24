@@ -7474,6 +7474,345 @@ fn range_rect_is_none_before_layout() {
 }
 
 // ---------------------------------------------------------------------------
+// Intrinsic height before the text has been laid out
+// ---------------------------------------------------------------------------
+
+/// The **body**'s height, which is what intrinsic sizing decides. The outer
+/// editor takes the proposal it is handed; the body is the part that measures
+/// to its text.
+fn body_height(tree: &WidgetTree, id: teksilo_core::widget_id::WidgetId) -> f32 {
+    fn walk(
+        tree: &WidgetTree,
+        id: teksilo_core::widget_id::WidgetId,
+    ) -> Option<teksilo_core::widget_id::WidgetId> {
+        if tree
+            .widget_type_name(id)
+            .is_some_and(|n| n.ends_with("RichTextEditorBody"))
+        {
+            return Some(id);
+        }
+        tree.children(id).into_iter().find_map(|c| walk(tree, c))
+    }
+    walk(tree, id).map(|b| tree.bounds(b).height).unwrap_or(0.0)
+}
+
+/// **A long document must not measure the same as an empty one** before either has
+/// been laid out.
+///
+/// `content_height()` is `0` until `layout_full` has run, and that waits for a frame
+/// on screen. The zero fell through to the `min_lines` floor, so every unlaid-out
+/// editor claimed exactly ten lines whatever it held. On one editor that is
+/// invisible; down a stream of them it makes the page's height wrong by an order of
+/// magnitude, and anything drawing that extent — a scroll bar, a margin lane —
+/// draws it settling a row at a time as the reader arrives.
+#[test]
+fn an_unlaid_out_editor_estimates_its_height_from_its_text() {
+    fn measured(text: &str) -> f32 {
+        let doc = TextDocument::new();
+        doc.set_plain_text(text).unwrap();
+        let editor = RichTextEditor::editor(doc)
+            .min_lines(10)
+            .estimate_height_before_layout(true);
+        let mut tree = WidgetTree::new();
+        let id = tree.add(editor);
+        // Laid out but never rendered: exactly the state a row below the fold is in.
+        // **Twice.** The guess is made at the width the body was last *placed* at,
+        // so the first pass has no measure to guess against and reports the floor;
+        // the pass after it is the one that estimates. That is the contract, not a
+        // quirk of the harness: guessing against whatever proposal happens to be
+        // asking was measured claiming six times a scene's true height.
+        tree.layout(SizeProposal::exact(400.0, 3000.0));
+        tree.layout(SizeProposal::exact(400.0, 3001.0));
+        body_height(&tree, id)
+    }
+
+    let empty = measured("");
+    let short = measured("One line.");
+    let long = measured(&"The ferry left before the light did. ".repeat(200));
+
+    assert!(
+        (empty - short).abs() < 1.0,
+        "nothing and almost nothing both sit on the floor: {empty} against {short}"
+    );
+    assert!(
+        long > short * 4.0,
+        "a document forty times longer must not measure the same: {long} against {short}"
+    );
+}
+
+/// **The estimate uses the measure it was given**, not a constant.
+///
+/// `layout_response`'s `w` falls back to 200 for a proposal carrying no width, which
+/// is a reasonable default for a *width* and ruinous for a line count: the same text
+/// wraps to four times as many lines at a quarter of the measure. Estimating against
+/// that fallback made a scene claim nearly twice its real height, which pushed the
+/// editor below it clean off the page — where it then never laid out at all, and the
+/// margin lane beside it had no geometry to place a single mark against. A consumer
+/// test in the Skribisto tree caught that; this says the same thing here.
+#[test]
+fn a_narrower_measure_estimates_a_taller_block_of_text() {
+    fn at(width: f32) -> f32 {
+        let doc = TextDocument::new();
+        doc.set_plain_text(&"The ferry left before the light did. ".repeat(200))
+            .unwrap();
+        let editor = RichTextEditor::editor(doc)
+            .min_lines(1)
+            .estimate_height_before_layout(true);
+        let mut tree = WidgetTree::new();
+        let id = tree.add(editor);
+        tree.layout(SizeProposal::exact(width, 3000.0));
+        tree.layout(SizeProposal::exact(width, 3001.0));
+        body_height(&tree, id)
+    }
+
+    let wide = at(800.0);
+    let narrow = at(200.0);
+    assert!(
+        narrow > wide * 2.0,
+        "a quarter of the measure is roughly four times the lines: {narrow} at 200 px \
+         against {wide} at 800 px"
+    );
+}
+
+/// **Manuscript typography has to be in the guess**, or it is not worth making.
+///
+/// Prose is set with a line-height multiplier and space between paragraphs. A first
+/// cut counted bare lines at the font's natural height, came out well under the
+/// truth, and the rows it sized still visibly grew when they finally laid out —
+/// which is the whole thing the estimate exists to stop.
+#[test]
+fn the_estimate_counts_the_line_height_and_the_paragraph_spacing() {
+    fn at(defaults: teksilo_text::EditorTypographyDefaults) -> f32 {
+        let doc = TextDocument::new();
+        doc.set_plain_text(&"The ferry left before the light did.\n\n".repeat(30))
+            .unwrap();
+        let editor = RichTextEditor::editor(doc)
+            .min_lines(1)
+            .typography_defaults(defaults)
+            .estimate_height_before_layout(true);
+        let mut tree = WidgetTree::new();
+        let id = tree.add(editor);
+        tree.layout(SizeProposal::exact(400.0, 6000.0));
+        tree.layout(SizeProposal::exact(400.0, 6001.0));
+        body_height(&tree, id)
+    }
+
+    let plain = at(teksilo_text::EditorTypographyDefaults::default());
+    let spaced = at(teksilo_text::EditorTypographyDefaults {
+        line_height: 1.6,
+        ..Default::default()
+    });
+    let gapped = at(teksilo_text::EditorTypographyDefaults {
+        paragraph_spacing_before: 6.0,
+        paragraph_spacing_after: 6.0,
+        ..Default::default()
+    });
+
+    assert!(
+        spaced > plain * 1.4,
+        "a 1.6 line-height multiplier must show: {spaced} against {plain}"
+    );
+    assert!(
+        gapped > plain,
+        "twelve pixels between each of thirty paragraphs is real page: {gapped} against {plain}"
+    );
+}
+
+/// The estimate has to be **close**, and it has to be **content rather than a
+/// bound**.
+///
+/// Close, because its whole job is to be nearer the truth than the constant it
+/// replaced; a wild guess would trade one wrong page height for another, and the
+/// row would visibly jump either way when the real layout landed. Content, because a
+/// `min_lines` big enough to cover a long scene would leave blank space under a
+/// short one for the life of the widget — so the number goes through the same clamp
+/// a real height does, and `max_lines` still caps it.
+///
+/// The tolerance is deliberately tight. Two loose ones shipped before it: the first
+/// guess ignored the line-height multiplier and came out 60% under for manuscript
+/// prose, the second over-counted lines by a third, and both were inside a
+/// `0.4..=2.5` band that let them through. What a reader sees is the *correction*,
+/// so the size of the correction is the thing to pin.
+///
+/// What this cannot show is the settling itself: adopting the real height is driven
+/// by the frame loop, which a bare `layout`/`render` pair does not stand in for.
+/// `scripts/automation_margin_lane.py` in the Skribisto tree watches that in a window.
+#[test]
+fn the_estimate_is_close_to_the_truth_and_is_not_a_floor() {
+    /// Guessed height over real height, for one shape of text at one measure.
+    fn ratio(text: &str, typography: teksilo_text::EditorTypographyDefaults) -> f32 {
+        let doc = TextDocument::new();
+        doc.set_plain_text(text).unwrap();
+        let editor = RichTextEditor::editor(doc)
+            .min_lines(10)
+            .typography_defaults(typography)
+            .estimate_height_before_layout(true);
+        let handle = editor.handle();
+        let mut tree = WidgetTree::new();
+        let id = tree.add(editor);
+
+        tree.layout(SizeProposal::exact(400.0, 6000.0));
+        tree.layout(SizeProposal::exact(400.0, 6001.0));
+        let guessed = body_height(&tree, id);
+        assert!(handle.content_height().is_none(), "nothing laid out yet");
+        let _ = tree.render();
+        guessed / handle.content_height().expect("laid out now")
+    }
+
+    let manuscript = teksilo_text::EditorTypographyDefaults {
+        line_height: 1.6,
+        ..Default::default()
+    };
+    // Three shapes, because the error is not the same for all of them: long wrapped
+    // paragraphs are dominated by the advance estimate, many short ones by the
+    // per-block allowance.
+    for (name, text, typo) in [
+        (
+            "one long paragraph",
+            "The ferry left before the light did. ".repeat(200),
+            Default::default(),
+        ),
+        (
+            "many short paragraphs",
+            "The ferry left.\n\n".repeat(120),
+            Default::default(),
+        ),
+        (
+            "manuscript line height",
+            "The ferry left before the light did. ".repeat(200),
+            manuscript,
+        ),
+    ] {
+        let r = ratio(&text, typo);
+        assert!(
+            (0.75..=1.35).contains(&r),
+            "{name}: the guess was a factor of {r} off, which a reader would see correct itself"
+        );
+    }
+
+    // Capped like any content height. A floor could not be capped, which is the
+    // structural half of "this is not a `min_lines`".
+    let doc = TextDocument::new();
+    doc.set_plain_text(&"The ferry left before the light did. ".repeat(200))
+        .unwrap();
+    let capped = RichTextEditor::editor(doc)
+        .min_lines(2)
+        .max_lines(4)
+        .estimate_height_before_layout(true);
+    let mut tree = WidgetTree::new();
+    let id = tree.add(capped);
+    tree.layout(SizeProposal::exact(400.0, 6000.0));
+    tree.layout(SizeProposal::exact(400.0, 6001.0));
+    let h = body_height(&tree, id);
+    assert!(
+        h < 200.0,
+        "`max_lines` must cap the estimate as it caps a real height: got {h}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// EditorHandle content space — the scroll-free geometry an overview strip maps
+// ---------------------------------------------------------------------------
+
+/// A tall document in a short viewport, laid out and rendered once.
+#[cfg(test)]
+fn tall_editor() -> (
+    RichTextEditor,
+    crate::rich_text::EditorHandle,
+    teksilo_core::signal::Signal<f32>,
+) {
+    let doc = TextDocument::new();
+    let mut text = String::new();
+    for i in 0..60 {
+        text.push_str(&format!(
+            "Paragraph {i}: the ferry left before the light did.\n"
+        ));
+    }
+    doc.set_plain_text(&text).unwrap();
+    let editor = RichTextEditor::editor(doc);
+    let handle = editor.handle();
+    let scroll = editor.scroll_y();
+    (editor, handle, scroll)
+}
+
+/// **The property the whole content-space API exists for.**
+///
+/// Scrolling moves what is on screen and moves nothing about the document. A lane
+/// that mapped window coordinates would slide every mark up the strip as the writer
+/// scrolled down, which is precisely backwards: the marks are supposed to be the
+/// fixed thing the viewport moves over.
+#[test]
+fn content_rect_ignores_scrolling_where_the_window_rect_follows_it() {
+    let (editor, handle, scroll) = tall_editor();
+    let mut tree = WidgetTree::new();
+    let _id = tree.add(editor);
+    tree.layout(SizeProposal::exact(400.0, 200.0));
+    let _ = tree.render();
+
+    let window_before = handle.range_rect(100, 110).expect("laid out");
+    let content_before = handle.range_content_rect(100, 110).expect("laid out");
+
+    scroll.set(300.0);
+
+    let window_after = handle.range_rect(100, 110).expect("still laid out");
+    let content_after = handle.range_content_rect(100, 110).expect("still laid out");
+
+    assert!(
+        (window_before.y - window_after.y).abs() > 100.0,
+        "the window rect must follow the scroll: {window_before:?} then {window_after:?}"
+    );
+    assert!(
+        (content_before.y - content_after.y).abs() < 0.01,
+        "the content rect must not: {content_before:?} then {content_after:?}"
+    );
+}
+
+/// The division a lane actually performs: an offset's content y over the content
+/// height is a fraction of the document, monotone in the offset and inside `0..=1`.
+#[test]
+fn content_rect_over_content_height_is_a_monotone_document_fraction() {
+    let (editor, handle, _scroll) = tall_editor();
+    let mut tree = WidgetTree::new();
+    let _id = tree.add(editor);
+    tree.layout(SizeProposal::exact(400.0, 200.0));
+    let _ = tree.render();
+
+    let height = handle.content_height().expect("laid out");
+    assert!(
+        height > 200.0,
+        "the document is taller than its viewport: {height}"
+    );
+
+    let fraction = |offset: usize| handle.offset_content_rect(offset).unwrap().y / height;
+
+    let first = fraction(0);
+    let middle = fraction(1500);
+    let last = fraction(3000);
+
+    assert!(
+        (0.0..=1.0).contains(&first) && (0.0..=1.0).contains(&last),
+        "fractions stay inside the document: {first} .. {last}"
+    );
+    assert!(
+        first < middle && middle < last,
+        "and rise with the offset: {first}, {middle}, {last}"
+    );
+}
+
+/// The same gate as the window queries, so a caller holding one holds the other and
+/// never divides a real y by a stale or absent height.
+#[test]
+fn content_geometry_is_absent_together_before_layout() {
+    let doc = TextDocument::new();
+    doc.set_plain_text("hello").unwrap();
+    let editor = RichTextEditor::editor(doc);
+    let handle = editor.handle();
+    assert!(handle.range_content_rect(0, 5).is_none());
+    assert!(handle.offset_content_rect(0).is_none());
+    assert!(handle.content_height().is_none());
+}
+
+// ---------------------------------------------------------------------------
 // External (OS) drag hover
 // ---------------------------------------------------------------------------
 

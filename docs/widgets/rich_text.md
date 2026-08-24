@@ -1338,6 +1338,51 @@ The **window-space** caret rectangle at one offset — a zero-width
 `range_rect`, and the anchor point for a marker drawn at
 one end of a span (the triangle at a comment's tail).
 
+#### `pub fn document_version(&self) -> Signal<u64>`
+
+Reactive counter that bumps on every document change — the handle mirror of
+`RichTextEditor::document_version`.
+
+The change token a decoration drawn *outside* the editor binds, so it
+re-derives when the text moves under it. Without it such a widget has only
+the scroll metrics to go on, and those move on a reflow but not on an edit
+that leaves the height alone — which is most edits, and exactly the ones that
+shift the offsets a mark is anchored to.
+
+#### `pub fn range_content_rect(&self, start: usize, end: usize) -> Option<Rect>`
+
+The **content-space** rectangle enclosing ``start, end)` — y = 0 at the top
+of the laid-out text, unaffected by scrolling and by where the editor sits
+in the window.
+
+The scroll-free counterpart to [`range_rect``, and the one
+to reach for when the question is *what proportion of the document is this*
+rather than *where is this on screen*. Divided by
+`content_height` it gives a fraction an overview
+strip can draw against, for offsets the writer has long scrolled past —
+which window space cannot express at all, since it reports those relative to
+a viewport they are nowhere near.
+
+`None` before the first full layout. Focus is not required.
+
+#### `pub fn offset_content_rect(&self, offset: usize) -> Option<Rect>`
+
+The **content-space** caret rectangle at one offset — a zero-width
+`range_content_rect`.
+
+#### `pub fn content_height(&self) -> Option<f32>`
+
+Height of the laid-out text, in the same space
+`range_content_rect` reports.
+
+The denominator that turns a content rect into a fraction of the document.
+`None` before the first full layout — the same gate the rect queries use, so
+a caller that has one has the other and the division is never against a
+stale height.
+
+This is the *text's* height, not the widget's: an editor laid out taller
+than its content (a short scene in a tall pane) reports the text.
+
 #### `pub fn offset_at_point(&self, window_point: Point) -> Option<usize>`
 
 Hit-test a point — **in window coordinates**, as a
