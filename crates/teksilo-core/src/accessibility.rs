@@ -82,6 +82,18 @@ pub enum SyntheticKind {
     /// let the user navigate in, rather than reciting the thread inline every
     /// time the caret crosses the span.
     Annotation = 9,
+    /// A positional mark in a margin lane — the strip beside a scroll area that
+    /// maps where things are in a document rather than picturing it.
+    ///
+    /// Emitted by the lane widget's `accessibility()`, one synthetic child per
+    /// mark, the same shape [`SyntheticKind::ChartMark`] uses per datum. Marks
+    /// get their own nodes, rather than riding the content they refer to, for
+    /// the reason `CodeGutter` gives for *not* doing so: line numbers are
+    /// uniform, dense and derivable from the text, so they belong on the
+    /// paragraph node as `position_in_set`; lane marks are sparse, heterogeneous
+    /// and not derivable from anything — "a comment from Marie at 62 percent" is
+    /// not in the paragraph, so there is no node to delegate to.
+    LaneMark = 10,
 }
 
 /// A captured live-region announcement — the text a screen reader would
@@ -857,8 +869,9 @@ impl AccessNodeBuilder {
                     | SyntheticKind::SceneGroup
                     | SyntheticKind::SceneMagnet
                     | SyntheticKind::ChartMark
+                    | SyntheticKind::LaneMark
             ),
-            "push_scene_child requires SyntheticKind::SceneItem, ::SceneGroup, ::SceneMagnet, or ::ChartMark"
+            "push_scene_child requires SyntheticKind::SceneItem, ::SceneGroup, ::SceneMagnet, ::ChartMark, or ::LaneMark"
         );
         let Some(owner) = self.owner else {
             debug_assert!(
@@ -937,8 +950,9 @@ impl AccessNodeBuilder {
                     | SyntheticKind::SceneGroup
                     | SyntheticKind::SceneMagnet
                     | SyntheticKind::ChartMark
+                    | SyntheticKind::LaneMark
             ),
-            "push_scene_child_under requires SyntheticKind::SceneItem, ::SceneGroup, ::SceneMagnet, or ::ChartMark"
+            "push_scene_child_under requires SyntheticKind::SceneItem, ::SceneGroup, ::SceneMagnet, ::ChartMark, or ::LaneMark"
         );
         let Some(owner) = self.owner else {
             debug_assert!(
