@@ -450,6 +450,10 @@ impl WidgetTree {
         let node = self.arena.get(id).expect("widget id is active in arena");
         let mut builder = AccessNodeBuilder::for_widget(id);
         node.widget.accessibility(&mut builder);
+        // Same call, same place, as `build_overridden_builder` — the two builder
+        // paths are parallel by construction and a derivation added to one of them
+        // only is a node that reads differently to a test than to a screen reader.
+        self.announce_context_menu(id, &mut builder);
 
         // Apply builder-level overrides AFTER the inner widget has
         // emitted its defaults, so the overrides win for scalar fields
@@ -646,11 +650,45 @@ impl WidgetTree {
     /// when the widget has `access_subtree(Merge)`, the merged
     /// descendant state. Centralized so `accessibility_node`,
     /// `text_content`, and the recursive walker stay in sync.
+    /// Announce the context menu a widget owns, before any override runs.
+    ///
+    /// The dispatcher has always *serviced* `Action::ShowContextMenu` by falling
+    /// through to the node's `.context_menu(..)` factory, so an assistive
+    /// technology that tried the action got a menu. Nothing ever told it the
+    /// action was there, and an AT offers what a node advertises: the menu was
+    /// reachable and undiscoverable at the same time.
+    ///
+    /// That is not a cosmetic gap wherever a menu is the accessible route to
+    /// something else. A row that puts its actions on hover buttons has to hide
+    /// those buttons from the AT -- a control that exists only under a pointer
+    /// does not exist for a keyboard -- and offer the same actions on its context
+    /// menu instead. Unannounced, that leaves the actions with no route at all.
+    ///
+    /// Only where the node owns the factory ITSELF, not wherever the ancestor walk
+    /// would eventually find one: every descendant of a widget with a menu would
+    /// otherwise advertise it, and an AT would offer the same menu on a dozen
+    /// nested boxes. Applied BEFORE the overrides so `access_remove_action` still
+    /// takes it away, and so a widget wiring its own `on_access_action` handler is
+    /// not given a second one.
+    fn announce_context_menu(&self, id: WidgetId, builder: &mut AccessNodeBuilder) {
+        if self
+            .arena
+            .get(id)
+            .is_some_and(|node| node.context_menu_factory.is_some())
+            && !builder
+                .actions()
+                .contains(&accesskit::Action::ShowContextMenu)
+        {
+            builder.add_action(accesskit::Action::ShowContextMenu);
+        }
+    }
+
     fn build_overridden_builder(&self, id: WidgetId) -> AccessNodeBuilder {
         use crate::widget_builder::AccessSubtreeMode;
         let node = self.arena.get(id).expect("widget id is active in arena");
         let mut builder = AccessNodeBuilder::for_widget(id);
         node.widget.accessibility(&mut builder);
+        self.announce_context_menu(id, &mut builder);
         if let Some(ov) = node.access_overrides.as_deref() {
             ov.apply(&mut builder);
             // Resolve `access_shortcut_id` against the live registry —
@@ -1145,6 +1183,84 @@ mod tests {
         );
         hidden.set(false);
         assert!(!tree.accessibility_node(w).is_hidden());
+    }
+
+    /// **A widget with a context menu says so.** The dispatcher already opened
+    /// the menu for `Action::ShowContextMenu`; nothing advertised the action, and
+    /// an assistive technology offers what a node advertises.
+    #[test]
+    fn a_widget_with_a_context_menu_advertises_the_action() {
+        let mut tree = WidgetTree::new();
+        let plain = tree.add(FillWidget::new().label("no menu"));
+        let with_menu = tree.add(
+            FillWidget::new()
+                .label("has menu")
+                .context_menu(|_pos, _ctx| Some(Box::new(FillWidget::new()) as Box<dyn Widget>)),
+        );
+        tree.layout(SizeProposal::exact(100.0, 20.0));
+
+        assert!(
+            tree.accessibility_node(with_menu)
+                .actions()
+                .contains(&Action::ShowContextMenu),
+            "a node owning a context-menu factory must announce it"
+        );
+        assert!(
+            !tree
+                .accessibility_node(plain)
+                .actions()
+                .contains(&Action::ShowContextMenu),
+            "and a node without one must not"
+        );
+    }
+
+    /// The action is derived BEFORE the overrides, so an author who explicitly
+    /// takes it away still has it taken away.
+    #[test]
+    fn a_removed_context_menu_action_stays_removed() {
+        let mut tree = WidgetTree::new();
+        let id = tree.add(
+            FillWidget::new()
+                .label("suppressed")
+                .context_menu(|_pos, _ctx| Some(Box::new(FillWidget::new()) as Box<dyn Widget>))
+                .access_remove_action(Action::ShowContextMenu),
+        );
+        tree.layout(SizeProposal::exact(100.0, 20.0));
+        assert!(
+            !tree
+                .accessibility_node(id)
+                .actions()
+                .contains(&Action::ShowContextMenu)
+        );
+    }
+
+    /// A descendant of a widget with a menu does **not** advertise it, even
+    /// though the ancestor walk would open one there. Otherwise every nested box
+    /// under a row with a menu would offer that menu, and an AT would read a
+    /// dozen of them.
+    #[test]
+    fn a_child_does_not_advertise_its_parents_context_menu() {
+        let mut tree = WidgetTree::new();
+        let child = tree.add(FillWidget::new().label("inner"));
+        let parent = tree.add(
+            StackWidget::new()
+                .add_child(child)
+                .context_menu(|_pos, _ctx| Some(Box::new(FillWidget::new()) as Box<dyn Widget>)),
+        );
+        tree.layout(SizeProposal::exact(100.0, 20.0));
+
+        assert!(
+            tree.accessibility_node(parent)
+                .actions()
+                .contains(&Action::ShowContextMenu)
+        );
+        assert!(
+            !tree
+                .accessibility_node(child)
+                .actions()
+                .contains(&Action::ShowContextMenu),
+            "the menu belongs to the widget that declared it"
+        );
     }
 
     #[test]
