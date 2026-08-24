@@ -459,7 +459,8 @@ fn resolve_label_role(enabled: bool) -> TextRole {
 struct RowRoles {
     style: SharedStandardItemStyle,
     /// The role an *emphasised* row's foregrounds take, per
-    /// [`StandardItemStyle::selected_label_role`]. `None` for a design
+    /// [`StandardItemStyle::selected_label_role`](teksilo_core::styles::StandardItemStyle::selected_label_role).
+    /// `None` for a design
     /// language whose selection is a pale wash (IntUI, Fluent), which is
     /// also what keeps `emphasised` unbuilt.
     on_selected: Option<TextRole>,

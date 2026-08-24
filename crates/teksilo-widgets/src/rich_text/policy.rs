@@ -97,7 +97,8 @@ impl crate::common::editor_runtime::EditorCommand for EditCommandKind {
     /// True for commands that can take text away — a delete, a cut, or a
     /// history step that reverts one.
     ///
-    /// Deliberately much narrower than [`mutates_document`](Self::mutates_document):
+    /// Deliberately much narrower than
+    /// [`mutates_document`](crate::common::editor_runtime::EditorCommand::mutates_document):
     ///
     /// * **Inserts are never regressive.** `InsertChar`/`InsertBlock`/
     ///   `InsertTab`/`Paste` only add — the type-over case (inserting *over* a

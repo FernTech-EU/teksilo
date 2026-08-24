@@ -602,7 +602,8 @@ fn resolve_shortcut_role(state: MenuItemState) -> TextRole {
 }
 
 /// Whether a state is the row's *highlighted* one — the state a
-/// [`MenuItemStyle::highlighted_label_role`] applies to. Hover and the
+/// [`MenuItemStyle::highlighted_label_role`](teksilo_core::styles::MenuItemStyle::highlighted_label_role)
+/// applies to. Hover and the
 /// keyboard-arrow highlight share `Hovered`; a pressed row is still
 /// highlighted underneath the press.
 fn is_highlight(state: MenuItemState) -> bool {
