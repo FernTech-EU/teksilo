@@ -179,8 +179,11 @@ pub(crate) fn tick(state: &mut EditorState, delta: f32) -> bool {
                 state.content_dirty = true;
             }
             Err(_) => {
-                // Block vanished between the event firing and now:
-                // fall back to a full layout next frame.
+                // The block vanished between the event firing and now, or this
+                // view's layout has never seen it. Either way the incremental
+                // path cannot serve it — and must not pretend to, because the
+                // relayout also shifts every later block's document position.
+                // Fall back to a full layout next frame.
                 state.needs_full_layout = true;
             }
         }

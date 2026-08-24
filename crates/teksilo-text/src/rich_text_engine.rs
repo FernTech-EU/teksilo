@@ -433,10 +433,17 @@ impl RichTextEngine {
         let params = text_typeset::bridge::convert_block_with(&snap, &opts);
         {
             let bridge = self.shared.borrow();
-            self.flow.relayout_block(bridge.service(), &params).expect(
-                "relayout_block invariant violated: has_full_layout() should already \
-                 guarantee has_layout() && !layout_dirty_for_scale()",
-            );
+            // `NoLayout` / `ScaleDirty` are ruled out by the `has_full_layout()`
+            // gate above, so those really would be invariant violations. But a
+            // block the flow has never laid out is an ordinary miss — the
+            // document can carry a block this view's layout has not seen — and
+            // the incremental path cannot serve it: the position shift that runs
+            // after a relayout is half its job, and skipping it silently leaves
+            // every later block describing the document as it was. Report it so
+            // the caller falls back to a full layout.
+            self.flow
+                .relayout_block(bridge.service(), &params)
+                .map_err(|e| e.to_string())?;
         }
         // Re-apply the paint overlay for just this block on top of its freshly-reshaped base.
         // The snapshot is already masked, so its paint spans are exactly what this view should

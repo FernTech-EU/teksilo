@@ -9440,3 +9440,489 @@ mod regression_block_position_desync {
         assert!(bad.is_empty(), "{bad:?}");
     }
 }
+
+/// The bug as reported: type a word at the end of one paragraph, then click into
+/// the next one.
+#[cfg(test)]
+mod regression_recolor_reverts_block_position {
+    use super::*;
+    use teksilo_text::text_document::{BlockFormat, MoveMode};
+
+    const P1: &str = "Elle avait longtemps vecu dans une petite ville tranquille pres du \
+                      fleuve, loin de tout, quelque part au Canada.";
+    const P2: &str = "Quelqu'un s'approcha d'elle par derriere et lui tapota l'epaule. \
+                      Surprise, Claire se detendit en reconnaissant sa soeur, Marie.";
+    const P3: &str = "Le lendemain, elles repartirent ensemble vers le nord.";
+
+    fn build(
+        indent: Option<i32>,
+    ) -> (
+        TextDocument,
+        WidgetTree,
+        crate::rich_text::SharedState,
+        crate::rich_text::EditorHandle,
+    ) {
+        let doc = TextDocument::new();
+        doc.set_plain_text(&format!("{P1}\n{P2}\n{P3}")).unwrap();
+        if let Some(px) = indent {
+            for b in doc.blocks() {
+                let c = doc.cursor_at(b.position());
+                c.set_position(b.position(), MoveMode::MoveAnchor);
+                let _ = c.set_block_format(&BlockFormat {
+                    text_indent: Some(px),
+                    ..Default::default()
+                });
+            }
+        }
+        let editor = RichTextEditor::editor(doc.clone());
+        let state = editor.state_handle();
+        let handle = editor.handle();
+        let mut tree = WidgetTree::new();
+        let id = tree.add(editor);
+        tree.layout(SizeProposal::exact(430.0, 400.0));
+        focus_editor(&mut tree, id);
+        tick_past_debounce(&mut tree);
+        let _ = tree.render();
+        (doc, tree, state, handle)
+    }
+
+    /// Leftmost glyph x, and the mid-y, of the FIRST line of `block_index`,
+    /// read straight off the painted frame — the ground truth for "where the
+    /// writer sees this paragraph start".
+    fn first_line_of_block(
+        doc: &TextDocument,
+        state: &crate::rich_text::SharedState,
+        block_index: usize,
+    ) -> (f32, f32) {
+        let mut st = state.borrow_mut();
+        let bid = doc.blocks()[block_index].id();
+        let info = st.engine.block_visual_info(bid).expect("laid out");
+        st.engine.with_render_frame(|frame| {
+            let mut in_block: Vec<&teksilo_text::TypesetterGlyphQuad> = frame
+                .glyphs
+                .iter()
+                .filter(|g| g.screen[1] >= info.y - 1.0 && g.screen[1] < info.y + info.height)
+                .collect();
+            in_block.sort_by(|a, b| a.screen[1].partial_cmp(&b.screen[1]).unwrap());
+            let top_y = in_block.first().map(|g| g.screen[1]).unwrap_or(info.y);
+            let first_line: Vec<_> = in_block
+                .iter()
+                .filter(|g| (g.screen[1] - top_y).abs() < 2.0)
+                .collect();
+            let min_x = first_line
+                .iter()
+                .map(|g| g.screen[0])
+                .fold(f32::INFINITY, f32::min);
+            let h = first_line.first().map(|g| g.screen[3]).unwrap_or(12.0);
+            (min_x, top_y + h * 0.5)
+        })
+    }
+
+    /// **The reported bug, end to end.**
+    ///
+    /// Type a word at the end of paragraph 1, then click into paragraph 2 — with
+    /// the ambient caret band on, which is what a writing app has on. The click
+    /// retargets the band to paragraph 2, which recolours just that block; the
+    /// recolour used to re-derive it wholesale from a base captured before the
+    /// typing, putting its document position back where it was. From then on
+    /// clicking paragraph 2 landed N characters early.
+    #[test]
+    fn typing_then_clicking_the_next_paragraph_with_the_band_on() {
+        let doc = TextDocument::new();
+        doc.set_plain_text(&format!("{P1}\n{P2}\n{P3}")).unwrap();
+        let editor = RichTextEditor::editor(doc.clone());
+        let state = editor.state_handle();
+        let handle = editor.handle();
+        let mut tree = WidgetTree::new();
+        let id = tree.add(editor);
+        tree.layout(SizeProposal::exact(430.0, 400.0));
+        focus_editor(&mut tree, id);
+        handle.set_caret_highlight(Some(super::caret_band::band(
+            crate::rich_text::caret_highlight::CaretHighlightScope::Paragraph,
+        )));
+        tick_past_debounce(&mut tree);
+        let _ = tree.render();
+
+        // 1. Type "test" at the end of paragraph 1.
+        let end_p1 = P1.chars().count();
+        handle.select_range(end_p1, end_p1);
+        tick_past_debounce(&mut tree);
+        for ch in "test".chars() {
+            press_char(&mut tree, ch);
+        }
+        tick_past_debounce(&mut tree);
+        let _ = tree.render();
+
+        let plain = doc.to_plain_text().unwrap();
+        let p2 = plain.find("Quelqu").expect("second paragraph");
+
+        // 2. Click into paragraph 2 — this is what retargets the band.
+        let (x, y) = first_line_of_block(&doc, &state, 1);
+        synth_pointer_down(&mut tree, x + 20.0, y);
+        synth_pointer_up(&mut tree, x + 20.0, y);
+        tick_past_debounce(&mut tree);
+        let _ = tree.render();
+
+        // 3. Now clicking paragraph 2's first character must land on it.
+        let hit = state
+            .borrow()
+            .engine
+            .hit_test(x + 0.5, y)
+            .map(|h| h.position);
+        assert_eq!(
+            hit,
+            Some(p2),
+            "after typing above it and clicking into it, paragraph 2's first \
+             character must still be reachable (p2 starts at {p2})"
+        );
+    }
+}
+
+/// A standing check that the typesetter's idea of where each block starts never
+/// drifts from the document's, under long runs of ordinary editing.
+///
+/// Written to hunt a reported drift rather than to pin a known one, and it
+/// earned its keep: with the `drain_events` fix reverted it finds the fault in
+/// seed 0. Both faults it guards reached the writer the same way — a click
+/// landing on the wrong character, a selection painted off the words it covers.
+#[cfg(test)]
+mod invariant_fuzz {
+    use super::*;
+    use teksilo_core::event::{Key, Modifiers};
+
+    /// For every top-level block: clicking the far-left edge of its first line
+    /// must return that block's own start offset. When it does not, the
+    /// typesetter and the document disagree about where the block begins —
+    /// which is what puts the caret on the wrong character and paints
+    /// selections in the wrong place.
+    fn invariant_violations(
+        doc: &TextDocument,
+        state: &crate::rich_text::SharedState,
+    ) -> Vec<String> {
+        let st = state.borrow();
+        if !st.engine.has_full_layout() {
+            return Vec::new();
+        }
+        let mut bad = Vec::new();
+        for b in doc.blocks() {
+            if st.engine.is_block_in_table(b.id()) {
+                continue;
+            }
+            let pos = b.position();
+            let r = st
+                .engine
+                .caret_rect(pos, teksilo_text::CursorAffinity::Downstream);
+            if r[3] <= 0.0 {
+                continue;
+            }
+            let hit = st
+                .engine
+                .hit_test(0.5, r[1] + r[3] * 0.5)
+                .map(|h| h.position);
+            if hit != Some(pos) {
+                bad.push(format!(
+                    "block {pos} {:?} -> left-edge hit {hit:?}",
+                    b.text().chars().take(16).collect::<String>()
+                ));
+            }
+        }
+        bad
+    }
+
+    /// Select a range that lies wholly inside one block, and check that every
+    /// painted Selection rect lands inside THAT block's vertical band.
+    ///
+    /// This is the half the hit-test probe cannot see: a highlight painted in
+    /// the paragraph *below* the selected text is a paint-side mapping fault,
+    /// and the reported bug shows exactly that — selecting a word paints a
+    /// phantom band of the same width at the start of the next paragraph.
+    fn stray_selection_rects(
+        doc: &TextDocument,
+        state: &crate::rich_text::SharedState,
+        tree: &mut WidgetTree,
+        handle: &crate::rich_text::EditorHandle,
+    ) -> Vec<String> {
+        let mut bad = Vec::new();
+        let blocks = doc.blocks();
+        for b in &blocks {
+            let len = b.text().chars().count();
+            if len < 6 {
+                continue;
+            }
+            let (bid, pos) = (b.id(), b.position());
+            let band = {
+                let st = state.borrow();
+                if st.engine.is_block_in_table(bid) {
+                    continue;
+                }
+                // `block_visual_info` answers in content space; decoration rects
+                // are screen space, with the scroll already taken off. Compare
+                // like with like.
+                let off = st.engine.scroll_offset();
+                match st.engine.block_visual_info(bid) {
+                    Some(i) => (i.y - off, i.y + i.height - off),
+                    None => continue,
+                }
+            };
+            handle.select_range(pos + 1, pos + 5);
+            for _ in 0..3 {
+                tree.request_frame();
+                tree.tick_animations(std::time::Duration::from_millis(16));
+                tree.layout(SizeProposal::exact(430.0, 160.0));
+            }
+            let _ = tree.render();
+            let (strays, left_of_text) = state.borrow_mut().engine.with_render_frame(|frame| {
+                let sel: Vec<&teksilo_text::DecorationRect> = frame
+                    .decorations
+                    .iter()
+                    .filter(|d| {
+                        d.kind == teksilo_text::TypesetterDecorationKind::Selection
+                            && d.rect[3] > 0.0
+                            && d.rect[2] > 0.0
+                    })
+                    .collect();
+                let strays: Vec<(i64, i64)> = sel
+                    .iter()
+                    .filter(|d| {
+                        d.rect[1] + d.rect[3] * 0.5 < band.0 - 1.0
+                            || d.rect[1] + d.rect[3] * 0.5 > band.1 + 1.0
+                    })
+                    .map(|d| (d.rect[0].round() as i64, d.rect[1].round() as i64))
+                    .collect();
+                // Ground truth for "where the text is": the glyphs on the
+                // same visual line as the highlight. A highlight that starts
+                // left of the leftmost glyph on its own line is drawn off the
+                // text it claims to cover.
+                let mut left_of_text = Vec::new();
+                for d in &sel {
+                    let mid = d.rect[1] + d.rect[3] * 0.5;
+                    let line_min_x = frame
+                        .glyphs
+                        .iter()
+                        .filter(|g| mid >= g.screen[1] && mid <= g.screen[1] + g.screen[3])
+                        .map(|g| g.screen[0])
+                        .fold(f32::INFINITY, f32::min);
+                    // 10 px of slack: a highlight legitimately starts at the
+                    // pen position while the glyph's ink starts after its left
+                    // side bearing, which is a few pixels. The fault being
+                    // hunted is a whole-character shift (~34 px for four
+                    // characters at this size), well clear of that.
+                    if line_min_x.is_finite() && d.rect[0] < line_min_x - 10.0 {
+                        left_of_text.push((d.rect[0].round() as i64, line_min_x.round() as i64));
+                    }
+                }
+                (strays, left_of_text)
+            });
+            if !strays.is_empty() {
+                bad.push(format!(
+                    "selecting {}..{} (block band {:.0}..{:.0}) painted outside it at {strays:?}",
+                    pos + 1,
+                    pos + 5,
+                    band.0,
+                    band.1
+                ));
+            }
+            if !left_of_text.is_empty() {
+                bad.push(format!(
+                    "selecting {}..{} painted left of the text on its own line \
+                     (rect x, first glyph x): {left_of_text:?}",
+                    pos + 1,
+                    pos + 5
+                ));
+            }
+        }
+        bad
+    }
+
+    struct Lcg(u64);
+    impl Lcg {
+        fn next(&mut self, n: usize) -> usize {
+            self.0 = self
+                .0
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            ((self.0 >> 33) as usize) % n.max(1)
+        }
+    }
+
+    #[test]
+    fn editing_never_drifts_the_layout_from_the_document() {
+        for seed in 0..8u64 {
+            // A document long enough to scroll inside a small viewport, with a
+            // first-line indent on every block — the shape in the report.
+            let doc = TextDocument::new();
+            // Every other seed uses an imported document with a blockquote (a
+            // frame) and a list, which `set_plain_text` cannot build — those
+            // take different branches in the incremental relayout.
+            if seed % 2 == 1 {
+                doc.set_plain_text("").unwrap();
+                let c = doc.cursor_at(0);
+                c.set_position(0, teksilo_text::text_document::MoveMode::MoveAnchor);
+                let mut html = String::new();
+                for i in 0..6 {
+                    html.push_str(&format!(
+                        "<p>Paragraphe {i}. Elle avait longtemps vecu dans une petite ville \
+                         tranquille pres du fleuve, quelque part au Canada.</p>"
+                    ));
+                    if i == 2 {
+                        html.push_str(
+                            "<blockquote><p>Une citation, dans un cadre, qui occupe \
+                             deux lignes au moins.</p></blockquote>",
+                        );
+                        html.push_str("<ul><li>premier</li><li>deuxieme</li></ul>");
+                    }
+                }
+                let _ = c.insert_html(&html);
+            } else {
+                let body: String = (0..14)
+                    .map(|i| {
+                        format!(
+                            "Paragraphe {i}. Elle avait longtemps vecu dans une petite ville \
+                         tranquille pres du fleuve, loin de tout, quelque part au Canada."
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                doc.set_plain_text(&body).unwrap();
+                for b in doc.blocks() {
+                    let c = doc.cursor_at(b.position());
+                    c.set_position(
+                        b.position(),
+                        teksilo_text::text_document::MoveMode::MoveAnchor,
+                    );
+                    let _ = c.set_block_format(&teksilo_text::text_document::BlockFormat {
+                        text_indent: Some(32),
+                        ..Default::default()
+                    });
+                }
+            }
+            let editor = RichTextEditor::editor(doc.clone());
+            let state = editor.state_handle();
+            let handle = editor.handle();
+            let scroll_y = state.borrow().scroll_y.clone();
+            {
+                let mut st = state.borrow_mut();
+                st.viewport_width = 410.0;
+                st.viewport_height = 140.0;
+                st.engine.set_viewport(410.0, 140.0);
+                st.needs_full_layout = true;
+            }
+            let mut tree = WidgetTree::new();
+            let id = tree.add(editor);
+            let _box = tree.add(
+                crate::primitives::FixedSize::new()
+                    .width(410.0)
+                    .height(140.0)
+                    .child_id(id),
+            );
+            tree.layout(SizeProposal::exact(430.0, 160.0));
+            focus_editor(&mut tree, id);
+            tick_past_debounce(&mut tree);
+            let _ = tree.render();
+
+            let mut rng = Lcg(seed.wrapping_mul(0x9E3779B97F4A7C15).wrapping_add(12345));
+            let mut log: Vec<String> = Vec::new();
+            for step in 0..30 {
+                let len = doc.to_plain_text().unwrap().chars().count().max(1);
+                let op = rng.next(10);
+                let desc = match op {
+                    0 => {
+                        let at = rng.next(len);
+                        handle.select_range(at, at);
+                        for ch in "test".chars() {
+                            press_char(&mut tree, ch);
+                        }
+                        format!("type \"test\" at {at}")
+                    }
+                    1 => {
+                        // Type, then click WITHOUT letting the batch flush.
+                        let at = rng.next(len);
+                        handle.select_range(at, at);
+                        for ch in "abcd".chars() {
+                            press_char(&mut tree, ch);
+                        }
+                        let y = (rng.next(6) * 17) as f32 + 4.0;
+                        synth_pointer_down(&mut tree, 3.0, y);
+                        synth_pointer_up(&mut tree, 3.0, y);
+                        format!("type \"abcd\" at {at} then click y={y} before the flush")
+                    }
+                    2 => {
+                        let y = (rng.next(6) * 17) as f32 + 4.0;
+                        let x = (rng.next(20) * 12) as f32;
+                        synth_pointer_down(&mut tree, x, y);
+                        synth_pointer_up(&mut tree, x, y);
+                        format!("click ({x},{y})")
+                    }
+                    3 => {
+                        let at = rng.next(len);
+                        handle.select_range(at, at);
+                        press_key(&mut tree, Key::Enter, Modifiers::NONE);
+                        format!("Enter at {at}")
+                    }
+                    4 => {
+                        let at = rng.next(len);
+                        handle.select_range(at, at);
+                        press_key(&mut tree, Key::Backspace, Modifiers::NONE);
+                        format!("Backspace at {at}")
+                    }
+                    5 => {
+                        press_key(&mut tree, Key::Z, Modifiers::CTRL);
+                        "undo".to_string()
+                    }
+                    6 => {
+                        let a = rng.next(len);
+                        let b = (a + 1 + rng.next(12)).min(len);
+                        handle.select_range(a, b);
+                        press_key(&mut tree, Key::Delete, Modifiers::NONE);
+                        format!("delete range {a}..{b}")
+                    }
+                    7 => {
+                        let at = rng.next(len);
+                        handle.select_range(at, at);
+                        press_key(&mut tree, Key::ArrowDown, Modifiers::NONE);
+                        format!("ArrowDown from {at}")
+                    }
+                    9 => {
+                        let to = (rng.next(12) * 40) as f32;
+                        scroll_y.set(to);
+                        format!("scroll to {to}")
+                    }
+                    _ => {
+                        // Two programmatic edits with no tick between them.
+                        let a = rng.next(len);
+                        let b = rng.next(len);
+                        for at in [a, b] {
+                            let c = doc.cursor_at(at);
+                            c.set_position(at, teksilo_text::text_document::MoveMode::MoveAnchor);
+                            let _ = c.insert_text("Z");
+                        }
+                        format!("two raw inserts at {a} and {b}")
+                    }
+                };
+                log.push(desc.clone());
+                for _ in 0..3 {
+                    tree.request_frame();
+                    tree.tick_animations(std::time::Duration::from_millis(16));
+                    tree.layout(SizeProposal::exact(430.0, 160.0));
+                }
+                let _ = tree.render();
+
+                let mut bad = invariant_violations(&doc, &state);
+                // The painted-selection probe re-selects and re-renders once per
+                // block, so it costs far more than the hit-test one. Every third
+                // step keeps it cheap without losing it.
+                if step % 3 == 0 {
+                    bad.extend(stray_selection_rects(&doc, &state, &mut tree, &handle));
+                }
+                if !bad.is_empty() {
+                    eprintln!("seed {seed}: VIOLATION at step {step} after: {desc}");
+                    eprintln!("  history: {log:?}");
+                    eprintln!("  violations: {bad:?}");
+                    eprintln!("  text: {:?}", doc.to_plain_text().unwrap());
+                    panic!("invariant broken");
+                }
+            }
+        }
+        eprintln!("no violations across 8 seeds x 30 steps");
+    }
+}
