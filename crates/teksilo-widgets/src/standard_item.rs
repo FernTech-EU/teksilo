@@ -124,6 +124,8 @@ pub struct StandardListItem {
     /// Per-call label overflow override. `None` ⇒ the `TextWidget` default
     /// (`TextOverflow::Wrap`).
     label_overflow: Option<TextOverflow>,
+    /// Drawn in place of the label's text, when a row's label is not plain text.
+    label_slot: Option<Box<dyn Widget>>,
     /// Per-call subtitle overflow override. `None` ⇒ the `TextWidget` default
     /// (`TextOverflow::Wrap`).
     subtitle_overflow: Option<TextOverflow>,
@@ -160,6 +162,7 @@ impl StandardListItem {
             label_color: None,
             subtitle_color: None,
             label_overflow: None,
+            label_slot: None,
             subtitle_overflow: None,
             interaction: Signal::new(InteractionState::Idle),
             style_override: None,
@@ -321,6 +324,41 @@ impl StandardListItem {
     /// [`trailing_slot`](Self::trailing_slot) is pushed past the row's edge.
     /// Set `TextOverflow::Ellipsis(..)` on rows whose trailing actions must
     /// stay reachable: the label then shrinks and truncates within the row.
+    /// **Share the row's interaction state**, so a caller can reveal controls on
+    /// hover.
+    ///
+    /// A row that shows its actions only while the pointer is over it is a standard
+    /// pattern — a search result offering *replace* and *dismiss*, a list offering
+    /// *remove* — and it cannot be built from outside without knowing when the row
+    /// is hovered. The row already tracks that; this is the handle on it.
+    ///
+    /// The signal is written by the row, not read: pass one in, watch it, and gate
+    /// a trailing slot on it. Reserve the space the controls will take, or the row
+    /// reflows under the pointer that is trying to hit them.
+    pub fn interaction_signal(mut self, signal: Signal<InteractionState>) -> Self {
+        self.interaction = signal;
+        self
+    }
+
+    /// **Draw this instead of the label's text**, keeping the label as the row's
+    /// accessible name.
+    ///
+    /// For a row whose label is not plain text: a search result with the matched
+    /// run picked out of its excerpt, a diff line, anything built from runs rather
+    /// than from a string. The label passed to [`new`](Self::new) is still what
+    /// `accessibility` reports, so the row keeps a name a screen reader can read —
+    /// which is the whole reason this is a *replacement for the drawing* and not a
+    /// replacement for the label.
+    ///
+    /// The widget is laid out where the text would have been, so it inherits the
+    /// row's spacing and its place beside the leading and trailing slots.
+    /// [`label_style`](Self::label_style), [`label_color`](Self::label_color) and
+    /// [`label_overflow`](Self::label_overflow) do not reach it: it draws itself.
+    pub fn label_slot(mut self, widget: impl Widget + 'static) -> Self {
+        self.label_slot = Some(Box::new(widget));
+        self
+    }
+
     pub fn label_overflow(mut self, overflow: TextOverflow) -> Self {
         self.label_overflow = Some(overflow);
         self
@@ -497,17 +535,24 @@ impl StandardListItem {
 
         // Label column: either a single TextWidget or a VStack with
         // label on top and subtitle (with its own slots) below.
-        let mut label_widget = TextWidget::new(self.label.clone())
-            .style(self.label_style.clone())
-            .a11y_hidden();
-        label_widget = match &self.label_color {
-            Some(c) => label_widget.color(c.clone()),
-            None => label_widget.color(label_role.clone()),
+        // A row whose label is not plain text draws its own; the `label` field is
+        // still what `accessibility` reports, so the name survives the substitution.
+        let label_id = match self.label_slot.take() {
+            Some(widget) => ctx.add_boxed(widget),
+            None => {
+                let mut label_widget = TextWidget::new(self.label.clone())
+                    .style(self.label_style.clone())
+                    .a11y_hidden();
+                label_widget = match &self.label_color {
+                    Some(c) => label_widget.color(c.clone()),
+                    None => label_widget.color(label_role.clone()),
+                };
+                if let Some(overflow) = self.label_overflow {
+                    label_widget = label_widget.overflow(overflow);
+                }
+                ctx.add(label_widget)
+            }
         };
-        if let Some(overflow) = self.label_overflow {
-            label_widget = label_widget.overflow(overflow);
-        }
-        let label_id = ctx.add(label_widget);
 
         let label_column_id = if let Some(subtitle) = &self.subtitle {
             // Two-line: VStack { label, subtitle line }.
@@ -827,6 +872,20 @@ impl StandardTreeItem {
 
     /// Forwarded to the inner [`StandardListItem`] — see its
     /// [`subtitle`](StandardListItem::subtitle).
+    /// See [`StandardListItem::interaction_signal`]: the row's own hover/press
+    /// state, for a caller revealing controls on hover.
+    pub fn interaction_signal(mut self, signal: Signal<InteractionState>) -> Self {
+        self.inner = self.inner.interaction_signal(signal);
+        self
+    }
+
+    /// See [`StandardListItem::label_slot`]: draw this instead of the label's
+    /// text, keeping the label as the row's accessible name.
+    pub fn label_slot(mut self, widget: impl Widget + 'static) -> Self {
+        self.inner = self.inner.label_slot(widget);
+        self
+    }
+
     pub fn subtitle(mut self, text: impl Into<LocalizedString>) -> Self {
         self.inner = self.inner.subtitle(text);
         self
@@ -1606,6 +1665,53 @@ mod tests {
         tree.layout(SizeProposal::exact(300.0, 100.0));
         let info = tree.accessibility_node(id);
         assert_eq!(info.name(), Some("Title"));
+    }
+
+    /// **A caller can see when the row is hovered**, which is what lets it reveal
+    /// controls there. The row writes the signal; the caller only watches it.
+    #[test]
+    fn a_shared_interaction_signal_reports_the_rows_hover() {
+        let state = Signal::new(InteractionState::Idle);
+        let mut tree = WidgetTree::new().with_theme(theme());
+        let id =
+            tree.add(StandardListItem::new(lit!("A result")).interaction_signal(state.clone()));
+        tree.layout(SizeProposal::exact(300.0, 40.0));
+        let _ = tree.render();
+        assert_eq!(state.get(), InteractionState::Idle);
+
+        let b = tree.bounds(id);
+        tree.dispatch_event(teksilo_core::WidgetEvent::PointerMove {
+            position: teksilo_canvas::Point::new(b.x + b.width / 2.0, b.y + b.height / 2.0),
+        });
+        tree.layout(SizeProposal::exact(300.0, 40.0));
+        let _ = tree.render();
+        assert_eq!(
+            state.get(),
+            InteractionState::Hovered,
+            "the row shares its own hover state with whoever asked for it"
+        );
+    }
+
+    /// **A row that draws its own label still has a name.**
+    ///
+    /// `label_slot` replaces the drawing, not the label: a search result picking
+    /// the matched run out of its excerpt is built from runs and cannot be a
+    /// string, but a row a screen reader cannot name is not an acceptable price
+    /// for that. The text passed to `new` stays the accessible name.
+    #[test]
+    fn a_row_that_draws_its_own_label_keeps_its_accessible_name() {
+        let mut tree = WidgetTree::new().with_theme(theme());
+        let id = tree.add(
+            StandardListItem::new(lit!("she walked across the ice"))
+                .label_slot(TextWidget::new(lit!("…across the ice"))),
+        );
+        tree.layout(SizeProposal::exact(300.0, 100.0));
+        let info = tree.accessibility_node(id);
+        assert_eq!(
+            info.name(),
+            Some("she walked across the ice"),
+            "the name comes from the label, not from what was drawn instead of it"
+        );
     }
 
     #[test]
