@@ -1195,16 +1195,20 @@ fn editor_copy_paste_round_trip_uses_stored_fragment() {
             st.rich_clipboard_fragment.is_some(),
             "Ctrl+C must stash the rich fragment"
         );
+        assert!(
+            st.rich_clipboard_marker.is_some(),
+            "Ctrl+C must stash the marker that identifies the payload as ours"
+        );
         assert_eq!(
-            st.rich_clipboard_plain.as_deref(),
-            Some("one"),
-            "Ctrl+C must remember the copied plain text for round-trip detection"
+            st.rich_clipboard_plain, None,
+            "this backend carries the marker, so the plain-text identity — the \
+             fallback for backends that cannot — must stay unset: another \
+             application's identical text would otherwise pick up our fragment"
         );
     }
 
-    // Move to end, paste. The paste path sees that the system
-    // clipboard's text matches the stored plain and reinserts the
-    // fragment.
+    // Move to end, paste. The paste path finds its own marker in the system
+    // clipboard's HTML payload and reinserts the fragment.
     press_key(
         &mut tree,
         teksilo_core::event::Key::End,
@@ -8689,12 +8693,13 @@ fn read_only_still_follows_a_link_on_ctrl_click() {
 }
 
 // ===========================================================================
-// Regressions — RichTextEditor vertical caret motion.
+// Regressions — RichTextEditor vertical caret motion & clipboard.
 //
 // Each test here pins one defect that shipped, and its doc comment says what
 // the code used to do. They are grouped rather than scattered because they
-// share one root cause: the engine answers caret geometry in two coordinate
-// spaces at once, and three call sites each read that wrong differently.
+// share two root causes: the engine answers caret geometry in two coordinate
+// spaces at once, and the clipboard path had three places where a payload
+// shape nobody had in front of them silently did nothing.
 // ===========================================================================
 
 /// Vertical caret motion: `move_cursor_vertical`'s range guard compares a
@@ -8954,6 +8959,299 @@ mod regression_vertical {
              wrong place",
             at_top.y,
             scrolled.y
+        );
+    }
+}
+
+/// Clipboard: internal (intra-app) copy / cut / paste.
+#[cfg(test)]
+mod regression_clipboard_internal {
+    use super::*;
+    use teksilo_core::event::{Key, Modifiers};
+    use teksilo_text::text_document::{MoveMode, TextFormat};
+
+    /// A backend with no HTML support — the trait's default bodies, which
+    /// `teksilo-platform/src/clipboard.rs` documents as a supported degrade.
+    #[derive(Default)]
+    struct PlainOnly(std::rc::Rc<std::cell::RefCell<String>>);
+    impl teksilo_platform::clipboard::ClipboardBackend for PlainOnly {
+        fn get_text(&mut self) -> Result<String, String> {
+            Ok(self.0.borrow().clone())
+        }
+        fn set_text(&mut self, text: &str) -> Result<(), String> {
+            *self.0.borrow_mut() = text.to_string();
+            Ok(())
+        }
+    }
+
+    fn install<B: teksilo_platform::clipboard::ClipboardBackend + 'static>(
+        tree: &mut WidgetTree,
+        backend: B,
+    ) {
+        use std::any::TypeId;
+        use std::collections::HashMap;
+        use teksilo_core::event_source::TreeAppContext;
+        use teksilo_platform::clipboard::ClipboardHandle;
+        let mut registry: HashMap<TypeId, Box<dyn std::any::Any>> = HashMap::new();
+        registry.insert(
+            TypeId::of::<ClipboardHandle>(),
+            Box::new(ClipboardHandle::new(backend)),
+        );
+        tree.set_app_context(std::rc::Rc::new(
+            TreeAppContext::empty().with_app_state(registry),
+        ));
+    }
+
+    fn is_bold_at(doc: &TextDocument, pos: usize) -> Option<bool> {
+        let probe = doc.cursor();
+        probe.set_position(pos, MoveMode::MoveAnchor);
+        probe.char_format().unwrap_or_default().font_bold
+    }
+
+    /// **A multi-line paste is N undo steps, not one.**
+    ///
+    /// `insert_multiline_plain` issues one `insert_text` per line with an
+    /// `insert_block` between them and never wraps the run in
+    /// `begin_edit_block()` / `end_edit_block()` — unlike
+    /// `nest_current_list_item` in `keyboard.rs`, which does. Pasting four
+    /// lines therefore takes four Ctrl+Z presses to undo.
+    #[test]
+    fn a_multiline_paste_undoes_in_one_step() {
+        let doc = TextDocument::new();
+        doc.set_plain_text("").unwrap();
+        let editor = RichTextEditor::editor(doc.clone());
+        let mut tree = WidgetTree::new();
+        let cb = ctx_with_memory_clipboard(&mut tree);
+        cb.set_text("a\nb\nc\nd").unwrap();
+        let id = tree.add(editor);
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        focus_editor(&mut tree, id);
+
+        press_key(&mut tree, Key::V, Modifiers::CTRL);
+        tick_past_debounce(&mut tree);
+        assert_eq!(doc.to_plain_text().unwrap_or_default(), "a\nb\nc\nd");
+
+        press_key(&mut tree, Key::Z, Modifiers::CTRL);
+        tick_past_debounce(&mut tree);
+        assert_eq!(
+            doc.to_plain_text().unwrap_or_default().trim(),
+            "",
+            "one undo must remove the whole pasted block"
+        );
+    }
+
+    /// **An intra-app copy/paste loses its formatting on a clipboard backend
+    /// with no HTML support.**
+    ///
+    /// `paste()`'s self-round-trip branch is gated on `cb.has_html()`, so the
+    /// bit-exact `DocumentFragment` sitting in `state.rich_clipboard_fragment`
+    /// is never consulted. `state.rich_clipboard_plain` — written on every
+    /// copy, read by no production code — exists for exactly the fallback
+    /// `paste()`'s own doc comment describes ("if the system clipboard's
+    /// plain text matches what this editor last copied") and which was never
+    /// implemented.
+    #[test]
+    fn a_self_paste_keeps_formatting_without_an_html_payload() {
+        let doc = TextDocument::new();
+        doc.set_plain_text("hello world").unwrap();
+        let c = doc.cursor();
+        c.set_position(0, MoveMode::MoveAnchor);
+        c.set_position(5, MoveMode::KeepAnchor);
+        let _ = c.set_char_format(&TextFormat {
+            font_bold: Some(true),
+            ..Default::default()
+        });
+
+        let editor = RichTextEditor::editor(doc.clone());
+        let handle = editor.handle();
+        let mut tree = WidgetTree::new();
+        install(&mut tree, PlainOnly::default());
+        let id = tree.add(editor);
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        focus_editor(&mut tree, id);
+
+        handle.select_range(0, 5);
+        press_key(&mut tree, Key::C, Modifiers::CTRL);
+        press_key(&mut tree, Key::End, Modifiers::CTRL);
+        press_key(&mut tree, Key::V, Modifiers::CTRL);
+        tick_past_debounce(&mut tree);
+
+        let plain = doc.to_plain_text().unwrap_or_default();
+        let pasted = plain.rfind("hello").expect("the pasted copy");
+        assert_eq!(
+            is_bold_at(&doc, pasted),
+            Some(true),
+            "an intra-app copy/paste must keep its formatting; got {plain:?}"
+        );
+    }
+
+    /// **Paste-unformatted does nothing on an HTML-only clipboard.**
+    ///
+    /// `paste_unformatted` reads only `get_text()`; `can_paste()` reports
+    /// `has_text() || has_html()`, so the command is offered and then no-ops.
+    #[test]
+    fn paste_unformatted_falls_back_to_the_html_payload() {
+        let doc = TextDocument::new();
+        doc.set_plain_text("").unwrap();
+        let editor = RichTextEditor::editor(doc.clone());
+        let mut tree = WidgetTree::new();
+        let cb = ctx_with_memory_clipboard(&mut tree);
+        cb.set_html("<p>rich</p>", "").unwrap();
+        let id = tree.add(editor);
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        focus_editor(&mut tree, id);
+
+        press_key(&mut tree, Key::V, Modifiers::CTRL | Modifiers::SHIFT);
+        tick_past_debounce(&mut tree);
+        assert!(
+            !doc.to_plain_text().unwrap_or_default().is_empty(),
+            "paste-unformatted inserted nothing from an html-only clipboard, \
+             yet can_paste() reports true"
+        );
+    }
+}
+
+/// Clipboard: external interop — payloads as real applications publish them.
+#[cfg(test)]
+mod regression_clipboard_external {
+    use super::*;
+    use teksilo_core::event::{Key, Modifiers};
+
+    fn paste_html(html: &str, plain: &str) -> TextDocument {
+        let doc = TextDocument::new();
+        doc.set_plain_text("").unwrap();
+        let editor = RichTextEditor::editor(doc.clone());
+        let mut tree = WidgetTree::new();
+        let clipboard = ctx_with_memory_clipboard(&mut tree);
+        clipboard.set_html(html, plain).unwrap();
+        let id = tree.add(editor);
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        focus_editor(&mut tree, id);
+        press_key(&mut tree, Key::V, Modifiers::CTRL);
+        tick_past_debounce(&mut tree);
+        doc
+    }
+
+    /// **A `<style>` block pastes as visible body text.**
+    ///
+    /// Word, Google Docs and Chrome all publish `text/html` as a full
+    /// document with a `<style>` element. text-document's HTML walker
+    /// (`common/src/parser_tools/content_parser.rs`) has no case for
+    /// `head` / `style` / `script` / `title`, so they fall through the
+    /// "inline element or unknown: recurse" arm and their raw text children
+    /// become paragraphs.
+    ///
+    /// Got: `"Hello\nWorld\np.c1 { color: #ff0000; font-weight: 700 }\np.c2 { margin: 0 }"`.
+    #[test]
+    fn a_style_block_does_not_paste_as_body_text() {
+        let doc = paste_html(
+            "<html><head><meta charset=\"utf-8\"><style type=\"text/css\">\
+             p.c1 { color: #ff0000; font-weight: 700 }\np.c2 { margin: 0 }\
+             </style></head><body><!--StartFragment--><p class=\"c1\">Hello</p>\
+             <p class=\"c2\">World</p><!--EndFragment--></body></html>",
+            "Hello\nWorld",
+        );
+        let got = doc.to_plain_text().unwrap_or_default();
+        assert!(got.contains("Hello") && got.contains("World"), "{got:?}");
+        assert!(
+            !got.contains("color:") && !got.contains("font-weight"),
+            "the <style> CSS was inserted as literal text: {got:?}"
+        );
+    }
+
+    /// **The self-round-trip marker survives a platform that wraps the payload.**
+    ///
+    /// `arboard`'s macOS backend puts everything handed to `set_html` inside
+    /// `<html><head><meta …></head><body>…</body></html>` and returns the
+    /// wrapper verbatim on read (`platform/osx.rs`). `payload_marker` used to
+    /// be a strict `strip_prefix` at byte 0, so it never matched there and
+    /// every intra-editor copy/paste on macOS silently fell through to
+    /// re-parsing its own HTML — losing everything `to_html` cannot say.
+    ///
+    /// Font size is one such thing, which is what makes it the probe here: the
+    /// fragment carries it, the HTML does not.
+    ///
+    /// (X11 and Wayland round-trip verbatim; Windows' CF_HTML reader slices to
+    /// `StartFragment`, which lands exactly on the marker. Only macOS wraps.)
+    #[test]
+    fn the_self_copy_marker_survives_the_macos_pasteboard_wrapping() {
+        use teksilo_text::text_document::{MoveMode, TextFormat};
+
+        let doc = TextDocument::new();
+        doc.set_plain_text("hello world").unwrap();
+        let sized = doc.cursor();
+        sized.set_position(0, MoveMode::MoveAnchor);
+        sized.set_position(5, MoveMode::KeepAnchor);
+        let _ = sized.set_char_format(&TextFormat {
+            font_point_size: Some(33),
+            ..Default::default()
+        });
+
+        let editor = RichTextEditor::editor(doc.clone());
+        let handle = editor.handle();
+        let mut tree = WidgetTree::new();
+        let clipboard = ctx_with_memory_clipboard(&mut tree);
+        let id = tree.add(editor);
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        focus_editor(&mut tree, id);
+
+        handle.select_range(0, 5);
+        press_key(&mut tree, Key::C, Modifiers::CTRL);
+
+        // Re-publish exactly what NSPasteboard would hand back on macOS.
+        let written = clipboard.get_html().expect("copy wrote an html payload");
+        clipboard
+            .set_html(
+                &format!(
+                    "<html><head><meta http-equiv=\"content-type\" \
+                     content=\"text/html; charset=utf-8\"></head><body>{written}</body></html>"
+                ),
+                "hello",
+            )
+            .unwrap();
+
+        press_key(&mut tree, Key::End, Modifiers::CTRL);
+        press_key(&mut tree, Key::V, Modifiers::CTRL);
+        tick_past_debounce(&mut tree);
+
+        let plain = doc.to_plain_text().unwrap_or_default();
+        let pasted = plain.rfind("hello").expect("the pasted copy");
+        let probe = doc.cursor();
+        probe.set_position(pasted, MoveMode::MoveAnchor);
+        assert_eq!(
+            probe.char_format().unwrap_or_default().font_point_size,
+            Some(33),
+            "the wrapped payload must still be recognised as this editor's own \
+             copy, so the stored fragment is reinserted rather than the HTML \
+             re-parsed; got {plain:?}"
+        );
+    }
+
+    /// **Superscript and subscript do not survive HTML.**
+    ///
+    /// Neither direction handles them: `push_inline_html`
+    /// (`text-document/crates/public_api/src/fragment.rs`) never emits
+    /// `<sup>`/`<sub>` for `fmt_vertical_alignment`, and the HTML walker
+    /// hard-codes `superscript: false` at every `ParsedSpan` site. So a
+    /// formula copied out arrives flat, and one pasted in stays flat.
+    #[test]
+    fn superscript_survives_an_html_paste() {
+        use teksilo_text::text_document::MoveMode;
+        let doc = paste_html("<p>x<sup>2</sup></p>", "x2");
+        let plain = doc.to_plain_text().unwrap_or_default();
+        let two = plain.rfind('2').expect("the exponent");
+        let probe = doc.cursor();
+        probe.set_position(two, MoveMode::MoveAnchor);
+        let fmt = probe.char_format().unwrap_or_default();
+        assert_ne!(
+            fmt.vertical_alignment,
+            Some(teksilo_text::text_document::CharVerticalAlignment::Normal),
+            "<sup> must import as superscript, got {:?}",
+            fmt.vertical_alignment
+        );
+        assert!(
+            fmt.vertical_alignment.is_some(),
+            "<sup> must import as superscript, got None"
         );
     }
 }

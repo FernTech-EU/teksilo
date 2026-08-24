@@ -23,6 +23,12 @@
 //! clipboard. The marker is regenerated on every copy/cut so a stale
 //! state from an earlier session can never accidentally match a later
 //! external copy whose plain text happens to coincide.
+//!
+//! Plain-text equality does serve as a **last** resort, for the one case the
+//! marker cannot reach: a clipboard backend that carries no HTML at all. There
+//! is no foreign rich payload to be confused with then, so matching the text
+//! this editor last copied is unambiguous, and without it an intra-app
+//! copy/paste would lose its formatting on every such backend.
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -64,22 +70,35 @@ pub(crate) fn copy(state: &mut EditorState, ctx: &EventContext) {
         "{MARKER_PREFIX}{marker}{MARKER_SUFFIX}{}",
         fragment.to_html()
     );
+    // Whether the marker actually reached the clipboard. The plain-text identity
+    // below is a fallback for backends that cannot carry it at all, so it is
+    // kept only when the marker did **not** land: on a backend that took the
+    // HTML, a later `set_text` from another application can leave text
+    // identical to ours with no marker behind it — the exact ambiguity the
+    // marker exists to resolve — and reusing our stale fragment there would
+    // paste this editor's old formatting onto somebody else's text.
+    let mut carries_marker = false;
     if let Some(cb) = ctx.app_state::<ClipboardHandle>() {
         // `set_html` writes both payloads in one transaction. Backends
         // without native HTML support see the default trait body and
         // fall back to `set_text(plain)`.
         let _ = cb.set_html(&html, &plain);
+        carries_marker = cb.has_html();
     }
     state.rich_clipboard_fragment = Some(fragment);
-    state.rich_clipboard_plain = Some(plain);
     state.rich_clipboard_marker = Some(marker);
+    state.rich_clipboard_plain = (!carries_marker).then_some(plain);
 }
 
-/// Generate a unique per-copy marker. Mixes a monotonic nanosecond
-/// timestamp with the fragment's memory identity so back-to-back
-/// copies in the same millisecond still differ. Not a cryptographic
-/// identifier — the only requirement is that an unrelated app can't
-/// plausibly emit the same string.
+/// Generate a per-copy marker from the wall clock, in nanoseconds.
+///
+/// Not a cryptographic identifier, and not a unique one either: the clock is
+/// not monotonic, so a step backwards can repeat a value. Neither matters. The
+/// only requirement is that an *unrelated* application cannot plausibly emit
+/// the same string, and a 32-hex-digit token behind a `teksilo-rtc:` prefix
+/// clears that by a wide margin. Repeating our own token costs nothing either:
+/// the fragment it guards was overwritten by the same copy that regenerated
+/// it.
 fn new_marker() -> String {
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -88,12 +107,35 @@ fn new_marker() -> String {
     format!("{nanos:032x}")
 }
 
+/// How far into a clipboard payload the marker is still ours.
+///
+/// Long enough for any plausible wrapper preamble, short enough that a
+/// `teksilo-rtc:` comment sitting in the *body* of a foreign document cannot
+/// masquerade as one.
+const MARKER_SEARCH_WINDOW: usize = 1024;
+
 /// Extract the marker token from a clipboard HTML payload written by
-/// `copy`. Returns `None` for any payload that doesn't start with
-/// `<!--teksilo-rtc:...-->` — which covers every payload emitted by any
-/// other app.
+/// `copy`. Returns `None` for any payload that doesn't carry
+/// `<!--teksilo-rtc:...-->` near its head — which covers every payload emitted
+/// by any other app.
+///
+/// Near its head, not at byte 0: platform clipboards are entitled to wrap what
+/// they are handed, and macOS does. `arboard`'s AppKit backend puts every
+/// payload inside `<html><head><meta …></head><body>…</body></html>` on write
+/// and hands the wrapper straight back on read, so a strict prefix test never
+/// matched there and every intra-editor copy/paste on macOS silently fell
+/// through to re-parsing its own HTML. (X11 and Wayland round-trip verbatim;
+/// Windows' CF_HTML reader slices to `StartFragment`, which lands exactly on
+/// the marker.)
 fn payload_marker(html: &str) -> Option<&str> {
-    let rest = html.strip_prefix(MARKER_PREFIX)?;
+    // Truncate on a character boundary — a clipboard payload is arbitrary UTF-8
+    // and slicing it mid-codepoint would panic on somebody else's document.
+    let limit = html
+        .char_indices()
+        .find(|(i, _)| *i >= MARKER_SEARCH_WINDOW)
+        .map_or(html.len(), |(i, _)| i);
+    let start = html[..limit].find(MARKER_PREFIX)? + MARKER_PREFIX.len();
+    let rest = &html[start..];
     let end = rest.find(MARKER_SUFFIX)?;
     Some(&rest[..end])
 }
@@ -112,17 +154,23 @@ pub(crate) fn cut(state: &mut EditorState, ctx: &EventContext) {
 
 /// Paste from the system clipboard. Prefers richer payloads, in order:
 ///
-/// 1. **Self-round-trip rich fragment** — if the system clipboard's
-///    plain text matches what this editor last copied, reinsert the
+/// 1. **Self-round-trip rich fragment** — if the clipboard's HTML payload
+///    carries the marker this editor's last copy embedded, reinsert the
 ///    stored `DocumentFragment` so intra-editor formatting round-trips
 ///    losslessly (retains table cells, heading levels, spans that don't
-///    serialise into HTML losslessly).
+///    serialise into HTML losslessly). The marker, not plain-text equality:
+///    two applications can publish identical text with different formatting.
 /// 2. **External HTML payload** — if the clipboard carries `text/html`
 ///    / `CF_HTML` / `public.html`, parse it into a `DocumentFragment`
 ///    via text-document and insert. This is the path that makes
 ///    rich paste *from another app* work (Firefox, Word, Google Docs,
 ///    etc.).
-/// 3. **Plain-text fallback** — when neither rich path applies, split
+/// 3. **Self-round-trip by plain text** — with no HTML payload at all there
+///    is no foreign rich content to be confused with, so text identical to
+///    what this editor last copied reinserts the stored fragment. Only this
+///    keeps formatting on a clipboard backend that cannot carry HTML, where
+///    step 1 can never fire.
+/// 4. **Plain-text fallback** — when no rich path applies, split
 ///    the clipboard text on `\n` / `\r\n` / `\r` and insert as separate
 ///    blocks. Without the split, a multi-line clipboard payload would
 ///    collapse into one block with literal newline scalars —
@@ -154,14 +202,8 @@ pub(crate) fn paste(state: &mut EditorState, ctx: &EventContext) {
         html_payload.as_deref(),
         state.rich_clipboard_marker.as_deref(),
     ) && payload_marker(html).is_some_and(|m| m == stored_marker)
-        && let Some(frag) = state.rich_clipboard_fragment.as_ref()
+        && insert_stored_fragment(state)
     {
-        let frag = frag.clone();
-        report_measured(state, |st| {
-            let _ = st.cursor.insert_fragment(&frag);
-        });
-        state.cursor.clear_selection();
-        state.pending_text_changed = true;
         return;
     }
 
@@ -171,23 +213,62 @@ pub(crate) fn paste(state: &mut EditorState, ctx: &EventContext) {
     //    `DocumentFragment` (via text-document's
     //    `DocumentFragment::from_html`) and inserts it at the caret.
     if let Some(html) = html_payload.as_deref()
-        && report_measured(state, |st| st.cursor.insert_html(html)).is_ok()
+        && report_measured(state, |st| {
+            st.cursor.begin_edit_block();
+            let out = st.cursor.insert_html(html);
+            st.cursor.end_edit_block();
+            out
+        })
+        .is_ok()
     {
         state.cursor.clear_selection();
         state.pending_text_changed = true;
         return;
     }
 
-    // 3. Plain-text fallback.
     let Ok(text) = cb.get_text() else {
         return;
     };
     if text.is_empty() {
         return;
     }
+
+    // 3. Self-round-trip by plain text. `rich_clipboard_plain` is set only when
+    //    the copy could not put its marker on the clipboard — a backend
+    //    inheriting the default `set_html` body writes the plain alternative
+    //    and drops the rest — so reaching here means there was never a marker
+    //    to miss, and text equality is the only identity available. On a
+    //    backend that does carry HTML the field is `None` and this cannot fire,
+    //    which keeps another application's identical plain text from picking up
+    //    our stale formatting.
+    if html_payload.is_none()
+        && state.rich_clipboard_plain.as_deref() == Some(text.as_str())
+        && insert_stored_fragment(state)
+    {
+        return;
+    }
+
+    // 4. Plain-text fallback.
     insert_multiline_plain(state, &text);
     state.cursor.clear_selection();
     state.pending_text_changed = true;
+}
+
+/// Reinsert the fragment stashed by the last copy/cut, reporting how much
+/// arrived. `false` when there is nothing stashed, so the caller falls through
+/// to the next payload shape.
+fn insert_stored_fragment(state: &mut EditorState) -> bool {
+    let Some(frag) = state.rich_clipboard_fragment.clone() else {
+        return false;
+    };
+    report_measured(state, |st| {
+        st.cursor.begin_edit_block();
+        let _ = st.cursor.insert_fragment(&frag);
+        st.cursor.end_edit_block();
+    });
+    state.cursor.clear_selection();
+    state.pending_text_changed = true;
+    true
 }
 
 /// Paste plain text only, bypassing any rich payload. Bound to
@@ -200,11 +281,22 @@ pub(crate) fn paste_unformatted(state: &mut EditorState, ctx: &EventContext) {
     let Some(cb) = ctx.app_state::<ClipboardHandle>() else {
         return;
     };
-    let Ok(text) = cb.get_text() else {
-        return;
-    };
+    let mut text = cb.get_text().unwrap_or_default();
     if text.is_empty() {
-        return;
+        // An application is free to publish `text/html` with an empty plain-text
+        // alternative, and some do. Reading only `get_text` then made
+        // Paste Unformatted a command that visibly did nothing while
+        // `can_paste` — which asks `has_text() || has_html()` — kept offering
+        // it. Flattening the rich payload is what the user asked for anyway.
+        let Some(html) = cb.get_html().ok().filter(|h| !h.is_empty()) else {
+            return;
+        };
+        text = teksilo_text::text_document::DocumentFragment::from_html(&html)
+            .to_plain_text()
+            .to_string();
+        if text.is_empty() {
+            return;
+        }
     }
     // As in `paste`: append after the selection rather than over it when the
     // filter forbids taking text away.
@@ -243,6 +335,11 @@ pub(crate) fn can_paste(ctx: &EventContext) -> bool {
 /// Windows- and classic-Mac clipboards round-trip cleanly.
 fn insert_multiline_plain(state: &mut EditorState, text: &str) {
     let normalised = text.replace("\r\n", "\n").replace('\r', "\n");
+    // One paste, one undo step. Without the edit block each line is its own
+    // entry, so undoing a four-line paste took four presses of Ctrl+Z and left
+    // three quarters of it behind — every other multi-step mutation in the
+    // editor is grouped for exactly this reason.
+    state.cursor.begin_edit_block();
     // Counted from the payload rather than measured afterwards, because this is
     // the one paste path where the text itself is in hand. The newlines count:
     // a pasted paragraph break is text that arrived, and dropping it would make
@@ -259,6 +356,7 @@ fn insert_multiline_plain(state: &mut EditorState, text: &str) {
             let _ = state.cursor.insert_text(line);
         }
     }
+    state.cursor.end_edit_block();
 }
 
 /// How many characters an insertion actually added, measured around it.

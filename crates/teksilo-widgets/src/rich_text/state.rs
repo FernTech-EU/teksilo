@@ -500,11 +500,21 @@ pub(crate) struct EditorState {
     /// In-process rich clipboard fragment captured by the last Ctrl+C /
     /// Ctrl+X. On paste the HTML payload is inspected for
     /// `rich_clipboard_marker`; on a match the fragment is reinserted
-    /// to preserve formatting, otherwise the system text lands as plain
-    /// text. Plain-text equality alone is not sufficient because two
+    /// to preserve formatting, otherwise the clipboard's own payload is
+    /// parsed. Plain-text equality alone is not sufficient because two
     /// different apps can publish identical plain text with different
     /// formatting; the embedded marker disambiguates.
     pub rich_clipboard_fragment: Option<DocumentFragment>,
+    /// Plain-text form of the same copy, and the fallback identity check on a
+    /// clipboard backend that could not carry the marker.
+    ///
+    /// Set **only** when the copy found no HTML payload on the clipboard
+    /// afterwards, which is how a backend inheriting the default `set_html`
+    /// body announces itself. On a backend that does carry HTML this stays
+    /// `None`, because there the marker is the identity and text equality is
+    /// ambiguous: another application can publish the same words with different
+    /// formatting, and matching on them would paste this editor's stale
+    /// formatting onto somebody else's text.
     pub rich_clipboard_plain: Option<String>,
     /// Opaque token embedded as an HTML comment in the clipboard HTML
     /// payload of the most recent copy/cut. Regenerated on every copy,
@@ -516,7 +526,7 @@ pub(crate) struct EditorState {
     /// caret is inside a table cell the ladder climbs through 4 levels
     /// (paragraph → cell → table → document); outside a table it is a
     /// single-shot `SelectionType::Document` and stays at 0. Reset to 0
-    /// by any non-SelectAll key action (matching godot edit.rs:520-521).
+    /// by any non-SelectAll key action (matching the godot reference).
     pub select_all_level: u8,
 
     /// Cached flow snapshot used by the accessibility pass. The
