@@ -671,8 +671,8 @@ pub(super) fn handle_double_tap(state: &SharedState, pos: Point, ctx: &mut Event
     ctx.request_frame();
 }
 
-/// Select block under the caret on triple-click. Matches godot
-/// the godot reference's own word-selection rule.
+/// Select block under the caret on triple-click. Matches the godot reference's
+/// own triple-click rule.
 pub(super) fn handle_triple_tap(state: &SharedState, pos: Point, ctx: &mut EventContext) {
     tap_select(state, pos, SelectionType::BlockUnderCursor);
     super::keyboard::chase_caret_into_view(state, ctx);

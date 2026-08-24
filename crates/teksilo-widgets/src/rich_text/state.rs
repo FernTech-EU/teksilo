@@ -397,11 +397,10 @@ pub(crate) struct EditorState {
     // --- M8b editor preset state (unused by read-only preset) ----------
     /// Accumulates typed characters within a single frame, flushed as
     /// one `cursor.insert_text(batch)` at the start of the next
-    /// `frame_loop::tick`. Batching matches the godot reference
-    /// (as the godot reference does) and collapses a burst of keystrokes
-    /// into a single `ContentsChanged` event so incremental relayout
-    /// and debounced `text_changed` emission stay O(burst) instead of
-    /// O(keystrokes).
+    /// `frame_loop::tick`. Batching matches the godot reference, and collapses
+    /// a burst of keystrokes into a single `ContentsChanged` event so
+    /// incremental relayout and debounced `text_changed` emission stay
+    /// O(burst) instead of O(keystrokes).
     pub pending_chars: String,
     /// How many of [`Self::pending_chars`] were typed, and how many were the
     /// settled result of an IME composition.
