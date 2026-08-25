@@ -33,7 +33,7 @@
 
 use std::cell::Cell;
 use std::rc::Rc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
@@ -266,15 +266,54 @@ struct DemoJobEvent {
 #[derive(Clone, Default)]
 struct DemoBus {
     #[allow(clippy::type_complexity)]
-    subscribers: Arc<Mutex<Vec<(DemoTopic, Arc<dyn Fn(DemoJobEvent) + Send + Sync + 'static>)>>>,
+    subscribers: Arc<
+        Mutex<
+            Vec<(
+                u64,
+                DemoTopic,
+                Arc<dyn Fn(DemoJobEvent) + Send + Sync + 'static>,
+            )>,
+        >,
+    >,
+    next_id: Arc<AtomicU64>,
 }
 
 impl DemoBus {
     fn publish(&self, topic: DemoTopic, event: DemoJobEvent) {
-        for (sub_topic, callback) in self.subscribers.lock().unwrap().iter() {
+        for (_id, sub_topic, callback) in self.subscribers.lock().unwrap().iter() {
             if *sub_topic == topic {
                 callback(event.clone());
             }
+        }
+    }
+}
+
+/// Removes one subscriber from [`DemoBus`] when the framework drops it.
+///
+/// ⚠ **A source has to honour its handle.** Returning `SubscriptionHandle::empty()`
+/// here reads as harmless — the bus is tiny and the process is short — and it is not:
+/// a widget's subscription keeps its id across that widget's rebuilds, so a bus that
+/// never removes anything would still be holding the wrapper each earlier build
+/// registered, and one `publish` would post the same event once per build the widget
+/// has ever had. All of them now name a live id, so all of them would be delivered.
+struct DemoToken {
+    #[allow(clippy::type_complexity)]
+    subscribers: Arc<
+        Mutex<
+            Vec<(
+                u64,
+                DemoTopic,
+                Arc<dyn Fn(DemoJobEvent) + Send + Sync + 'static>,
+            )>,
+        >,
+    >,
+    id: u64,
+}
+
+impl Drop for DemoToken {
+    fn drop(&mut self) {
+        if let Ok(mut subs) = self.subscribers.lock() {
+            subs.retain(|(id, _, _)| *id != self.id);
         }
     }
 }
@@ -288,8 +327,15 @@ impl EventSource for DemoBus {
         origin: Self::Origin,
         callback: Arc<dyn Fn(Self::Event) + Send + Sync + 'static>,
     ) -> SubscriptionHandle {
-        self.subscribers.lock().unwrap().push((origin, callback));
-        SubscriptionHandle::empty()
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        self.subscribers
+            .lock()
+            .unwrap()
+            .push((id, origin, callback));
+        SubscriptionHandle::new(DemoToken {
+            subscribers: self.subscribers.clone(),
+            id,
+        })
     }
 }
 

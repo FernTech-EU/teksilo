@@ -22,6 +22,24 @@ pub struct BuildContext<'a> {
     /// cycle via `subscribe_event`. Transferred to the arena node's
     /// `subscription_handles` after build returns.
     pub(crate) subscription_handles: Vec<(SubscriptionId, SubscriptionHandle)>,
+    /// The `SubscriptionId`s the **previous** build of this same widget used, in the
+    /// order it created them. Empty on a first mount.
+    ///
+    /// A subscription's id is what crosses the thread boundary: the publisher-side
+    /// wrapper captures it by value and posts it, and the UI thread looks it up some
+    /// frames later. Minting a fresh id on every rebuild therefore silently destroys
+    /// every event already in flight, because `rebuild_single_widget` removes the
+    /// previous build's callbacks before `build()` runs and the queued event then names
+    /// an id nothing answers to. Re-using the ids here makes a subscription's identity
+    /// span the rebuilds of one widget, so an event posted before a rebuild is delivered
+    /// to the closure the *new* build installed.
+    ///
+    /// Matched **by position**, which is what makes it cheap and predictable: the Nth
+    /// `subscribe_event`/`subscribe_event_with_ctx` call of this build re-uses the id of
+    /// the Nth call of the last one. A build that subscribes fewer times simply leaves
+    /// the surplus ids unclaimed and they stay torn down; one that subscribes more
+    /// allocates fresh ids for the extras.
+    pub(crate) reusable_sub_ids: Vec<SubscriptionId>,
 }
 
 impl<'a> BuildContext<'a> {
@@ -932,6 +950,35 @@ impl<'a> BuildContext<'a> {
     /// Panics if no event source has been registered on the
     /// `TeksiloAppBuilder`. In debug builds, also asserts that the `Origin`
     /// and `Event` types match the registered source.
+    /// The id this subscription should carry: the one the previous build used at this
+    /// same position, or a fresh one.
+    ///
+    /// ⚠ **Position is the whole matching rule**, and it is deliberate. The alternative
+    /// — matching on the origin — cannot be written here: `origin` reaches the adapter
+    /// as `Box<dyn Any>`, with no `Eq` and no `Hash` to compare it by, and requiring
+    /// either would change every `EventSource` in existence. Position is stable for the
+    /// shape widgets actually have, where `build()` runs the same subscribe calls in the
+    /// same order every time.
+    ///
+    /// What a widget that subscribes *conditionally* gets: if the origin at position N
+    /// differs between two builds, an event still in flight from the old origin is
+    /// delivered to the new build's callback rather than being dropped. That is safe by
+    /// construction rather than by luck — an app registers exactly one `EventSource`, so
+    /// every subscription in the tree shares one origin type and one event type, and the
+    /// payload downcast cannot mismatch. The callback receives the whole event and can
+    /// read its origin, which is what `Origin::LongOperation(..)` handlers already do.
+    fn next_subscription_id(
+        &self,
+        app_context: &crate::event_source::TreeAppContext,
+    ) -> SubscriptionId {
+        // `subscription_handles` is pushed to once per subscribe call and starts empty
+        // for each build, so its length *is* this call's position within the build.
+        self.reusable_sub_ids
+            .get(self.subscription_handles.len())
+            .copied()
+            .unwrap_or_else(|| app_context.allocate_subscription_id())
+    }
+
     pub fn subscribe_event<O, E, F>(&mut self, origin: O, callback: F)
     where
         O: 'static,
@@ -963,7 +1010,7 @@ impl<'a> BuildContext<'a> {
             std::any::type_name::<E>(),
         );
 
-        let sub_id = app_context.allocate_subscription_id();
+        let sub_id = self.next_subscription_id(&app_context);
 
         // The UI-side callback that runs after an event posted from the
         // source thread is delivered back to the UI thread. It downcasts
@@ -1072,7 +1119,11 @@ impl<'a> BuildContext<'a> {
             std::any::type_name::<E>(),
         );
 
-        let sub_id = app_context.allocate_subscription_id();
+        // Re-used across this widget's rebuilds exactly as in `subscribe_event` — the
+        // context-bearing path keeps its callbacks in a second map but crosses the very
+        // same queue, so it loses in-flight events the very same way. See
+        // [`Self::next_subscription_id`].
+        let sub_id = self.next_subscription_id(&app_context);
 
         // The UI-side callback, invoked after an event posted from the source
         // thread is delivered back to the UI thread and a fresh `EventContext`

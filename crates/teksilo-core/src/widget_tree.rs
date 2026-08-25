@@ -1883,9 +1883,22 @@ impl WidgetTree {
         // Per §9.4.5, drop the source handle first (stops further source-side
         // dispatch) and then remove the UI-side callback. Either order gives
         // the same user-visible outcome for events that get posted between
-        // the two steps (they are silently dropped once the callback is
-        // gone), but dropping the source handle first stops the publisher
-        // thread's work sooner.
+        // the two steps, but dropping the source handle first stops the
+        // publisher thread's work sooner.
+        //
+        // ⚠ That reasoning is about the two steps below, and it used to be
+        // read as covering the whole problem. It does not. The dangerous gap
+        // is not the microseconds between these two lines, it is the whole
+        // span from *publish* to *dispatch*: a backend event is posted with
+        // the id its publisher captured and is handled by the UI thread
+        // frames later, so any rebuild in between used to strand it. The ids
+        // are therefore carried across into the new build (see
+        // `BuildContext::reusable_sub_ids`) rather than being retired here.
+        // Skribisto's Analysis pane hit this every time it was the restored
+        // view at project open: it starts a long operation in `build()` and
+        // sets its own `Rebuild`-bound state signal, the operation finished
+        // inside its own rebuild, and the pane sat on "Reading the
+        // manuscript…" for the rest of the session with nothing logged.
         // Cancel any looping/one-shot animations owned by this widget
         // before build() runs. Without this, a widget that creates a
         // fresh `animated_signal` in build() would leak the previous
@@ -1953,6 +1966,11 @@ impl WidgetTree {
         // cycle so `build()` can re-register a fresh set without
         // accumulating duplicates across rebuilds.
         self.binding_registry.unregister_for_widget(widget_id);
+        // Kept, in order, and handed to the upcoming `build()` so it re-subscribes under
+        // the same ids. A subscription's id is what a publisher captured and posted with;
+        // minting new ones here would leave every event already queued for this widget
+        // naming an id nothing answers to. See `BuildContext::reusable_sub_ids`.
+        let mut reusable_sub_ids = Vec::with_capacity(drained_subs.len());
         for (sub_id, handle) in drained_subs {
             drop(handle);
             self.app_context
@@ -1963,6 +1981,7 @@ impl WidgetTree {
                 .subscription_ctx_callbacks
                 .borrow_mut()
                 .remove(&sub_id);
+            reusable_sub_ids.push(sub_id);
         }
 
         // Decide how to treat the existing children. Two modes:
@@ -2013,6 +2032,7 @@ impl WidgetTree {
             composite_id: Some(widget_id),
             effect_handles: Vec::new(),
             subscription_handles: Vec::new(),
+            reusable_sub_ids,
         };
         let new_children = widget_box.build(&mut build_ctx);
         let effect_handles = std::mem::take(&mut build_ctx.effect_handles);
@@ -2861,6 +2881,8 @@ impl WidgetTree {
                 composite_id: Some(id),
                 effect_handles: Vec::new(),
                 subscription_handles: Vec::new(),
+                // A first mount has no previous build to inherit ids from.
+                reusable_sub_ids: Vec::new(),
             };
             let built_children = widget_box.build(&mut build_ctx);
             let effect_handles = std::mem::take(&mut build_ctx.effect_handles);
@@ -3002,6 +3024,8 @@ impl WidgetTree {
                     composite_id: Some(id),
                     effect_handles: Vec::new(),
                     subscription_handles: Vec::new(),
+                    // A first mount has no previous build to inherit ids from.
+                    reusable_sub_ids: Vec::new(),
                 };
                 let built_children = widget_box.build(&mut build_ctx);
                 let effect_handles = std::mem::take(&mut build_ctx.effect_handles);

@@ -396,13 +396,54 @@ mod tests {
         message: String,
     }
 
-    /// A trivial in-process event source. Holds a list of (origin, callback)
+    /// A trivial in-process event source. Holds a list of (id, origin, callback)
     /// entries; `publish` walks them and invokes matching callbacks
     /// synchronously on the calling thread.
+    ///
+    /// ⚠ **Its handle really unsubscribes**, which is not decoration. A source that
+    /// returns [`SubscriptionHandle::empty`] keeps every subscriber it was ever given,
+    /// so one publish reaches the wrappers of *all* of a widget's past builds. That used
+    /// to be invisible, because each of those wrappers posted a by-then-dead id and the
+    /// dispatch dropped it; now that an id outlives a rebuild it would deliver the same
+    /// event once per past build. A mock that never removes anything would model a
+    /// source no real one resembles and would make this suite assert the wrong thing.
     #[derive(Default)]
     struct MockEventSource {
         #[allow(clippy::type_complexity)]
-        subscribers: Mutex<Vec<(TestOrigin, Arc<dyn Fn(TestEvent) + Send + Sync + 'static>)>>,
+        subscribers: Arc<
+            Mutex<
+                Vec<(
+                    u64,
+                    TestOrigin,
+                    Arc<dyn Fn(TestEvent) + Send + Sync + 'static>,
+                )>,
+            >,
+        >,
+        next_id: std::sync::atomic::AtomicU64,
+    }
+
+    /// Removes its entry from [`MockEventSource`] on drop, the way a real source's
+    /// token does.
+    struct MockToken {
+        #[allow(clippy::type_complexity)]
+        subscribers: Arc<
+            Mutex<
+                Vec<(
+                    u64,
+                    TestOrigin,
+                    Arc<dyn Fn(TestEvent) + Send + Sync + 'static>,
+                )>,
+            >,
+        >,
+        id: u64,
+    }
+
+    impl Drop for MockToken {
+        fn drop(&mut self) {
+            if let Ok(mut subs) = self.subscribers.lock() {
+                subs.retain(|(id, _, _)| *id != self.id);
+            }
+        }
     }
 
     impl EventSource for MockEventSource {
@@ -414,15 +455,24 @@ mod tests {
             origin: Self::Origin,
             callback: Arc<dyn Fn(Self::Event) + Send + Sync + 'static>,
         ) -> SubscriptionHandle {
-            self.subscribers.lock().unwrap().push((origin, callback));
-            SubscriptionHandle::empty()
+            let id = self
+                .next_id
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            self.subscribers
+                .lock()
+                .unwrap()
+                .push((id, origin, callback));
+            SubscriptionHandle::new(MockToken {
+                subscribers: self.subscribers.clone(),
+                id,
+            })
         }
     }
 
     impl MockEventSource {
         fn publish(&self, origin: TestOrigin, event: TestEvent) {
             let subs = self.subscribers.lock().unwrap();
-            for (sub_origin, cb) in subs.iter() {
+            for (_id, sub_origin, cb) in subs.iter() {
                 if *sub_origin == origin {
                     cb(event.clone());
                 }
@@ -487,13 +537,17 @@ mod tests {
     #[derive(Debug)]
     struct CtxSubscribingWidget {
         origin: TestOrigin,
+        last_message: Signal<String>,
     }
 
     impl Widget for CtxSubscribingWidget {
         fn build(&mut self, ctx: &mut crate::build_context::BuildContext) -> Vec<WidgetId> {
+            let last_message = self.last_message.clone();
             ctx.subscribe_event_with_ctx(
                 self.origin.clone(),
-                |_event: &TestEvent, _ctx: &mut crate::widget::EventContext| {},
+                move |event: &TestEvent, _ctx: &mut crate::widget::EventContext| {
+                    last_message.set(event.message.clone());
+                },
             );
             Vec::new()
         }
@@ -699,6 +753,7 @@ mod tests {
 
         let id = tree.add(CtxSubscribingWidget {
             origin: TestOrigin::Created,
+            last_message: Signal::new(String::new()),
         });
         // The ctx path uses the OTHER map — the plain count stays 0.
         assert_eq!(tree.app_context().ctx_subscription_count(), 1);
@@ -885,5 +940,291 @@ mod tests {
         assert_eq!(ctx.app_state::<Rc<Alpha>>().unwrap().0, 42);
         assert_eq!(ctx.app_state::<Rc<Beta>>().unwrap().0, "beta!");
         assert!(ctx.app_state::<Rc<u64>>().is_none());
+    }
+
+    /// **An event posted before a rebuild must still reach the widget after it.**
+    ///
+    /// A backend event crosses two thread boundaries and a queue: the source publishes
+    /// on its own thread, the wrapper posts an `AppEvent::SubscriptionEvent` carrying
+    /// the `SubscriptionId` it captured at *publish* time, and the UI thread dispatches
+    /// it some frames later. A rebuild in that gap used to be fatal — `build()` runs
+    /// again, allocates fresh ids, and the teardown in `rebuild_single_widget` removes
+    /// the previous build's callbacks, so the queued event named a dead id and
+    /// `dispatch_subscription_event` dropped it on the floor and returned `false`.
+    ///
+    /// ⚠ The window is **not** the microsecond between dropping the source handle and
+    /// removing the callback, which is what that function's `§9.4.5` comment reasons
+    /// about. It is the whole span from publish to dispatch, and a widget opens it on
+    /// itself simply by binding a signal at `BindingLevel::Rebuild` and then setting
+    /// that signal — the ordinary documented pattern. Skribisto's Analysis pane starts
+    /// a long operation in `build()` and sets its own state signal to `Running`, so
+    /// whenever the operation finished inside that gap the completion was lost and the
+    /// pane sat on "Reading the manuscript…" for the rest of the session.
+    #[test]
+    fn an_event_posted_before_a_rebuild_still_reaches_the_widget() {
+        let mut tree = WidgetTree::new();
+        let (source, poster) = install_source(&mut tree, MockEventSource::default());
+
+        let signal = Signal::new(String::new());
+        let id = tree.add(SubscribingWidget {
+            origin: TestOrigin::Created,
+            last_message: signal.clone(),
+        });
+
+        // Posted now: the queued event carries the id minted by the first build.
+        source.publish(
+            TestOrigin::Created,
+            TestEvent {
+                id: 1,
+                message: "landed".to_string(),
+            },
+        );
+
+        // …and the widget rebuilds before the UI thread gets to it. This is exactly
+        // what a `BindingLevel::Rebuild` binding does when its signal changes.
+        tree.arena_mark_needs_rebuild_for_testing(id);
+        tree.layout(SizeProposal::exact(100.0, 100.0));
+
+        drain_and_dispatch(&tree, &poster);
+
+        assert_eq!(
+            signal.get(),
+            "landed",
+            "the rebuild must not swallow an event that was already in flight"
+        );
+    }
+
+    /// The same guarantee for the **context-bearing** API.
+    ///
+    /// `subscribe_event_with_ctx` keeps its callbacks in a second map and is dispatched
+    /// by a different function, so it fails and has to be fixed separately from the
+    /// plain path. It is also the API the framework documents as *the* bridge for
+    /// long-operation progress, which is precisely the traffic this race eats.
+    #[test]
+    fn an_event_posted_before_a_rebuild_still_reaches_a_context_bearing_subscription() {
+        use crate::window::NoopWindowOps;
+
+        let mut tree = WidgetTree::new();
+        let (source, poster) = install_source(&mut tree, MockEventSource::default());
+
+        let signal = Signal::new(String::new());
+        let id = tree.add(CtxSubscribingWidget {
+            origin: TestOrigin::Created,
+            last_message: signal.clone(),
+        });
+
+        source.publish(
+            TestOrigin::Created,
+            TestEvent {
+                id: 1,
+                message: "landed".to_string(),
+            },
+        );
+
+        tree.arena_mark_needs_rebuild_for_testing(id);
+        tree.layout(SizeProposal::exact(100.0, 100.0));
+
+        // Dispatched the way teksilo-app's `try_dispatch_subscription_with_ctx` does,
+        // from the queue the wrapper actually posted into.
+        let app_ctx = tree.app_context().clone();
+        let events = poster.drain();
+        assert!(!events.is_empty(), "the source must have posted something");
+        for (sub_id, event) in events {
+            tree.run_with_event_context(&mut NoopWindowOps, |ctx| {
+                app_ctx.dispatch_subscription_event_with_ctx(sub_id, &*event, ctx);
+            });
+        }
+
+        assert_eq!(
+            signal.get(),
+            "landed",
+            "the ctx-bearing path must survive a rebuild too"
+        );
+    }
+
+    /// A widget that is genuinely **destroyed** must not have its callback fired by a
+    /// late event, and must not leave one behind. The fix above makes a subscription's
+    /// identity outlive a rebuild; it must not make it outlive the widget.
+    #[test]
+    fn an_event_posted_before_a_destroy_fires_nothing_and_leaks_nothing() {
+        let mut tree = WidgetTree::new();
+        let (source, poster) = install_source(&mut tree, MockEventSource::default());
+
+        let signal = Signal::new(String::new());
+        let id = tree.add(SubscribingWidget {
+            origin: TestOrigin::Created,
+            last_message: signal.clone(),
+        });
+
+        source.publish(
+            TestOrigin::Created,
+            TestEvent {
+                id: 1,
+                message: "too late".to_string(),
+            },
+        );
+        tree.destroy_subtree(id);
+        drain_and_dispatch(&tree, &poster);
+
+        assert_eq!(
+            signal.get(),
+            "",
+            "a destroyed widget's callback must not run"
+        );
+        assert_eq!(
+            tree.app_context().subscription_count(),
+            0,
+            "and nothing may be left behind in the callback map"
+        );
+    }
+
+    /// The mirror of the case below: a rebuild that subscribes **more** times than the one
+    /// before it re-uses what it can and allocates the rest.
+    ///
+    /// Worth its own test because the re-use is matched by position against a list that can
+    /// simply run out. Reading one past its end has to mean "allocate", not panic and not
+    /// silently re-use somebody else's id, and the extra subscription has to be a real live
+    /// one rather than a slot that quietly went nowhere.
+    #[test]
+    fn a_rebuild_that_subscribes_more_reuses_what_it_can_and_allocates_the_rest() {
+        /// Subscribes once on the first build and twice on every build after it.
+        #[derive(Debug)]
+        struct GrowingWidget {
+            built: std::rc::Rc<std::cell::Cell<u32>>,
+            first_message: Signal<String>,
+            second_message: Signal<String>,
+        }
+
+        impl Widget for GrowingWidget {
+            fn build(&mut self, ctx: &mut crate::build_context::BuildContext) -> Vec<WidgetId> {
+                let first = self.built.get() == 0;
+                self.built.set(self.built.get() + 1);
+                let one = self.first_message.clone();
+                ctx.subscribe_event(TestOrigin::Created, move |event: &TestEvent| {
+                    one.set(event.message.clone());
+                });
+                if !first {
+                    let two = self.second_message.clone();
+                    ctx.subscribe_event(TestOrigin::Updated, move |event: &TestEvent| {
+                        two.set(event.message.clone());
+                    });
+                }
+                Vec::new()
+            }
+
+            fn layout_response(
+                &self,
+                proposal: SizeProposal,
+                _ctx: &LayoutContext,
+            ) -> crate::widget::LayoutResponse {
+                proposal.resolve(0.0, 0.0).into()
+            }
+        }
+
+        let mut tree = WidgetTree::new();
+        let (source, poster) = install_source(&mut tree, MockEventSource::default());
+
+        let built = std::rc::Rc::new(std::cell::Cell::new(0));
+        let one = Signal::new(String::new());
+        let two = Signal::new(String::new());
+        let id = tree.add(GrowingWidget {
+            built: built.clone(),
+            first_message: one.clone(),
+            second_message: two.clone(),
+        });
+        assert_eq!(tree.app_context().subscription_count(), 1);
+
+        tree.arena_mark_needs_rebuild_for_testing(id);
+        tree.layout(SizeProposal::exact(100.0, 100.0));
+        assert_eq!(
+            tree.app_context().subscription_count(),
+            2,
+            "the re-used slot plus a freshly allocated one"
+        );
+        assert_eq!(
+            source.subscriber_count(),
+            2,
+            "and both are registered with the source, not just the re-used one"
+        );
+
+        // Both deliver, and neither is delivering the other's traffic.
+        source.publish(
+            TestOrigin::Created,
+            TestEvent {
+                id: 1,
+                message: "to the first".to_string(),
+            },
+        );
+        source.publish(
+            TestOrigin::Updated,
+            TestEvent {
+                id: 2,
+                message: "to the second".to_string(),
+            },
+        );
+        drain_and_dispatch(&tree, &poster);
+
+        assert_eq!(one.get(), "to the first");
+        assert_eq!(
+            two.get(),
+            "to the second",
+            "the newly allocated id must be live"
+        );
+    }
+
+    /// A rebuild that subscribes **fewer** times than the one before it must not leave
+    /// the surplus subscription live. Reusing a slot across a rebuild is only safe if a
+    /// slot the new build did not claim is dropped.
+    #[test]
+    fn a_rebuild_that_subscribes_less_drops_the_surplus_subscription() {
+        /// Subscribes twice on the first build and once on every build after it.
+        #[derive(Debug)]
+        struct ShrinkingWidget {
+            built: std::rc::Rc<std::cell::Cell<u32>>,
+        }
+
+        impl Widget for ShrinkingWidget {
+            fn build(&mut self, ctx: &mut crate::build_context::BuildContext) -> Vec<WidgetId> {
+                let first = self.built.get() == 0;
+                self.built.set(self.built.get() + 1);
+                ctx.subscribe_event(TestOrigin::Created, |_event: &TestEvent| {});
+                if first {
+                    ctx.subscribe_event(TestOrigin::Updated, |_event: &TestEvent| {});
+                }
+                Vec::new()
+            }
+
+            fn layout_response(
+                &self,
+                proposal: SizeProposal,
+                _ctx: &LayoutContext,
+            ) -> crate::widget::LayoutResponse {
+                proposal.resolve(0.0, 0.0).into()
+            }
+        }
+
+        let mut tree = WidgetTree::new();
+        let (source, _poster) = install_source(&mut tree, MockEventSource::default());
+
+        let built = std::rc::Rc::new(std::cell::Cell::new(0));
+        let id = tree.add(ShrinkingWidget {
+            built: built.clone(),
+        });
+        assert_eq!(tree.app_context().subscription_count(), 2);
+        assert_eq!(source.subscriber_count(), 2);
+
+        tree.arena_mark_needs_rebuild_for_testing(id);
+        tree.layout(SizeProposal::exact(100.0, 100.0));
+
+        assert_eq!(
+            tree.app_context().subscription_count(),
+            1,
+            "the second slot was not re-registered, so it must be gone"
+        );
+        assert_eq!(
+            source.subscriber_count(),
+            1,
+            "and the source must not still be holding it"
+        );
     }
 }
