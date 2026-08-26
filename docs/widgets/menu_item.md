@@ -25,6 +25,33 @@ Check and radio modes are mutually exclusive with `.icon(...)` — the
 Windows convention reserves the leading slot for state glyphs on
 checkable items; a `debug_assert!` fires when both are set.
 
+## An icon that keeps its own colour
+
+`.icon(...)` recolours whatever it is handed with the row's text role, so the
+glyph follows hover, press and disabled alongside the label. That is right for
+an icon that says the same thing as the label, and wrong for one whose colour
+*is* the content — a tag's swatch, a status light, a colour a person chose.
+
+`.icon_keeps_color()` leaves it alone. Two costs come with it: the icon no
+longer follows the highlight (on a style whose highlighted row is a solid
+accent fill, it has to carry its own contrast against that fill), and a
+*literal* colour does not dim in a disabled row — `ColorProp::Static` and
+`Bound` ignore the enabled state, while every role variant substitutes its
+disabled counterpart. An icon that should dim wants a role, and then it does
+not want this at all.
+
+```rust
+# use teksilo_widgets::{MenuItem, primitives::IconWidget};
+# use teksilo_canvas::{Path, Point};
+# use teksilo_i18n::lit;
+# use teksilo_tokens::Color;
+let swatch = IconWidget::from_path(Path::circle(Point::new(5.0, 5.0), 4.5), 10.0)
+    .color(Color::from_hex("#e91e63"));
+let _w = MenuItem::new(lit!("Characters"))
+    .icon(swatch)
+    .icon_keeps_color();
+```
+
 **Mnemonic markers** use the in-string `&` convention (`&Save` →
 underline 'S' when Alt is held; `&&` → literal `&`). The enclosing
 `MenuList` wires bare-letter in-menu activation automatically.
@@ -39,7 +66,7 @@ let _w = MenuItem::new(lit!("&Save"))
 
 ## Builder methods at a glance
 
-`on_activate_fn`, `label`, `label_localized`, `action`, `icon`, `shortcut_label`, `trailing_hint`, `for_shortcut`, `enabled`, `style`, `text_style`, `text_role`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`, `submenu`, `submenu_delay`, `is_submenu`, `checked`, `reflect_checked`, `check_state`, `radio`
+`on_activate_fn`, `label`, `label_localized`, `action`, `icon`, `icon_keeps_color`, `shortcut_label`, `trailing_hint`, `for_shortcut`, `enabled`, `style`, `text_style`, `text_role`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`, `submenu`, `submenu_delay`, `is_submenu`, `checked`, `reflect_checked`, `check_state`, `radio`
 
 ## API reference
 
@@ -91,6 +118,32 @@ overlay dismissal that the tap handler also performs).
 #### `pub fn icon(mut self, icon: IconWidget) -> Self`
 
 Set a leading icon.
+
+#### `pub fn icon_keeps_color(mut self) -> Self`
+
+Keep the icon's **own** colour rather than tinting it with the row's.
+
+A menu icon normally says the same thing as the label beside it, so it takes
+the row's text role and follows it through hover, press and disabled — which
+is why `icon` recolours whatever it is handed. Some icons are
+not that. A tag's swatch, a status light, a colour a person chose: there the
+colour *is* the content, and tinting it to the menu's foreground deletes the
+only thing the icon was there to say.
+
+Opt-in, because the default is right for nearly every row, and keeping a
+colour has two costs the caller takes on:
+
+* **It does not follow the highlight.** On a style whose highlighted row is a
+  solid accent fill (the macOS recipe), the icon has to carry its own contrast
+  against that fill as well as against the menu's surface.
+* **It does not dim when the row is disabled** — if it is a literal colour.
+  That is `ColorProp`'s own rule everywhere, not a
+  special case here: `Static` and `Bound` ignore the enabled state, while every
+  role variant substitutes its disabled counterpart. An icon that should dim
+  should be given a role instead, and then it does not need this at all.
+
+Ignored in the check and radio modes, which draw an indicator glyph of the
+framework's own rather than the caller's icon.
 
 #### `pub fn shortcut_label(mut self, label: impl Into<String>) -> Self`
 

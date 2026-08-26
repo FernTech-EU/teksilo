@@ -23,6 +23,33 @@
 //! Windows convention reserves the leading slot for state glyphs on
 //! checkable items; a `debug_assert!` fires when both are set.
 //!
+//! ## An icon that keeps its own colour
+//!
+//! `.icon(...)` recolours whatever it is handed with the row's text role, so the
+//! glyph follows hover, press and disabled alongside the label. That is right for
+//! an icon that says the same thing as the label, and wrong for one whose colour
+//! *is* the content — a tag's swatch, a status light, a colour a person chose.
+//!
+//! `.icon_keeps_color()` leaves it alone. Two costs come with it: the icon no
+//! longer follows the highlight (on a style whose highlighted row is a solid
+//! accent fill, it has to carry its own contrast against that fill), and a
+//! *literal* colour does not dim in a disabled row — `ColorProp::Static` and
+//! `Bound` ignore the enabled state, while every role variant substitutes its
+//! disabled counterpart. An icon that should dim wants a role, and then it does
+//! not want this at all.
+//!
+//! ```rust
+//! # use teksilo_widgets::{MenuItem, primitives::IconWidget};
+//! # use teksilo_canvas::{Path, Point};
+//! # use teksilo_i18n::lit;
+//! # use teksilo_tokens::Color;
+//! let swatch = IconWidget::from_path(Path::circle(Point::new(5.0, 5.0), 4.5), 10.0)
+//!     .color(Color::from_hex("#e91e63"));
+//! let _w = MenuItem::new(lit!("Characters"))
+//!     .icon(swatch)
+//!     .icon_keeps_color();
+//! ```
+//!
 //! **Mnemonic markers** use the in-string `&` convention (`&Save` →
 //! underline 'S' when Alt is held; `&&` → literal `&`). The enclosing
 //! `MenuList` wires bare-letter in-menu activation automatically.
@@ -135,6 +162,9 @@ enum CheckKind {
 pub struct MenuItem {
     label: LocalizedString,
     icon: Option<IconWidget>,
+    /// Leave the icon's own colour alone instead of tinting it with the row's
+    /// text role — see [`MenuItem::icon_keeps_color`].
+    icon_keeps_color: bool,
     shortcut_label: Option<String>,
     /// A trailing *descriptive* phrase — not an accelerator. Unlike
     /// `shortcut_label` this stays a [`LocalizedString`], so it re-resolves
@@ -223,6 +253,7 @@ impl MenuItem {
         Self {
             label: ls,
             icon: None,
+            icon_keeps_color: false,
             shortcut_label: None,
             trailing_hint: None,
             shortcut_id: None,
@@ -282,6 +313,34 @@ impl MenuItem {
     /// Set a leading icon.
     pub fn icon(mut self, icon: IconWidget) -> Self {
         self.icon = Some(icon);
+        self
+    }
+
+    /// Keep the icon's **own** colour rather than tinting it with the row's.
+    ///
+    /// A menu icon normally says the same thing as the label beside it, so it takes
+    /// the row's text role and follows it through hover, press and disabled — which
+    /// is why [`icon`](Self::icon) recolours whatever it is handed. Some icons are
+    /// not that. A tag's swatch, a status light, a colour a person chose: there the
+    /// colour *is* the content, and tinting it to the menu's foreground deletes the
+    /// only thing the icon was there to say.
+    ///
+    /// Opt-in, because the default is right for nearly every row, and keeping a
+    /// colour has two costs the caller takes on:
+    ///
+    /// * **It does not follow the highlight.** On a style whose highlighted row is a
+    ///   solid accent fill (the macOS recipe), the icon has to carry its own contrast
+    ///   against that fill as well as against the menu's surface.
+    /// * **It does not dim when the row is disabled** — if it is a literal colour.
+    ///   That is [`ColorProp`](teksilo_core::ColorProp)'s own rule everywhere, not a
+    ///   special case here: `Static` and `Bound` ignore the enabled state, while every
+    ///   role variant substitutes its disabled counterpart. An icon that should dim
+    ///   should be given a role instead, and then it does not need this at all.
+    ///
+    /// Ignored in the check and radio modes, which draw an indicator glyph of the
+    /// framework's own rather than the caller's icon.
+    pub fn icon_keeps_color(mut self) -> Self {
+        self.icon_keeps_color = true;
         self
     }
 
@@ -413,6 +472,7 @@ impl MenuItem {
         Self {
             label: ls,
             icon: None,
+            icon_keeps_color: false,
             shortcut_label: None,
             trailing_hint: None,
             shortcut_id: None,
@@ -670,13 +730,12 @@ impl Widget for MenuItem {
         // check/radio mode wins in release.
         let leading = {
             let icon_child_id = match &self.mode {
-                MenuItemMode::Plain => {
-                    if let Some(icon) = self.icon.take() {
-                        ctx.add(icon.color(text_role.clone()))
-                    } else {
-                        ctx.add(Spacer::new())
-                    }
-                }
+                MenuItemMode::Plain => match self.icon.take() {
+                    // The caller's own colour stands — see `icon_keeps_color`.
+                    Some(icon) if self.icon_keeps_color => ctx.add(icon),
+                    Some(icon) => ctx.add(icon.color(text_role.clone())),
+                    None => ctx.add(Spacer::new()),
+                },
                 MenuItemMode::Check(CheckKind::TwoState(s)) => {
                     debug_assert!(
                         self.icon.is_none(),
@@ -2173,6 +2232,55 @@ mod tests {
             t.widget_count(),
             baseline,
             "each rebuild stranded a tooltip content subtree in the arena"
+        );
+    }
+
+    /// **A swatch is not a glyph that repeats the label.**
+    ///
+    /// A menu icon normally means what the label means, so it takes the row's colour.
+    /// An icon whose colour *is* the content — a tag's swatch, a status light — has
+    /// nothing left to say once the row has tinted it to its own foreground. The
+    /// opt-in leaves it alone; without it, the row wins, which is the default every
+    /// other row wants.
+    #[test]
+    fn an_icon_that_keeps_its_color_is_not_tinted_by_the_row() {
+        // A colour no theme role resolves to, so finding it among the painted glyphs
+        // can only mean the icon's own was kept.
+        let swatch = teksilo_tokens::Color::from_hex("#e91e63");
+
+        let painted = |keep: bool| {
+            let mut t = WidgetTree::new()
+                .with_theme(teksilo_core::presets::intui::light())
+                .with_text_backend(std::rc::Rc::new(std::cell::RefCell::new(
+                    teksilo_canvas::MockTextBackend::new(),
+                )));
+            let mut item = MenuItem::new(lit!("Places"))
+                .icon(IconWidget::checkmark(MENU_INDICATOR_GLYPH_SIZE).color(swatch));
+            if keep {
+                item = item.icon_keeps_color();
+            }
+            t.add(item);
+            layout(&mut t);
+            // The checkmark is vector artwork, so it lands in `paths` rather than
+            // among the label's glyphs.
+            t.render()
+                .paths
+                .iter()
+                .map(|p| {
+                    let q = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
+                    [q(p.color[0]), q(p.color[1]), q(p.color[2]), q(p.color[3])]
+                })
+                .collect::<Vec<_>>()
+        };
+
+        assert!(
+            painted(true).contains(&rgba8(swatch)),
+            "the swatch must keep the colour it was given"
+        );
+        assert!(
+            !painted(false).contains(&rgba8(swatch)),
+            "and without the opt-in the row must still tint its icon, or every \
+             existing menu icon would stop following hover and disabled"
         );
     }
 
