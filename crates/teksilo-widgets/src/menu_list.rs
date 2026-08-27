@@ -211,6 +211,23 @@ impl Widget for KeyboardHighlightWrapper {
     }
 }
 
+/// Scroll the row at `idx` into view after the keyboard highlight moved onto it.
+///
+/// Arrow / Home / End / type-ahead navigation moves `focused_index`, **not**
+/// real tree focus (which stays on the panel so the key handler keeps
+/// receiving keys) — so the framework's own focus-follow scroll never runs.
+/// Past `max_visible_items` the panel is a `ScrollArea`, and without this the
+/// highlight walks straight out of the viewport and the menu looks frozen.
+///
+/// The id-based reveal is the right one here: a menu row is a real, mounted,
+/// non-virtualized child, so the arena already knows its bounds. It is a no-op
+/// when the row is already visible or nothing above it scrolls.
+fn reveal(idx: usize, item_ids: &[WidgetId], ctx: &mut EventContext) {
+    if let Some(&id) = item_ids.get(idx) {
+        ctx.ensure_widget_visible(id);
+    }
+}
+
 /// A themed vertical dropdown menu panel with keyboard navigation and type-ahead.
 ///
 /// See the module documentation for the full feature description.
@@ -309,9 +326,16 @@ impl MenuList {
 
     /// Add a menu item (typically a `MenuItem`).
     pub fn item(mut self, widget: impl Widget + 'static) -> Self {
-        // Detect submenu items via Any downcast before boxing
-        let is_submenu = (&widget as &dyn std::any::Any)
-            .downcast_ref::<crate::menu_item::MenuItem>()
+        // Probe through the `as_any` hook rather than downcasting the generic
+        // directly: a `MenuItem` carrying any builder method (`.context_menu`,
+        // `.focusable`, …) arrives here as `WidgetWithHandlers<MenuItem>`, which
+        // a concrete-type downcast misses while `as_any` forwards through it.
+        // This is the probe [`item_boxed_when`](Self::item_boxed_when) already
+        // uses; the two disagreeing is what let a decorated submenu trigger lose
+        // its inline-forward arrow.
+        let is_submenu = widget
+            .as_any()
+            .and_then(|a| a.downcast_ref::<crate::menu_item::MenuItem>())
             .is_some_and(|mi| mi.is_submenu());
         self.submenu_flags.push(is_submenu);
         self.entries.push(MenuEntry::Item {
@@ -690,6 +714,7 @@ impl Widget for MenuList {
                             };
                             focused_index.set(Some(next));
                             ctx.show_highlight_tooltip(item_ids[next]);
+                            reveal(next, &item_ids, ctx);
                             EventResponse::Handled
                         }
                         Key::ArrowUp => {
@@ -706,6 +731,7 @@ impl Widget for MenuList {
                             };
                             focused_index.set(Some(next));
                             ctx.show_highlight_tooltip(item_ids[next]);
+                            reveal(next, &item_ids, ctx);
                             EventResponse::Handled
                         }
                         Key::Home => {
@@ -714,6 +740,7 @@ impl Widget for MenuList {
                             };
                             focused_index.set(Some(first));
                             ctx.show_highlight_tooltip(item_ids[first]);
+                            reveal(first, &item_ids, ctx);
                             EventResponse::Handled
                         }
                         Key::End => {
@@ -722,6 +749,7 @@ impl Widget for MenuList {
                             };
                             focused_index.set(Some(last));
                             ctx.show_highlight_tooltip(item_ids[last]);
+                            reveal(last, &item_ids, ctx);
                             EventResponse::Handled
                         }
                         Key::Enter | Key::Space => {
@@ -834,6 +862,7 @@ impl Widget for MenuList {
                                 {
                                     focused_index.set(Some(i));
                                     ctx.show_highlight_tooltip(item_ids[i]);
+                                    reveal(i, &item_ids, ctx);
                                     return EventResponse::Handled;
                                 }
                             }
@@ -900,6 +929,7 @@ impl Widget for MenuList {
 mod tests {
     use super::*;
     use crate::menu_item::MenuItem;
+    use teksilo_core::WidgetBuilder;
     use teksilo_core::widget_tree::WidgetTree;
     use teksilo_i18n::lit;
 
@@ -1531,6 +1561,168 @@ mod tests {
         assert!(
             tree.active_overlays().is_empty(),
             "one Tab must leave no menu behind"
+        );
+    }
+
+    // --- Decorated rows: a `MenuItem` carrying a builder method ---
+    //
+    // Any `WidgetBuilder` call (`.context_menu`, `.focusable`, …) wraps the
+    // item in a `WidgetWithHandlers<MenuItem>`. Every `MenuList` feature that
+    // reads the item's concrete type has to keep working through that wrapper,
+    // or a row silently degrades with no error anywhere.
+
+    /// Wrap a `MenuItem` the way a caller that needs a per-row context menu
+    /// does — the shape that used to de-register the row from `MenuList`.
+    fn decorated(item: MenuItem) -> impl Widget + 'static {
+        item.context_menu(|_pos, _ctx| None)
+    }
+
+    #[test]
+    fn a_decorated_item_keeps_its_mnemonic() {
+        let fired = StdRc::new(StdCell::new(None));
+        let mut tree = light_tree();
+        let mut menu = MenuList::new();
+        for (i, label) in ["&Save", "&Open", "&Quit"].iter().enumerate() {
+            let fired_for_this = fired.clone();
+            menu = menu.item(decorated(
+                MenuItem::new(lit!(*label)).on_activate_fn(move |_| fired_for_this.set(Some(i))),
+            ));
+        }
+        let menu_id = tree.add(menu);
+        tree.layout(SizeProposal::with_width(300.0));
+        tree.focus(menu_id);
+
+        tree.press_key(Key::O, Modifiers::NONE);
+        assert_eq!(
+            fired.get(),
+            Some(1),
+            "the mnemonic is read off the MenuItem; decorating it must not hide it"
+        );
+    }
+
+    #[test]
+    fn a_decorated_item_keeps_its_type_ahead_label() {
+        let fired = StdRc::new(StdCell::new(None));
+        let mut tree = light_tree();
+        let mut menu = MenuList::new();
+        // No `&` markers here, so only the type-ahead path can reach a row.
+        for (i, label) in ["Alpha", "Beta", "Gamma"].iter().enumerate() {
+            let fired_for_this = fired.clone();
+            menu = menu.item(decorated(
+                MenuItem::new(lit!(*label)).on_activate_fn(move |_| fired_for_this.set(Some(i))),
+            ));
+        }
+        let menu_id = tree.add(menu);
+        tree.layout(SizeProposal::with_width(300.0));
+        tree.focus(menu_id);
+
+        tree.press_key(Key::G, Modifiers::NONE);
+        tree.press_key(Key::Enter, Modifiers::NONE);
+        assert_eq!(
+            fired.get(),
+            Some(2),
+            "type-ahead reads the label off the MenuItem, through any wrapper"
+        );
+    }
+
+    #[test]
+    fn a_decorated_submenu_trigger_still_opens_on_the_inline_arrow() {
+        let mut tree = light_tree();
+        let menu = MenuList::new()
+            .item(decorated(MenuItem::submenu(lit!("More"), || {
+                Box::new(MenuList::new().item(MenuItem::new(lit!("Child"))))
+            })))
+            .item(MenuItem::new(lit!("Plain")));
+        let menu_id = tree.add(menu);
+        tree.layout(SizeProposal::with_width(300.0));
+        tree.focus(menu_id);
+
+        tree.press_key(Key::ArrowDown, Modifiers::NONE); // highlight the trigger
+        assert!(tree.active_overlays().is_empty(), "precondition: closed");
+
+        tree.press_key(Key::ArrowRight, Modifiers::NONE);
+        assert_eq!(
+            tree.active_overlays().len(),
+            1,
+            "the submenu flag is read off the MenuItem, through any wrapper"
+        );
+    }
+
+    // --- Keyboard navigation scrolls a capped menu ---
+
+    /// A menu row that records the absolute bounds it was last laid out at.
+    ///
+    /// The accessibility tree is not a usable probe here: its node bounds are
+    /// captured when the node is emitted and a pure scroll does not re-emit
+    /// them, so a stale rect reads back as "nothing moved" whether or not the
+    /// scroll happened. `place_children` is the layout's own answer.
+    #[derive(Debug)]
+    struct ProbeRow {
+        seen: StdRc<Cell<Rect>>,
+    }
+
+    impl Widget for ProbeRow {
+        fn layout_response(
+            &self,
+            proposal: SizeProposal,
+            _ctx: &LayoutContext,
+        ) -> teksilo_core::widget::LayoutResponse {
+            proposal.resolve(200.0, 24.0).into()
+        }
+
+        fn place_children(
+            &self,
+            bounds: Rect,
+            _proposal: SizeProposal,
+            _children: &mut [WidgetPlacement],
+            _ctx: &LayoutContext,
+        ) {
+            self.seen.set(bounds);
+        }
+    }
+
+    #[test]
+    fn keyboard_navigation_scrolls_a_capped_menu_to_the_highlight() {
+        // Past `max_visible_items` the panel is a `ScrollArea`, and arrow / End
+        // navigation moves `focused_index` rather than real tree focus — so the
+        // framework's own focus-follow scroll never runs. Without an explicit
+        // reveal the highlight walks straight out of the viewport and the menu
+        // looks frozen from the fifth row down.
+        let seen = StdRc::new(Cell::new(Rect::new(0.0, 0.0, 0.0, 0.0)));
+        let mut tree = light_tree();
+        let mut menu = MenuList::new().max_visible_items(4);
+        for i in 0..19 {
+            menu = menu.item(MenuItem::new(lit!(format!("Entry {i}"))));
+        }
+        // The last row is the probe, so `End` lands on it.
+        menu = menu.item(ProbeRow { seen: seen.clone() });
+        let menu_id = tree.add(menu);
+        tree.layout(SizeProposal::with_width(300.0));
+        tree.focus(menu_id);
+
+        let panel = tree.bounds(menu_id);
+        let before = seen.get();
+        assert!(
+            before.y > panel.bottom(),
+            "precondition: the last row starts below the capped panel \
+             (row y={}, panel bottom={})",
+            before.y,
+            panel.bottom()
+        );
+
+        tree.press_key(Key::End, Modifiers::NONE);
+        // The reveal is queued from the handler and applied by the enclosing
+        // ScrollArea; bounds only move on the next layout pass.
+        tree.layout(SizeProposal::with_width(300.0));
+
+        let after = seen.get();
+        assert!(
+            after.y >= panel.y - 0.5 && after.bottom() <= panel.bottom() + 0.5,
+            "End must scroll the last row into the panel, got {}..{} for a panel of {}..{}",
+            after.y,
+            after.bottom(),
+            panel.y,
+            panel.bottom()
         );
     }
 }

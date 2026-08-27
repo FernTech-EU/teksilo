@@ -1416,6 +1416,19 @@ impl<W: Widget + 'static> Widget for WidgetWithHandlers<W> {
         self.widget.as_any()
     }
 
+    /// Mutable counterpart of [`as_any`](Widget::as_any), forwarded for the
+    /// same reason it is.
+    ///
+    /// A composing container that reads a child's concrete type must see the
+    /// same widget whether or not a builder method wrapped it. `MenuList` reads
+    /// a `MenuItem` this way for its mnemonic, its type-ahead label, its radio
+    /// group and its safe-triangle state; without this forward,
+    /// `MenuItem::new(..).context_menu(..)` silently stops being a `MenuItem`
+    /// to its parent — no error, just a row that lost all four.
+    fn as_any_mut(&mut self) -> Option<&mut dyn std::any::Any> {
+        self.widget.as_any_mut()
+    }
+
     fn clips_children(&self) -> bool {
         self.handler_set
             .clips_children
@@ -1962,5 +1975,56 @@ mod tests {
         tree.layout(teksilo_canvas::SizeProposal::exact(200.0, 100.0));
 
         assert_eq!(tree.children(root).len(), 1);
+    }
+
+    /// A widget that exposes both downcast hooks, like every widget a
+    /// composing container reads its child's concrete type through.
+    #[derive(Debug)]
+    struct Reflective {
+        marker: u32,
+    }
+
+    impl Widget for Reflective {
+        fn layout_response(
+            &self,
+            proposal: teksilo_canvas::SizeProposal,
+            _ctx: &crate::widget::LayoutContext,
+        ) -> crate::widget::LayoutResponse {
+            proposal.resolve(0.0, 0.0).into()
+        }
+
+        fn as_any(&self) -> Option<&dyn std::any::Any> {
+            Some(self)
+        }
+
+        fn as_any_mut(&mut self) -> Option<&mut dyn std::any::Any> {
+            Some(self)
+        }
+    }
+
+    /// Decorating a widget must not hide its concrete type from a parent that
+    /// reads it. `as_any` was already forwarded; `as_any_mut` was not, so a
+    /// container reading a child through the mutable hook (`MenuList` does, for
+    /// mnemonics, the type-ahead label and radio grouping) silently saw nothing
+    /// the moment any builder method was called on that child.
+    #[test]
+    fn both_downcast_hooks_see_through_the_handler_wrapper() {
+        let mut wrapped = Reflective { marker: 7 }.focusable(true);
+
+        let seen = wrapped
+            .as_any()
+            .and_then(|a| a.downcast_ref::<Reflective>())
+            .map(|r| r.marker);
+        assert_eq!(seen, Some(7), "as_any must forward through the wrapper");
+
+        let seen_mut = wrapped
+            .as_any_mut()
+            .and_then(|a| a.downcast_mut::<Reflective>())
+            .map(|r| r.marker);
+        assert_eq!(
+            seen_mut,
+            Some(7),
+            "as_any_mut must forward through the wrapper too"
+        );
     }
 }
