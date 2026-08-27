@@ -147,6 +147,17 @@ impl I18nManager {
 
     /// Resolve the initial locale:
     /// `user_locale` → OS auto-detect (with partial matching) → fallback.
+    ///
+    /// The OS step walks the writer's **whole** preferred-language chain in
+    /// order, not just its head, and offers each entry an exact match, then the
+    /// same language and script in any region (`fr-CA` reaches a supported
+    /// `fr-FR`, `en-GB` reaches `en-US`), then the same language with a script
+    /// named on only one side — all three before the next entry is tried at all.
+    /// Per-entry rather than exact-passes-first on purpose: a chain of
+    /// `["fr-CA", "en-US"]` means "French, and English if you must", so the near
+    /// miss on the first entry must beat the exact hit on the second.
+    ///
+    /// See `docs/i18n.md` for the full precedence table.
     pub fn resolve_initial_locale(cfg: &I18nConfig) -> LanguageIdentifier {
         if let Some(user) = &cfg.user_locale
             && cfg.supported_locales.contains(user)
@@ -155,19 +166,10 @@ impl I18nManager {
         }
 
         if cfg.auto_detect_os
-            && let Some(os_str) = sys_locale::get_locale()
-            && let Ok(parsed) = os_str.parse::<LanguageIdentifier>()
+            && let Some(matched) =
+                first_supported(&cfg.supported_locales, sys_locale::get_locales())
         {
-            if cfg.supported_locales.contains(&parsed) {
-                return parsed;
-            }
-            if let Some(matched) = cfg
-                .supported_locales
-                .iter()
-                .find(|s| s.matches(&parsed, true, false))
-            {
-                return matched.clone();
-            }
+            return matched;
         }
 
         cfg.fallback_locale.clone()
@@ -311,6 +313,60 @@ impl I18nManager {
         eprintln!("teksilo-i18n: missing key `{key}` in widget bundles");
         key.to_string()
     }
+}
+
+/// Walk a preferred-language chain in order and return the first entry any
+/// supported locale can serve, per [`best_supported_match`].
+///
+/// Unparseable tags are skipped rather than aborting the walk — an OS is free to
+/// report something exotic ahead of something ordinary.
+fn first_supported(
+    supported: &[LanguageIdentifier],
+    chain: impl IntoIterator<Item = String>,
+) -> Option<LanguageIdentifier> {
+    chain.into_iter().find_map(|tag| {
+        let parsed = tag.parse::<LanguageIdentifier>().ok()?;
+        best_supported_match(supported, &parsed)
+    })
+}
+
+/// The entry of `supported` that best serves a writer who asked for `wanted`,
+/// or `None` when no entry speaks the language at all.
+///
+/// Three tiers, narrowest first:
+///
+/// 1. **exact** — every subtag agrees;
+/// 2. **same language and script, any region** — `fr-CA` and a bare `fr` both
+///    reach a supported `fr-FR`, `en-GB` reaches `en-US`;
+/// 3. **same language, script named on only one side** — `zh-Hans` reaches a
+///    supported `zh-Hans-CN`; a script named on *both* sides and disagreeing is
+///    never bridged, so `zh-Hans` can not land on `zh-Hant-TW`.
+///
+/// ⚠ [`LanguageIdentifier::matches`] cannot express tier 2, which is why this
+/// function exists rather than delegating. Its `as_range` flags wildcard only
+/// the subtags the range side leaves *unset*, and every entry of a real
+/// `supported_locales` list is fully qualified — so the
+/// `supported.matches(&wanted, true, false)` call that used to stand in for
+/// "partial matching" could only ever return what the exact comparison one line
+/// above it had already returned. It never fired once: a French Windows account
+/// reporting `fr` or `fr-CA` fell all the way through to `fallback_locale`, and
+/// the `en-GB` → `en-US` example the documentation offered was simply false.
+fn best_supported_match(
+    supported: &[LanguageIdentifier],
+    wanted: &LanguageIdentifier,
+) -> Option<LanguageIdentifier> {
+    if supported.contains(wanted) {
+        return Some(wanted.clone());
+    }
+    supported
+        .iter()
+        .find(|s| s.language == wanted.language && s.script == wanted.script)
+        .or_else(|| {
+            supported.iter().find(|s| {
+                s.language == wanted.language && (s.script.is_none() || wanted.script.is_none())
+            })
+        })
+        .cloned()
 }
 
 /// Errors returned by `I18nManager::reload_from_path`. The watcher keeps
@@ -547,6 +603,107 @@ mod tests {
             .auto_detect_os_locale(false)
             .fallback_locale(lid("fr-FR"));
         assert_eq!(I18nManager::resolve_initial_locale(&cfg), lid("fr-FR"));
+    }
+
+    /// Tier 1 of [`best_supported_match`]: an exact tag comes back untouched.
+    #[test]
+    fn os_match_prefers_an_exact_tag() {
+        let sup = [lid("en-US"), lid("fr-FR")];
+        assert_eq!(
+            best_supported_match(&sup, &lid("fr-FR")),
+            Some(lid("fr-FR"))
+        );
+    }
+
+    /// Tier 2, and the bug this whole function was written for: a French Windows
+    /// account reports `fr`, `fr-CA`, `fr-BE` or `fr-CH` at least as often as it
+    /// reports `fr-FR`, and every one of them must reach the French bundle. The
+    /// `LanguageIdentifier::matches` call that stood here before answered `None`
+    /// to all four, so the app came up in English.
+    #[test]
+    fn os_match_tolerates_the_region() {
+        let sup = [lid("en-US"), lid("fr-FR")];
+        for os in ["fr", "fr-CA", "fr-BE", "fr-CH"] {
+            assert_eq!(
+                best_supported_match(&sup, &lid(os)),
+                Some(lid("fr-FR")),
+                "{os} must reach the supported French bundle"
+            );
+        }
+        // The example `docs/i18n.md` has always promised, and which used to fail.
+        assert_eq!(
+            best_supported_match(&sup, &lid("en-GB")),
+            Some(lid("en-US"))
+        );
+    }
+
+    /// Region tolerance stops at the language: a locale nothing supports gets
+    /// `None` and the caller falls back, rather than being handed a stranger.
+    #[test]
+    fn os_match_refuses_another_language() {
+        let sup = [lid("en-US"), lid("fr-FR")];
+        assert_eq!(best_supported_match(&sup, &lid("de-DE")), None);
+        assert_eq!(best_supported_match(&sup, &lid("de")), None);
+    }
+
+    /// Script is authoritative where it is named on both sides: simplified and
+    /// traditional Chinese are not substitutes for one another, however tolerant
+    /// the region rule is. Tier 3 bridges only a script named on one side.
+    #[test]
+    fn os_match_never_crosses_a_named_script() {
+        let sup = [lid("zh-Hant-TW"), lid("zh-Hans-CN"), lid("en-US")];
+        assert_eq!(
+            best_supported_match(&sup, &lid("zh-Hans")),
+            Some(lid("zh-Hans-CN"))
+        );
+        assert_eq!(
+            best_supported_match(&sup, &lid("zh-Hans-SG")),
+            Some(lid("zh-Hans-CN"))
+        );
+        assert_eq!(
+            best_supported_match(&sup, &lid("zh-Hant")),
+            Some(lid("zh-Hant-TW"))
+        );
+        // No script asked for: the application's own declared order decides.
+        assert_eq!(
+            best_supported_match(&sup, &lid("zh")),
+            Some(lid("zh-Hant-TW"))
+        );
+    }
+
+    /// The whole preferred-language chain is consulted, not just its head — an
+    /// OS whose first choice the app has no strings for still gets its second.
+    #[test]
+    fn os_chain_is_walked_past_an_unsupported_head() {
+        let sup = [lid("en-US"), lid("fr-FR")];
+        let chain = ["de-DE".to_string(), "fr-FR".to_string()];
+        assert_eq!(first_supported(&sup, chain), Some(lid("fr-FR")));
+    }
+
+    /// Each entry is offered exact-then-tolerant before the next is tried at
+    /// all. `["fr-CA", "en-US"]` means "French, and English if you must", so the
+    /// near miss on the first entry must beat the exact hit on the second.
+    #[test]
+    fn os_chain_prefers_a_near_miss_on_an_earlier_entry() {
+        let sup = [lid("en-US"), lid("fr-FR")];
+        let chain = ["fr-CA".to_string(), "en-US".to_string()];
+        assert_eq!(first_supported(&sup, chain), Some(lid("fr-FR")));
+    }
+
+    /// A tag the OS reports that does not parse is stepped over, not fatal.
+    #[test]
+    fn os_chain_skips_an_unparseable_tag() {
+        let sup = [lid("en-US"), lid("fr-FR")];
+        let chain = ["!!not-a-tag!!".to_string(), "fr-FR".to_string()];
+        assert_eq!(first_supported(&sup, chain), Some(lid("fr-FR")));
+    }
+
+    /// Nothing in the chain speaks a supported language: the caller falls back.
+    #[test]
+    fn os_chain_reports_nothing_when_no_entry_is_supported() {
+        let sup = [lid("en-US"), lid("fr-FR")];
+        let chain = ["de-DE".to_string(), "ja-JP".to_string()];
+        assert_eq!(first_supported(&sup, chain), None);
     }
 
     #[test]
