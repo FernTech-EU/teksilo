@@ -16,6 +16,15 @@
 //! [`session_id`](FindSession::session_id) in its mask (the default `all()` already shows it)
 //! and calling `select_range` / `reveal_range` on the current match.
 //!
+//! ## A document with matches and no current one
+//!
+//! [`set_current`](FindSession::set_current) takes an `Option`, and the `None` is not a
+//! convenience: a find that spans **several** documents — a page of editors, one per
+//! scene — has exactly one current match across the whole page, so every document except
+//! the one the reader is standing in holds matches that are all "other". Without that
+//! state each document would style one of its own matches as current, and a reader
+//! walking a fifty-scene chapter would see fifty current matches at once.
+//!
 //! ## Staleness on edit
 //!
 //! Matches are **absolute char offsets**, frozen at [`set_query`](FindSession::set_query). An
@@ -43,8 +52,12 @@ pub struct FindSession {
     doc: TextDocument,
     session: SessionId,
     matches: Vec<FindMatch>,
-    /// Index into `matches` of the current match. Meaningless when `matches` is empty.
-    current: usize,
+    /// Index into `matches` of the current match — the one the reader is standing on.
+    ///
+    /// `None` when there is no such match: either nothing matched, or this document is
+    /// one of several being searched and the reader is standing in another of them. See
+    /// the module note.
+    current: Option<usize>,
     current_format: HighlightFormat,
     other_format: HighlightFormat,
     /// The last query + options, kept so [`refresh_if_stale`](Self::refresh_if_stale) can
@@ -95,7 +108,7 @@ impl FindSession {
             doc: doc.clone(),
             session,
             matches: Vec::new(),
-            current: 0,
+            current: None,
             current_format,
             other_format,
             query: String::new(),
@@ -117,8 +130,25 @@ impl FindSession {
         self.query = query.to_string();
         self.options = options.clone();
         self.rerun();
-        self.current = 0;
+        self.current = (!self.matches.is_empty()).then_some(0);
         self.apply();
+    }
+
+    /// Say which of this document's matches the reader is standing on, or `None` for
+    /// "none of them" — the state a find spanning several documents needs for every
+    /// document but the one holding the cursor. Returns the new current match.
+    ///
+    /// An index past the end is clamped to the last match, and any index at all on an
+    /// empty match set is `None`: a caller stepping into a document it has just re-run
+    /// cannot be asked to know how many matches it turned out to have.
+    pub fn set_current(&mut self, index: Option<usize>) -> Option<FindMatch> {
+        self.current = match index {
+            Some(_) if self.matches.is_empty() => None,
+            Some(i) => Some(i.min(self.matches.len() - 1)),
+            None => None,
+        };
+        self.apply();
+        self.current_match()
     }
 
     /// Re-derive the matches for the stored query **if** an edit has staled them since the last
@@ -126,14 +156,17 @@ impl FindSession {
     /// call every frame: a no-op when nothing has changed.
     ///
     /// The current-match index is clamped, not reset — an edit should not throw away where the
-    /// writer was in the match list, only re-locate the matches.
+    /// writer was in the match list, only re-locate the matches. A document that had no
+    /// current match still has none: the reader is standing somewhere else.
     pub fn refresh_if_stale(&mut self) -> bool {
         if !self.dirty.swap(false, Ordering::Relaxed) {
             return false;
         }
         self.rerun();
-        if self.current >= self.matches.len() {
-            self.current = self.matches.len().saturating_sub(1);
+        if let Some(i) = self.current
+            && i >= self.matches.len()
+        {
+            self.current = self.matches.len().checked_sub(1);
         }
         self.apply();
         true
@@ -159,33 +192,42 @@ impl FindSession {
         self.matches.len()
     }
 
-    /// The current match's 0-based index (`0` when there are no matches).
+    /// The current match's 0-based index (`0` when the reader is not standing on one).
     pub fn current_index(&self) -> usize {
-        self.current
+        self.current.unwrap_or(0)
     }
 
-    /// The current match, if any.
+    /// The current match, if the reader is standing on one of this document's.
     pub fn current_match(&self) -> Option<FindMatch> {
-        self.matches.get(self.current).cloned()
+        self.matches.get(self.current?).cloned()
     }
 
     /// Advance to the next match, wrapping past the end, and return it. `None` if there are no
-    /// matches.
+    /// matches. From "no current match" it lands on the **first** — which is what stepping
+    /// into this document from the one above it means.
     pub fn next_match(&mut self) -> Option<FindMatch> {
         if self.matches.is_empty() {
             return None;
         }
-        self.current = (self.current + 1) % self.matches.len();
+        self.current = Some(match self.current {
+            Some(i) => (i + 1) % self.matches.len(),
+            None => 0,
+        });
         self.apply();
         self.current_match()
     }
 
-    /// Step to the previous match, wrapping past the start, and return it.
+    /// Step to the previous match, wrapping past the start, and return it. From "no current
+    /// match" it lands on the **last**, the mirror of [`next_match`](Self::next_match):
+    /// stepping backwards into a document arrives at its end.
     pub fn prev_match(&mut self) -> Option<FindMatch> {
         if self.matches.is_empty() {
             return None;
         }
-        self.current = (self.current + self.matches.len() - 1) % self.matches.len();
+        self.current = Some(match self.current {
+            Some(i) => (i + self.matches.len() - 1) % self.matches.len(),
+            None => self.matches.len() - 1,
+        });
         self.apply();
         self.current_match()
     }
@@ -194,7 +236,7 @@ impl FindSession {
     pub fn clear(&mut self) {
         self.query.clear();
         self.matches.clear();
-        self.current = 0;
+        self.current = None;
         self.dirty.store(false, Ordering::Relaxed);
         self.apply();
     }
@@ -205,7 +247,7 @@ impl FindSession {
     fn apply(&self) {
         let mut ranges: Vec<RangeHighlight> = Vec::with_capacity(self.matches.len());
         for (i, m) in self.matches.iter().enumerate() {
-            if i == self.current {
+            if Some(i) == self.current {
                 continue;
             }
             ranges.push(RangeHighlight {
@@ -214,7 +256,7 @@ impl FindSession {
                 format: self.other_format.clone(),
             });
         }
-        if let Some(cur) = self.matches.get(self.current) {
+        if let Some(cur) = self.current.and_then(|i| self.matches.get(i)) {
             ranges.push(RangeHighlight {
                 start: cur.position,
                 length: cur.length,
@@ -363,6 +405,81 @@ mod tests {
         assert!(fs.refresh_if_stale());
         assert_eq!(fs.match_count(), 1);
         assert_eq!(fs.current_index(), 0, "clamped to the one remaining match");
+    }
+
+    /// **A document nobody is standing in still shows its matches** — all of them as
+    /// "other", none as current. This is what a find spanning a page of editors needs:
+    /// one current match across the whole page, not one per document.
+    #[test]
+    fn clearing_the_current_match_leaves_every_match_an_other() {
+        let d = doc("elena and Elena and ELENA");
+        let mut fs = FindSession::new(&d, bg(CURRENT), bg(OTHER));
+        fs.set_query("elena", &FindOptions::default());
+        assert!(fs.current_match().is_some(), "set_query lands on the first");
+
+        assert!(
+            fs.set_current(None).is_none(),
+            "no current match to report back"
+        );
+        let spans = paint_spans(&d);
+        assert_eq!(spans.len(), 3, "all three still highlighted");
+        assert!(
+            spans.iter().all(|s| s.background_color == Some(OTHER)),
+            "and every one of them as an `other`"
+        );
+    }
+
+    /// Stepping into a document from the one above lands on its **first** match; stepping
+    /// in backwards lands on its **last**. That is the whole of how a multi-document walk
+    /// crosses a boundary, so it is asserted here rather than in the caller.
+    #[test]
+    fn stepping_into_a_document_with_no_current_match_enters_from_the_right_end() {
+        let d = doc("a x a x a");
+        let mut fs = FindSession::new(&d, bg(CURRENT), bg(OTHER));
+        fs.set_query("a", &FindOptions::default());
+
+        fs.set_current(None);
+        assert_eq!(fs.next_match().unwrap().position, 0, "forwards: the first");
+
+        fs.set_current(None);
+        assert_eq!(fs.prev_match().unwrap().position, 8, "backwards: the last");
+    }
+
+    /// `set_current` is handed an index by a caller that has not counted this document's
+    /// matches — walking backwards into it asks for "the last one" as a number it guessed.
+    /// Out of range clamps; an empty document answers `None` rather than panicking.
+    #[test]
+    fn setting_a_current_match_out_of_range_clamps_instead_of_panicking() {
+        let d = doc("a x a");
+        let mut fs = FindSession::new(&d, bg(CURRENT), bg(OTHER));
+        fs.set_query("a", &FindOptions::default());
+        assert_eq!(
+            fs.set_current(Some(99)).unwrap().position,
+            4,
+            "the last one"
+        );
+
+        fs.set_query("zzz", &FindOptions::default());
+        assert!(fs.set_current(Some(0)).is_none(), "nothing to stand on");
+        assert_eq!(fs.current_index(), 0, "and the index reads as zero");
+    }
+
+    /// An edit that removes the matches under a document nobody is standing in must not
+    /// hand it a current match on the way past — `refresh_if_stale` clamps `Some`, it does
+    /// not invent one.
+    #[test]
+    fn a_refresh_does_not_give_a_currentless_document_a_current_match() {
+        let d = doc("a a a");
+        let mut fs = FindSession::new(&d, bg(CURRENT), bg(OTHER));
+        fs.set_query("a", &FindOptions::default());
+        fs.set_current(None);
+
+        d.set_plain_text("a").unwrap();
+        assert!(fs.refresh_if_stale());
+        assert!(
+            fs.current_match().is_none(),
+            "the reader is still standing somewhere else"
+        );
     }
 
     #[test]

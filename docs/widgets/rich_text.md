@@ -32,7 +32,7 @@ let editor = RichTextEditor::editor(doc)
 
 ## Builder methods at a glance
 
-`read_only`, `editor`, `style`, `content_padding`, `content_padding_symmetric`, `content_padding_each`, `content_padding_top`, `content_padding_right`, `content_padding_bottom`, `content_padding_left`, `wrap_mode`, `show_highlights`, `annotation_spans`, `set_highlight_mask`, `typography_defaults`, `background`, `selection_color`, `caret_color`, `text_color`, `v_scroll_policy`, `h_scroll_policy`, `window_to_clip`, `scroll_policy`, `follow_caret_in_page`, `typewriter`, `overscroll_behavior`, `min_lines`, `max_lines`, `follow_text_scale`, `font_size_scale`, `context_menu`, `default_context_menu`, `font_registrar`, `on_change`, `document_version`, `cursor_position`, `cursor_anchor`, `is_composing`, `cursor_position_signal`, `cursor_anchor_signal`, `has_selection`, `can_undo`, `can_redo`, `caret_char_format`, `scroll_y`, `scroll_x`, `context_target_at`, `selected_text`, `select_all`, `deselect`, `insert_text`, `insert_html`, `insert_djot`, `insert_block`, `insert_image`, `delete_selection`, `select_word`, `select_line`, `set_caret_position`, `focused_signal`, `select_range`, `reveal_range`, `set_bold`, `set_italic`, `set_underline`, `set_strikethrough`, `set_font_size`, `set_font_family`, `toggle_bold`, `toggle_italic`, `toggle_underline`, `toggle_strikethrough`, `set_superscript`, `set_subscript`, `set_vertical_alignment`, `get_vertical_alignment`, `is_superscript`, `is_subscript`, `toggle_superscript`, `toggle_subscript`, `apply_block_format`, `apply_text_format`, `set_alignment`, `clear_direction`, `set_direction`, `set_heading_level`, `insert_list`, `create_list`, `indent`, `outdent`, `remove_from_list`, `is_in_blockquote`, `selection_spans_multiple_frames`, `toggle_blockquote`, `increase_blockquote_depth`, `decrease_blockquote_depth`, `insert_table`, `remove_current_table`, `insert_row_above`, `insert_row_below`, `insert_column_before`, `insert_column_after`, `remove_current_row`, `remove_current_column`, `is_in_table`, `is_bold`, `is_italic`, `is_underline`, `is_strikethrough`, `get_heading_level`, `get_alignment`, `get_direction`, `undo`, `redo`, `begin_edit_block`, `end_edit_block`, `edit_block`, `set_default_language`, `default_language`, `handle`, `copy`, `cut`, `paste`, `paste_unformatted`, `can_paste`, `set_font_size_scale`, `get_font_size_scale`, `set_typography_defaults`, `get_typography_defaults`, `set_typewriter`, `get_typewriter`, `set_caret_highlight`, `get_caret_highlight`, `caret_window_rect`, `format_version`, `document_loaded_count`, `on_link_activated`, `on_image_missing`, `on_files_dropped`, `on_image_resized`, `on_image_activated`
+`read_only`, `editor`, `style`, `content_padding`, `content_padding_symmetric`, `content_padding_each`, `content_padding_top`, `content_padding_right`, `content_padding_bottom`, `content_padding_left`, `wrap_mode`, `show_highlights`, `annotation_spans`, `set_highlight_mask`, `typography_defaults`, `background`, `selection_color`, `caret_color`, `text_color`, `v_scroll_policy`, `h_scroll_policy`, `estimate_height_before_layout`, `window_to_clip`, `scroll_policy`, `follow_caret_in_page`, `typewriter`, `overscroll_behavior`, `min_lines`, `max_lines`, `follow_text_scale`, `font_size_scale`, `context_menu`, `default_context_menu`, `font_registrar`, `on_change`, `on_text_inserted`, `document_version`, `cursor_position`, `cursor_anchor`, `is_composing`, `cursor_position_signal`, `cursor_anchor_signal`, `has_selection`, `can_undo`, `can_redo`, `caret_char_format`, `scroll_y`, `scroll_x`, `context_target_at`, `selected_text`, `select_all`, `deselect`, `insert_text`, `insert_html`, `insert_djot`, `insert_block`, `insert_image`, `delete_selection`, `select_word`, `select_line`, `set_caret_position`, `focused_signal`, `select_range`, `reveal_range`, `set_bold`, `set_italic`, `set_underline`, `set_strikethrough`, `set_font_size`, `set_font_family`, `toggle_bold`, `toggle_italic`, `toggle_underline`, `toggle_strikethrough`, `set_superscript`, `set_subscript`, `set_vertical_alignment`, `get_vertical_alignment`, `is_superscript`, `is_subscript`, `toggle_superscript`, `toggle_subscript`, `apply_block_format`, `apply_text_format`, `set_alignment`, `clear_direction`, `set_direction`, `set_heading_level`, `insert_list`, `create_list`, `indent`, `outdent`, `remove_from_list`, `is_in_blockquote`, `selection_spans_multiple_frames`, `toggle_blockquote`, `increase_blockquote_depth`, `decrease_blockquote_depth`, `insert_table`, `remove_current_table`, `insert_row_above`, `insert_row_below`, `insert_column_before`, `insert_column_after`, `remove_current_row`, `remove_current_column`, `is_in_table`, `is_bold`, `is_italic`, `set_link`, `clear_link`, `link_at_caret`, `is_link`, `is_underline`, `is_strikethrough`, `get_heading_level`, `get_alignment`, `get_direction`, `undo`, `redo`, `begin_edit_block`, `end_edit_block`, `edit_block`, `set_default_language`, `default_language`, `handle`, `copy`, `cut`, `paste`, `paste_unformatted`, `can_paste`, `set_font_size_scale`, `get_font_size_scale`, `set_typography_defaults`, `get_typography_defaults`, `set_typewriter`, `get_typewriter`, `set_command_filter`, `command_filter`, `set_caret_highlight`, `get_caret_highlight`, `caret_window_rect`, `format_version`, `document_loaded_count`, `on_link_activated`, `on_image_missing`, `on_files_dropped`, `on_image_resized`, `on_image_activated`
 
 ## API reference
 
@@ -51,6 +51,34 @@ pub enum ScrollPolicy { /* variants */ }
 - **`Auto`** — Show the scroll bar only when content overflows the visible area (default).
 - **`AlwaysOn`** — Always show the scroll bar, reserving gutter space even when content fits.
 - **`AlwaysOff`** — Never show the scroll bar; useful when embedding the editor inside an outer `ScrollArea` or in headless tests.
+
+## `pub enum EditSource`
+
+How a piece of text reached the document — the **channel**, not the author.
+
+Deliberately framework-generic, and deliberately small. These are the routes
+a toolkit can actually observe: which input path the characters came down.
+What that *means* is the application's to decide, and every application will
+decide differently — a writing tool cares that dictation is not typing, a
+code editor cares that a snippet is not either, and a form cares about none
+of it. Teksilo says what it saw; it does not interpret.
+
+⚠ **Not evidence of who wrote anything.** Text typed one character at a time
+was typed one character at a time, and that is the entire claim. Anything
+further — who, or whether a person at all — is an inference this cannot make
+and no consumer of it should pretend to.
+
+```rust
+pub enum EditSource { /* variants */ }
+```
+
+### Variants
+
+- **`Keyboard`** — Typed, one key at a time.
+- **`Ime`** — The settled result of an IME composition — CJK/Kana candidate selection, a dead-key accent. Separate from `Self::Keyboard` because the characters that land are not the keys that were pressed.
+- **`Clipboard`** — Pasted, as plain text or as HTML.
+- **`Accessibility`** — Arrived through an assistive technology: AccessKit's `SetValue` or `ReplaceSelectedText`, which is how dictation and a braille display write.  **Never folded into `Self::Keyboard`.** For some people this *is* typing, and a toolkit that reported it as something else — or as nothing — would be quietly erasing how they work.
+- **`Programmatic`** — Inserted by the application itself rather than by anything the person at the keyboard did: a template, a substitution, a completion.
 
 ## `pub struct RichTextEditor`
 
@@ -210,7 +238,7 @@ Set the vertical scroll-bar visibility policy.
 
 Set the horizontal scroll-bar visibility policy.
 
-#### `pub fn window_to_clip(self, on: bool) -> Self`
+#### `pub fn estimate_height_before_layout(self, on: bool) -> Self`
 
 Window paint-time culling to the accumulated ancestor clip rather than
 this editor's own bounds.
@@ -229,6 +257,30 @@ offset and doesn't need this — leave it **off** (the default). (The window
 is computed relative to the editor's own scroll offset as well, so enabling
 it on a self-scroller degrades to a correct-but-redundant cull rather than
 rendering the wrong rows.)
+Guess this editor's height from its text until something has laid it out.
+
+`content_height()` is `0` until `layout_full` has run, and that waits for the
+editor to have been through a frame on screen. The zero falls through to the
+`min_lines` floor, so an editor that has never been shown claims the same few
+lines whatever it holds.
+
+For an editor that **is** on screen that is invisible — it lays out on the
+first frame and the floor never shows. Turn this on for one that may not be:
+a row of a long column, most of which is below the fold. There the page's
+height is the sum of its rows' claims, so the scroll extent starts wrong by an
+order of magnitude and settles a row at a time as the reader arrives — and
+anything drawing that extent draws the settling.
+
+Off by default, deliberately. The estimate is crude by construction, and an
+editor that lays out immediately gains nothing from it while every consumer of
+its first-frame size pays for the guess — including the windowed-render path,
+whose culling is derived from the editor's own bounds.
+
+Never a floor: it goes through the same clamp a real height does, so
+`max_lines` still caps it and an over-estimate corrects downwards when the
+layout lands.
+
+#### `pub fn window_to_clip(self, on: bool) -> Self`
 
 #### `pub fn scroll_policy(mut self, policy: ScrollPolicy) -> Self`
 
@@ -417,6 +469,38 @@ For a reactive change *token* (which also bumps on loads/format-only
 changes, and on intermediate IME composition steps), observe
 `document_version` instead.
 
+#### `pub fn on_text_inserted(self, f: impl Fn(EditSource, usize) + 'static) -> Self`
+
+Install a callback fired **at each insertion**, with the
+`EditSource` the text came through and how many characters it was.
+
+Additive to `on_change` rather than a replacement for
+it, because they answer different questions. `on_change` fires once per
+drain batch and says *that* the document changed — the right shape for a
+dirty flag and a debounced autosave, and the wrong one for counting: a
+batch can carry a typed run and a paste, and after the fact nothing can
+tell them apart.
+
+**Reported where the text is, not derived afterwards.** Every site below
+holds the literal `&str` about to be inserted, so the count is what was
+actually written rather than a position delta — which is a different
+number the moment an insertion replaces a selection.
+
+Fires for text arriving through:
+
+- the keyboard, once per batched run of typed characters;
+- an IME commit, once for the settled result and never for the
+  intermediate composition states;
+- a paste, of plain text or HTML;
+- an assistive technology, through AccessKit's `SetValue` and
+  `ReplaceSelectedText`.
+
+It does **not** fire for a programmatic `set_djot` / `set_markdown` /
+`set_html` load, for undo or redo, or for a format-only change: none of
+those is text arriving.
+
+Replaces any prior callback on this editor. Runs on the UI thread.
+
 #### `pub fn document_version(&self) -> Signal<u64>`
 
 Reactive counter that bumps on every document change (content edits,
@@ -591,13 +675,19 @@ highlight marks the range and a subsequent replace acts on it. Used to select a 
 match. (The non-collapsing two-call shape is the same one the AccessKit
 `SetTextSelection` handler uses.)
 
-#### `pub fn reveal_range( &self, ctx: &mut teksilo_core::widget::EventContext, start: usize, end: usize, )`
+#### `pub fn reveal_range( &self, ctx: &mut teksilo_core::widget::EventContext, start: usize, end: usize, ) -> bool`
 
 Scroll the character range ``start, end)` into view within the enclosing scroll area.
 
 Reveals an **arbitrary** offset range — the current search match — rather than the live
 caret the follow-into-view path tracks, and works whether or not the editor is focused.
-A no-op until the editor has a full layout.
+
+**Returns whether it could.** `false` means this editor has no layout to locate the
+range in — never laid out, or parked dormant in a tab that is not on screen — and
+nothing was requested. A caller holding several editors over one document (two split
+panes; a stream row and that row's own tab) must try the next rather than take the
+first as the answer: revealing through a dormant one silently does nothing, which
+reads as "the viewport does not follow".
 
 Under [`typewriter`` scrolling the range is *pinned* to
 the anchor rather than merely revealed, so a search walks matches to the
@@ -847,6 +937,32 @@ Whether the current selection / typing position is bold.
 
 Whether italic.
 
+#### `pub fn set_link(&self, href: &str)`
+
+Point the selection at `href`.
+
+Merges, so formatting already on the range is kept. A collapsed
+selection formats nothing (as everywhere else), so a caller linking
+existing text should select it first — see
+`link_at_caret` for the range of a link already
+there.
+
+#### `pub fn clear_link(&self)`
+
+Take the link off the selection, leaving its text.
+
+#### `pub fn link_at_caret(&self) -> Option<LinkExtent>`
+
+The link the caret is in, and how far it reaches.
+
+Coalesced across the runs an inner mark splits a link into, so the
+range covers the whole link rather than the piece under the caret.
+`None` when the caret is not on a link.
+
+#### `pub fn is_link(&self) -> bool`
+
+Whether the caret / selection sits on a link.
+
 #### `pub fn is_underline(&self) -> bool`
 
 Whether underline.
@@ -996,6 +1112,26 @@ changes would jump the view under a reader who is not even typing.
 #### `pub fn get_typewriter(&self) -> Option<f32>`
 
 Current typewriter anchor (see `typewriter`).
+
+#### `pub fn set_command_filter(&self, filter: policy::CommandFilter)`
+
+Narrow (or restore) what the keyboard may do on this mounted editor.
+
+The other three policy dimensions — caret, accessibility role, clipboard
+surface — describe what *kind* of surface this is and are fixed at
+construction; only the command filter is a mode the host can change
+while the writer is looking at it. Swapping in
+`CommandFilter::ForwardOnly` gives a forward-only drafting mode;
+`CommandFilter::All` restores ordinary editing.
+
+Every gate reads the filter live — the keyboard dispatch, the default
+context menu, and drag-and-drop — so this takes effect on the next
+event without rebuilding the widget.
+
+#### `pub fn command_filter(&self) -> policy::CommandFilter`
+
+The filter currently in force (see
+`set_command_filter`).
 
 #### `pub fn set_caret_highlight(&self, highlight: Option<caret_highlight::CaretHighlight>)`
 
@@ -1229,6 +1365,23 @@ Reaching through `TextDocument::cursor`
 instead would mutate the document behind the widget's back, leaving the
 caret decoupled from the edit — use this.
 
+#### `pub fn replace_range_from(&self, start: usize, end: usize, text: &str, source: EditSource)`
+
+As `replace_range`, saying which channel the text
+came through for `on_text_inserted`.
+
+`replace_range` itself reports `EditSource::Programmatic`, which is
+what a handle-driven edit is by default: a toolbar, a menu command, a
+substitution the application made. **An application that knows better
+should say so here rather than let the default stand.** The distinction
+that matters most is an edit which merely puts back what the person
+typed — undoing an autocorrect, say. Those characters were typed, they
+are being typed again, and reporting them as the application's own work
+would credit the application with the writer's words.
+
+One call rather than an insert plus a separate report, so the two cannot
+drift apart at a call site that later grows a second early return.
+
 #### `pub fn insert_text(&self, text: &str)`
 
 Insert plain text at the caret, replacing any selection. The
@@ -1315,6 +1468,14 @@ them mixes two different moments in time and can invent — or miss — a select
 if the mirror lags. A caller deciding *"is there a selection, and over what"*
 wants one consistent answer.
 
+#### `pub fn selected_text(&self) -> String`
+
+The selected text, or an empty string when nothing is selected.
+
+O(selection), not O(document). Pairs with `selection`
+for a caller that needs the range *and* what is in it — a link dialog
+pre-filling its display name from what the writer highlighted, say.
+
 #### `pub fn range_rect(&self, start: usize, end: usize) -> Option<Rect>`
 
 The **window-space** rectangle enclosing the character range ``start, end)`.
@@ -1338,17 +1499,6 @@ The **window-space** caret rectangle at one offset — a zero-width
 `range_rect`, and the anchor point for a marker drawn at
 one end of a span (the triangle at a comment's tail).
 
-#### `pub fn document_version(&self) -> Signal<u64>`
-
-Reactive counter that bumps on every document change — the handle mirror of
-`RichTextEditor::document_version`.
-
-The change token a decoration drawn *outside* the editor binds, so it
-re-derives when the text moves under it. Without it such a widget has only
-the scroll metrics to go on, and those move on a reflow but not on an edit
-that leaves the height alone — which is most edits, and exactly the ones that
-shift the offsets a mark is anchored to.
-
 #### `pub fn range_content_rect(&self, start: usize, end: usize) -> Option<Rect>`
 
 The **content-space** rectangle enclosing ``start, end)` — y = 0 at the top
@@ -1369,6 +1519,17 @@ a viewport they are nowhere near.
 
 The **content-space** caret rectangle at one offset — a zero-width
 `range_content_rect`.
+
+#### `pub fn document_version(&self) -> Signal<u64>`
+
+Reactive counter that bumps on every document change — the handle mirror of
+`RichTextEditor::document_version`.
+
+The change token a decoration drawn *outside* the editor binds, so it
+re-derives when the text moves under it. Without it such a widget has only
+the scroll metrics to go on, and those move on a reflow but not on an edit
+that leaves the height alone — which is most edits, and exactly the ones that
+shift the offsets a mark is anchored to.
 
 #### `pub fn content_height(&self) -> Option<f32>`
 
@@ -1403,10 +1564,11 @@ is preserved). Call this at the top of a custom
 — and any caret-relative action — operates where the user clicked, exactly
 as the built-in menu and the single-line field do.
 
-#### `pub fn reveal_range( &self, ctx: &mut teksilo_core::widget::EventContext, start: usize, end: usize, )`
+#### `pub fn reveal_range( &self, ctx: &mut teksilo_core::widget::EventContext, start: usize, end: usize, ) -> bool`
 
-Scroll the character range `[start, end)` into view. A no-op until the
-editor has a full layout. See `RichTextEditor::reveal_range`.
+Scroll the character range `[start, end)` into view, reporting whether this editor
+could — it has a layout to locate the range in, and is on screen rather than parked
+dormant. See `RichTextEditor::reveal_range`.
 
 #### `pub fn focus(&self, ctx: &mut teksilo_core::widget::EventContext)`
 
@@ -1488,6 +1650,17 @@ keeps typography following one.
 
 Current typewriter anchor.
 
+#### `pub fn set_command_filter(&self, filter: policy::CommandFilter)`
+
+Narrow (or restore) what the keyboard may do — the `EditorHandle`
+counterpart of `RichTextEditor::set_command_filter`, for hosts that
+drive a drafting mode from a settings or session effect after the editor
+is mounted.
+
+#### `pub fn command_filter(&self) -> policy::CommandFilter`
+
+The filter currently in force on this editor.
+
 #### `pub fn set_caret_highlight(&self, highlight: Option<caret_highlight::CaretHighlight>)`
 
 Draw an ambient band behind the caret's sentence or paragraph — the `EditorHandle`
@@ -1533,6 +1706,32 @@ Whether the selection / typing position is bold.
 #### `pub fn is_italic(&self) -> bool`
 
 Whether italic.
+
+#### `pub fn set_link(&self, href: &str)`
+
+Point the selection at `href`.
+
+Merges, so formatting already on the range is kept. A collapsed
+selection formats nothing (as everywhere else), so a caller linking
+existing text should select it first — see
+`link_at_caret` for the range of a link already
+there.
+
+#### `pub fn clear_link(&self)`
+
+Take the link off the selection, leaving its text.
+
+#### `pub fn link_at_caret(&self) -> Option<LinkExtent>`
+
+The link the caret is in, and how far it reaches.
+
+Coalesced across the runs an inner mark splits a link into, so the
+range covers the whole link rather than the piece under the caret.
+`None` when the caret is not on a link.
+
+#### `pub fn is_link(&self) -> bool`
+
+Whether the caret / selection sits on a link.
 
 #### `pub fn is_underline(&self) -> bool`
 

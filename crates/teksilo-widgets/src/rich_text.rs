@@ -1101,7 +1101,13 @@ impl RichTextEditor {
     ///
     /// Reveals an **arbitrary** offset range — the current search match — rather than the live
     /// caret the follow-into-view path tracks, and works whether or not the editor is focused.
-    /// A no-op until the editor has a full layout.
+    ///
+    /// **Returns whether it could.** `false` means this editor has no layout to locate the
+    /// range in — never laid out, or parked dormant in a tab that is not on screen — and
+    /// nothing was requested. A caller holding several editors over one document (two split
+    /// panes; a stream row and that row's own tab) must try the next rather than take the
+    /// first as the answer: revealing through a dormant one silently does nothing, which
+    /// reads as "the viewport does not follow".
     ///
     /// Under [`typewriter`](Self::typewriter) scrolling the range is *pinned* to
     /// the anchor rather than merely revealed, so a search walks matches to the
@@ -1113,8 +1119,8 @@ impl RichTextEditor {
         ctx: &mut teksilo_core::widget::EventContext,
         start: usize,
         end: usize,
-    ) {
-        reveal_range_impl(&self.state, ctx, start, end);
+    ) -> bool {
+        reveal_range_impl(&self.state, ctx, start, end)
     }
 
     // --- Character-format commands ----------------------------------------
@@ -2546,15 +2552,57 @@ impl EditorHandle {
         mouse::reposition_caret_for_context_menu(&self.state, window_point);
     }
 
-    /// Scroll the character range `[start, end)` into view. A no-op until the
-    /// editor has a full layout. See [`RichTextEditor::reveal_range`].
+    /// Scroll the character range `[start, end)` into view, reporting whether this editor
+    /// could — it has a layout to locate the range in, and is on screen rather than parked
+    /// dormant. See [`RichTextEditor::reveal_range`].
+    ///
+    /// When it answers `false` because there is no layout yet, the coarser
+    /// [`reveal_widget`](Self::reveal_widget) is the way to get one.
     pub fn reveal_range(
         &self,
         ctx: &mut teksilo_core::widget::EventContext,
         start: usize,
         end: usize,
-    ) {
-        reveal_range_impl(&self.state, ctx, start, end);
+    ) -> bool {
+        reveal_range_impl(&self.state, ctx, start, end)
+    }
+
+    /// Scroll **the editor itself** into view — the coarse fallback for the one case
+    /// [`reveal_range`](Self::reveal_range) cannot serve at all. Reports whether this
+    /// editor could: it has been built, so the arena knows a widget to scroll to, and
+    /// it is on screen rather than parked dormant.
+    ///
+    /// A row of a stream that has never been painted has no full layout, so there is
+    /// no rect to locate an offset in and `reveal_range` answers `false` — for ever,
+    /// because the row only gets a layout when it is painted and it is only painted
+    /// when it comes on screen. That is a deadlock a range reveal has no way out of:
+    /// a match found in row 31 of a Book leaves the page exactly where it was, with
+    /// the counter cheerfully reading `1 of 40`.
+    ///
+    /// Revealing by *widget* breaks it, because the arena knows where row 31 is laid
+    /// out whether or not its text has been shaped. The row comes on screen, the next
+    /// paint gives it a layout, and a later `reveal_range` can then put the match
+    /// itself where the caller wants it. Coarser on purpose: this reveals the row,
+    /// not the offset inside it.
+    pub fn reveal_widget(&self, ctx: &mut teksilo_core::widget::EventContext) -> bool {
+        let id = {
+            let st = self.state.borrow();
+            // The same dormancy gate `reveal_range` applies, and for the same reason:
+            // a parked editor's bounds are still in the arena, so the walk would
+            // happily scroll a container nobody can see and answer `true` — and a
+            // caller told `true` stops looking for the editor that is on screen.
+            if st.activation.as_ref().is_some_and(|a| !a.get()) {
+                return false;
+            }
+            // `None` only before the editor's first build: nothing is mounted, so
+            // there is no widget for the arena to resolve bounds for.
+            match st.self_id {
+                Some(id) => id,
+                None => return false,
+            }
+        };
+        ctx.ensure_widget_visible(id);
+        true
     }
 
     /// Move keyboard focus onto the editor. Lets a control built *above* the
@@ -4421,6 +4469,12 @@ impl Widget for RichTextEditor {
         // awake just because it was built (TabWidget pre-mounts every
         // open tab).
         let activation = ctx.activation_signal(ctx.self_id());
+        // Stash it too: `reveal_range` has no other way to tell an on-screen
+        // editor from one parked dormant, because the engine's layout survives
+        // the parking. Taken from the signal rather than set by the dormancy
+        // effect below, which fires only on a *transition* — an editor built
+        // dormant (a TabWidget pre-mounts every open tab) never transitions.
+        self.state.borrow_mut().activation = Some(activation.clone());
         if activation.get() {
             ctx.request_frame();
         }
@@ -5058,20 +5112,46 @@ fn reveal_range_impl(
     ctx: &mut teksilo_core::widget::EventContext,
     start: usize,
     end: usize,
-) {
-    let (area, pin) = {
+) -> bool {
+    // **Named as the rect's owner**, so the scroll walk climbs the *editor's*
+    // ancestors and not the handler's. The two are the same widget when the editor
+    // reveals its own caret, and different every time something built beside it asks
+    // — a find banner's Next button, a mention counter's chevron. Those sit outside
+    // the scrolling page, so a walk from them leaves through the strip and never
+    // meets the scroll container: the match was selected, the counter moved, and the
+    // viewport stayed exactly where it was. `self_id` is `None` only before the
+    // editor's first build, and there is nothing laid out to reveal then anyway.
+    let (area, pin, owner) = {
         let st = state.borrow();
+        // **Dormant is "no layout to do it in"**, even though the engine still holds
+        // one: `has_full_layout` is set at the first full layout and never cleared, and
+        // parking an editor clears its focus, caret and band but not its layout. So the
+        // rect below resolves perfectly for a tab nobody can see, the ancestor walk
+        // finds a scroll container that is not on screen, and the answer `true` tells a
+        // caller holding several editors over one document to stop looking — while the
+        // visible one, never asked, stays exactly where it was.
+        if st.activation.as_ref().is_some_and(|a| !a.get()) {
+            return false;
+        }
         match self::keyboard::range_window_rect(&st, start, end) {
-            Some(a) => (a, st.typewriter),
-            None => return,
+            Some(a) => (a, st.typewriter, st.self_id),
+            None => return false,
         }
     };
-    match pin {
-        Some(fraction) => {
+    match (pin, owner) {
+        (Some(fraction), Some(owner)) => ctx.ensure_visible_aligned_from(
+            owner,
+            area,
+            fraction,
+            teksilo_core::event::ScrollMotion::Smooth,
+        ),
+        (Some(fraction), None) => {
             ctx.ensure_visible_aligned(area, fraction, teksilo_core::event::ScrollMotion::Smooth)
         }
-        None => ctx.ensure_visible(area),
+        (None, Some(owner)) => ctx.ensure_visible_from(owner, area),
+        (None, None) => ctx.ensure_visible(area),
     }
+    true
 }
 
 /// Set (or clear) an editor's ambient caret band. Shared by

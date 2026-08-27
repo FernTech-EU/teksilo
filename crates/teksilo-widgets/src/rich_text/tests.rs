@@ -9926,3 +9926,193 @@ mod invariant_fuzz {
         eprintln!("no violations across 8 seeds x 30 steps");
     }
 }
+
+// ---------------------------------------------------------------------------
+// reveal_range — the answer a caller holding several editors relies on.
+// ---------------------------------------------------------------------------
+
+/// Ask an editor to reveal `[0, 5)` through its handle, and report what it
+/// answered. `run_with_event_context` returns nothing, so the answer comes back
+/// through a cell.
+fn reveal_answer(tree: &mut WidgetTree, handle: &super::EditorHandle) -> bool {
+    use teksilo_core::window::NoopWindowOps;
+    let answer = Rc::new(Cell::new(false));
+    let sink = answer.clone();
+    tree.run_with_event_context(&mut NoopWindowOps, |ctx| {
+        sink.set(handle.reveal_range(ctx, 0, 5));
+    });
+    answer.get()
+}
+
+#[test]
+fn reveal_range_answers_false_for_a_dormant_editor() {
+    // `reveal_range` promises that `false` means nothing was requested, and a
+    // caller holding several editors over one document — two split panes, a
+    // stream row and that row's own tab — stops at the first `true`. A parked
+    // editor keeps the layout it had (`has_full_layout` is set once and never
+    // cleared; parking clears focus, caret and band and nothing else), so it
+    // used to locate the offset happily and answer `true` from behind a tab
+    // nobody can see. The match was selected, the counter moved, and the
+    // visible editor was never asked: "the viewport does not follow".
+    let doc = TextDocument::new();
+    doc.set_plain_text("Alpha Beta Gamma Delta Epsilon")
+        .unwrap();
+    let editor = RichTextEditor::editor(doc);
+    let handle = editor.handle();
+
+    let mut tree = WidgetTree::new();
+    let id = tree.add(editor);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    // The paint pass is what runs the full layout the reveal needs.
+    let _ = tree.render();
+
+    assert!(
+        reveal_answer(&mut tree, &handle),
+        "on screen and laid out, the editor must report that it revealed the \
+         range — without this the dormant assertion below could pass on an \
+         editor that simply never laid out"
+    );
+
+    tree.set_dormant(id);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+
+    assert!(
+        !reveal_answer(&mut tree, &handle),
+        "parked dormant, the editor must answer false: it still holds a layout, \
+         but nothing it scrolls is on screen, and a caller told `true` stops \
+         looking for the editor that is"
+    );
+
+    // And it must come back. A dormancy answer that never clears would strand
+    // every match in a tab the reader returns to.
+    tree.activate(id);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    let _ = tree.render();
+    assert!(
+        reveal_answer(&mut tree, &handle),
+        "a re-activated editor must reveal again"
+    );
+}
+
+/// Ask an editor to reveal *itself* through its handle, and report what it
+/// answered.
+fn reveal_widget_answer(tree: &mut WidgetTree, handle: &super::EditorHandle) -> bool {
+    use teksilo_core::window::NoopWindowOps;
+    let answer = Rc::new(Cell::new(false));
+    let sink = answer.clone();
+    tree.run_with_event_context(&mut NoopWindowOps, |ctx| {
+        sink.set(handle.reveal_widget(ctx));
+    });
+    answer.get()
+}
+
+#[test]
+fn reveal_widget_scrolls_a_row_that_has_never_been_painted() {
+    // The stream deadlock: a Book is one scrolling page of one editor per row, and a
+    // row below the fold is never painted, so its engine never runs a full layout.
+    // `reveal_range` needs that layout to locate the match, so it answers `false` —
+    // and it will answer `false` for ever, because the row is only painted once it is
+    // on screen and it only comes on screen if something scrolls to it. Ctrl+F found
+    // the match, the counter said "1 of 40", and the page did not move.
+    //
+    // `reveal_widget` is the way out: the arena knows where the row is laid out
+    // whether or not its text has been shaped.
+    use crate::ScrollArea;
+    use crate::primitives::{FixedSize, TextWidget, VStack};
+
+    let doc = TextDocument::new();
+    doc.set_plain_text("Alpha Beta Gamma Delta Epsilon")
+        .unwrap();
+    let editor = RichTextEditor::editor(doc);
+    let handle = editor.handle();
+
+    let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+    let editor_id = tree.add(editor);
+    // 2000 px of other rows above it, so the row starts far below a 150 px viewport.
+    let header = tree.add(
+        FixedSize::new()
+            .width(220.0)
+            .height(2000.0)
+            .child(TextWidget::new(lit!(""))),
+    );
+    let row = tree.add(
+        FixedSize::new()
+            .width(220.0)
+            .height(300.0)
+            .child_id(editor_id),
+    );
+    let content = tree.add(VStack::new().add_child(header).add_child(row));
+    let page = ScrollArea::from_id(content).smooth_scrolling(false);
+    let page_y = page.scroll_y_signal().clone();
+    let _page = tree.add(page);
+
+    let sz = SizeProposal::exact(220.0, 150.0);
+    tree.layout(sz);
+    // Deliberately no `render`: the paint pass is what runs the full layout, and the
+    // whole point of this row is that it has never had one.
+
+    assert!(
+        !reveal_answer(&mut tree, &handle),
+        "fixture sanity: an unpainted row must have no layout to reveal a range in — \
+         without this the assertion below would be testing nothing"
+    );
+    assert_eq!(
+        page_y.get(),
+        0.0,
+        "fixture sanity: the page must start at the top"
+    );
+
+    assert!(
+        reveal_widget_answer(&mut tree, &handle),
+        "a built, on-screen-eligible editor must accept a widget reveal even with no \
+         text layout — that is the only thing that can bring the row on screen"
+    );
+    tree.layout(sz);
+
+    assert!(
+        page_y.get() > 0.0,
+        "the page must have scrolled down to the row; still at {}",
+        page_y.get()
+    );
+}
+
+#[test]
+fn reveal_widget_refuses_from_a_dormant_editor_and_before_the_first_build() {
+    // The two answers a caller walking several editors over one document relies on.
+    // A parked tab's editor still has bounds in the arena, so an ungated widget
+    // reveal would scroll a container nobody can see and report success — and the
+    // caller, told the row was revealed, stops looking for the editor that is on
+    // screen. An editor that has never built has no widget at all.
+    let doc = TextDocument::new();
+    doc.set_plain_text("Alpha Beta Gamma").unwrap();
+    let editor = RichTextEditor::editor(doc);
+    let handle = editor.handle();
+
+    let mut tree = WidgetTree::new();
+    assert!(
+        !reveal_widget_answer(&mut tree, &handle),
+        "before its first build the editor is not mounted, so there is nothing to \
+         scroll to"
+    );
+
+    let id = tree.add(editor);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    assert!(
+        reveal_widget_answer(&mut tree, &handle),
+        "fixture sanity: built and active, the editor must accept"
+    );
+
+    tree.set_dormant(id);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    assert!(
+        !reveal_widget_answer(&mut tree, &handle),
+        "parked dormant, the editor must refuse: nothing it is inside is on screen"
+    );
+
+    tree.activate(id);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    assert!(
+        reveal_widget_answer(&mut tree, &handle),
+        "and it must come back when the tab does"
+    );
+}

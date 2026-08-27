@@ -44,6 +44,16 @@ pub(crate) struct ScrollRevealRequest {
     pub(crate) align: crate::event::ScrollAlign,
     /// Whether to jump or glide.
     pub(crate) motion: crate::event::ScrollMotion,
+    /// **Whose** ancestors to walk, when that is not the widget whose handler
+    /// queued this.
+    ///
+    /// `None` means the source widget, which is right whenever a widget reveals
+    /// something inside itself. It is wrong — silently — whenever the rect belongs
+    /// to a *different* widget: a find banner's Next button asking for a match in
+    /// the prose, a toolbar revealing a row in the list below it. Those walk the
+    /// button's ancestors, which do not include the scroll container the rect lives
+    /// in, so nothing scrolls and the reveal is a no-op no error reports.
+    pub(crate) from: Option<crate::widget_id::WidgetId>,
 }
 
 /// Context available during event handling.
@@ -1173,6 +1183,36 @@ impl<'ops> EventContext<'ops> {
             margin: 0.0,
             align: crate::event::ScrollAlign::Minimal,
             motion: crate::event::ScrollMotion::Instant,
+            from: None,
+        });
+    }
+
+    /// [`ensure_visible`](Self::ensure_visible), for a rect that belongs to
+    /// **another** widget.
+    ///
+    /// The framework walks `owner`'s ancestors rather than the handling widget's.
+    /// That distinction is the whole of it, and getting it wrong fails silently:
+    /// a find banner's Next button sits *beside* the scrolling page, not inside
+    /// it, so a reveal walked from the button climbs out through the banner and
+    /// never meets the scroll container the match is in. The match is selected,
+    /// the counter moves, and the viewport does not follow.
+    ///
+    /// The same reasoning [`ensure_widget_visible`](Self::ensure_widget_visible)
+    /// already records for the id-based form; this is its rect-based twin, for a
+    /// target that is an interior span rather than a mounted child.
+    ///
+    /// `rect` is in absolute tree (window) coordinates.
+    pub fn ensure_visible_from(
+        &mut self,
+        owner: crate::widget_id::WidgetId,
+        rect: teksilo_canvas::Rect,
+    ) {
+        self.scroll_into_view_requests.push(ScrollRevealRequest {
+            rect,
+            margin: 0.0,
+            align: crate::event::ScrollAlign::Minimal,
+            motion: crate::event::ScrollMotion::Instant,
+            from: Some(owner),
         });
     }
 
@@ -1187,6 +1227,7 @@ impl<'ops> EventContext<'ops> {
             margin: margin.max(0.0),
             align: crate::event::ScrollAlign::Minimal,
             motion: crate::event::ScrollMotion::Instant,
+            from: None,
         });
     }
 
@@ -1222,6 +1263,26 @@ impl<'ops> EventContext<'ops> {
             margin: 0.0,
             align: crate::event::ScrollAlign::Fraction(fraction.clamp(0.0, 1.0)),
             motion,
+            from: None,
+        });
+    }
+
+    /// [`ensure_visible_aligned`](Self::ensure_visible_aligned), for a rect that
+    /// belongs to **another** widget — see [`ensure_visible_from`](Self::ensure_visible_from)
+    /// for why the distinction exists and how it fails when it is missed.
+    pub fn ensure_visible_aligned_from(
+        &mut self,
+        owner: crate::widget_id::WidgetId,
+        rect: teksilo_canvas::Rect,
+        fraction: f32,
+        motion: crate::event::ScrollMotion,
+    ) {
+        self.scroll_into_view_requests.push(ScrollRevealRequest {
+            rect,
+            margin: 0.0,
+            align: crate::event::ScrollAlign::Fraction(fraction.clamp(0.0, 1.0)),
+            motion,
+            from: Some(owner),
         });
     }
 

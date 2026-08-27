@@ -901,6 +901,76 @@ mod tests {
     use crate::test_widgets::FillWidget;
     use crate::widget_builder::WidgetBuilder;
 
+    /// **A reveal walks the rect's owner's ancestors, not the asker's.**
+    ///
+    /// The default — walk from whoever handled the event — is right whenever a widget
+    /// reveals something inside itself, and silently wrong the moment the rect belongs
+    /// elsewhere. A find banner's Next button sits *beside* the scrolling page, so a walk
+    /// from the button climbs out through the banner and never meets the scroll container
+    /// the match is in: the match is selected, the counter moves, and the viewport does
+    /// not follow. Naming the owner is what fixes that, and this pins both halves.
+    #[test]
+    fn a_reveal_walks_the_ancestors_of_whoever_owns_the_rect() {
+        use crate::event::{EventResponse, ScrollAlign, ScrollMotion};
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        let asked = Rc::new(Cell::new(0usize));
+        let mut tree = WidgetTree::new();
+        // A clipping container that records every reveal it is asked for.
+        let viewport = {
+            let asked = asked.clone();
+            tree.add(
+                // `on_scroll` first: `clips_children` is also a `Widget` trait *method*,
+                // so calling it on the bare widget resolves to the getter.
+                FillWidget::new()
+                    .on_scroll(move |event, _ctx| {
+                        if matches!(event, WidgetEvent::ScrollIntoView { .. }) {
+                            asked.set(asked.get() + 1);
+                        }
+                        EventResponse::Ignored
+                    })
+                    .clips_children(true),
+            )
+        };
+        let inside = tree.add_child(viewport, FillWidget::new());
+        // The "button": a sibling of the viewport, not a descendant — the banner's shape.
+        let button = tree.add(FillWidget::new());
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+
+        // Far below the viewport, so a container that hears about it must scroll.
+        let target = Rect::new(0.0, 5_000.0, 10.0, 10.0);
+        let mut ops = crate::window::NoopWindowOps;
+
+        tree.scroll_rect_into_view(
+            button,
+            target,
+            0.0,
+            ScrollAlign::Minimal,
+            ScrollMotion::Instant,
+            &mut ops,
+        );
+        assert_eq!(
+            asked.get(),
+            0,
+            "walking from the asker never reaches a viewport it is not inside"
+        );
+
+        tree.scroll_rect_into_view(
+            inside,
+            target,
+            0.0,
+            ScrollAlign::Minimal,
+            ScrollMotion::Instant,
+            &mut ops,
+        );
+        assert_eq!(
+            asked.get(),
+            1,
+            "walking from the rect's owner reaches the viewport enclosing it"
+        );
+    }
+
     #[test]
     fn focus_widget() {
         let mut tree = WidgetTree::new();

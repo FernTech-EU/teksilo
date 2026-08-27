@@ -343,6 +343,20 @@ pub(crate) struct EditorState {
     /// exactly where a click would.
     pub self_id: Option<teksilo_core::widget_id::WidgetId>,
 
+    /// The node's activation signal, stashed on every build so code with no
+    /// context of its own can tell an on-screen editor from one parked dormant
+    /// in a tab that is not selected.
+    ///
+    /// Dormancy is **not** visible in the engine: `has_full_layout` is set once
+    /// and never cleared, so an editor that laid out and was then parked still
+    /// answers "I have a layout" and would happily locate an offset nobody can
+    /// see. `reveal_range` reads this to keep its promise that `false` means
+    /// nothing was requested — a caller holding several editors over one
+    /// document takes the first `true` as the answer, and a dormant one that
+    /// lies costs the reader the scroll. `None` only before the first build,
+    /// where there is no layout to reveal in anyway.
+    pub activation: Option<Signal<bool>>,
+
     /// Sticky preferred X for vertical navigation. Set
     /// the first time Up/Down/PageUp/PageDown is pressed, preserved
     /// across further vertical presses so the cursor keeps trying to
@@ -813,6 +827,7 @@ impl EditorState {
             window_active: true,
             focus_signal: Signal::new(false),
             self_id: None,
+            activation: None,
             event_queue,
             _event_subscription: subscription,
             image_cache: ImageCache::new(),

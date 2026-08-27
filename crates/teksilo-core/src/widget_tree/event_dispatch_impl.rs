@@ -1861,7 +1861,9 @@ impl WidgetTree {
         // owns revealing an interior rect inside its own viewport.
         for req in ctx.scroll_into_view_requests {
             self.scroll_rect_into_view(
-                source_widget,
+                // Whoever the rect belongs to — the source widget unless the caller
+                // named another. See `EventContext::ensure_visible_from`.
+                req.from.unwrap_or(source_widget),
                 req.rect,
                 req.margin,
                 req.align,
