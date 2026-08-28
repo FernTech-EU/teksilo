@@ -449,6 +449,14 @@ impl<T: 'static> TreeSource<T> {
         (self.with_row_str_fn)(index, f)
     }
 
+    /// The tree depth of the visible row at `index`, or `0` when the row is
+    /// out of range or its data is still `Loading`. Drives the drop
+    /// affordance's indent — a missing row reads as root level rather than
+    /// shifting the indicator somewhere arbitrary.
+    pub(crate) fn depth(&self, index: usize) -> usize {
+        self.meta(index).map(|m| m.depth).unwrap_or(0)
+    }
+
     pub(crate) fn set_expanded_at(&self, index: usize, expanded: bool) {
         (self.set_expanded_at_fn)(index, expanded)
     }

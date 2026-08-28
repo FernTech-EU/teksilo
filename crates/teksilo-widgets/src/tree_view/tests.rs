@@ -3020,3 +3020,129 @@ fn a_natural_height_query_does_not_strand_the_realization_window() {
          place_children disagree about the viewport"
     );
 }
+
+// --- Drop affordance: Into must not read as a Before/After line ---
+
+/// Build an expanded 3-level tree view whose rows accept every drop, and drive
+/// a same-view drag over the row at `target_row`.
+fn drag_over(target_row: usize, frac: f32) -> (WidgetTree, WidgetId, f32) {
+    use teksilo_core::event::{Modifiers, PointerButton, WidgetEvent};
+
+    let tree = TreeModel::new();
+    let a = tree.insert_root(0, "A");
+    let a1 = tree.insert_child(a, 0, "A1");
+    tree.insert_child(a1, 0, "A1a");
+    tree.insert_root(1, "B");
+
+    let tv = TreeView::new(tree, |_item, entry, _selected| {
+        Box::new(FixedLeaf(100.0 + entry.depth as f32 * 20.0, 28.0)) as Box<dyn Widget>
+    })
+    .item_height(28.0)
+    .reorderable(true);
+    // Rows: A(0) A1(1) A1a(2) B(3) — three levels, all visible.
+    tv.expand(a);
+    tv.expand(a1);
+    let mut wtree = WidgetTree::new();
+    let tv_id = wtree.add(tv);
+    wtree.layout(SizeProposal::exact(400.0, 300.0));
+
+    // Drag the last row (B) so no target is inside the dragged subtree.
+    let src_y = 3.0 * 28.0 + 14.0;
+    wtree.dispatch_event(WidgetEvent::PointerDown {
+        position: Point::new(50.0, src_y),
+        button: PointerButton::Primary,
+        modifiers: Modifiers::NONE,
+    });
+    wtree.dispatch_event(WidgetEvent::PointerMove {
+        position: Point::new(62.0, src_y),
+    });
+    let y = target_row as f32 * 28.0 + 28.0 * frac;
+    wtree.dispatch_event(WidgetEvent::PointerMove {
+        position: Point::new(62.0, y),
+    });
+    (wtree, tv_id, y)
+}
+
+fn viz(wtree: &WidgetTree, tv_id: WidgetId) -> Option<DropViz> {
+    wtree
+        .widget_as_any(tv_id)
+        .unwrap()
+        .downcast_ref::<TreeView<&'static str>>()
+        .unwrap()
+        .drop_feedback
+        .get()
+}
+
+#[test]
+fn insertion_line_is_indented_to_the_level_the_row_lands_at() {
+    // Row 2 is "A1a" at depth 2; a sibling drop lands at depth 2, so the line
+    // must start two indent steps in — that is the whole difference between
+    // "after this scene, still inside the chapter" and "after the chapter".
+    let (wtree, tv, _) = drag_over(2, 0.9);
+    assert!(
+        matches!(viz(&wtree, tv), Some(DropViz::Line { depth: 2, .. })),
+        "After a depth-2 row must report depth 2, got {:?}",
+        viz(&wtree, tv)
+    );
+
+    // Row 0 is "A" at depth 0 — a root-level sibling, no indent.
+    let (wtree, tv, _) = drag_over(0, 0.05);
+    assert!(
+        matches!(viz(&wtree, tv), Some(DropViz::Line { depth: 0, .. })),
+        "Before a root row must report depth 0, got {:?}",
+        viz(&wtree, tv)
+    );
+}
+
+#[test]
+fn into_box_is_inset_so_it_cannot_be_read_as_an_insertion_line() {
+    use teksilo_canvas::{DrawCommand, ShapeKind};
+
+    // Middle third of row 1 ("A1", depth 1) — a reparent, not a sibling.
+    let (mut wtree, tv, _) = drag_over(1, 0.5);
+    let Some(DropViz::Rect {
+        top, height, depth, ..
+    }) = viz(&wtree, tv)
+    else {
+        panic!("middle third must be an Into, got {:?}", viz(&wtree, tv));
+    };
+    assert_eq!(
+        depth, 1,
+        "the box frames the target row, at the target's depth"
+    );
+    assert_eq!((top, height), (28.0, 28.0), "the box frames row 1");
+
+    // The painted geometry is what the writer actually reads: a rounded rect
+    // strictly inside the row band. If its top edge sat on `top` it would be
+    // pixel-identical to the Before line, which is the bug this guards.
+    let recipe = teksilo_core::styles::ListDropIntoRecipe::default();
+    assert!(recipe.inset > 0.0, "a zero inset re-creates the ambiguity");
+    let frame = wtree.render();
+    let rounded: Vec<_> = frame
+        .draw_order
+        .iter()
+        .filter_map(|c| match c {
+            DrawCommand::Shape(i) => frame.shapes.get(*i),
+            _ => None,
+        })
+        .filter(|s| s.shape == ShapeKind::RoundedRect && s.corner_radii[0] > 0.0)
+        .collect();
+    assert!(
+        rounded.iter().any(|s| {
+            let [x, y, w, h] = s.screen;
+            (y - (top + recipe.inset)).abs() < 0.01
+                && (h - (height - recipe.inset * 2.0)).abs() < 0.01
+                && x > 0.0
+                && w > 0.0
+        }),
+        "no inset rounded box for the Into hover; shapes = {:?}",
+        rounded.iter().map(|s| s.screen).collect::<Vec<_>>()
+    );
+    // Both a fill and an outline — the outline is what survives a drag ghost
+    // sitting over the row's right half.
+    assert!(
+        rounded.iter().any(|s| s.stroke_width > 0.0)
+            && rounded.iter().any(|s| s.stroke_width == 0.0),
+        "the Into box needs both a wash and an outline"
+    );
+}

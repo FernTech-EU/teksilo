@@ -263,7 +263,38 @@ the source answers `can_accept` / `accept_drop`. Reading
 
 - `drop_feedback` signal (bound at `BindingLevel::RepaintOnly`) — set by `on_drag_hover`, cleared by `on_drag_leave`. Reading it in `paint()` is enough; the binding dirties the widget when the signal changes.
 - `on_drag` (per item wrapper) — fires only when the source's `drag(key)` returns `CanDrag`; emits the shared **public** [`RowDragData<T> { source: ViewId, rows: Vec<usize>, items: Option<Vec<T>> }`](../crates/teksilo-widgets/src/data_views.rs) typed payload (one type for all five data views) and a `DragPreview` built by re-invoking the delegate for the dragged row. `rows` is the selection-aware dragged set; `items` is `Some` only when the view opted into [`.exportable(..)`](#12-dragging-rows-out-of-a-data-view--cross-widget-export). The identity is a kind-tagged, process-global [`ViewId`](../crates/teksilo-widgets/src/data_views.rs) so a foreign drag is never misread as a same-view reorder.
-- `on_drag_hover` (on the list/tree itself) — computes the geometric `(target, position)` from local Y + scroll offset, asks the source `can_accept`, and sets the feedback signal to match the verdict (`Accept` → insertion line, `Reject` → suppress, `Redirect` → snap). `TreeView` also records the hovered node + timestamp for spring-load. The row under a given `y` is resolved by the same `PrefixSumOffsets::row_at` a click uses, so the two agree even at a zero-height row boundary — see [table-view.md "Which row a `y` coordinate resolves to"](table-view.md) for the degenerate-height tie-break `row_at` applies.
+- `on_drag_hover` (on the list/tree itself) — computes the geometric `(target, position)` from local Y + scroll offset, asks the source `can_accept`, and sets the feedback signal to match the verdict (`Accept` → the affordance for the effective position, `Reject` → suppress, `Redirect` → snap). `TreeView` also records the hovered node + timestamp for spring-load. The row under a given `y` is resolved by the same `PrefixSumOffsets::row_at` a click uses, so the two agree even at a zero-height row boundary — see [table-view.md "Which row a `y` coordinate resolves to"](table-view.md) for the degenerate-height tie-break `row_at` applies.
+
+### The two affordances must not look alike
+
+A tree answers two different questions during a drag, and `TreeView` /
+`TreeTableView` paint them differently on purpose:
+
+| Verdict | Affordance | Recipe |
+|---|---|---|
+| `Before` / `After` | an insertion line at the row boundary, **indented** to the depth the dropped row lands at | [`ListInsertionRecipe`](../crates/teksilo-core/src/styles/list_container_style.rs) (`role`, `thickness`, `indent_step`) |
+| `Into` | a rounded box round the target row, **inset on every side** | [`ListDropIntoRecipe`](../crates/teksilo-core/src/styles/list_container_style.rs) (`role`, `fill_alpha`, `corner_radius`, `inset`, `thickness`) |
+
+Both properties are load-bearing, and both were once absent:
+
+- **The inset.** Painted flush to the row, the `Into` box shares its top edge
+  with a `Before` line and its bottom edge with an `After` line, and the drag
+  ghost covers the vertical sides that would have told them apart — so all
+  three hovers read as "an accent bar at a row boundary" and the writer cannot
+  tell a reparent from a reorder. A theme setting `inset` to zero re-creates
+  exactly that.
+- **The indent.** Un-indented, an `After` line says nothing about *whose*
+  sibling the row becomes: "after this scene, still inside the chapter" and
+  "after the chapter" draw the same pixels. The depth travels on the feedback
+  signal (`DropViz::{Line, Rect}`) so `paint` can multiply it by the step; the
+  hover handler reads it from the source's `FlatEntry`, and a foreign drop —
+  which lands at a flat index with no nesting the view can promise — reports
+  depth 0 rather than claiming one.
+
+`TreeTableView` measures its indent from the **tree column's** leading edge, not
+the body's: `.tree_column()` and a user column-reorder can move the twist/indent
+gutter off the leading slot.
+
 - `on_drag_tick` — edge auto-scroll (linear ramp inside a 32 px zone, max 12 px/frame). `TreeView` additionally checks the spring-load timer and expands the hovered branch after 700 ms.
 - `on_drag_leave` — clears the feedback signal and the spring-load timer.
 - `on_drop` — re-queries `can_accept`; if not `Reject`, routes the commit to the source's `accept_drop`. A same-view `RowDragData` is a `DragSource::SameView` the source applies (a `ListModel` reorders in place — one row via `move_item`, a multi-row block via `move_items`; a `TreeModel`-backed source `move_node`s with the cycle guard); a cross-view or OS payload arrives as `DragSource::Foreign { payload }` at the *same* `accept_drop`, which downcasts it. The same-view reorder only runs when the view is `reorderable`.

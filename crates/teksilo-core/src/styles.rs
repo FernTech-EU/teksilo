@@ -142,7 +142,8 @@ pub use icon_button_style::{
 };
 pub use link_style::{LinkStyle, LinkStyleConfig, SharedLinkStyle};
 pub use list_container_style::{
-    ListContainerStyle, ListInsertionConfig, ListInsertionRecipe, SharedListContainerStyle,
+    ListContainerStyle, ListDropIntoRecipe, ListInsertionConfig, ListInsertionRecipe,
+    SharedListContainerStyle,
 };
 pub use menu_item_style::{MenuItemStyle, MenuItemStyleConfig, SharedMenuItemStyle};
 pub use panel_style::{PanelStyle, PanelStyleConfig, PanelVariant, SharedPanelStyle};

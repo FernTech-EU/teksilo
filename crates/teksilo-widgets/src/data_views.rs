@@ -770,11 +770,18 @@ pub(crate) fn drop_into_tint() -> teksilo_tokens::Color {
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub(crate) enum DropViz {
-    /// Horizontal insertion line at `y`, spanning `width`.
-    Line { y: f32, width: f32 },
-    /// Highlighted target row `[top, top + height]`, spanning `width` — the
-    /// "drop into this folder" affordance.
-    Rect { top: f32, height: f32, width: f32 },
+    /// Horizontal insertion line at `y`, spanning `width`, indented by
+    /// `depth` tree levels — the level the dropped row lands at.
+    Line { y: f32, width: f32, depth: usize },
+    /// Highlighted target row `[top, top + height]`, spanning `width`,
+    /// indented by the target's own `depth` — the "drop into this folder"
+    /// affordance.
+    Rect {
+        top: f32,
+        height: f32,
+        width: f32,
+        depth: usize,
+    },
 }
 
 /// The reusable export / foreign-drop machinery shared by all five data views:

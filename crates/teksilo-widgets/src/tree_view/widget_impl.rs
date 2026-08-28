@@ -582,24 +582,31 @@ impl<T: 'static> Widget for TreeView<T> {
                 };
                 // The source's verdict decides the *effective* position: a
                 // `Redirect` (e.g. Into-a-leaf → After) overrides the raw zone.
-                let effective = match (source_for_hover.dnd.can_accept_fn)(
+                // `depth` rides along so `paint` can indent the affordance to
+                // the level the dropped row actually lands at — `Before` /
+                // `After` are documented as *siblings* of the target, so both
+                // take the target's own depth, and so does the `Into` box,
+                // which frames that very row.
+                let (effective, depth) = match (source_for_hover.dnd.can_accept_fn)(
                     payload, row_idx, drop_pos, my_view_id,
                 ) {
                     DropResponse::Reject => {
                         // The source itself won't take this drop — fall back to
                         // the foreign-export sugar, shown as a plain between-rows
                         // insertion (a foreign source has no Into/reparent
-                        // semantics to honor).
+                        // semantics to honor). It lands at a flat index with no
+                        // nesting the view can promise, so it claims none:
+                        // depth 0.
                         let foreign_ok =
                             export_for_hover.accepts_foreign_export(payload, my_view_id);
                         if !foreign_ok {
                             feedback_for_hover.set(None);
                             return DropFeedback::NoFeedback;
                         }
-                        DropPosition::Before
+                        (DropPosition::Before, 0)
                     }
-                    DropResponse::Accept => drop_pos,
-                    DropResponse::Redirect(p) => p,
+                    DropResponse::Accept => (drop_pos, source_for_hover.depth(row_idx)),
+                    DropResponse::Redirect(p) => (p, source_for_hover.depth(row_idx)),
                 };
                 if effective == DropPosition::Into {
                     // Drop *into* the hovered container → highlight its whole row.
@@ -608,6 +615,7 @@ impl<T: 'static> Widget for TreeView<T> {
                         top,
                         height: row_h,
                         width: line_width,
+                        depth,
                     }));
                     DropFeedback::HighlightRect {
                         rect: Rect::new(0.0, top, line_width, row_h),
@@ -618,6 +626,7 @@ impl<T: 'static> Widget for TreeView<T> {
                     feedback_for_hover.set(Some(DropViz::Line {
                         y: insertion_y,
                         width: line_width,
+                        depth,
                     }));
                     DropFeedback::InsertionLine {
                         y: insertion_y,
@@ -893,35 +902,53 @@ impl<T: 'static> Widget for TreeView<T> {
         canvas: &mut teksilo_canvas::Canvas,
         ctx: &teksilo_core::widget::PaintContext,
     ) {
-        // Draw insertion line during drag hover — recipe-driven role +
-        // thickness via `ListContainerStyle::insertion()`.
+        // Draw the drop affordance during drag hover — recipe-driven role +
+        // thickness via `ListContainerStyle::insertion()` / `drop_into()`.
         if let Some(viz) = self.drop_feedback.get() {
-            let recipe = ctx
-                .theme
-                .style_slots
-                .list_container
-                .as_ref()
-                .map(|s| s.insertion())
-                .unwrap_or_default();
+            let slot = ctx.theme.style_slots.list_container.as_ref();
+            let recipe = slot.map(|s| s.insertion()).unwrap_or_default();
             let color = recipe.role.resolve(&ctx.theme.colors);
             // Own paint isn't covered by `clips_children` — clip so feedback at
             // the after-last boundary can't bleed past the widget's bottom edge.
             canvas.set_clip(bounds);
             match viz {
-                DropViz::Line { y, width } => {
+                DropViz::Line { y, width, depth } => {
                     let line_y = bounds.y + y;
                     let half = recipe.thickness * 0.5;
+                    let indent = (depth as f32 * recipe.indent_step).min(width);
                     canvas.fill_rect(
-                        Rect::new(bounds.x, line_y - half, width, recipe.thickness),
+                        Rect::new(
+                            bounds.x + indent,
+                            line_y - half,
+                            width - indent,
+                            recipe.thickness,
+                        ),
                         color,
                     );
                 }
-                DropViz::Rect { top, height, width } => {
-                    // Into-container highlight: a translucent fill plus a solid
-                    // outline at the insertion role's color.
-                    let rect = Rect::new(bounds.x, bounds.y + top, width, height);
-                    canvas.fill_rect(rect, color.with_alpha(0.18));
-                    canvas.stroke_rect(rect, color, recipe.thickness.max(1.5));
+                DropViz::Rect {
+                    top,
+                    height,
+                    width,
+                    depth,
+                } => {
+                    // Into-container highlight. Inset on every side — see
+                    // `ListDropIntoRecipe::inset`: flush to the row, its top and
+                    // bottom edges would be the very pixels a Before / After
+                    // line occupies, and the affordance would stop saying
+                    // anything the line doesn't.
+                    let into = slot.map(|s| s.drop_into()).unwrap_or_default();
+                    let color = into.role.resolve(&ctx.theme.colors);
+                    let indent = (depth as f32 * recipe.indent_step).min(width);
+                    let rect = Rect::new(
+                        bounds.x + indent + into.inset,
+                        bounds.y + top + into.inset,
+                        (width - indent - into.inset * 2.0).max(0.0),
+                        (height - into.inset * 2.0).max(0.0),
+                    );
+                    let radius = teksilo_tokens::CornerRadius::uniform(into.corner_radius);
+                    canvas.fill_rounded_rect(rect, radius, color.with_alpha(into.fill_alpha));
+                    canvas.stroke_rounded_rect(rect, radius, color, into.thickness);
                 }
             }
             canvas.clear_clip();

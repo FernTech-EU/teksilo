@@ -1805,7 +1805,11 @@ impl<T: 'static> Widget for TreeTableView<T> {
                 // The source owns the structural verdict — including the cycle
                 // guard (a node may not land inside its own subtree), which used
                 // to be re-derived here against the `TreeModel`.
-                let effective = if reorder_ok {
+                // `depth` rides along so `paint` can indent the affordance to
+                // the level the dropped row lands at — see `TreeView`'s twin of
+                // this block. A foreign drop lands at a flat index the view
+                // cannot promise a nesting for, so it claims none: depth 0.
+                let (effective, depth) = if reorder_ok {
                     match (source_for_hover.dnd.can_accept_fn)(
                         payload,
                         row_idx,
@@ -1817,14 +1821,14 @@ impl<T: 'static> Widget for TreeTableView<T> {
                                 feedback_for_hover.set(None);
                                 return teksilo_core::DropFeedback::NoFeedback;
                             }
-                            DropPosition::Before
+                            (DropPosition::Before, 0)
                         }
-                        DropResponse::Accept => drop_pos,
-                        DropResponse::Redirect(p) => p,
+                        DropResponse::Accept => (drop_pos, source_for_hover.depth(row_idx)),
+                        DropResponse::Redirect(p) => (p, source_for_hover.depth(row_idx)),
                     }
                 } else {
                     // A foreign source has no Into/reparent semantics to honor.
-                    DropPosition::Before
+                    (DropPosition::Before, 0)
                 };
                 if effective == DropPosition::Into {
                     let top = row_top - scroll;
@@ -1832,6 +1836,7 @@ impl<T: 'static> Widget for TreeTableView<T> {
                         top,
                         height: row_h,
                         width: viz_width,
+                        depth,
                     }));
                     teksilo_core::DropFeedback::HighlightRect {
                         rect: Rect::new(0.0, top, viz_width, row_h),
@@ -1842,6 +1847,7 @@ impl<T: 'static> Widget for TreeTableView<T> {
                     feedback_for_hover.set(Some(DropViz::Line {
                         y: insertion_y,
                         width: viz_width,
+                        depth,
                     }));
                     teksilo_core::DropFeedback::InsertionLine {
                         y: insertion_y,
@@ -2561,28 +2567,88 @@ impl<T: 'static> Widget for TreeTableView<T> {
 
         // Row-drop insertion indicator (source-accepted positions only — a
         // forbidden hover clears the signal). `y` is stored body-local.
+        //
+        // Both affordances are indented to the level the dropped row lands at,
+        // measured from the **tree column's** own leading edge rather than the
+        // body's: `.tree_column()` and a user column-reorder can move the
+        // twist/indent gutter off the leading slot, and an indent measured from
+        // the wrong origin points at nothing. The per-level step is this view's
+        // `effective_indent()` — the very value its indent gutter renders with
+        // — not the container recipe's, which describes `StandardTreeItem`.
+        let drop_indent_origin = |depth: usize| -> f32 {
+            let step = self.effective_indent();
+            let tree_decl = self.tree_column_decl_index();
+            let tree_slot = self
+                .display_indices
+                .borrow()
+                .iter()
+                .position(|&i| i == tree_decl)
+                .unwrap_or(0);
+            let col_x = layout::column_logical_x(
+                &widths,
+                boundaries,
+                scroll_x,
+                body_width_for_paint,
+                tree_slot,
+            )
+            .unwrap_or(0.0);
+            (col_x + depth as f32 * step).clamp(0.0, body_width_for_paint)
+        };
         match self.drop_feedback.get() {
-            Some(DropViz::Line { y, .. }) => {
-                let line_color = BorderRole::Focused.resolve(colors);
-                let thickness = 2.0_f32;
+            Some(DropViz::Line { y, depth, .. }) => {
+                let recipe = ctx
+                    .theme
+                    .style_slots
+                    .list_container
+                    .as_ref()
+                    .map(|s| s.insertion())
+                    .unwrap_or_default();
+                let line_color = recipe.role.resolve(colors);
+                let thickness = recipe.thickness;
                 let line_y = body_origin_y + y - thickness * 0.5;
+                let indent = drop_indent_origin(depth);
+                // RTL mirrors the row, so the indent eats into the *right* edge
+                // and the line still runs away from the row's leading side.
+                let x = if rtl {
+                    content_left
+                } else {
+                    content_left + indent
+                };
                 canvas.fill_rect(
-                    Rect::new(content_left, line_y, body_width_for_paint, thickness),
+                    Rect::new(x, line_y, body_width_for_paint - indent, thickness),
                     line_color,
                 );
             }
-            // "Drop into this container" — highlight the whole target row, the
-            // same affordance `TreeView` paints for an `Into` verdict.
-            Some(DropViz::Rect { top, height, .. }) => {
-                canvas.fill_rect(
-                    Rect::new(
-                        content_left,
-                        body_origin_y + top,
-                        body_width_for_paint,
-                        height,
-                    ),
-                    drop_into_tint(),
+            // "Drop into this container" — a box round the target row, inset on
+            // every side so its horizontal edges can never be mistaken for the
+            // Before / After line. Same affordance `TreeView` paints for an
+            // `Into` verdict; see `ListDropIntoRecipe`.
+            Some(DropViz::Rect {
+                top, height, depth, ..
+            }) => {
+                let into = ctx
+                    .theme
+                    .style_slots
+                    .list_container
+                    .as_ref()
+                    .map(|s| s.drop_into())
+                    .unwrap_or_default();
+                let color = into.role.resolve(colors);
+                let indent = drop_indent_origin(depth);
+                let x = if rtl {
+                    content_left
+                } else {
+                    content_left + indent
+                };
+                let rect = Rect::new(
+                    x + into.inset,
+                    body_origin_y + top + into.inset,
+                    (body_width_for_paint - indent - into.inset * 2.0).max(0.0),
+                    (height - into.inset * 2.0).max(0.0),
                 );
+                let radius = teksilo_tokens::CornerRadius::uniform(into.corner_radius);
+                canvas.fill_rounded_rect(rect, radius, color.with_alpha(into.fill_alpha));
+                canvas.stroke_rounded_rect(rect, radius, color, into.thickness);
             }
             None => {}
         }
@@ -3276,6 +3342,103 @@ mod tests {
             proxy.tree().parent(docs),
             Some(src),
             "docs became a child of src"
+        );
+    }
+
+    #[test]
+    fn the_into_box_is_inset_and_the_insertion_line_is_indented() {
+        // The twin of `TreeView`'s pair: the two drop affordances must not read
+        // alike. Flush to the row, the Into box's top edge is the very pixel a
+        // Before line occupies — and the drag ghost hides the vertical sides
+        // that would have told them apart.
+        use teksilo_canvas::{DrawCommand, Point, ShapeKind};
+        use teksilo_core::event::{Modifiers, PointerButton, WidgetEvent};
+
+        let proxy = SortFilterTreeModel::new(sample_tree());
+        proxy.expand_all(); // docs@0 readme@1 guide@2 src@3 main.rs@4
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        tree.add(
+            TreeTableView::from_projection(proxy.clone())
+                .add_column(name_col())
+                .reorderable(true)
+                .row_height(20.0),
+        );
+        tree.layout(SizeProposal {
+            width: Some(400.0),
+            height: Some(300.0),
+        });
+        let h = cp::HEADER_HEIGHT;
+
+        // Hold a drag from "main.rs" (flat 4) — nothing is inside its subtree,
+        // so every target below accepts.
+        let start = Point::new(40.0, h + 90.0);
+        tree.dispatch_event(WidgetEvent::PointerDown {
+            position: start,
+            button: PointerButton::Primary,
+            modifiers: Modifiers::NONE,
+        });
+        tree.dispatch_event(WidgetEvent::PointerMove {
+            position: Point::new(52.0, start.y),
+        });
+
+        // Bottom third of "readme" (flat 1, depth 1) → After, at depth 1.
+        tree.dispatch_event(WidgetEvent::PointerMove {
+            position: Point::new(52.0, h + 38.0),
+        });
+        let frame = tree.render();
+        let line_recipe = teksilo_core::styles::ListInsertionRecipe::default();
+        // The insertion line is the only decoration exactly `thickness` tall
+        // that spans the body — identify it by that, not by "something at x>0",
+        // which any future row stripe would satisfy vacuously.
+        let lines: Vec<_> = frame
+            .decorations
+            .iter()
+            .filter(|d| (d.rect[3] - line_recipe.thickness).abs() < 0.01 && d.rect[2] > 100.0)
+            .collect();
+        assert_eq!(lines.len(), 1, "exactly one insertion line, got {lines:?}");
+        assert!(
+            lines[0].rect[0] >= line_recipe.indent_step,
+            "the After line must start one indent step in for a depth-1 target, \
+             got x = {} (step {})",
+            lines[0].rect[0],
+            line_recipe.indent_step
+        );
+
+        // Middle third of "docs" (flat 0, depth 0) → Into, a box round the row.
+        tree.dispatch_event(WidgetEvent::PointerMove {
+            position: Point::new(52.0, h + 10.0),
+        });
+        let frame = tree.render();
+        let recipe = teksilo_core::styles::ListDropIntoRecipe::default();
+        let boxes: Vec<_> = frame
+            .draw_order
+            .iter()
+            .filter_map(|c| match c {
+                DrawCommand::Shape(i) => frame.shapes.get(*i),
+                _ => None,
+            })
+            .filter(|s| s.shape == ShapeKind::RoundedRect && s.corner_radii[0] > 0.0)
+            .filter(|s| (s.screen[3] - (20.0 - recipe.inset * 2.0)).abs() < 0.01)
+            .collect();
+        assert!(
+            !boxes.is_empty(),
+            "no inset rounded box for the Into hover; shapes = {:?}",
+            frame.shapes.iter().map(|s| s.screen).collect::<Vec<_>>()
+        );
+        // Row 0 spans [h, h + 20]. The box's top edge must sit *inside* that
+        // band — on the boundary it is pixel-identical to a Before line.
+        assert!(
+            boxes
+                .iter()
+                .all(|s| (s.screen[1] - (h + recipe.inset)).abs() < 0.01),
+            "the Into box must be inset from the row's top edge ({}), got {:?}",
+            h,
+            boxes.iter().map(|s| s.screen).collect::<Vec<_>>()
+        );
+        assert!(
+            boxes.iter().any(|s| s.stroke_width > 0.0)
+                && boxes.iter().any(|s| s.stroke_width == 0.0),
+            "the Into box needs both a wash and an outline"
         );
     }
 
