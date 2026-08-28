@@ -68,7 +68,7 @@ fn main() {
 
 Skribisto, a rich-text writing tool built with Teksilo, was ported from C++/Qt to Rust/Teksilo. It is available [here](https://github.com/jacquetc/skribisto/).
 
-A widget catalog example is available if you run `cargo run -p widget-catalog` in the Teksilo repo. It shows most of the widgets, with live property editing and multi-variant rendering.
+A widget catalog example is available if you run `cargo run -p widget-catalog` in the Teksilo repo. It shows most of the widgets. Dozens of runnable examples are available in the `examples/` directory of the Teksilo repo.
 
 ## Documentation
 
@@ -76,7 +76,7 @@ Available in `docs/` and on [Cloudflare Pages](https://teksilo.pages.dev).
 
 ## Who is this for
 
-Built primarily for professional desktop applications (writing tools, IDEs, dispatcher consoles, admin panels) where users spend hours and expect keyboard-first interaction, screen-reader support, and locale-aware formatting. Small tools and one-off utilities are equally well served: the batteries-included surface means a "window with a list and a few buttons" needs little more than the boilerplate above.
+Built primarily for professional desktop applications (writing tools, IDEs, dispatcher consoles, admin panels) where users spend hours and expect full keyboard navigation, screen-reader support, and locale-aware formatting. Small tools and one-off utilities are equally well served: the batteries-included surface means a "window with a list and a few buttons" needs little more than the boilerplate above.
 
 Default styles are inspired by JetBrains' Int UI, with a light and dark theme that meet WCAG 2.1 AA contrast out of the box. No Win95-style "classic" theme is provided; the framework is intended for modern desktop applications.
 
@@ -98,15 +98,15 @@ Teksilo is a retained-tree framework inspired by Qt and the ShiftUI layouting.
 
 Expect breaking changes between 0.x versions.
 
-The test suite is roughly 2,600 tests in teksilo and over 4,000 across the whole stack. Tests target behavior (event dispatch, layout output, accessibility-tree structure), not implementation snapshots. The same widget tree runs under tests without a window, a GPU, or winit, and a simulated clock makes time-dependent behavior deterministic.
+The test suite is roughly 6,200 tests in teksilo and over 8,700 across the whole stack. Tests target behavior (event dispatch, layout output, accessibility-tree structure), not implementation snapshots. The same widget tree runs under tests without a window, a GPU, or winit, and a simulated clock makes time-dependent behavior deterministic.
 
-Teksilo builds on two earlier MPL-2.0 crates already at v1.x: [text-document](https://github.com/jacquetc/text-document) (rich-text document model) and [text-typeset](https://github.com/jacquetc/text-typeset) (typesetting engine).
+Teksilo builds on two earlier MPL-2.0 crates already at v1.x: [text-document](https://github.com/ferntech-eu/text-document) (rich-text document model) and [text-typeset](https://github.com/ferntech-eu/text-typeset) (typesetting engine).
 
 Production deployment is currently limited to FernTech's own applications; the 0.x version label reflects this scope. The known gaps are listed at the end of this README.
 
 Project. Architecture, design reviews, code review and final acceptance were human; code generation and routine refactoring were LLM-assisted (Claude Opus and Mistral Medium) under that review.
 
-**Scale:** 30+ framework crates · 200k+ lines of Rust · 100+ widgets · 1000+ builder methods.
+**Scale:** 40+ framework crates · 450k+ lines of Rust · 100+ widgets · 1400+ builder methods.
 
 ## Authorship and review
 
@@ -211,11 +211,9 @@ Reference documents live in `docs/`. Good entry points:
 
 ## Known gaps
 
-What is not yet shipped:
-
 - **CJK IME composition.** Latin and BiDi input compose correctly; Chinese, Japanese, and Korean input methods need to be tested by actual users.
 - **X11 verification breadth.** The X11 custom title bar and drag-and-drop backends ship and are covered by protocol tests, but live verification has been done against KWin (via XWayland) and, in CI, Openbox. Other window managers are untested, and there is no run against a standalone Xorg server. A window manager without `_NET_WM_MOVERESIZE` is detected up front and keeps native decorations rather than producing an immovable window.
-- **Mobile and web.** Linux and Windows are the primary targets. No mobile or web targets.
+- **Mobile and web.** Linux, Windows and macOS are the primary targets. No mobile or web targets.
 - **API stability.** Pre-1.0; breaking changes are expected between minor versions.
 
 ## Architecture stack
@@ -247,7 +245,13 @@ For priority bug fixes, written support, or an indemnification agreement, contac
 
 ## Trademark
 
-"Teksilo" is a trademark of FernTech. The MPL-2.0 source license does **not** grant trademark rights. Forks and derivative works may use the source code under MPL-2.0 but must adopt a distinct name and distinct branding when distributed (compare Firefox / Iceweasel, Chromium / Chrome). Nominative use ("built with Teksilo", "Teksilo-compatible widget", articles describing Teksilo) is fine. See [TRADEMARKS.md](TRADEMARKS.md) for the full policy; for anything it doesn't cover, contact <trademarks@ferntech.eu>.
+"Teksilo"™ is a trademark of FernTech, a French company, the subject of French trademark application No. 5292025 (INPI, classes 9 and 42; pending).
+
+The MPL-2.0 source license does not grant trademark rights. Forks and derivative works may use the source code under MPL-2.0 but must adopt a distinct name and distinct branding when distributed (compare Firefox / Iceweasel, Chromium / Chrome).
+
+Nominative use ("built with Teksilo", "Teksilo-compatible widget", articles describing Teksilo) is fine. Distribution packagers may keep the Teksilo name for packages that track upstream releases, including backported fixes, dependency adjustments, and build-system changes; see TRADEMARKS.md for where that line falls.
+
+See TRADEMARKS.md for the full policy; for anything it doesn't cover, contact trademarks@ferntech.eu.
 
 ## Acknowledgments
 

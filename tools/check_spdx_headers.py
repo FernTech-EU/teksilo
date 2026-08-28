@@ -17,6 +17,11 @@ The year is the year of the file's first commit, derived from
 the current year (override with `--fallback-year YYYY`). Existing
 headers whose year disagrees with git history are normalized.
 
+A few files in the repository are deliberately not MPL-2.0 licensed
+source (the trademark policy, for one). They are still checked, but
+against their own identifier from `LICENSE_OVERRIDES` rather than the
+repository default.
+
 Modes:
   --check          report missing / outdated headers, non-zero exit if any
                    (use this in CI)
@@ -40,6 +45,14 @@ from pathlib import Path
 
 LICENSE_ID = "MPL-2.0"
 COPYRIGHT_HOLDER = "FernTech"
+
+# Repo-relative posix paths whose content is deliberately NOT under the
+# repository's MPL-2.0 source license. These files are still checked — they
+# must carry a canonical header — but against the identifier named here.
+# `LicenseRef-` is SPDX's form for a license that is not on the SPDX list.
+LICENSE_OVERRIDES: dict[str, str] = {
+    "TRADEMARKS.md": "LicenseRef-Teksilo-Trademark-Policy",
+}
 
 # (line_prefix, line_suffix) — line_suffix is "" for line-comment styles
 # and " -->" / " */" for block-comment styles where each header line is its
@@ -191,10 +204,12 @@ def collect_first_commit_years(repo: Path) -> dict[str, int]:
     return years
 
 
-def expected_header_lines(style: tuple[str, str], year: int) -> list[str]:
+def expected_header_lines(
+    style: tuple[str, str], year: int, license_id: str = LICENSE_ID
+) -> list[str]:
     prefix, suffix = style
     return [
-        f"{prefix}SPDX-License-Identifier: {LICENSE_ID}{suffix}",
+        f"{prefix}SPDX-License-Identifier: {license_id}{suffix}",
         f"{prefix}SPDX-FileCopyrightText: {year} {COPYRIGHT_HOLDER}{suffix}",
     ]
 
@@ -269,7 +284,7 @@ def normalize_year(existing: str, target_year: int) -> str:
 
 
 def process_file(
-    path: Path, year: int, fix: bool
+    path: Path, year: int, fix: bool, license_id: str = LICENSE_ID
 ) -> Issue | None:
     style = style_for(path)
     if style is None:
@@ -286,7 +301,7 @@ def process_file(
         raw_lines = raw_lines[:-1]
 
     preamble, rest = split_preamble(raw_lines)
-    expected = expected_header_lines(style, year)
+    expected = expected_header_lines(style, year, license_id)
 
     found = find_existing_header(rest, style)
     if found is None:
@@ -305,12 +320,14 @@ def process_file(
         path.write_text(new_text, encoding="utf-8")
         return None
 
-    start, end, license_id, year_str = found
+    start, end, found_license_id, year_str = found
     needs_update = False
     reasons: list[str] = []
-    if license_id != LICENSE_ID:
+    if found_license_id != license_id:
         needs_update = True
-        reasons.append(f"license is `{license_id}`, expected `{LICENSE_ID}`")
+        reasons.append(
+            f"license is `{found_license_id}`, expected `{license_id}`"
+        )
     canonical_year = normalize_year(year_str or "", year)
     if (year_str or "").strip() != canonical_year:
         needs_update = True
@@ -401,7 +418,8 @@ def main() -> int:
         if should_skip(rel_posix, path.name):
             continue
         year = git_years.get(rel.as_posix(), args.fallback_year)
-        issue = process_file(path, year, fix=args.fix)
+        license_id = LICENSE_OVERRIDES.get(rel.as_posix(), LICENSE_ID)
+        issue = process_file(path, year, fix=args.fix, license_id=license_id)
         if issue is not None:
             issues.append(issue)
 

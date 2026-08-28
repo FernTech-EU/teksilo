@@ -214,7 +214,7 @@ teksilo-telemetry-codegen  Proc-macro: `include_telemetry_schema!("events.yaml")
 cargo-teksilo-telemetry-lint  CLI schema-drift linter. Checks expiry, required fields, unused
                      events (declared but not emitted in src/), unknown prop types. Run as
                      `cargo teksilo-telemetry-lint`. CI mode: `--fail-on-warnings`.
-teksilo-widgets         ~56 widgets + ~21 layout primitives (Button, ListView, TreeView, TableView,
+teksilo-widgets         ~107 widgets + ~28 layout primitives (Button, ListView, TreeView, TableView,
                      TreeTableView, MenuBar, Dialog, TextInput, SpinBox, etc.)
 teksilo-charts          BarChart, LineChart, PieChart (pie + donut, with center slot). Sits at the same tier
                      as teksilo-widgets — no dep on widgets. Series data is a `ChartModel<T>`
