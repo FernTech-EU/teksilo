@@ -245,6 +245,9 @@ pub struct Button {
     enabled: Prop<bool>,
     icon: Option<IconWidget>,
     icon_location: IconLocation,
+    /// Leave the icon's own colour alone instead of tinting it to the label's.
+    /// See [`Button::icon_keeps_color`].
+    icon_keeps_color: bool,
     tooltip_text: Option<LocalizedString>,
     /// Optional rich tooltip source (registry key or inline content).
     /// Mutually exclusive with `tooltip_text` and `composite_tooltip_content`
@@ -327,6 +330,7 @@ impl Button {
             enabled: Prop::Static(true),
             icon: None,
             icon_location: IconLocation::None,
+            icon_keeps_color: false,
             tooltip_text: None,
             rich_tooltip_source: None,
             composite_tooltip_content: None,
@@ -520,6 +524,28 @@ impl Button {
         self
     }
 
+    /// Keep the icon's own colour instead of tinting it to the label's.
+    ///
+    /// The mirror of [`MenuItem::icon_keeps_color`](crate::menu_item::MenuItem::icon_keeps_color),
+    /// and it exists for the same reason: an icon whose colour *is* the information.
+    /// A filter chip carrying a user-chosen tag colour, a legend swatch, a status
+    /// disc — tinting those to the label's foreground destroys the one thing they
+    /// carry, while tinting is exactly right for a glyph that merely repeats the
+    /// label.
+    ///
+    /// Two consequences worth knowing, both inherited from
+    /// [`ColorProp`](teksilo_core::color_prop::ColorProp)'s own rules rather than
+    /// special-cased here:
+    ///
+    /// * The colour must clear contrast against **every** fill the button takes —
+    ///   an accent-filled selected state as well as the resting surface.
+    /// * A literal colour **does not dim when the button is disabled**. An icon
+    ///   that should dim wants a role instead, and then it does not need this.
+    pub fn icon_keeps_color(mut self) -> Self {
+        self.icon_keeps_color = true;
+        self
+    }
+
     /// Declare that this button is a disclosure trigger for a
     /// popup (menu, dialog, listbox, tree, grid). Surfaced via
     /// `set_has_popup` in the a11y node so screen readers announce
@@ -601,13 +627,18 @@ impl Button {
             "Button: icon_location is {:?} but no icon was set via .icon(...)",
             self.icon_location,
         );
-        self.icon
+        let icon = self
+            .icon
             .take()
             .unwrap_or_else(|| {
                 IconWidget::from_path(teksilo_canvas::Path::new(), btn::BUTTON_ICON_SIZE)
             })
-            .icon_size(btn::BUTTON_ICON_SIZE)
-            .color(color)
+            .icon_size(btn::BUTTON_ICON_SIZE);
+        if self.icon_keeps_color {
+            icon
+        } else {
+            icon.color(color)
+        }
     }
 
     /// Assemble the V2 attached-handler set (tap / hover / key / focus /
@@ -1604,6 +1635,60 @@ mod tests {
         assert!(
             !frame.shapes.iter().any(|s| s.color == magenta),
             "theme slot must be ignored when per-call override is set — magenta should not appear",
+        );
+    }
+}
+
+/// [`Button::icon_keeps_color`] — the icon's own colour survives, or it does not.
+#[cfg(test)]
+mod icon_color_tests {
+    use super::*;
+    use teksilo_core::widget_tree::WidgetTree;
+
+    /// A disc in a colour no theme role would ever produce, so finding it in the frame
+    /// can only mean the icon kept it.
+    const SWATCH: [f32; 4] = [0.93, 0.29, 0.60, 1.0];
+
+    fn swatch_icon() -> IconWidget {
+        let centre = teksilo_canvas::Point::new(5.0, 5.0);
+        IconWidget::from_path(teksilo_canvas::Path::circle(centre, 4.5), 10.0).color(
+            teksilo_tokens::Color::from_rgba(SWATCH[0], SWATCH[1], SWATCH[2], SWATCH[3]),
+        )
+    }
+
+    fn painted(button: Button) -> bool {
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let _ = tree.add(button);
+        tree.layout(SizeProposal::exact(240.0, 60.0));
+        let frame = tree.render();
+        // An `IconWidget::from_path` lands in `paths`, not `shapes` — the button's
+        // own chrome is what fills `shapes`.
+        frame.paths.iter().any(|p| p.color == SWATCH)
+            || frame.shapes.iter().any(|s| s.color == SWATCH)
+            || frame.decorations.iter().any(|d| d.color == SWATCH)
+    }
+
+    /// The default: an icon repeats the label, so it takes the label's colour and the
+    /// button stays one legible unit under every variant and state.
+    #[test]
+    fn an_icon_is_tinted_to_the_label_by_default() {
+        assert!(
+            !painted(Button::new(lit!("Tag")).icon(swatch_icon(), IconLocation::Leading)),
+            "the icon kept its own colour without being asked to"
+        );
+    }
+
+    /// And the opt-out, for an icon whose colour *is* the information — a filter chip
+    /// carrying a user-chosen tag colour has nothing left if it is tinted away.
+    #[test]
+    fn icon_keeps_color_survives_the_buttons_tint() {
+        assert!(
+            painted(
+                Button::new(lit!("Tag"))
+                    .icon(swatch_icon(), IconLocation::Leading)
+                    .icon_keeps_color()
+            ),
+            "icon_keeps_color did not reach the painted icon"
         );
     }
 }
