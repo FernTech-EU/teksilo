@@ -68,6 +68,7 @@ use teksilo_core::accessibility::AccessNodeBuilder;
 use teksilo_core::accesskit::Role;
 use teksilo_core::binding::BindingLevel;
 use teksilo_core::build_context::BuildContext;
+use teksilo_core::color_prop::ColorProp;
 use teksilo_core::event::{EventResponse, Key, WidgetEvent};
 use teksilo_core::intent::Intent;
 use teksilo_core::modal::{ModalCloseBehavior, ModalPresentation, ModalRequest};
@@ -76,9 +77,9 @@ use teksilo_core::signal::Signal;
 use teksilo_core::widget::{EventContext, LayoutContext, LayoutResponse, Widget, WidgetPlacement};
 use teksilo_core::widget_builder::WidgetBuilder;
 use teksilo_core::widget_id::WidgetId;
-use teksilo_data::ListModel;
+use teksilo_data::{ListModel, SelectionMode, SelectionModel};
 use teksilo_i18n::{LocalizedString, lit, tr_widget};
-use teksilo_tokens::{SurfaceRole, TextRole, TextStyleRole};
+use teksilo_tokens::{BorderRole, SurfaceRole, TextRole, TextStyleRole};
 
 use crate::dialog::ModalContainer;
 use crate::keystroke_format::format_keystroke;
@@ -94,6 +95,9 @@ const PALETTE_WIDTH: u32 = 560;
 const PALETTE_HEIGHT: u32 = 420;
 /// Row height fed to the list's own metrics; two lines of text plus padding.
 const ROW_HEIGHT: f32 = 44.0;
+/// Width of the leading bar marking the highlighted row — the non-colour half
+/// of the highlight. 3 dp matches the selection edge `StandardListItem` draws.
+const SELECTION_MARKER_WIDTH: f32 = 3.0;
 /// How many rows the presented palette shows at once.
 ///
 /// Derived from [`PALETTE_HEIGHT`] rather than measured, which is what lets the
@@ -164,6 +168,23 @@ struct PaletteState {
     /// to the best match without an effect that would fire mid-build.
     last_query: Rc<RefCell<String>>,
     on_dismiss: Rc<RefCell<Option<DismissFn>>>,
+
+    // ── Accessibility ───────────────────────────────────────────────────
+    /// The result list's selection, mirroring [`Self::selected`].
+    ///
+    /// The highlight is `selected`; this exists so each realized row's
+    /// `Role::ListItem` reports `selected` truthfully. Without it every row
+    /// answered "not selected" and the arrow keys moved a highlight no
+    /// assistive technology could observe. Owned by the state, not rebuilt per
+    /// build, so a pointer click on a row can be routed back into `selected`.
+    selection: SelectionModel,
+    /// The result `ListView`'s node, published for the search field's
+    /// `controls` relation.
+    listbox_id: Signal<Option<WidgetId>>,
+    /// The highlighted row's node, published for the search field's
+    /// `active_descendant`. `None` when the list is empty, or when the
+    /// highlighted row is outside the realized virtualization window.
+    active_row: Signal<Option<WidgetId>>,
 }
 
 impl PaletteState {
@@ -175,7 +196,22 @@ impl PaletteState {
             top_index: Signal::new(0),
             last_query: Rc::new(RefCell::new(String::new())),
             on_dismiss: Rc::new(RefCell::new(None)),
+            selection: SelectionModel::new(SelectionMode::Single),
+            listbox_id: Signal::new(None),
+            active_row: Signal::new(None),
         }
+    }
+
+    /// Move the highlight to `index`, keeping the AT-visible selection with it.
+    ///
+    /// Every write to `selected` goes through here. The two must not drift:
+    /// `selected` is what Enter runs and what the row tint follows, while
+    /// `selection` is what a screen reader is told, and a palette that
+    /// announces one row while running another is worse than one that
+    /// announces nothing.
+    fn set_selected(&self, index: usize) {
+        self.selected.set(index);
+        self.selection.select(index);
     }
 
     /// Move the highlight by `delta`, clamped to the list, and scroll it into view.
@@ -186,7 +222,7 @@ impl PaletteState {
         }
         let current = self.selected.get() as isize;
         let next = (current + delta).clamp(0, len as isize - 1) as usize;
-        self.selected.set(next);
+        self.set_selected(next);
         self.reveal(next);
     }
 
@@ -393,14 +429,20 @@ impl Widget for CommandPalette {
         let query_now = self.state.query.get();
         if *self.state.last_query.borrow() != query_now {
             *self.state.last_query.borrow_mut() = query_now;
-            self.state.selected.set(0);
+            self.state.set_selected(0);
             self.state.top_index.set(0);
         }
         // Clamp before rendering, not after: a query that shortened the list must not
         // leave the highlight past the end for even one frame, or Enter would run
         // whichever row happens to sit at a stale index.
         if self.state.selected.get() >= rows.len() {
-            self.state.selected.set(rows.len().saturating_sub(1));
+            self.state.set_selected(rows.len().saturating_sub(1));
+        }
+        // Keep the AT-visible selection on the highlight even when neither
+        // branch above fired (first build, or a rebuild driven by the shortcut
+        // registry rather than by a keystroke).
+        if !rows.is_empty() && !self.state.selection.is_selected(self.state.selected.get()) {
+            self.state.selection.select(self.state.selected.get());
         }
         *self.state.rows.borrow_mut() = rows.clone();
         let selected_index = self.state.selected.get();
@@ -413,7 +455,20 @@ impl Widget for CommandPalette {
         let submit_state = self.state.clone();
         let field = SearchField::new(self.state.query.clone())
             .placeholder(placeholder)
-            .on_submit_fn(move |ctx| submit_state.activate_selected(ctx));
+            .label(tr_widget!(command_palette_title()))
+            .on_submit_fn(move |ctx| submit_state.activate_selected(ctx))
+            // The ARIA combobox pattern. Focus never leaves this field — that
+            // is what makes a palette feel like one — so the arrow-key
+            // highlight has to be announced through the field's own AT node.
+            // `SearchField` forwards both down to the focusable
+            // `TextInputField`, the only node whose `active_descendant`
+            // assistive technology follows.
+            .drives_listbox(self.state.listbox_id.clone(), self.state.active_row.clone());
+
+        // Stale entries would otherwise survive an empty result set and point
+        // `active_descendant` at a destroyed node.
+        self.state.listbox_id.set(None);
+        self.state.active_row.set(None);
 
         let body: Box<dyn Widget> = if rows.is_empty() {
             let empty = self
@@ -434,11 +489,29 @@ impl Widget for CommandPalette {
                     Box::new(command_row(cmd, index == selected_index))
                 },
             )
-            .item_height(ROW_HEIGHT);
+            .item_height(ROW_HEIGHT)
+            // Makes each row's `Role::ListItem` report `selected` truthfully.
+            .selection(self.state.selection.clone());
+            // Take the realized-row map before the view moves into the tree.
+            let row_ids = list.realized_row_ids();
             // The window the reader is looking at is state this widget owns, so it
             // survives the rebuild that every keystroke causes.
             list.scroll_to_index(self.state.top_index.get());
-            Box::new(Expand::new().child(list))
+
+            // `ctx.add` builds the subtree synchronously, so by the time this
+            // returns the body pane has already published its realized rows and
+            // the highlighted row's id is resolvable — no deferred effect, no
+            // frame of silence after an arrow key.
+            let list_id = ctx.add(list);
+            self.state.listbox_id.set(Some(list_id));
+            let active = row_ids
+                .borrow()
+                .iter()
+                .find(|(index, _)| *index == selected_index)
+                .map(|(_, id)| *id);
+            self.state.active_row.set(active);
+
+            Box::new(Expand::new().child_id(list_id))
         };
 
         let key_state = self.state.clone();
@@ -486,6 +559,22 @@ impl Widget for CommandPalette {
 
     fn accessibility(&self, node: &mut AccessNodeBuilder) {
         node.set_role(Role::Dialog);
+        // An unnamed dialog is announced as "dialog" and nothing else, which
+        // tells a screen-reader user that something opened but not what.
+        node.set_name(
+            tr_widget!(command_palette_title())
+                .resolve_now()
+                .to_string(),
+        );
+        node.set_modal();
+        // How many commands the query currently matches — the one fact a
+        // sighted user reads off the list at a glance and a screen-reader user
+        // otherwise has to arrow through the whole list to learn.
+        let count = self.state.rows.borrow().len();
+        node.set_description(
+            tr_widget!(command_palette_result_count(count = count as i64)).resolve_now(),
+        );
+        node.set_live(teksilo_core::accesskit::Live::Polite);
     }
 
     fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> LayoutResponse {
@@ -553,15 +642,30 @@ fn command_row(cmd: &PaletteCommand, selected: bool) -> impl Widget + 'static {
                 .single_line(),
         );
 
+    // The highlight carries two channels, not one. A background tint alone is a
+    // colour-only distinction (WCAG 1.4.1) and disappears entirely under a
+    // high-contrast or forced-colours setting; the leading bar is a shape, so it
+    // survives both. Same reading as the selection edge `StandardListItem`
+    // draws — a palette row is a list row wearing different padding.
     let bg = RectWidget::new().background(if selected {
         SurfaceRole::Selected
     } else {
         SurfaceRole::Transparent
     });
+    let marker =
+        FixedSize::new()
+            .width(SELECTION_MARKER_WIDTH)
+            .child(RectWidget::new().background(if selected {
+                ColorProp::from(BorderRole::Focused)
+            } else {
+                ColorProp::from(SurfaceRole::Transparent)
+            }));
 
-    ZStack::new()
-        .child(bg)
-        .child(Padding::symmetric(6.0, 10.0).child(row))
+    ZStack::new().child(bg).child(
+        HStack::new()
+            .child(marker)
+            .child(Expand::new().child(Padding::symmetric(6.0, 10.0).child(row))),
+    )
 }
 
 // ── Matching ────────────────────────────────────────────────────────────────

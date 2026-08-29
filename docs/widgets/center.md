@@ -15,6 +15,13 @@ reports `flex = 0`, so it never claims slack from a stack's distribution
 pass; to center content *within leftover space*, wrap it in an `Expand`:
 `Expand::horizontal().child(Center::new().child(w))`.
 
+The child is measured **under the constraint `Center` received** (a
+loose-but-bounded proposal, like Flutter's `Center`): rigid children keep
+their natural size and are centered, while adaptive children respond to
+the bound — an ellipsis `TextWidget` truncates at the slot width instead
+of overflowing symmetrically, and wrapping text reports its real wrapped
+height.
+
 ## When to use
 
 - Center a small widget inside a bounded slot (e.g., an icon in a fixed

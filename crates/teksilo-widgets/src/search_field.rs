@@ -112,6 +112,13 @@ pub struct SearchField {
     min_chars: usize,
     on_select: Option<OnSelect>,
     on_submit: Option<OnSubmit>,
+    /// ARIA combobox wiring for an **externally owned** listbox — a command
+    /// palette's result list, not this field's own suggestion popup — forwarded
+    /// to the inner `TextInput` and from there to the focusable
+    /// `TextInputField`. Independent of `row_ids_slot` / `highlighted_slot`,
+    /// which serve the built-in suggestion panel.
+    external_active_descendant: Option<Signal<Option<WidgetId>>>,
+    external_controls: Option<Signal<Option<WidgetId>>>,
     /// Build state — populated in `build()`.
     root_child_id: Option<WidgetId>,
     /// Slot the SuggestionPanel writes its inner ListBox WidgetId into,
@@ -166,6 +173,8 @@ impl SearchField {
             min_chars: 1,
             on_select: None,
             on_submit: None,
+            external_active_descendant: None,
+            external_controls: None,
             root_child_id: None,
             listbox_id_slot: Rc::new(Cell::new(None)),
             row_ids_slot: Rc::new(RefCell::new(Vec::new())),
@@ -196,6 +205,27 @@ impl SearchField {
     pub fn label(mut self, label: impl Into<LocalizedString>) -> Self {
         let ls: LocalizedString = label.into();
         self.label = Some(ls);
+        self
+    }
+
+    /// Wire this field to a listbox **the caller owns**, so arrow keys that
+    /// move a highlight through that list are announced while focus stays here
+    /// (the ARIA combobox pattern). `listbox` is the list's node, `active` the
+    /// currently-highlighted row's node; both are forwarded to the inner
+    /// `TextInputField`, which is the node that actually holds focus and
+    /// therefore the only one whose `active_descendant` assistive technology
+    /// follows.
+    ///
+    /// This is for a search field driving a list built by its *host* — a
+    /// command palette, a filter box above a results view. The built-in
+    /// suggestion popup (`suggestions`) wires itself and needs none of this.
+    pub fn drives_listbox(
+        mut self,
+        listbox: Signal<Option<WidgetId>>,
+        active: Signal<Option<WidgetId>>,
+    ) -> Self {
+        self.external_controls = Some(listbox);
+        self.external_active_descendant = Some(active);
         self
     }
 
@@ -368,6 +398,12 @@ impl Widget for SearchField {
             });
         if let Some(label) = &self.label {
             input = input.label(label.clone());
+        }
+        if let Some(active) = self.external_active_descendant.clone() {
+            input = input.active_descendant(active);
+        }
+        if let Some(listbox) = self.external_controls.clone() {
+            input = input.controls(listbox);
         }
         let input_id = ctx.add(input);
 

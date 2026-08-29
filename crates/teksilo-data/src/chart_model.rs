@@ -51,6 +51,7 @@ use teksilo_core::color_prop::ColorProp;
 use teksilo_core::signal::Signal;
 
 use crate::chart_change::{ChartChange, SeriesId};
+use crate::series_pattern::SeriesPattern;
 
 /// One numeric data point at a category/x-axis position, with an optional
 /// per-point color that overrides the series color (bar charts only).
@@ -87,6 +88,13 @@ impl<T> ChartDatum<T> {
 pub struct ChartSeries<T> {
     pub name: String,
     pub color: Option<ColorProp>,
+    /// The non-colour channel identifying this series — a dash pattern on a
+    /// line, a marker shape on a point, a hatch on a filled region. `None`
+    /// takes the pattern for the series' position
+    /// ([`SeriesPattern::for_index`]), which is why the channel exists even
+    /// with no application code. Set it when a series' identity must survive a
+    /// reorder. See [`SeriesPattern`].
+    pub pattern: Option<SeriesPattern>,
     pub visible: bool,
     pub points: Vec<ChartDatum<T>>,
 }
@@ -98,6 +106,7 @@ where
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ChartSeries")
             .field("name", &self.name)
+            .field("pattern", &self.pattern)
             .field("visible", &self.visible)
             .field("len", &self.points.len())
             .finish()
@@ -112,6 +121,7 @@ where
         Self {
             name: self.name.clone(),
             color: self.color.clone(),
+            pattern: self.pattern,
             visible: self.visible,
             points: self.points.clone(),
         }
@@ -123,6 +133,7 @@ impl<T> ChartSeries<T> {
         Self {
             name: name.into(),
             color: None,
+            pattern: None,
             visible: true,
             points: Vec::new(),
         }
@@ -130,6 +141,13 @@ impl<T> ChartSeries<T> {
 
     pub fn color(mut self, color: impl Into<ColorProp>) -> Self {
         self.color = Some(color.into());
+        self
+    }
+
+    /// Pin this series' non-colour channel instead of taking the one its
+    /// position implies. See [`SeriesPattern`].
+    pub fn pattern(mut self, pattern: SeriesPattern) -> Self {
+        self.pattern = Some(pattern);
         self
     }
 
@@ -154,6 +172,9 @@ pub struct SeriesView<'a, T> {
     pub id: SeriesId,
     pub name: &'a str,
     pub color: Option<&'a ColorProp>,
+    /// The series' explicit non-colour channel, or `None` to take the one its
+    /// position implies. See [`SeriesPattern`].
+    pub pattern: Option<SeriesPattern>,
     pub visible: bool,
     pub points: &'a [ChartDatum<T>],
 }
@@ -161,6 +182,7 @@ pub struct SeriesView<'a, T> {
 struct SeriesEntry<T> {
     name: String,
     color: Option<ColorProp>,
+    pattern: Option<SeriesPattern>,
     visible: bool,
     points: Vec<ChartDatum<T>>,
 }
@@ -246,6 +268,7 @@ impl<T: 'static> ChartModel<T> {
                 let key = guard.arena.insert(SeriesEntry {
                     name: s.name,
                     color: s.color,
+                    pattern: s.pattern,
                     visible: s.visible,
                     points: s.points,
                 });
@@ -282,6 +305,7 @@ impl<T: 'static> ChartModel<T> {
             let key = guard.arena.insert(SeriesEntry {
                 name: name.into(),
                 color: None,
+                pattern: None,
                 visible: true,
                 points: Vec::new(),
             });
@@ -305,6 +329,7 @@ impl<T: 'static> ChartModel<T> {
             let key = guard.arena.insert(SeriesEntry {
                 name: name.into(),
                 color: None,
+                pattern: None,
                 visible: true,
                 points: Vec::new(),
             });
@@ -406,6 +431,53 @@ impl<T: 'static> ChartModel<T> {
             return;
         }
         self.notify(ChartChange::SeriesColorChanged { series });
+        self.bump_style();
+    }
+
+    /// Set a series' explicit [`SeriesPattern`] — the non-colour channel that
+    /// identifies it. Bumps [`Self::style_version`] (paint-only), like
+    /// [`set_series_color`](Self::set_series_color). A no-op if unchanged.
+    ///
+    /// # Panics
+    /// Panics if `series` is unknown.
+    pub fn set_series_pattern(&self, series: SeriesId, pattern: SeriesPattern) {
+        let changed = {
+            let mut guard = self.inner.borrow_mut();
+            let entry = &mut guard.arena[series.key()];
+            if entry.pattern == Some(pattern) {
+                false
+            } else {
+                entry.pattern = Some(pattern);
+                true
+            }
+        };
+        if !changed {
+            return;
+        }
+        self.notify(ChartChange::SeriesPatternChanged { series });
+        self.bump_style();
+    }
+
+    /// Clear a series' explicit pattern, falling back to the one its position
+    /// implies. Bumps [`Self::style_version`]. A no-op if already unset.
+    ///
+    /// # Panics
+    /// Panics if `series` is unknown.
+    pub fn clear_series_pattern(&self, series: SeriesId) {
+        let changed = {
+            let mut guard = self.inner.borrow_mut();
+            let entry = &mut guard.arena[series.key()];
+            if entry.pattern.is_none() {
+                false
+            } else {
+                entry.pattern = None;
+                true
+            }
+        };
+        if !changed {
+            return;
+        }
+        self.notify(ChartChange::SeriesPatternChanged { series });
         self.bump_style();
     }
 
@@ -630,6 +702,7 @@ impl<T: 'static> ChartModel<T> {
                 id: series,
                 name: &e.name,
                 color: e.color.as_ref(),
+                pattern: e.pattern,
                 visible: e.visible,
                 points: &e.points,
             })
@@ -647,6 +720,7 @@ impl<T: 'static> ChartModel<T> {
                     id,
                     name: &e.name,
                     color: e.color.as_ref(),
+                    pattern: e.pattern,
                     visible: e.visible,
                     points: &e.points,
                 })

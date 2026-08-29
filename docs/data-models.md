@@ -594,17 +594,19 @@ Every mutation method follows the mutate-then-notify discipline
 1. Emits a [`ChartChange`](../crates/teksilo-data/src/chart_change.rs)
    describing exactly what changed — `SeriesInserted` / `SeriesRemoved`
    / `SeriesMoved` / `SeriesRenamed` / `SeriesColorChanged` /
-   `SeriesVisibilityChanged` / `PointsInserted` / `PointsRemoved` /
-   `PointUpdated` / `SeriesDataReplaced` / `Reset` — to every observer
+   `SeriesPatternChanged` / `SeriesVisibilityChanged` / `PointsInserted`
+   / `PointsRemoved` / `PointUpdated` / `SeriesDataReplaced` / `Reset`
+   — to every observer
    registered via `model.observe_changes(|change| …) -> ObserverHandle`
    (RAII, same as every other model's observer handle).
 2. Bumps exactly one of two `Signal<u64>` version counters:
    `structure_version()` for everything that can move the y-domain,
    tick positions, or bar/point layout (series add/remove/move/rename,
    *and* visibility toggles, plus every point mutation), or
-   `style_version()` for the one variant that's paint-only —
-   `SeriesColorChanged`, from `set_series_color` /
-   `clear_series_color`. This binary split is deliberately coarse: a
+   `style_version()` for the two variants that are paint-only —
+   `SeriesColorChanged` (from `set_series_color` / `clear_series_color`)
+   and `SeriesPatternChanged` (from `set_series_pattern` /
+   `clear_series_pattern`). This binary split is deliberately coarse: a
    consumer that only cares "did *anything* change" can bind either
    signal at `Rebuild`; a chart widget that wants to skip a relayout
    for a pure color change binds `structure_version` at `Relayout` and
@@ -616,12 +618,25 @@ Construction: `ChartModel::new()` (empty) + `add_series` /
 (the common multi-series case, no per-item notification — mirrors
 `ListModel::from_vec`), or `ChartModel::from_points(vec![ChartDatum...])`
 (a single anonymous, visible series — the flat, one-dimensional path
-`PieChart` uses). `ChartSeries<T>` (the construction DTO) carries
+`PieChart` uses).
+
+Each series also carries a
+[`pattern: Option<SeriesPattern>`](../crates/teksilo-data/src/series_pattern.rs)
+— the **non-colour channel** that identifies it (a dash on a line, a
+marker shape on a point, a hatch on a filled region). `None` takes the
+pattern the series' position implies, so the channel exists with no
+application code; set one when a series' identity must survive a
+reorder. This is what keeps a multi-series chart readable in greyscale,
+under forced colours, or by a reader who does not see the palette — see
+[charts.md §5.1](charts.md) for the rendering table and the policy that
+decides when a chart draws it.
+
+`ChartSeries<T>` (the construction DTO) carries
 `visible: bool` — a **plain bool**, not a `Signal<bool>`: it only
 describes a series' desired shape at construction time. Once a series
 is in the model, mutate it through the model's own methods
-(`set_series_visible`, `set_series_color`, `rename_series`,
-`move_series`, `push_point` / `insert_point` / `remove_point` /
+(`set_series_visible`, `set_series_color`, `set_series_pattern`,
+`rename_series`, `move_series`, `push_point` / `insert_point` / `remove_point` /
 `update_point` / `replace_series_data`), not by reaching back into the
 DTO. Read access is callback-scoped like every other model here —
 `with_series`, `with_point`, `with_series_view` (one series, metadata

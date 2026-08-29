@@ -89,3 +89,74 @@ fn controller_writes_and_observes_signals() {
     assert_eq!(shared.borrow().writes, b"echo hi\n");
     let _ = id;
 }
+
+#[test]
+fn ctrl_tab_is_not_written_to_the_child() {
+    // WCAG 2.1.2. The terminal encodes plain Tab as `\t` and Shift+Tab as
+    // CSI Z, so those can never leave the widget. Ctrl+Tab is the reserved
+    // escape chord: it must reach the framework's focus cycling instead of
+    // the child process, so nothing is written and focus moves on.
+    let mut tree = WidgetTree::new().with_theme(theme());
+    let factory = MemoryEngineFactory::new();
+    let shared = factory.shared();
+    let id = tree.add(Terminal::with_engine_factory(factory));
+
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    tree.run_mount_actions(&mut NoopWindowOps);
+    tree.focus(id);
+
+    // Plain Tab is the child's business.
+    tree.dispatch_event(WidgetEvent::KeyDown {
+        key: Key::Tab,
+        modifiers: Modifiers::NONE,
+        text: None,
+    });
+    assert_eq!(shared.borrow().writes, b"\t");
+
+    // Ctrl+Tab is the framework's.
+    tree.dispatch_event(WidgetEvent::KeyDown {
+        key: Key::Tab,
+        modifiers: Modifiers::CTRL,
+        text: None,
+    });
+    assert_eq!(
+        shared.borrow().writes,
+        b"\t",
+        "Ctrl+Tab must not be encoded to the PTY"
+    );
+}
+
+#[test]
+fn a_read_only_terminal_declines_keys_it_cannot_use() {
+    // A read-only terminal has no child to receive a keystroke, so consuming
+    // every key trapped focus for no benefit. It now declines, which lets the
+    // framework's plain-Tab focus cycling work as usual.
+    let mut tree = WidgetTree::new().with_theme(theme());
+    let factory = MemoryEngineFactory::new();
+    let shared = factory.shared();
+    let id = tree.add(Terminal::with_engine_factory(factory).read_only(true));
+
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    tree.run_mount_actions(&mut NoopWindowOps);
+    tree.focus(id);
+
+    tree.dispatch_event(WidgetEvent::KeyDown {
+        key: Key::A,
+        modifiers: Modifiers::NONE,
+        text: Some("a".to_string()),
+    });
+    assert!(
+        shared.borrow().writes.is_empty(),
+        "a read-only terminal must not write to the child"
+    );
+
+    tree.dispatch_event(WidgetEvent::KeyDown {
+        key: Key::Tab,
+        modifiers: Modifiers::NONE,
+        text: None,
+    });
+    assert!(
+        shared.borrow().writes.is_empty(),
+        "a read-only terminal must not encode Tab either"
+    );
+}

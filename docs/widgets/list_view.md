@@ -50,7 +50,7 @@ let _w = ListView::new(model, |_i, item, _selected| {
 
 ## Builder methods at a glance
 
-`from_source`, `from_source_keyed`, `enabled`, `overscroll_behavior`, `smooth_scrolling`, `smooth_scroll_duration`, `scroll_bar_style`, `item_height`, `item_height_fn`, `auto_item_height`, `spacing`, `selection`, `reorderable`, `exportable`, `export_external`, `on_rows_transferred_out`, `accept_foreign_rows`, `on_rows_received`, `on_activate`, `activate_on`, `row_tooltip_sticky`, `row_tooltip`, `row_rich_tooltip`, `row_composite_tooltip`, `type_ahead_label`, `type_ahead_timeout`, `show_scrollbar`, `scroll_y_signal`, `max_scroll_y_signal`, `viewport_ratio_y_signal`, `scroll_to_index`, `ensure_index_visible`
+`from_source`, `from_source_keyed`, `enabled`, `overscroll_behavior`, `smooth_scrolling`, `smooth_scroll_duration`, `scroll_bar_style`, `item_height`, `item_height_fn`, `auto_item_height`, `spacing`, `selection`, `realized_row_ids`, `reorderable`, `exportable`, `export_external`, `on_rows_transferred_out`, `accept_foreign_rows`, `on_rows_received`, `on_activate`, `activate_on`, `row_tooltip_sticky`, `row_tooltip`, `row_rich_tooltip`, `row_composite_tooltip`, `type_ahead_label`, `type_ahead_timeout`, `show_scrollbar`, `scroll_y_signal`, `max_scroll_y_signal`, `viewport_ratio_y_signal`, `scroll_to_index`, `ensure_index_visible`
 
 ## API reference
 
@@ -149,6 +149,26 @@ Set spacing between items (default 0.0).
 Set the index-based selection model (positions). For identity-based
 selection that survives reorder / filter / window-slide, build the view
 with `from_source_keyed` instead.
+
+#### `pub fn realized_row_ids(&self) -> Rc<RefCell<Vec<(usize, WidgetId)>>>`
+
+A shared handle to the live `(model index → row node id)` map of the
+**realized** rows, rewritten at the end of every build.
+
+The id is the row's `Role::ListItem` wrapper — the node an
+`active_descendant` has to point at. Take the handle before moving the
+view into the tree; it is populated on the first build.
+
+This exists for the ARIA combobox / listbox pattern, where keyboard
+focus stays on a *text field* while the arrow keys move a highlight
+through this list (a command palette, a type-ahead picker). The field's
+AT node publishes `active_descendant` pointing here, so a screen reader
+announces each row as the highlight moves without focus ever leaving
+the input. A `ListView` that holds focus itself does not need this.
+
+Only realized rows are present — a row scrolled outside the
+virtualization window has no widget, so look-ups for it return `None`.
+Callers should `scroll_to_index` the row they intend to announce.
 
 #### `pub fn reorderable(mut self, enabled: bool) -> Self`
 

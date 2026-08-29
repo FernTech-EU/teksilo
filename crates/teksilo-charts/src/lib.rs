@@ -29,6 +29,7 @@ pub mod layout;
 pub mod legend;
 pub mod line_chart;
 pub mod palette;
+pub mod pattern;
 pub mod pie_chart;
 #[cfg(feature = "preview")]
 mod preview_catalog;
@@ -43,9 +44,10 @@ pub use layout::LegendPosition;
 pub use legend::{ChartLegend, LegendOrientation};
 pub use line_chart::LineChart;
 pub use palette::ChartPalette;
+pub use pattern::{LegendSwatch, PatternPolicy};
 pub use pie_chart::{PieChart, PieLabelMode};
 pub use recipe_style::RecipeChartStyle;
 pub use teksilo_data::{
     ChartAggregate, ChartAggregateFn, ChartDatum, ChartModel, ChartSelection, ChartSeries,
-    ChartWindow, SeriesId, SeriesView,
+    ChartWindow, SeriesHatch, SeriesId, SeriesMarker, SeriesPattern, SeriesView,
 };

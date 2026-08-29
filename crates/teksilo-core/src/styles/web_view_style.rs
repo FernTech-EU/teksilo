@@ -63,6 +63,11 @@ impl WebViewVisualState {
 pub struct WebViewStyleConfig {
     /// Reactive lifecycle state — bind overlay surface/border/opacity to it.
     pub state: Signal<WebViewVisualState>,
+    /// Whether the Teksilo-side frame holds keyboard focus. The web view paints
+    /// no content of its own — the page is the engine's native subview — so the
+    /// focus ring drawn from this is the *only* thing telling a keyboard user
+    /// that Tab landed here and Enter will enter the page. Draw it.
+    pub focused: Signal<bool>,
     /// Pre-built overlay content (e.g. a spinner + status label) the chrome
     /// centers. The native engine surface is composited by the OS on top of
     /// this; the overlay is what shows through before/around the page.

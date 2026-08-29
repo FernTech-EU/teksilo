@@ -507,6 +507,9 @@ Clear the keyboard-focused cell.
 
 Programmatically sort by `col_id` (pass `None` to clear the sort).
 
+Equality-guarded, like every persisted-layout setter here — see
+`set_column_widths`.
+
 #### `pub fn set_filter(&self, col_id: &str, text: &str)`
 
 Set or clear the filter text for a single column.
@@ -542,6 +545,11 @@ its declared width policy).
 
 Replace the full width-override map (typically used to restore
 a persisted layout).
+
+Equality-guarded for the same reason as
+`TableView::set_column_widths`:
+the documented settings round-trip would otherwise recurse without
+bound on the first tick of a live resize drag.
 
 #### `pub fn set_column_order(&self, order: Vec<String>)`
 

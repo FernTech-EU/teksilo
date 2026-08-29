@@ -358,3 +358,168 @@ fn revealing_scrolls_only_far_enough_to_show_the_row() {
     }
     assert_eq!(state.top_index.get(), 0, "returning to row 0 shows row 0");
 }
+
+// ── Accessibility ───────────────────────────────────────────────────────────
+//
+/// The published AccessKit nodes, keyed by id. `AccessibilityInfo` is a coarse
+/// test view carrying neither `description` nor `active_descendant`, so these
+/// assertions go to the real tree update.
+fn a11y_nodes(
+    t: &mut WidgetTree,
+) -> std::collections::HashMap<teksilo_core::accesskit::NodeId, teksilo_core::accesskit::Node> {
+    t.sync_accessibility().nodes.into_iter().collect()
+}
+
+fn node_of(
+    nodes: &std::collections::HashMap<
+        teksilo_core::accesskit::NodeId,
+        teksilo_core::accesskit::Node,
+    >,
+    id: WidgetId,
+) -> teksilo_core::accesskit::Node {
+    nodes
+        .get(&teksilo_core::accessibility::widget_id_to_node_id(id))
+        .cloned()
+        .unwrap_or_else(|| panic!("{id:?} published no AccessKit node"))
+}
+
+//
+// The palette used to emit a bare, unnamed `Role::Dialog` over a `ListView`
+// built with no `SelectionModel`, so every row reported "not selected" and the
+// arrow-key highlight was announced to nobody. These pin the fix.
+
+#[test]
+fn the_dialog_is_named_and_reports_its_match_count() {
+    // No `I18nManager` is installed by default in widget tests, so `tr_widget!`
+    // resolves to the bare message key. Install one carrying the crate's real
+    // framework locales, so the assertions read the sentence a user is actually
+    // announced — including the plural selector, which is the point.
+    use teksilo_i18n::{
+        I18nConfig, I18nManager,
+        thread_local::{clear, install},
+    };
+    clear();
+    install(I18nManager::from_config(
+        &I18nConfig::new().framework_locales(crate::framework_locales()),
+    ));
+
+    let mut tree = tree_with_commands();
+    let palette = CommandPalette::new();
+    let state = palette.state.clone();
+    let id = tree.add(palette);
+    tree.layout(SizeProposal::exact(560.0, 420.0));
+
+    let info = tree.accessibility_node(id);
+    assert_eq!(info.role(), teksilo_core::accesskit::Role::Dialog);
+    assert!(
+        info.name().is_some_and(|n| !n.is_empty()),
+        "an unnamed dialog announces that *something* opened, not what"
+    );
+
+    let nodes = a11y_nodes(&mut tree);
+    assert_eq!(
+        node_of(&nodes, id).description(),
+        Some("3 commands"),
+        "the match count must be announced, not left to be arrowed through"
+    );
+
+    state.query.set("exp".to_string());
+    tree.layout(SizeProposal::exact(560.0, 420.0));
+    let nodes = a11y_nodes(&mut tree);
+    assert_eq!(
+        node_of(&nodes, id).description(),
+        Some("1 command"),
+        "the count must track the query"
+    );
+    teksilo_i18n::thread_local::clear();
+}
+
+#[test]
+fn the_highlighted_row_is_reported_as_selected() {
+    let mut tree = tree_with_commands();
+    let palette = CommandPalette::new();
+    let state = palette.state.clone();
+    let _ = tree.add(palette);
+    tree.layout(SizeProposal::exact(560.0, 420.0));
+
+    assert!(
+        state.selection.is_selected(0),
+        "the first row must be selected on open"
+    );
+    state.step_selection(1);
+    tree.layout(SizeProposal::exact(560.0, 420.0));
+    assert!(
+        state.selection.is_selected(1),
+        "an arrow key must move the AT-visible selection, not only the tint"
+    );
+    assert!(
+        !state.selection.is_selected(0),
+        "the previous row must stop reporting itself as selected"
+    );
+}
+
+#[test]
+fn the_search_field_publishes_the_highlighted_row_as_its_active_descendant() {
+    // The ARIA combobox pattern: focus stays in the search field, so the
+    // highlight has to reach AT through *that* node's active descendant.
+    let mut tree = tree_with_commands();
+    let palette = CommandPalette::new();
+    let state = palette.state.clone();
+    let _ = tree.add(palette);
+    tree.layout(SizeProposal::exact(560.0, 420.0));
+
+    let first = state
+        .active_row
+        .get()
+        .expect("the highlighted row must resolve to a live node");
+    assert!(
+        state.listbox_id.get().is_some(),
+        "the result list must be published for the field's `controls` relation"
+    );
+
+    state.step_selection(1);
+    tree.layout(SizeProposal::exact(560.0, 420.0));
+    let second = state
+        .active_row
+        .get()
+        .expect("the highlight must still resolve after moving");
+    assert_ne!(
+        first, second,
+        "moving the highlight must move the announced active descendant"
+    );
+
+    // The relation must land on the node that actually holds keyboard focus —
+    // an ancestor's active descendant is not what a screen reader follows.
+    let want = teksilo_core::accessibility::widget_id_to_node_id(second);
+    let nodes = a11y_nodes(&mut tree);
+    let publisher = nodes
+        .values()
+        .find(|n| n.active_descendant() == Some(want))
+        .expect("the highlighted row must be published as an active descendant");
+    assert_eq!(
+        publisher.role(),
+        teksilo_core::accesskit::Role::TextInput,
+        "the relation must sit on the focusable text field, not on a composite \
+         ancestor — AT follows the focused node's active descendant"
+    );
+}
+
+#[test]
+fn an_empty_result_set_publishes_no_stale_active_descendant() {
+    let mut tree = tree_with_commands();
+    let palette = CommandPalette::new();
+    let state = palette.state.clone();
+    let _ = tree.add(palette);
+    tree.layout(SizeProposal::exact(560.0, 420.0));
+    assert!(state.active_row.get().is_some(), "precondition");
+
+    state.query.set("zzzzz".to_string());
+    tree.layout(SizeProposal::exact(560.0, 420.0));
+    assert_eq!(
+        state.active_row.get(),
+        None,
+        "with no rows there is no node to point at — a stale id would name a \
+         destroyed widget"
+    );
+    assert_eq!(state.listbox_id.get(), None, "and no listbox either");
+}

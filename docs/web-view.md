@@ -236,6 +236,30 @@ wash (loading / error / transparent-when-ready). Override per-call with
 title binding; the page's own AT tree is published to the OS by the engine, so
 Teksilo does not duplicate it.
 
+**Keyboard: the frame, then the page.** The web view is `focusable`, so Tab
+reaches it and the style paints a focus ring around the frame — necessary
+because the widget draws no content of its own to show focus on. Landing there
+does **not** hand the keyboard to the engine; **Enter** or **Space** does
+(`WebViewHandle::set_focus`), and so does an AT-invoked `Click` or `Focus`. Every
+other key is declined, so the frame is never a trap: Tab cycles straight off it.
+
+The two-step is deliberate. A `WebView` has **two disjoint focus rings and two
+AT trees** — AccessKit's and the engine's platform tree — and once the native
+subview owns the keyboard, Teksilo stops receiving keys altogether. An automatic
+hand-off on Tab would therefore be a one-way door out of the app's own focus
+cycle. Getting back out of an entered page is the engine's and the OS's business,
+not something the toolkit can guarantee; this is the same reason the web
+platform treats an `<iframe>` as a focus scope you enter rather than fall into.
+
+Apps whose web view **is** the window content can take the one-step form with
+`.enter_page_on_focus(true)`. `.focus_page()` is the programmatic equivalent of
+Enter, and `.focused_signal()` reports whether the *frame* holds focus (it can
+say nothing about what happens once the page has been entered).
+
+A consequence for anyone assembling a conformance artifact: a WebView-embedding
+application cannot inherit the toolkit's 2.1.1 or 4.1.2 posture for the page. It
+must scope the embedded content separately.
+
 ## The dormancy / visibility bridge
 
 This is the one place `WebView` breaks a framework invariant, and it is handled
@@ -311,6 +335,13 @@ one-liner) and pump post-mount opens with `tree.run_mount_actions(&mut NoopWindo
   handling is unverified.
 - **Memory** of an open WebView with heavy content is non-trivial (~50–150 MB
   for WebView2 / WKWebView); a `WebView` is not a cheap widget.
+- **Leaving an entered page** is not under Teksilo's control. Once
+  `set_focus()` has handed the keyboard to the engine subview, the toolkit sees
+  no further keystrokes, so it cannot offer an escape chord the way a
+  `keyboard_capture` surface can. Whether Tab at the end of the document returns
+  focus to the host window is engine- and platform-dependent and is **not**
+  verified here. Nor is a click on the page mirrored back onto Teksilo's focus
+  ring — the native subview receives it directly.
 
 [`WebViewBackend`]: ../crates/teksilo-webview/src/backend.rs
 [`WebViewHandle`]: ../crates/teksilo-webview/src/backend.rs

@@ -99,6 +99,10 @@ pub struct TextInput {
     /// Semantic input purpose (WCAG 1.3.5) forwarded to the inner
     /// `TextInputField` to select a specialised AT role.
     input_purpose: crate::primitives::text_input_field::InputPurpose,
+    /// ARIA combobox wiring, forwarded verbatim to the inner
+    /// `TextInputField` (the node that actually holds focus).
+    active_descendant: Option<Signal<Option<WidgetId>>>,
+    controls: Option<Signal<Option<WidgetId>>>,
     /// Optional validator closure. Forwarded 1:1 to
     /// `TextInputField::validator`. Runs on commit (Enter, Tab-out,
     /// blur). Set this AND `validation_feedback` together for
@@ -175,6 +179,8 @@ impl TextInput {
             suffix: String::new(),
             input_mask: None,
             input_purpose: crate::primitives::text_input_field::InputPurpose::Normal,
+            active_descendant: None,
+            controls: None,
             validator: None,
             caret_position_slot: std::rc::Rc::new(std::cell::RefCell::new(None)),
             caret_setter_slot: std::rc::Rc::new(std::cell::RefCell::new(None)),
@@ -329,6 +335,23 @@ impl TextInput {
         purpose: crate::primitives::text_input_field::InputPurpose,
     ) -> Self {
         self.input_purpose = purpose;
+        self
+    }
+
+    /// Publish `active_descendant` on the inner field, pointing at the row a
+    /// separate listbox is currently highlighting (the ARIA combobox pattern).
+    /// Forwarded 1:1 to [`TextInputField::active_descendant`], which is where
+    /// it has to land: AT follows the *focused* node's active descendant, and
+    /// the inner field is the focusable one.
+    pub fn active_descendant(mut self, active: Signal<Option<WidgetId>>) -> Self {
+        self.active_descendant = Some(active);
+        self
+    }
+
+    /// Publish a `controls` relation to the listbox this input drives.
+    /// Forwarded 1:1 to [`TextInputField::controls`].
+    pub fn controls(mut self, listbox: Signal<Option<WidgetId>>) -> Self {
+        self.controls = Some(listbox);
         self
     }
 
@@ -523,6 +546,12 @@ impl Widget for TextInput {
             field = field.input_mask(mask);
         }
         field = field.input_purpose(self.input_purpose);
+        if let Some(active) = self.active_descendant.clone() {
+            field = field.active_descendant(active);
+        }
+        if let Some(controls) = self.controls.clone() {
+            field = field.controls(controls);
+        }
         let validator_installed = self.validator.is_some();
         if let Some(validator) = self.validator.take() {
             // ValidatorFn is `Rc<dyn Fn(&str) -> ValidationOutcome>`.

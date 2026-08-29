@@ -22,6 +22,16 @@
 **Previous revision:** 2026-07-02 (commit `771fa3e0`), superseded — see §7
 **Standards referenced:** WCAG 2.1 A/AA · WCAG 2.2 delta · EN 301 549 v3.2.1 (§5, §9, §11) · WCAG2ICT
 
+> **Remediation layer, 2026-08-28.** The four Level-A findings this revision newly
+> identified — §5.1 Terminal keyboard trap, §5.2 colour-only chart series, §5.4
+> `CommandPalette`, §5.10 `WebView` outside the Tab cycle — have been fixed. Those
+> four sections are rewritten to record **what was done, what was tested, and what
+> was deliberately left**; the findings table in §2 and the affected criterion rows
+> (1.4.1, 2.1.1, 2.1.2, 4.1.2) are updated to match. Everything else in this file is
+> the original assessment and carries all the caveats in §1.1 — in particular, the
+> remediation is covered by headless regression tests, **not** by a live
+> assistive-technology session, which is the same omission §7 is about.
+
 ---
 
 ## 1. Executive summary
@@ -51,17 +61,20 @@ later — produces three findings that matter more than any individual criterion
 3. **The widget catalog has grown faster than this assessment tracked it.** Terminal,
    WebView, CommandPalette, CodeEditor/LogView, GridView, DockingLayout, Splitter,
    SegmentedControl, ColumnFlow, Toast, charts, and three new theme presets all
-   post-date the previous revision and appear nowhere in it. Three of them carry
-   live Level-A defects.
+   post-date the previous revision and appear nowhere in it. Four of them carried
+   live Level-A defects (findings 1–4 below); all four have since been fixed, and
+   §§5.1, 5.2, 5.4 and 5.10 record what was done and what was left.
 
-**Newly identified, ranked by severity:**
+**Newly identified, ranked by severity.** Findings 1–4 were remediated after this
+revision was written; each is struck through here and its section below records
+what was done, what was verified, and what was *not*. Findings 5–9 stand.
 
 | # | Finding | Criterion | Severity |
 |---|---|---|---|
-| 1 | `Terminal` is an unconditional keyboard trap — Tab, Shift+Tab and Escape are encoded to the PTY and every `KeyDown` returns `Handled`, with no escape chord | 2.1.2 (A) | **Fail** (opt-in feature) |
-| 2 | Chart series are distinguished by colour alone — no dash, marker, or fill-pattern channel exists | 1.4.1 (A) | **Fail** |
-| 3 | `CommandPalette` exposes an unnamed `Role::Dialog`; its arrow-key highlight is invisible to AT and is colour-only on screen | 4.1.2 (A), 1.4.1 (A) | **Fail** |
-| 4 | `WebView` is never `.focusable()` — embedded page content is outside the Tab cycle entirely | 2.1.1 (A) | **Fail** |
+| 1 | ~~`Terminal` is an unconditional keyboard trap~~ | 2.1.2 (A) | **Fixed** — see §5.1 |
+| 2 | ~~Chart series are distinguished by colour alone~~ | 1.4.1 (A) | **Fixed** — see §5.2 |
+| 3 | ~~`CommandPalette` exposes an unnamed `Role::Dialog` with an AT-invisible highlight~~ | 4.1.2 (A), 1.4.1 (A) | **Fixed** — see §5.4 |
+| 4 | ~~`WebView` is never `.focusable()`~~ | 2.1.1 (A) | **Fixed** — see §5.10 |
 | 5 | `Toast` auto-dismisses actionable controls after 10 s, pausable by pointer hover only — never by keyboard focus | 2.2.1 (A), 2.2.2 (A) | Partial |
 | 6 | No keyboard route to any context menu exists (no `Key::ContextMenu`, no Shift+F10) | 2.1.1 (A) | Partial |
 | 7 | `teksilo-theme-material3` ships with zero contrast assertions | 1.4.3, 1.4.11 (AA) | Untested |
@@ -152,7 +165,7 @@ Legend: ✅ supported · 🟡 partial · ❌ not supported · ➖ not applicable
 | 1.3.3 Sensory Characteristics | A | framework-enabled | ✅ | No shipped instructional copy relies on shape or position alone |
 | 1.3.4 Orientation | AA | — | ➖ | Desktop, freely resizable windows; no orientation lock |
 | 1.3.5 Identify Input Purpose | AA | framework | 🟡 | Role half done ([text_input_field.rs:120-149](../crates/teksilo-widgets/src/primitives/text_input_field.rs)). The autofill-token half is unreachable — but **not for the reason previously given**: AccessKit 0.24.1 *does* have an `AutoComplete` field; it carries the ARIA `aria-autocomplete` behaviour vocabulary (`Inline`/`List`/`Both`), not the HTML autofill tokens. Only the previous revision of *this* file garbled that — [`docs/a11y/a11y_issues.md`](a11y/a11y_issues.md) and the source comment at `text_input_field.rs:113-118` both draw the distinction correctly |
-| 1.4.1 Use of Color | A | framework | ❌ | **Three colour-only sites.** (a) Chart series carry no non-colour channel — `ChartSeries` is `{name, color, visible, points}` ([chart_model.rs:87-92](../crates/teksilo-data/src/chart_model.rs)) and the legend maps by swatch; the palette also wraps modulo its length, so series 9 repeats series 1. (b) `CommandPalette`'s highlight is a background fill with no border or marker ([command_palette.rs:556-560](../crates/teksilo-widgets/src/command_palette.rs)). (c) TableView/TreeTableView selection band remains a flat fill (§5.3). List/tree rows *were* fixed (G13) |
+| 1.4.1 Use of Color | A | framework | 🟡 | **Was three colour-only sites; one remains.** (a) *Fixed* — chart series carry a non-colour channel (`SeriesPattern`: dash / marker / hatch, rendered in the plot **and** the legend swatch), which also breaks the palette's modulo wrap (§5.2). (b) *Fixed* — `CommandPalette`'s highlight gained a leading marker bar beside the tint (§5.4). (c) **Still open:** TableView/TreeTableView selection band remains a flat fill (§5.3). List/tree rows *were* fixed (G13) |
 | 1.4.2 Audio Control | A | — | ➖ | No auto-playing audio. The terminal bell is visual-only (`BellStyle::{Visual,None}`) — but see 2.3.1 |
 | 1.4.3 Contrast (Minimum) | AA | framework | 🟡 | Formula at [color.rs:261-283](../crates/teksilo-tokens/src/color.rs). CI-gated for IntUI ([theme.rs:844-887](../crates/teksilo-tokens/src/theme.rs)); Fluent self-gates with 14 assertions using an alpha-compositing-aware helper ([color.rs:259-264, :334-402](../crates/teksilo-theme-fluent/src/color.rs)); macOS self-gates with ~43. **Material 3 has zero contrast assertions** — its tokens measure fine today but nothing holds them there |
 | 1.4.4 Resize Text | AA | framework | ✅ | Global text scale 80–200 % applied through `effective_theme` at relayout. The editor family moved from post-layout page zoom to a true `font_size_scale` since (`dfe23340`), so enlarged text now shapes at a larger ppem rather than stretching a raster. `SegmentedControl`'s 24 dp height was a *ceiling* that clipped labels at raised scale until `7f212749` made it a floor |
@@ -166,8 +179,8 @@ Legend: ✅ supported · 🟡 partial · ❌ not supported · ➖ not applicable
 
 | Criterion | Lvl | Resp. | Status | Evidence / note |
 |---|---|---|---|---|
-| 2.1.1 Keyboard | A | framework | 🟡 | Real DFS Tab order + roving tabindex. Strong coverage: Splitter (arrows/Home/End/Enter, [handle.rs:489, :519-528](../crates/teksilo-widgets/src/splitter/handle.rs)), GridView (full 2D nav + Alt+Arrow reorder), SegmentedControl, CommandPalette, table cell navigation (added `15837b69`/`79b916f3`), scene magnetism connect flow. **Three gaps:** no `Key::ContextMenu`/Shift+F10 exists anywhere, so every `.context_menu(..)` is pointer- or AT-only; docking's `split_into_tab`/`stack_into_tab` drop zones have no menu equivalent; `WebView` is never `.focusable()`. Charts are also unreachable — no `focusable`/`on_key` outside the legend |
-| 2.1.2 No Keyboard Trap | A | framework | ❌ | Modal and overlay scopes still default to `EscapeOrClickOutside`. But `Terminal` sets `keyboard_capture(true)` ([terminal.rs:633](../crates/teksilo-terminal/src/terminal.rs)) and returns `EventResponse::Handled` from **every** `KeyDown` arm — including the read-only path — after encoding Tab as `\t` and Shift+Tab as CSI Z. Core dispatches Tab to the focused widget first and only cycles focus when unhandled ([event_dispatch_impl.rs:476-492](../crates/teksilo-core/src/widget_tree/event_dispatch_impl.rs)), so neither escapes. No escape chord exists. The editable `CodeEditor` has a milder version: its Tab-indent arm lacks the `tab_escape = ctrl` guard `RichTextEditor` has. Behind the off-by-default `terminal` feature |
+| 2.1.1 Keyboard | A | framework | 🟡 | Real DFS Tab order + roving tabindex. Strong coverage: Splitter (arrows/Home/End/Enter, [handle.rs:489, :519-528](../crates/teksilo-widgets/src/splitter/handle.rs)), GridView (full 2D nav + Alt+Arrow reorder), SegmentedControl, CommandPalette, table cell navigation (added `15837b69`/`79b916f3`), scene magnetism connect flow. `WebView` **was** never `.focusable()`; it is now in the Tab cycle, with Enter entering the page (§5.10 — leaving an entered page stays outside the toolkit's control). **Two gaps remain:** no `Key::ContextMenu`/Shift+F10 exists anywhere, so every `.context_menu(..)` is pointer- or AT-only; docking's `split_into_tab`/`stack_into_tab` drop zones have no menu equivalent. Charts are also unreachable — no `focusable`/`on_key` outside the legend |
+| 2.1.2 No Keyboard Trap | A | framework | 🟡 | Modal and overlay scopes default to `EscapeOrClickOutside`. `Terminal`'s trap is **fixed at the primitive**: the dispatcher now reserves `Ctrl+Tab` / `Ctrl+Shift+Tab` for *every* `keyboard_capture` node before the widget is consulted, so no capture surface can swallow the one chord that gets focus out ([event_dispatch_impl.rs](../crates/teksilo-core/src/widget_tree/event_dispatch_impl.rs)); Terminal also declines it itself, no longer consumes keys on the read-only path, and announces the chord to AT (§5.1). **One milder case remains:** the editable `CodeEditor`'s Tab-indent arm lacks the `tab_escape = ctrl` guard `RichTextEditor` has, and is not a capture surface so the dispatcher reservation does not cover it |
 | 2.1.4 Character Key Shortcuts | A | framework | ✅ | Type-ahead and mnemonics are active only while the owning component holds focus. Scene magnetism's single-character `m` trigger meets the criterion by both available exceptions — remappable via `connect_key(..)` and active-on-focus-only. `4402128c` fixed hidden menu rows claiming a mnemonic and being activatable through it |
 | 2.2.1 Timing Adjustable | A | framework | 🟡 | **Previously scored ➖ n/a on the grounds that "no time-limited interactions exist" — that is false.** `Toast` auto-dismisses after a default 10 s ([toast.rs:65, :443](../crates/teksilo-widgets/src/toast.rs)) and can carry Link/Button actions. Adjustable only by the app author (`auto_dismiss_after`/`persistent`), never by the end user. Partially mitigated: dismissed toasts persist in the notification archive |
 | 2.2.2 Pause, Stop, Hide | A | framework | 🟡 | No auto-updating surface ships a pause affordance. `Cycle` (3 s default) has zero `pause`/`paused` occurrences. Joined since by `LogView` tail-following, `Terminal` scroll-on-output, and streaming charts — the chart demo hand-rolls its own pause signal, i.e. the framework supplies none. `Toast` pauses on pointer hover only, never on keyboard focus |
@@ -199,7 +212,7 @@ Legend: ✅ supported · 🟡 partial · ❌ not supported · ➖ not applicable
 | 3.3.3 Error Suggestion | AA | framework-enabled | ✅ | **Previously absent.** `ValidationStrip` announces `Invalid` at `Live::Assertive` and `Corrected` at `Live::Polite` under `Role::Status` ([validation_strip.rs:4-15, :154-163](../crates/teksilo-widgets/src/primitives/validation_strip.rs)); `InputDialog` adds live validation. Suggestion *text* is author-supplied |
 | 3.3.4 Error Prevention | AA | framework-enabled | ✅ | **Previously absent.** `WindowConfig::on_close_requested` → `CloseResponse::Veto` plus `MessageBox`/`Dialog` give the confirm-before-destructive pattern. Which actions are guarded is author-scope |
 | 4.1.1 Parsing | A | — | ➖ | No markup surface; removed outright in WCAG 2.2 |
-| 4.1.2 Name, Role, Value | A | framework | 🟡 | G1, G15, G17, and — since the previous revision — the fixes listed in §7 that made the declared semantics actually executable. Every post-audit widget family was spot-checked and declares role, name and value: Terminal, WebView, DockingLayout, GridView, SegmentedControl, ColumnFlow, Splitter, CodeEditor/LogView, Toast. **One exception: `CommandPalette`** emits only a bare `Role::Dialog` ([command_palette.rs:487-489](../crates/teksilo-widgets/src/command_palette.rs)) with no name, and its inner `ListView` is built with no `SelectionModel` and no `active_descendant`, so the arrow-key highlight is announced to nobody. `LogView` is partial by design (windowed tree, §5.5). Note: change notification is delegated to `accesskit_winit::Adapter::update_if_active` ([window.rs:415](../crates/teksilo-platform/src/window.rs)) — the previously cited `Tree::update_and_process_changes` does not exist in this workspace |
+| 4.1.2 Name, Role, Value | A | framework | 🟡 | G1, G15, G17, and — since the previous revision — the fixes listed in §7 that made the declared semantics actually executable. Every post-audit widget family was spot-checked and declares role, name and value: Terminal, WebView, DockingLayout, GridView, SegmentedControl, ColumnFlow, Splitter, CodeEditor/LogView, Toast. The one exception, `CommandPalette` — a bare unnamed `Role::Dialog` over a `ListView` with no `SelectionModel` and no `active_descendant`, so its arrow-key highlight was announced to nobody — **is fixed** (§5.4): the dialog is named and carries a live match count, rows report their selection, and `active_descendant` is published on the focusable text node (the only one AT follows), with regression tests against the real AccessKit tree. `LogView` is partial by design (windowed tree, §5.5). Note: change notification is delegated to `accesskit_winit::Adapter::update_if_active` ([window.rs:415](../crates/teksilo-platform/src/window.rs)) — the previously cited `Tree::update_and_process_changes` does not exist in this workspace |
 | 4.1.3 Status Messages | AA | framework | ✅ | G4 (ProgressBar). Now joined by `Toast`'s severity×priority mapping — `Role::Alert` for Error and high-priority Warning, `Role::Status` otherwise, matching `Live` and `live_atomic` so title and body announce as one unit ([toast/surface.rs:117-135, :368-385](../crates/teksilo-widgets/src/toast/surface.rs)) — and by the Terminal's delta-only `Role::Status` announcer. `StatusBar`, `LogView` and `NotificationLog` opt in or deliberately opt out, consistently |
 
 ### 3.4 WCAG 2.2 delta — forward look
@@ -269,8 +282,9 @@ product — never by the toolkit. The v4 draft moves §9/§11 to WCAG 2.2, which
 **US Section 508 (Revised).** References WCAG **2.0** A/AA plus the Chapter 3
 functional performance criteria. Most open items here (1.4.10, 1.4.11, 1.4.12, 1.3.5,
 2.5.x) are 2.1-or-later and sit outside its literal scope. The 2.0 AA criteria that do
-bind — 1.4.3 and 4.1.2 — are in the state described above, meaning 4.1.2's
-CommandPalette exception and 1.4.3's Material 3 gap are the two in-scope items.
+bind — 1.4.3 and 4.1.2 — are in the state described above. 4.1.2's CommandPalette
+exception has since been closed (§5.4), leaving 1.4.3's Material 3 gap as the in-scope
+item.
 
 **RGAA 4.1 (France).** Same criteria set as EAA, but audited through RGAA's 106 test
 criteria and conducted manually with real screen readers. That methodology is
@@ -284,44 +298,112 @@ for. A live manual audit is mandatory regardless of anything written here.
 
 Ranked by severity. Each is tagged with who can act on it.
 
-### 5.1 `Terminal` is an unconditional keyboard trap — WCAG 2.1.2 (A) · framework
+### 5.1 `Terminal` was an unconditional keyboard trap — WCAG 2.1.2 (A) · framework · **FIXED**
 
-`Terminal` sets `keyboard_capture(true)` and returns `EventResponse::Handled` from
-every `KeyDown` arm, including the `read_only` early return. Tab is encoded to `\t`
-and Shift+Tab to CSI Z; core only falls back to `cycle_focus` when the focused widget
-did not handle the key. No escape chord exists anywhere in the crate.
+**As found.** `Terminal` set `keyboard_capture(true)` and returned
+`EventResponse::Handled` from every `KeyDown` arm, including the `read_only` early
+return. Tab was encoded to `\t` and Shift+Tab to CSI Z; core only falls back to
+`cycle_focus` when the focused widget did not handle the key. No escape chord existed
+anywhere in the crate.
 
-The framework already has the correct pattern in three other widgets: `GridView`'s
-`Key::Tab` handler returns `None` at either grid boundary, which becomes
-`EventResponse::Ignored` and lets core's `cycle_focus` take over.
+**How it was fixed.** The recommendation was to treat `keyboard_capture(bool)` itself
+as the hazard rather than Terminal, and that is what was done — the escape is a
+property of the primitive, not a promise each capture-surface author has to remember
+to keep:
 
-Treat `keyboard_capture(bool)` itself as the hazard, not just Terminal. It is a
-general primitive with no contract requiring an escape, and its doc comment at
-[widget_builder.rs:616-624](../crates/teksilo-core/src/widget_builder.rs) currently
-promises that "Escape and overlay back-navigation still run first, so an open overlay
-can still be closed" — true only while an overlay *is* open. That sentence is what a
-future capture-surface author will rely on, and it should be corrected in source.
+- **The dispatcher reserves `Ctrl+Tab` / `Ctrl+Shift+Tab`.** In
+  [`dispatch_event_impl`](../crates/teksilo-core/src/widget_tree/event_dispatch_impl.rs),
+  the `Key::Tab` branch cycles focus *before* dispatching to a focused
+  `keyboard_capture` node, so the chord never reaches the widget and no capture
+  surface — present or future — can swallow it however greedily its `on_key`
+  behaves. Literal `ctrl()`, not the platform accelerator: ⌘⇥ is the macOS
+  application switcher and never arrives.
+- **The misleading doc sentence was corrected.** Both
+  [`WidgetBuilder::keyboard_capture`](../crates/teksilo-core/src/widget_builder.rs)
+  and [`WidgetNode::keyboard_capture`](../crates/teksilo-core/src/arena.rs) now state
+  the escape contract explicitly and say plainly that Escape is **not** reserved —
+  overlay back-navigation runs ahead of the capture check only while an overlay is
+  actually open.
+- **Terminal declines the chord itself** as well, so the widget is correct in
+  isolation (a direct `keyboard_handler` call, a host that dispatches keys itself)
+  rather than relying on its caller.
+- **The read-only path no longer consumes everything.** A read-only terminal has no
+  child to receive a keystroke, so returning `Handled` trapped focus for no benefit;
+  it now returns `Ignored` and plain Tab cycles out of it normally.
+- **The chord is announced.** `build_terminal_a11y` sets
+  `keyboard_shortcut = "Ctrl+Tab"` on the `Role::Terminal` node, because a
+  screen-reader user has no other way to discover that Tab here will not do what it
+  does everywhere else in the app.
 
-**Recommendation:** define a framework-level escape chord for capture surfaces
-(Ctrl+Tab / Ctrl+Shift+Tab, returning `Ignored`), document it as part of the
-`keyboard_capture` contract, and implement it in Terminal. Mitigated today only by
-the `terminal` feature being off by default.
+**Tests.** `ctrl_tab_always_escapes_a_keyboard_capture_surface` (teksilo-core) drives
+the framework contract against a deliberately greedy capture widget — plain Tab is
+consumed and focus stays, Ctrl+Tab and Ctrl+Shift+Tab move focus and never reach the
+widget. `ctrl_tab_is_not_written_to_the_child` and
+`a_read_only_terminal_declines_keys_it_cannot_use` (teksilo-terminal) pin the
+widget-side behaviour against the `MemoryEngine`.
 
-### 5.2 Chart series are distinguished by colour alone — WCAG 1.4.1 (A) · framework
+**Not fixed.** The `CodeEditor` Tab-indent arm still lacks the `tab_escape = ctrl`
+guard `RichTextEditor` has (it is not a `keyboard_capture` surface, so the dispatcher
+reservation does not cover it). The terminal's visual bell (§5.12) is untouched.
 
-`ChartSeries<T>` is `{name, color, visible, points}` with no dash-pattern, marker-shape
-or fill-pattern field, and `LineChart` strokes every series at the same width. The
-legend maps series to plot by swatch. `ChartPalette::color_for` wraps modulo the
-palette length, so a tenth series repeats the second's colour exactly.
+### 5.2 Chart series were distinguished by colour alone — WCAG 1.4.1 (A) · framework · **FIXED**
 
-The default palette is Okabe–Ito, which is a genuine and deliberate CVD-safe choice
-worth crediting — but it addresses whether the colours are *distinguishable*, not the
+**As found.** `ChartSeries<T>` was `{name, color, visible, points}` with no
+dash-pattern, marker-shape or fill-pattern field, and `LineChart` stroked every series
+at the same width. The legend mapped series to plot by swatch.
+`ChartPalette::color_for` wraps modulo the palette length, so a tenth series repeated
+the second's colour exactly. The Okabe–Ito default palette is a genuine CVD-safe
+choice, but it addresses whether the colours are *distinguishable* — not the
 requirement that colour not be the *only* visual means of conveying information.
 
-**Recommendation:** add a per-series non-colour channel (dash pattern for lines,
-marker shape for points, hatch for areas) and render it in the legend swatch.
+**How it was fixed.** The recommended channel was added, in the data layer so it is
+part of a series' identity rather than a per-chart decoration:
 
-### 5.3 Colour-only selection: TableView/TreeTableView, and now CommandPalette — WCAG 1.4.1 / 1.4.11 · framework
+- **[`SeriesPattern`](../crates/teksilo-data/src/series_pattern.rs)** (teksilo-data)
+  is one value driving all three renderings a chart needs — a **dash** on a line, a
+  **marker shape** at a point, a **hatch** on a filled region — so a series looks like
+  itself whether drawn as a line, a bar, a slice, or a legend swatch. `ChartSeries`
+  gained `pattern: Option<SeriesPattern>`; `ChartModel` gained
+  `set_series_pattern` / `clear_series_pattern` and a `SeriesPatternChanged` change
+  bumping `style_version` (paint-only, alongside `SeriesColorChanged`).
+- **The channel exists with no application code.** A series with no explicit pattern
+  takes the one its position implies. Six patterns against the theme palette's eight
+  colours also fixes the wrap complaint: the pair `(colour, pattern)` first repeats at
+  the 24th series, where colour alone repeated at the 9th.
+- **[`PatternPolicy`](../crates/teksilo-charts/src/pattern.rs)** decides when a chart
+  draws it. `Auto` — the default — draws it exactly when colour is doing
+  identification work: from the second **plotted** series onwards for `BarChart`
+  (so `BarGrouping::Single`, which draws one series however many the model holds,
+  stays plain) and `LineChart`; for `PieChart`, when a legend is shown and there is
+  more than one slice, because a pie's colour-to-category mapping lives in its legend.
+  A single-series chart is left plain — there is nothing to disambiguate, and hatching
+  it would be decoration carrying no information. `Never` is named plainly so it reads
+  as the accessibility regression it is at the call site.
+- **Legend swatches sample what the plot draws**, so the legend does not hand the
+  reader a second mapping to learn: a hatched chip for bars, a dashed line sample with
+  the marker at its centre for lines, a chip stamped with the marker glyph for pie
+  slices.
+- **A wedge is not a rectangle** and the canvas clips to rectangles only, so pie
+  slices carry a centroid marker glyph rather than a hatch — in a tone derived from
+  the slice's own fill, so it contrasts against any palette. Hatch colour is derived
+  the same way rather than themed: a fixed token would be either light or dark and
+  would vanish against half of any palette.
+
+**Tests.** `series_pattern` (teksilo-data) pins that the first six series get six
+distinct patterns, that the pattern cycle does not share a period with the palette,
+and that each pattern carries all three renderings distinctly. `pattern` and the three
+chart modules (teksilo-charts) drive the rendered frame: a second series brings hatch
+strokes / a distinct dash a single-series chart does not draw, a pie's legend brings
+centroid markers, `Never` drops the channel in all three, and a pinned pattern
+survives its series' position.
+
+**Not fixed, and stated plainly.** The hatch and marker are *visual* channels only —
+nothing here changes what a chart tells assistive technology, which remains the
+per-datum `Role::GraphicsObject` nodes described under 1.1.1. Contrast of the derived
+hatch tone against arbitrary palettes was reasoned from luminance, **not measured**.
+Chart tooltips still bypass the tooltip pipeline (1.4.13).
+
+### 5.3 Colour-only selection: TableView/TreeTableView — WCAG 1.4.1 / 1.4.11 · framework
 
 `RecipeTableStyle::make_row_background`
 ([recipe_table_style.rs:182-233](../crates/teksilo-widgets/src/styles/recipe_table_style.rs))
@@ -336,23 +418,56 @@ touch **both** the recipe style and the widget's own paint path — porting
 `border_color(BorderRole::Focused).border_width(selection_edge_width)` from
 `recipe_standard_item_style.rs:133-166` into `make_row_background` alone is not enough.
 
-`CommandPalette` is a second site with the same shape (§5.4).
+`CommandPalette` was a second site with the same shape; it is fixed (§5.4). This one
+is not.
 
-### 5.4 `CommandPalette` is inert to assistive technology — WCAG 4.1.2 (A) · framework
+### 5.4 `CommandPalette` was inert to assistive technology — WCAG 4.1.2 (A) · framework · **FIXED**
 
-Four defects in one widget: the root emits a bare, unnamed `Role::Dialog` with no
-combobox/listbox relationship and no `active_descendant`; the inner `ListView` is
-constructed with no `SelectionModel`, so every row reports `set_selected(false)`; the
-highlight is a colour-only background; and arrow keys move `state.selected` while focus
-stays in the `SearchField`, with nothing published to AT. Its test module contains no
-accessibility assertions.
+**As found.** Four defects in one widget: the root emitted a bare, unnamed
+`Role::Dialog` with no combobox/listbox relationship and no `active_descendant`; the
+inner `ListView` was constructed with no `SelectionModel`, so every row reported
+`set_selected(false)`; the highlight was a colour-only background; and arrow keys moved
+`state.selected` while focus stayed in the `SearchField`, with nothing published to AT.
+Its test module contained no accessibility assertions. A fresh instance of exactly the
+defect class §7 describes, shipped after the remediation that was supposed to close it.
 
-This is a fresh instance of exactly the defect class §7 describes, shipped after the
-remediation that was supposed to close it.
+**How it was fixed.** All four, plus the plumbing the fourth turned out to need:
 
-**Recommendation:** give the `ListView` a `SelectionModel` bound to `state.selected`,
-point `active_descendant` at the highlighted row, name the dialog, and add a non-colour
-highlight cue. `SegmentedControl` is the house reference for getting this right.
+- **The dialog is named** (`command-palette-title`, en + fr) and carries
+  `set_modal()` plus a `Live::Polite` description giving the live match count — the
+  one fact a sighted reader takes off the list at a glance and a screen-reader user
+  otherwise had to arrow through the whole list to learn.
+- **The `ListView` has a `SelectionModel`** kept in lockstep with `state.selected`
+  through a single `set_selected` helper, so each row's `Role::ListItem` reports its
+  selection truthfully. The two must not drift: a palette that announces one row and
+  runs another is worse than one that announces nothing.
+- **`active_descendant` lands on the node that actually holds focus.** This is the
+  part the original recommendation understates. Focus in a palette is in the *text
+  field*, and AT follows the focused node's active descendant — publishing it on the
+  composite ancestor, which is what `SearchField` already did for its own suggestion
+  popup, is not the same thing. Three small additions make the correct placement
+  reachable: `TextInputField::active_descendant` / `controls` (bound at
+  `AccessibilityOnly`, so moving the highlight re-walks AT without a rebuild),
+  forwarded verbatim by `TextInput`, and exposed as `SearchField::drives_listbox` for
+  a listbox the *host* owns. `ListView::realized_row_ids` publishes the live
+  `(model index → row node)` map the palette resolves the highlight against —
+  the `GridView::tile_map` pattern, and reusable by any type-ahead picker.
+- **The highlight carries a second channel** — a 3 dp leading bar beside the
+  background tint, which survives a forced-colours setting where a tint does not.
+
+**Tests.** Four new accessibility tests in the palette's own module, asserting against
+the real published AccessKit tree (`AccessibilityInfo` carries neither `description`
+nor `active_descendant`): the dialog is named and its match count tracks the query;
+the highlighted row reports itself selected and the previous one stops; moving the
+highlight moves the announced active descendant **and** that relation sits on the
+focusable `Role::TextInput` node, not on a composite ancestor; and an empty result set
+publishes no stale id naming a destroyed widget.
+
+**Not fixed.** Clicking a palette row still does not run its command (the list has no
+`on_activate`) — a usability gap, not one of the four defects. `SearchField`'s *own*
+suggestion popup still publishes its `active_descendant` on the `SearchField` node
+rather than the inner field; the mechanism to fix that now exists, but the call site
+was left alone.
 
 ### 5.5 Content reachable on screen but not through AT — 4.1.2 / 1.3.1 · framework
 
@@ -368,7 +483,7 @@ solve it to three different standards:
   not a 1.3.1 failure — but AT-action-driven traversal stops at the window edge, because
   `ScrollUp`/`ScrollDown` are not advertised. **Recommendation:** advertise and service
   them, as Terminal does.
-- **`CommandPalette`** — not solved. See §5.4.
+- **`CommandPalette`** — solved. See §5.4.
 
 ### 5.6 High contrast overwrites the active preset's palette — EN 11.7(a) · framework
 
@@ -424,18 +539,49 @@ where a syntax-highlighted editor exposes runs whose colours AT cannot see at al
 **Recommendation:** extend `TextRunAttributes` with colour and language fields,
 following the pattern G7 established, and emit them from all three walks.
 
-### 5.10 `WebView` is outside the Tab cycle — 2.1.1 / 2.4.3 (A) · framework + author
+### 5.10 `WebView` was outside the Tab cycle — 2.1.1 / 2.4.3 (A) · framework + author · **FIXED**
 
-`WebView::accessibility` emits one node and deliberately does not mirror the page. The
-widget declares no `.focusable(true)` and installs no `HandlerSet` — the file contains
-zero occurrences of `focus`. The backend trait exposes `WebViewHandle::set_focus()`
-([backend.rs:128](../crates/teksilo-webview/src/backend.rs)) but the widget never calls
-it. A keyboard-only user cannot reach page content.
+**As found.** `WebView::accessibility` emits one node and deliberately does not mirror
+the page. The widget declared no `.focusable(true)` and installed no `HandlerSet` —
+the file contained zero occurrences of `focus`. The backend trait exposes
+`WebViewHandle::set_focus()` but the widget never called it. A keyboard-only user
+could not reach page content.
 
-Note the structural consequence for anyone assembling a conformance artifact: a
-WebView-embedding application has **two disjoint focus rings and two AT trees** —
-AccessKit's and the engine's platform tree. It cannot inherit the toolkit's 2.1.1 or
-4.1.2 posture; it must scope the embedded page separately.
+**How it was fixed.** As a deliberate **two-step**, not an automatic hand-off:
+
+- The frame is `focusable(true)`, so Tab reaches it, and the style paints a focus ring
+  around it — necessary because the widget draws no content of its own to show focus
+  on (`WebViewStyleConfig` gained a `focused: Signal<bool>`; the default recipe strokes
+  a 2 dp `BorderRole::Focused` ring inset by its full width, since the engine subview
+  composites *over* Teksilo's paint and would cover a ring straddling the edge).
+- **Enter or Space** hands the keyboard to the engine (`WebViewHandle::set_focus`), and
+  so does an AT-invoked `Click` or `Focus` — both advertised **and** handled, which is
+  the §7 lesson applied. Every other key is declined, so the frame itself is never a
+  trap: Tab cycles straight off it.
+- `.enter_page_on_focus(true)` opts into the one-step form for a web view that *is*
+  the window content; `.focus_page()` is the programmatic Enter; `.focused_signal()`
+  reports whether the frame holds focus.
+
+Landing on the frame deliberately does not enter the page, for the reason the original
+finding names: a `WebView` has two disjoint focus rings and two AT trees, and once the
+native subview owns the keyboard the toolkit stops receiving keys altogether. An
+automatic hand-off on Tab would be a one-way door out of the app's own focus cycle.
+
+**Tests.** Four in `basic_lifecycle`: Tab reaches the frame and it publishes its focus
+without entering the page; Enter enters it; Tab moves focus *off* it (not a trap);
+`enter_page_on_focus` is the opt-in one-step; and the advertised `Click` action is
+actually handled rather than being a no-op the AT reports as operable.
+
+**Not fixed, and not fixable here.** Leaving an *entered* page is outside Teksilo's
+control: after `set_focus()` the toolkit sees no further keystrokes, so it cannot offer
+an escape chord the way a `keyboard_capture` surface can. Whether Tab at the end of the
+document returns focus to the host window is engine- and platform-dependent and was
+**not verified**. A click on the page is likewise not mirrored back onto Teksilo's
+focus ring — the native subview receives it directly. The structural consequence for
+anyone assembling a conformance artifact stands unchanged: a WebView-embedding
+application cannot inherit the toolkit's 2.1.1 or 4.1.2 posture for the page and must
+scope the embedded content separately. Both limits are now stated in
+[web-view.md](web-view.md).
 
 ### 5.11 Toast timing, and pause affordances generally — 2.2.1 / 2.2.2 (A) · framework
 

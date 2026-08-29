@@ -30,7 +30,7 @@
 //!
 //! `ListBodyPane` is `pub(crate)` — applications still talk to `ListView`.
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use teksilo_canvas::{Point, Rect, Size, SizeProposal};
@@ -114,6 +114,14 @@ pub(crate) struct ListBodyPane<T: 'static> {
 
     // Build state
     pub(crate) item_entries: Vec<(usize, WidgetId)>,
+    /// Shared mirror of [`Self::item_entries`], published at the end of each
+    /// build so the `ListView` root — and anything the app hands the handle to
+    /// — can resolve a model index back to the realized row's wrapper id. The
+    /// wrapper is the node carrying `Role::ListItem`, so this is what an
+    /// `active_descendant` must point at. Same shape as `GridView`'s
+    /// `tile_map`. Only realized rows appear; a row outside the virtualization
+    /// window has no widget and therefore no id.
+    pub(crate) row_map: Rc<RefCell<Vec<(usize, WidgetId)>>>,
 }
 
 impl<T: 'static> ListBodyPane<T> {
@@ -481,6 +489,9 @@ impl<T: 'static> Widget for ListBodyPane<T> {
             }
         }
         ctx.end_view_focus();
+
+        // Publish the realized (index → wrapper id) map for the root's a11y.
+        *self.row_map.borrow_mut() = self.item_entries.clone();
 
         self.item_entries.iter().map(|(_, id)| *id).collect()
     }

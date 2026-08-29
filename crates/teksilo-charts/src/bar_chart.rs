@@ -28,7 +28,7 @@ use teksilo_core::widget::{
 };
 use teksilo_core::widget_builder::HandlerSet;
 use teksilo_core::widget_id::WidgetId;
-use teksilo_data::{ChartModel, ChartSelection, SeriesId, SeriesView};
+use teksilo_data::{ChartModel, ChartSelection, SeriesId, SeriesPattern, SeriesView};
 use teksilo_tokens::{BorderRole, CornerRadius, TextRole, TextStyle, TextStyleRole};
 
 use crate::axis::AxisConfig;
@@ -36,6 +36,7 @@ use crate::hit::{self, MarkGeometry, MarkShape};
 use crate::layout::{LegendPosition, PlotGeometry, PlotGeometryParams, compute_plot_geometry};
 use crate::legend::{ChartLegend, legend_main_axis_size, orientation_for_position};
 use crate::palette::ChartPalette;
+use crate::pattern::{self, PatternPolicy};
 use crate::recipe_style::RecipeChartStyle;
 use crate::reference_line::{ReferenceLine, ValueAxis, draw_reference_lines};
 use crate::text::measure_text_width;
@@ -78,6 +79,11 @@ pub struct BarChart<T: Clone + 'static> {
     axis_x: AxisConfig,
     axis_y: AxisConfig,
     palette: Prop<ChartPalette>,
+    /// Whether series carry their non-colour channel (a hatch over the bar
+    /// fill). See [`PatternPolicy`] — `Auto` draws it from the second visible
+    /// series on, which is what keeps a grouped or stacked bar chart readable
+    /// without colour (WCAG 1.4.1).
+    pattern_policy: PatternPolicy,
     bar_corner_radius: Option<f32>,
     min_bar_gap: f32,
     group_gap: f32,
@@ -108,6 +114,7 @@ impl<T: Clone + std::fmt::Display + 'static> BarChart<T> {
             axis_x: AxisConfig::new(),
             axis_y: AxisConfig::new(),
             palette: Prop::Static(ChartPalette::FromTheme),
+            pattern_policy: PatternPolicy::default(),
             bar_corner_radius: None,
             min_bar_gap: 6.0,
             group_gap: 12.0,
@@ -173,6 +180,19 @@ impl<T: Clone + std::fmt::Display + 'static> BarChart<T> {
 
     pub fn palette(mut self, p: impl Into<Prop<ChartPalette>>) -> Self {
         self.palette = p.into();
+        self
+    }
+
+    /// Whether series carry a non-colour channel — a per-series hatch laid
+    /// over the bar fill, and the matching hatch in the legend swatch.
+    ///
+    /// Defaults to [`PatternPolicy::Auto`]: drawn from the second visible
+    /// series onwards, because that is when colour starts carrying information
+    /// a reader who cannot see it would otherwise lose (WCAG 1.4.1). A
+    /// single-series bar chart stays plain. Read
+    /// [`Never`](PatternPolicy::Never)'s docs before reaching for it.
+    pub fn pattern_policy(mut self, policy: PatternPolicy) -> Self {
+        self.pattern_policy = policy;
         self
     }
 
@@ -374,6 +394,9 @@ impl<T: Clone + std::fmt::Display + 'static> Widget for BarChart<T> {
             let legend = ChartLegend::new(self.model.clone())
                 .palette(self.palette.clone())
                 .orientation(orientation_for_position(self.legend_position))
+                // The swatch samples what the plot draws: a hatched chip.
+                .swatch(crate::pattern::LegendSwatch::Block)
+                .pattern_policy(self.pattern_policy)
                 .interactive(self.legend_interactive);
             let legend_id = ctx.add(legend);
             self.legend_id = Some(legend_id);
@@ -465,29 +488,46 @@ impl<T: Clone + std::fmt::Display + 'static> Widget for BarChart<T> {
         // `compute_marks` walked, so palette indices match pre-refactor
         // behavior exactly.
         let palette = self.palette.get();
-        let mut color_lookup: HashMap<SeriesId, (usize, Option<ColorProp>)> = HashMap::new();
+        // The visible index drives both default channels — the palette entry
+        // and the hatch — which wrap at different periods, so the pair stays
+        // unique long after colour alone would have repeated.
+        type SeriesStyle = (usize, Option<ColorProp>, Option<SeriesPattern>);
+        let mut color_lookup: HashMap<SeriesId, SeriesStyle> = HashMap::new();
         // Per-point color overrides, keyed by `(series, point index)`. A bar
         // whose datum sets a color uses it in preference to the series color.
         let mut point_colors: HashMap<(SeriesId, usize), ColorProp> = HashMap::new();
+        let mut visible_series = 0usize;
         self.model.with_all_series(|views| {
-            let mut vi = 0usize;
             for v in views {
                 if v.visible {
-                    color_lookup.insert(v.id, (vi, v.color.cloned()));
+                    color_lookup.insert(v.id, (visible_series, v.color.cloned(), v.pattern));
                     for (pi, d) in v.points.iter().enumerate() {
                         if let Some(c) = &d.color {
                             point_colors.insert((v.id, pi), c.clone());
                         }
                     }
-                    vi += 1;
+                    visible_series += 1;
                 }
             }
         });
+        // The non-colour channel is on exactly when colour is identifying
+        // something — see `PatternPolicy`. `Single` grouping draws only the
+        // first series however many the model holds, so the count that matters
+        // is what reaches the plot, not what the model contains: hatching a
+        // chart that shows one series would be decoration carrying nothing.
+        let plotted_series = match self.grouping {
+            BarGrouping::Single => visible_series.min(1),
+            BarGrouping::Grouped => visible_series,
+        };
+        let patterned = self.pattern_policy.applies(plotted_series);
         for m in &marks {
             let MarkShape::Rect(rect) = m.shape else {
                 continue;
             };
-            let (si, color_prop) = color_lookup.get(&m.series_id).cloned().unwrap_or((0, None));
+            let (si, color_prop, series_pattern) = color_lookup
+                .get(&m.series_id)
+                .cloned()
+                .unwrap_or((0, None, None));
             let resolved_color = point_colors
                 .get(&(m.series_id, m.point_idx))
                 .or(color_prop.as_ref())
@@ -502,6 +542,18 @@ impl<T: Clone + std::fmt::Display + 'static> Widget for BarChart<T> {
             let paint =
                 PaintProp::from_fill(&fill, &theme.colors).resolve(theme, enabled, rect.size());
             paint_bar(canvas, rect, paint, self.bar_corner_radius);
+            // The hatch is the series' second, non-colour channel: a grouped
+            // bar chart printed in greyscale, or read by someone who does not
+            // see the palette, still separates the series. Laid over the fill
+            // (which may be a gradient), so it is drawn after `paint_bar`.
+            if patterned {
+                pattern::fill_hatch(
+                    canvas,
+                    rect,
+                    pattern::resolve(series_pattern, si),
+                    resolved_color,
+                );
+            }
 
             if self
                 .selection
@@ -1159,6 +1211,89 @@ mod tests {
             frame.decorations.len() >= 4,
             "expected ≥ 4 decorations, got {}",
             frame.decorations.len()
+        );
+    }
+
+    /// Two series over the same categories — the case where colour starts
+    /// carrying information.
+    fn two_series_model() -> ChartModel<String> {
+        ChartModel::from_series_vec(vec![
+            ChartSeries::new("Revenue").data(vec![
+                ChartDatum::new("Q1".to_string(), 10.0),
+                ChartDatum::new("Q2".to_string(), 25.0),
+            ]),
+            ChartSeries::new("Cost").data(vec![
+                ChartDatum::new("Q1".to_string(), 6.0),
+                ChartDatum::new("Q2".to_string(), 14.0),
+            ]),
+        ])
+    }
+
+    /// `Single` grouping — the default — plots only the first series, so a
+    /// multi-series chart must ask for `Grouped` to actually show both.
+    fn grouped(model: ChartModel<String>) -> BarChart<String> {
+        BarChart::new(model).grouping(BarGrouping::Grouped)
+    }
+
+    fn path_count(chart: BarChart<String>) -> usize {
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        tree.add(chart);
+        tree.layout(SizeProposal::exact(400.0, 200.0));
+        tree.render().paths.len()
+    }
+
+    // ── The non-colour series channel (WCAG 1.4.1) ──────────────────────
+
+    #[test]
+    fn a_second_series_brings_a_hatch_with_it() {
+        // The finding this closes: series were told apart by fill colour and
+        // nothing else, so a greyscale print, a forced-colours setting, or a
+        // reader with monochrome vision lost the distinction entirely.
+        let plain = path_count(BarChart::new(sample_model()));
+        let patterned = path_count(grouped(two_series_model()));
+        assert!(
+            patterned > plain,
+            "a two-series bar chart must draw hatch strokes its single-series              counterpart does not ({patterned} vs {plain} paths)"
+        );
+    }
+
+    #[test]
+    fn a_single_series_chart_stays_plain() {
+        // Nothing to disambiguate, so the hatch would be decoration carrying
+        // no information — `PatternPolicy::Auto` holds off.
+        let auto = path_count(BarChart::new(sample_model()));
+        let never = path_count(BarChart::new(sample_model()).pattern_policy(PatternPolicy::Never));
+        assert_eq!(
+            auto, never,
+            "with one series, Auto must draw exactly what Never draws"
+        );
+    }
+
+    #[test]
+    fn the_policy_overrides_the_default_in_both_directions() {
+        let auto = path_count(grouped(two_series_model()));
+        let never = path_count(grouped(two_series_model()).pattern_policy(PatternPolicy::Never));
+        assert!(
+            never < auto,
+            "Never must drop the hatch a two-series chart draws"
+        );
+
+        // `Always` on a single series draws that series' pattern — which for
+        // series 0 is `Solid`, i.e. no hatch. Pinning a non-solid pattern is
+        // what makes the override observable, and exercises the explicit-
+        // pattern path at the same time.
+        let pinned = ChartModel::from_series_vec(vec![
+            ChartSeries::new("Revenue")
+                .pattern(teksilo_data::SeriesPattern::Dotted)
+                .data(vec![
+                    ChartDatum::new("Q1".to_string(), 10.0),
+                    ChartDatum::new("Q2".to_string(), 25.0),
+                ]),
+        ]);
+        let always = path_count(BarChart::new(pinned).pattern_policy(PatternPolicy::Always));
+        assert!(
+            always > 0,
+            "Always must hatch a single-series chart that pinned a hatched pattern"
         );
     }
 

@@ -23,7 +23,12 @@ use teksilo_core::signal::Signal;
 use teksilo_core::styles::{WebViewStyle, WebViewStyleConfig, WebViewVisualState};
 use teksilo_core::widget::{LayoutContext, LayoutResponse, PaintContext, Widget, WidgetPlacement};
 use teksilo_core::widget_id::WidgetId;
-use teksilo_tokens::CornerRadius;
+use teksilo_tokens::{BorderRole, CornerRadius};
+
+/// Focus-ring stroke width, in logical pixels. Two, not the usual one: the ring
+/// is drawn against page content the toolkit did not choose and cannot know the
+/// contrast of, so it is deliberately the heavier of the framework's two.
+const FOCUS_RING_WIDTH: f32 = 2.0;
 
 /// Default IntUI web-view style. Stateless; reads theme tokens at paint time.
 #[derive(Debug, Default, Clone, Copy)]
@@ -33,6 +38,7 @@ impl WebViewStyle for RecipeWebViewStyle {
     fn make_body(&self, cfg: &WebViewStyleConfig, ctx: &mut BuildContext) -> WidgetId {
         ctx.add(WebViewOverlay {
             state: cfg.state.clone(),
+            focused: cfg.focused.clone(),
             content: cfg.content,
         })
     }
@@ -43,6 +49,7 @@ impl WebViewStyle for RecipeWebViewStyle {
 #[derive(Debug)]
 struct WebViewOverlay {
     state: Signal<WebViewVisualState>,
+    focused: Signal<bool>,
     content: WidgetId,
 }
 
@@ -51,6 +58,8 @@ impl Widget for WebViewOverlay {
         // Repaint (not relayout) when the lifecycle state flips.
         let self_id = ctx.self_id();
         self.state
+            .bind_to(self_id, ctx.binding_registry(), BindingLevel::RepaintOnly);
+        self.focused
             .bind_to(self_id, ctx.binding_registry(), BindingLevel::RepaintOnly);
         // Adopt the pre-built overlay content as our single child.
         vec![self.content]
@@ -81,6 +90,21 @@ impl Widget for WebViewOverlay {
         let color = role.resolve(&ctx.theme.colors);
         if color.a() > 0.0 {
             canvas.fill_rounded_rect(bounds, CornerRadius::ZERO, color);
+        }
+
+        // Focus ring. Inset by the full stroke width rather than centred on the
+        // edge, because the engine subview is composited *over* this paint —
+        // a ring straddling the boundary would have its inner half covered by
+        // the page and read as half as thick as it is.
+        if self.focused.get() {
+            let w = FOCUS_RING_WIDTH;
+            let rect = Rect::new(
+                bounds.x + w * 0.5,
+                bounds.y + w * 0.5,
+                (bounds.width - w).max(0.0),
+                (bounds.height - w).max(0.0),
+            );
+            canvas.stroke_rect(rect, BorderRole::Focused.resolve(&ctx.theme.colors), w);
         }
     }
 

@@ -31,7 +31,7 @@ let _w = ScrollArea::new()
 
 ## Builder methods at a glance
 
-`child`, `from_id`, `scroll_bar_style`, `scroll_bar_thumb_color`, `vertical_scroll_bar_policy`, `horizontal_scroll_bar_policy`, `line_height`, `scroll_bar_thickness`, `widget_resizable`, `smooth_scrolling`, `smooth_scroll_duration`, `scroll_past_end`, `preferred_size`, `preferred_height`, `overscroll_behavior`, `scroll_y_signal`, `scroll_x_signal`, `max_scroll_y_signal`, `viewport_ratio_y_signal`, `max_scroll_x_signal`
+`child`, `from_id`, `scroll_bar_style`, `scroll_bar_thumb_color`, `vertical_scroll_bar_policy`, `horizontal_scroll_bar_policy`, `line_height`, `scroll_bar_thickness`, `widget_resizable`, `smooth_scrolling`, `smooth_scroll_duration`, `scroll_past_end`, `preferred_size`, `preferred_height`, `overscroll_behavior`, `restore_scroll_y`, `scroll_y_signal`, `scroll_x_signal`, `max_scroll_y_signal`, `viewport_ratio_y_signal`, `max_scroll_x_signal`
 
 ## API reference
 
@@ -192,6 +192,31 @@ is taken literally.
 Set the scroll-chaining behavior at the boundary. Default
 `OverscrollBehavior::Chain` (a boundary scroll bubbles to an ancestor
 scrollable); `OverscrollBehavior::Contain` absorbs it instead.
+
+#### `pub fn restore_scroll_y(self, offset: f32) -> Self`
+
+Land `offset` on the first layout pass at which this area has a real
+scrollable range, then forget it.
+
+`max_scroll_y` is `0.0` until the content has been measured, so an
+offset a host writes before that first measurement is clamped away to
+zero and the page paints at the top for a frame before jumping to
+where it should have started. This stores the offset instead and
+applies it itself, inside layout, as soon as `max_scroll_y` becomes
+nonzero, before the ordinary clamp would otherwise discard it, so the
+very first frame the content is measured on is already laid out at
+the restored position, with no visible jump.
+
+It is a one-shot: once applied, it is dropped, so a later reflow (a
+wider window, an edit that lengthens the document) never yanks the
+reader back to where they came in. The offset is still clamped to the
+real range when it lands: past the end it lands at the end, negative
+it lands at zero.
+
+`offset <= 0.0` is a no-op: there is nothing to restore, and it clears
+any previously armed offset rather than leaving it pending.
+
+An area that never calls this behaves exactly as it always has.
 
 #### `pub fn scroll_y_signal(&self) -> &Signal<f32>`
 

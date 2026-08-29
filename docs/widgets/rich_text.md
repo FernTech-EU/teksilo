@@ -1570,6 +1570,29 @@ Scroll the character range `[start, end)` into view, reporting whether this edit
 could — it has a layout to locate the range in, and is on screen rather than parked
 dormant. See `RichTextEditor::reveal_range`.
 
+When it answers `false` because there is no layout yet, the coarser
+`reveal_widget` is the way to get one.
+
+#### `pub fn reveal_widget(&self, ctx: &mut teksilo_core::widget::EventContext) -> bool`
+
+Scroll **the editor itself** into view — the coarse fallback for the one case
+`reveal_range` cannot serve at all. Reports whether this
+editor could: it has been built, so the arena knows a widget to scroll to, and
+it is on screen rather than parked dormant.
+
+A row of a stream that has never been painted has no full layout, so there is
+no rect to locate an offset in and `reveal_range` answers `false` — for ever,
+because the row only gets a layout when it is painted and it is only painted
+when it comes on screen. That is a deadlock a range reveal has no way out of:
+a match found in row 31 of a Book leaves the page exactly where it was, with
+the counter cheerfully reading `1 of 40`.
+
+Revealing by *widget* breaks it, because the arena knows where row 31 is laid
+out whether or not its text has been shaped. The row comes on screen, the next
+paint gives it a layout, and a later `reveal_range` can then put the match
+itself where the caller wants it. Coarser on purpose: this reveals the row,
+not the offset inside it.
+
 #### `pub fn focus(&self, ctx: &mut teksilo_core::widget::EventContext)`
 
 Move keyboard focus onto the editor. Lets a control built *above* the

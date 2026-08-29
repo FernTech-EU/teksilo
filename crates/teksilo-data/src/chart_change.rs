@@ -70,6 +70,12 @@ pub enum ChartChange {
     /// [`crate::ChartModel::structure_version`].
     SeriesColorChanged { series: SeriesId },
 
+    /// A series' explicit [`SeriesPattern`](crate::SeriesPattern) changed (set
+    /// or cleared). Paint-only, like
+    /// [`SeriesColorChanged`](Self::SeriesColorChanged): it bumps
+    /// [`crate::ChartModel::style_version`], not `structure_version`.
+    SeriesPatternChanged { series: SeriesId },
+
     /// A series' visibility flag changed.
     SeriesVisibilityChanged { series: SeriesId },
 

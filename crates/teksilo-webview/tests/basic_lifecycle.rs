@@ -331,3 +331,150 @@ fn dropping_widget_tears_down_handle() {
         "engine handle must drop when the widget/tree is torn down"
     );
 }
+
+#[test]
+fn the_frame_is_in_the_tab_cycle_and_enter_hands_focus_to_the_engine() {
+    // WCAG 2.1.1 / 2.4.3. Before this, `WebView` installed no HandlerSet at
+    // all: the widget was never focusable, so Tab skipped straight past it and
+    // embedded page content was unreachable without a pointer.
+    use teksilo_core::event::{Key, Modifiers, WidgetEvent};
+
+    let (registry, records) = memory_registry();
+    let mut tree = tree_with_registry(registry);
+
+    let webview = WebView::new().url("https://example.com");
+    let wv_id = webview.id();
+    let focused_signal = webview.focused_signal();
+    let id = tree.add(webview);
+    layout(&mut tree);
+
+    // Tab reaches it, and the frame publishes its focus so the style can ring it.
+    tree.dispatch_event(WidgetEvent::KeyDown {
+        key: Key::Tab,
+        modifiers: Modifiers::NONE,
+        text: None,
+    });
+    assert_eq!(tree.focused(), Some(id), "Tab must reach the web view");
+    assert!(focused_signal.get(), "the frame must publish its focus");
+
+    // Landing on the frame does NOT enter the page — that is the two-step.
+    assert!(
+        !records
+            .ops_for(wv_id)
+            .iter()
+            .any(|op| matches!(op, WebViewOp::SetFocus { .. })),
+        "focusing the frame must not hand the keyboard to the engine"
+    );
+
+    // Enter does.
+    tree.dispatch_event(WidgetEvent::KeyDown {
+        key: Key::Enter,
+        modifiers: Modifiers::NONE,
+        text: None,
+    });
+    assert!(
+        records
+            .ops_for(wv_id)
+            .iter()
+            .any(|op| matches!(op, WebViewOp::SetFocus { .. })),
+        "Enter must hand keyboard focus to the engine subview"
+    );
+}
+
+#[test]
+fn the_frame_is_not_a_keyboard_trap() {
+    // The other half of 2.1.1: reaching it must not mean being stuck in it.
+    // Every key except Enter / Space is declined, so Tab cycles off the frame
+    // exactly as it would off any other control.
+    use teksilo_core::event::{Key, Modifiers, WidgetEvent};
+
+    let (registry, _records) = memory_registry();
+    let mut tree = tree_with_registry(registry);
+
+    let wv = tree.add(WebView::new().url("https://example.com"));
+    let after = tree.add(teksilo_core::widget_builder::WidgetBuilder::focusable(
+        teksilo_widgets::primitives::RectWidget::new(),
+        true,
+    ));
+    layout(&mut tree);
+
+    tree.focus(wv);
+    tree.dispatch_event(WidgetEvent::KeyDown {
+        key: Key::Tab,
+        modifiers: Modifiers::NONE,
+        text: None,
+    });
+    assert_eq!(
+        tree.focused(),
+        Some(after),
+        "Tab must move focus off the web view frame"
+    );
+}
+
+#[test]
+fn enter_page_on_focus_is_the_opt_in_one_step() {
+    use teksilo_core::event::{Key, Modifiers, WidgetEvent};
+
+    let (registry, records) = memory_registry();
+    let mut tree = tree_with_registry(registry);
+
+    let webview = WebView::new()
+        .url("https://example.com")
+        .enter_page_on_focus(true);
+    let wv_id = webview.id();
+    tree.add(webview);
+    layout(&mut tree);
+
+    tree.dispatch_event(WidgetEvent::KeyDown {
+        key: Key::Tab,
+        modifiers: Modifiers::NONE,
+        text: None,
+    });
+    assert!(
+        records
+            .ops_for(wv_id)
+            .iter()
+            .any(|op| matches!(op, WebViewOp::SetFocus { .. })),
+        "with enter_page_on_focus, landing on the frame enters the page"
+    );
+}
+
+#[test]
+fn the_advertised_click_action_actually_enters_the_page() {
+    // The §7 lesson from the accessibility audit: an action a widget declares
+    // but never executes reports the control to AT as operable when it is not.
+    let (registry, records) = memory_registry();
+    let mut tree = tree_with_registry(registry);
+
+    let webview = WebView::new().url("https://example.com");
+    let wv_id = webview.id();
+    let id = tree.add(webview);
+    layout(&mut tree);
+
+    let node = tree.accessibility_node(id);
+    assert!(
+        node.actions()
+            .contains(&teksilo_core::accesskit::Action::Click),
+        "the web-view frame must advertise Click"
+    );
+    assert!(
+        node.actions()
+            .contains(&teksilo_core::accesskit::Action::Focus),
+        "the web-view frame must advertise Focus"
+    );
+
+    let handled = tree.dispatch_access_action(
+        teksilo_core::accessibility::widget_id_to_node_id(id),
+        teksilo_core::accesskit::Action::Click,
+        None,
+        &mut NoopWindowOps,
+    );
+    assert!(handled, "the advertised Click must be handled, not ignored");
+    assert!(
+        records
+            .ops_for(wv_id)
+            .iter()
+            .any(|op| matches!(op, WebViewOp::SetFocus { .. })),
+        "an AT-invoked Click must enter the page, not be a no-op"
+    );
+}

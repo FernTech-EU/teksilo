@@ -475,6 +475,27 @@ impl WidgetTree {
             }
             WidgetEvent::KeyDown { key, modifiers, .. } => {
                 if *key == Key::Tab {
+                    // Ctrl+Tab / Ctrl+Shift+Tab always leave a keyboard-capture
+                    // surface (WCAG 2.1.2). A capture node exists precisely to
+                    // swallow every keystroke — a terminal encodes Tab as `\t`
+                    // and Shift+Tab as CSI Z — so the ordinary "dispatch first,
+                    // cycle only when unhandled" rule below can never move focus
+                    // out of one. Reserving this one chord at the dispatcher, not
+                    // in each capture widget, is what makes the escape a property
+                    // of `keyboard_capture` itself rather than a promise every
+                    // future capture-surface author has to remember to keep.
+                    //
+                    // Literal `ctrl()`, not `command()`: Ctrl+Tab is Ctrl+Tab on
+                    // macOS too — ⌘⇥ is the application switcher and never
+                    // reaches an app at all. Same reading as `TableView`'s
+                    // cell-grid escape and `RichTextEditor`'s `tab_escape`.
+                    let captured_focus = self
+                        .focused
+                        .is_some_and(|focused| self.is_keyboard_capture(focused));
+                    if captured_focus && modifiers.ctrl() {
+                        self.cycle_focus(modifiers.shift(), &mut *ops);
+                        return;
+                    }
                     // Dispatch Tab to the focused widget first so
                     // ancestors (e.g. an open overlay that wants to
                     // close instead of moving focus out through its
@@ -3499,6 +3520,67 @@ mod tests {
         let (action, on_key) = run(false);
         assert!(action, "without capture the shortcut must fire");
         assert!(!on_key, "without capture the widget must not see the key");
+    }
+
+    #[test]
+    fn ctrl_tab_always_escapes_a_keyboard_capture_surface() {
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        // WCAG 2.1.2. A capture surface answers `Handled` to every key —
+        // that is what it is for — so the "cycle focus only when the focused
+        // widget did not handle Tab" rule can never get focus out of one.
+        // Ctrl+Tab / Ctrl+Shift+Tab are therefore reserved by the dispatcher
+        // and never reach the widget at all.
+        let saw_key = Rc::new(Cell::new(false));
+        let sk = saw_key.clone();
+
+        let mut tree = WidgetTree::new();
+        let capture = tree.add(
+            FillWidget::new()
+                .focusable()
+                .keyboard_capture(true)
+                // The greediest possible handler: everything is consumed.
+                .on_key(move |_event, _ctx| {
+                    sk.set(true);
+                    EventResponse::Handled
+                }),
+        );
+        let neighbour = tree.add(FillWidget::new().focusable());
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+
+        // Plain Tab stays inside: the widget consumed it (a terminal writes
+        // it to the child as `\t`).
+        tree.focus(capture);
+        tree.press_key(Key::Tab, Modifiers::NONE);
+        assert!(saw_key.get(), "plain Tab must reach the capture surface");
+        assert_eq!(
+            tree.focused(),
+            Some(capture),
+            "plain Tab must not move focus off a capture surface"
+        );
+
+        // Ctrl+Tab escapes forward, without the widget ever seeing it.
+        saw_key.set(false);
+        tree.press_key(Key::Tab, Modifiers::CTRL);
+        assert!(
+            !saw_key.get(),
+            "Ctrl+Tab is reserved and must not reach the capture surface"
+        );
+        assert_eq!(
+            tree.focused(),
+            Some(neighbour),
+            "Ctrl+Tab must move focus out of a capture surface"
+        );
+
+        // And backwards.
+        tree.focus(capture);
+        tree.press_key(Key::Tab, Modifiers::CTRL | Modifiers::SHIFT);
+        assert_eq!(
+            tree.focused(),
+            Some(neighbour),
+            "Ctrl+Shift+Tab must move focus out of a capture surface"
+        );
     }
 
     #[test]

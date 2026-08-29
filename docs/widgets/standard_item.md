@@ -70,7 +70,7 @@ the wrapper.
 
 ## Builder methods at a glance
 
-`style`, `subtitle`, `leading_slot`, `leading_slot_boxed`, `center_slot`, `center_slot_boxed`, `trailing_slot`, `trailing_slot_boxed`, `subtitle_leading_slot`, `subtitle_leading_slot_boxed`, `subtitle_trailing_slot`, `subtitle_trailing_slot_boxed`, `checkbox`, `tristate_checkbox`, `selected`, `enabled`, `label_style`, `subtitle_style`, `label_color`, `subtitle_color`, `label_overflow`, `subtitle_overflow`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`
+`style`, `subtitle`, `leading_slot`, `leading_slot_boxed`, `center_slot`, `center_slot_boxed`, `trailing_slot`, `trailing_slot_boxed`, `subtitle_leading_slot`, `subtitle_leading_slot_boxed`, `subtitle_trailing_slot`, `subtitle_trailing_slot_boxed`, `checkbox`, `tristate_checkbox`, `selected`, `enabled`, `label_style`, `subtitle_style`, `label_color`, `subtitle_color`, `interaction_signal`, `label_slot`, `label_overflow`, `subtitle_overflow`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`
 
 ## API reference
 
@@ -189,7 +189,7 @@ Override the label's text color. Accepts `Color`, a role, or a
 Override the subtitle's text color. Default (unset) is
 `TextRole::Secondary`.
 
-#### `pub fn label_overflow(mut self, overflow: TextOverflow) -> Self`
+#### `pub fn interaction_signal(mut self, signal: Signal<InteractionState>) -> Self`
 
 Truncate the primary label instead of wrapping it. Default (unset) is
 `TextOverflow::Wrap`.
@@ -199,6 +199,36 @@ narrow to hold it the primary `HStack` is over-constrained and the
 `trailing_slot` is pushed past the row's edge.
 Set `TextOverflow::Ellipsis(..)` on rows whose trailing actions must
 stay reachable: the label then shrinks and truncates within the row.
+**Share the row's interaction state**, so a caller can reveal controls on
+hover.
+
+A row that shows its actions only while the pointer is over it is a standard
+pattern — a search result offering *replace* and *dismiss*, a list offering
+*remove* — and it cannot be built from outside without knowing when the row
+is hovered. The row already tracks that; this is the handle on it.
+
+The signal is written by the row, not read: pass one in, watch it, and gate
+a trailing slot on it. Reserve the space the controls will take, or the row
+reflows under the pointer that is trying to hit them.
+
+#### `pub fn label_slot(mut self, widget: impl Widget + 'static) -> Self`
+
+**Draw this instead of the label's text**, keeping the label as the row's
+accessible name.
+
+For a row whose label is not plain text: a search result with the matched
+run picked out of its excerpt, a diff line, anything built from runs rather
+than from a string. The label passed to `new` is still what
+`accessibility` reports, so the row keeps a name a screen reader can read —
+which is the whole reason this is a *replacement for the drawing* and not a
+replacement for the label.
+
+The widget is laid out where the text would have been, so it inherits the
+row's spacing and its place beside the leading and trailing slots.
+`label_style`, `label_color` and
+`label_overflow` do not reach it: it draws itself.
+
+#### `pub fn label_overflow(mut self, overflow: TextOverflow) -> Self`
 
 #### `pub fn subtitle_overflow(mut self, overflow: TextOverflow) -> Self`
 
@@ -265,10 +295,19 @@ pub struct StandardTreeItem { /* fields */ }
 
 Create a tree item with the given primary label.
 
-#### `pub fn subtitle(mut self, text: impl Into<LocalizedString>) -> Self`
+#### `pub fn interaction_signal(mut self, signal: Signal<InteractionState>) -> Self`
 
 Forwarded to the inner `StandardListItem` — see its
 `subtitle`.
+See [`StandardListItem::interaction_signal`]: the row's own hover/press
+state, for a caller revealing controls on hover.
+
+#### `pub fn label_slot(mut self, widget: impl Widget + 'static) -> Self`
+
+See [`StandardListItem::label_slot`]: draw this instead of the label's
+text, keeping the label as the row's accessible name.
+
+#### `pub fn subtitle(mut self, text: impl Into<LocalizedString>) -> Self`
 
 #### `pub fn leading_slot(mut self, widget: impl Widget + 'static) -> Self`
 

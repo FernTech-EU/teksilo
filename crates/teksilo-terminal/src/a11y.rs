@@ -35,6 +35,11 @@ pub(crate) fn build_terminal_a11y(
     builder.add_action(Action::Focus);
     builder.add_action(Action::ScrollUp);
     builder.add_action(Action::ScrollDown);
+    // The terminal is a `keyboard_capture` surface: Tab is encoded to the
+    // child, so the one chord that moves focus out is Ctrl+Tab. Announce it,
+    // because a screen-reader user has no other way to discover that pressing
+    // Tab here will not do what it does everywhere else in the app.
+    builder.set_keyboard_shortcut("Ctrl+Tab");
 
     let cols = snapshot.columns;
     let mut cursor_target: Option<(accesskit::NodeId, usize)> = None;

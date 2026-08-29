@@ -56,7 +56,7 @@ screen readers can announce "Apple, 1 of 5".
 
 ## Builder methods at a glance
 
-`style`, `placeholder`, `label`, `enabled`, `on_submit_fn`, `with_suggestions`, `max_suggestions`, `min_chars`, `on_select`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`
+`style`, `placeholder`, `label`, `drives_listbox`, `enabled`, `on_submit_fn`, `with_suggestions`, `max_suggestions`, `min_chars`, `on_select`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`
 
 ## API reference
 
@@ -87,6 +87,20 @@ Set the placeholder text shown when the query is empty.
 #### `pub fn label(mut self, label: impl Into<LocalizedString>) -> Self`
 
 Set an accessible label for the field (announced by screen readers, not visually shown).
+
+#### `pub fn drives_listbox( mut self, listbox: Signal<Option<WidgetId>>, active: Signal<Option<WidgetId>>, ) -> Self`
+
+Wire this field to a listbox **the caller owns**, so arrow keys that
+move a highlight through that list are announced while focus stays here
+(the ARIA combobox pattern). `listbox` is the list's node, `active` the
+currently-highlighted row's node; both are forwarded to the inner
+`TextInputField`, which is the node that actually holds focus and
+therefore the only one whose `active_descendant` assistive technology
+follows.
+
+This is for a search field driving a list built by its *host* — a
+command palette, a filter box above a results view. The built-in
+suggestion popup (`suggestions`) wires itself and needs none of this.
 
 #### `pub fn enabled(mut self, on: impl Into<Prop<bool>>) -> Self`
 

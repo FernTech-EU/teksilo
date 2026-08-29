@@ -357,6 +357,77 @@ unreadable.
 > needed — this falls out of the same theme-side swap every other
 > control gets.
 
+## 5.1 The non-colour channel — `SeriesPattern`
+
+A palette answers *"are these colours distinguishable from one another?"*
+Okabe-Ito answers it well. It does **not** answer WCAG **1.4.1 (Use of
+Color)**, which is a different question: colour must not be the *only*
+visual means of conveying information. A reader with monochrome vision, a
+greyscale printout, a screen in direct sunlight, or a forced-colours
+setting has no colour channel at all — and neither does a ninth series,
+which used to repeat the first's colour exactly under the modulo wrap
+described above.
+
+So every series carries a second, orthogonal identity:
+[`SeriesPattern`](../crates/teksilo-data/src/series_pattern.rs), a single
+value that drives all three renderings a chart needs, so a series looks
+like *itself* whether it is drawn as a line, a bar, a slice, or a legend
+swatch:
+
+| | line | marker | filled area |
+| --- | --- | --- | --- |
+| `Solid` | solid | circle | plain |
+| `Dashed` | long dash | square | 45° hatch |
+| `Dotted` | dotted | triangle | back-hatch |
+| `DashDot` | dash-dot | diamond | cross-hatch |
+| `ShortDash` | short dash | × | horizontal |
+| `WideDash` | wide dash | + | vertical |
+
+Six patterns against eight palette colours means the pair
+`(colour, pattern)` does not repeat until the 24th series. A series with
+no explicit pattern takes the one its position implies, so the channel
+exists with no application code; pin one with
+`ChartSeries::pattern(..)` or `ChartModel::set_series_pattern(..)` when a
+series' identity must survive a reorder.
+
+**When it is drawn** is
+[`PatternPolicy`](../crates/teksilo-charts/src/pattern.rs), a builder on
+all three charts (`.pattern_policy(..)`):
+
+- **`Auto`** (default) — drawn once colour is actually doing
+  identification work: from the second **plotted** series onwards for
+  `BarChart` (so `BarGrouping::Single`, which draws one series however
+  many the model holds, stays plain) and `LineChart`; for `PieChart`,
+  when a **legend** is shown and there is more than one slice, since a
+  pie's colour-to-category mapping lives in its legend. A chart showing
+  one series has nothing to disambiguate, and hatching it would be
+  decoration carrying no information.
+- **`Always`** — draw it regardless. Use for consistency across a small
+  multiple, where each panel holds one series but the set is read
+  together. Note that series 0's pattern is `Solid`, so a single-series
+  chart needs an explicit `.pattern(..)` for `Always` to be visible.
+- **`Never`** — a deliberate accessibility regression, named plainly so
+  it reads as one at the call site. Reach for it only where the design
+  already carries the distinction some other way — direct series labels
+  on the plot, or one series per chart.
+
+**Legend swatches sample what the plot draws**, so there is no second
+mapping to learn: `LegendSwatch::Block` (a hatched chip) for bars,
+`LegendSwatch::Line` (a dashed sample with the marker at its centre) for
+lines, `LegendSwatch::Marked` (a chip stamped with the marker glyph) for
+pie slices. The charts set this themselves; a standalone `ChartLegend`
+takes `.swatch(..)` and `.pattern_policy(..)` to match its chart.
+
+**Why a pie gets a marker and a bar gets a hatch.** Hatches are parallel
+strokes clipped to the region being filled, and the canvas clips to
+rectangles only. A bar and a legend swatch are rectangles; a wedge is
+not. Each slice therefore carries its pattern's marker glyph at its
+centroid — in a tone derived from the slice's own fill so it contrasts
+against any palette — and the matching legend swatch carries the same
+glyph. Slices narrower than
+`style::MIN_MARKED_SLICE_RAD` are skipped: a sliver cannot hold a glyph
+without it spilling into its neighbours.
+
 ## 6. Legend
 
 Two ways to use it:

@@ -53,6 +53,15 @@ pub const PIE_LEADER_LENGTH: f32 = 12.0;
 /// Pie chart — minimum slice angle (in degrees) that still gets a
 /// label drawn. Smaller slices fold into a generic "Other" leader.
 pub const PIE_MIN_SLICE_LABEL_DEGREES: f32 = 12.0;
+/// Pie chart — radius of the non-colour marker glyph stamped at a slice's
+/// centroid. Small enough not to compete with a slice label, large enough for
+/// the six shapes to be told apart.
+pub const SLICE_MARKER_RADIUS: f32 = 3.5;
+/// Pie chart — narrowest slice that still gets a centroid marker. A sliver
+/// cannot hold a glyph without it spilling into its neighbours, and its
+/// identity comes from the legend order anyway.
+pub const MIN_MARKED_SLICE_RAD: f32 = 0.20;
+
 /// Donut chart — default `inner_radius / outer_radius` ratio. `0.0`
 /// would be a solid pie; `0.55` is the conventional donut thickness.
 pub const DONUT_DEFAULT_INNER_RATIO: f32 = 0.55;

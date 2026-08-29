@@ -236,6 +236,12 @@ pub struct TextInputField {
     /// field is `secure` (password role wins).
     input_purpose: InputPurpose,
 
+    /// ARIA combobox wiring — see [`active_descendant`](Self::active_descendant).
+    active_descendant: Option<Signal<Option<WidgetId>>>,
+    /// The listbox this field drives, if any — see
+    /// [`controls`](Self::controls).
+    controls: Option<Signal<Option<WidgetId>>>,
+
     // ── Internal (set during build) ─────────────────────────────────
     state: Option<SharedState>,
     /// Interaction signal actually used at runtime. Either the one
@@ -304,6 +310,8 @@ impl TextInputField {
             at_reveal_policy: AtRevealPolicy::SwapRole,
             allow_copy: true,
             input_purpose: InputPurpose::Normal,
+            active_descendant: None,
+            controls: None,
             state: None,
             interaction: Signal::new(InteractionState::Idle),
             caret_position: Signal::new(0),
@@ -476,6 +484,32 @@ impl TextInputField {
     /// which AccessKit cannot express (see `docs/a11y/a11y_issues.md`).
     pub fn input_purpose(mut self, purpose: InputPurpose) -> Self {
         self.input_purpose = purpose;
+        self
+    }
+
+    /// Publish `active_descendant` pointing at the row a *separate* list is
+    /// currently highlighting — the ARIA combobox pattern.
+    ///
+    /// Keyboard focus stays in this field while arrow keys move a highlight
+    /// through a listbox elsewhere in the tree (a command palette, a
+    /// type-ahead picker, a suggestion popup). Assistive technology follows
+    /// the focused node's active descendant, so the announcement has to be
+    /// published **here**, on the node that actually holds focus — not on the
+    /// composite ancestor that owns the list. Without it the arrow keys move a
+    /// highlight that is announced to nobody.
+    ///
+    /// Bound at `AccessibilityOnly`, so moving the highlight re-walks the AT
+    /// tree without a rebuild or a repaint. Pair with [`controls`](Self::controls).
+    pub fn active_descendant(mut self, active: Signal<Option<WidgetId>>) -> Self {
+        self.active_descendant = Some(active);
+        self
+    }
+
+    /// Publish a `controls` relation to the listbox this field drives, so an
+    /// AT client can navigate from the input to the list it is filtering.
+    /// The companion of [`active_descendant`](Self::active_descendant).
+    pub fn controls(mut self, listbox: Signal<Option<WidgetId>>) -> Self {
+        self.controls = Some(listbox);
         self
     }
 
@@ -761,6 +795,20 @@ impl Widget for TextInputField {
             let self_id = ctx.self_id();
             self.feedback.bind_to(
                 self_id,
+                ctx.binding_registry(),
+                teksilo_core::binding::BindingLevel::AccessibilityOnly,
+            );
+        }
+
+        // Combobox wiring: a moved highlight in the list this field drives must
+        // re-walk the AT tree so the new `active_descendant` is announced.
+        // AccessibilityOnly — nothing about this field's own pixels changed.
+        for sig in [self.active_descendant.as_ref(), self.controls.as_ref()]
+            .into_iter()
+            .flatten()
+        {
+            sig.bind_to(
+                ctx.self_id(),
                 ctx.binding_registry(),
                 teksilo_core::binding::BindingLevel::AccessibilityOnly,
             );
@@ -1582,6 +1630,19 @@ impl Widget for TextInputField {
             builder
                 .inner_mut()
                 .set_invalid(teksilo_core::accesskit::Invalid::True);
+        }
+
+        // ARIA combobox wiring. This node is the one that actually holds
+        // keyboard focus, which is why the relation is published here and not
+        // on whichever composite owns the list — AT follows the *focused*
+        // node's active descendant.
+        if let Some(listbox) = self.controls.as_ref().and_then(|s| s.get()) {
+            builder.push_controlled(teksilo_core::accessibility::widget_id_to_node_id(listbox));
+        }
+        if let Some(active) = self.active_descendant.as_ref().and_then(|s| s.get()) {
+            builder
+                .inner_mut()
+                .set_active_descendant(teksilo_core::accessibility::widget_id_to_node_id(active));
         }
     }
 }

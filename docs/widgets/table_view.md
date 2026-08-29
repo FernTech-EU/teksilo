@@ -459,7 +459,9 @@ before the first layout pass.
 #### `pub fn set_sort(&self, col_id: Option<&str>, dir: SortDirection)`
 
 Set the active sort imperatively. Equivalent to writing to
-`sort_signal` directly.
+`sort_signal` directly, except that an unchanged
+value neither writes nor notifies — see
+`set_column_widths`.
 
 #### `pub fn clear_sort(&self)`
 
@@ -475,6 +477,11 @@ its declared width policy).
 
 Replace the full width-override map (typically used to restore
 a persisted layout).
+
+A no-op when the map is unchanged, so the documented
+settings-round-trip wiring (see docs/table-view.md, "Persistence")
+terminates instead of recursing: `Signal::set` has no equality check of
+its own, and a live resize writes a width on every pointer move.
 
 #### `pub fn set_column_order(&self, order: Vec<String>)`
 

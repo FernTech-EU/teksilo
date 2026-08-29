@@ -407,3 +407,15 @@ toast-body-copied = Copied
 # See crates/teksilo-widgets/src/command_palette.rs.
 command-palette-placeholder = Type a command
 command-palette-empty = No matching command
+# Accessible name of the palette dialog and of its search field. Never shown
+# on screen — the palette has no visible title bar — so it is the only thing
+# telling a screen-reader user what just opened.
+command-palette-title = Command palette
+# Announced as the dialog's description and re-announced as the query narrows,
+# so the match count is available without arrowing through the whole list.
+command-palette-result-count =
+    { $count ->
+        [0] No matching command
+        [one] 1 command
+       *[other] { $count } commands
+    }

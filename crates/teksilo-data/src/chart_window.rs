@@ -320,6 +320,9 @@ fn translate<T: 'static>(
         ChartChange::SeriesColorChanged { series } => {
             vec![ChartChange::SeriesColorChanged { series: *series }]
         }
+        ChartChange::SeriesPatternChanged { series } => {
+            vec![ChartChange::SeriesPatternChanged { series: *series }]
+        }
         ChartChange::SeriesVisibilityChanged { series } => {
             vec![ChartChange::SeriesVisibilityChanged { series: *series }]
         }

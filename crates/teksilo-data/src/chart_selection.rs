@@ -359,6 +359,7 @@ impl ChartSelection {
             | ChartChange::SeriesMoved { .. }
             | ChartChange::SeriesRenamed { .. }
             | ChartChange::SeriesColorChanged { .. }
+            | ChartChange::SeriesPatternChanged { .. }
             | ChartChange::SeriesVisibilityChanged { .. }
             | ChartChange::PointUpdated { .. } => {}
         }

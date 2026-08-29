@@ -103,6 +103,12 @@ re-themes live when you swap the scheme.
 - **Mouse reporting** — when a full-screen app (vim, tmux) enables it, presses /
   releases / drags / wheel are reported (SGR + legacy X10). `Shift` forces local
   selection instead.
+- **Leaving the terminal** — `Ctrl+Tab` / `Ctrl+Shift+Tab` move focus to the
+  next / previous widget. Plain `Tab` and `Shift+Tab` belong to the child (they
+  are encoded as `\t` and CSI Z), so this chord is the way out; it is reserved
+  by the dispatcher for **every** `keyboard_capture` surface and never reaches
+  the widget. Ctrl, not ⌘, on macOS as well — ⌘⇥ is the application switcher.
+  The terminal advertises it to assistive technology as its keyboard shortcut.
 
 ## Accessibility
 
@@ -122,7 +128,11 @@ Both are generally useful and live in `teksilo-core`, not just here:
 - **`WidgetBuilder::keyboard_capture(bool)`** — while focused, the node receives
   every `KeyDown` raw, bypassing shortcut → intent → action resolution. Any
   "capture all keys" surface (a terminal, a game viewport, a modal editor) wants
-  it. (Escape / overlay back-navigation still run first.)
+  it. One chord is reserved and never delivered: **`Ctrl+Tab` /
+  `Ctrl+Shift+Tab` always cycle focus**, so a capture surface cannot become a
+  keyboard trap (WCAG 2.1.2) however greedily its `on_key` behaves. Escape is
+  *not* reserved — overlay back-navigation runs ahead of the capture check only
+  while an overlay is actually open.
 - **`RepaintWindowRequest { window_id }`** — a thread-safe "repaint this window"
   request posted via `AppEventPoster::post_external` from a background thread. A
   bare redraw re-presents cached paint, so content changed **off the UI thread**

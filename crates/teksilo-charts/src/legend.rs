@@ -34,6 +34,7 @@ use teksilo_data::{ChartModel, SeriesId};
 use teksilo_tokens::{TextRole, TextStyleRole};
 
 use crate::palette::ChartPalette;
+use crate::pattern::{self, LegendSwatch, PatternPolicy};
 use crate::text::{measure_text_width, measure_text_width_via};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -50,6 +51,13 @@ struct LegendRow<T: Clone + 'static> {
     series_id: SeriesId,
     palette_index: usize,
     palette: Prop<ChartPalette>,
+    /// How this row samples its series — must match what the plot draws, or
+    /// the legend hands the reader a second mapping to learn.
+    swatch: LegendSwatch,
+    /// Whether the non-colour channel is drawn at all. Decided once by the
+    /// owning `ChartLegend` from its policy and the visible-series count, so
+    /// every row agrees.
+    patterned: bool,
 }
 
 impl<T: Clone + 'static> std::fmt::Debug for LegendRow<T> {
@@ -154,10 +162,9 @@ impl<T: Clone + 'static> Widget for LegendRow<T> {
         use crate::style as cs;
         let theme = ctx.theme;
         let enabled = ctx.effective_enabled;
-        let Some((name, color_prop, visible)) = self
-            .model
-            .with_series(self.series_id, |name, color, visible| {
-                (name.to_string(), color.cloned(), visible)
+        let Some((name, color_prop, series_pattern, visible)) =
+            self.model.with_series_view(self.series_id, |v| {
+                (v.name.to_string(), v.color.cloned(), v.pattern, v.visible)
             })
         else {
             return;
@@ -183,10 +190,13 @@ impl<T: Clone + 'static> Widget for LegendRow<T> {
             cs::LEGEND_SWATCH_SIZE,
             cs::LEGEND_SWATCH_SIZE,
         );
-        canvas.fill_rounded_rect(
+        pattern::draw_legend_swatch(
+            canvas,
             swatch,
-            teksilo_tokens::CornerRadius::uniform(2.0),
+            self.swatch,
+            pattern::resolve(series_pattern, self.palette_index),
             final_color,
+            self.patterned,
         );
 
         let label_w = measure_text_width(canvas, &name, &label_style);
@@ -227,6 +237,13 @@ pub struct ChartLegend<T: Clone + 'static> {
     palette: Prop<ChartPalette>,
     orientation: LegendOrientation,
     interactive: bool,
+    /// How each row samples its series. Set by the owning chart to match what
+    /// its plot draws — a hatched chip for bars, a dashed line + marker for
+    /// lines. A swatch that does not match the plot is a second mapping for
+    /// the reader to learn, which defeats the point.
+    swatch: LegendSwatch,
+    /// Whether rows draw the non-colour channel. See [`PatternPolicy`].
+    pattern_policy: PatternPolicy,
     row_ids: Vec<WidgetId>,
 }
 
@@ -237,8 +254,36 @@ impl<T: Clone + 'static> ChartLegend<T> {
             palette: Prop::Static(ChartPalette::FromTheme),
             orientation: LegendOrientation::Horizontal,
             interactive: false,
+            swatch: LegendSwatch::Block,
+            pattern_policy: PatternPolicy::default(),
             row_ids: Vec::new(),
         }
+    }
+
+    /// How each row samples its series — a filled chip carrying the hatch
+    /// ([`LegendSwatch::Block`], the default, matching bars and pie slices) or
+    /// a line sample carrying the dash and marker
+    /// ([`LegendSwatch::Line`], matching a line series).
+    pub fn swatch(mut self, swatch: LegendSwatch) -> Self {
+        self.swatch = swatch;
+        self
+    }
+
+    /// Whether rows carry the series' non-colour channel. Mirror the owning
+    /// chart's own [`PatternPolicy`] so plot and legend agree; a legend that
+    /// hatches what the plot leaves plain is worse than one that does neither.
+    pub fn pattern_policy(mut self, policy: PatternPolicy) -> Self {
+        self.pattern_policy = policy;
+        self
+    }
+
+    /// Whether the non-colour channel applies given how many series are
+    /// currently visible.
+    fn patterned(&self) -> bool {
+        let visible = self
+            .model
+            .with_all_series(|views| views.iter().filter(|v| v.visible).count());
+        self.pattern_policy.applies(visible)
     }
 
     pub fn palette(mut self, p: impl Into<Prop<ChartPalette>>) -> Self {
@@ -306,6 +351,7 @@ impl<T: Clone + 'static> Widget for ChartLegend<T> {
         }
 
         if self.interactive {
+            let patterned = self.patterned();
             let series_ids = self.model.series_ids();
             let mut row_ids = Vec::with_capacity(series_ids.len());
             for (i, sid) in series_ids.into_iter().enumerate() {
@@ -314,6 +360,8 @@ impl<T: Clone + 'static> Widget for ChartLegend<T> {
                     series_id: sid,
                     palette_index: i,
                     palette: self.palette.clone(),
+                    swatch: self.swatch,
+                    patterned,
                 };
                 row_ids.push(ctx.add(row));
             }
@@ -404,6 +452,8 @@ impl<T: Clone + 'static> Widget for ChartLegend<T> {
         let label_color = TextRole::Primary.resolve(&theme.colors);
         let line_height = cs::LEGEND_SWATCH_SIZE.max(label_style.size * 1.2);
         let orientation = self.orientation;
+        let patterned = self.patterned();
+        let swatch_style = self.swatch;
 
         self.model.with_all_series(|views| {
             if views.is_empty() {
@@ -439,10 +489,13 @@ impl<T: Clone + 'static> Widget for ChartLegend<T> {
                             cs::LEGEND_SWATCH_SIZE,
                             cs::LEGEND_SWATCH_SIZE,
                         );
-                        canvas.fill_rounded_rect(
+                        pattern::draw_legend_swatch(
+                            canvas,
                             swatch,
-                            teksilo_tokens::CornerRadius::uniform(2.0),
+                            swatch_style,
+                            pattern::resolve(view.pattern, i),
                             final_color,
+                            patterned,
                         );
                         x += cs::LEGEND_SWATCH_SIZE + 4.0;
                         let label_w = label_widths[i];
@@ -484,10 +537,13 @@ impl<T: Clone + 'static> Widget for ChartLegend<T> {
                             cs::LEGEND_SWATCH_SIZE,
                             cs::LEGEND_SWATCH_SIZE,
                         );
-                        canvas.fill_rounded_rect(
+                        pattern::draw_legend_swatch(
+                            canvas,
                             swatch,
-                            teksilo_tokens::CornerRadius::uniform(2.0),
+                            swatch_style,
+                            pattern::resolve(view.pattern, i),
                             final_color,
+                            patterned,
                         );
                         let label_w = measure_text_width(canvas, view.name, &label_style);
                         let text_color = if view.visible {

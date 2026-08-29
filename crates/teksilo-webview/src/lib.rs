@@ -208,6 +208,15 @@ pub struct WebView {
     /// Registry handle, written by the post-mount open action and read by
     /// `Drop` for unregistration. Shared so the moved open closure can set it.
     registry: Rc<RefCell<Option<WebViewRegistry>>>,
+    /// Whether the Teksilo-side node holds keyboard focus — i.e. the *frame*
+    /// is focused, which is not the same as the page having been entered.
+    /// Drives the style's focus ring so a keyboard user can see where Tab
+    /// landed even though the widget paints no content of its own.
+    focused: Signal<bool>,
+    /// Hand keyboard focus straight to the engine the moment the frame gains
+    /// focus, instead of waiting for Enter. Off by default — see
+    /// [`enter_page_on_focus`](Self::enter_page_on_focus).
+    enter_page_on_focus: bool,
 
     // Optional bindings.
     /// Two-way: the engine writes the resolved URL on navigation-finish, and
@@ -265,6 +274,8 @@ impl WebView {
             root_child_id: None,
             state_signal: Signal::new(WebViewVisualState::Loading),
             registry: Rc::new(RefCell::new(None)),
+            focused: Signal::new(false),
+            enter_page_on_focus: false,
             url_signal: None,
             title_signal: None,
             loading_signal: None,
@@ -404,6 +415,37 @@ impl WebView {
     pub fn style(mut self, style: impl WebViewStyle) -> Self {
         self.style_override = Some(Rc::new(style));
         self
+    }
+
+    /// Enter the page as soon as the frame receives keyboard focus, rather
+    /// than on Enter (the default two-step).
+    ///
+    /// Only appropriate when the web view *is* the window's content and there
+    /// is nothing else in the Tab cycle worth reaching — a kiosk view, a
+    /// full-window document preview. In a mixed UI it makes Tab a one-way
+    /// door: once the engine owns the keyboard, Teksilo sees no more keys and
+    /// getting back out is up to the engine and the OS. Off by default for
+    /// exactly that reason.
+    pub fn enter_page_on_focus(mut self, enter: bool) -> Self {
+        self.enter_page_on_focus = enter;
+        self
+    }
+
+    /// Hand keyboard focus to the engine subview, entering the page.
+    ///
+    /// The programmatic form of the frame's Enter key. No-op before the engine
+    /// has opened (the handle is created post-mount).
+    pub fn focus_page(&self) {
+        self.with_handle(|h| h.set_focus());
+    }
+
+    /// Whether the Teksilo-side frame currently holds keyboard focus.
+    ///
+    /// True while Tab has landed *on* the web view; it says nothing about
+    /// whether the page has been entered, because once the engine subview
+    /// owns the keyboard the toolkit is no longer told what happens inside it.
+    pub fn focused_signal(&self) -> Signal<bool> {
+        self.focused.clone()
     }
 
     /// The stable routing identity of this web view.
@@ -566,11 +608,78 @@ impl Widget for WebView {
         let body = style.make_body(
             &WebViewStyleConfig {
                 state: self.state_signal.clone(),
+                focused: self.focused.clone(),
                 content,
             },
             ctx,
         );
         self.root_child_id = Some(body);
+
+        // --- Keyboard: put the frame in the Tab cycle, then let Enter in ---
+        //
+        // The page's own focus ring lives in the engine's tree, not ours, so a
+        // web view that is not focusable is simply unreachable without a mouse
+        // (WCAG 2.1.1 / 2.4.3). Making the *frame* focusable is the first half.
+        //
+        // The second half is deliberately a **two-step**: landing on the frame
+        // does not hand the keyboard to the engine, Enter (or Space) does. A
+        // web view has two disjoint focus rings — AccessKit's and the engine's
+        // platform tree — and once the native subview owns the keyboard the
+        // toolkit stops seeing keys entirely, so an automatic hand-off would
+        // turn Tab into a one-way door out of the app's own focus cycle. The
+        // same reasoning the HTML `<iframe>` / canvas-embed pattern arrives at.
+        // Apps whose web view is the whole window can opt into the one-step
+        // form with `enter_page_on_focus(true)`.
+        let focused = self.focused.clone();
+        let focus_handle = self.handle.clone();
+        let enter_on_focus = self.enter_page_on_focus;
+        let mut handlers = teksilo_core::widget_builder::HandlerSet::new()
+            .focusable(true)
+            .on_focus(move |gained, _ctx| {
+                focused.set(gained);
+                if gained
+                    && enter_on_focus
+                    && let Some(h) = focus_handle.borrow().as_ref()
+                {
+                    h.set_focus();
+                }
+            });
+
+        let key_handle = self.handle.clone();
+        handlers = handlers.on_key(move |event, _ctx| {
+            use teksilo_core::event::{EventResponse, Key, Modifiers, WidgetEvent};
+            // Enter / Space enter the page. Everything else — Tab included —
+            // is declined, so the frame never becomes a trap: focus cycles off
+            // it exactly as it would off any other control.
+            if let WidgetEvent::KeyDown { key, modifiers, .. } = event
+                && matches!(key, Key::Enter | Key::Space)
+                && *modifiers == Modifiers::NONE
+                && let Some(h) = key_handle.borrow().as_ref()
+            {
+                h.set_focus();
+                return EventResponse::Handled;
+            }
+            EventResponse::Ignored
+        });
+
+        // The advertised `Click` needs something behind it: an action a widget
+        // declares but does not execute is worse than one it never declared,
+        // because AT reports the control as operable when it is not.
+        let action_handle = self.handle.clone();
+        handlers = handlers.on_access_action(move |action, _ctx| {
+            use teksilo_core::event::EventResponse;
+            if matches!(
+                action,
+                teksilo_core::accesskit::Action::Click | teksilo_core::accesskit::Action::Focus
+            ) && let Some(h) = action_handle.borrow().as_ref()
+            {
+                h.set_focus();
+                return EventResponse::Handled;
+            }
+            EventResponse::Ignored
+        });
+
+        ctx.apply_self_handlers(handlers);
 
         // Capture the window id now — the post-mount EventContext has no
         // direct window-id accessor, but BuildContext::window() does.
@@ -708,6 +817,16 @@ impl Widget for WebView {
         builder.set_role(Role::WebView);
         if let Some(title) = &self.title_signal {
             builder.set_name(title.get());
+        }
+        // The frame is reachable by Tab and *enterable* by Enter. Both have to
+        // be advertised: `Focus` so an AT client can put the toolkit's focus
+        // here, `Click` so "activate" from a screen reader means the same as
+        // pressing Enter — hand the keyboard to the engine. The `on_key` /
+        // `on_access_action` paths both end at `WebViewHandle::set_focus`.
+        builder.add_action(teksilo_core::accesskit::Action::Focus);
+        builder.add_action(teksilo_core::accesskit::Action::Click);
+        if !self.enter_page_on_focus {
+            builder.set_keyboard_shortcut("Enter");
         }
     }
 

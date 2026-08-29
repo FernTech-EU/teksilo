@@ -109,6 +109,14 @@ pub struct ListView<T: 'static> {
     /// Keyboard-focused item index within the list.
     focused_index: Rc<Cell<Option<usize>>>,
 
+    /// Shared (model index → row wrapper id) map, written by the body pane at
+    /// the end of every build. Handed out by
+    /// [`realized_row_ids`](Self::realized_row_ids) so a host that keeps focus
+    /// elsewhere — a command palette whose focus stays in its search field —
+    /// can point `active_descendant` at the highlighted row. Mirrors
+    /// `GridView`'s `tile_map`.
+    row_map: Rc<RefCell<Vec<(usize, WidgetId)>>>,
+
     /// Type-ahead ("type to jump") label extractor — opt-in via
     /// [`type_ahead_label`](Self::type_ahead_label). When set, typing a
     /// printable character jumps the selection to the next row whose label
@@ -317,6 +325,7 @@ impl<T: 'static> ListView<T> {
             metrics: Rc::new(RefCell::new(RowMetrics::uniform(DEFAULT_ITEM_HEIGHT, 0.0))),
             row_selection: None,
             focused_index: Rc::new(Cell::new(None)),
+            row_map: Rc::new(RefCell::new(Vec::new())),
             type_ahead_label: None,
             type_ahead_timeout: crate::common::type_ahead::DEFAULT_TYPE_AHEAD_TIMEOUT,
             type_ahead: crate::common::type_ahead::TypeAheadState::new(),
@@ -438,6 +447,27 @@ impl<T: 'static> ListView<T> {
     pub fn selection(mut self, sel: SelectionModel) -> Self {
         self.row_selection = Some(RowSelection::from_index(sel));
         self
+    }
+
+    /// A shared handle to the live `(model index → row node id)` map of the
+    /// **realized** rows, rewritten at the end of every build.
+    ///
+    /// The id is the row's `Role::ListItem` wrapper — the node an
+    /// `active_descendant` has to point at. Take the handle before moving the
+    /// view into the tree; it is populated on the first build.
+    ///
+    /// This exists for the ARIA combobox / listbox pattern, where keyboard
+    /// focus stays on a *text field* while the arrow keys move a highlight
+    /// through this list (a command palette, a type-ahead picker). The field's
+    /// AT node publishes `active_descendant` pointing here, so a screen reader
+    /// announces each row as the highlight moves without focus ever leaving
+    /// the input. A `ListView` that holds focus itself does not need this.
+    ///
+    /// Only realized rows are present — a row scrolled outside the
+    /// virtualization window has no widget, so look-ups for it return `None`.
+    /// Callers should `scroll_to_index` the row they intend to announce.
+    pub fn realized_row_ids(&self) -> Rc<RefCell<Vec<(usize, WidgetId)>>> {
+        self.row_map.clone()
     }
 
     /// Enable intra-widget drag reordering.
@@ -1396,6 +1426,7 @@ impl<T: 'static> Widget for ListView<T> {
             metrics: self.metrics.clone(),
             row_selection: self.row_selection.clone(),
             focused_index: self.focused_index.clone(),
+            row_map: self.row_map.clone(),
             reorderable: self.reorderable,
             export: self.export.clone(),
             on_activate: self.on_activate.clone(),

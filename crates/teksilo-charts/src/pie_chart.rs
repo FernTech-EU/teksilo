@@ -39,12 +39,13 @@ use teksilo_core::widget::{
 use teksilo_core::widget_builder::HandlerSet;
 use teksilo_core::widget_id::WidgetId;
 use teksilo_data::{ChartModel, ChartSelection, ChartSeries, SeriesId};
-use teksilo_tokens::{CornerRadius, TextRole, TextStyle, TextStyleRole};
+use teksilo_tokens::{TextRole, TextStyle, TextStyleRole};
 
 use crate::hit::{self, MarkGeometry, MarkShape};
 use crate::layout::{LegendPosition, PieGeometry, PieGeometryParams, compute_pie_geometry};
 use crate::legend::{LegendOrientation, orientation_for_position};
 use crate::palette::ChartPalette;
+use crate::pattern::{self, LegendSwatch, PatternPolicy};
 use crate::recipe_style::RecipeChartStyle;
 use crate::text::measure_text_width;
 
@@ -91,6 +92,14 @@ pub struct PieChart<T: Clone + 'static> {
     legend_position: LegendPosition,
     show_hover_tooltip: bool,
     palette: Prop<ChartPalette>,
+    /// Whether slices carry a non-colour channel — a marker glyph at each
+    /// slice's centroid, stamped again on the matching legend swatch.
+    ///
+    /// A pie's colour-to-category mapping lives in its legend, so this matters
+    /// exactly when a legend is shown; a pie with slice labels or with neither
+    /// labels nor legend is not conveying identity through colour at all. See
+    /// [`Self::pattern_policy`].
+    pattern_policy: PatternPolicy,
     explicit_colors: Vec<Option<ColorProp>>,
     pending_center: Option<PendingChild>,
     center_id: Option<WidgetId>,
@@ -120,6 +129,7 @@ impl<T: Clone + std::fmt::Display + 'static> PieChart<T> {
             legend_position: LegendPosition::Bottom,
             show_hover_tooltip: true,
             palette: Prop::Static(ChartPalette::FromTheme),
+            pattern_policy: PatternPolicy::default(),
             explicit_colors: Vec::new(),
             pending_center: None,
             center_id: None,
@@ -187,6 +197,34 @@ impl<T: Clone + std::fmt::Display + 'static> PieChart<T> {
     pub fn palette(mut self, p: impl Into<Prop<ChartPalette>>) -> Self {
         self.palette = p.into();
         self
+    }
+
+    /// Whether slices carry a non-colour channel — a marker glyph at each
+    /// slice's centroid, stamped again on the matching legend swatch.
+    ///
+    /// Defaults to [`PatternPolicy::Auto`], which draws it exactly when the
+    /// chart shows a **legend** and has more than one slice. That is the case
+    /// where colour is the mapping from a legend row to a wedge, and a reader
+    /// who does not see the palette has nothing else to go on (WCAG 1.4.1).
+    /// With slice labels instead of a legend the wedges name themselves; with
+    /// neither, the chart conveys proportion only and colour identifies
+    /// nothing. [`Always`](PatternPolicy::Always) marks the slices regardless.
+    ///
+    /// A wedge is not a rectangle and the canvas clips to rectangles only, so
+    /// the channel here is a centroid marker rather than the hatch a bar gets.
+    pub fn pattern_policy(mut self, policy: PatternPolicy) -> Self {
+        self.pattern_policy = policy;
+        self
+    }
+
+    /// Whether the non-colour channel applies to this chart as configured.
+    fn slices_are_marked(&self, slice_count: usize) -> bool {
+        match self.pattern_policy {
+            // A pie identifies its wedges by colour only through its legend.
+            PatternPolicy::Auto => self.show_legend && slice_count > 1,
+            PatternPolicy::Always => true,
+            PatternPolicy::Never => false,
+        }
     }
 
     pub fn slice_color(mut self, index: usize, c: impl Into<ColorProp>) -> Self {
@@ -461,6 +499,7 @@ impl<T: Clone + std::fmt::Display + 'static> Widget for PieChart<T> {
         *self.marks.borrow_mut() = marks.clone();
 
         let palette = self.palette.get();
+        let marked = self.slices_are_marked(marks.len());
         let total: f32 = marks.iter().map(|m| m.value).sum();
         let disc_bounds = Rect::new(
             geometry.center.x - geometry.outer_radius,
@@ -514,6 +553,27 @@ impl<T: Clone + std::fmt::Display + 'static> Widget for PieChart<T> {
             }
 
             let bisector = start_rad + sweep_rad * 0.5;
+
+            // The non-colour channel. A wedge cannot be hatched (the canvas
+            // clips to rectangles), so each slice is stamped with its pattern's
+            // marker glyph at its centroid, in a tone derived to contrast with
+            // the slice's own fill. The legend swatch carries the same glyph,
+            // so the mapping legend-row → wedge survives without colour.
+            if marked && sweep_rad >= crate::style::MIN_MARKED_SLICE_RAD {
+                let r_mid = (inner_radius + outer_radius) * 0.5;
+                let centroid = Point::new(
+                    center.x + bisector.cos() * r_mid,
+                    center.y + bisector.sin() * r_mid,
+                );
+                pattern::draw_marker(
+                    canvas,
+                    centroid,
+                    crate::style::SLICE_MARKER_RADIUS,
+                    pattern::resolve(None, i).marker(),
+                    pattern::hatch_color(color),
+                );
+            }
+
             let percent = if total > 0.0 {
                 m.value / total * 100.0
             } else {
@@ -774,6 +834,12 @@ impl<T: Clone + std::fmt::Display + 'static> PieChart<T> {
         let label_color = TextRole::Primary.resolve(&theme.colors);
         let line_height = cs::LEGEND_SWATCH_SIZE.max(label_style.size * 1.2);
         let palette = self.palette.get();
+        // Same verdict the slices used, so swatch and wedge always agree.
+        let marked = self.slices_are_marked(
+            self.model
+                .with_series_view(series_id, |v| v.points.len())
+                .unwrap_or(0),
+        );
 
         self.model
             .with_series_view(series_id, |view| match orientation {
@@ -808,7 +874,14 @@ impl<T: Clone + std::fmt::Display + 'static> PieChart<T> {
                             cs::LEGEND_SWATCH_SIZE,
                             cs::LEGEND_SWATCH_SIZE,
                         );
-                        canvas.fill_rounded_rect(swatch, CornerRadius::uniform(2.0), color);
+                        pattern::draw_legend_swatch(
+                            canvas,
+                            swatch,
+                            LegendSwatch::Marked,
+                            pattern::resolve(None, i),
+                            color,
+                            marked,
+                        );
                         x += cs::LEGEND_SWATCH_SIZE + 4.0;
                         canvas.draw_text(
                             name,
@@ -841,7 +914,14 @@ impl<T: Clone + std::fmt::Display + 'static> PieChart<T> {
                             cs::LEGEND_SWATCH_SIZE,
                             cs::LEGEND_SWATCH_SIZE,
                         );
-                        canvas.fill_rounded_rect(swatch, CornerRadius::uniform(2.0), color);
+                        pattern::draw_legend_swatch(
+                            canvas,
+                            swatch,
+                            LegendSwatch::Marked,
+                            pattern::resolve(None, i),
+                            color,
+                            marked,
+                        );
                         let label_w = measure_text_width(canvas, &name, label_style);
                         canvas.draw_text(
                             &name,
@@ -1097,6 +1177,56 @@ mod tests {
             ChartDatum::new("B".to_string(), 50.0),
             ChartDatum::new("C".to_string(), 20.0),
         ])
+    }
+
+    // ── The non-colour slice channel (WCAG 1.4.1) ───────────────────────
+
+    fn path_count(chart: PieChart<String>) -> usize {
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        tree.add(chart);
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        tree.render().paths.len()
+    }
+
+    #[test]
+    fn a_legend_brings_centroid_markers_with_it() {
+        // A pie maps colour to category through its legend, and nothing else.
+        // Without a second channel, the legend is unreadable to anyone who
+        // does not see the palette.
+        let bare = path_count(PieChart::new(three_slices_model()));
+        let with_legend = path_count(PieChart::new(three_slices_model()).legend(true));
+        assert!(
+            with_legend > bare,
+            "a pie with a legend must stamp its slices and swatches with marker \
+             glyphs ({with_legend} vs {bare} paths)"
+        );
+    }
+
+    #[test]
+    fn a_pie_without_a_legend_stays_unmarked() {
+        // Nothing maps colour to meaning, so there is nothing to duplicate —
+        // markers would be decoration carrying no information.
+        let auto = path_count(PieChart::new(three_slices_model()));
+        let never =
+            path_count(PieChart::new(three_slices_model()).pattern_policy(PatternPolicy::Never));
+        assert_eq!(
+            auto, never,
+            "with no legend, Auto must draw exactly what Never draws"
+        );
+    }
+
+    #[test]
+    fn never_drops_the_markers_a_legend_would_have_added() {
+        let auto = path_count(PieChart::new(three_slices_model()).legend(true));
+        let never = path_count(
+            PieChart::new(three_slices_model())
+                .legend(true)
+                .pattern_policy(PatternPolicy::Never),
+        );
+        assert!(
+            never < auto,
+            "PatternPolicy::Never must drop the channel entirely ({never} vs {auto})"
+        );
     }
 
     #[test]

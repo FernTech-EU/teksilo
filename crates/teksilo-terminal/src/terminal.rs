@@ -1050,8 +1050,27 @@ fn keyboard_handler(
                 return EventResponse::Handled;
             }
 
+            // The keyboard-capture escape chord (WCAG 2.1.2). A terminal
+            // encodes Tab as `\t` and Shift+Tab as CSI Z, so plain Tab can
+            // never leave — Ctrl+Tab / Ctrl+Shift+Tab are the way out, and
+            // must reach the framework's focus cycling as `Ignored` rather
+            // than being written to the child. `dispatch_event_impl` already
+            // intercepts this chord for every `keyboard_capture` node before
+            // the widget is consulted; declining it here too keeps the widget
+            // correct in isolation (a direct `keyboard_handler` call, a host
+            // that dispatches keys itself) instead of relying on the caller.
+            // Literal `ctrl()`: ⌘⇥ is the macOS application switcher and
+            // never arrives, so Ctrl+Tab is Ctrl+Tab on every platform.
+            if *key == Key::Tab && modifiers.ctrl() {
+                return EventResponse::Ignored;
+            }
+
             if state.borrow().read_only {
-                return EventResponse::Handled;
+                // Nothing to forward: a read-only terminal has no child to
+                // receive the keystroke, so consuming it would trap focus for
+                // no benefit. Decline instead and let the framework's normal
+                // key routing (Tab cycling included) proceed.
+                return EventResponse::Ignored;
             }
 
             let (mode, cfg) = {

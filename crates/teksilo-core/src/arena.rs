@@ -172,9 +172,14 @@ pub struct WidgetNode {
     /// Used by a terminal emulator (which must forward `Ctrl+C` to the
     /// child process, not trigger the app's copy shortcut), a game
     /// viewport, or a vim-mode editor. Honored by `dispatch_event_impl`,
-    /// which skips the shortcut block for a focused capture node. Escape
-    /// and overlay back-navigation still run before the check, so an open
-    /// overlay can still be dismissed. Default `false`.
+    /// which skips the shortcut block for a focused capture node.
+    ///
+    /// **`Ctrl+Tab` / `Ctrl+Shift+Tab` are reserved**: `dispatch_event_impl`
+    /// cycles focus on that chord before dispatching to a focused capture
+    /// node, so no capture surface can trap the keyboard (WCAG 2.1.2).
+    /// Escape is not reserved — overlay back-navigation runs ahead of the
+    /// check only while an overlay is open, so a capture surface below no
+    /// overlay does see Escape. Default `false`.
     pub keyboard_capture: bool,
     /// When `true`, this widget AND its entire subtree are invisible to
     /// hit-testing: the recursion returns immediately without descending

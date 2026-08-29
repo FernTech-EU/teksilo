@@ -68,7 +68,7 @@ runs the highlighted command; Escape dismisses.
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/teksilo_widgets/index.html)
+📖 [Full rustdoc API for this module](../api/teksilo_widgets/command_palette/index.html)
 
 ## `pub struct PaletteCommand`
 

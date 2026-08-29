@@ -618,9 +618,20 @@ impl HandlerSet {
     /// handler, bypassing shortcut → intent → action resolution. Use for
     /// a terminal emulator that must forward `Ctrl+C` / `Ctrl+W` /
     /// `Alt+<letter>` to a child process instead of triggering the host
-    /// app's shortcuts, a game viewport, or a modal text surface. Escape
-    /// and overlay back-navigation still run first, so an open overlay
-    /// can still be closed. See [`super::arena::WidgetNode::keyboard_capture`].
+    /// app's shortcuts, a game viewport, or a modal text surface.
+    ///
+    /// # The escape contract
+    ///
+    /// **`Ctrl+Tab` / `Ctrl+Shift+Tab` are reserved and always move focus
+    /// out.** The dispatcher cycles focus on that chord before the capture
+    /// node is consulted, so a capture surface cannot become a keyboard trap
+    /// (WCAG 2.1.2) however greedily its `on_key` behaves. Do not bind them.
+    ///
+    /// Nothing else is reserved. In particular Escape is **not**: overlay
+    /// back-navigation runs first only while an overlay is actually open, so
+    /// a focused capture surface with no overlay above it does receive
+    /// Escape and may consume it. See
+    /// [`super::arena::WidgetNode::keyboard_capture`].
     pub fn keyboard_capture(mut self, capture: bool) -> Self {
         self.keyboard_capture = Some(capture);
         self

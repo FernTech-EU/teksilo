@@ -22,7 +22,7 @@ let arrow = TwistArrow::new(16.0, true, false)
 
 ## Builder methods at a glance
 
-`on_click`
+`color`, `on_click`
 
 ## API reference
 
@@ -43,6 +43,21 @@ pub struct TwistArrow { /* fields */ }
 Construct a chevron. `size` is the square side length in logical pixels;
 `has_children` determines whether the glyph is painted; `expanded`
 determines the glyph direction (down = expanded, right/left = collapsed).
+
+#### `pub fn color(mut self, color: impl Into<ColorProp>) -> Self`
+
+Override the glyph colour. Accepts a `Color`, a `TextRole`, or a
+`Signal` of either.
+
+The default `TextRole::Secondary` is a muted grey, which is right on
+every row that is not filled. It is *not* right on one that is: a
+design language whose selected row is a solid accent capsule flips
+its label to `TextRole::OnAccent` through
+`StandardItemStyle::selected_label_role`, and a chevron left behind
+at `Secondary` then sits on that capsule at roughly 2.5:1 — under
+WCAG SC 1.4.11's 3:1 floor, and visibly wrong beside a white label.
+`StandardTreeItem` passes the row's own label role here so the two
+always move together.
 
 #### `pub fn on_click(mut self, f: impl Fn(&mut EventContext) + 'static) -> Self`
 

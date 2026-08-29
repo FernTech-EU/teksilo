@@ -28,7 +28,7 @@ use teksilo_core::widget::{
 };
 use teksilo_core::widget_builder::HandlerSet;
 use teksilo_core::widget_id::WidgetId;
-use teksilo_data::{ChartModel, ChartSelection, SeriesId, SeriesView};
+use teksilo_data::{ChartModel, ChartSelection, SeriesId, SeriesPattern, SeriesView};
 use teksilo_tokens::{BorderRole, TextRole, TextStyle, TextStyleRole};
 
 use crate::axis::AxisConfig;
@@ -36,6 +36,7 @@ use crate::hit::{self, MarkGeometry, MarkShape};
 use crate::layout::{LegendPosition, PlotGeometry, PlotGeometryParams, compute_plot_geometry};
 use crate::legend::{ChartLegend, legend_main_axis_size, orientation_for_position};
 use crate::palette::ChartPalette;
+use crate::pattern::{self, PatternPolicy};
 use crate::recipe_style::RecipeChartStyle;
 use crate::reference_line::{ReferenceLine, ValueAxis, draw_reference_lines};
 use crate::text::measure_text_width;
@@ -69,6 +70,11 @@ pub struct LineChart<T: Clone + 'static> {
     axis_x: AxisConfig,
     axis_y: AxisConfig,
     palette: Prop<ChartPalette>,
+    /// Whether series carry their non-colour channel (dash + marker shape).
+    /// See [`PatternPolicy`] — `Auto` draws it from the second visible series
+    /// on, which is what keeps a multi-series line chart readable without
+    /// colour (WCAG 1.4.1).
+    pattern_policy: PatternPolicy,
     style_override: Option<SharedChartStyle>,
     selection: Option<ChartSelection>,
     reference_lines: Vec<ReferenceLine>,
@@ -99,6 +105,7 @@ impl<T: Clone + std::fmt::Display + 'static> LineChart<T> {
             axis_x: AxisConfig::new(),
             axis_y: AxisConfig::new(),
             palette: Prop::Static(ChartPalette::FromTheme),
+            pattern_policy: PatternPolicy::default(),
             style_override: None,
             selection: None,
             reference_lines: Vec::new(),
@@ -176,6 +183,21 @@ impl<T: Clone + std::fmt::Display + 'static> LineChart<T> {
 
     pub fn point_radius(mut self, r: f32) -> Self {
         self.point_radius = Some(r);
+        self
+    }
+
+    /// Whether series carry a non-colour channel — a per-series dash pattern
+    /// on the line and a per-series marker shape at each point.
+    ///
+    /// Defaults to [`PatternPolicy::Auto`]: drawn from the second visible
+    /// series onwards, because that is when colour starts carrying information
+    /// a reader who cannot see it would otherwise lose (WCAG 1.4.1). Set
+    /// [`Always`](PatternPolicy::Always) to keep a single-series line dashed
+    /// for consistency across a small multiple, or
+    /// [`Never`](PatternPolicy::Never) only where the design already carries
+    /// the distinction some other way — read that variant's docs first.
+    pub fn pattern_policy(mut self, policy: PatternPolicy) -> Self {
+        self.pattern_policy = policy;
         self
     }
 
@@ -346,6 +368,12 @@ impl<T: Clone + std::fmt::Display + 'static> Widget for LineChart<T> {
             let legend = ChartLegend::new(self.model.clone())
                 .palette(self.palette.clone())
                 .orientation(orientation_for_position(self.legend_position))
+                // The swatch samples what the plot draws: a dashed line, plus
+                // the marker glyph when the plot shows points.
+                .swatch(crate::pattern::LegendSwatch::Line {
+                    marker: self.show_points,
+                })
+                .pattern_policy(self.pattern_policy)
                 .interactive(self.legend_interactive);
             let legend_id = ctx.add(legend);
             self.legend_id = Some(legend_id);
@@ -443,16 +471,24 @@ impl<T: Clone + std::fmt::Display + 'static> Widget for LineChart<T> {
         let line_w = self.line_width.unwrap_or(cs::LINE_DEFAULT_WIDTH);
         let point_r = self.point_radius.unwrap_or(cs::POINT_DEFAULT_RADIUS);
 
-        let mut color_lookup: HashMap<SeriesId, (usize, Option<ColorProp>)> = HashMap::new();
+        // Visible-series index → (index, explicit colour, explicit pattern).
+        // The index drives BOTH default channels: the palette entry and the
+        // pattern, which wrap at different periods so the pair stays unique
+        // well past the point where colour alone repeats.
+        type SeriesStyle = (usize, Option<ColorProp>, Option<SeriesPattern>);
+        let mut color_lookup: HashMap<SeriesId, SeriesStyle> = HashMap::new();
+        let mut visible_series = 0usize;
         self.model.with_all_series(|views| {
-            let mut vi = 0usize;
             for v in views {
                 if v.visible {
-                    color_lookup.insert(v.id, (vi, v.color.cloned()));
-                    vi += 1;
+                    color_lookup.insert(v.id, (visible_series, v.color.cloned(), v.pattern));
+                    visible_series += 1;
                 }
             }
         });
+        // The non-colour channel is on exactly when colour is identifying
+        // something — see `PatternPolicy`.
+        let patterned = self.pattern_policy.applies(visible_series);
 
         let baseline_y = y_to_pixel(
             0.0_f32.max(geometry.y_lo).min(geometry.y_hi),
@@ -462,11 +498,13 @@ impl<T: Clone + std::fmt::Display + 'static> Widget for LineChart<T> {
         );
         for series_marks in marks_by_series(&marks) {
             let sid = series_marks[0].series_id;
-            let (si, color_prop) = color_lookup.get(&sid).cloned().unwrap_or((0, None));
+            let (si, color_prop, series_pattern) =
+                color_lookup.get(&sid).cloned().unwrap_or((0, None, None));
             let color = color_prop
                 .as_ref()
                 .map(|c| c.resolve(theme, enabled))
                 .unwrap_or_else(|| palette.color_for(si, theme));
+            let series_pattern = pattern::resolve(series_pattern, si);
 
             let mut path = Path::new();
             for (i, m) in series_marks.iter().enumerate() {
@@ -507,12 +545,24 @@ impl<T: Clone + std::fmt::Display + 'static> Widget for LineChart<T> {
                 canvas.fill_path(&filled, paint);
             }
 
-            canvas.stroke_path(&path, color, line_w);
+            // Dash and marker shape are the series' second, non-colour
+            // channel: a monochrome print, a forced-colours setting, or a
+            // reader with monochrome vision still tells the series apart.
+            canvas.stroke_path(
+                &path,
+                color,
+                pattern::stroke_style(series_pattern, line_w, patterned),
+            );
 
             if self.show_points {
+                let marker = series_pattern.marker();
                 for m in series_marks {
                     if let MarkShape::Point { center, .. } = m.shape {
-                        canvas.fill_circle(center, point_r, color);
+                        if patterned {
+                            pattern::draw_marker(canvas, center, point_r, marker, color);
+                        } else {
+                            canvas.fill_circle(center, point_r, color);
+                        }
                     }
                 }
             }
@@ -584,7 +634,7 @@ impl<T: Clone + std::fmt::Display + 'static> Widget for LineChart<T> {
                 .find(|m| m.series_id == sid && m.point_idx == idx)
             && let MarkShape::Point { center, .. } = m.shape
         {
-            let (si, color_prop) = color_lookup.get(&sid).cloned().unwrap_or((0, None));
+            let (si, color_prop, _) = color_lookup.get(&sid).cloned().unwrap_or((0, None, None));
             let marker_color = color_prop
                 .as_ref()
                 .map(|c| c.resolve(theme, enabled))
@@ -967,6 +1017,73 @@ mod tests {
             ChartDatum::new("C".to_string(), 8.0),
             ChartDatum::new("D".to_string(), 20.0),
         ])])
+    }
+
+    // ── The non-colour series channel (WCAG 1.4.1) ──────────────────────
+
+    /// The stroke styles of every path the chart emitted, in draw order.
+    fn stroke_dashes(chart: LineChart<String>) -> Vec<Option<Vec<f32>>> {
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        tree.add(chart);
+        tree.layout(SizeProposal::exact(400.0, 200.0));
+        tree.render()
+            .paths
+            .iter()
+            .map(|p| p.stroke_style.dash_pattern.clone())
+            .collect()
+    }
+
+    #[test]
+    fn two_series_are_stroked_with_different_dashes() {
+        // The finding this closes: every series was stroked solid at the same
+        // width, so the lines were told apart by colour and nothing else.
+        let dashes = stroke_dashes(LineChart::new(two_series()));
+        let distinct: std::collections::BTreeSet<String> =
+            dashes.iter().map(|d| format!("{d:?}")).collect();
+        assert!(
+            distinct.len() >= 2,
+            "two series must be stroked distinguishably without colour, got {dashes:?}"
+        );
+    }
+
+    #[test]
+    fn a_single_series_stays_solid() {
+        // Nothing to disambiguate — dashing it would be decoration carrying no
+        // information. `PatternPolicy::Auto` holds off.
+        let dashes = stroke_dashes(LineChart::new(one_series()));
+        assert!(
+            dashes.iter().all(|d| d.is_none()),
+            "a lone series must stay solid, got {dashes:?}"
+        );
+    }
+
+    #[test]
+    fn never_returns_every_series_to_a_solid_stroke() {
+        let dashes =
+            stroke_dashes(LineChart::new(two_series()).pattern_policy(PatternPolicy::Never));
+        assert!(
+            dashes.iter().all(|d| d.is_none()),
+            "PatternPolicy::Never must drop the channel entirely, got {dashes:?}"
+        );
+    }
+
+    #[test]
+    fn a_pinned_pattern_survives_the_series_position() {
+        let model = ChartModel::from_series_vec(vec![
+            ChartSeries::new("Foo")
+                .pattern(teksilo_data::SeriesPattern::Dotted)
+                .data(vec![ChartDatum::new("A".to_string(), 1.0)]),
+            ChartSeries::new("Bar").data(vec![ChartDatum::new("A".to_string(), 4.0)]),
+        ]);
+        let dashes = stroke_dashes(LineChart::new(model));
+        let dotted = teksilo_data::SeriesPattern::Dotted
+            .dash(crate::style::LINE_DEFAULT_WIDTH)
+            .map(|(d, g)| vec![d, g]);
+        assert!(
+            dashes.contains(&dotted),
+            "series 0 pinned Dotted, but the strokes were {dashes:?} \
+             (position 0 would otherwise be Solid)"
+        );
     }
 
     fn two_series() -> ChartModel<String> {

@@ -55,7 +55,7 @@ ctx.add(
 
 ## Builder methods at a glance
 
-`placeholder`, `enabled`, `read_only`, `max_length`, `on_submit_fn`, `on_blur_fn`, `char_filter`, `suffix`, `text_height`, `interaction_signal`, `input_mask`, `mask_placeholder`, `validator`, `secure`, `input_purpose`, `echo_char`, `revealed`, `at_reveal_policy`, `allow_copy`, `validation_feedback_signal`, `text`, `interaction`, `caret_position`, `caret_setter`
+`placeholder`, `enabled`, `read_only`, `max_length`, `on_submit_fn`, `on_blur_fn`, `char_filter`, `suffix`, `text_height`, `interaction_signal`, `input_mask`, `mask_placeholder`, `validator`, `secure`, `input_purpose`, `active_descendant`, `controls`, `echo_char`, `revealed`, `at_reveal_policy`, `allow_copy`, `validation_feedback_signal`, `text`, `interaction`, `caret_position`, `caret_setter`
 
 ## API reference
 
@@ -263,6 +263,28 @@ selects a specialised AccessKit role (`EmailInput`, `PhoneNumberInput`,
 (the password role wins). Does not change IME behaviour — winit's
 `ImePurpose` has no email/number/url variants — nor drive OS autofill,
 which AccessKit cannot express (see `docs/a11y/a11y_issues.md`).
+
+#### `pub fn active_descendant(mut self, active: Signal<Option<WidgetId>>) -> Self`
+
+Publish `active_descendant` pointing at the row a *separate* list is
+currently highlighting — the ARIA combobox pattern.
+
+Keyboard focus stays in this field while arrow keys move a highlight
+through a listbox elsewhere in the tree (a command palette, a
+type-ahead picker, a suggestion popup). Assistive technology follows
+the focused node's active descendant, so the announcement has to be
+published **here**, on the node that actually holds focus — not on the
+composite ancestor that owns the list. Without it the arrow keys move a
+highlight that is announced to nobody.
+
+Bound at `AccessibilityOnly`, so moving the highlight re-walks the AT
+tree without a rebuild or a repaint. Pair with `controls`.
+
+#### `pub fn controls(mut self, listbox: Signal<Option<WidgetId>>) -> Self`
+
+Publish a `controls` relation to the listbox this field drives, so an
+AT client can navigate from the input to the list it is filtering.
+The companion of `active_descendant`.
 
 #### `pub fn echo_char(mut self, c: char) -> Self`
 
