@@ -1051,6 +1051,16 @@ impl WidgetTree {
         // owner is a strict descendant of it — the press belongs to the inner
         // control, not the row. Tap-like handlers only; drag/swipe are excluded
         // so a draggable row still selects itself on press.
+        //
+        // **`on_tap` / `on_long_press` only — never `on_double_tap` alone.**
+        // The question this answers is "does a descendant own *this press*",
+        // and a widget that wired only a multi-tap handler does not: the first
+        // click of a double-click is not its business. Counting it meant a
+        // table cell could not carry double-click-to-edit without also
+        // silently stopping its row from selecting on a plain click — while
+        // every file manager selects a row on the first click of the
+        // double-click that opens it. A node that wants the press still has
+        // `on_tap` (a real `Button`, a checkbox), and those are unaffected.
         let tap_owner: Option<WidgetId> = if matches!(
             event,
             WidgetEvent::PointerDown { .. } | WidgetEvent::PointerUp { .. }
@@ -1059,12 +1069,7 @@ impl WidgetTree {
             let mut cur = Some(target);
             while let Some(id) = cur {
                 if self.arena.get(id).is_some_and(|n| {
-                    n.any_handler(|h| {
-                        h.on_tap.is_some()
-                            || h.on_double_tap.is_some()
-                            || h.on_triple_tap.is_some()
-                            || h.on_long_press.is_some()
-                    })
+                    n.any_handler(|h| h.on_tap.is_some() || h.on_long_press.is_some())
                 }) {
                     owner = Some(id);
                     break;

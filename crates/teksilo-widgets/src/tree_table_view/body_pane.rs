@@ -43,7 +43,7 @@ use crate::primitives::{HStack, Padding, TwistArrow};
 use crate::styles::recipe_table_style as cp;
 use crate::table_view::a11y::{CellA11y, TreeRowA11y};
 use crate::table_view::body::{BodyRow, SharedColumnWidths};
-use crate::table_view::body_pane::CellRowPreview;
+use crate::table_view::body_pane::{CellRowPreview, cell_edit_dismiss_handler, cell_edit_handlers};
 use crate::table_view::column::{CellContext, Column};
 use crate::table_view::selection::{CellSelectionModel, TableSelectionMode};
 use crate::tree_source::TreeSource;
@@ -109,6 +109,19 @@ pub(crate) struct TreeBodyPane<T: 'static> {
     pub(crate) on_row_activate: Option<Rc<dyn Fn(usize, &mut teksilo_core::widget::EventContext)>>,
     /// Whether activation is a single or double click (default `DoubleClick`).
     pub(crate) activate_on: crate::data_views::ActivateOn,
+    /// Which gestures open a cell editor. The pane implements the
+    /// **double-click** arm; F2 and type-to-edit live in the shared key
+    /// handler (`table_view::keyboard`), which is the root's business.
+    pub(crate) edit_triggers: crate::table_view::EditTriggers,
+    /// Fired with `(flat row, column id)` when a double-click opens an editor,
+    /// so the owner can seed its buffer — the same callback the keyboard
+    /// routes use.
+    pub(crate) on_cell_edit_request:
+        Option<Rc<dyn Fn(usize, &str, &mut teksilo_core::widget::EventContext)>>,
+    /// Fired when a press lands outside the cell currently being edited, so the
+    /// owner can end that edit. See `TreeTableView::on_cell_edit_dismissed`.
+    pub(crate) on_cell_edit_dismissed:
+        Option<Rc<dyn Fn(usize, &str, &mut teksilo_core::widget::EventContext)>>,
     /// Drag-start anchor (the root id), captured so the drag closure stays
     /// `'static`.
     pub(crate) drag_anchor: WidgetId,
@@ -247,6 +260,14 @@ impl<T: 'static> Widget for TreeBodyPane<T> {
         let (start, end) = self.visible_range();
         let display_indices = self.display_indices.borrow().clone();
         let columns = self.columns.clone();
+        // Column ids in display order, so a dismissal can name the column whose
+        // editor it is ending rather than the one that was pressed.
+        let display_col_ids: Rc<Vec<String>> = Rc::new(
+            display_indices
+                .iter()
+                .map(|&i| columns[i].id.clone())
+                .collect(),
+        );
         let source = self.source.clone();
         let selection = self.selection.clone();
         let cell_selection = self.cell_selection.clone();
@@ -337,6 +358,29 @@ impl<T: 'static> Widget for TreeBodyPane<T> {
                 };
                 let inner_id = ctx.add_boxed(inner_widget);
 
+                // The editor a cell delegate just swapped in has to *hold the
+                // keyboard*, or the whole editing protocol is decorative: the
+                // table keeps focus, so Escape, Enter and every character land
+                // on the table's own key handler instead — Escape cancels
+                // nothing, Enter activates the row, and typing runs type-ahead
+                // over the value being edited. Nothing else focuses it: the
+                // widget's `begin_edit` and the F2 / type-to-edit routes all
+                // only write `editing_cell`.
+                //
+                // `TableView`'s body pane has always done this; the line was
+                // simply left behind when the tree table was split out of it,
+                // so `TreeTableView`'s inline editing has never been reachable
+                // from the keyboard at all.
+                //
+                // `focus_into` and not `focus`: it is a no-op while focus is
+                // already inside this cell, so the rebuild storm a table lives
+                // in (selection, filtering, scroll, the edit signal itself)
+                // cannot yank focus back mid-edit — while a rebuild that
+                // *destroys and re-creates* the editor still restores it.
+                if is_editing {
+                    ctx.focus_into(inner_id);
+                }
+
                 // Wrap the tree-column's inner widget with indent +
                 // twist arrow — skipped while loading, since has_children
                 // isn't knowable yet (a placeholder twist would be a
@@ -389,6 +433,32 @@ impl<T: 'static> Widget for TreeBodyPane<T> {
                 let cell_a11y =
                     CellA11y::new(leading_id, flat_idx + 2, display_pos + 1, is_selected);
                 let cell_id = ctx.add(cell_a11y);
+
+                // Click-to-edit, from this column's `EditTriggers`. Per cell,
+                // not per row: the row knows where the pointer was, the cell
+                // knows which column it is — and which gestures that column
+                // asked for. A click anywhere else still means whatever the
+                // caller wired `on_row_activate` to.
+                if let Some(handlers) = cell_edit_handlers(
+                    col.effective_edit_triggers(self.edit_triggers),
+                    &self.on_cell_edit_request,
+                    &self.editing_cell,
+                    &row_anchor,
+                    display_pos,
+                    &col.id,
+                ) {
+                    ctx.apply_handlers(cell_id, handlers);
+                }
+                if let Some(handlers) = cell_edit_dismiss_handler(
+                    &self.on_cell_edit_dismissed,
+                    &self.editing_cell,
+                    &display_col_ids,
+                    &row_anchor,
+                    display_pos,
+                ) {
+                    ctx.apply_handlers(cell_id, handlers);
+                }
+
                 cell_entries.push(((flat_idx, display_pos), cell_id));
                 cell_ids.push(cell_id);
             }
@@ -664,6 +734,15 @@ impl<T: 'static> Widget for TreeBodyPane<T> {
                     }
                     crate::data_views::ActivateOn::DoubleClick => {
                         let a = activate_anchor;
+                        // **Editing wins over activation, and the framework
+                        // arbitrates it — there is nothing to guard here.** A
+                        // node carrying a gesture arena answers `Handled` to
+                        // the press and the bubble stops there, so once a cell
+                        // takes a click trigger its row's activation no longer
+                        // sees clicks on *that column*. Which is the wanted
+                        // reading: a column that edits on double-click must not
+                        // also open the row on the same gesture. Every other
+                        // column still activates.
                         HandlerSet::new().on_double_tap(move |_tap, ctx| {
                             if let Some(i) = a.index() {
                                 cb(i, ctx);

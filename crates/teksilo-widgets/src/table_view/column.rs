@@ -88,18 +88,95 @@ pub enum ColumnResizePolicy {
     OnRelease,
 }
 
-/// Triggers that cause the table to fire `on_cell_edit_request` on the
-/// focused cell.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum EditTrigger {
-    /// All three triggers active. **Default.**
-    #[default]
-    F2OrTypeOrDoubleClick,
-    F2,
-    F2OrType,
-    DoubleClick,
-    /// Editing disabled — the table does not fire `on_cell_edit_request`.
-    None,
+/// Which gestures open a cell editor — a **set**, composed with `|`, after
+/// Qt's `QAbstractItemView::EditTriggers`.
+///
+/// A set rather than an enum of named combinations, because the combinations
+/// are the caller's to choose: "one click" and "F2 or one click" are ordinary
+/// requests that a closed enum of `F2 / F2OrType / F2OrTypeOrDoubleClick /
+/// DoubleClick / None` could not express at all.
+///
+/// Set table-wide with [`TableView::edit_triggers`](crate::TableView::edit_triggers)
+/// / [`TreeTableView::edit_triggers`](crate::TreeTableView::edit_triggers), and
+/// per column with [`Column::edit_triggers`] — the column wins where it sets
+/// one. Only cells of an [`editable`](Column::editable) column ever open an
+/// editor, whatever the triggers say; the two are the same split Qt makes
+/// between a view's `editTriggers` and an item's `ItemIsEditable`.
+///
+/// **`SINGLE_CLICK` claims the press.** A cell that edits on one click does not
+/// also select its row — the same trade any interactive cell content already
+/// makes, and the reason it is per column: put it on the columns that are
+/// nothing but a value, and leave the row's own column alone.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EditTriggers(u8);
+
+impl EditTriggers {
+    /// Editing is never opened by the view. Cells of an editable column still
+    /// render normally; nothing reaches `on_cell_edit_request`.
+    pub const NONE: Self = Self(0);
+    /// **F2** on the focused cell.
+    pub const F2: Self = Self(1 << 0);
+    /// Any printable character typed on the focused cell. Note that the
+    /// keystroke that opens the editor is **not** delivered into it — the
+    /// editor does not exist until the next build — so this reads as "F2 with
+    /// an extra key", and it shadows type-ahead on every editable column.
+    pub const ANY_KEY: Self = Self(1 << 1);
+    /// A single click on the cell. Claims the press, so that cell no longer
+    /// selects its row.
+    pub const SINGLE_CLICK: Self = Self(1 << 2);
+    /// A double click on the cell. It takes the gesture from row activation on
+    /// **this column** — a column that edits on double-click must not also open
+    /// its row on the same click — while every other column still activates.
+    pub const DOUBLE_CLICK: Self = Self(1 << 3);
+    /// Every trigger at once.
+    pub const ALL: Self = Self(0b0000_1111);
+
+    /// `true` when every trigger in `other` is present.
+    pub const fn contains(self, other: Self) -> bool {
+        self.0 & other.0 == other.0
+    }
+
+    /// `true` when nothing opens an editor.
+    pub const fn is_empty(self) -> bool {
+        self.0 == 0
+    }
+
+    pub const fn union(self, other: Self) -> Self {
+        Self(self.0 | other.0)
+    }
+
+    pub const fn intersection(self, other: Self) -> Self {
+        Self(self.0 & other.0)
+    }
+}
+
+impl Default for EditTriggers {
+    /// `F2 | ANY_KEY | DOUBLE_CLICK` — what the old
+    /// `EditTriggers::F2OrTypeOrDoubleClick` default named. (It only ever
+    /// delivered the first two: the click arm had no implementation anywhere.)
+    fn default() -> Self {
+        Self::F2.union(Self::ANY_KEY).union(Self::DOUBLE_CLICK)
+    }
+}
+
+impl std::ops::BitOr for EditTriggers {
+    type Output = Self;
+    fn bitor(self, rhs: Self) -> Self {
+        self.union(rhs)
+    }
+}
+
+impl std::ops::BitOrAssign for EditTriggers {
+    fn bitor_assign(&mut self, rhs: Self) {
+        *self = self.union(rhs);
+    }
+}
+
+impl std::ops::BitAnd for EditTriggers {
+    type Output = Self;
+    fn bitand(self, rhs: Self) -> Self {
+        self.intersection(rhs)
+    }
 }
 
 /// Tab / Shift-Tab traversal policy across cells of a row.
@@ -170,6 +247,8 @@ pub struct Column<T: 'static> {
     pub(crate) sortable: bool,
     pub(crate) filterable: bool,
     pub(crate) editable: bool,
+    /// Per-column override of the view's [`EditTriggers`]; `None` inherits.
+    pub(crate) edit_triggers: Option<EditTriggers>,
     pub(crate) pinned: PinnedSide,
     pub(crate) truncation: TruncationPolicy,
     pub(crate) cell: Rc<dyn Fn(&T, &CellContext) -> Box<dyn Widget>>,
@@ -197,6 +276,7 @@ impl<T: 'static> Column<T> {
             sortable: false,
             filterable: false,
             editable: false,
+            edit_triggers: None,
             pinned: PinnedSide::None,
             truncation: TruncationPolicy::default(),
             cell: Rc::new(cell),
@@ -254,6 +334,30 @@ impl<T: 'static> Column<T> {
         self
     }
 
+    /// Override the view's [`EditTriggers`] for this column alone.
+    ///
+    /// The reason the set is not only table-wide: a table's columns rarely
+    /// want the same gesture. A tree column has to keep click-to-select and
+    /// double-click-to-open, while the plain value columns beside it are
+    /// exactly where one click to edit belongs. Unset columns inherit the
+    /// view's set.
+    pub fn edit_triggers(mut self, triggers: EditTriggers) -> Self {
+        self.edit_triggers = Some(triggers);
+        self
+    }
+
+    /// The triggers in force for this column, given the view's set — the
+    /// question the body pane and the key handler both ask, and the one an
+    /// application's own tests want to ask about their column set.
+    ///
+    /// A non-editable column never opens an editor, whatever either says.
+    pub fn effective_edit_triggers(&self, view: EditTriggers) -> EditTriggers {
+        if !self.editable {
+            return EditTriggers::NONE;
+        }
+        self.edit_triggers.unwrap_or(view)
+    }
+
     pub fn pinned(mut self, side: PinnedSide) -> Self {
         self.pinned = side;
         self
@@ -296,6 +400,7 @@ impl<T: 'static> Clone for Column<T> {
             sortable: self.sortable,
             filterable: self.filterable,
             editable: self.editable,
+            edit_triggers: self.edit_triggers,
             pinned: self.pinned,
             truncation: self.truncation,
             cell: self.cell.clone(),

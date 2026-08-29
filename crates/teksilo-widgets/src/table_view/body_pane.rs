@@ -41,6 +41,7 @@ use super::column::{CellContext, Column};
 use super::selection::{CellSelectionModel, TableSelectionMode};
 use crate::common::row_metrics::SharedRowMetrics;
 use crate::data_views::{RowSelection, ViewId, default_placeholder};
+use crate::table_view::column::EditTriggers;
 
 const BUFFER_ROWS: usize = 5;
 
@@ -112,6 +113,19 @@ pub(crate) struct BodyPane<T: 'static> {
     pub(crate) on_row_activate: Option<Rc<dyn Fn(usize, &mut teksilo_core::widget::EventContext)>>,
     /// Whether activation is a single or double click (default `DoubleClick`).
     pub(crate) activate_on: crate::data_views::ActivateOn,
+    /// Which gestures open a cell editor. The pane implements the
+    /// **double-click** arm; F2 and type-to-edit live in the shared key
+    /// handler (`table_view::keyboard`), which is the root's business.
+    pub(crate) edit_triggers: crate::table_view::EditTriggers,
+    /// Fired with `(flat row, column id)` when a double-click opens an editor,
+    /// so the owner can seed its buffer — the same callback the keyboard
+    /// routes use.
+    pub(crate) on_cell_edit_request:
+        Option<Rc<dyn Fn(usize, &str, &mut teksilo_core::widget::EventContext)>>,
+    /// Fired when a press lands outside the cell currently being edited, so the
+    /// owner can end that edit. See `TableView::on_cell_edit_dismissed`.
+    pub(crate) on_cell_edit_dismissed:
+        Option<Rc<dyn Fn(usize, &str, &mut teksilo_core::widget::EventContext)>>,
     /// Anchor used by row drag-start to identify the source. Captured
     /// at construction so the closure stays `'static`.
     pub(crate) drag_anchor: WidgetId,
@@ -252,6 +266,14 @@ impl<T: 'static> Widget for BodyPane<T> {
         let columns = self.columns.clone();
         let with_item_fn = self.with_item_fn.clone();
         let display_indices = self.display_indices.borrow().clone();
+        // Column ids in display order, so a dismissal can name the column whose
+        // editor it is ending rather than the one that was pressed.
+        let display_col_ids: Rc<Vec<String>> = Rc::new(
+            display_indices
+                .iter()
+                .map(|&i| columns[i].id.clone())
+                .collect(),
+        );
         let editing_state = self.editing_cell.get();
         let row_widths_handle = self.column_widths.clone();
         let selection_mode = self.selection_mode;
@@ -265,6 +287,11 @@ impl<T: 'static> Widget for BodyPane<T> {
         // cell's focus-aware selection must track the root's focus.
         ctx.begin_view_focus_for(self.drag_anchor);
         for row_idx in start..end {
+            // One anchor per row, cloned into every handler that addresses the
+            // row — the cells' double-click-to-edit as well as the row's own
+            // selection / activation / drag. Resolved once here, above the cell
+            // loop, so all of them agree on which row this is.
+            let row_anchor = (self.anchor_fn)(row_idx);
             let row_selected_for_a11y = match (selection_mode, &self.selection) {
                 (TableSelectionMode::SingleRow | TableSelectionMode::MultiRow, Some(s)) => {
                     s.is_selected(row_idx)
@@ -321,10 +348,15 @@ impl<T: 'static> Widget for BodyPane<T> {
                     // hand keyboard focus to it. Without this, F2 puts
                     // a `TextInput` on screen but the user has to
                     // click it before they can type.
-                    if is_editing
-                        && let Some(focus_target) = ctx.first_focusable_descendant(inner_id)
-                    {
-                        ctx.focus(focus_target);
+                    //
+                    // `focus_into` rather than a bare `focus` on the
+                    // first focusable descendant: it is a no-op while
+                    // focus is already inside the cell, so the rebuild
+                    // storm a table lives in (selection, filtering,
+                    // scroll, the edit signal itself) cannot yank the
+                    // caret back to the field's start mid-edit.
+                    if is_editing {
+                        ctx.focus_into(inner_id);
                     }
                     let cell_a11y = CellA11y::new(
                         inner_id,
@@ -381,6 +413,29 @@ impl<T: 'static> Widget for BodyPane<T> {
                             _ => teksilo_core::event::EventResponse::Ignored,
                         });
                     ctx.apply_handlers(cell_id, cell_handlers);
+                    // Click-to-edit, from this column's `EditTriggers`. A second
+                    // `apply_handlers` on the same node *merges* into its
+                    // external bucket, so the focus-ring / cell-selection
+                    // handler above survives.
+                    if let Some(edit_handlers) = cell_edit_handlers(
+                        col.effective_edit_triggers(self.edit_triggers),
+                        &self.on_cell_edit_request,
+                        &self.editing_cell,
+                        &row_anchor,
+                        display_pos,
+                        &col.id,
+                    ) {
+                        ctx.apply_handlers(cell_id, edit_handlers);
+                    }
+                    if let Some(dismiss) = cell_edit_dismiss_handler(
+                        &self.on_cell_edit_dismissed,
+                        &self.editing_cell,
+                        &display_col_ids,
+                        &row_anchor,
+                        display_pos,
+                    ) {
+                        ctx.apply_handlers(cell_id, dismiss);
+                    }
 
                     cell_entries.push(((row_idx, display_pos), cell_id));
                     cell_ids.push(cell_id);
@@ -414,8 +469,6 @@ impl<T: 'static> Widget for BodyPane<T> {
             // the cell's `TextInput`) don't change the selection — a
             // selection change would re-emit the row, destroying the
             // editor and dropping focus mid-click.
-            // One anchor per row, cloned into each handler (see the tree pane).
-            let row_anchor = (self.anchor_fn)(row_idx);
             let mut row_handlers = HandlerSet::new();
             if let Some(ref sel) = self.selection {
                 let click_anchor = row_anchor.clone();
@@ -616,6 +669,15 @@ impl<T: 'static> Widget for BodyPane<T> {
                         })
                     }
                     crate::data_views::ActivateOn::DoubleClick => {
+                        // **Editing wins over activation, and the framework
+                        // arbitrates it — there is nothing to guard here.** A
+                        // node carrying a gesture arena answers `Handled` to
+                        // the press and the bubble stops there, so once a cell
+                        // takes a click trigger its row's activation no longer
+                        // sees clicks on *that column*. Which is the wanted
+                        // reading: a column that edits on double-click must not
+                        // also open the row on the same gesture. Every other
+                        // column still activates.
                         HandlerSet::new().on_double_tap(move |_tap, ctx| {
                             if let Some(cur) = a.index() {
                                 cb(cur, ctx)
@@ -833,4 +895,148 @@ impl Widget for CellRowPreview {
     fn children(&self) -> Vec<WidgetId> {
         self.ids.clone()
     }
+}
+
+/// The click half of [`EditTriggers`], as handlers for one cell.
+///
+/// Shared by both body panes so `TableView` and `TreeTableView` cannot drift
+/// about what a click on an editable cell means — the drift that left the tree
+/// table with no keyboard focus in its editors for as long as it has existed.
+///
+/// Returns `None` when this column opens no editor by click, so a cell that
+/// wants neither trigger gets no handler at all — and stays out of the
+/// gesture-arena bookkeeping entirely.
+///
+/// Nothing here has to suppress row activation: a node carrying a gesture arena
+/// answers `Handled` to the press, so the bubble stops at the cell and the row's
+/// activation never sees a click on a column that took a click trigger.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn cell_edit_handlers(
+    triggers: EditTriggers,
+    request: &Option<Rc<dyn Fn(usize, &str, &mut teksilo_core::widget::EventContext)>>,
+    editing_cell: &Signal<Option<(usize, usize)>>,
+    row_anchor: &crate::data_views::RowAnchor,
+    display_pos: usize,
+    col_id: &str,
+) -> Option<HandlerSet> {
+    let single = triggers.contains(EditTriggers::SINGLE_CLICK);
+    let double = triggers.contains(EditTriggers::DOUBLE_CLICK);
+    if !(single || double) {
+        return None;
+    }
+    let request = request.clone()?;
+
+    // Anchored like every other row-addressed handler in a body pane: a row
+    // that moved between build and click must not hand its edit to whoever
+    // took its slot.
+    let open = {
+        let editing_cell = editing_cell.clone();
+        let anchor = row_anchor.clone();
+        let col_id = col_id.to_string();
+        move |ctx: &mut teksilo_core::widget::EventContext| {
+            if let Some(row) = anchor.index() {
+                editing_cell.set(Some((row, display_pos)));
+                request(row, &col_id, ctx);
+            }
+        }
+    };
+    let open = Rc::new(open);
+
+    let mut handlers = HandlerSet::new();
+    if single {
+        let open = open.clone();
+        handlers = handlers.on_tap(move |_tap, ctx| open(ctx));
+    }
+    if double {
+        // Only when `SINGLE_CLICK` is off: with both set the first click has
+        // already opened the editor, and a second one arriving as a `DoubleTap`
+        // would re-seed the buffer from the model — silently discarding what
+        // the writer typed between the two clicks. (The gesture arena would not
+        // deliver it anyway: `TapRecognizer` is skipped whenever a multi-tap
+        // recognizer is present, so wiring both would cost the single click
+        // instead.)
+        if !single {
+            handlers = handlers.on_double_tap(move |_tap, ctx| open(ctx));
+        }
+    }
+    Some(handlers)
+}
+
+/// Ends an open edit when a press lands on **some other cell**.
+///
+/// Shared by both body panes, next to [`cell_edit_handlers`], so the two tables
+/// cannot disagree about when an edit stops.
+///
+/// `on_pointer_event` rather than a tap: it is not a gesture, so this adds no
+/// recognizer to the cell and does not make it a tap owner — a cell carrying
+/// this still selects its row on a press exactly as before. It also fires on
+/// the press, not the release, which is what makes "click away and the value is
+/// kept" feel immediate.
+///
+/// **A press inside the edited cell is not a dismissal.** Clicking into the open
+/// field to move the caret, select a word or drag over text all land there, and
+/// every one of them would otherwise close the editor under the pointer.
+///
+/// Deliberately reports the **editing** cell, not the pressed one: the owner is
+/// being told which edit ended, and it has to be able to write that row's value
+/// back. `EventResponse::Ignored` throughout — ending an edit is a side effect
+/// of the press, never a reason to swallow it, so the press goes on to select
+/// its row (or open its own editor) in the same gesture.
+pub(crate) fn cell_edit_dismiss_handler(
+    dismissed: &Option<Rc<dyn Fn(usize, &str, &mut teksilo_core::widget::EventContext)>>,
+    editing_cell: &Signal<Option<(usize, usize)>>,
+    display_col_ids: &Rc<Vec<String>>,
+    row_anchor: &crate::data_views::RowAnchor,
+    display_pos: usize,
+) -> Option<HandlerSet> {
+    let dismissed = dismissed.clone()?;
+    let editing_cell = editing_cell.clone();
+    let col_ids = display_col_ids.clone();
+    let anchor = row_anchor.clone();
+    Some(HandlerSet::new().on_pointer_event(move |event, ctx| {
+        if let teksilo_core::event::WidgetEvent::PointerDown {
+            button: teksilo_core::event::PointerButton::Primary,
+            ..
+        } = event
+            && let Some((edit_row, edit_col)) = editing_cell.get()
+            && (edit_col != display_pos || anchor.index() != Some(edit_row))
+            && let Some(col_id) = col_ids.get(edit_col)
+        {
+            dismissed(edit_row, col_id, ctx);
+        }
+        teksilo_core::event::EventResponse::Ignored
+    }))
+}
+
+/// The same dismissal, mounted on the **table root** so it also catches a press
+/// that lands on no cell at all — the empty band below the last row, the gutter
+/// beside a short column set, the header strip.
+///
+/// Guarded on `press_claimed_by_interactive_child`, which here is exactly the
+/// question "did this press belong to a control inside the table": the open
+/// editor is a `TextInput` and owns its taps, so clicking into the field to move
+/// the caret or drag over a word is claimed, and is not a dismissal. A press on
+/// a plain cell is not claimed and so dismisses here as well as through its own
+/// handler — the second call is a no-op, there being no open edit left to end.
+pub(crate) fn root_edit_dismiss_handler(
+    dismissed: &Option<Rc<dyn Fn(usize, &str, &mut teksilo_core::widget::EventContext)>>,
+    editing_cell: &Signal<Option<(usize, usize)>>,
+    display_col_ids: &Rc<Vec<String>>,
+) -> Option<HandlerSet> {
+    let dismissed = dismissed.clone()?;
+    let editing_cell = editing_cell.clone();
+    let col_ids = display_col_ids.clone();
+    Some(HandlerSet::new().on_pointer_event(move |event, ctx| {
+        if let teksilo_core::event::WidgetEvent::PointerDown {
+            button: teksilo_core::event::PointerButton::Primary,
+            ..
+        } = event
+            && !ctx.press_claimed_by_interactive_child()
+            && let Some((edit_row, edit_col)) = editing_cell.get()
+            && let Some(col_id) = col_ids.get(edit_col)
+        {
+            dismissed(edit_row, col_id, ctx);
+        }
+        teksilo_core::event::EventResponse::Ignored
+    }))
 }

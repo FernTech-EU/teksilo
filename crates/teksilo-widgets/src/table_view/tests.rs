@@ -1694,7 +1694,7 @@ fn f2_triggers_edit_request() {
             .add_column(id_col())
             .add_column(name_col().editable(true))
             .row_height(20.0)
-            .edit_trigger(super::EditTrigger::F2)
+            .edit_triggers(super::EditTriggers::F2)
             .on_cell_edit_request(move |row, col_id, _ctx| {
                 *f.borrow_mut() = Some((row, col_id.to_string()));
             }),
@@ -1722,7 +1722,7 @@ fn typing_triggers_edit_request_in_f2_or_type_mode() {
             .add_column(id_col().editable(true))
             .add_column(name_col())
             .row_height(20.0)
-            .edit_trigger(super::EditTrigger::F2OrType)
+            .edit_triggers(super::EditTriggers::F2 | super::EditTriggers::ANY_KEY)
             .on_cell_edit_request(move |_, _, _| f.set(f.get() + 1)),
     );
     tree.layout(SizeProposal {
@@ -1746,7 +1746,7 @@ fn typing_does_not_trigger_edit_when_only_f2() {
             .add_column(id_col())
             .add_column(name_col())
             .row_height(20.0)
-            .edit_trigger(super::EditTrigger::F2)
+            .edit_triggers(super::EditTriggers::F2)
             .on_cell_edit_request(move |_, _, _| f.set(f.get() + 1)),
     );
     tree.layout(SizeProposal {

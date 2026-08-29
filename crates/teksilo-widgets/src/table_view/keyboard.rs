@@ -19,7 +19,7 @@ use teksilo_data::SelectionMode;
 
 use super::PaneBoundaries;
 use super::body::SharedColumnWidths;
-use super::column::{EditTrigger, TabTraversal};
+use super::column::{EditTriggers, TabTraversal};
 use super::row_navigator::RowNavigator;
 use super::selection::{CellSelectionModel, TableSelectionMode};
 use crate::common::row_metrics::SharedRowMetrics;
@@ -64,17 +64,19 @@ pub(crate) struct KeyHandlerConfig {
     pub row_metrics: SharedRowMetrics,
     pub tab_traversal: TabTraversal,
     pub editing_cell: Signal<Option<(usize, usize)>>,
-    pub edit_trigger: EditTrigger,
     /// `(row, col_id)` → invoke user's edit hook. The closure resolves
     /// `col_id` from a display position; we keep it generic over
     /// `&str` so the keyboard module doesn't need a `Column<T>`
     /// reference.
     pub display_col_to_id: Rc<dyn Fn(usize) -> Option<String>>,
-    /// Whether the column at the given display position is editable.
-    /// F2 and type-to-edit are no-ops on cells of non-editable
-    /// columns — entering edit mode on a column whose delegate has no
-    /// editor would only confuse the focus / dispatch state.
-    pub display_col_editable: Rc<dyn Fn(usize) -> bool>,
+    /// The [`EditTriggers`] in force for the column at a display position —
+    /// the view's set, overridden by the column's own, and `NONE` for a
+    /// non-editable column. Per column rather than one set for the table
+    /// because that is what the caller declares: entering edit mode on a
+    /// column whose delegate has no editor would only confuse the focus /
+    /// dispatch state, and a tree column usually wants different gestures from
+    /// the value columns beside it.
+    pub display_col_triggers: Rc<dyn Fn(usize) -> EditTriggers>,
     /// Optional: user callback fired when an edit trigger matches.
     #[allow(clippy::type_complexity)]
     pub on_cell_edit_request:
@@ -324,12 +326,7 @@ pub(crate) fn build_key_handler(
                 }
                 return EventResponse::Handled;
             }
-            Key::F2
-                if matches!(
-                    cfg.edit_trigger,
-                    EditTrigger::F2 | EditTrigger::F2OrType | EditTrigger::F2OrTypeOrDoubleClick
-                ) && (cfg.display_col_editable)(col) =>
-            {
+            Key::F2 if (cfg.display_col_triggers)(col).contains(EditTriggers::F2) => {
                 if let Some(col_id) = (cfg.display_col_to_id)(col) {
                     cfg.editing_cell.set(Some((row, col)));
                     if let Some(ref f) = cfg.on_cell_edit_request {
@@ -347,14 +344,11 @@ pub(crate) fn build_key_handler(
             // don't enter edit mode (which would set `editing_cell`
             // without any actual editor in the cell to receive focus
             // and follow-up keystrokes).
-            k if matches!(
-                cfg.edit_trigger,
-                EditTrigger::F2OrType | EditTrigger::F2OrTypeOrDoubleClick
-            ) && !modifiers.ctrl()
+            k if (cfg.display_col_triggers)(col).contains(EditTriggers::ANY_KEY)
+                && !modifiers.ctrl()
                 && !modifiers.alt()
                 && !modifiers.super_key()
-                && k.to_char().is_some()
-                && (cfg.display_col_editable)(col) =>
+                && k.to_char().is_some() =>
             {
                 if let Some(col_id) = (cfg.display_col_to_id)(col) {
                     cfg.editing_cell.set(Some((row, col)));

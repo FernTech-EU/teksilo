@@ -23,7 +23,7 @@
 //! - `SortFilterListModel<Employee>` proxy bound to `table.sort_signal()`
 //!   and `table.filters_signal()` so sort + filter compose.
 //! - Reset-filters button + status-bar row count.
-//! - **Editable name column**: `EditTrigger::F2OrType` plus an
+//! - **Editable name column**: `EditTriggers::F2 | EditTriggers::ANY_KEY` plus an
 //!   `is_editing`-aware cell delegate that swaps a `TextInput` in for
 //!   the focused cell. (This example does not write the edited value
 //!   back into the model — see the comment on `name_column`.)
@@ -39,7 +39,7 @@ use teksilo::data::{
 };
 use teksilo::prelude::*;
 use teksilo::widgets::{
-    Button, CellContext, Column, ColumnWidth, EditTrigger, Expand, GridLines, HStack, Padding,
+    Button, CellContext, Column, ColumnWidth, EditTriggers, Expand, GridLines, HStack, Padding,
     Panel, Spacer, TableAlignment as Alignment, TableSelectionMode, TableView, TextInput,
     TextWidget, Toolbar, VStack,
 };
@@ -240,7 +240,7 @@ fn main() {
                     .selection(selection.clone())
                     // Press F2 (or start typing a letter) on the
                     // focused name cell to swap in a TextInput.
-                    .edit_trigger(EditTrigger::F2OrType);
+                    .edit_triggers(EditTriggers::F2 | EditTriggers::ANY_KEY);
 
                 // Wire the proxy's sort + filter from the table's signals.
                 proxy.sort_signal(table.sort_signal().clone());

@@ -387,7 +387,7 @@ mod tests {
 
     /// The host is layout-transparent once built, and zero-size while not.
     #[test]
-    fn the_host_reports_its_childs_size_and_nothing_before_that() {
+    fn the_host_reports_the_size_of_its_child_and_nothing_before_that() {
         let (mut tree, reveal, _builds, _host_builds, host) = tree_with_host();
         // Laid out under a proposal that leaves the height free, so the root's
         // height follows what the subtree *reports*. Under `exact` every node is

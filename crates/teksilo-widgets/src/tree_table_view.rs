@@ -92,7 +92,7 @@ use crate::scroll_bar::{ScrollBar, ScrollBarOrientation, ScrollBarVisual};
 use crate::table_view::ColumnReorderDragData;
 use crate::table_view::body::SharedColumnWidths;
 use crate::table_view::column::{
-    Column, ColumnResizePolicy, EditTrigger, GridLines, PinnedSide, TabTraversal,
+    Column, ColumnResizePolicy, EditTriggers, GridLines, PinnedSide, TabTraversal,
 };
 use crate::table_view::header::{
     ColumnResizeInfo, ColumnResizeTable, HeaderCell, HeaderCellSpec, HeaderRow, ResizeStateHandle,
@@ -190,9 +190,10 @@ pub struct TreeTableView<T: 'static> {
     show_internal_scrollbars: bool,
     column_resize_policy: ColumnResizePolicy,
     tab_traversal: TabTraversal,
-    edit_trigger: EditTrigger,
+    edit_triggers: EditTriggers,
     #[allow(clippy::type_complexity)]
     on_cell_edit_request: Option<Rc<dyn Fn(usize, &str, &mut EventContext)>>,
+    on_cell_edit_dismissed: Option<Rc<dyn Fn(usize, &str, &mut EventContext)>>,
     #[allow(clippy::type_complexity)]
     on_row_activate: Option<Rc<dyn Fn(usize, &mut EventContext)>>,
 
@@ -450,8 +451,9 @@ impl<T: 'static> TreeTableView<T> {
             show_internal_scrollbars: true,
             column_resize_policy: ColumnResizePolicy::default(),
             tab_traversal: TabTraversal::default(),
-            edit_trigger: EditTrigger::default(),
+            edit_triggers: EditTriggers::default(),
             on_cell_edit_request: None,
+            on_cell_edit_dismissed: None,
             on_row_activate: None,
             reorderable: false,
             drop_feedback: Signal::new(None),
@@ -882,19 +884,44 @@ impl<T: 'static> TreeTableView<T> {
 
     /// Set which user gesture starts an in-place cell edit (default
     /// `DoubleClick`).
-    pub fn edit_trigger(mut self, trigger: EditTrigger) -> Self {
-        self.edit_trigger = trigger;
+    pub fn edit_triggers(mut self, trigger: EditTriggers) -> Self {
+        self.edit_triggers = trigger;
         self
     }
 
     /// Callback invoked when the user requests an in-place cell edit (e.g.
-    /// double-click when `edit_trigger` is `DoubleClick`). Receives the flat row
+    /// double-click when `edit_triggers` is `DoubleClick`). Receives the flat row
     /// index, the column id, and a mutable `EventContext`.
     pub fn on_cell_edit_request(
         mut self,
         f: impl Fn(usize, &str, &mut EventContext) + 'static,
     ) -> Self {
         self.on_cell_edit_request = Some(Rc::new(f));
+        self
+    }
+
+    /// Callback invoked when an **open** cell editor should end because the
+    /// pointer went somewhere else: a press that lands on any cell other than
+    /// the one being edited. Receives the editing cell's flat row index and
+    /// column id, so the owner can commit (or discard) whatever is in its
+    /// buffer, then clear its own editing state.
+    ///
+    /// The counterpart of [`on_cell_edit_request`](Self::on_cell_edit_request),
+    /// and the view cannot do it alone: the framework owns *which* cell is being
+    /// edited, but only the owner knows what an ended edit means — commit,
+    /// discard, or refuse a value that will not parse.
+    ///
+    /// **Why a press and not a focus change.** "The editor lost focus" is the
+    /// obvious signal and it cannot be used: a body pane rebuilds constantly —
+    /// selection, filtering, scroll, a reload from elsewhere — and every rebuild
+    /// destroys and re-creates the open editor, so focus leaves it many times
+    /// during an edit the writer never interrupted. A press on another cell is
+    /// unambiguous and happens exactly once.
+    pub fn on_cell_edit_dismissed(
+        mut self,
+        f: impl Fn(usize, &str, &mut EventContext) + 'static,
+    ) -> Self {
+        self.on_cell_edit_dismissed = Some(Rc::new(f));
         self
     }
 
@@ -1004,6 +1031,19 @@ impl<T: 'static> TreeTableView<T> {
     /// Cell currently being edited as `(row, display_column_index)`, or `None`.
     pub fn editing_cell_signal(&self) -> &Signal<Option<(usize, usize)>> {
         &self.editing_cell
+    }
+
+    /// The widget realized for the cell at `(row, display column)` in the body
+    /// pane's latest build, or `None` once it has scrolled (or collapsed) out
+    /// of the realized buffer — `cell_map` is a snapshot, not an index of every
+    /// row the source holds, so a miss here means "not on screen", never "no
+    /// such cell".
+    fn realized_cell(&self, row: usize, col: usize) -> Option<WidgetId> {
+        self.cell_map
+            .borrow()
+            .iter()
+            .find(|&&(pos, _)| pos == (row, col))
+            .map(|&(_, id)| id)
     }
 
     /// Access the underlying `SortFilterTreeModel` (for programmatic sort /
@@ -1547,12 +1587,21 @@ impl<T: 'static> Widget for TreeTableView<T> {
             let ids = column_ids_in_display_order;
             Rc::new(move |pos| ids.get(pos).cloned())
         };
-        let display_col_editable: Rc<dyn Fn(usize) -> bool> = {
-            let editable_in_display_order: Vec<bool> = display_indices
+        // The effective trigger set per display column: the view's, overridden
+        // by the column's own, and `NONE` for a non-editable one. Resolved here
+        // so the keyboard handler never has to reach a `Column<T>`.
+        let display_col_triggers: Rc<dyn Fn(usize) -> EditTriggers> = {
+            let view_triggers = self.edit_triggers;
+            let per_display_column: Vec<EditTriggers> = display_indices
                 .iter()
-                .map(|&i| self.columns[i].editable)
+                .map(|&i| self.columns[i].effective_edit_triggers(view_triggers))
                 .collect();
-            Rc::new(move |pos| editable_in_display_order.get(pos).copied().unwrap_or(false))
+            Rc::new(move |pos| {
+                per_display_column
+                    .get(pos)
+                    .copied()
+                    .unwrap_or(EditTriggers::NONE)
+            })
         };
 
         let navigator: Rc<dyn RowNavigator> = Rc::new(TreeNavigator::new(self.source.clone()));
@@ -1584,9 +1633,8 @@ impl<T: 'static> Widget for TreeTableView<T> {
             row_metrics: self.row_metrics.clone(),
             tab_traversal: self.tab_traversal,
             editing_cell: self.editing_cell.clone(),
-            edit_trigger: self.edit_trigger,
             display_col_to_id,
-            display_col_editable,
+            display_col_triggers,
             on_cell_edit_request: self.on_cell_edit_request.clone(),
             on_row_activate: self.on_row_activate.clone(),
             type_ahead: self.type_ahead.clone(),
@@ -2125,6 +2173,9 @@ impl<T: 'static> Widget for TreeTableView<T> {
                 drag_anchor: ctx.self_id(),
                 on_row_activate: self.on_row_activate.clone(),
                 activate_on: self.activate_on,
+                edit_triggers: self.edit_triggers,
+                on_cell_edit_request: self.on_cell_edit_request.clone(),
+                on_cell_edit_dismissed: self.on_cell_edit_dismissed.clone(),
                 version: self.pane_version.clone(),
                 prev_built_start: self.pane_built_start.clone(),
                 prev_built_end: self.pane_built_end.clone(),
@@ -2133,6 +2184,21 @@ impl<T: 'static> Widget for TreeTableView<T> {
                 cell_map: self.cell_map.clone(),
             };
             self.body_pane_id = Some(ctx.add(pane));
+            // An open cell editor also ends on a press that lands on no cell at
+            // all — the empty band under the last row. Mounted here rather than
+            // on the pane because the pane is not the hit target there.
+            if let Some(handlers) = crate::table_view::body_pane::root_edit_dismiss_handler(
+                &self.on_cell_edit_dismissed,
+                &self.editing_cell,
+                &Rc::new(
+                    display_indices
+                        .iter()
+                        .map(|&i| self.columns[i].id.clone())
+                        .collect::<Vec<_>>(),
+                ),
+            ) {
+                ctx.apply_self_handlers(handlers);
+            }
         } else if let Some(ref f) = self.empty_view {
             // Empty state — an empty tree, or a filter that matched nothing.
             self.empty_id = Some(ctx.add_boxed(f()));
@@ -2702,11 +2768,10 @@ impl<T: 'static> Widget for TreeTableView<T> {
         // of the body pane's last realized cells; a focused cell that
         // scrolled (or collapsed) out of the realized buffer simply
         // isn't in it, so no stale id is emitted.
-        if let Some(target) = self.focused_cell.get() {
-            let map = self.cell_map.borrow();
-            if let Some(&(_, cell_id)) = map.iter().find(|&&(pos, _)| pos == target) {
-                builder.set_active_descendant(widget_id_to_node_id(cell_id));
-            }
+        if let Some((row, col)) = self.focused_cell.get()
+            && let Some(cell_id) = self.realized_cell(row, col)
+        {
+            builder.set_active_descendant(widget_id_to_node_id(cell_id));
         }
     }
 
@@ -6142,5 +6207,358 @@ mod tests {
             checked,
             "the tree column's indent + twist wrapper must clip its children"
         );
+    }
+
+    /// An editable column whose delegate swaps in a real `TextInput`, so a test
+    /// can ask where the keyboard actually went.
+    fn editable_name_col() -> Column<&'static str> {
+        Column::<&str>::new("name", lit!("Name"), |row, cx: &CellContext| {
+            if cx.is_editing {
+                Box::new(crate::text_input::TextInput::new(Signal::new(
+                    (*row).to_string(),
+                )))
+            } else {
+                Box::new(crate::primitives::TextWidget::new(lit!(*row)))
+            }
+        })
+        .width(ColumnWidth::Flex(1.0))
+        .editable(true)
+    }
+
+    fn three_row_slice() -> teksilo_data::TreeDataSlice<u64, &'static str> {
+        let slice = teksilo_data::TreeDataSlice::<u64, &'static str>::new();
+        slice.set_source(move || {
+            [(1_u64, "one"), (2, "two"), (3, "three")]
+                .into_iter()
+                .map(|(k, n)| teksilo_data::TreeRow::new(k, n, 0))
+                .collect()
+        });
+        slice.reload();
+        slice
+    }
+
+    /// Two primary clicks at one point, close enough together to read as a
+    /// double-click. `WidgetTree::click` twice would be two separate taps.
+    fn double_click_at(tree: &mut WidgetTree, at: Point) {
+        use teksilo_core::event::{Modifiers, PointerButton, WidgetEvent};
+        for _ in 0..2 {
+            tree.dispatch_event(WidgetEvent::PointerDown {
+                position: at,
+                button: PointerButton::Primary,
+                modifiers: Modifiers::NONE,
+            });
+            tree.dispatch_event(WidgetEvent::PointerUp {
+                position: at,
+                button: PointerButton::Primary,
+                modifiers: Modifiers::NONE,
+            });
+        }
+    }
+
+    /// **An open cell editor holds the keyboard.**
+    ///
+    /// `TableView`'s body pane has always focused into the editing cell; the
+    /// line was left behind when the tree table was split out of it, so
+    /// `TreeTableView`'s inline editing was reachable only with the mouse. With
+    /// focus still on the table, every keystroke went to the table's own key
+    /// handler instead: Escape cancelled nothing, Enter activated the row, and
+    /// typing ran type-ahead over the value being edited.
+    #[test]
+    fn opening_a_cell_editor_moves_the_keyboard_into_it() {
+        let slice = three_row_slice();
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let id = tree.add(
+            TreeTableView::from_source(slice)
+                .add_column(editable_name_col())
+                .row_height(20.0),
+        );
+        let proposal = SizeProposal {
+            width: Some(400.0),
+            height: Some(200.0),
+        };
+        tree.layout(proposal);
+        tree.focus(id);
+
+        {
+            let any = tree.widget_as_any(id).unwrap();
+            let tt = any.downcast_ref::<TreeTableView<&'static str>>().unwrap();
+            tt.begin_edit(1, "name");
+        }
+        tree.layout(proposal);
+
+        let focused = tree.focused().expect("something must hold focus");
+        assert_ne!(
+            focused, id,
+            "focus is still on the table, not in the editor"
+        );
+        let cell = {
+            let any = tree.widget_as_any(id).unwrap();
+            let tt = any.downcast_ref::<TreeTableView<&'static str>>().unwrap();
+            tt.realized_cell(1, 0).expect("the edited cell is realized")
+        };
+        assert!(
+            tree.is_descendant_of(focused, cell),
+            "focus must land inside the edited cell, not on {:?}",
+            tree.widget_type_name(focused)
+        );
+    }
+
+    /// ...and it still holds it after the pane rebuilds under it.
+    ///
+    /// A table rebuilds its rows constantly — selection, filtering, scroll, the
+    /// edit signal itself — and each rebuild destroys and re-creates every cell
+    /// widget, the open editor included. Restoring focus is therefore not a
+    /// one-shot at edit-open: without it the first click on another row would
+    /// silently deafen the editor the writer is still typing into. Driven
+    /// through a selection change because that is the rebuild a click produces.
+    #[test]
+    fn an_open_editor_still_holds_the_keyboard_after_the_pane_rebuilds() {
+        let slice = three_row_slice();
+        let selection = teksilo_data::SelectionModel::new(teksilo_data::SelectionMode::Single);
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let id = tree.add(
+            TreeTableView::from_source(slice)
+                .selection(selection.clone())
+                .add_column(editable_name_col())
+                .row_height(20.0),
+        );
+        let proposal = SizeProposal {
+            width: Some(400.0),
+            height: Some(200.0),
+        };
+        tree.layout(proposal);
+        {
+            let any = tree.widget_as_any(id).unwrap();
+            let tt = any.downcast_ref::<TreeTableView<&'static str>>().unwrap();
+            tt.begin_edit(1, "name");
+        }
+        tree.layout(proposal);
+        tree.focused().expect("the editor took focus");
+
+        selection.select(2);
+        tree.layout(proposal);
+
+        let focused = tree.focused().expect("focus survived the rebuild");
+        assert_ne!(focused, id, "the rebuild dropped focus back onto the table");
+        let cell = {
+            let any = tree.widget_as_any(id).unwrap();
+            let tt = any.downcast_ref::<TreeTableView<&'static str>>().unwrap();
+            tt.realized_cell(1, 0)
+                .expect("the edited cell is still realized")
+        };
+        assert!(
+            tree.is_descendant_of(focused, cell),
+            "focus must still be inside the edited cell, not on {:?}",
+            tree.widget_type_name(focused)
+        );
+    }
+
+    /// **Double-click opens the editor on an editable cell** — one arm of
+    /// [`EditTriggers`], and one that had no implementation anywhere.
+    /// `F2 | ANY_KEY | DOUBLE_CLICK` is the default set, so every table has
+    /// been promising this; only `keyboard.rs`'s F2 and type-to-edit ever
+    /// reached `on_cell_edit_request`.
+    #[test]
+    fn a_double_click_on_an_editable_cell_opens_its_editor() {
+        let (mut tree, id, seen, _) = click_probe(EditTriggers::DOUBLE_CLICK);
+        let cell = realized(&tree, id, 1, 0);
+        let at = tree.bounds(cell).center();
+        double_click_at(&mut tree, at);
+
+        assert_eq!(
+            seen.borrow().as_slice(),
+            &[(1, "name".to_string())],
+            "a double-click on an editable cell must request its editor"
+        );
+        let any = tree.widget_as_any(id).unwrap();
+        let tt = any.downcast_ref::<TreeTableView<&'static str>>().unwrap();
+        assert_eq!(tt.editing_cell_signal().get(), Some((1, 0)));
+    }
+
+    /// **One click opens it** when the column asks for `SINGLE_CLICK` — the
+    /// case the old closed enum could not express at all.
+    #[test]
+    fn a_single_click_opens_the_editor_when_the_column_asks_for_it() {
+        let (mut tree, id, seen, _) = click_probe(EditTriggers::SINGLE_CLICK);
+        let cell = realized(&tree, id, 1, 0);
+        tree.click(cell);
+
+        assert_eq!(
+            seen.borrow().as_slice(),
+            &[(1, "name".to_string())],
+            "one click on a SINGLE_CLICK column must request its editor"
+        );
+    }
+
+    /// ...and a column that asked for neither is not opened by any click.
+    /// `NONE` has to mean none, or "read-only in practice" would be
+    /// unexpressible for an otherwise editable column.
+    #[test]
+    fn a_click_opens_nothing_when_the_column_asks_for_no_click_trigger() {
+        let (mut tree, id, seen, _) = click_probe(EditTriggers::F2);
+        let cell = realized(&tree, id, 1, 0);
+        tree.click(cell);
+        let at = tree.bounds(cell).center();
+        double_click_at(&mut tree, at);
+
+        assert!(
+            seen.borrow().is_empty(),
+            "an F2-only column opened an editor from a click: {:?}",
+            seen.borrow()
+        );
+    }
+
+    /// A double-click that opens an editor does **not** also activate the row.
+    ///
+    /// The collision this rules out is opening the item *and* starting to edit
+    /// it on one gesture, which is why the click arm could not simply be
+    /// switched on. The framework settles it with no guard in the pane: the
+    /// cell's gesture arena answers `Handled` to the press, so the bubble never
+    /// reaches the row.
+    ///
+    /// One gesture per tree, and the read-only baseline is the **separate**
+    /// test below: a second synthetic double-click in the same tree never
+    /// reaches the row's `on_double_tap` at all (the recognizer reads clicks 3
+    /// and 4 as a continuing run), so a single test doing both would pass with
+    /// the behaviour removed — an earlier draft did, which is why this note
+    /// exists.
+    #[test]
+    fn editing_a_cell_by_double_click_does_not_also_activate_the_row() {
+        let (mut tree, id, _, activated) = click_probe(EditTriggers::DOUBLE_CLICK);
+        let cell = realized(&tree, id, 1, 0);
+        let at = tree.bounds(cell).center();
+        double_click_at(&mut tree, at);
+        assert_eq!(
+            activated.get(),
+            0,
+            "double-clicking an editable cell opened the item as well as the editor"
+        );
+    }
+
+    /// The read-only column beside it still activates, which is what makes the
+    /// guard a rule about *this gesture on an editable cell* rather than about
+    /// the whole table.
+    #[test]
+    fn a_double_click_off_an_editable_cell_still_activates_the_row() {
+        let (mut tree, id, _, activated) = click_probe(EditTriggers::DOUBLE_CLICK);
+        let cell = realized(&tree, id, 1, 1);
+        let at = tree.bounds(cell).center();
+        double_click_at(&mut tree, at);
+        assert_eq!(
+            activated.get(),
+            1,
+            "a double-click away from an editable cell must still activate the row"
+        );
+    }
+
+    /// **A cell that edits on double-click still lets its row select on a
+    /// plain click.**
+    ///
+    /// `press_claimed_by_interactive_child` counted `on_double_tap` as owning
+    /// the press, so merely giving a cell double-click-to-edit silently stopped
+    /// its row selecting — while every file manager selects a row on the first
+    /// click of the double-click that opens it. The claim is now about
+    /// handlers that act on a single press (`on_tap` / `on_long_press`).
+    #[test]
+    fn a_double_click_editable_cell_still_lets_its_row_select_on_one_click() {
+        let selection = teksilo_data::SelectionModel::new(teksilo_data::SelectionMode::Single);
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let id = tree.add(
+            TreeTableView::from_source(three_row_slice())
+                .selection(selection.clone())
+                .add_column(editable_name_col().edit_triggers(EditTriggers::DOUBLE_CLICK))
+                .row_height(20.0)
+                .on_cell_edit_request(|_row, _col, _ctx| {}),
+        );
+        tree.layout(SizeProposal {
+            width: Some(400.0),
+            height: Some(200.0),
+        });
+
+        let cell = realized(&tree, id, 1, 0);
+        tree.click(cell);
+        assert!(
+            selection.is_selected(1),
+            "one click on a double-click-editable cell must still select its row"
+        );
+    }
+
+    /// ...whereas `SINGLE_CLICK` deliberately does claim the press: that cell's
+    /// click means "edit this value", not "select this row". Documented on
+    /// [`EditTriggers::SINGLE_CLICK`] and the reason the set is per column.
+    #[test]
+    fn a_single_click_editable_cell_claims_the_press_from_row_selection() {
+        let selection = teksilo_data::SelectionModel::new(teksilo_data::SelectionMode::Single);
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let id = tree.add(
+            TreeTableView::from_source(three_row_slice())
+                .selection(selection.clone())
+                .add_column(editable_name_col().edit_triggers(EditTriggers::SINGLE_CLICK))
+                .add_column(size_col())
+                .row_height(20.0)
+                .on_cell_edit_request(|_row, _col, _ctx| {}),
+        );
+        tree.layout(SizeProposal {
+            width: Some(400.0),
+            height: Some(200.0),
+        });
+
+        let editable = realized(&tree, id, 1, 0);
+        tree.click(editable);
+        assert!(
+            !selection.is_selected(1),
+            "a SINGLE_CLICK cell's click must go to the editor, not to selection"
+        );
+
+        // The column beside it selects as always — which is what makes this a
+        // property of the column rather than of the table.
+        let plain = realized(&tree, id, 2, 1);
+        tree.click(plain);
+        assert!(
+            selection.is_selected(2),
+            "a click on a non-editing column must still select its row"
+        );
+    }
+
+    /// The cell realized at `(row, display column)`.
+    fn realized(tree: &WidgetTree, id: WidgetId, row: usize, col: usize) -> WidgetId {
+        let any = tree.widget_as_any(id).unwrap();
+        let tt = any.downcast_ref::<TreeTableView<&'static str>>().unwrap();
+        tt.realized_cell(row, col)
+            .unwrap_or_else(|| panic!("cell ({row}, {col}) is not realized"))
+    }
+
+    /// A laid-out table whose first column is editable under `triggers` and
+    /// whose second is read-only, with the edit requests it receives and a
+    /// count of row activations.
+    #[allow(clippy::type_complexity)]
+    fn click_probe(
+        triggers: EditTriggers,
+    ) -> (
+        WidgetTree,
+        WidgetId,
+        Rc<RefCell<Vec<(usize, String)>>>,
+        Rc<Cell<usize>>,
+    ) {
+        let seen: Rc<RefCell<Vec<(usize, String)>>> = Rc::new(RefCell::new(Vec::new()));
+        let sink = seen.clone();
+        let activated: Rc<Cell<usize>> = Rc::new(Cell::new(0));
+        let counter = activated.clone();
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let id = tree.add(
+            TreeTableView::from_source(three_row_slice())
+                .add_column(editable_name_col().edit_triggers(triggers))
+                .add_column(size_col())
+                .row_height(20.0)
+                .on_cell_edit_request(move |row, col, _ctx| {
+                    sink.borrow_mut().push((row, col.to_string()));
+                })
+                .on_row_activate(move |_row, _ctx| counter.set(counter.get() + 1)),
+        );
+        tree.layout(SizeProposal {
+            width: Some(400.0),
+            height: Some(200.0),
+        });
+        (tree, id, seen, activated)
     }
 }

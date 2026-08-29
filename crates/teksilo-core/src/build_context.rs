@@ -853,6 +853,55 @@ impl<'a> BuildContext<'a> {
         self.tree.first_focusable_descendant(root)
     }
 
+    /// Move keyboard focus **into** the subtree rooted at `id`: its first
+    /// focusable descendant in tab order, or `id` itself when it is the only
+    /// focusable thing there. Returns whether focus ended up inside `id`.
+    ///
+    /// The build-time twin of
+    /// [`EventContext::request_focus_into`](crate::widget::EventContext::request_focus_into),
+    /// and safe here for the same reason [`focus`](Self::focus) is: `add` builds
+    /// a child's whole subtree synchronously, so by the time a composing widget
+    /// holds a child's id the focusable descendants of that child already exist.
+    ///
+    /// **Idempotent, and that is the point.** `build` runs again on every
+    /// rebuild, so a bare `focus` here would drag focus back into this subtree
+    /// every time the owner rebuilt for an unrelated reason — a table body pane
+    /// rebuilds on selection, on filtering and on scroll. This is a no-op while
+    /// focus already sits inside `id`, so it expresses "focus belongs in here"
+    /// rather than "focus here now".
+    ///
+    /// A subtree with nothing focusable leaves focus exactly where it was: an
+    /// empty region never traps it.
+    ///
+    /// ⚠ **Ancestor-chain side effects do not run**, and that is a property of
+    /// focusing from `build` at all, not of this method — [`focus`](Self::focus)
+    /// has it too. A node added during `build` is not parented until the build
+    /// that produced it *returns*, so at this moment `id`'s chain stops at
+    /// whatever the caller has already inserted: `focus_within` signals on
+    /// enclosing nodes never flip, and `scroll_focused_into_view` finds no
+    /// scroll container to reveal the target in. Everything **below** `id` is
+    /// linked (children are parented as each is inserted), so the walk that
+    /// picks the focusable descendant, and every later key dispatch — which
+    /// happens after the pass, on a whole tree — are unaffected.
+    ///
+    /// Reach for [`EventContext::request_focus_into`](crate::widget::EventContext::request_focus_into)
+    /// where the difference matters: it is queued and drained after dispatch,
+    /// against a complete tree.
+    pub fn focus_into(&mut self, id: WidgetId) -> bool {
+        if let Some(focused) = self.tree.focused()
+            && (focused == id || self.tree.is_descendant_of(focused, id))
+        {
+            return true;
+        }
+        match self.tree.first_focusable_descendant(id) {
+            Some(target) => {
+                self.tree.focus(target);
+                true
+            }
+            None => false,
+        }
+    }
+
     // --- Actions & shortcuts ---
 
     /// Attach an [`Action`](crate::action::Action) to the widget being
@@ -1461,5 +1510,183 @@ mod effect_tests {
             7,
             "effect must be unregistered after widget destruction"
         );
+    }
+}
+
+#[cfg(test)]
+mod focus_into_tests {
+    use super::*;
+    use crate::widget::{LayoutContext, Widget};
+    use crate::widget_builder::HandlerSet;
+    use crate::widget_id::WidgetId;
+    use crate::widget_tree::WidgetTree;
+    use teksilo_canvas::SizeProposal;
+
+    /// A leaf that is focusable when asked, so the walk has something real to
+    /// find — or nothing at all.
+    #[derive(Debug)]
+    struct Leaf {
+        focusable: bool,
+    }
+
+    impl Widget for Leaf {
+        fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+            if self.focusable {
+                ctx.apply_self_handlers(HandlerSet::new().focusable(true));
+            }
+            Vec::new()
+        }
+        fn layout_response(
+            &self,
+            proposal: SizeProposal,
+            _ctx: &LayoutContext,
+        ) -> crate::widget::LayoutResponse {
+            proposal.resolve(10.0, 10.0).into()
+        }
+    }
+
+    /// Holds `focusable` focusable leaves and publishes their ids.
+    #[derive(Debug)]
+    struct Panel {
+        focusable: usize,
+        leaves: Signal<Vec<WidgetId>>,
+    }
+
+    impl Widget for Panel {
+        fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+            let kids: Vec<WidgetId> = (0..2)
+                .map(|i| {
+                    ctx.add(Leaf {
+                        focusable: i < self.focusable,
+                    })
+                })
+                .collect();
+            self.leaves.set(kids.clone());
+            kids
+        }
+        fn layout_response(
+            &self,
+            proposal: SizeProposal,
+            _ctx: &LayoutContext,
+        ) -> crate::widget::LayoutResponse {
+            proposal.resolve(10.0, 10.0).into()
+        }
+    }
+
+    /// Calls `focus_into(panel)` on every one of *its own* builds, which is how
+    /// a composing widget uses it. Rebuilt on demand through `tick` — and
+    /// rebuilding it leaves the panel and its leaves alive, which is the whole
+    /// point: that is the situation the idempotence has to survive.
+    #[derive(Debug)]
+    struct Driver {
+        panel: Signal<Option<WidgetId>>,
+        tick: Signal<u64>,
+        moved: Signal<bool>,
+    }
+
+    impl Widget for Driver {
+        fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+            self.tick.bind_to(
+                ctx.self_id(),
+                ctx.binding_registry(),
+                crate::binding::BindingLevel::Rebuild,
+            );
+            if let Some(panel) = self.panel.get() {
+                let moved = ctx.focus_into(panel);
+                self.moved.set(moved);
+            }
+            Vec::new()
+        }
+        fn layout_response(
+            &self,
+            proposal: SizeProposal,
+            _ctx: &LayoutContext,
+        ) -> crate::widget::LayoutResponse {
+            proposal.resolve(0.0, 0.0).into()
+        }
+    }
+
+    struct Probe {
+        tree: WidgetTree,
+        leaves: Vec<WidgetId>,
+        tick: Signal<u64>,
+        moved: Signal<bool>,
+    }
+
+    impl Probe {
+        fn rebuild_driver(&mut self) {
+            self.tick.set(self.tick.get() + 1);
+            self.tree.layout(SizeProposal::exact(100.0, 100.0));
+        }
+    }
+
+    /// A panel with `focusable` focusable leaves, plus a sibling driver that
+    /// calls `focus_into` on it from `build`. `outside` is focusable and lives
+    /// outside the panel, so "focus did not move" is observable.
+    fn probe(focusable: usize) -> (Probe, WidgetId) {
+        let leaves = Signal::new(Vec::new());
+        let panel_id = Signal::new(None);
+        let tick = Signal::new(0_u64);
+        let moved = Signal::new(false);
+
+        let mut tree = WidgetTree::new();
+        let outside = tree.add(Leaf { focusable: true });
+        let panel = tree.add(Panel {
+            focusable,
+            leaves: leaves.clone(),
+        });
+        panel_id.set(Some(panel));
+        tree.add(Driver {
+            panel: panel_id,
+            tick: tick.clone(),
+            moved: moved.clone(),
+        });
+        tree.layout(SizeProposal::exact(100.0, 100.0));
+        (
+            Probe {
+                tree,
+                leaves: leaves.get(),
+                tick,
+                moved,
+            },
+            outside,
+        )
+    }
+
+    /// It lands on the first focusable descendant, not on the container.
+    #[test]
+    fn focus_into_lands_on_the_first_focusable_descendant() {
+        let (p, _) = probe(2);
+        assert!(p.moved.get());
+        assert_eq!(p.tree.focused(), Some(p.leaves[0]));
+    }
+
+    /// **It is a no-op while focus is already inside** — the property that lets
+    /// it be called from `build`, which re-runs on every rebuild. A bare
+    /// `focus` on the first focusable descendant would drag focus back to the
+    /// first field every time the caller rebuilt for an unrelated reason, which
+    /// mid-edit is the caret jumping to the start of the line.
+    #[test]
+    fn focus_into_leaves_focus_alone_when_it_is_already_inside() {
+        let (mut p, _) = probe(2);
+        p.tree.focus(p.leaves[1]);
+        p.rebuild_driver();
+        assert!(p.moved.get(), "focus is inside, so the answer is still yes");
+        assert_eq!(
+            p.tree.focused(),
+            Some(p.leaves[1]),
+            "focus was dragged back to the first focusable child"
+        );
+    }
+
+    /// A subtree with nothing focusable leaves focus exactly where it was: an
+    /// empty region never traps it, and the caller is told so.
+    #[test]
+    fn focus_into_an_unfocusable_subtree_moves_nothing() {
+        let (mut p, outside) = probe(0);
+        p.tree.focus(outside);
+        p.rebuild_driver();
+        assert!(!p.moved.get());
+        assert_eq!(p.tree.focused(), Some(outside));
     }
 }

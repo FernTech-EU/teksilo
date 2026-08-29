@@ -244,7 +244,7 @@ pub use tab_widget::{
 };
 pub use table_view::{
     Alignment as TableAlignment, CellContext, CellSelectionModel, Column, ColumnContext,
-    ColumnResizePolicy, ColumnWidth, EditTrigger, GridLines, PinnedSide, SortDirection,
+    ColumnResizePolicy, ColumnWidth, EditTriggers, GridLines, PinnedSide, SortDirection,
     TabTraversal, TableSelectionMode, TableView, TruncationPolicy,
 };
 pub use teksilo_tokens::Orientation;

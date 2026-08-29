@@ -91,7 +91,7 @@ use crate::scroll_area::ScrollBarMode;
 use crate::scroll_bar::{ScrollBar, ScrollBarOrientation, ScrollBarVisual};
 
 pub use self::column::{
-    Alignment, CellContext, Column, ColumnContext, ColumnResizePolicy, ColumnWidth, EditTrigger,
+    Alignment, CellContext, Column, ColumnContext, ColumnResizePolicy, ColumnWidth, EditTriggers,
     GridLines, PinnedSide, TabTraversal, TruncationPolicy,
 };
 pub use self::selection::{CellSelectionModel, TableSelectionMode};
@@ -281,11 +281,14 @@ pub struct TableView<T: 'static> {
     /// Cell delegates inspect this through `CellContext::is_editing` to
     /// swap in an editor widget.
     editing_cell: Signal<Option<(usize, usize)>>,
-    edit_trigger: EditTrigger,
+    edit_triggers: EditTriggers,
     /// User callback invoked when an edit trigger fires on the focused
     /// cell.
     #[allow(clippy::type_complexity)]
     on_cell_edit_request: Option<Rc<dyn Fn(usize, &str, &mut teksilo_core::widget::EventContext)>>,
+    #[allow(clippy::type_complexity)]
+    on_cell_edit_dismissed:
+        Option<Rc<dyn Fn(usize, &str, &mut teksilo_core::widget::EventContext)>>,
     /// Per-column filter text. Updated by filter affordances in the
     /// header, by `set_filter` / `clear_filters`, and by
     /// downstream consumers binding it (e.g., `SortFilterListModel`).
@@ -574,8 +577,9 @@ impl<T: 'static> TableView<T> {
             focus_visible: Signal::new(false),
             tab_traversal: TabTraversal::default(),
             editing_cell: Signal::new(None),
-            edit_trigger: EditTrigger::default(),
+            edit_triggers: EditTriggers::default(),
             on_cell_edit_request: None,
+            on_cell_edit_dismissed: None,
             filters_signal: Signal::new(HashMap::new()),
             on_row_activate: None,
             reorderable: false,
@@ -641,7 +645,7 @@ impl<T: 'static> TableView<T> {
     /// ASCII-case-insensitive. A pause longer than the
     /// [`type_ahead_timeout`](Self::type_ahead_timeout) starts a fresh term.
     ///
-    /// On an editable column whose [`EditTrigger`] is type-to-edit, typing
+    /// On an editable column whose [`EditTriggers`] is type-to-edit, typing
     /// starts an edit instead — type-ahead applies on non-editable columns
     /// (or when no type-to-edit trigger is configured).
     pub fn type_ahead_label(mut self, label: impl Fn(&T) -> String + 'static) -> Self {
@@ -753,9 +757,9 @@ impl<T: 'static> TableView<T> {
         self
     }
 
-    /// Set which user action opens a cell editor. See [`EditTrigger`].
-    pub fn edit_trigger(mut self, trigger: EditTrigger) -> Self {
-        self.edit_trigger = trigger;
+    /// Set which user action opens a cell editor. See [`EditTriggers`].
+    pub fn edit_triggers(mut self, trigger: EditTriggers) -> Self {
+        self.edit_triggers = trigger;
         self
     }
 
@@ -766,6 +770,31 @@ impl<T: 'static> TableView<T> {
         f: impl Fn(usize, &str, &mut teksilo_core::widget::EventContext) + 'static,
     ) -> Self {
         self.on_cell_edit_request = Some(Rc::new(f));
+        self
+    }
+
+    /// Callback invoked when an **open** cell editor should end because the
+    /// pointer went somewhere else: a press that lands on any cell other than
+    /// the one being edited. Receives the editing cell's flat row index and
+    /// column id, so the owner can commit (or discard) whatever is in its
+    /// buffer, then clear its own editing state.
+    ///
+    /// The counterpart of [`on_cell_edit_request`](Self::on_cell_edit_request),
+    /// and the view cannot do it alone: the framework owns *which* cell is being
+    /// edited, but only the owner knows what an ended edit means — commit,
+    /// discard, or refuse a value that will not parse.
+    ///
+    /// **Why a press and not a focus change.** "The editor lost focus" is the
+    /// obvious signal and it cannot be used: a body pane rebuilds constantly —
+    /// selection, filtering, scroll, a reload from elsewhere — and every rebuild
+    /// destroys and re-creates the open editor, so focus leaves it many times
+    /// during an edit the writer never interrupted. A press on another cell is
+    /// unambiguous and happens exactly once.
+    pub fn on_cell_edit_dismissed(
+        mut self,
+        f: impl Fn(usize, &str, &mut teksilo_core::widget::EventContext) + 'static,
+    ) -> Self {
+        self.on_cell_edit_dismissed = Some(Rc::new(f));
         self
     }
 
@@ -1625,12 +1654,21 @@ impl<T: 'static> Widget for TableView<T> {
             let ids = column_ids_in_display_order;
             Rc::new(move |pos| ids.get(pos).cloned())
         };
-        let display_col_editable: Rc<dyn Fn(usize) -> bool> = {
-            let editable_in_display_order: Vec<bool> = display_indices_now
+        // The effective trigger set per display column: the view's, overridden
+        // by the column's own, and `NONE` for a non-editable one. Resolved here
+        // so the keyboard handler never has to reach a `Column<T>`.
+        let display_col_triggers: Rc<dyn Fn(usize) -> EditTriggers> = {
+            let view_triggers = self.edit_triggers;
+            let per_display_column: Vec<EditTriggers> = display_indices_now
                 .iter()
-                .map(|&i| self.columns[i].editable)
+                .map(|&i| self.columns[i].effective_edit_triggers(view_triggers))
                 .collect();
-            Rc::new(move |pos| editable_in_display_order.get(pos).copied().unwrap_or(false))
+            Rc::new(move |pos| {
+                per_display_column
+                    .get(pos)
+                    .copied()
+                    .unwrap_or(EditTriggers::NONE)
+            })
         };
 
         // Type-ahead label resolver (row -> Some(text)) built from the user's
@@ -1667,9 +1705,8 @@ impl<T: 'static> Widget for TableView<T> {
             row_metrics: self.row_metrics.clone(),
             tab_traversal: self.tab_traversal,
             editing_cell: self.editing_cell.clone(),
-            edit_trigger: self.edit_trigger,
             display_col_to_id,
-            display_col_editable,
+            display_col_triggers,
             on_cell_edit_request: self.on_cell_edit_request.clone(),
             on_row_activate: self.on_row_activate.clone(),
             type_ahead: self.type_ahead.clone(),
@@ -2120,6 +2157,9 @@ impl<T: 'static> Widget for TableView<T> {
                 drag_anchor: ctx.self_id(),
                 on_row_activate: self.on_row_activate.clone(),
                 activate_on: self.activate_on,
+                edit_triggers: self.edit_triggers,
+                on_cell_edit_request: self.on_cell_edit_request.clone(),
+                on_cell_edit_dismissed: self.on_cell_edit_dismissed.clone(),
                 version: self.pane_version.clone(),
                 prev_built_start: self.pane_built_start.clone(),
                 prev_built_end: self.pane_built_end.clone(),
@@ -2128,6 +2168,21 @@ impl<T: 'static> Widget for TableView<T> {
                 cell_map: self.cell_map.clone(),
             };
             self.body_pane_id = Some(ctx.add(pane));
+            // An open cell editor also ends on a press that lands on no cell at
+            // all — the empty band under the last row. Mounted here rather than
+            // on the pane because the pane is not the hit target there.
+            if let Some(handlers) = body_pane::root_edit_dismiss_handler(
+                &self.on_cell_edit_dismissed,
+                &self.editing_cell,
+                &Rc::new(
+                    display_indices
+                        .iter()
+                        .map(|&i| self.columns[i].id.clone())
+                        .collect::<Vec<_>>(),
+                ),
+            ) {
+                ctx.apply_self_handlers(handlers);
+            }
         }
 
         // Scrollbar (single internal vertical bar).
