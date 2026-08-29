@@ -7,8 +7,8 @@ use teksilo::core::WidgetPlacement;
 use teksilo::prelude::*;
 use teksilo::widgets::{
     Badge, Button, ButtonVariant, Dialog, DialogContent, EventContextMessageBoxExt, Expand, HStack,
-    MessageBox, MessageBoxButton, MessageBoxButtons, Panel, Popover, ScrollArea, Snackbar, Spacer,
-    StandardButton, TextWidget, Toolbar, VStack,
+    MessageBox, MessageBoxButton, MessageBoxButtons, OverlayTrigger, Panel, PopoverWidget,
+    ScrollArea, Snackbar, Spacer, StandardButton, TextWidget, Toolbar, VStack,
 };
 
 fn dark_mode_toolbar() -> impl Widget {
@@ -305,10 +305,11 @@ impl Widget for OverlayDemo {
                             HStack::new()
                                 .spacing(16.0)
                                 .child(
-                                    Popover::new(lit!("Show popover"))
-                                        .content(popover_content)
-                                        .caret_size(12.0)
-                                        .trigger(popover_trigger),
+                                    PopoverWidget::new(
+                                        OverlayTrigger::around(popover_trigger)
+                                            .named("Show popover"),
+                                    )
+                                    .content(popover_content),
                                 )
                                 .child(
                                     Dialog::new(lit!("Open dialog"))

@@ -770,10 +770,14 @@ impl Widget for StandardListItem {
                 tip_placement,
             );
         } else if let Some(text) = self.tooltip_text.clone() {
-            let tooltip_widget = crate::tooltip::TooltipWidget::new(text);
-            let tooltip_id = ctx.add(tooltip_widget);
             let delay = ctx.theme().motion.tooltip_delay;
-            ctx.attach_tooltip_with_placement(root_id, tooltip_id, delay, tip_placement);
+            crate::tooltip::attach_plain_tooltip_with_placement(
+                ctx,
+                root_id,
+                text,
+                delay,
+                tip_placement,
+            );
         }
 
         vec![root_id]
@@ -1231,10 +1235,14 @@ impl Widget for StandardTreeItem {
                 tip_placement,
             );
         } else if let Some(text) = self.inner.tooltip_text.clone() {
-            let tooltip_widget = crate::tooltip::TooltipWidget::new(text);
-            let tooltip_id = ctx.add(tooltip_widget);
             let delay = ctx.theme().motion.tooltip_delay;
-            ctx.attach_tooltip_with_placement(root_id, tooltip_id, delay, tip_placement);
+            crate::tooltip::attach_plain_tooltip_with_placement(
+                ctx,
+                root_id,
+                text,
+                delay,
+                tip_placement,
+            );
         }
 
         vec![root_id]

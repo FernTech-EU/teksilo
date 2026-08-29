@@ -698,10 +698,8 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
             let delay = ctx.theme().motion.tooltip_delay;
             crate::tooltip::attach_rich_tooltip_source(ctx, root_id, source, delay);
         } else if let Some(tooltip_text) = self.tooltip_text.clone() {
-            let tooltip_widget = crate::tooltip::TooltipWidget::new(tooltip_text);
-            let tooltip_id = ctx.add(tooltip_widget);
             let delay = ctx.theme().motion.tooltip_delay;
-            ctx.attach_tooltip(root_id, tooltip_id, delay);
+            crate::tooltip::attach_plain_tooltip(ctx, root_id, tooltip_text, delay);
         }
 
         // Pre-create the dropdown panel (dormant until opened). On
@@ -746,7 +744,11 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
             search_input_slot: search_input_slot.clone(),
             root_child_id: None,
         };
-        let dropdown_id = ctx.add(dropdown_panel);
+        // Built the first time the combo is opened, not here. A closed combo
+        // box used to build its whole panel — every option row — on every
+        // rebuild of its owner; in a table cell that is once per row, per
+        // rebuild. See `teksilo_core::deferred_subtree::DeferredSubtree`.
+        let dropdown_id = ctx.add_deferred(self.is_open.clone(), dropdown_panel);
         self.dropdown_content_id = Some(dropdown_id);
         ctx.set_dormant(dropdown_id);
         // Make `is_open` the single source of truth for the panel's
@@ -784,9 +786,12 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
         let open_overlay = {
             let is_open = self.is_open.clone();
             let dismiss_callback = dismiss_callback.clone();
-            let search_input_slot = search_input_slot.clone();
+            let searchable = self.searchable;
             Rc::new(move |ctx: &mut EventContext| {
                 is_open.set(true);
+                // Build the panel if this is its first open, before the overlay
+                // below is measured against it and before focus moves into it.
+                ctx.materialize_now(dropdown_id);
                 ctx.activate(dropdown_id);
                 ctx.show_overlay(OverlayRequest {
                     content_id: dropdown_id,
@@ -800,8 +805,18 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
                 });
                 // Searchable mode: land focus in the search field so
                 // the user can start typing immediately after opening.
-                if let Some(input_id) = search_input_slot.get() {
-                    ctx.request_focus(input_id);
+                //
+                // Asked for by *panel* id rather than by reading the slot the
+                // panel fills in during its build: the panel may not have been
+                // built yet when this handler runs (see `materialize_now`
+                // above), so the slot would be empty on the very first open.
+                // `request_focus` walks to the first focusable descendant, and
+                // in a searchable panel that is the search field — and focus
+                // requests are applied after the tree mutations that build it.
+                // Gated on `searchable` so a plain dropdown still moves focus
+                // nowhere, exactly as an empty slot did.
+                if searchable {
+                    ctx.request_focus(dropdown_id);
                 }
             })
         };

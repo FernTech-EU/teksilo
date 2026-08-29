@@ -352,9 +352,10 @@ impl<T: 'static> RowTooltips<T> {
                 );
             }
             ResolvedRowTooltip::Plain(text) => {
-                let tip = ctx.add(crate::tooltip::TooltipWidget::new(text));
                 let delay = ctx.theme().motion.tooltip_delay;
-                ctx.attach_tooltip_with_placement(row_id, tip, delay, placement);
+                crate::tooltip::attach_plain_tooltip_with_placement(
+                    ctx, row_id, text, delay, placement,
+                );
             }
         }
     }

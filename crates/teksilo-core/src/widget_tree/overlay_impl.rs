@@ -440,15 +440,26 @@ impl WidgetTree {
             })
             .collect();
         for index in pending {
+            // Tooltip bodies are built lazily (`add_detached_deferred_on_demand`),
+            // so materialize this one before anything asks it a question — the
+            // `tooltip_has_content` check below reads the content widget, and an
+            // unbuilt host would answer for a body that does not exist yet.
+            let content_id = self.tooltips[index].content_id;
+            self.materialize_deferred(content_id);
             // A tooltip with nothing to say must not open. An unresolved or
             // blank i18n key would otherwise pop an empty chromed bubble,
             // which reads as a rendering fault rather than as "no tip here".
             // The content widget decides — see `Widget::tooltip_has_content`,
             // which defaults to `true` so arbitrary bodies are never
             // suppressed by a check they did not opt into.
+            // …and ask the *body*, not the host: once materialized the deferred
+            // host has handed its widget value to a real child, so probing the
+            // host would consult the default `true` and let an empty bubble
+            // through on exactly the second hover.
+            let body_id = self.tooltip_content_node(content_id);
             if !self
                 .arena
-                .get(self.tooltips[index].content_id)
+                .get(body_id)
                 .is_none_or(|node| node.widget.tooltip_has_content())
             {
                 let entry = &mut self.tooltips[index];

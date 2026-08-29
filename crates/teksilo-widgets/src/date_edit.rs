@@ -647,7 +647,9 @@ impl Widget for DateEdit {
             // calendar dies with this widget and each rebuild reaps the
             // previous one — a bare `ctx.add` stranded a ~200-widget calendar
             // in the arena per rebuild.
-            let calendar_id = ctx.add_detached(calendar);
+            // Built the first time the popup is opened, not on every rebuild of the
+            // field. See `teksilo_core::deferred_subtree::DeferredSubtree`.
+            let calendar_id = ctx.add_detached_deferred(self.popover_open.clone(), calendar);
             ctx.set_dormant(calendar_id);
             Some(calendar_id)
         } else {
@@ -686,6 +688,9 @@ impl Widget for DateEdit {
                             ctx_evt.dismiss_all_except_hosts();
                         } else {
                             popover_open.set(true);
+                            // Build the popup if this is its first open, before the overlay
+                            // below is measured against it and focus moves into it.
+                            ctx_evt.materialize_now(calendar_id);
                             ctx_evt.activate(calendar_id);
                             ctx_evt.show_overlay(OverlayRequest {
                                 content_id: calendar_id,
@@ -817,10 +822,8 @@ impl Widget for DateEdit {
             let delay = ctx.theme().motion.tooltip_delay;
             crate::tooltip::attach_rich_tooltip_source(ctx, root_id, source, delay);
         } else if let Some(text) = self.tooltip_text.clone() {
-            let tooltip_widget = crate::tooltip::TooltipWidget::new(text);
-            let tooltip_id = ctx.add(tooltip_widget);
             let delay = ctx.theme().motion.tooltip_delay;
-            ctx.attach_tooltip(root_id, tooltip_id, delay);
+            crate::tooltip::attach_plain_tooltip(ctx, root_id, text, delay);
         }
 
         // ── Segment-stepping helper — captured by the on_key_preview

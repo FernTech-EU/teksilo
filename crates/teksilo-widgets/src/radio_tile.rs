@@ -582,10 +582,14 @@ impl Widget for RadioTile {
                 tip_placement,
             );
         } else if let Some(tooltip_text) = self.tooltip_text.clone() {
-            let tw = crate::tooltip::TooltipWidget::new(tooltip_text);
-            let tid = ctx.add(tw);
             let delay = ctx.theme().motion.tooltip_delay;
-            ctx.attach_tooltip_with_placement(root_id, tid, delay, tip_placement);
+            crate::tooltip::attach_plain_tooltip_with_placement(
+                ctx,
+                root_id,
+                tooltip_text,
+                delay,
+                tip_placement,
+            );
         }
 
         self.root_child_id = Some(root_id);

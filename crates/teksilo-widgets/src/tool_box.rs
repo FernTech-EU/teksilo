@@ -51,9 +51,7 @@ use teksilo_tokens::{BorderRole, SurfaceRole, TextRole, TextStyleRole};
 use crate::primitives::{
     Divider, FixedSize, HStack, IconWidget, MinSize, RectWidget, Spacer, TextWidget, VStack, ZStack,
 };
-use crate::tooltip::{
-    RichTooltipSource, TooltipContent, TooltipWidget, attach_rich_tooltip_source,
-};
+use crate::tooltip::{RichTooltipSource, TooltipContent, attach_rich_tooltip_source};
 
 /// Orientation of a [`ToolBox`]: how its collapsible sections are arranged.
 ///
@@ -737,9 +735,8 @@ impl Widget for ToolBoxHeader {
             let delay = ctx.theme().motion.tooltip_delay;
             attach_rich_tooltip_source(ctx, root_id, source, delay);
         } else if let Some(text) = self.tooltip_text.take() {
-            let tip_id = ctx.add(TooltipWidget::new(text));
             let delay = ctx.theme().motion.tooltip_delay;
-            ctx.attach_tooltip(root_id, tip_id, delay);
+            crate::tooltip::attach_plain_tooltip(ctx, root_id, text, delay);
         }
 
         // --- V2 attached handlers on the header's own node ---

@@ -162,9 +162,8 @@ impl Widget for SegmentCell {
         } else {
             let implicit = (!self.shows_label()).then(|| self.label.clone());
             if let Some(text) = self.tooltip.clone().or(implicit) {
-                let tip = ctx.add(crate::tooltip::TooltipWidget::new(text));
                 let delay = ctx.theme().motion.tooltip_delay;
-                ctx.attach_tooltip(self_id, tip, delay);
+                crate::tooltip::attach_plain_tooltip(ctx, self_id, text, delay);
             }
         }
 

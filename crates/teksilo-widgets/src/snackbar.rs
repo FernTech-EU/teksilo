@@ -60,11 +60,16 @@ fn present_snackbar(
     ctx: &mut teksilo_core::widget::EventContext,
     anchor: WidgetId,
     content_id: WidgetId,
+    shown: &teksilo_core::signal::Signal<bool>,
     dismiss: DismissBehavior,
     auto_dismiss_after: Option<Duration>,
     fade_duration: Option<Duration>,
 ) {
     ctx.dismiss_all_except_hosts();
+    // Build the surface if this is the first time this snackbar is presented —
+    // `activate` alone would wake a node whose subtree does not exist yet.
+    shown.set(true);
+    ctx.materialize_now(content_id);
     ctx.activate(content_id);
     let request = OverlayRequest {
         content_id,
@@ -370,7 +375,12 @@ impl Widget for Snackbar {
         } else {
             Some(ctx.theme().motion.duration_normal)
         };
-        let content_id = ctx.add_detached(
+        // The surface is built the first time the snackbar is presented, not on
+        // every rebuild of the trigger that presents it. See
+        // `teksilo_core::deferred_subtree::DeferredSubtree`.
+        let shown = ctx.signal(false);
+        let content_id = ctx.add_detached_deferred(
+            shown.clone(),
             SnackbarSurface::new(
                 self.pending_content
                     .take()
@@ -391,6 +401,7 @@ impl Widget for Snackbar {
             // three to `Button::on_activate_fn`.)
             let open_on_tap = {
                 let dismiss = dismiss.clone();
+                let shown = shown.clone();
                 move |_event: &teksilo_core::TapEvent,
                       ctx: &mut teksilo_core::widget::EventContext| {
                     if !enabled {
@@ -400,6 +411,7 @@ impl Widget for Snackbar {
                         ctx,
                         self_id,
                         content_id,
+                        &shown,
                         dismiss.clone(),
                         auto_dismiss_after,
                         fade_duration,
@@ -412,6 +424,7 @@ impl Widget for Snackbar {
                 .on_tap(open_on_tap)
                 .on_key({
                     let dismiss = dismiss.clone();
+                    let shown = shown.clone();
                     move |event, ctx| match event {
                         WidgetEvent::KeyUp {
                             key: Key::Enter | Key::Space,
@@ -421,6 +434,7 @@ impl Widget for Snackbar {
                                 ctx,
                                 self_id,
                                 content_id,
+                                &shown,
                                 dismiss.clone(),
                                 auto_dismiss_after,
                                 fade_duration,
@@ -431,12 +445,14 @@ impl Widget for Snackbar {
                     }
                 })
                 .on_access_action({
+                    let shown = shown.clone();
                     move |action, ctx| {
                         if action == teksilo_core::accesskit::Action::Click && enabled {
                             present_snackbar(
                                 ctx,
                                 self_id,
                                 content_id,
+                                &shown,
                                 dismiss.clone(),
                                 auto_dismiss_after,
                                 fade_duration,
@@ -467,6 +483,7 @@ impl Widget for Snackbar {
                             ctx,
                             self_id,
                             content_id,
+                            &shown,
                             dismiss.clone(),
                             auto_dismiss_after,
                             fade_duration,

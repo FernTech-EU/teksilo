@@ -407,8 +407,13 @@ impl SceneView {
         // mirroring how the per-item cursor override is applied. Resolving
         // the item's `LocalizedString` at show time keeps it locale-correct.
         let tooltip_text = ctx.signal(String::new());
-        let tooltip_content_id =
-            ctx.add(teksilo_widgets::TooltipWidget::bound(tooltip_text.clone()));
+        let tooltip_shown = ctx.signal(false);
+        // Built the first time an item's tooltip is actually shown, not on every
+        // rebuild of the view. See `teksilo_core::deferred_subtree::DeferredSubtree`.
+        let tooltip_content_id = ctx.add_deferred(
+            tooltip_shown.clone(),
+            teksilo_widgets::TooltipWidget::bound(tooltip_text.clone()),
+        );
         ctx.set_dormant(tooltip_content_id);
         let tooltip_fade = if prefers_reduced {
             None
@@ -424,10 +429,13 @@ impl SceneView {
         handlers = self.register_pointer_handlers(
             handlers,
             self_id,
-            tooltip_content_id,
-            tooltip_text,
-            tooltip_fade,
-            tooltip_delay,
+            super::gestures_impl::TooltipWiring {
+                content_id: tooltip_content_id,
+                text: tooltip_text,
+                shown: tooltip_shown,
+                fade: tooltip_fade,
+                delay: tooltip_delay,
+            },
         );
 
         if self.interactive {

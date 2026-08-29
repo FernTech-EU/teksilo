@@ -58,7 +58,8 @@ use super::column::{ColumnResizePolicy, PinnedSide};
 use super::filter::FilterIndicator;
 use super::filter::FilterPopoverContent;
 use super::layout::{band_rects, insertion_slot_at_x};
-use crate::popover::Popover;
+use crate::overlay_trigger::OverlayTrigger;
+use crate::popover_widget::PopoverWidget;
 use teksilo_core::overlay::OverlayPlacement;
 
 const DRAG_REORDER_THRESHOLD: f32 = 5.0;
@@ -451,17 +452,16 @@ impl Widget for HeaderCell {
                     filters_signal.set(m);
                 }
             };
-            let focus_slot = Rc::new(Cell::new(None));
-            let popover = Popover::new(lit!("Filter"))
-                .content(
-                    FilterPopoverContent::new(initial)
-                        .on_change(on_change)
-                        .focus_slot(focus_slot.clone()),
-                )
-                .trigger(glyph)
-                .placement(OverlayPlacement::BelowPreferred)
-                .caret(false)
-                .focus_on_show(focus_slot);
+            // A custom (non-button) trigger, so `PopoverWidget` takes it through
+            // `OverlayTrigger`. No `focus_on_show` slot: the popover asks for
+            // focus by *panel* id and the framework walks to the first focusable
+            // descendant, which is this panel's filter field.
+            let popover = PopoverWidget::new(
+                OverlayTrigger::around(glyph).named(lit!("Filter").resolve_now()),
+            )
+            .content(FilterPopoverContent::new(initial).on_change(on_change))
+            .placement(OverlayPlacement::BelowPreferred)
+            .show_disclosure_caret(false);
             let popover_id = ctx.add(popover);
             row = row.add_child(popover_id);
         }

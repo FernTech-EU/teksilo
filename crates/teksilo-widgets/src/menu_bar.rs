@@ -1014,7 +1014,12 @@ impl Widget for MenuBar {
             // inline under the bar. Owned all the same, so a rebuilt menubar
             // reaps the menus it replaced instead of stranding one host — and
             // its whole `MenuList` — per rebuild.
-            let content_id = ctx.add_detached(host);
+            // Built the first time *this* menu is opened. A menu bar used to
+            // build every menu's whole `MenuList` — and every submenu under it —
+            // on each rebuild of the bar, which a locale or shortcut change
+            // triggers. See `teksilo_core::deferred_subtree::DeferredSubtree`.
+            let opened_here = menu_ctx.open_index.map(move |open| *open == Some(i));
+            let content_id = ctx.add_detached_deferred(opened_here, host);
             ctx.set_dormant(content_id);
 
             let trigger = MenuBarTrigger {

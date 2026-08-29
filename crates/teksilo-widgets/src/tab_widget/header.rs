@@ -961,10 +961,14 @@ impl Widget for TabHeader {
                 tip_placement,
             );
         } else if let Some(tip) = self.tooltip.take() {
-            let tip_widget = crate::tooltip::TooltipWidget::new(tip);
-            let tip_id = ctx.add(tip_widget);
             let delay = ctx.theme().motion.tooltip_delay;
-            ctx.attach_tooltip_with_placement(self_id, tip_id, delay, tip_placement);
+            crate::tooltip::attach_plain_tooltip_with_placement(
+                ctx,
+                self_id,
+                tip,
+                delay,
+                tip_placement,
+            );
         }
 
         vec![root_id]

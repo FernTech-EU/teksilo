@@ -26,7 +26,9 @@ use teksilo_core::build_context::BuildContext;
 use teksilo_core::overlay::TooltipPlacement;
 use teksilo_core::widget::Widget;
 use teksilo_core::widget_id::WidgetId;
+use teksilo_i18n::LocalizedString;
 
+use crate::tooltip::TooltipWidget;
 use crate::tooltip::composite::CompositeTooltipWidget;
 use crate::tooltip::registry::TooltipContent;
 use crate::tooltip::rich::{DWELL_PROMOTION, RichTooltipWidget};
@@ -81,12 +83,17 @@ pub fn attach_rich_tooltip_with_placement(
     placement: TooltipPlacement,
 ) -> WidgetId {
     let tooltip = RichTooltipWidget::from_key(key);
-    // Grab the sink BEFORE handing the widget to the arena — after
-    // `ctx.add(tooltip)` we can't borrow the widget back. The sink is
-    // an Rc<Cell<..>> that the tree updates on show / dismiss and the
-    // widget reads from `paint()` to drive its dwell indicator.
+    // Grab the sink BEFORE handing the widget to the arena — after the add we
+    // can't borrow the widget back. The sink is an Rc<Cell<..>> that the tree
+    // updates on show / dismiss and the widget reads from `paint()` to drive
+    // its dwell indicator.
     let sink = tooltip.shown_at_sink();
-    let tooltip_id = ctx.add(tooltip);
+    // Deferred: the body is built the first time a dwell actually matures here
+    // (`WidgetTree::materialize_deferred`), not on every rebuild of the anchor.
+    // A rich tooltip is the most expensive tip there is — its `build` recursively
+    // pre-creates a nested tooltip per `:key` link — so an eagerly-built one on a
+    // row delegate is paid for by every row, on every rebuild.
+    let tooltip_id = ctx.add_deferred_on_demand(tooltip);
     ctx.attach_tooltip_with_sticky_sink_placement(
         anchor_id,
         tooltip_id,
@@ -117,6 +124,41 @@ pub fn attach_rich_tooltip_content(
     )
 }
 
+/// Attach a **plain** tooltip — first tier, a single line of text.
+///
+/// The one door for plain tooltips, and the reason it exists rather than each
+/// widget doing `ctx.add(TooltipWidget::new(text))` inline: the body is built
+/// the first time a dwell matures over the anchor, not on every rebuild of it.
+/// A plain tip is cheap on its own, but it is attached to nearly every control
+/// in the framework, so on a data view's row delegate the framework was paying
+/// for one per control per row per rebuild — and paying again to tear them all
+/// down, which is where the time actually went.
+pub fn attach_plain_tooltip(
+    ctx: &mut BuildContext,
+    anchor_id: WidgetId,
+    text: impl Into<LocalizedString>,
+    delay: Duration,
+) -> WidgetId {
+    let tooltip_id = ctx.add_deferred_on_demand(TooltipWidget::new(text));
+    ctx.attach_tooltip(anchor_id, tooltip_id, delay);
+    tooltip_id
+}
+
+/// [`attach_plain_tooltip`] with an explicit [`TooltipPlacement`] — what the
+/// widgets that live in a vertical list (menu items, standard items, tab
+/// headers) want, so the tip lands beside the row rather than under it.
+pub fn attach_plain_tooltip_with_placement(
+    ctx: &mut BuildContext,
+    anchor_id: WidgetId,
+    text: impl Into<LocalizedString>,
+    delay: Duration,
+    placement: TooltipPlacement,
+) -> WidgetId {
+    let tooltip_id = ctx.add_deferred_on_demand(TooltipWidget::new(text));
+    ctx.attach_tooltip_with_placement(anchor_id, tooltip_id, delay, placement);
+    tooltip_id
+}
+
 /// [`attach_rich_tooltip_content`] with an explicit [`TooltipPlacement`].
 pub fn attach_rich_tooltip_content_with_placement(
     ctx: &mut BuildContext,
@@ -127,7 +169,8 @@ pub fn attach_rich_tooltip_content_with_placement(
 ) -> WidgetId {
     let tooltip = RichTooltipWidget::new(content);
     let sink = tooltip.shown_at_sink();
-    let tooltip_id = ctx.add(tooltip);
+    // Deferred for the same reason as the key-driven path above.
+    let tooltip_id = ctx.add_deferred_on_demand(tooltip);
     ctx.attach_tooltip_with_sticky_sink_placement(
         anchor_id,
         tooltip_id,
@@ -232,7 +275,12 @@ pub fn attach_composite_tooltip_widget_with_placement(
     // surface it, and it never becomes a `Dialog`.
     let sticky_after = tooltip.sticky_enabled().then_some(DWELL_PROMOTION);
     let sink = tooltip.shown_at_sink();
-    let tooltip_id = ctx.add(tooltip);
+    // Built the first time the pointer actually dwells here, not on every
+    // rebuild of the anchor. Tooltips are the most widely attached thing in the
+    // framework — a table cell with one pays for its body on every rebuild of
+    // the row — and the tree forces this host just before the dwell matures
+    // (`WidgetTree::materialize_deferred`).
+    let tooltip_id = ctx.add_detached_deferred_on_demand(tooltip);
     ctx.attach_tooltip_with_sticky_sink_placement(
         anchor_id,
         tooltip_id,
@@ -275,6 +323,7 @@ mod tests {
     use std::rc::Rc;
     use teksilo_canvas::{MockTextBackend, SizeProposal};
     use teksilo_core::event::{Key, Modifiers};
+    use teksilo_core::signal::Signal;
     use teksilo_core::widget_tree::WidgetTree;
     use teksilo_i18n::lit;
 
@@ -345,6 +394,112 @@ mod tests {
             .filter(|(_, n)| n.description() == Some("Where a note is attached"))
             .count();
         assert_eq!(carriers, 1, "exactly one node may carry the hint");
+    }
+
+    /// **A tooltip nobody has hovered is never built.**
+    ///
+    /// Not built-and-parked — not built. This is the whole reason the three
+    /// attach tiers go through `add_*deferred_on_demand`: a tooltip is the most
+    /// widely attached thing in the framework, so on a data view's row delegate
+    /// the eager form charged every row for a body no one had asked to see, on
+    /// every rebuild — and charged again to tear them all down. Measured on
+    /// Skribisto's Overview before this: 29 rows carried 1,305 tooltip widgets
+    /// inside a 22,737-node subtree, and one arrow-key press spent 5.3 s
+    /// destroying it against 0.06 s rebuilding it.
+    #[test]
+    fn an_unhovered_tooltip_body_is_never_built() {
+        /// Counts its own builds, so the test can tell "not shown" from
+        /// "not built".
+        #[derive(Debug)]
+        struct Counted {
+            builds: Signal<u32>,
+        }
+
+        impl teksilo_core::widget::Widget for Counted {
+            fn build(
+                &mut self,
+                _ctx: &mut teksilo_core::build_context::BuildContext,
+            ) -> Vec<WidgetId> {
+                self.builds.set(self.builds.get() + 1);
+                Vec::new()
+            }
+
+            fn layout_response(
+                &self,
+                proposal: SizeProposal,
+                _ctx: &teksilo_core::widget::LayoutContext,
+            ) -> teksilo_core::widget::LayoutResponse {
+                proposal.resolve(40.0, 20.0).into()
+            }
+        }
+
+        /// An anchor that attaches a composite tooltip carrying `Counted`.
+        #[derive(Debug)]
+        struct Anchor {
+            builds: Signal<u32>,
+            anchor_builds: Signal<u32>,
+            root: Option<WidgetId>,
+        }
+
+        impl teksilo_core::widget::Widget for Anchor {
+            fn build(
+                &mut self,
+                ctx: &mut teksilo_core::build_context::BuildContext,
+            ) -> Vec<WidgetId> {
+                self.anchor_builds.set(self.anchor_builds.get() + 1);
+                let root = ctx.add(Button::new(lit!("row")));
+                self.root = Some(root);
+                attach_composite_tooltip(
+                    ctx,
+                    root,
+                    Counted {
+                        builds: self.builds.clone(),
+                    },
+                    Duration::from_millis(10),
+                );
+                vec![root]
+            }
+
+            fn layout_response(
+                &self,
+                proposal: SizeProposal,
+                ctx: &teksilo_core::widget::LayoutContext,
+            ) -> teksilo_core::widget::LayoutResponse {
+                self.root
+                    .and_then(|id| ctx.child_size(id, proposal))
+                    .unwrap_or(teksilo_canvas::Size::new(0.0, 0.0))
+                    .into()
+            }
+        }
+
+        let builds = Signal::new(0);
+        let anchor_builds = Signal::new(0);
+        let mut tree = WidgetTree::new();
+        let id = tree.add(Anchor {
+            builds: builds.clone(),
+            anchor_builds: anchor_builds.clone(),
+            root: None,
+        });
+        tree.layout(SizeProposal::exact(300.0, 40.0));
+        assert_eq!(builds.get(), 0, "a tooltip body was built without a dwell");
+
+        // And rebuilding the anchor — what a row delegate does constantly —
+        // still does not build it. This is the case the cost was in.
+        for _ in 0..5 {
+            tree.arena_mark_needs_rebuild_for_testing(id);
+            tree.layout(SizeProposal::exact(300.0, 40.0));
+        }
+        assert!(
+            anchor_builds.get() >= 5,
+            "the anchor must really have rebuilt; got {}",
+            anchor_builds.get()
+        );
+        assert_eq!(
+            builds.get(),
+            0,
+            "the anchor rebuilt {} times and dragged its unhovered tooltip along",
+            anchor_builds.get()
+        );
     }
 
     /// **A build that attaches many tooltips claims none of them.**
@@ -964,6 +1119,103 @@ mod tests {
         assert!(
             tree.next_timer_deadline().is_none(),
             "a plain tooltip must not schedule a dwell wake deadline"
+        );
+    }
+}
+
+/// **Drift guard: every tooltip body in the workspace is deferred.**
+///
+/// Not a style rule. An eagerly-added tooltip is invisible until it lands on a
+/// widget that a data view rebuilds per row, and then it is a freeze: 29 rows of
+/// Skribisto's Overview carried 1,305 tooltip widgets in a 22,737-node subtree,
+/// and one arrow-key press spent 5.3 s **destroying** it. The cost is in the
+/// teardown, so it does not show up in a build profile and it is not the kind of
+/// thing review catches.
+///
+/// The fix was a sweep of ~45 call sites across 35 files, which is exactly the
+/// kind of thing that grows back one widget at a time. So the rule is checked:
+/// a tooltip body reaches the arena through the doors in this module, or the
+/// build is red.
+#[cfg(test)]
+mod deferred_tooltip_drift {
+    use std::path::{Path, PathBuf};
+
+    /// Every `.rs` under the workspace's `crates/`, production halves only.
+    ///
+    /// Test code is cut at the first `#[cfg(test)]` — this workspace puts test
+    /// modules at the bottom of the file, and a test that deliberately drives
+    /// the low-level `attach_tooltip` path is exercising the framework, not
+    /// shipping a tooltip.
+    fn production_sources() -> Vec<(PathBuf, String)> {
+        fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
+            let Ok(entries) = std::fs::read_dir(dir) else {
+                return;
+            };
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    walk(&path, out);
+                } else if path.extension().is_some_and(|e| e == "rs") {
+                    out.push(path);
+                }
+            }
+        }
+        let crates_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("teksilo-widgets sits in crates/")
+            .to_path_buf();
+        let mut files = Vec::new();
+        walk(&crates_dir, &mut files);
+        files
+            .into_iter()
+            .filter_map(|path| {
+                let text = std::fs::read_to_string(&path).ok()?;
+                let production = match text.find("#[cfg(test)]") {
+                    Some(cut) => text[..cut].to_string(),
+                    None => text,
+                };
+                Some((path, production))
+            })
+            .collect()
+    }
+
+    #[test]
+    fn no_tooltip_body_is_added_eagerly() {
+        // `ctx.add(..)` / `ctx.add_boxed(..)` / `ctx.add_detached(..)` handing over
+        // a tooltip body. The deferred doors (`add_deferred_on_demand`,
+        // `add_detached_deferred_on_demand`) do not match, which is the point.
+        const EAGER: [&str; 3] = ["ctx.add(", "ctx.add_boxed(", "ctx.add_detached("];
+        const BODIES: [&str; 3] = [
+            "TooltipWidget::new",
+            "RichTooltipWidget::",
+            "CompositeTooltipWidget::new",
+        ];
+
+        let mut offenders: Vec<String> = Vec::new();
+        for (path, text) in production_sources() {
+            for (n, line) in text.lines().enumerate() {
+                // Prose about the rule is not a breach of it — this module's own
+                // doc comment spells the banned shape out.
+                if line.trim_start().starts_with("//") {
+                    continue;
+                }
+                // The add and the body land on one line at every site the sweep
+                // found; a split one still shows up because the `let x = ctx.add(`
+                // half carries the variable the next line builds into, and the
+                // doors are the only other way to reach the arena.
+                if EAGER.iter().any(|a| line.contains(a)) && BODIES.iter().any(|b| line.contains(b))
+                {
+                    offenders.push(format!("{}:{}: {}", path.display(), n + 1, line.trim()));
+                }
+            }
+        }
+
+        assert!(
+            offenders.is_empty(),
+            "a tooltip body is added eagerly — route it through \
+             `attach_plain_tooltip`, `attach_rich_tooltip*` or \
+             `attach_composite_tooltip*`, which defer it until a dwell matures:\n{}",
+            offenders.join("\n")
         );
     }
 }

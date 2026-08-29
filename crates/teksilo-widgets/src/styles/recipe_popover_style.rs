@@ -21,7 +21,7 @@ use teksilo_core::widget::PendingChild;
 use teksilo_core::widget_id::WidgetId;
 use teksilo_tokens::SurfaceRole;
 
-use crate::popover::PopoverSurface;
+use crate::popover_surface::PopoverSurface;
 
 // IntUI design tokens for Popover. The recipe and surface own their
 // own dimensions.

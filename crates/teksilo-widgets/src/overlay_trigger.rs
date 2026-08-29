@@ -9,7 +9,21 @@ use teksilo_core::widget::{LayoutContext, PendingChild, Widget, WidgetPlacement}
 use teksilo_core::widget_builder::HandlerSet;
 use teksilo_core::widget_id::WidgetId;
 
-pub(crate) struct OverlayTrigger {
+/// Wraps an arbitrary widget so it can drive a popover.
+///
+/// `PopoverButton` and `PopoverIconButton` cover the two stock triggers; this
+/// is the third case — a trigger that is *not* a button, such as a table
+/// header's filter glyph or a tag chip. It supplies what those two get from
+/// `Button`/`IconButton`: an activate route (pointer, Enter/Space, and the
+/// AT `Click` action), the `has_popup` / `expanded` disclosure annotations, and
+/// the arena-level `enabled` gate.
+///
+/// ```ignore
+/// PopoverWidget::new(OverlayTrigger::around(my_glyph))
+///     .content(my_panel)
+///     .placement(OverlayPlacement::BelowPreferred)
+/// ```
+pub struct OverlayTrigger {
     child_id: Option<WidgetId>,
     pending_child: Option<PendingChild>,
     pending_handlers: Option<HandlerSet>,
@@ -27,6 +41,10 @@ pub(crate) struct OverlayTrigger {
     /// gated — the same treatment a stock `Button` gets. Default
     /// `Prop::Static(true)`.
     enabled: Prop<bool>,
+    /// Installed by [`PopoverTrigger::with_on_activate`]. Routed onto the child
+    /// in `build` as pointer-tap, Enter/Space and the AT `Click` action, so a
+    /// custom trigger is reachable exactly the ways a `Button` trigger is.
+    on_activate: Option<std::rc::Rc<dyn Fn(&mut teksilo_core::widget::EventContext)>>,
 }
 
 impl OverlayTrigger {
@@ -47,7 +65,38 @@ impl OverlayTrigger {
             has_popup: None,
             expanded_signal: None,
             enabled: Prop::Static(true),
+            on_activate: None,
         }
+    }
+
+    /// Wrap any widget as a popover trigger.
+    pub fn around(widget: impl Widget + 'static) -> Self {
+        Self::from_pending(PendingChild::Deferred(Box::new(widget)), HandlerSet::new())
+    }
+
+    /// [`around`](Self::around) for a widget already inserted by id.
+    pub fn around_id(id: WidgetId) -> Self {
+        Self::from_pending(PendingChild::Id(id), HandlerSet::new())
+    }
+
+    /// Set the trigger's accessible name.
+    pub fn named(self, name: impl Into<String>) -> Self {
+        self.name(name)
+    }
+
+    /// Whether an activate handler is already installed.
+    pub fn has_on_activate(&self) -> bool {
+        self.on_activate.is_some()
+    }
+
+    /// Install the popover's open/close handler. Routed onto the wrapped widget
+    /// as pointer-tap, Enter/Space and the AT `Click` action.
+    pub fn on_activate(
+        mut self,
+        f: impl Fn(&mut teksilo_core::widget::EventContext) + 'static,
+    ) -> Self {
+        self.on_activate = Some(std::rc::Rc::new(f));
+        self
     }
 
     /// Set the trigger's enabled state (static or reactive). When
@@ -109,7 +158,35 @@ impl Widget for OverlayTrigger {
         // For non-interactive triggers (test `FixedLeaf`, `Panel`,
         // etc.) `ensure_gesture_arena` lazily installs a recognizer
         // for the external `on_tap`, so the same path works.
-        if let Some(handlers) = self.pending_handlers.take() {
+        let mut handlers = self.pending_handlers.take();
+        if let Some(activate) = self.on_activate.clone() {
+            let set = handlers.take().unwrap_or_default();
+            let tap = activate.clone();
+            let key = activate.clone();
+            let act = activate;
+            handlers = Some(
+                set.on_tap(move |_pos, ctx| tap(ctx))
+                    .on_key(move |event, ctx| match event {
+                        teksilo_core::event::WidgetEvent::KeyDown {
+                            key: teksilo_core::event::Key::Enter | teksilo_core::event::Key::Space,
+                            ..
+                        } => {
+                            key(ctx);
+                            teksilo_core::event::EventResponse::Handled
+                        }
+                        _ => teksilo_core::event::EventResponse::Ignored,
+                    })
+                    .on_access_action(move |action, ctx| {
+                        if action == teksilo_core::accesskit::Action::Click {
+                            act(ctx);
+                            teksilo_core::event::EventResponse::Handled
+                        } else {
+                            teksilo_core::event::EventResponse::Ignored
+                        }
+                    }),
+            );
+        }
+        if let Some(handlers) = handlers {
             if let Some(child_id) = self.child_id {
                 ctx.apply_handlers(child_id, handlers);
             } else {

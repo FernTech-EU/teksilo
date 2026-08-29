@@ -448,10 +448,8 @@ impl Widget for Slider {
             let delay = ctx.theme().motion.tooltip_delay;
             crate::tooltip::attach_rich_tooltip_source(ctx, body_id, source, delay);
         } else if let Some(text) = self.tooltip_text.clone() {
-            let tooltip_widget = crate::tooltip::TooltipWidget::new(text);
-            let tooltip_id = ctx.add(tooltip_widget);
             let delay = ctx.theme().motion.tooltip_delay;
-            ctx.attach_tooltip(body_id, tooltip_id, delay);
+            crate::tooltip::attach_plain_tooltip(ctx, body_id, text, delay);
         }
 
         vec![body_id]

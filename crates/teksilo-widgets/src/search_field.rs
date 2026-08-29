@@ -451,22 +451,26 @@ impl Widget for SearchField {
             row_ids_slot: self.row_ids_slot.clone(),
             root_child_id: None,
         };
-        let panel_id = ctx.add_detached(panel);
-        ctx.set_dormant(panel_id);
-        self.panel_content_id = Some(panel_id);
-        // Expose `highlighted` to `accessibility()` so it can publish
-        // `set_active_descendant` pointing at the currently-highlighted
-        // suggestion row.
-        *self.highlighted_slot.borrow_mut() = Some(highlighted.clone());
-
         // ── Open / dismiss state ────────────────────────────────────
         // `overlay_open` mirrors the live overlay state: set to true by
         // the open helper before `ctx.show_overlay`, set to false by
         // the dismiss callback the overlay manager invokes (Escape,
         // outside click, programmatic dismiss). Read by
         // `accessibility()` for `set_expanded`.
+        //
+        // Created before the panel because it is also the panel's reveal gate:
+        // the suggestion list is built the first time the field actually
+        // suggests something, not on every rebuild of the field.
         let overlay_open = ctx.signal(false);
         *self.overlay_open.borrow_mut() = Some(overlay_open.clone());
+
+        let panel_id = ctx.add_detached_deferred(overlay_open.clone(), panel);
+        ctx.set_dormant(panel_id);
+        self.panel_content_id = Some(panel_id);
+        // Expose `highlighted` to `accessibility()` so it can publish
+        // `set_active_descendant` pointing at the currently-highlighted
+        // suggestion row.
+        *self.highlighted_slot.borrow_mut() = Some(highlighted.clone());
 
         let dismiss_callback: OverlayDismissCallback = {
             let overlay_open = overlay_open.clone();
@@ -508,6 +512,9 @@ impl Widget for SearchField {
                 // pushes onto the stack, and `layout_impl`'s overlay
                 // loop skips dormant content — popup never paints.
                 // ComboBox does the same dance at combo_box.rs:545.
+                // Build the panel if this is its first open — `activate` alone
+                // would wake a node whose subtree does not exist yet.
+                ctx.materialize_now(panel_id);
                 ctx.activate(panel_id);
                 ctx.show_overlay(OverlayRequest {
                     content_id: panel_id,
@@ -559,10 +566,8 @@ impl Widget for SearchField {
             let delay = ctx.theme().motion.tooltip_delay;
             crate::tooltip::attach_rich_tooltip_source(ctx, visible_root, source, delay);
         } else if let Some(text) = self.tooltip_text.clone() {
-            let tooltip_widget = crate::tooltip::TooltipWidget::new(text);
-            let tooltip_id = ctx.add(tooltip_widget);
             let delay = ctx.theme().motion.tooltip_delay;
-            ctx.attach_tooltip(visible_root, tooltip_id, delay);
+            crate::tooltip::attach_plain_tooltip(ctx, visible_root, text, delay);
         }
 
         // ── Handlers ───────────────────────────────────────────────

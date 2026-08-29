@@ -11,7 +11,7 @@
 //! table's `filters_signal[col_id]` slot. Callers can also drive
 //! `filters_signal` programmatically.
 //!
-//! [`Popover`]: crate::popover::Popover
+//! [`Popover`]: crate::popover_widget::PopoverWidget
 //! [`TextInput`]: crate::text_input::TextInput
 //! [`IconButton::clear`]: crate::icon_button::IconButton::clear
 

@@ -554,7 +554,9 @@ impl Widget for SplitButton {
         };
 
         // ---- Pre-register the menu overlay (dormant until opened) ----
-        let menu_id = ctx.add(menu);
+        // Built the first time the popup is opened, not on every rebuild of the
+        // field. See `teksilo_core::deferred_subtree::DeferredSubtree`.
+        let menu_id = ctx.add_deferred(self.menu_open.clone(), menu);
         ctx.set_dormant(menu_id);
         self.menu_content_id = Some(menu_id);
 
@@ -633,10 +635,8 @@ impl Widget for SplitButton {
             let delay = ctx.theme().motion.tooltip_delay;
             crate::tooltip::attach_rich_tooltip_source(ctx, main_region_id, source, delay);
         } else if let Some(text) = self.tooltip_text.clone() {
-            let tooltip_widget = crate::tooltip::TooltipWidget::new(text);
-            let tooltip_id = ctx.add(tooltip_widget);
             let delay = ctx.theme().motion.tooltip_delay;
-            ctx.attach_tooltip(main_region_id, tooltip_id, delay);
+            crate::tooltip::attach_plain_tooltip(ctx, main_region_id, text, delay);
         }
 
         // ---- Divider between main and chevron regions ----
@@ -671,6 +671,9 @@ impl Widget for SplitButton {
                     let menu_open = self.menu_open.clone();
                     move |_pos, ctx: &mut EventContext| {
                         int_for_tap.set(InteractionState::Pressed);
+                        // Build the popup if this is its first open, before the overlay
+                        // below is measured against it and focus moves into it.
+                        ctx.materialize_now(menu_id);
                         ctx.activate(menu_id);
                         menu_open.set(true);
                         let on_dismiss_open = menu_open.clone();
@@ -711,10 +714,8 @@ impl Widget for SplitButton {
                 .chevron_tooltip_text
                 .clone()
                 .unwrap_or_else(|| lit!("Show dropdown menu"));
-            let tooltip_widget = crate::tooltip::TooltipWidget::new(chevron_text);
-            let tooltip_id = ctx.add(tooltip_widget);
             let delay = ctx.theme().motion.tooltip_delay;
-            ctx.attach_tooltip(chevron_region_id, tooltip_id, delay);
+            crate::tooltip::attach_plain_tooltip(ctx, chevron_region_id, chevron_text, delay);
         }
 
         // ---- Row: main | divider | chevron ----
@@ -796,6 +797,9 @@ impl Widget for SplitButton {
                             key: Key::ArrowDown,
                             ..
                         } => {
+                            // Build the popup if this is its first open, before the overlay
+                            // below is measured against it and focus moves into it.
+                            ctx.materialize_now(menu_id);
                             ctx.activate(menu_id);
                             menu_open_for_key.set(true);
                             let on_dismiss_key = menu_open_for_key.clone();

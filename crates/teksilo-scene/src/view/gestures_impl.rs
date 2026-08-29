@@ -16,16 +16,38 @@
 use super::magnetism::{PortDragState, build_connection, handle_connect_key};
 use super::*;
 
+/// Everything the pointer handlers need to drive the view's item tooltip.
+///
+/// Grouped rather than passed as five parallel parameters: they are one
+/// concern, and threading them individually put `register_pointer_handlers`
+/// over the argument-count limit the moment the deferred-build gate
+/// (`shown`) joined them.
+pub(super) struct TooltipWiring {
+    /// The (deferred) tooltip body.
+    pub content_id: WidgetId,
+    /// The text to show, resolved at show time so it stays locale-correct.
+    pub text: Signal<String>,
+    /// Flipped true the first time a tooltip is shown, which is what builds
+    /// `content_id`'s subtree.
+    pub shown: Signal<bool>,
+    pub fade: Option<Duration>,
+    pub delay: Duration,
+}
+
 impl SceneView {
     pub(super) fn register_pointer_handlers(
         &self,
         mut handlers: HandlerSet,
         self_id: WidgetId,
-        tooltip_content_id: WidgetId,
-        tooltip_text: Signal<String>,
-        tooltip_fade: Option<Duration>,
-        tooltip_delay: Duration,
+        tooltip: TooltipWiring,
     ) -> HandlerSet {
+        let TooltipWiring {
+            content_id: tooltip_content_id,
+            text: tooltip_text,
+            shown: tooltip_shown,
+            fade: tooltip_fade,
+            delay: tooltip_delay,
+        } = tooltip;
         // Track the latest pointer position so Ctrl+wheel can
         // zoom-about-pointer (the scene point under the cursor
         // stays put). Updated even when not interactive — the
@@ -187,6 +209,10 @@ impl SceneView {
                                 .and_then(|h| h.tooltip.as_ref())
                             {
                                 tooltip_text.set(ls.resolve_now());
+                                // Build the tooltip body if this is the first
+                                // time this view shows one.
+                                tooltip_shown.set(true);
+                                ctx.materialize_now(tooltip_content_id);
                                 ctx.show_overlay_after(
                                     teksilo_core::overlay::OverlayRequest {
                                         content_id: tooltip_content_id,

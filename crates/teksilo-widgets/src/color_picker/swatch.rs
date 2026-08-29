@@ -254,10 +254,8 @@ impl Widget for ColorSwatch {
             let delay = ctx.theme().motion.tooltip_delay;
             crate::tooltip::attach_rich_tooltip_source(ctx, self_id, source, delay);
         } else if let Some(text) = self.tooltip_text.clone() {
-            let tooltip_widget = crate::tooltip::TooltipWidget::new(text);
-            let tooltip_id = ctx.add(tooltip_widget);
             let delay = ctx.theme().motion.tooltip_delay;
-            ctx.attach_tooltip(self_id, tooltip_id, delay);
+            crate::tooltip::attach_plain_tooltip(ctx, self_id, text, delay);
         }
 
         // Reactive: when `color` is bound to a Signal, re-paint and

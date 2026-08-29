@@ -79,6 +79,110 @@ impl<'a> BuildContext<'a> {
         self.add_detached_boxed(Box::new(widget))
     }
 
+    /// Insert a child whose subtree is **not built until `reveal` first turns
+    /// true**, and is retained from then on. Returns the host's id immediately.
+    ///
+    /// The shape this replaces is `ctx.add(panel)` followed by
+    /// `ctx.set_dormant(id)` — correct, but it builds content the user may never
+    /// open, on every rebuild of the owner. In a virtualized collection the
+    /// owner is a per-row delegate, so that cost is multiplied by the row count:
+    /// on a 40-row table whose cells each carried a four-item menu, the eager
+    /// form cost 325–552 ms per rebuild against 42–46 ms without the column at
+    /// all, and ~85% of it was the `add` rather than constructing the widget
+    /// value. See [`DeferredSubtree`](crate::deferred_subtree::DeferredSubtree)
+    /// for the full contract.
+    ///
+    /// Pass the same signal the content's `visible_when` gate uses. Everything
+    /// downstream of the returned id — `set_dormant` / `activate`,
+    /// `visible_when`, `OverlayRequest::content_id`, descendant checks,
+    /// dismissal — is unchanged; only when the subtree below it exists moves.
+    pub fn add_deferred(
+        &mut self,
+        reveal: crate::signal::Signal<bool>,
+        widget: impl crate::widget::Widget + 'static,
+    ) -> WidgetId {
+        self.add_deferred_boxed(reveal, Box::new(widget))
+    }
+
+    /// [`add_deferred`](Self::add_deferred) for an already-boxed widget.
+    pub fn add_deferred_boxed(
+        &mut self,
+        reveal: crate::signal::Signal<bool>,
+        widget: Box<dyn crate::widget::Widget>,
+    ) -> WidgetId {
+        self.add(crate::deferred_subtree::DeferredSubtree::new(
+            Some(reveal),
+            widget,
+        ))
+    }
+
+    /// [`add_deferred`](Self::add_deferred) for content the **framework**
+    /// materializes, kept as a child of the builder.
+    ///
+    /// The parented twin of
+    /// [`add_detached_deferred_on_demand`](Self::add_detached_deferred_on_demand),
+    /// for the two rich-tooltip attach paths: they have always parented their
+    /// body on the anchor's owner, and reparenting them to `detached` would move
+    /// which teardown reaps them. Only *when* the body is built changes.
+    ///
+    /// Worth the separate entry point because a rich tooltip is not one widget:
+    /// `RichTooltipWidget::build` eagerly pre-creates a nested tooltip for every
+    /// `:key` link in its body, recursively, so one attached tip expands into a
+    /// cascade. Built eagerly on a data view's row delegate, 29 rows of
+    /// Skribisto's Overview carried 1,305 tooltip widgets inside a 22,737-node
+    /// subtree, and tearing that down cost 5.3 s per arrow-key press — the
+    /// destroy, not the build.
+    pub fn add_deferred_on_demand(
+        &mut self,
+        widget: impl crate::widget::Widget + 'static,
+    ) -> WidgetId {
+        self.add(crate::deferred_subtree::DeferredSubtree::new(
+            None,
+            Box::new(widget),
+        ))
+    }
+
+    /// [`add_deferred`](Self::add_deferred) for content the **framework**
+    /// materializes rather than a widget's own open signal.
+    ///
+    /// The tooltip case: a tooltip body has no open signal a widget could hand
+    /// over — the tree decides, when a dwell matures. `WidgetTree` forces such
+    /// a host just before it consults `Widget::tooltip_has_content`, so the
+    /// body exists by the time anything asks it a question.
+    pub fn add_detached_deferred_on_demand(
+        &mut self,
+        widget: impl crate::widget::Widget + 'static,
+    ) -> WidgetId {
+        self.add_detached(crate::deferred_subtree::DeferredSubtree::new(
+            None,
+            Box::new(widget),
+        ))
+    }
+
+    /// [`add_deferred`](Self::add_deferred), inserted detached — the shape
+    /// overlay content wants, so it is owned by the builder and dies with it
+    /// rather than outliving every menu the user ever opened.
+    pub fn add_detached_deferred_boxed(
+        &mut self,
+        reveal: crate::signal::Signal<bool>,
+        widget: Box<dyn crate::widget::Widget>,
+    ) -> WidgetId {
+        self.add_detached(crate::deferred_subtree::DeferredSubtree::new(
+            Some(reveal),
+            widget,
+        ))
+    }
+
+    /// [`add_detached_deferred_boxed`](Self::add_detached_deferred_boxed) for an
+    /// unboxed widget.
+    pub fn add_detached_deferred(
+        &mut self,
+        reveal: crate::signal::Signal<bool>,
+        widget: impl crate::widget::Widget + 'static,
+    ) -> WidgetId {
+        self.add_detached_deferred_boxed(reveal, Box::new(widget))
+    }
+
     /// [`add_detached`](Self::add_detached) for an already-boxed widget.
     pub fn add_detached_boxed(&mut self, widget: Box<dyn crate::widget::Widget>) -> WidgetId {
         let id = self.tree.add_boxed(widget);

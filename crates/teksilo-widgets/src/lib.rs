@@ -66,11 +66,11 @@ pub mod menu_item;
 pub mod menu_list;
 pub mod message_box;
 pub mod notification;
-pub(crate) mod overlay_trigger;
+pub mod overlay_trigger;
 pub mod panel;
 pub mod password_field;
-pub mod popover;
 pub(crate) mod popover_caret;
+pub mod popover_surface;
 pub mod popover_widget;
 pub mod primitives;
 #[cfg(feature = "telemetry")]
@@ -190,10 +190,13 @@ pub use notification::{
     NotificationArchive, NotificationArchiveModel, NotificationCenterButton, NotificationEntry,
     NotificationLog, NotificationLogDialog, NotificationUpdate,
 };
+pub use overlay_trigger::OverlayTrigger;
 pub use panel::Panel;
 pub use password_field::{AtRevealPolicy, EchoMode, PasswordField, RevealMode};
-pub use popover::Popover;
-pub use popover_widget::{PopoverButton, PopoverIconButton, PopoverTrigger, PopoverWidget};
+pub use popover_surface::PopoverSurface;
+pub use popover_widget::{
+    PopoverButton, PopoverCustom, PopoverIconButton, PopoverTrigger, PopoverWidget,
+};
 pub use primitives::TextInputField;
 pub use primitives::text_input_field::{InputPurpose, ValidationFeedback, ValidationOutcome};
 pub use primitives::{

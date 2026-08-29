@@ -46,7 +46,7 @@
 use std::rc::Rc;
 use std::time::Duration;
 
-use teksilo_canvas::{Rect, SizeProposal};
+use teksilo_canvas::{Point, Rect, Size, SizeProposal};
 use teksilo_core::accessibility::AccessNodeBuilder;
 use teksilo_core::accesskit::HasPopup;
 use teksilo_core::build_context::BuildContext;
@@ -63,6 +63,7 @@ use crate::button::{Button, InteractionState, resolve_text_role};
 use crate::icon_button::{
     IconButton, IconButtonSize, resolve_icon_role_embedded, resolve_icon_role_standalone,
 };
+use crate::overlay_trigger::OverlayTrigger;
 use crate::popover_caret::DisclosureCaret;
 use crate::primitives::ZStack;
 
@@ -115,6 +116,57 @@ pub trait PopoverTrigger: Widget + Sized + 'static {
     /// Return `true` if the trigger already has an activate handler set by
     /// the caller — the wrapper replaces it and will warn at build time.
     fn has_on_activate(&self) -> bool;
+}
+
+/// A popover whose trigger is an arbitrary widget, wrapped in
+/// [`OverlayTrigger`].
+///
+/// The third stock shape beside [`PopoverButton`] and [`PopoverIconButton`],
+/// and what replaced the standalone `Popover` widget: that type existed only
+/// because this generic could not take a non-button trigger.
+pub type PopoverCustom = PopoverWidget<OverlayTrigger>;
+
+impl PopoverTrigger for OverlayTrigger {
+    /// A custom trigger opens a panel, not a menu — the same announcement the
+    /// standalone `Popover` made.
+    fn default_has_popup() -> HasPopup {
+        HasPopup::Dialog
+    }
+
+    /// No caret. A caller supplying their own trigger has drawn whatever
+    /// affordance they want; painting a disclosure chevron over it would be the
+    /// framework second-guessing them.
+    fn default_show_caret() -> bool {
+        false
+    }
+
+    fn caret_role(&self, _interaction: &Signal<InteractionState>) -> Signal<TextRole> {
+        // Never consulted while `default_show_caret` is false, and a custom
+        // trigger has no interaction signal of its own to derive a tint from.
+        Signal::new(TextRole::Secondary)
+    }
+
+    fn with_shared_interaction(self, _signal: Signal<InteractionState>) -> Self {
+        // Nothing to share: the caret this exists to tint is not drawn, and an
+        // arbitrary widget has no `InteractionState` the framework can read.
+        self
+    }
+
+    fn with_has_popup(self, kind: HasPopup) -> Self {
+        self.has_popup(kind)
+    }
+
+    fn with_expanded_when(self, open: Signal<bool>) -> Self {
+        self.expanded_when(open)
+    }
+
+    fn with_on_activate(self, f: impl Fn(&mut EventContext) + 'static) -> Self {
+        self.on_activate(f)
+    }
+
+    fn has_on_activate(&self) -> bool {
+        self.has_on_activate()
+    }
 }
 
 impl PopoverTrigger for Button {
@@ -426,7 +478,7 @@ impl<T: PopoverTrigger> PopoverWidget<T> {
 
     /// Per-call [`PopoverStyle`] override for the surface (highest
     /// precedence over the theme slot and the built-in default). Mirrors
-    /// [`Popover::style`](crate::Popover::style). No effect under
+    /// the per-call override the standalone `Popover` used to offer. No effect under
     /// [`bare`](Self::bare).
     pub fn surface_style(mut self, style: impl PopoverStyle) -> Self {
         self.surface_style = Some(Rc::new(style));
@@ -488,25 +540,48 @@ impl<T: PopoverTrigger> PopoverWidget<T> {
     }
 }
 
-impl<T: PopoverTrigger> Widget for PopoverWidget<T> {
+/// The popover's panel: the caller's content, wrapped in the themed surface.
+///
+/// A widget of its own so the whole thing — surface included — can sit behind a
+/// [`DeferredSubtree`](teksilo_core::deferred_subtree::DeferredSubtree) and be
+/// built the first time the popover is opened. It was inline in
+/// `PopoverWidget::build` until then, which meant every popover built its panel
+/// whether or not anyone ever opened it, on every rebuild of its owner. In a
+/// virtualized table that is once per row per rebuild; see `DeferredSubtree`
+/// for the measurement.
+struct PopoverBody {
+    content: Option<Box<dyn Widget>>,
+    surface_variant: Option<teksilo_core::styles::PopoverVariant>,
+    surface_style: Option<SharedPopoverStyle>,
+    surface_name: String,
+    placement: OverlayPlacement,
+    body_id: Option<WidgetId>,
+}
+
+impl std::fmt::Debug for PopoverBody {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PopoverBody").finish()
+    }
+}
+
+impl Widget for PopoverBody {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        let content = self
-            .content
-            .take()
-            .expect("PopoverWidget::content(...) was not set");
-        // Materialize the inner content first so the surface style sees
-        // a ready WidgetId (same pattern as the `Popover` widget).
+        if let Some(id) = self.body_id {
+            return vec![id];
+        }
+        let Some(content) = self.content.take() else {
+            return Vec::new();
+        };
+        // Materialize the inner content first so the surface style sees a ready
+        // WidgetId (same pattern as the `Popover` widget).
         let inner_content_id = ctx.add_boxed(content);
 
-        // Wrap the inner content in the themed popover surface
-        // (background, border, padding, shadow) unless the caller opted
-        // out with `bare()`. The surface is resolved per-call > theme
-        // slot > built-in `RecipePopoverStyle`, so popovers theme
-        // app-wide via `theme.style_slots.popover`. The id that flows
-        // through the overlay machinery (dormant / gated / shown /
-        // returned-as-child) is the SURFACE; focus targets the inner
-        // content so it lands inside the chrome, not on the panel.
-        let content_id = match self.surface_variant {
+        // Wrap the inner content in the themed popover surface (background,
+        // border, padding, shadow) unless the caller opted out with `bare()`.
+        // The surface is resolved per-call > theme slot > built-in
+        // `RecipePopoverStyle`, so popovers theme app-wide via
+        // `theme.style_slots.popover`.
+        let id = match self.surface_variant {
             None => inner_content_id,
             Some(variant) => {
                 let style: SharedPopoverStyle = self
@@ -525,7 +600,68 @@ impl<T: PopoverTrigger> Widget for PopoverWidget<T> {
                 style.make_body(&cfg, ctx)
             }
         };
-        let focus_id = inner_content_id;
+        self.body_id = Some(id);
+        vec![id]
+    }
+
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        ctx: &LayoutContext,
+    ) -> teksilo_core::widget::LayoutResponse {
+        match self.body_id {
+            Some(id) => ctx
+                .child_size(id, proposal)
+                .unwrap_or_else(|| proposal.resolve(0.0, 0.0))
+                .into(),
+            None => Size::new(0.0, 0.0).into(),
+        }
+    }
+
+    fn place_children(
+        &self,
+        bounds: Rect,
+        _proposal: SizeProposal,
+        children: &mut [WidgetPlacement],
+        _ctx: &LayoutContext,
+    ) {
+        for child in children.iter_mut() {
+            child.origin = Point::new(bounds.x, bounds.y);
+            child.size = bounds.size();
+        }
+    }
+
+    fn preserves_children_on_rebuild(&self) -> bool {
+        true
+    }
+}
+
+impl<T: PopoverTrigger> Widget for PopoverWidget<T> {
+    fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+        let content = self
+            .content
+            .take()
+            .expect("PopoverWidget::content(...) was not set");
+        // The panel — content *and* the surface around it — is built the first
+        // time the popover is opened, not here. The id below is a real node
+        // from this moment, so everything downstream (dormant / gated / shown /
+        // returned-as-child / dismissed) is unchanged; only when the subtree
+        // under it exists has moved. `materialize_now` in the open handler
+        // closes it up before the overlay is placed and focus moves in.
+        let content_id = ctx.add_deferred(
+            self.popover_open.clone(),
+            PopoverBody {
+                content: Some(content),
+                surface_variant: self.surface_variant,
+                surface_style: self.surface_style.clone(),
+                surface_name: self.surface_name.clone(),
+                placement: self.placement.clone(),
+                body_id: None,
+            },
+        );
+        // Focus targets the panel; `request_focus` walks to its first focusable
+        // descendant, so it still lands inside the chrome rather than on it.
+        let focus_id = content_id;
         ctx.set_dormant(content_id);
         // Gate the content's activation on `popover_open` so it is the single
         // source of truth. Without this, when the PopoverWidget itself is woken
@@ -600,6 +736,10 @@ impl<T: PopoverTrigger> Widget for PopoverWidget<T> {
                     ctx_evt.dismiss_all_except_hosts();
                 } else {
                     popover_open.set(true);
+                    // Build the panel if this is its first open, before the
+                    // overlay below is measured against it and before focus
+                    // moves into it — both happen in this same drain.
+                    ctx_evt.materialize_now(content_id);
                     ctx_evt.activate(content_id);
                     let mut req = OverlayRequest {
                         content_id,
@@ -661,10 +801,8 @@ impl<T: PopoverTrigger> Widget for PopoverWidget<T> {
                 let delay = ctx.theme().motion.tooltip_delay;
                 crate::tooltip::attach_rich_tooltip_source(ctx, root_id, source, delay);
             } else if let Some(text) = self.tooltip_text.clone() {
-                let tooltip_widget = crate::tooltip::TooltipWidget::new(text);
-                let tooltip_id = ctx.add(tooltip_widget);
                 let delay = ctx.theme().motion.tooltip_delay;
-                ctx.attach_tooltip(root_id, tooltip_id, delay);
+                crate::tooltip::attach_plain_tooltip(ctx, root_id, text, delay);
             }
             // Return BOTH the trigger root AND the dormant content as
             // children so the framework links content_id under this
@@ -689,10 +827,8 @@ impl<T: PopoverTrigger> Widget for PopoverWidget<T> {
             let delay = ctx.theme().motion.tooltip_delay;
             crate::tooltip::attach_rich_tooltip_source(ctx, trigger_id, source, delay);
         } else if let Some(text) = self.tooltip_text.clone() {
-            let tooltip_widget = crate::tooltip::TooltipWidget::new(text);
-            let tooltip_id = ctx.add(tooltip_widget);
             let delay = ctx.theme().motion.tooltip_delay;
-            ctx.attach_tooltip(trigger_id, tooltip_id, delay);
+            crate::tooltip::attach_plain_tooltip(ctx, trigger_id, text, delay);
         }
         // See the disclosure-caret branch for the content-linking rationale.
         vec![trigger_id, content_id]
@@ -922,12 +1058,143 @@ mod tests {
         assert!(!open_signal.get(), "second fire closes");
     }
 
+    /// **A popover that is never opened never builds its panel** — and keeps
+    /// not building it however often its owner rebuilds.
+    ///
+    /// This is the regression guard for the reason `DeferredSubtree` exists. A
+    /// `PopoverIconButton` in a virtualized table is constructed once per
+    /// visible row per rebuild; building each one's menu was measured at ~85%
+    /// of the whole table's rebuild cost. The panel here counts its own builds,
+    /// so "parked dormant" cannot pass for "not built".
+    #[test]
+    fn an_unopened_popover_never_builds_its_panel() {
+        use teksilo_core::signal::Signal;
+
+        #[derive(Debug)]
+        struct CountingContent {
+            builds: Signal<u32>,
+        }
+        impl Widget for CountingContent {
+            fn build(&mut self, _ctx: &mut BuildContext) -> Vec<WidgetId> {
+                self.builds.set(self.builds.get() + 1);
+                Vec::new()
+            }
+            fn layout_response(
+                &self,
+                p: SizeProposal,
+                _c: &teksilo_core::widget::LayoutContext,
+            ) -> teksilo_core::widget::LayoutResponse {
+                p.resolve(40.0, 20.0).into()
+            }
+        }
+
+        /// The owner: rebuilds on demand and constructs a **fresh**
+        /// `PopoverButton` each time, which is what a virtualized table's cell
+        /// delegate does. Constructing the widget value is nearly free; adding
+        /// its panel to the arena is what used to cost.
+        #[derive(Debug)]
+        struct Owner {
+            builds: Signal<u32>,
+            open_out: Signal<Option<Signal<bool>>>,
+            child: Option<WidgetId>,
+        }
+        impl Widget for Owner {
+            fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+                let pb = PopoverButton::new(Button::new(lit!("Open"))).content(CountingContent {
+                    builds: self.builds.clone(),
+                });
+                self.open_out.set(Some(pb.open_signal()));
+                let id = ctx.add(pb);
+                self.child = Some(id);
+                vec![id]
+            }
+            fn layout_response(
+                &self,
+                p: SizeProposal,
+                c: &teksilo_core::widget::LayoutContext,
+            ) -> teksilo_core::widget::LayoutResponse {
+                self.child
+                    .and_then(|id| c.child_size(id, p))
+                    .unwrap_or_else(|| p.resolve(0.0, 0.0))
+                    .into()
+            }
+        }
+
+        let builds = Signal::new(0);
+        let open_out = Signal::new(None);
+        let mut tree = light_tree();
+        let owner = tree.add(Owner {
+            builds: builds.clone(),
+            open_out: open_out.clone(),
+            child: None,
+        });
+        tree.layout(SizeProposal::exact(300.0, 120.0));
+        assert_eq!(builds.get(), 0, "the panel was built without being opened");
+
+        // Rebuild the owner repeatedly — one fresh popover per pass, exactly as
+        // a table cell produces one per row per rebuild.
+        for _ in 0..5 {
+            tree.arena_mark_needs_rebuild_for_testing(owner);
+            tree.layout(SizeProposal::exact(300.0, 120.0));
+        }
+        assert_eq!(
+            builds.get(),
+            0,
+            "rebuilding the owner dragged five unopened panels into the arena"
+        );
+
+        // Opening builds it — once — and it survives a close/reopen, so
+        // whatever state the panel holds is not thrown away.
+        let open = open_out.get().expect("the popover published its signal");
+        let button = tree
+            .first_focusable_descendant(owner)
+            .expect("focusable inner Button");
+        let enter = move |t: &mut WidgetTree| {
+            // Re-aim at the trigger each time: opening moves focus into the
+            // panel, and this panel has no focusable control of its own.
+            t.focus(button);
+            t.dispatch_event(WidgetEvent::KeyDown {
+                key: Key::Enter,
+                modifiers: Modifiers::NONE,
+                text: None,
+            });
+            t.dispatch_event(WidgetEvent::KeyUp {
+                key: Key::Enter,
+                modifiers: Modifiers::NONE,
+            });
+            t.layout(SizeProposal::exact(300.0, 120.0));
+        };
+        enter(&mut tree);
+        assert!(open.get(), "Enter should open the popover");
+        assert_eq!(builds.get(), 1, "opening must build the panel");
+
+        // Close and reopen. Driven through the widget's own open signal rather
+        // than a second keystroke: opening moved focus into the panel, and
+        // routing a key back out of it is a different guarantee, covered by
+        // `shared_open_closure_fires_from_trigger_and_from_inside_the_panel`.
+        open.set(false);
+        tree.layout(SizeProposal::exact(300.0, 120.0));
+        open.set(true);
+        tree.layout(SizeProposal::exact(300.0, 120.0));
+        assert_eq!(
+            builds.get(),
+            1,
+            "reopening rebuilt the panel — its state would have been lost"
+        );
+    }
+
     #[test]
     fn default_wraps_content_in_themed_surface_bare_does_not() {
-        // A pure-leaf content (RectWidget has no children) makes the
-        // wrapping observable: with the default surface the overlay's
-        // content id is the PopoverSurface (which has children); under
-        // `bare()` it's the leaf itself (no children).
+        // A pure-leaf content (RectWidget has no children) makes the wrapping
+        // observable: the default surface puts one more node between the
+        // overlay's content id and that leaf than `bare()` does.
+        //
+        // Asserted as a *difference* rather than as an absolute depth on
+        // purpose. The panel is now built behind a `DeferredSubtree` (so an
+        // unopened popover costs nothing), which puts two layout-transparent
+        // wrappers above it; pinning the exact chain would make this test a
+        // record of how many wrappers there happen to be rather than of the
+        // thing it is named after.
         fn open_overlay_content(bare: bool) -> (WidgetTree, WidgetId) {
             let mut tree = light_tree();
             let mut pb = PopoverButton::new(Button::new(lit!("Open"))).content(RectWidget::new());
@@ -961,16 +1228,31 @@ mod tests {
             (tree, content)
         }
 
-        let (tree_def, c_def) = open_overlay_content(false);
-        assert!(
-            !tree_def.children(c_def).is_empty(),
-            "default surface should wrap the content in chrome"
-        );
+        /// Steps from `id` down to the first node with no children.
+        fn depth_to_leaf(tree: &WidgetTree, id: WidgetId) -> usize {
+            let mut depth = 0;
+            let mut cur = id;
+            loop {
+                let kids = tree.children(cur);
+                match kids.first() {
+                    Some(&next) => {
+                        depth += 1;
+                        cur = next;
+                    }
+                    None => return depth,
+                }
+            }
+        }
 
+        let (tree_def, c_def) = open_overlay_content(false);
         let (tree_bare, c_bare) = open_overlay_content(true);
-        assert!(
-            tree_bare.children(c_bare).is_empty(),
-            "bare() should add the leaf content raw, with no surface"
+        let deep = depth_to_leaf(&tree_def, c_def);
+        let bare = depth_to_leaf(&tree_bare, c_bare);
+        assert_eq!(
+            deep,
+            bare + 1,
+            "the default surface must add exactly one node of chrome that bare() \
+             does not (default {deep}, bare {bare})"
         );
     }
 

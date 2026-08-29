@@ -1879,6 +1879,29 @@ impl WidgetTree {
         self.arena.mark_needs_rebuild(id);
     }
 
+    /// Force a [`DeferredSubtree`](crate::deferred_subtree::DeferredSubtree) at
+    /// `id` to build its content now. A no-op for any other widget.
+    ///
+    /// The framework's own door into deferred content, for the case where the
+    /// decision to show is the tree's rather than a widget's: a tooltip whose
+    /// dwell has just matured has no open signal anyone could have handed over.
+    pub(crate) fn materialize_deferred(&mut self, id: WidgetId) {
+        let forced = self
+            .arena
+            .get_mut(id)
+            .and_then(|n| n.widget.as_any_mut())
+            .and_then(|any| any.downcast_mut::<crate::deferred_subtree::DeferredSubtree>())
+            .map(|deferred| {
+                let needed = !deferred.is_materialized();
+                deferred.force();
+                needed
+            })
+            .unwrap_or(false);
+        if forced {
+            self.rebuild_single_widget(id);
+        }
+    }
+
     pub(crate) fn rebuild_single_widget(&mut self, widget_id: WidgetId) {
         // Per §9.4.5, drop the source handle first (stops further source-side
         // dispatch) and then remove the UI-side callback. Either order gives

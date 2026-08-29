@@ -623,9 +623,11 @@ impl Widget for CodeEditor {
         // ghost-paints while logically closed. `show_overlay` moves it to the
         // overlay layer when completion opens.
         if self.state.borrow().completion.has_provider() {
-            let panel_id = ctx.add(CompletionPanel::new(&self.state));
-            ctx.set_dormant(panel_id);
             let open = self.state.borrow().completion.open.clone();
+            // Built the first time completion opens, not on every rebuild of the
+            // editor. See `teksilo_core::deferred_subtree::DeferredSubtree`.
+            let panel_id = ctx.add_deferred(open.clone(), CompletionPanel::new(&self.state));
+            ctx.set_dormant(panel_id);
             ctx.visible_when(panel_id, open);
             self.state.borrow_mut().completion.panel_id = Some(panel_id);
             children.push(panel_id);

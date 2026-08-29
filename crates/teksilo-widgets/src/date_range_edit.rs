@@ -461,7 +461,9 @@ impl Widget for DateRangeEdit {
         }
         // Detached rather than a child, and owned rather than orphaned — see
         // `DateEdit`'s calendar for why both halves matter.
-        let cal_id = ctx.add_detached(cal);
+        // Built the first time the popup is opened, not on every rebuild of the
+        // field. See `teksilo_core::deferred_subtree::DeferredSubtree`.
+        let cal_id = ctx.add_detached_deferred(self.range_popover_open.clone(), cal);
         ctx.set_dormant(cal_id);
 
         let popover_open = self.range_popover_open.clone();
@@ -486,6 +488,9 @@ impl Widget for DateRangeEdit {
                     ctx_evt.dismiss_all_except_hosts();
                 } else {
                     popover_open.set(true);
+                    // Build the popup if this is its first open, before the overlay
+                    // below is measured against it and focus moves into it.
+                    ctx_evt.materialize_now(cal_id);
                     ctx_evt.activate(cal_id);
                     ctx_evt.show_overlay(OverlayRequest {
                         content_id: cal_id,
@@ -623,10 +628,8 @@ impl Widget for DateRangeEdit {
             let delay = ctx.theme().motion.tooltip_delay;
             crate::tooltip::attach_rich_tooltip_source(ctx, root_id, source, delay);
         } else if let Some(text) = self.tooltip_text.clone() {
-            let tooltip_widget = crate::tooltip::TooltipWidget::new(text);
-            let tooltip_id = ctx.add(tooltip_widget);
             let delay = ctx.theme().motion.tooltip_delay;
-            ctx.attach_tooltip(root_id, tooltip_id, delay);
+            crate::tooltip::attach_plain_tooltip(ctx, root_id, text, delay);
         }
 
         // ── Self handlers: focus_within drives the frame border ─

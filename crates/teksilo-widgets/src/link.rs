@@ -223,10 +223,8 @@ impl Widget for Link {
             let delay = ctx.theme().motion.tooltip_delay;
             crate::tooltip::attach_rich_tooltip_source(ctx, root_id, source, delay);
         } else if let Some(tooltip_text) = self.tooltip_text.clone() {
-            let tw = crate::tooltip::TooltipWidget::new(tooltip_text);
-            let tid = ctx.add(tw);
             let delay = ctx.theme().motion.tooltip_delay;
-            ctx.attach_tooltip(root_id, tid, delay);
+            crate::tooltip::attach_plain_tooltip(ctx, root_id, tooltip_text, delay);
         }
 
         self.root_child_id = Some(root_id);

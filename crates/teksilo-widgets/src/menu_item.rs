@@ -209,6 +209,12 @@ pub struct MenuItem {
     /// path. `accessibility()` reads this for `set_expanded`.
     /// Only meaningful when `submenu_factory.is_some()`.
     submenu_open: Signal<bool>,
+    /// "This submenu has been wanted at least once" — the reveal gate for its
+    /// deferred content. Distinct from `submenu_open`, which is the disclosure
+    /// state AT reads and the chevron follows: the hover path schedules a
+    /// *delayed* overlay and must have the content built before the delay
+    /// matures, while the item is not yet open.
+    submenu_needed: Signal<bool>,
     /// Live per-id handle to the effective primary keystroke for
     /// `shortcut_id`, obtained in `build()` from
     /// [`BuildContext::effective_shortcut_signal`]. The trailing label
@@ -268,6 +274,7 @@ impl MenuItem {
             submenu_open_delay: DEFAULT_SUBMENU_OPEN_DELAY,
             interaction: Signal::new(MenuItemState::Idle),
             submenu_open: Signal::new(false),
+            submenu_needed: Signal::new(false),
             shortcut_signal: None,
             label_style: None,
             text_role_override: None,
@@ -487,6 +494,7 @@ impl MenuItem {
             submenu_open_delay: DEFAULT_SUBMENU_OPEN_DELAY,
             interaction: Signal::new(MenuItemState::Idle),
             submenu_open: Signal::new(false),
+            submenu_needed: Signal::new(false),
             shortcut_signal: None,
             label_style: None,
             text_role_override: None,
@@ -867,7 +875,10 @@ impl Widget for MenuItem {
             // Detached (a submenu opens in an overlay beside the item, never
             // inline) but owned, so it dies with the item instead of outliving
             // every menu the user ever opened.
-            let id = ctx.add_detached_boxed(submenu_widget);
+            // Built the first time the submenu is actually wanted. A menu of
+            // twenty items with submenus used to build all twenty submenus —
+            // and their submenus — the moment the menu was mounted.
+            let id = ctx.add_detached_deferred_boxed(self.submenu_needed.clone(), submenu_widget);
             ctx.set_dormant(id);
             self.submenu_content_id = Some(id);
             Some(id)
@@ -1037,10 +1048,14 @@ impl Widget for MenuItem {
                 TooltipPlacement::Side,
             );
         } else if let Some(tooltip_text) = self.tooltip_text.clone() {
-            let tooltip_widget = crate::tooltip::TooltipWidget::new(tooltip_text);
-            let tooltip_id = ctx.add(tooltip_widget);
             let delay = ctx.theme().motion.tooltip_delay;
-            ctx.attach_tooltip_with_placement(root_id, tooltip_id, delay, TooltipPlacement::Side);
+            crate::tooltip::attach_plain_tooltip_with_placement(
+                ctx,
+                root_id,
+                tooltip_text,
+                delay,
+                TooltipPlacement::Side,
+            );
         }
 
         // --- Handlers ---
@@ -1101,6 +1116,7 @@ impl Widget for MenuItem {
         // submenu are properly gated) means we MUST clear it here
         // once the submenu is finally gone.
         let submenu_open_signal = self.submenu_open.clone();
+        let submenu_needed_signal = self.submenu_needed.clone();
         let submenu_content_id_for_dismiss = submenu_content_id;
         let safe_triangle_for_dismiss = self.safe_triangle.clone();
         let submenu_dismiss_callback: teksilo_core::overlay::OverlayDismissCallback = {
@@ -1131,6 +1147,7 @@ impl Widget for MenuItem {
             let action = action_rc.clone();
             let sub_id = submenu_content_id;
             let open = submenu_open_signal.clone();
+            let needed = submenu_needed_signal.clone();
             let dismiss = submenu_dismiss_callback.clone();
             std::rc::Rc::new(move |ctx: &mut EventContext| {
                 if let Some(ref activate) = mode_activate {
@@ -1143,6 +1160,10 @@ impl Widget for MenuItem {
                     ctx.dismiss_self_overlay_chain();
                 } else if let Some(sub_id) = sub_id {
                     ctx.dismiss_child_overlays_except(sub_id);
+                    // Build the submenu if this is the first time it is wanted, before
+                    // the overlay below is measured against it.
+                    needed.set(true);
+                    ctx.materialize_now(sub_id);
                     ctx.activate(sub_id);
                     open.set(true);
                     ctx.show_overlay(OverlayRequest {
@@ -1174,8 +1195,10 @@ impl Widget for MenuItem {
             let open_delay = self.submenu_open_delay;
 
             let open_for_tap = submenu_open_signal.clone();
+            let needed_for_tap = submenu_needed_signal.clone();
             let dismiss_for_tap = submenu_dismiss_callback.clone();
             let open_for_hover = submenu_open_signal.clone();
+            let needed_for_hover = submenu_needed_signal.clone();
             let dismiss_for_hover = submenu_dismiss_callback.clone();
             // Capture the safe-triangle shared state so we can stamp
             // / clear the anchor on submenu open / close.
@@ -1187,6 +1210,10 @@ impl Widget for MenuItem {
                     move |_pos, ctx: &mut EventContext| {
                         // Click on submenu trigger opens it immediately
                         ctx.dismiss_child_overlays_except(sub_id);
+                        // Build the submenu if this is the first time it is wanted, before
+                        // the overlay below is measured against it.
+                        needed_for_tap.set(true);
+                        ctx.materialize_now(sub_id);
                         ctx.activate(sub_id);
                         open_for_tap.set(true);
                         ctx.show_overlay(OverlayRequest {
@@ -1223,6 +1250,10 @@ impl Widget for MenuItem {
                                 state.submenu_content_id = Some(sub_id);
                                 state.anchor = ctx.tree_pointer_position();
                             }
+                            // Build the submenu if this is the first time it is wanted, before
+                            // the overlay below is measured against it.
+                            needed_for_hover.set(true);
+                            ctx.materialize_now(sub_id);
                             ctx.show_overlay_after_with_focus(
                                 OverlayRequest {
                                     content_id: sub_id,
@@ -1354,6 +1385,7 @@ impl Widget for MenuItem {
             let interaction = interaction.clone();
             let sub_id = submenu_content_id;
             let open_for_key = submenu_open_signal.clone();
+            let needed_for_key = submenu_needed_signal.clone();
             let dismiss_for_key = submenu_dismiss_callback.clone();
             move |event: &WidgetEvent, ctx: &mut EventContext| -> EventResponse {
                 // The "open submenu / go deeper" key is inline-forward:
@@ -1387,6 +1419,10 @@ impl Widget for MenuItem {
                             ctx.dismiss_self_overlay_chain();
                         } else if let Some(sub_id) = sub_id {
                             ctx.dismiss_child_overlays_except(sub_id);
+                            // Build the submenu if this is the first time it is wanted, before
+                            // the overlay below is measured against it.
+                            needed_for_key.set(true);
+                            ctx.materialize_now(sub_id);
                             ctx.activate(sub_id);
                             open_for_key.set(true);
                             ctx.show_overlay(OverlayRequest {
@@ -1411,6 +1447,10 @@ impl Widget for MenuItem {
                     WidgetEvent::KeyDown { key, .. } if *key == open_submenu_key => {
                         if let Some(sub_id) = sub_id {
                             ctx.dismiss_child_overlays_except(sub_id);
+                            // Build the submenu if this is the first time it is wanted, before
+                            // the overlay below is measured against it.
+                            needed_for_key.set(true);
+                            ctx.materialize_now(sub_id);
                             ctx.activate(sub_id);
                             open_for_key.set(true);
                             ctx.show_overlay(OverlayRequest {

@@ -580,6 +580,9 @@ fn open_or_update(state: &SharedState, ctx: &mut EventContext, anchor: Point) {
         return;
     };
     open_sig.set_if_changed(true);
+    // Build the panel if this is its first open, before the overlay below is
+    // measured against it.
+    ctx.materialize_now(panel_id);
     ctx.activate(panel_id);
 
     let on_dismiss: OverlayDismissCallback = {

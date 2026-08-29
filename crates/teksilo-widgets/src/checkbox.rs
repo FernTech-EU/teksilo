@@ -419,10 +419,8 @@ impl Widget for Checkbox {
             let delay = ctx.theme().motion.tooltip_delay;
             crate::tooltip::attach_rich_tooltip_source(ctx, root_id, source, delay);
         } else if let Some(tooltip_text) = self.tooltip_text.clone() {
-            let tooltip_widget = crate::tooltip::TooltipWidget::new(tooltip_text);
-            let tooltip_id = ctx.add(tooltip_widget);
             let delay = ctx.theme().motion.tooltip_delay;
-            ctx.attach_tooltip(root_id, tooltip_id, delay);
+            crate::tooltip::attach_plain_tooltip(ctx, root_id, tooltip_text, delay);
         }
 
         self.root_child_id = Some(root_id);

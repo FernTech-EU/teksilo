@@ -605,7 +605,9 @@ impl Widget for DateTimeEdit {
             if let Some(fdow) = self.first_day_of_week {
                 calendar = calendar.first_day_of_week(fdow);
             }
-            let cal_id = ctx.add(calendar);
+            // Built the first time the popup is opened, not on every rebuild of the
+            // field. See `teksilo_core::deferred_subtree::DeferredSubtree`.
+            let cal_id = ctx.add_deferred(self.calendar_popover_open.clone(), calendar);
             ctx.set_dormant(cal_id);
             self.calendar_id = Some(cal_id);
 
@@ -631,6 +633,9 @@ impl Widget for DateTimeEdit {
                         ctx_evt.dismiss_all_except_hosts();
                     } else {
                         popover_open.set(true);
+                        // Build the popup if this is its first open, before the overlay
+                        // below is measured against it and focus moves into it.
+                        ctx_evt.materialize_now(cal_id);
                         ctx_evt.activate(cal_id);
                         ctx_evt.show_overlay(OverlayRequest {
                             content_id: cal_id,
@@ -760,10 +765,8 @@ impl Widget for DateTimeEdit {
             let delay = ctx.theme().motion.tooltip_delay;
             crate::tooltip::attach_rich_tooltip_source(ctx, root_id, source, delay);
         } else if let Some(text) = self.tooltip_text.clone() {
-            let tooltip_widget = crate::tooltip::TooltipWidget::new(text);
-            let tooltip_id = ctx.add(tooltip_widget);
             let delay = ctx.theme().motion.tooltip_delay;
-            ctx.attach_tooltip(root_id, tooltip_id, delay);
+            crate::tooltip::attach_plain_tooltip(ctx, root_id, text, delay);
         }
 
         // ── Self handlers: focus_within drives the frame border ─

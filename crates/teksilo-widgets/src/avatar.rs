@@ -823,10 +823,8 @@ impl Widget for Avatar {
             let delay = ctx.theme().motion.tooltip_delay;
             crate::tooltip::attach_rich_tooltip_source(ctx, root, source, delay);
         } else if let Some(text) = self.tooltip_text.clone() {
-            let tooltip_widget = crate::tooltip::TooltipWidget::new(text);
-            let tooltip_id = ctx.add(tooltip_widget);
             let delay = ctx.theme().motion.tooltip_delay;
-            ctx.attach_tooltip(root, tooltip_id, delay);
+            crate::tooltip::attach_plain_tooltip(ctx, root, text, delay);
         }
 
         vec![root]

@@ -2027,6 +2027,14 @@ impl WidgetTree {
                     }
                     self.destroy_subtree(id);
                 }
+                // Build now, not next frame: the same handler is about to show
+                // an overlay over this node and move focus into it, and both
+                // read the subtree. See `EventContext::materialize_now`.
+                TreeMutation::MaterializeNow(id) => {
+                    if self.arena.get(id).is_some() {
+                        self.rebuild_single_widget(id);
+                    }
+                }
                 TreeMutation::WithWidgetMut { id, dirty, apply } => {
                     // Run the typed mutation while `&mut arena` is live, then
                     // drop the borrow before dirty-marking (the `mark_*` calls

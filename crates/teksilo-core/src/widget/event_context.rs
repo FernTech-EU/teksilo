@@ -307,6 +307,10 @@ pub(crate) enum TreeMutation {
         dirty: crate::binding::BindingLevel,
         apply: Box<dyn FnOnce(&mut dyn std::any::Any)>,
     },
+    /// Re-run one widget's `build()` **now**, inside `apply_tree_mutations`,
+    /// rather than marking it for the next layout pass. See
+    /// [`EventContext::materialize_now`].
+    MaterializeNow(WidgetId),
 }
 
 // Manual `Debug`: the `WithWidgetMut` closure is not `Debug`.
@@ -315,6 +319,7 @@ impl std::fmt::Debug for TreeMutation {
         match self {
             Self::SetDormant(id) => f.debug_tuple("SetDormant").field(id).finish(),
             Self::Activate(id) => f.debug_tuple("Activate").field(id).finish(),
+            Self::MaterializeNow(id) => f.debug_tuple("MaterializeNow").field(id).finish(),
             Self::Destroy(id) => f.debug_tuple("Destroy").field(id).finish(),
             Self::WithWidgetMut { id, dirty, .. } => f
                 .debug_struct("WithWidgetMut")
@@ -897,6 +902,35 @@ impl<'ops> EventContext<'ops> {
                 ),
             }),
         });
+    }
+
+    /// Re-run one widget's `build()` **during this handler's drain**, before
+    /// overlays are shown and before focus requests are applied — rather than
+    /// dirty-marking it for the next layout pass, which is what every other
+    /// rebuild trigger does.
+    ///
+    /// It exists for one shape:
+    /// [`DeferredSubtree`](crate::deferred_subtree::DeferredSubtree) content
+    /// that a handler is *about to depend on*. Opening a popover activates its
+    /// content, shows an overlay anchored to it, and moves focus into it — all
+    /// three inside the same drain (see `collect_from_ctx`). A deferred panel
+    /// marked for rebuild would not exist yet at any of those points: the
+    /// overlay would be measured against an empty node and
+    /// `first_focusable_descendant` would find nothing to focus, so the popover
+    /// would open in the wrong place and swallow the keyboard. Materializing
+    /// here closes that window, and makes deferred content behave exactly like
+    /// the eagerly-built content it replaces.
+    ///
+    /// Cheap to call redundantly: a `DeferredSubtree` that is already
+    /// materialized returns its existing child, so a second open costs one
+    /// `build()` of the host and nothing below it.
+    ///
+    /// Not a general "rebuild this widget now" door — reach for
+    /// [`with_widget_mut`](Self::with_widget_mut) or a `Rebuild` binding for
+    /// ordinary reactive updates, which are correctly served by the next
+    /// layout pass.
+    pub fn materialize_now(&mut self, id: WidgetId) {
+        self.tree_mutations.push(TreeMutation::MaterializeNow(id));
     }
 
     /// Request that the AccessKit tree be re-walked after this handler

@@ -97,6 +97,10 @@ impl MenuContext {
 
         ctx.dismiss_all_except_hosts();
         self.open_index.set(Some(index));
+        // Build this menu's content if it has never been opened, before the
+        // overlay below is measured against it and focus moves into it. Set
+        // `open_index` first — that is the signal the deferred host reveals on.
+        ctx.materialize_now(content_id);
         ctx.activate(content_id);
         ctx.show_overlay(OverlayRequest {
             content_id,

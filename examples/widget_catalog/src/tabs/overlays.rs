@@ -10,7 +10,7 @@ use std::time::Duration;
 use teksilo::prelude::*;
 use teksilo::widgets::{
     Button, ButtonVariant, Divider, EventContextMessageBoxExt, MaxSize, MessageBox,
-    MessageBoxButtons, Panel, Popover, ProgressBar, Snackbar, Spacer, TabInfo, TabWidget,
+    MessageBoxButtons, Panel, PopoverButton, ProgressBar, Snackbar, Spacer, TabInfo, TabWidget,
     TextWidget, VStack, Wrap,
 };
 
@@ -310,7 +310,7 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     let popover = section(
         ctx,
         tr!(ovr_section_popover()),
-        Popover::new(tr!(ovr_popover_anchor())).content(
+        PopoverButton::new(Button::new(tr!(ovr_popover_anchor()))).content(
             VStack::new()
                 .spacing(4.0)
                 .child(
@@ -433,7 +433,7 @@ pub fn teksu(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     // .content+.trigger+chained — the chained imperative form is the
     // straightforward reading; pre-register and splice via #{...}.
     let popover_widget = ctx.add(
-        Popover::new(tr!(ovr_popover_anchor())).content(
+        PopoverButton::new(Button::new(tr!(ovr_popover_anchor()))).content(
             VStack::new()
                 .spacing(4.0)
                 .child(
