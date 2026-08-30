@@ -10,15 +10,22 @@
 
 use std::rc::Rc;
 
-use teksilo_core::signal::{Prop, Signal};
+use teksilo_core::signal::{ObserverHandle, Prop, Signal};
 
 use crate::thread_local::current_version_signal;
+
+/// Subscribes a callback to one extra dependency, type-erased so a
+/// `LocalizedString` can carry dependencies of any signal type.
+type DepSubscriber = Rc<dyn Fn(Box<dyn Fn() + 'static>) -> ObserverHandle>;
 
 /// A reactive *recipe* for a translatable string. Becomes a live binding
 /// only when a widget consumes it via `to_signal()`.
 #[derive(Clone)]
 pub struct LocalizedString {
     resolver: Rc<dyn Fn() -> String + 'static>,
+    /// Signals beyond the locale that this string's value depends on — see
+    /// [`LocalizedString::also_observing`]. Empty for almost every string.
+    deps: Vec<DepSubscriber>,
 }
 
 impl std::fmt::Debug for LocalizedString {
@@ -34,6 +41,7 @@ impl std::fmt::Debug for LocalizedString {
 pub fn localized<F: Fn() -> String + 'static>(resolver: F) -> LocalizedString {
     LocalizedString {
         resolver: Rc::new(resolver),
+        deps: Vec::new(),
     }
 }
 
@@ -46,7 +54,30 @@ impl LocalizedString {
         let text = text.into();
         Self {
             resolver: Rc::new(move || text.clone()),
+            deps: Vec::new(),
         }
+    }
+
+    /// Re-resolve this string whenever `dep` changes, as well as on a locale
+    /// change.
+    ///
+    /// For a label whose *content* is state, not just its language: an Undo menu
+    /// row reading "Undo renaming «Chapter 3»" has to follow the undo stack, and
+    /// a resolver that reads a signal would otherwise be evaluated once and
+    /// never again — [`to_signal`](Self::to_signal) observes only the
+    /// translation version.
+    ///
+    /// Dependencies are observed per binding, so a string consumed by two
+    /// widgets keeps both in step, and each observation dies with the signal it
+    /// fed.
+    #[must_use]
+    pub fn also_observing<T: Clone + 'static>(mut self, dep: &Signal<T>) -> Self {
+        let dep = dep.clone();
+        self.deps
+            .push(Rc::new(move |notify: Box<dyn Fn() + 'static>| {
+                dep.observe(move |_| notify())
+            }));
+        self
     }
 
     /// Resolve the current value once, without producing a reactive signal.
@@ -92,6 +123,22 @@ impl LocalizedString {
                     target.set((resolver)());
                 }
             });
+            signal.attach_keepalive(handle);
+        }
+
+        // The same treatment for any extra dependency: re-resolve on change,
+        // with the observation's lifetime tied to the returned signal exactly as
+        // the locale one is.
+        for subscribe in &self.deps {
+            let resolver = self.resolver.clone();
+            let Some(weak) = signal.downgrade() else {
+                continue;
+            };
+            let handle = subscribe(Box::new(move || {
+                if let Some(target) = weak.upgrade() {
+                    target.set((resolver)());
+                }
+            }));
             signal.attach_keepalive(handle);
         }
 

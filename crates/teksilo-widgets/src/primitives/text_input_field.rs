@@ -263,6 +263,9 @@ pub struct TextInputField {
     /// but the composing widget loses ownership of `self` once it
     /// hands the field to `ctx.add(...)`.
     state_slot: std::rc::Rc<std::cell::RefCell<Option<SharedState>>>,
+    /// Minted with the widget, not with its state, so a [`TextFieldHandle`]
+    /// taken before `build` observes the signal the built widget writes.
+    focus_signal: Signal<bool>,
     /// Natural intrinsic width in logical pixels, cached at the end
     /// of `build()`. When an [`InputMask`] is set, this measures the
     /// mask's empty template (e.g. `__/__/____`) in the theme body
@@ -316,6 +319,7 @@ impl TextInputField {
             interaction: Signal::new(InteractionState::Idle),
             caret_position: Signal::new(0),
             state_slot: std::rc::Rc::new(std::cell::RefCell::new(None)),
+            focus_signal: Signal::new(false),
             natural_width: 200.0,
         }
     }
@@ -559,6 +563,38 @@ impl TextInputField {
         self.text.clone()
     }
 
+    /// Adopt an existing handle instead of minting one.
+    ///
+    /// For a composing widget — `TextInput` wraps this field — that must hand
+    /// out a handle of its own **before** it builds the field it will delegate
+    /// to. Sharing the slot and the focus signal makes the wrapper's handle and
+    /// the field's the same handle, rather than two that agree by accident.
+    pub fn share_handle(mut self, handle: &TextFieldHandle) -> Self {
+        self.state_slot = handle.slot.clone();
+        self.focus_signal = handle.focus_signal.clone();
+        self
+    }
+
+    /// A live handle on this field, valid before and after `build`.
+    ///
+    /// The counterpart of `RichTextEditor::handle`, and the reason it exists:
+    /// an application that routes Undo, Cut, Copy, Paste and Select All to
+    /// "whichever text surface holds the caret" has to be able to *drive* every
+    /// such surface, not only the rich editors. Without this, a menu built for
+    /// those commands can only grey them out over a rename field or a search
+    /// box while the field's own key handling still works — a menu that lies
+    /// about what the keyboard can do.
+    ///
+    /// Like `caret_setter`, the handle reaches its state through the slot the
+    /// widget late-populates, so it may be taken while the tree is being
+    /// described and used once it is live.
+    pub fn handle(&self) -> TextFieldHandle {
+        TextFieldHandle {
+            slot: self.state_slot.clone(),
+            focus_signal: self.focus_signal.clone(),
+        }
+    }
+
     /// The interaction signal this field writes on focus changes.
     /// Call before inserting the field into the tree.
     pub fn interaction(&self) -> Signal<InteractionState> {
@@ -608,6 +644,17 @@ impl Widget for TextInputField {
     }
 
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+        // Tell the framework this widget edits text.
+        //
+        // What it buys: an application may take `Ctrl+Z`, `Ctrl+C` and friends
+        // for itself — a single Undo command over the whole app has to — and
+        // registered shortcuts resolve before any widget sees the raw key. This
+        // is how the host can tell that the caret is *here*, and either drive
+        // this surface or step aside so it keeps its own keys. Without it, an
+        // application that routes those chords silently breaks every text
+        // widget it does not personally know about. See
+        // `teksilo_core::text_surface`.
+        ctx.register_text_surface(std::rc::Rc::new(self.handle()));
         // Resolve the interaction signal (external override wins).
         if let Some(signal) = self.external_interaction.take() {
             self.interaction = signal;
@@ -752,6 +799,7 @@ impl Widget for TextInputField {
             revealed: self.revealed.clone(),
             at_reveal_policy: self.at_reveal_policy,
             allow_copy: self.allow_copy,
+            focus_signal: self.focus_signal.clone(),
         });
         self.state = Some(shared_state.clone());
         // Late-populate the slot so `caret_setter()` closures captured
@@ -1097,6 +1145,7 @@ impl Widget for TextInputField {
                 let mut st = state.borrow_mut();
                 if st.has_focus {
                     st.has_focus = false;
+                    st.focus_signal.set(false);
                     // Mirror the on_focus(false) interaction write so a
                     // Focused chrome style doesn't stick on a parked field.
                     interaction.set(InteractionState::Idle);
@@ -1241,6 +1290,7 @@ impl Widget for TextInputField {
 
                 let mut st = state_for_focus.borrow_mut();
                 st.has_focus = gained;
+                st.focus_signal.set(gained);
                 // Re-tint the selection band: `has_focus` is half of what
                 // decides it, so losing focus inside an active window has to
                 // re-apply just as losing the window does.
@@ -2321,5 +2371,179 @@ mod key_text_bubbling_tests {
             !outer_handler_sees(Key::A, Some("a"), digits_only),
             "a rejected letter must not bubble into a shortcut match"
         );
+    }
+}
+
+/// A live handle on a [`TextInputField`] — its text-editing commands, for a
+/// caller outside the widget.
+///
+/// Every method is a no-op before the field is built (and after it is
+/// destroyed), which is the honest answer rather than a panic: a menu row bound
+/// to a field that is no longer on screen should do nothing, not crash.
+#[derive(Clone)]
+pub struct TextFieldHandle {
+    slot: std::rc::Rc<std::cell::RefCell<Option<SharedState>>>,
+    focus_signal: Signal<bool>,
+}
+
+impl std::fmt::Debug for TextFieldHandle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TextFieldHandle")
+            .field("live", &self.slot.borrow().is_some())
+            .field("focused", &self.focus_signal.get())
+            .finish()
+    }
+}
+
+impl TextFieldHandle {
+    /// A handle not yet attached to any field — for a composing widget that
+    /// hands one out before building the field it will delegate to. Every
+    /// method answers "nothing" until [`TextInputField::share_handle`] binds it.
+    pub fn detached() -> Self {
+        Self {
+            slot: std::rc::Rc::new(std::cell::RefCell::new(None)),
+            focus_signal: Signal::new(false),
+        }
+    }
+
+    /// `true` while this field holds the keyboard focus. Observable, so a
+    /// router can follow the caret without polling.
+    pub fn focused_signal(&self) -> Signal<bool> {
+        self.focus_signal.clone()
+    }
+
+    /// Is the widget built and still alive?
+    pub fn is_live(&self) -> bool {
+        self.slot.borrow().is_some()
+    }
+
+    fn with<R>(&self, f: impl FnOnce(&mut TextInputState) -> R) -> Option<R> {
+        let slot = self.slot.borrow();
+        let state = slot.as_ref()?;
+        let mut st = state.borrow_mut();
+        Some(f(&mut st))
+    }
+
+    /// The field's current text.
+    pub fn text(&self) -> String {
+        self.with(|st| st.document.to_plain_text().unwrap_or_default())
+            .unwrap_or_default()
+    }
+
+    /// Is any text selected right now?
+    pub fn has_selection(&self) -> bool {
+        self.with(|st| st.cursor.has_selection()).unwrap_or(false)
+    }
+
+    /// May this field's content be copied at all? A password field says no —
+    /// see [`TextInputField::allow_copy`].
+    pub fn allows_copy(&self) -> bool {
+        self.with(|st| st.allow_copy).unwrap_or(false)
+    }
+
+    /// Is the field refusing edits? Cut and Paste are meaningless when it is.
+    pub fn is_read_only(&self) -> bool {
+        self.with(|st| st.read_only).unwrap_or(true)
+    }
+
+    /// Select the whole field.
+    pub fn select_all(&self) {
+        self.with(|st| st.cursor.select(SelectionType::Document));
+    }
+
+    /// Copy the selection to the clipboard.
+    pub fn copy(&self, ctx: &EventContext) {
+        self.with(|st| keyboard::clipboard_copy(st, ctx));
+    }
+
+    /// Cut the selection to the clipboard.
+    pub fn cut(&self, ctx: &EventContext) {
+        self.with(|st| keyboard::clipboard_cut(st, ctx));
+    }
+
+    /// Paste over the selection.
+    pub fn paste(&self, ctx: &EventContext) {
+        self.with(|st| keyboard::clipboard_paste(st, ctx));
+    }
+
+    /// Undo this field's own last edit.
+    pub fn undo(&self) {
+        self.with(|st| {
+            let _ = st.document.undo();
+        });
+    }
+
+    /// Redo this field's own last undone edit.
+    pub fn redo(&self) {
+        self.with(|st| {
+            let _ = st.document.redo();
+        });
+    }
+
+    /// Is there anything to undo? Debounced like the editor's twin.
+    pub fn can_undo(&self) -> Signal<bool> {
+        self.with(|st| st.can_undo.clone())
+            .unwrap_or_else(|| Signal::new(false))
+    }
+
+    /// Is there anything to redo?
+    pub fn can_redo(&self) -> Signal<bool> {
+        self.with(|st| st.can_redo.clone())
+            .unwrap_or_else(|| Signal::new(false))
+    }
+}
+
+// ── The framework's uniform view of a text-editing widget ────────────────────
+
+impl teksilo_core::text_surface::TextSurface for TextFieldHandle {
+    fn can_undo(&self) -> bool {
+        TextFieldHandle::can_undo(self).get()
+    }
+
+    fn can_redo(&self) -> bool {
+        TextFieldHandle::can_redo(self).get()
+    }
+
+    fn undo(&self) {
+        TextFieldHandle::undo(self);
+    }
+
+    fn redo(&self) {
+        TextFieldHandle::redo(self);
+    }
+
+    fn has_selection(&self) -> bool {
+        TextFieldHandle::has_selection(self)
+    }
+
+    fn is_read_only(&self) -> bool {
+        TextFieldHandle::is_read_only(self)
+    }
+
+    fn allows_copy(&self) -> bool {
+        TextFieldHandle::allows_copy(self)
+    }
+
+    fn cut(&self, ctx: &teksilo_core::widget::EventContext<'_>) {
+        TextFieldHandle::cut(self, ctx);
+    }
+
+    fn copy(&self, ctx: &teksilo_core::widget::EventContext<'_>) {
+        TextFieldHandle::copy(self, ctx);
+    }
+
+    fn paste(&self, ctx: &teksilo_core::widget::EventContext<'_>) {
+        TextFieldHandle::paste(self, ctx);
+    }
+
+    /// A one-line field carries no formatting to strip, so the plain paste
+    /// *is* the paste. Answering "nothing" here would make Edit ▸ Paste without
+    /// formatting silently dead over a rename box.
+    fn paste_plain(&self, ctx: &teksilo_core::widget::EventContext<'_>) {
+        TextFieldHandle::paste(self, ctx);
+    }
+
+    fn select_all(&self) {
+        TextFieldHandle::select_all(self);
     }
 }

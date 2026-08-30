@@ -39,6 +39,7 @@ pub mod shortcut;
 pub mod signal;
 pub mod styles;
 pub mod telemetry;
+pub mod text_surface;
 pub mod widget;
 pub mod widget_builder;
 pub mod widget_builder_branching;

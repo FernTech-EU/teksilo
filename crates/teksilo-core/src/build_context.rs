@@ -916,6 +916,36 @@ impl<'a> BuildContext<'a> {
         self.tree.push_action(id, action);
     }
 
+    /// Declare that the widget being built **edits text**.
+    ///
+    /// Every text widget should call this. It is what lets an application take
+    /// a text chord — `Ctrl+Z`, `Ctrl+C` — for itself without silently breaking
+    /// the widget it took it from: the host asks
+    /// [`focused_text_surface`](crate::widget_tree::WidgetTree::focused_text_surface)
+    /// and either drives this surface or steps aside so the widget keeps its own
+    /// keys. See [`crate::text_surface`] for the whole argument.
+    ///
+    /// Owned by the registering widget and torn down on its rebuild or destroy,
+    /// like [`register_action_global`](Self::register_action_global). Calling it
+    /// twice from one widget re-points rather than duplicating, so a rebuild
+    /// that hands over a fresh handle is correct.
+    pub fn register_text_surface(
+        &mut self,
+        surface: std::rc::Rc<dyn crate::text_surface::TextSurface>,
+    ) {
+        let id = self.self_id();
+        self.tree.push_text_surface(id, surface);
+    }
+
+    /// A cloneable view of this tree's registered text surfaces.
+    ///
+    /// Take it once, during `build`, and hold it: a view-model refreshed from a
+    /// frame tick has no `&WidgetTree` to consult, and that is exactly when it
+    /// needs to know whether the caret is in a text widget.
+    pub fn text_surfaces(&self) -> crate::text_surface::TextSurfaces {
+        self.tree.text_surfaces()
+    }
+
     /// Register a **window-global** [`Action`](crate::action::Action), owned by
     /// the widget being built. Unlike [`register_action`](Self::register_action)
     /// — which only fires when this widget is on the intent's source→root walk —

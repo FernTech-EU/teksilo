@@ -60,7 +60,9 @@ pub use rect_widget::RectWidget;
 pub use shrinkable::Shrinkable;
 pub use spacer::Spacer;
 pub use switcher::Switcher;
-pub use text_input_field::{AtRevealPolicy, EchoMode, InputPurpose, TextInputField};
+pub use text_input_field::{
+    AtRevealPolicy, EchoMode, InputPurpose, TextFieldHandle, TextInputField,
+};
 pub use text_widget::TextWidget;
 pub use twist_arrow::TwistArrow;
 pub use validation_strip::ValidationStrip;

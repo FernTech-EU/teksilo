@@ -160,6 +160,17 @@ pub struct WidgetTree {
     /// is owned by the registering widget and torn down on its rebuild/destroy,
     /// mirroring `register_shortcut_global`.
     global_actions: Vec<(WidgetId, crate::action::Action)>,
+    /// The widgets that edit text, registered via
+    /// [`BuildContext::register_text_surface`](crate::BuildContext::register_text_surface).
+    ///
+    /// Owned by the registering widget and torn down on its rebuild/destroy,
+    /// exactly like `global_actions` above. Read through
+    /// [`WidgetTree::focused_text_surface`] by a host that has taken a text
+    /// chord — `Ctrl+Z`, `Ctrl+C` — for itself and owes every text widget in the
+    /// tree an answer about what happens to it. See
+    /// [`crate::text_surface`] for why the framework is the only place that
+    /// question can be answered completely.
+    text_surfaces: crate::text_surface::TextSurfaces,
     /// Currently-armed key-capture slot. `Some` when
     /// [`WidgetTree::begin_key_capture`] has been called and the
     /// returned [`CaptureHandle`](crate::shortcut::CaptureHandle)
@@ -605,6 +616,10 @@ struct PendingDelayedOverlay {
 impl WidgetTree {
     pub fn new() -> Self {
         let initial_theme = crate::presets::intui::light();
+        // One signal, shared: the field the tree writes and the registry the
+        // application reads must be the same one, or a host mirroring "is the
+        // caret in a text widget" would never see focus move.
+        let focused_signal = crate::signal::Signal::new(None);
         Self {
             arena: WidgetArena::new(),
             theme: initial_theme.clone(),
@@ -619,7 +634,7 @@ impl WidgetTree {
             window_active_signal: crate::signal::Signal::new(true),
             text_backend: None,
             focused: None,
-            focused_signal: crate::signal::Signal::new(None),
+            focused_signal: focused_signal.clone(),
             hovered: None,
             hovered_signal: crate::signal::Signal::new(None),
             focus_visible: crate::signal::Signal::new(false),
@@ -632,6 +647,7 @@ impl WidgetTree {
             shortcut_registry: crate::shortcut::ShortcutRegistry::new(),
             pending_intents: Vec::new(),
             global_actions: Vec::new(),
+            text_surfaces: crate::text_surface::TextSurfaces::new(focused_signal.clone()),
             key_capture: None,
             binding_registry: crate::binding::BindingRegistry::new(),
             idle_queue: crate::idle::IdleQueue::new(),
@@ -1979,6 +1995,7 @@ impl WidgetTree {
         // graveyard semantics).
         self.shortcut_registry.unregister_all_for_owner(widget_id);
         self.global_actions.retain(|(owner, _)| *owner != widget_id);
+        self.text_surfaces.remove(widget_id);
         // Re-apply `Widget::declare_shortcuts` so the static metadata
         // survives the rebuild (the unregister above wiped both
         // declared and build-registered entries; build() will refill
@@ -2197,6 +2214,7 @@ impl WidgetTree {
         // user had overrides, they stay in the graveyard.
         self.shortcut_registry.unregister_all_for_owner(widget_id);
         self.global_actions.retain(|(owner, _)| *owner != widget_id);
+        self.text_surfaces.remove(widget_id);
         // Bindings from this widget stop being relevant; clean them
         // up so the registry doesn't leak dead entries for the
         // lifetime of the app.
@@ -2495,6 +2513,40 @@ impl WidgetTree {
     /// Append an [`Action`](crate::action::Action) to a widget's arena
     /// node. Invoked by `BuildContext::register_action`; not meant
     /// to be called directly.
+    /// Record that `widget_id` edits text. Replaces any previous registration
+    /// from the same widget, so a rebuild re-points rather than accumulating.
+    pub(crate) fn push_text_surface(
+        &mut self,
+        widget_id: WidgetId,
+        surface: std::rc::Rc<dyn crate::text_surface::TextSurface>,
+    ) {
+        self.text_surfaces.insert(widget_id, surface);
+    }
+
+    /// A cloneable view of this tree's text surfaces, for a caller that must ask
+    /// the question later, without a `&WidgetTree` in hand.
+    pub fn text_surfaces(&self) -> crate::text_surface::TextSurfaces {
+        self.text_surfaces.clone()
+    }
+
+    /// The text-editing widget that currently holds the keyboard focus.
+    ///
+    /// `None` when focus is elsewhere — or nowhere — which is exactly what a
+    /// host needs in order to know that a text chord is safe to route itself.
+    pub fn focused_text_surface(
+        &self,
+    ) -> Option<std::rc::Rc<dyn crate::text_surface::TextSurface>> {
+        self.text_surfaces.focused()
+    }
+
+    /// Is the keyboard focus inside a widget that edits text?
+    ///
+    /// The cheap half of [`focused_text_surface`](Self::focused_text_surface),
+    /// for a host that only needs to decide whether to step aside.
+    pub fn focused_is_text_surface(&self) -> bool {
+        self.text_surfaces.focused_is_text_surface()
+    }
+
     pub(crate) fn push_action(&mut self, widget_id: WidgetId, action: crate::action::Action) {
         if let Some(node) = self.arena.get_mut(widget_id) {
             node.actions.push(action);

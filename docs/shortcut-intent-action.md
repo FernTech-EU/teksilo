@@ -739,6 +739,56 @@ in the registry: a messenger composer claiming Enter that nobody
 registered as a shortcut, a list view consuming arrow keys that no
 ancestor declared.
 
+### Taking a text chord: `Ctrl+Z`, `Ctrl+C`, `Ctrl+X`, `Ctrl+V`, `Ctrl+A`
+
+The same rule has a sharp edge worth naming, because an application that
+wants **one** Undo command — one chord, one menu row, routed to whatever
+the user is actually editing — has to register `Ctrl+Z` globally, and the
+moment it does it has taken that key away from every text widget in the
+tree. `RichTextEditor`, `TextInputField` and `CodeEditor` all handle those
+chords in stage 3, so a global shortcut silently wins over all of them.
+
+Do not try to answer that from the application's own knowledge. It can
+recognise the surfaces it built and kept a handle on, and it is blind to
+the rest — a rename box in a table cell, a search field, an input inside a
+dialog it did not write. Guessing gets it exactly backwards: `Ctrl+Z` in
+the widget it forgot undoes something else entirely, which is worse than
+not shipping the feature. A hand-maintained list of text widgets is
+correct the day it is written and silently wrong the first time someone
+adds one.
+
+Ask the framework instead. Every text widget calls
+[`BuildContext::register_text_surface`](../crates/teksilo-core/src/build_context.rs),
+so the tree can answer completely:
+
+```rust
+// Once, during build — the handle shares the tree's focus signal, so it
+// stays live and can be read from a frame tick.
+let surfaces = ctx.text_surfaces();
+
+// Later, wherever the routing decision is made:
+match surfaces.focused() {
+    Some(surface) => surface.undo(),   // drive the caret's own widget
+    None          => app_undo(),       // no text surface: the app's own history
+}
+```
+
+`TextSurfaces::focused()` yields an `Rc<dyn TextSurface>` — undo/redo,
+`history_frozen`, selection, read-only, clipboard, select-all — for
+whichever widget holds the focus, whatever kind it is. Registrations are
+owned by the registering widget and torn down on its rebuild or destroy,
+exactly like `register_action_global`.
+
+Pair it with `enabled_when`. A disabled shortcut is treated as *not
+registered*, so the keystroke falls through to the focused widget's own
+handling — which is what you want whenever the router has nothing to
+offer. Between the two, the application only ever intercepts a text chord
+when it knows what it is doing.
+
+A custom text widget should call `register_text_surface` too. Failing to
+is not a compile error and will not be noticed until an application
+routes one of these chords and your widget quietly loses it.
+
 ---
 
 ## End-to-end skeleton

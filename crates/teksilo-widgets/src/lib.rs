@@ -197,13 +197,13 @@ pub use popover_surface::PopoverSurface;
 pub use popover_widget::{
     PopoverButton, PopoverCustom, PopoverIconButton, PopoverTrigger, PopoverWidget,
 };
-pub use primitives::TextInputField;
 pub use primitives::text_input_field::{InputPurpose, ValidationFeedback, ValidationOutcome};
 pub use primitives::{
     AspectRatio, Center, ColumnFlow, DeadZone, Divider, Expand, FixedSize, FormLayout, Grid,
     HStack, IconWidget, ImageFit, ImageWidget, MasonryLayout, MaxSize, MinSize, Padding,
     RectWidget, Shrinkable, Spacer, Switcher, TextWidget, TrackSize, VStack, Wrap, ZStack,
 };
+pub use primitives::{TextFieldHandle, TextInputField};
 #[cfg(feature = "telemetry")]
 pub use privacy_settings::PrivacySettings;
 pub use progress_bar::ProgressBar;

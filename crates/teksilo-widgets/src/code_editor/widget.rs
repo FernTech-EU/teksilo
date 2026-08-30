@@ -382,6 +382,11 @@ impl CodeEditor {
 
 impl Widget for CodeEditor {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+        // Tell the framework this widget edits text — registered on *this*
+        // node, the `.focusable(true)` one below, because the registry is keyed
+        // by whichever widget holds the focus. See `teksilo_core::text_surface`.
+        ctx.register_text_surface(std::rc::Rc::new(self.handle()));
+
         // Swap the private engine for one sharing the app's typesetter (no-op
         // headless), carrying over builder-set typography.
         adopt_shared_typesetter(&self.state, ctx);

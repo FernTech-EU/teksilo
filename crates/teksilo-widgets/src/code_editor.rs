@@ -552,6 +552,50 @@ impl CodeEditorHandle {
         self.state.borrow().can_undo.clone()
     }
 
+    /// Undo this editor's last edit.
+    ///
+    /// The handle could report [`can_undo`](Self::can_undo) long before it could
+    /// *act* on it, which left a host able to light an Undo button here and
+    /// unable to make it do anything. Ctrl+Z inside the widget always worked;
+    /// this is the same command from outside.
+    pub fn undo(&self) {
+        let st = self.state.borrow();
+        let _ = st.document.undo();
+    }
+
+    /// Redo this editor's last undone edit.
+    pub fn redo(&self) {
+        let st = self.state.borrow();
+        let _ = st.document.redo();
+    }
+
+    /// Copy the selection to the clipboard.
+    pub fn copy(&self, ctx: &teksilo_core::widget::EventContext<'_>) {
+        clipboard::copy(&self.state.borrow(), ctx);
+    }
+
+    /// Cut the selection to the clipboard.
+    pub fn cut(&self, ctx: &teksilo_core::widget::EventContext<'_>) {
+        clipboard::cut(&mut self.state.borrow_mut(), ctx);
+    }
+
+    /// Paste over the selection.
+    pub fn paste(&self, ctx: &teksilo_core::widget::EventContext<'_>) {
+        clipboard::paste(&mut self.state.borrow_mut(), ctx);
+    }
+
+    /// Select the whole document.
+    pub fn select_all(&self) {
+        let st = self.state.borrow();
+        st.cursor
+            .select(teksilo_text::text_document::SelectionType::Document);
+    }
+
+    /// Is this editor refusing edits?
+    pub fn is_read_only(&self) -> bool {
+        self.state.borrow().policy.is_read_only()
+    }
+
     pub fn can_redo(&self) -> teksilo_core::Signal<bool> {
         self.state.borrow().can_redo.clone()
     }
@@ -575,3 +619,65 @@ impl CodeEditorHandle {
 const _: () = {
     fn _assert_shared(_: &Rc<std::cell::RefCell<CodeEditorState>>) {}
 };
+
+// ── The framework's uniform view of a text-editing widget ────────────────────
+
+impl teksilo_core::text_surface::TextSurface for CodeEditorHandle {
+    fn can_undo(&self) -> bool {
+        CodeEditorHandle::can_undo(self).get()
+    }
+
+    fn can_redo(&self) -> bool {
+        CodeEditorHandle::can_redo(self).get()
+    }
+
+    fn undo(&self) {
+        CodeEditorHandle::undo(self);
+    }
+
+    fn redo(&self) {
+        CodeEditorHandle::redo(self);
+    }
+
+    fn has_selection(&self) -> bool {
+        CodeEditorHandle::has_selection(self).get()
+    }
+
+    fn is_read_only(&self) -> bool {
+        CodeEditorHandle::is_read_only(self)
+    }
+
+    fn allows_copy(&self) -> bool {
+        self.state.borrow().policy.clipboard_policy.allows_copy()
+    }
+
+    fn history_frozen(&self) -> bool {
+        !self
+            .state
+            .borrow()
+            .policy
+            .command_filter
+            .accepts(policy::CodeCommand::Undo)
+    }
+
+    fn cut(&self, ctx: &teksilo_core::widget::EventContext<'_>) {
+        CodeEditorHandle::cut(self, ctx);
+    }
+
+    fn copy(&self, ctx: &teksilo_core::widget::EventContext<'_>) {
+        CodeEditorHandle::copy(self, ctx);
+    }
+
+    fn paste(&self, ctx: &teksilo_core::widget::EventContext<'_>) {
+        CodeEditorHandle::paste(self, ctx);
+    }
+
+    /// Code has no rich formatting to strip; the plain paste is the paste.
+    fn paste_plain(&self, ctx: &teksilo_core::widget::EventContext<'_>) {
+        CodeEditorHandle::paste(self, ctx);
+    }
+
+    fn select_all(&self) {
+        CodeEditorHandle::select_all(self);
+    }
+}

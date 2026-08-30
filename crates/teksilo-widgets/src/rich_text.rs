@@ -1669,6 +1669,17 @@ impl RichTextEditor {
         sync_cursor_signals(&self.state);
     }
 
+    /// Close the current undo entry, so the next edit starts a new one.
+    ///
+    /// Typing coalesces into word-sized undo steps by looking only at the shape
+    /// of two edits — adjacent, moments apart. It cannot see that the user did
+    /// something else in between, somewhere else in the application, that they
+    /// would remember as a dividing line. A host that knows one was crossed says
+    /// so here, and the burst before it stops merging with the burst after.
+    pub fn break_undo_merge(&self) {
+        self.state.borrow().document.break_undo_merge();
+    }
+
     /// Redo the most recently undone edit. Mirrors Ctrl+Y /
     /// Ctrl+Shift+Z. No-op when the redo stack is empty.
     pub fn redo(&self) {
@@ -3214,6 +3225,17 @@ impl EditorHandle {
         sync_cursor_signals(&self.state);
     }
 
+    /// Close the current undo entry, so the next edit starts a new one.
+    ///
+    /// Typing coalesces into word-sized undo steps by looking only at the shape
+    /// of two edits — adjacent, moments apart. It cannot see that the user did
+    /// something else in between, somewhere else in the application, that they
+    /// would remember as a dividing line. A host that knows one was crossed says
+    /// so here, and the burst before it stops merging with the burst after.
+    pub fn break_undo_merge(&self) {
+        self.state.borrow().document.break_undo_merge();
+    }
+
     /// Redo the most recently undone edit. No-op when the redo stack
     /// is empty.
     pub fn redo(&self) {
@@ -4426,6 +4448,17 @@ impl Widget for RichTextEditorBody {
 
 impl Widget for RichTextEditor {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+        // Tell the framework this widget edits text.
+        //
+        // What it buys: an application may take `Ctrl+Z`, `Ctrl+C` and friends
+        // for itself — a single Undo command over the whole app has to — and
+        // registered shortcuts resolve before any widget sees the raw key. This
+        // is how the host can tell that the caret is *here*, and either drive
+        // this surface or step aside so it keeps its own keys. Without it, an
+        // application that routes those chords silently breaks every text
+        // widget it does not personally know about. See
+        // `teksilo_core::text_surface`.
+        ctx.register_text_surface(std::rc::Rc::new(self.handle()));
         // Engine swap: replace the private fallback with one sharing
         // the application's `SharedTypesetter` so rendered glyphs end
         // up in the atlas teksilo-render uploads to the GPU. Headless
@@ -5359,4 +5392,63 @@ fn char_index_in_text(text: &str, byte_offset: usize) -> usize {
         count += 1;
     }
     count
+}
+
+// ── The framework's uniform view of a text-editing widget ────────────────────
+
+impl teksilo_core::text_surface::TextSurface for EditorHandle {
+    fn can_undo(&self) -> bool {
+        EditorHandle::can_undo(self).get()
+    }
+
+    fn can_redo(&self) -> bool {
+        EditorHandle::can_redo(self).get()
+    }
+
+    fn undo(&self) {
+        EditorHandle::undo(self);
+    }
+
+    fn redo(&self) {
+        EditorHandle::redo(self);
+    }
+
+    /// The editor's own [`CommandFilter`](crate::common::editor_runtime::CommandFilter)
+    /// is the authority: a host that has imposed `ForwardOnly` or `ReadOnly` on
+    /// this editor must not be able to route around it from a menu.
+    fn history_frozen(&self) -> bool {
+        !self.command_filter().accepts(EditCommandKind::Undo)
+    }
+
+    fn has_selection(&self) -> bool {
+        EditorHandle::has_selection(self).get()
+    }
+
+    fn is_read_only(&self) -> bool {
+        !self.command_filter().accepts(EditCommandKind::InsertChar)
+    }
+
+    fn allows_copy(&self) -> bool {
+        self.command_filter().accepts(EditCommandKind::Copy)
+    }
+
+    fn cut(&self, ctx: &teksilo_core::widget::EventContext<'_>) {
+        EditorHandle::cut(self, ctx);
+    }
+
+    fn copy(&self, ctx: &teksilo_core::widget::EventContext<'_>) {
+        EditorHandle::copy(self, ctx);
+    }
+
+    fn paste(&self, ctx: &teksilo_core::widget::EventContext<'_>) {
+        EditorHandle::paste(self, ctx);
+    }
+
+    fn paste_plain(&self, ctx: &teksilo_core::widget::EventContext<'_>) {
+        EditorHandle::paste_unformatted(self, ctx);
+    }
+
+    fn select_all(&self) {
+        EditorHandle::select_all(self);
+    }
 }

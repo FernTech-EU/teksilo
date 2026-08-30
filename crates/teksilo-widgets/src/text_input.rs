@@ -116,6 +116,9 @@ pub struct TextInput {
     /// Same idea as `caret_position_slot` but for the setter
     /// closure. Captured pre-build by `caret_setter()`.
     caret_setter_slot: std::rc::Rc<std::cell::RefCell<Option<std::rc::Rc<dyn Fn(usize)>>>>,
+    /// Handed out by [`Self::handle`] before build, adopted by the inner field
+    /// at build time — so the two are one handle, not two that agree by luck.
+    field_handle: crate::primitives::TextFieldHandle,
     /// Mirrored from the inner field's `validation_feedback_signal`
     /// during `build`. Composing widgets that install a `validator`
     /// read this to compose feedback across multiple fields (range
@@ -184,6 +187,7 @@ impl TextInput {
             validator: None,
             caret_position_slot: std::rc::Rc::new(std::cell::RefCell::new(None)),
             caret_setter_slot: std::rc::Rc::new(std::cell::RefCell::new(None)),
+            field_handle: crate::primitives::TextFieldHandle::detached(),
             feedback_signal: Signal::new(ValidationFeedback::Pristine),
             label: None,
             min_width: None,
@@ -381,6 +385,21 @@ impl TextInput {
         slot.as_ref().unwrap().clone()
     }
 
+    /// A live handle on the inner field — its text-editing commands, for a
+    /// host outside the widget.
+    ///
+    /// Mirrors [`TextInputField::handle`], and exists for the same reason: an
+    /// application that routes Undo, Cut, Copy, Paste and Select All to
+    /// "whichever text surface holds the caret" must be able to reach *every*
+    /// such surface. A `TextInput` that could not be reached would silently
+    /// lose its own Ctrl+Z to whatever the host routed the chord at instead.
+    ///
+    /// Like [`caret_setter`](Self::caret_setter), safe to take before `build`:
+    /// the handle reaches the field through a slot the widget fills in.
+    pub fn handle(&self) -> crate::primitives::TextFieldHandle {
+        self.field_handle.clone()
+    }
+
     /// Programmatic caret setter. Mirrors the inner field's
     /// [`TextInputField::caret_setter`]. Returns a closure that
     /// is a no-op until `build` runs; afterwards it walks the
@@ -519,7 +538,8 @@ impl Widget for TextInput {
         let text_area_height =
             (inner_height - 2.0 * field_dims::TEXT_FIELD_PADDING_VERTICAL).max(0.0);
 
-        let mut field = TextInputField::new(self.text.clone())
+        let mut field = TextInputField::new(self.text.clone()).share_handle(&self.field_handle);
+        field = field
             .enabled(self.enabled.clone())
             .read_only(self.read_only)
             .placeholder(self.placeholder.clone())

@@ -18,6 +18,7 @@ use teksilo_core::event::{Key, Modifiers};
 use teksilo_core::shortcut::KeyStroke;
 use teksilo_core::signal::Prop;
 use teksilo_data::CheckState;
+use teksilo_i18n::LocalizedString;
 use teksilo_platform::native_menu::{
     MenuItemDelta, NativeCheck, NativeKeyEquivalent, NativeMenuActivation, NativeMenuHandle,
     NativeMenuNode, NativeMenuSnapshot, StandardMenuRole, StandardRoutedItem,
@@ -116,9 +117,27 @@ pub(crate) fn install(model: &MenuModel, ctx: &BuildContext) -> Option<NativeMen
 
     handle.set_window_menu(window_id, snapshot, activations, poster);
 
-    // Wire reactive per-item updates (enabled / check / radio).
+    // Wire reactive per-item updates (title / enabled / check / radio).
     let mut observers = Vec::new();
     for item in reactive {
+        // The title first, and by the same delta mechanism as the rest: a menu
+        // whose Undo row names its target has to say the same thing in the
+        // global bar as in the window, and re-installing the whole native menu
+        // to change one string would be both heavy and visibly flickery.
+        {
+            let sig = item.title.to_signal();
+            let h = handle.clone();
+            let id = item.id;
+            observers.push(sig.observe(move |v| {
+                h.update_item(
+                    id,
+                    MenuItemDelta {
+                        title: Some(strip_title(v)),
+                        ..Default::default()
+                    },
+                );
+            }));
+        }
         if let Prop::Bound(sig) = item.enabled {
             let h = handle.clone();
             let id = item.id;
@@ -182,6 +201,11 @@ struct ReactiveItem {
     id: MenuItemId,
     enabled: Prop<bool>,
     state: MenuItemState,
+    /// The entry's label, kept so a title that depends on application state —
+    /// "Undo renaming «Chapter 3»" — reaches the native bar too. Almost every
+    /// title only ever changes with the locale, and a locale change rebuilds
+    /// the whole menu, so for those this observation simply never fires.
+    title: LocalizedString,
 }
 
 fn resolve_node(
@@ -243,6 +267,7 @@ fn resolve_node(
                 id: entry.id,
                 enabled: entry.enabled.clone(),
                 state: entry.state.clone(),
+                title: entry.title.clone(),
             });
 
             Some(NativeMenuNode::Item {

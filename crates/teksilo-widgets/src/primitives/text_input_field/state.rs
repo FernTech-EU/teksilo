@@ -94,6 +94,14 @@ pub(crate) struct TextInputState {
 
     // ── Input state ─────────────────────────────────────────────────
     pub has_focus: bool,
+    /// The observable twin of [`has_focus`](Self::has_focus).
+    ///
+    /// The bool is what the widget's own drawing and key handling read; this is
+    /// what an *outside* observer needs — an application routing Undo to
+    /// whichever text surface holds the caret cannot poll a `bool` behind a
+    /// `RefCell` every frame. Same shape and same purpose as
+    /// `RichTextEditor`'s `focus_signal`.
+    pub focus_signal: Signal<bool>,
     /// Whether the host window is currently active (`focused AND not
     /// occluded`). Mirrored from `BuildContext::window_active_signal` by an
     /// effect in `TextInputField::build` (the frame-loop `tick` has no
@@ -214,6 +222,11 @@ pub(crate) struct TextInputConfig {
     pub revealed: Option<Signal<bool>>,
     pub at_reveal_policy: AtRevealPolicy,
     pub allow_copy: bool,
+    /// Handed in rather than minted here, so a [`TextFieldHandle`] taken before
+    /// the widget is built observes the same signal the built widget writes.
+    ///
+    /// [`TextFieldHandle`]: crate::primitives::TextFieldHandle
+    pub focus_signal: Signal<bool>,
 }
 
 impl TextInputState {
@@ -233,6 +246,7 @@ impl TextInputState {
             revealed,
             at_reveal_policy,
             allow_copy,
+            focus_signal,
         } = config;
         let document = TextDocument::new();
         if !initial_text.is_empty() {
@@ -281,6 +295,7 @@ impl TextInputState {
             event_queue,
             _event_subscription: subscription,
             has_focus: false,
+            focus_signal,
             window_active: true,
             selection_tint: [0.0; 4],
             drag_state: DragState::Idle,
@@ -514,6 +529,7 @@ mod secure_tests {
             revealed,
             at_reveal_policy: AtRevealPolicy::SwapRole,
             allow_copy,
+            focus_signal: Signal::new(false),
         }
     }
 
@@ -556,7 +572,11 @@ mod secure_tests {
     fn reveal_while_typing_unmasks_only_when_focused() {
         let st = TextInputState::new(cfg(true, EchoMode::RevealWhileTyping, None, false));
         assert!(st.borrow().should_mask(), "masked when unfocused");
-        st.borrow_mut().has_focus = true;
+        {
+            let mut st = st.borrow_mut();
+            st.has_focus = true;
+            st.focus_signal.set(true);
+        }
         let s = st.borrow();
         assert!(!s.should_mask(), "revealed while focused");
         assert!(s.copy_allowed(), "copy allowed while revealed by typing");
