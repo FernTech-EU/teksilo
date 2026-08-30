@@ -252,12 +252,34 @@ pub(crate) fn handle_key(
                                 st.pending_chars.push_str(&clean);
                             }
                             true
-                        } else {
-                            // Whole input was rejected (filter or
-                            // control-only); swallow the keystroke
-                            // so it doesn't bubble into a shortcut
-                            // match on a single-char rejected key.
+                        } else if t.chars().any(|c| !c.is_control()) {
+                            // Real text, rejected wholesale by the
+                            // filter or the max length: swallow it, so a
+                            // digits-only field doesn't let a rejected
+                            // "s" fall through and match a Save
+                            // shortcut.
                             return EventResponse::Handled;
+                        } else {
+                            // Nothing but control characters, so this
+                            // key never carried text at all — the
+                            // platform simply attaches some to a named
+                            // key, and winit hands Escape through as
+                            // U+001B. Stripping that to nothing is not a
+                            // rejection, and swallowing it on that
+                            // ground is what stopped Escape from ever
+                            // leaving a focused field: every "Escape
+                            // closes this" affordance above one was dead
+                            // — the cell editor that would not shut, and
+                            // any dialog whose cancel sits outside the
+                            // field. Bubble instead, the way `Key::Tab`
+                            // above already does.
+                            //
+                            // Not keyed on the `Key` variant: a typed
+                            // letter arrives as `Key::A`, not
+                            // `Key::Character('a')`, so "is it a
+                            // character key" would quietly stop
+                            // swallowing rejected letters.
+                            false
                         }
                     } else {
                         false

@@ -254,6 +254,31 @@ impl Key {
             _ => None,
         }
     }
+
+    /// The text the platform attaches to this key, for the handful of named
+    /// keys that carry any. Mirrors winit's `NamedKey::to_text`, which is
+    /// where these values reach the app from.
+    ///
+    /// Worth knowing because it is surprising: Escape arrives carrying
+    /// U+001B, so a widget that reads `KeyDown::text` sees text on a key
+    /// nobody thinks of as text. A `TextInputField` used to filter that
+    /// control character out, read the empty result as "input rejected" and
+    /// swallow the key — which is how Escape stopped bubbling out of a
+    /// focused field.
+    ///
+    /// Character keys are deliberately absent: `Key::A` is `None` here, and
+    /// the way to simulate typing is `type_text`, which already sends text.
+    /// The gap this closes is only the surprising one.
+    pub fn to_text(&self) -> Option<&'static str> {
+        match self {
+            Key::Enter => Some("\r"),
+            Key::Backspace => Some("\u{8}"),
+            Key::Tab => Some("\t"),
+            Key::Space => Some(" "),
+            Key::Escape => Some("\u{1b}"),
+            _ => None,
+        }
+    }
 }
 
 /// Keyboard modifier state.

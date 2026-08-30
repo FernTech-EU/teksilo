@@ -99,12 +99,19 @@ impl WidgetTree {
         self.dispatch_event(WidgetEvent::PointerMove { position });
     }
 
-    /// Simulate a key press (down + up).
+    /// Simulate a key press (down + up), carrying the text the platform
+    /// attaches to the key ([`Key::to_text`]).
+    ///
+    /// That text is not decoration: Escape arrives as U+001B, and a widget
+    /// that inspects `text` behaves differently with it than without. This
+    /// helper used to send `text: None` for every key, so a whole class of
+    /// bug was invisible to every test in the workspace — a field that
+    /// swallowed Escape passed the suite while failing in the user's hands.
     pub fn press_key(&mut self, key: Key, modifiers: Modifiers) {
         self.dispatch_event(WidgetEvent::KeyDown {
             key,
             modifiers,
-            text: None,
+            text: key.to_text().map(str::to_string),
         });
         self.dispatch_event(WidgetEvent::KeyUp { key, modifiers });
     }

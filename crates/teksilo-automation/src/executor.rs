@@ -410,12 +410,18 @@ fn pointer_up(
     );
 }
 
+/// Press and release one key, carrying the text the platform attaches to it
+/// ([`Key::to_text`]) so a driven run matches a hand-driven one.
+///
+/// It sent `text: None` for every key, which made `inject_key` a *weaker*
+/// probe than a real keypress rather than an equivalent one — an Escape that
+/// a focused field swallowed came back through this path looking fine.
 fn press_key(tree: &mut WidgetTree, ops: &mut dyn WindowOps, key: Key, modifiers: Modifiers) {
     tree.dispatch_event_with_ops(
         WidgetEvent::KeyDown {
             key,
             modifiers,
-            text: None,
+            text: key.to_text().map(str::to_string),
         },
         ops,
     );
