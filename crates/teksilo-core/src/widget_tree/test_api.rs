@@ -47,18 +47,51 @@ impl WidgetTree {
     ///
     /// Equivalent semantics to [`Self::click`]; named differently so
     /// production call sites read clearly.
+    ///
+    /// The tap runs on a standalone dispatch, so a handler it reaches
+    /// cannot use the multi-window API. Call
+    /// [`synthesise_tap_with_ops`](Self::synthesise_tap_with_ops) from
+    /// anywhere that already holds a real
+    /// [`WindowOps`](crate::window::WindowOps) sink.
     pub fn synthesise_tap(&mut self, id: WidgetId) {
+        let mut noop = crate::window::NoopWindowOps;
+        self.synthesise_tap_with_ops(id, &mut noop);
+    }
+
+    /// [`synthesise_tap`](Self::synthesise_tap), dispatched over the
+    /// caller's app-level [`WindowOps`](crate::window::WindowOps) sink.
+    ///
+    /// A synthetic tap is a *nested* dispatch, and everything the tapped
+    /// widget does happens inside it — including the intent it sends and
+    /// the action that intent resolves to. Dispatching it standalone
+    /// therefore hands that action a context with no window sink:
+    /// `ctx.open_window` panics, and `find_window` / `focus_window` /
+    /// `close_window_by_id` silently do nothing. That is how keyboard
+    /// activation in a menu (Enter, Space, a mnemonic, type-ahead — all
+    /// four route through `EventContext::synthetic_click`) lost the
+    /// multi-window API that the same row reached fine by mouse.
+    pub fn synthesise_tap_with_ops(
+        &mut self,
+        id: WidgetId,
+        ops: &mut dyn crate::window::WindowOps,
+    ) {
         let center = self.arena.bounds(id).center();
-        self.dispatch_event(WidgetEvent::PointerDown {
-            position: center,
-            button: PointerButton::Primary,
-            modifiers: Modifiers::NONE,
-        });
-        self.dispatch_event(WidgetEvent::PointerUp {
-            position: center,
-            button: PointerButton::Primary,
-            modifiers: Modifiers::NONE,
-        });
+        self.dispatch_event_with_ops(
+            WidgetEvent::PointerDown {
+                position: center,
+                button: PointerButton::Primary,
+                modifiers: Modifiers::NONE,
+            },
+            &mut *ops,
+        );
+        self.dispatch_event_with_ops(
+            WidgetEvent::PointerUp {
+                position: center,
+                button: PointerButton::Primary,
+                modifiers: Modifiers::NONE,
+            },
+            &mut *ops,
+        );
     }
 
     /// Simulate pointer movement to a position.

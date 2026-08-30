@@ -1862,7 +1862,11 @@ impl WidgetTree {
             self.arena.mark_needs_paint(id);
         }
         for id in ctx.synthetic_clicks {
-            self.click(id);
+            // Over the caller's ops, never a standalone dispatch: the
+            // tapped widget's own handler runs inside this nested
+            // dispatch, so a standalone one would deny it the
+            // multi-window API this dispatch already has in hand.
+            self.synthesise_tap_with_ops(id, &mut *ops);
         }
         if let Some(&id) = ctx.focus_requests.last() {
             // If the requested widget is itself not focusable (e.g. a

@@ -1065,6 +1065,80 @@ mod tests {
         tree.add(menu)
     }
 
+    /// A `WindowOps` that only counts `open_window`. Enough to tell "the
+    /// row's handler reached the app's window sink" from the panic a
+    /// standalone dispatch used to raise there.
+    #[derive(Default)]
+    struct CountingWindowOps {
+        opened: usize,
+    }
+
+    impl teksilo_core::WindowOps for CountingWindowOps {
+        fn open_window(
+            &mut self,
+            _config: teksilo_core::WindowConfig,
+        ) -> teksilo_core::window::TeksiloWindowId {
+            self.opened += 1;
+            teksilo_core::window::TeksiloWindowId::new(1)
+        }
+
+        fn find_window(&self, _string_id: &str) -> Option<teksilo_core::window::TeksiloWindowId> {
+            None
+        }
+
+        fn window_state(
+            &self,
+            _id: teksilo_core::window::TeksiloWindowId,
+        ) -> Option<teksilo_core::window::WindowState> {
+            None
+        }
+
+        fn windows(&self) -> Vec<teksilo_core::window::WindowState> {
+            Vec::new()
+        }
+
+        fn focus_window(&mut self, _id: teksilo_core::window::TeksiloWindowId) {}
+
+        fn close_window_by_id(&mut self, _id: teksilo_core::window::TeksiloWindowId) {}
+    }
+
+    #[test]
+    fn keyboard_activation_keeps_the_window_ops() {
+        // Enter on a menu row does not dispatch the click the pointer
+        // would: it queues `EventContext::synthetic_click`, which the tree
+        // drains as a *nested* dispatch — and the row's own handler runs
+        // inside it. Draining that tap standalone handed the handler a
+        // context with no window sink, so a row that opened a window by
+        // mouse panicked in `NoopWindowOps::open_window` by keyboard
+        // (Skribisto's Help ▸ Help Topics). Same for Space, a mnemonic and
+        // type-ahead: all four activate through `synthetic_click`.
+        for activate in [Key::Enter, Key::Space] {
+            let mut tree = light_tree();
+            let menu = MenuList::new().item(MenuItem::new(lit!("Help")).on_activate_fn(|ctx| {
+                ctx.open_window(teksilo_core::WindowConfig::new().title(lit!("Help")));
+            }));
+            let menu_id = tree.add(menu);
+            tree.layout(SizeProposal::with_width(300.0));
+            tree.focus(menu_id);
+
+            let mut ops = CountingWindowOps::default();
+            for key in [Key::ArrowDown, activate] {
+                tree.dispatch_event_with_ops(
+                    teksilo_core::event::WidgetEvent::KeyDown {
+                        key,
+                        modifiers: Modifiers::NONE,
+                        text: None,
+                    },
+                    &mut ops,
+                );
+            }
+            assert_eq!(
+                ops.opened, 1,
+                "{activate:?} on a menu row must reach the caller's WindowOps"
+            );
+        }
+    }
+
     #[test]
     fn mnemonic_letter_activates_matching_item() {
         // Bare letter that matches an item's `&`-marker activates it
