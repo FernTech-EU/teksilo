@@ -174,6 +174,18 @@ impl WidgetTree {
             }
         }
 
+        // Escape retires any shown tooltip first, and does **not** stop there —
+        // see `tooltip_escape_pressed`. Ordered before the stack walk below so
+        // that walk can no longer pick a tooltip as the thing to dismiss, which
+        // is what used to spend the key on a tip nobody was reading while the
+        // editor / menu / dialog the user meant stayed open.
+        if let WidgetEvent::KeyDown {
+            key: Key::Escape, ..
+        } = &event
+        {
+            self.tooltip_escape_pressed();
+        }
+
         if let WidgetEvent::KeyDown {
             key: Key::Escape, ..
         } = &event

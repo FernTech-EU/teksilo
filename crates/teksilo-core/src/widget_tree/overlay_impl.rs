@@ -1507,6 +1507,33 @@ impl WidgetTree {
         }
     }
 
+    /// Retire shown tooltips on **Escape**, without consuming the key.
+    ///
+    /// WCAG 1.4.13 (Content on Hover or Focus) requires that hover content can
+    /// be dismissed without moving the pointer or focus, and Escape is the
+    /// mechanism everyone expects. What it does **not** require is that the
+    /// keystroke stop there — and stopping there is a bug with real teeth,
+    /// because a tooltip is up far more often than anyone realises. A writer
+    /// renaming a table cell, pointer resting where they clicked, presses
+    /// Escape to abandon the rename: the tip they were not looking at silently
+    /// goes away and the editor stays open. Press it again and it works. It
+    /// reads as "Escape does nothing", and it is why an Escape-cancels
+    /// affordance anywhere in an app is unreliable rather than plainly broken.
+    ///
+    /// So this runs *before* the overlay stack's own Escape walk and returns no
+    /// verdict: the tips go, and the key carries on to whatever the user
+    /// actually meant it for — a menu, a popover, or the focused widget.
+    /// Retiring them first also means that walk can no longer pick a tooltip as
+    /// its target, which is what used to swallow the press.
+    ///
+    /// Sticky tooltips are untouched, exactly as on a pointer press: the user
+    /// deliberately pinned those, and they own their own Escape handling.
+    pub(super) fn tooltip_escape_pressed(&mut self) {
+        // No position — the same "every non-sticky tip goes" case as a window
+        // deactivation. A key press has nowhere to be "inside".
+        self.tooltip_pointer_press(None);
+    }
+
     /// Retire hover tooltips when the window stops being active.
     ///
     /// Same shape as [`tooltip_pointer_press`](Self::tooltip_pointer_press) —

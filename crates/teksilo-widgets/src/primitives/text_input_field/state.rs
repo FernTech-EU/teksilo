@@ -100,6 +100,12 @@ pub(crate) struct TextInputState {
     /// context). Gates the caret alongside `has_focus` — the caret hides in an
     /// inactive window. Starts `true` to match the tree's initial value.
     pub window_active: bool,
+    /// The selection tint last handed to the engine, so "what is this field
+    /// painting its selection in" is answerable without reaching into the
+    /// engine (whose `flow` keeps no getter). Both axes that decide it —
+    /// `window_active` and `has_focus` — change independently, and each has to
+    /// re-apply; see `field_selection_color`.
+    pub selection_tint: [f32; 4],
     pub drag_state: DragState,
     pub needs_full_layout: bool,
     pub content_dirty: bool,
@@ -276,6 +282,7 @@ impl TextInputState {
             _event_subscription: subscription,
             has_focus: false,
             window_active: true,
+            selection_tint: [0.0; 4],
             drag_state: DragState::Idle,
             needs_full_layout: true,
             content_dirty: true,

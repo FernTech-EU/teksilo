@@ -935,8 +935,9 @@ impl Widget for TextInputField {
             let theme = theme_signal.get();
             let colors = &theme.colors;
             let mut st = self.state().borrow_mut();
-            st.engine
-                .set_selection_color(field_selection_color(colors, ctx.window_active()));
+            let tint = field_selection_color(colors, ctx.window_active(), st.has_focus);
+            st.selection_tint = tint;
+            st.engine.set_selection_color(tint);
         }
         {
             let state = self.state().clone();
@@ -944,8 +945,9 @@ impl Widget for TextInputField {
             ctx.effect(&theme_signal, move |theme| {
                 let colors = &theme.colors;
                 let mut st = state.borrow_mut();
-                st.engine
-                    .set_selection_color(field_selection_color(colors, wa_signal.get()));
+                let tint = field_selection_color(colors, wa_signal.get(), st.has_focus);
+                st.selection_tint = tint;
+                st.engine.set_selection_color(tint);
             });
         }
 
@@ -1162,8 +1164,9 @@ impl Widget for TextInputField {
                 let mut st = state.borrow_mut();
                 st.window_active = window_active;
                 let theme = theme_for_sel.get();
-                st.engine
-                    .set_selection_color(field_selection_color(&theme.colors, window_active));
+                let tint = field_selection_color(&theme.colors, window_active, st.has_focus);
+                st.selection_tint = tint;
+                st.engine.set_selection_color(tint);
                 if window_active {
                     // Reactivated: show the caret immediately if still focused
                     // (restart the blink phase), rather than waiting one interval.
@@ -1204,6 +1207,9 @@ impl Widget for TextInputField {
 
         let state_for_focus = self.state().clone();
         let interaction_for_focus = self.interaction.clone();
+        // The selection band's tint depends on focus, so the focus handler has
+        // to re-apply it — and needs the live theme to do so.
+        let theme_for_focus = theme_signal.clone();
         let state_for_pointer = self.state().clone();
         let state_for_key = self.state().clone();
         let state_for_double = self.state().clone();
@@ -1235,6 +1241,13 @@ impl Widget for TextInputField {
 
                 let mut st = state_for_focus.borrow_mut();
                 st.has_focus = gained;
+                // Re-tint the selection band: `has_focus` is half of what
+                // decides it, so losing focus inside an active window has to
+                // re-apply just as losing the window does.
+                let sel_theme = theme_for_focus.get();
+                let tint = field_selection_color(&sel_theme.colors, st.window_active, gained);
+                st.selection_tint = tint;
+                st.engine.set_selection_color(tint);
                 // RevealWhileTyping shows plaintext while focused and
                 // re-masks on blur — both transitions need a relayout.
                 if st.secure && st.echo_mode == EchoMode::RevealWhileTyping {
@@ -1736,8 +1749,26 @@ fn paint_suffix_glyphs(canvas: &mut Canvas, frame: &teksilo_text::RenderFrame, o
 /// is inactive — so a field's selection desaturates in a background window
 /// (the universal desktop convention; the same `selection_bg_inactive` the OS
 /// uses for unfocused selection).
-fn field_selection_color(colors: &teksilo_tokens::ColorTokens, window_active: bool) -> [f32; 4] {
-    if window_active {
+/// The band a selection is painted in — the **active** tint only while this
+/// field is the one the keystrokes would go to.
+///
+/// Two axes, and both are needed. The window losing focus was already handled;
+/// what was missing is the field losing it *within* an active window, which is
+/// the common case: click into a cell editor, then click a button, and the
+/// field went on showing a fully-lit selection as though it were still taking
+/// input. Two fields on screen could both look focused at once.
+///
+/// The selection *state* is deliberately kept across blur — see the
+/// `on_focus(false)` arm, which spells out why (the right-click Copy path needs
+/// it, and native fields keep it too). This is the other half of that same
+/// sentence: the state is preserved, the **visual is dimmed**. Only the second
+/// half was implemented.
+fn field_selection_color(
+    colors: &teksilo_tokens::ColorTokens,
+    window_active: bool,
+    has_focus: bool,
+) -> [f32; 4] {
+    if window_active && has_focus {
         colors.selection_bg_active.to_array()
     } else {
         colors.selection_bg_inactive.to_array()
@@ -2061,19 +2092,76 @@ mod window_active_tests {
     fn field_selection_color_swaps_on_window_active() {
         let colors = teksilo_core::presets::intui::light().colors;
         assert_eq!(
-            field_selection_color(&colors, true),
+            field_selection_color(&colors, true, true),
             colors.selection_bg_active.to_array(),
             "active window uses the vivid selection colour"
         );
         assert_eq!(
-            field_selection_color(&colors, false),
+            field_selection_color(&colors, false, true),
             colors.selection_bg_inactive.to_array(),
             "inactive window uses the muted selection colour"
         );
         assert_ne!(
-            field_selection_color(&colors, true),
-            field_selection_color(&colors, false)
+            field_selection_color(&colors, true, true),
+            field_selection_color(&colors, false, true)
         );
+    }
+
+    /// **A field that is not focused dims its selection, even in an active
+    /// window.**
+    ///
+    /// Only the window axis was ever consulted, so clicking from one field to
+    /// another left both showing a fully-lit selection: two controls claiming
+    /// the keystrokes at once. The selection *state* is kept on blur on
+    /// purpose — the `on_focus(false)` arm explains why, and native fields do
+    /// the same — and this is the other half of that sentence, which had never
+    /// been written.
+    #[test]
+    fn field_selection_color_dims_when_the_field_is_not_focused() {
+        let colors = teksilo_core::presets::intui::light().colors;
+        assert_eq!(
+            field_selection_color(&colors, true, false),
+            colors.selection_bg_inactive.to_array(),
+            "an unfocused field must dim its selection even in an active window"
+        );
+        assert_eq!(
+            field_selection_color(&colors, false, false),
+            colors.selection_bg_inactive.to_array()
+        );
+    }
+
+    /// ...and the live field re-tints as focus comes and goes, rather than
+    /// keeping whatever colour it was built with.
+    #[test]
+    fn a_field_re_tints_its_selection_when_focus_leaves_it() {
+        let colors = teksilo_core::presets::intui::light().colors;
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let a = tree.add(TextInputField::new(Signal::new("hello".to_string())));
+        let b = tree.add(TextInputField::new(Signal::new("world".to_string())));
+        tree.layout(SizeProposal::exact(200.0, 40.0));
+
+        let tint = |tree: &WidgetTree, id| {
+            tree.widget_as_any(id)
+                .and_then(|w| w.downcast_ref::<TextInputField>())
+                .and_then(|f| f.state.as_ref())
+                .map(|st| st.borrow().selection_tint)
+                .expect("a built field")
+        };
+
+        tree.focus(a);
+        assert_eq!(
+            tint(&tree, a),
+            colors.selection_bg_active.to_array(),
+            "the focused field paints its selection live"
+        );
+
+        tree.focus(b);
+        assert_eq!(
+            tint(&tree, a),
+            colors.selection_bg_inactive.to_array(),
+            "focus moved to another field and the first kept a lit selection"
+        );
+        assert_eq!(tint(&tree, b), colors.selection_bg_active.to_array());
     }
 
     #[test]

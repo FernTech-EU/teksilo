@@ -656,6 +656,66 @@ mod tests {
         );
     }
 
+    /// **A shown tooltip does not eat Escape.**
+    ///
+    /// It is dismissed by the press — WCAG 1.4.13 asks for exactly that — but
+    /// the keystroke carries on to the focused widget, which is the half that
+    /// was missing. A tooltip is up far more often than anyone realises: the
+    /// pointer rests wherever it last clicked, the tip dwells in behind it, and
+    /// the next Escape goes to the tip instead of to the rename / dialog /
+    /// menu the user meant to cancel. It works on the *second* press, so it
+    /// reads as "Escape does nothing" rather than as a tooltip bug.
+    #[test]
+    fn escape_dismisses_a_tooltip_and_still_reaches_the_focused_widget() {
+        use std::cell::Cell;
+        use std::rc::Rc;
+        use teksilo_core::event::{EventResponse, Key, Modifiers, WidgetEvent};
+        use teksilo_core::widget_builder::WidgetBuilder;
+
+        let seen: Rc<Cell<usize>> = Rc::new(Cell::new(0));
+        let counter = seen.clone();
+
+        let mut tree = tree_with_backend();
+        let btn = tree.add(
+            Button::new(lit!("Save As"))
+                .tooltip(lit!("Save the current file under a new name"))
+                .on_key(move |ev, _ctx| {
+                    if let WidgetEvent::KeyDown {
+                        key: Key::Escape, ..
+                    } = ev
+                    {
+                        counter.set(counter.get() + 1);
+                        return EventResponse::Handled;
+                    }
+                    EventResponse::Ignored
+                }),
+        );
+        tree.layout(SizeProposal::exact(400.0, 200.0));
+        tree.focus(btn);
+
+        // Dwell until the tip is up — the ordinary state of a pointer that has
+        // stopped moving.
+        tree.pointer_move(tree.bounds(btn).center());
+        tree.advance_time(Duration::from_millis(500) + Duration::from_millis(50));
+        assert_eq!(
+            tree.active_overlays().len(),
+            1,
+            "the tooltip should be showing"
+        );
+
+        tree.press_key(Key::Escape, Modifiers::NONE);
+
+        assert!(
+            tree.active_overlays().is_empty(),
+            "Escape must still dismiss the tooltip (WCAG 1.4.13)"
+        );
+        assert_eq!(
+            seen.get(),
+            1,
+            "the focused widget never saw Escape — the tooltip swallowed it"
+        );
+    }
+
     #[test]
     fn button_rich_tooltip_appears_after_hover_delay() {
         _reset_tooltip_registry();
