@@ -1,0 +1,14 @@
+# SPDX-License-Identifier: MPL-2.0
+# SPDX-FileCopyrightText: 2026 FernTech
+
+[advisories]
+ignore = [
+    # rsa 0.10.0-rc.18, pulled in non-optionally and version-pinned by
+    # servo-script, reachable only through teksilo-webview's non-default
+    # `servo-backend` feature (no default feature set in the workspace
+    # enables it). No fixed rsa release exists; Servo's pin cannot move
+    # from this side. Teksilo performs no RSA operations of its own.
+    # Re-check when servo-script relaxes the pin or rsa ships a fix:
+    # https://rustsec.org/advisories/RUSTSEC-2023-0071
+    "RUSTSEC-2023-0071",
+]
