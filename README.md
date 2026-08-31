@@ -9,6 +9,8 @@
 
 A pure-Rust, batteries-included GUI framework for desktop applications. Accessibility, internationalization, rich text, themes, persistent settings, drag-and-drop, charts, and a scene canvas all ship as first-class citizens.
 
+Website: [https://teksilo.rs](https://teksilo.rs)
+
 ```rust
 use teksilo::prelude::*;
 use teksilo::widgets::Button;
@@ -72,7 +74,7 @@ A widget catalog example is available if you run `cargo run -p widget-catalog` i
 
 ## Documentation
 
-Available in `docs/` and on [Cloudflare Pages](https://docs.teksilo.rs).
+Available in `docs/` and on [https://docs.teksilo.rs](https://docs.teksilo.rs).
 
 ## Who is this for
 
