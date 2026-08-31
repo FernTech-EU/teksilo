@@ -21,6 +21,7 @@ teksilo-widgets = { workspace = true }
 teksilo-preview = { workspace = true }
 teksilo-render = { workspace = true }
 teksilo-platform = { workspace = true }
+teksilo-text = { workspace = true }
 png = { workspace = true }
 wgpu = { workspace = true }
 pollster = { workspace = true }

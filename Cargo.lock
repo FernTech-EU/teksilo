@@ -11051,6 +11051,7 @@ dependencies = [
  "teksilo-platform",
  "teksilo-preview",
  "teksilo-render",
+ "teksilo-text",
  "teksilo-tokens",
  "teksilo-widgets",
  "wgpu",

@@ -47,6 +47,7 @@
 
 mod builder_props;
 mod catalog;
+mod doc_snippet;
 mod knob;
 mod registry;
 mod source_loc;
@@ -54,6 +55,7 @@ mod variant;
 
 pub use builder_props::builder_property_groups;
 pub use catalog::{CatalogEntry, SlottedChild, WidgetCatalog, WidgetCategory};
+pub use doc_snippet::{DocSnippet, iter_doc_snippets};
 pub use knob::{EnumInfo, KnobDecl, KnobKind, KnobOverrides, KnobSpec, KnobValue, KnobValues};
 pub use registry::{entries_by_group, find_by_file, find_by_id, iter_entries};
 pub use source_loc::SourceLoc;

@@ -9,7 +9,13 @@
 //! cargo run -p teksilo-widgets-previewer
 //! cargo run -p teksilo-widgets-previewer -- --widget=button --variant=disabled
 //! cargo run -p teksilo-widgets-previewer -- --file=crates/teksilo-widgets/src/button.rs
+//! cargo run -p teksilo-widgets-previewer -- --list
+//! cargo run -p teksilo-widgets-previewer -- --export-docs
 //! ```
+//!
+//! `--export-docs` is the headless batch that fills `docs/widgets/img/`
+//! with the pictures the generated mdBook catalog pages reference. It
+//! needs a wgpu adapter but no display server.
 //!
 //! The binary intentionally has no logic beyond delegation —
 //! everything happens inside `teksilo_preview_ui::run_previewer`.
@@ -18,6 +24,12 @@
 
 fn main() {
     let argv: Vec<String> = std::env::args().collect();
+    if argv
+        .iter()
+        .any(|a| a == "--export-docs" || a.starts_with("--export-docs="))
+    {
+        std::process::exit(run_doc_export(&argv[1..]));
+    }
     if argv.iter().any(|a| a == "--list") {
         for entry in teksilo_preview::iter_entries() {
             println!(
@@ -32,6 +44,56 @@ fn main() {
     }
     let opts = teksilo_preview_ui::PreviewerOptions::from_args();
     teksilo_preview_ui::run_previewer(opts);
+}
+
+/// Headless documentation-image export.
+///
+/// ```text
+/// --export-docs[=OUT_DIR]   default: docs/widgets/img
+/// --pages=DIR               catalog pages to check against (default: docs/widgets)
+/// --all-subjects            write images even for slugs with no catalog page
+/// --dark                    render the dark theme instead of light
+/// --scale=N                 HiDPI factor (default 2)
+/// --only=slug[,slug...]     restrict the batch
+/// ```
+fn run_doc_export(args: &[String]) -> i32 {
+    let mut opts = teksilo_preview_ui::DocExportOptions::default();
+    for arg in args {
+        if let Some(dir) = arg.strip_prefix("--export-docs=") {
+            opts.out_dir = std::path::PathBuf::from(dir);
+        } else if let Some(dir) = arg.strip_prefix("--pages=") {
+            opts.pages_dir = Some(std::path::PathBuf::from(dir));
+        } else if arg == "--all-subjects" {
+            opts.pages_dir = None;
+        } else if arg == "--dark" {
+            opts.dark = true;
+        } else if let Some(scale) = arg.strip_prefix("--scale=") {
+            match scale.parse::<f32>() {
+                Ok(s) if s > 0.0 => opts.scale = s,
+                _ => {
+                    eprintln!("teksilo-previewer: invalid --scale '{}'", scale);
+                    return 2;
+                }
+            }
+        } else if let Some(list) = arg.strip_prefix("--only=") {
+            opts.only = list.split(',').map(str::to_string).collect();
+        } else if arg != "--export-docs" {
+            eprintln!(
+                "teksilo-previewer: unrecognised argument '{}' for --export-docs",
+                arg
+            );
+            return 2;
+        }
+    }
+
+    println!("Exporting catalog images to {} …", opts.out_dir.display());
+    match teksilo_preview_ui::export_doc_images(&opts) {
+        Ok(report) => teksilo_preview_ui::print_report(&report, &opts),
+        Err(e) => {
+            eprintln!("teksilo-previewer: {}", e);
+            1
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -184,6 +246,58 @@ mod tests {
              layout:\n  {}",
             failures.join("\n  "),
         );
+    }
+
+    /// The documentation snippets are a second registry feeding the same
+    /// image exporter, and they are only exercised by a `--export-docs`
+    /// run. Build and lay out every one so a snippet that panics deep
+    /// inside `build()` fails here rather than in the docs job.
+    #[test]
+    fn every_doc_snippet_lays_out_without_panic() {
+        use teksilo_canvas::SizeProposal;
+        use teksilo_core::widget_tree::WidgetTree;
+
+        let mut failures: Vec<String> = Vec::new();
+        for snippet in teksilo_preview::iter_doc_snippets() {
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let widget = (snippet.build)();
+                let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+                let _ = tree.add_boxed(widget);
+                tree.layout(SizeProposal::exact(800.0, 600.0));
+            }));
+            if let Err(err) = result {
+                let msg = err
+                    .downcast_ref::<&'static str>()
+                    .map(|s| s.to_string())
+                    .or_else(|| err.downcast_ref::<String>().cloned())
+                    .unwrap_or_else(|| "<unknown panic>".to_string());
+                failures.push(format!("{}: {}", snippet.source_file, msg));
+            }
+        }
+        assert!(
+            failures.is_empty(),
+            "the following documentation snippets panicked during layout:\n  {}",
+            failures.join("\n  "),
+        );
+    }
+
+    /// Every snippet must name a source file that actually exists — the
+    /// path is what files the image under `docs/widgets/<stem>.md`, so a
+    /// typo silently produces an orphan PNG.
+    #[test]
+    fn doc_snippet_source_paths_exist() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(|p| p.parent())
+            .expect("workspace root");
+        for snippet in teksilo_preview::iter_doc_snippets() {
+            let path = root.join(snippet.source_file);
+            assert!(
+                path.exists(),
+                "doc snippet references a missing source file: {}",
+                snippet.source_file
+            );
+        }
     }
 
     #[test]

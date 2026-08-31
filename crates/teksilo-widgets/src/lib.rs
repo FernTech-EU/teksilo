@@ -116,6 +116,8 @@ pub mod tree_table_view;
 pub mod tree_view;
 
 #[cfg(feature = "preview")]
+mod doc_snippets;
+#[cfg(feature = "preview")]
 mod preview_catalog;
 
 pub use tooltip::TooltipWidget;

@@ -64,6 +64,11 @@ def _classify(target: str, src_dir: Path, base: str) -> tuple[str, str | None]:
         or "://" in t
         or t.startswith("mailto:")
         or re.match(r"(\.\./)*api/", t)  # the in-book rustdoc tree, at any depth
+        # Page-local images (the generated catalog previews under
+        # `docs/*/img/`). mdBook copies them into the build output, so the
+        # relative path already resolves; rewriting one to a GitHub *blob*
+        # URL would swap the picture for a link to an HTML page.
+        or re.match(r"(\.\./)*img/", t)
     ):
         return ("keep", t)
 
@@ -184,6 +189,9 @@ def _self_test() -> int:
     ri = fx("see [`Ref`] now.\n\n[`Ref`]: crate::Ref")
     assert "[`Ref`]:" not in ri and "see `Ref` now." in ri, ri
     # reference-style source def -> GitHub URL (body shortcut still resolves)
+    img = fx("![Button preview](img/button.png)")
+    assert img == "![Button preview](img/button.png)", img
+
     rd = fx("see [`T`].\n\n[`T`]: ../crates/teksilo-widgets/src/toolbar.rs")
     assert f"[`T`]: {r}/blob/{b}/crates/teksilo-widgets/src/toolbar.rs" in rd, rd
     # idempotent

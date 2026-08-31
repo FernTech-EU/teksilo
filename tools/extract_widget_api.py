@@ -1463,6 +1463,9 @@ def _catalog_keep_target(target: str) -> bool:
     return (
         t.startswith("#")
         or t.startswith("../api/")
+        # The page's own preview image, written next to it by
+        # `teksilo-widgets-previewer --export-docs`.
+        or t.startswith("img/")
         or t.startswith("mailto:")
         or "://" in t
     )

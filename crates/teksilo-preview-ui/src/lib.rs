@@ -13,13 +13,18 @@
 mod app_state;
 mod canvas;
 mod cli;
+mod doc_export;
 mod inspector;
 mod knob_form;
 mod navigator;
 mod png_export;
+mod shot;
 mod toolbar;
 
 pub use cli::PreviewerOptions;
+pub use doc_export::{
+    DocExportOptions, DocExportReport, SubjectOutcome, export_doc_images, print_report,
+};
 
 use teksilo_app::{TeksiloAppBuilder, ThemeMode};
 use teksilo_core::WindowConfig;

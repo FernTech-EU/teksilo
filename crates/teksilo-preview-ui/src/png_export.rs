@@ -3,29 +3,20 @@
 
 //! Off-screen PNG snapshot of the current canvas.
 //!
-//! Reuses the production `teksilo-render::Renderer` against a detached
-//! `wgpu::TextureView`. The pipeline mirrors teksilo-render's headless
-//! test infrastructure (`teksilo_render::test_support`):
-//!
-//! 1. Construct a fresh `WidgetTree` with the canvas's theme, add the
-//!    catalog entry's `build(variant, knobs)` widget as its root.
-//! 2. Run layout at a fixed proposal size (default 1024 × 768).
-//! 3. Spin up an off-screen `wgpu::Texture`, generate a `RenderFrame`
-//!    via `WidgetTree::render`, render to the texture.
-//! 4. Read back via `copy_texture_to_buffer` and encode PNG.
-//!
-//! The result is the path the PNG was saved to.
+//! The rendering itself lives in [`crate::shot`] — shared with the
+//! documentation image exporter, so a toolbar export and a `--export-docs`
+//! run produce the same picture. This module only resolves *what* to
+//! render (the selected widget/variant plus its live knob values) and
+//! *where* to save it.
 
 use std::path::PathBuf;
 
-use teksilo_canvas::SizeProposal;
-use teksilo_core::widget_tree::WidgetTree;
-use teksilo_render::test_support;
-
 use crate::app_state::AppState;
+use crate::shot::{Shooter, ShotOptions, write_png};
 
-const DEFAULT_TEXTURE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
-const DEFAULT_CANVAS_SIZE: (u32, u32) = (1024, 768);
+/// HiDPI factor for a manual export. Matches the doc exporter so a
+/// hand-taken snapshot can be dropped into `docs/widgets/img/` as-is.
+const EXPORT_SCALE: f32 = 2.0;
 
 /// Export the currently selected (widget, variant) to a PNG at
 /// `~/.teksilo-previewer/exports/<widget>__<variant>__<theme>.png`. The
@@ -45,16 +36,12 @@ pub fn export_current(state: &AppState) -> Result<PathBuf, String> {
 
     let canvas_theme = state.canvas_theme.get();
     let theme = canvas_theme.theme();
-    let (width, height) = DEFAULT_CANVAS_SIZE;
 
-    let mut tree = WidgetTree::new().with_theme(theme);
-    let _root = tree.add_boxed(widget);
-    tree.layout(SizeProposal::exact(width as f32, height as f32));
-    let frame = tree.render();
+    let mut shooter = Shooter::new(EXPORT_SCALE)?;
+    let shot = shooter.capture(widget, theme, &ShotOptions::default())?;
 
-    let bytes = pollster::block_on(render_offscreen(&frame, width, height))?;
     let out_path = output_path(widget_id, variant_name, canvas_theme)?;
-    encode_rgba_to_png(&out_path, &bytes, width, height)?;
+    write_png(&out_path, &shot.rgba, shot.width, shot.height)?;
     Ok(out_path)
 }
 
@@ -103,63 +90,4 @@ fn home_dir() -> Option<PathBuf> {
         }
     }
     None
-}
-
-async fn render_offscreen(
-    frame: &teksilo_canvas::RenderFrame,
-    width: u32,
-    height: u32,
-) -> Result<Vec<u8>, String> {
-    let (mut renderer, device, queue) =
-        match test_support::create_test_renderer("teksilo-preview-ui png export").await {
-            Some(t) => t,
-            None => {
-                return Err(
-                    "wgpu adapter unavailable — no GPU backend present for snapshot rendering"
-                        .into(),
-                );
-            }
-        };
-
-    let texture = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("teksilo-preview-ui export texture"),
-        size: wgpu::Extent3d {
-            width,
-            height,
-            depth_or_array_layers: 1,
-        },
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format: DEFAULT_TEXTURE_FORMAT,
-        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
-        view_formats: &[],
-    });
-    let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-
-    renderer.render(frame, &view, 1.0, width, height, [0.0, 0.0, 0.0, 0.0]);
-
-    Ok(test_support::read_texture_rgba(
-        &device, &queue, &texture, width, height,
-    ))
-}
-
-fn encode_rgba_to_png(
-    path: &std::path::Path,
-    rgba: &[u8],
-    width: u32,
-    height: u32,
-) -> Result<(), String> {
-    let file = std::fs::File::create(path).map_err(|e| format!("create {:?}: {}", path, e))?;
-    let writer = std::io::BufWriter::new(file);
-    let mut encoder = png::Encoder::new(writer, width, height);
-    encoder.set_color(png::ColorType::Rgba);
-    encoder.set_depth(png::BitDepth::Eight);
-    let mut writer = encoder
-        .write_header()
-        .map_err(|e| format!("png header: {}", e))?;
-    writer
-        .write_image_data(rgba)
-        .map_err(|e| format!("png write: {}", e))?;
-    Ok(())
 }
