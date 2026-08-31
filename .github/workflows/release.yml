@@ -16,10 +16,9 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  # Validate the release before creating it.
-  # Note: the workspace is `publish = false`, so there is no crates.io publish
-  # job and no binary-artifact build — Teksilo is a framework, not a shippable
-  # binary. This workflow only validates the tag and cuts a GitHub release.
+  # Validate the release before publishing it. No binary-artifact build —
+  # Teksilo is a framework, not a shippable binary — so this workflow validates
+  # the tag, publishes the workspace to crates.io, and cuts a GitHub release.
   validate:
     name: Validate Release
     runs-on: ubuntu-latest
@@ -70,8 +69,20 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v6
 
+      # `cargo publish` verify-builds every crate, which needs the same X11 /
+      # Wayland / keyboard libraries the test jobs install.
+      - name: Install Linux system dependencies
+        uses: ./.github/actions/install-linux-deps
+
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
+
+      # `cargo publish` resolves the whole workspace before it packages
+      # anything, which must resolve workspace path deps. Sibling repos
+      # (text-document, text-typeset) are not checked out on the runner.
+      # This rewrites Cargo.toml, hence the `--allow-dirty` below.
+      - name: Strip path dependencies
+        uses: ./.github/actions/strip-path-deps
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
@@ -123,7 +134,7 @@ jobs:
             fi
 
             echo "::group::cargo publish (attempt $attempt, $pending pending)"
-            if cargo publish --workspace "${excludes[@]}"; then
+            if cargo publish --workspace --allow-dirty "${excludes[@]}"; then
               echo "::endgroup::"
               echo "Publish complete."
               exit 0
@@ -151,7 +162,10 @@ jobs:
         run: |
           VERSION="${GITHUB_REF#refs/tags/v}"
           if [[ -f CHANGELOG.md ]]; then
-            sed -n "/^## \[${VERSION}\]/,/^## \[/p" CHANGELOG.md | sed '1d;$d' > release_notes.md
+            # Stop at the next H2 of any shape — the file ends with an
+            # unbracketed "## Earlier history" that would otherwise be
+            # swept into the notes of the oldest release listed.
+            sed -n "/^## \[${VERSION}\]/,/^## /p" CHANGELOG.md | sed '1d;$d' > release_notes.md
             if [[ ! -s release_notes.md ]]; then
               echo "No changelog entry found for version ${VERSION}" > release_notes.md
             fi

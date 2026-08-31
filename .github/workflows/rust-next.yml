@@ -90,6 +90,12 @@ jobs:
           toolchain: ${{ matrix.rust }}
           components: rustfmt
 
+      # `cargo fmt --all` runs `cargo metadata`, which must resolve workspace
+      # path deps. Sibling repos (text-document, text-typeset) are not checked
+      # out on the runner.
+      - name: Strip path dependencies
+        uses: ./.github/actions/strip-path-deps
+
       - name: Check formatting
         run: cargo fmt --all -- --check
 
@@ -115,13 +121,13 @@ jobs:
           toolchain: ${{ matrix.rust }}
           components: clippy
 
+      - name: Strip path dependencies
+        uses: ./.github/actions/strip-path-deps
+
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
         with:
           shared-key: clippy-${{ matrix.rust }}
-
-      - name: Strip path dependencies
-        uses: ./.github/actions/strip-path-deps
 
       - name: Lint
         run: cargo clippy --workspace --all-targets -- -D warnings -A deprecated

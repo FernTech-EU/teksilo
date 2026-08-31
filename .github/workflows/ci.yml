@@ -265,6 +265,12 @@ jobs:
         with:
           components: rustfmt
 
+      # `cargo fmt --all` runs `cargo metadata`, which must resolve workspace
+      # path deps. Sibling repos (text-document, text-typeset) are not checked
+      # out on the runner.
+      - name: Strip path dependencies
+        uses: ./.github/actions/strip-path-deps
+
       - name: Check formatting
         run: cargo fmt --all -- --check
 
