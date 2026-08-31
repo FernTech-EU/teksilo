@@ -23,8 +23,8 @@ with the two things that make a *first* publication awkward:
     script remembers it and waits that long between subsequent publishes,
     so the remaining crates go through on the first attempt instead of
     burning a failed upload each time. ``--min-interval`` seeds that pace
-    up front when you already know it; ``--max-interval`` caps a wildly
-    large learned value.
+    for one run when you already know it (it is not written to the state
+    file); ``--max-interval`` caps a wildly large learned value.
 
 Everything else is about being safely resumable across a run that long:
 
@@ -88,10 +88,33 @@ USER_AGENT = "teksilo-publish-crates (https://github.com/ferntech-eu/teksilo)"
 _RATE_LIMIT_RES = [
     re.compile(r"too many (?:new )?crates? in a short period", re.I),
     re.compile(r"too many (?:versions|updates).{0,40}short period", re.I),
-    re.compile(r"\b429\b|too many requests", re.I),
+    # cargo prints the HTTP status with its reason phrase — "(status 429
+    # Too Many Requests)". Match the phrase, never a bare 429: "exit
+    # status 429" from a linker is a build failure, and reading one as a
+    # rate limit would make the script sleep and retry it forever.
+    re.compile(r"too many requests|\b429\b[^\n]{0,40}rate.?limit", re.I),
 ]
+# "this exact version is already on the registry" — the one failure that
+# means "done", so it has to be the registry saying it. A bare "already
+# exists" also shows up in packaging and build-script errors, and taking
+# one for a successful publish would record the crate as done and skip it
+# on every resume, stranding the workspace half-uploaded.
 _ALREADY_UPLOADED_RE = re.compile(
-    r"already (?:uploaded|exists)|crate version .* is already", re.I)
+    r"crate version\s+`?[^`\s]+`?\s+is already (?:uploaded|being uploaded)"
+    r"|version\s+`?[^`\s]+`?\s+already (?:uploaded|exists)"
+    r"|already (?:uploaded|exists) (?:on|in|at) (?:the )?(?:crates\.io|registry)",
+    re.I)
+
+# Cargo tees a lot before it ever talks to the registry: packaging, then
+# a full verify build. The registry's reply is the tail of that, so the
+# detectors are pointed at the tail alone — a compile error that happens
+# to say "already exists" upstream must not be read as a reply.
+_ERROR_SCOPE_RES = [
+    re.compile(r"the remote server responded", re.I),
+    re.compile(r"failed to publish", re.I),
+    re.compile(r"^\s*Caused by:", re.M),
+]
+_SCOPE_FALLBACK_LINES = 40
 
 # A timestamp anywhere in the message. Accepts the RFC-3339-ish forms
 # crates.io has used, with or without a zone: 2026-07-23T15:04:05+0000,
@@ -122,6 +145,23 @@ def is_rate_limited(text: str) -> bool:
 def is_already_uploaded(text: str) -> bool:
     """True when the failure is 'this exact version is already on the registry'."""
     return bool(_ALREADY_UPLOADED_RE.search(text))
+
+
+def registry_error_text(output: str) -> str:
+    """The tail of cargo's output that carries the registry's reply.
+
+    Slices from the *last* anchor, so the scope is the final error rather
+    than the packaging and verify-build noise before it. With no anchor
+    at all (a short message, a proxy answering for itself) the last few
+    lines stand in.
+    """
+    start = -1
+    for rx in _ERROR_SCOPE_RES:
+        for m in rx.finditer(output):
+            start = max(start, m.start())
+    if start >= 0:
+        return output[start:]
+    return "\n".join(output.splitlines()[-_SCOPE_FALLBACK_LINES:])
 
 
 def parse_timestamp(raw: str) -> dt.datetime | None:
@@ -305,7 +345,7 @@ class State:
     # runs so a resumed run does not immediately spend a token it doesn't
     # have.
     last_publish: float | None = None
-    burst: int | None = None  # publishes accepted before the first 429
+    burst: int | None = None  # uploads accepted before the first 429
 
     @classmethod
     def load(cls, path: str, version: str) -> State:
@@ -404,11 +444,23 @@ class Options:
 
 def publish_all(order: list[str], versions: dict[str, str],
                 state: State, opt: Options) -> int:
-    if opt.min_interval is not None and (state.interval is None
-                                         or state.interval < opt.min_interval):
-        state.interval = opt.min_interval
+    def pace() -> float | None:
+        """Seconds to leave between publishes: the learned pace, floored
+        by --min-interval.
+
+        --min-interval is a seed for *this run* and deliberately stays
+        out of `state`, so a one-off "I know it's an hour" does not
+        become the state file's permanent opinion of the registry.
+        """
+        known = [v for v in (state.interval, opt.min_interval) if v]
+        return max(known) if known else None
+
+    # --plan and --dry-run change nothing on the registry, so they leave
+    # the state file alone too.
+    read_only = opt.plan or opt.dry_run
 
     accepted_this_run = 0
+    done_now: list[str] = []  # confirmed on the registry, this run's view
     failures: list[str] = []
     total = len(order)
 
@@ -424,14 +476,17 @@ def publish_all(order: list[str], versions: dict[str, str],
 
         if name in state.published:
             log(f"{head}: already published in a previous run — skipping")
+            done_now.append(name)
             continue
 
         if not opt.skip_index_check:
             known = fetch_index_versions(name)
             if known is not None and version in known:
                 log(f"{head}: already on crates.io — skipping")
-                state.published.append(name)
-                state.save()
+                done_now.append(name)
+                if not read_only:
+                    state.published.append(name)
+                    state.save()
                 continue
 
         if opt.plan:
@@ -452,35 +507,38 @@ def publish_all(order: list[str], versions: dict[str, str],
         consumed_token = False
 
         while True:
-            if (state.interval and state.last_publish is not None
+            interval = pace()
+            if (interval and state.last_publish is not None
                     and not opt.dry_run):
                 due = dt.datetime.fromtimestamp(
-                    state.last_publish + state.interval, dt.timezone.utc)
+                    state.last_publish + interval, dt.timezone.utc)
                 if due > now_utc():
                     sleep_until(due, f"{name}: pacing to the registry's "
-                                     f"{human_duration(state.interval)} refill")
+                                     f"{human_duration(interval)} refill")
 
             log(f"{head}: publishing")
             rc, out = run_cargo_publish(opt.root, name, opt.dry_run,
                                         opt.extra_cargo)
+            # Read the registry's reply, not the build output before it.
+            err = registry_error_text(out)
 
             if rc == 0:
                 consumed_token = True
                 break
 
-            if is_already_uploaded(out):
+            if is_already_uploaded(err):
                 # The pre-flight index check can see a stale CDN 404; the
                 # registry is the authority and it says this is done.
                 log(f"{head}: already uploaded (registry) — treating as done")
                 rc = 0
                 break
 
-            if is_rate_limited(out):
-                retry_at = parse_retry_at(out)
+            if is_rate_limited(err):
+                retry_at = parse_retry_at(err)
                 if retry_at is None:
                     # Throttled but no parseable instant: fall back to the
                     # learned pace, else a conservative hour.
-                    fallback = state.interval or 3600.0
+                    fallback = pace() or 3600.0
                     retry_at = now_utc() + dt.timedelta(seconds=fallback)
                     log(f"{head}: rate-limited, no retry instant in the "
                         f"message — backing off {human_duration(fallback)}")
@@ -497,9 +555,11 @@ def publish_all(order: list[str], versions: dict[str, str],
                             log(f"    learned registry pace: "
                                 f"{human_duration(learned)} between publishes")
                 if state.burst is None:
-                    state.burst = len(state.published)
+                    # Uploads this run only: a crate skipped because the
+                    # index already had it spent no rate-limit token.
+                    state.burst = accepted_this_run
                     log(f"    registry accepted {state.burst} publish(es) "
-                        f"before throttling")
+                        f"this run before throttling")
                 state.save()
 
                 wait = (retry_at - now_utc()).total_seconds()
@@ -525,10 +585,12 @@ def publish_all(order: list[str], versions: dict[str, str],
             continue
 
         if opt.dry_run:
+            accepted_this_run += 1
             log(f"{head}: dry-run OK")
             continue
 
         state.published.append(name)
+        done_now.append(name)
         if consumed_token:
             state.last_publish = time.time()
             accepted_this_run += 1
@@ -545,14 +607,21 @@ def publish_all(order: list[str], versions: dict[str, str],
                     f"{human_duration(opt.index_timeout)}; "
                     f"a dependent crate may fail to resolve it")
 
-    state.save()
+    if not read_only:
+        state.save()
 
-    remaining = [n for n in order if n not in state.published
-                 and n not in failures]
+    # Counted over the crates this run actually looked at, so --only /
+    # --start-at cannot report more done than there were to do.
+    remaining = [n for n in order if n not in done_now and n not in failures]
     log("")
-    log(f"done: {len(state.published)}/{total} published"
-        + (f", {len(failures)} failed" if failures else "")
-        + (f", {len(remaining)} remaining" if remaining else ""))
+    if opt.dry_run:
+        log(f"done: {accepted_this_run}/{total} dry-run OK, "
+            f"{len(done_now)} already on crates.io"
+            + (f", {len(failures)} failed" if failures else ""))
+    else:
+        log(f"done: {len(done_now)}/{total} published"
+            + (f", {len(failures)} failed" if failures else "")
+            + (f", {len(remaining)} remaining" if remaining else ""))
     if failures:
         log(f"failed: {', '.join(failures)}")
     if remaining and not opt.plan and not opt.dry_run:
@@ -574,11 +643,11 @@ def self_test() -> int:
             print(f"FAIL {label}: got {got!r}, want {want!r}")
             failures += 1
 
-    check("index_path 4+", index_path("teksilo-core"), "ba/st/teksilo-core")
+    check("index_path 4+", index_path("teksilo-core"), "te/ks/teksilo-core")
     check("index_path 3", index_path("abc"), "3/a/abc")
     check("index_path 2", index_path("ab"), "2/ab")
     check("index_path 1", index_path("a"), "1/a")
-    check("index_path case", index_path("Teksilo"), "ba/st/teksilo")
+    check("index_path case", index_path("Teksilo"), "te/ks/teksilo")
 
     utc = dt.timezone.utc
     check("ts offset", parse_timestamp("2026-07-23T15:04:05+0000"),
@@ -625,10 +694,45 @@ def self_test() -> int:
     check("already uploaded", is_already_uploaded(dup), True)
     check("already uploaded is not a rate limit", is_rate_limited(dup), False)
 
+    check("already uploaded, scoped",
+          is_already_uploaded(registry_error_text(dup)), True)
+
     build_err = "error[E0432]: unresolved import `foo::bar`"
     check("build error is not a rate limit", is_rate_limited(build_err), False)
     check("build error is not already-uploaded",
           is_already_uploaded(build_err), False)
+
+    # Failures that merely contain the words. Reading either as a
+    # registry verdict is the expensive kind of wrong: one records an
+    # unpublished crate as done, the other sleeps and retries forever.
+    pkg_err = ("   Packaging teksilo-core v0.8.0\n"
+               "error: failed to package: destination "
+               "`target/package/teksilo-core-0.8.0` already exists\n")
+    check("packaging 'already exists' is not an upload",
+          is_already_uploaded(registry_error_text(pkg_err)), False)
+    check("os 'File already exists' is not an upload",
+          is_already_uploaded("could not create directory: File already "
+                              "exists (os error 17)"), False)
+    check("linker 'exit status 429' is not a rate limit",
+          is_rate_limited("error: linking with `cc` failed: exit status 429"),
+          False)
+    check("'429 tests' is not a rate limit",
+          is_rate_limited("error: test failed, 429 tests"), False)
+
+    # Scoping: the registry's reply is the tail, and only the tail.
+    noisy = ("error: file already exists\n"
+             "error[E0432]: unresolved import `foo::bar`\n" + msg_new)
+    check("scope keeps the registry reply",
+          is_rate_limited(registry_error_text(noisy)), True)
+    check("scope drops the build noise",
+          is_already_uploaded(registry_error_text(noisy)), False)
+    check("scope keeps the retry instant, not a stray timestamp",
+          parse_retry_at(registry_error_text(
+              "built at 2020-01-01T00:00:00Z\n" + msg_new)),
+          dt.datetime(2026, 7, 23, 15, 4, 5, tzinfo=utc))
+    check("scope falls back to the tail",
+          is_rate_limited(registry_error_text("please try again in 5 minutes")),
+          False)
 
     check("duration hours", human_duration(3725), "1h02m")
     check("duration minutes", human_duration(125), "2m05s")
@@ -656,8 +760,9 @@ def main() -> int:
     ap.add_argument("--yes", "-y", action="store_true",
                     help="skip the confirmation prompt")
     ap.add_argument("--limit", type=int, default=None,
-                    help="stop after N successful publishes this run (e.g. "
-                         "--limit 10 to spend the burst and come back later)")
+                    help="stop after N successful publishes this run — or N "
+                         "successful dry-runs under --dry-run (e.g. --limit "
+                         "10 to spend the burst and come back later)")
     ap.add_argument("--start-at", metavar="CRATE",
                     help="skip everything before CRATE in the release order")
     ap.add_argument("--only", metavar="LIST",
@@ -665,7 +770,8 @@ def main() -> int:
                          "release order)")
     ap.add_argument("--min-interval", type=float, default=None, metavar="SECS",
                     help="seed the pace between publishes when you already "
-                         "know the registry's refill period (e.g. 3600)")
+                         "know the registry's refill period (e.g. 3600). "
+                         "This run only — never stored in the state file")
     ap.add_argument("--max-interval", type=float, default=6 * 3600,
                     metavar="SECS",
                     help="reject a learned pace longer than this "
