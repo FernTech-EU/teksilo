@@ -72,6 +72,7 @@ icu_calendar = "2"
 icu_locale_core = "2"
 icu_experimental = { version = "0.6", features = ["compiled_data"] }
 fixed_decimal = { version = "0.7", features = ["ryu"] }
+writeable = "0.6"
 serde = { version = "1", features = ["derive"] }
 thiserror = "2"
 toml = "1.1"

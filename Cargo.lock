@@ -10953,6 +10953,7 @@ dependencies = [
  "thiserror 2.0.20",
  "trybuild",
  "unic-langid",
+ "writeable 0.6.4",
 ]
 
 [[package]]

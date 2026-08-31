@@ -22,20 +22,34 @@
 //!
 //! # ICU coverage in this implementation
 //!
-//! Backed by `icu_decimal` (full) and `icu_datetime` (full); currency and
-//! percent live in the unstable `icu_experimental` crate today and are not
-//! linked here. Resulting limitations:
+//! Backed by `icu_decimal` + `icu_datetime` (stable) and
+//! `icu_experimental` (percent + currency).
 //!
 //! - **Decimal** — full locale-aware grouping, digit shaping, sign handling.
-//! - **Percent** — value × 100, formatted as decimal, suffixed with ASCII `%`.
-//!   The percent sign is locale-naive; in CJK/Arabic this is acceptable but
-//!   visually less polished than ICU's `PercentFormatter`. Promote when the
-//!   experimental crate stabilises.
-//! - **Currency** — value formatted as decimal with the ISO-4217 code
-//!   appended as a suffix (`"42,50 EUR"`). No symbol substitution, no
-//!   per-locale prefix/suffix positioning. Promote alongside Percent.
+//! - **Percent** — `PercentFormatter`, so the sign is the locale's own and
+//!   sits where the locale puts it (`"12 %"` in fr-FR, `"%12"` in tr-TR).
+//!   The value is still multiplied by 100 here; ICU formats the result.
+//! - **Currency** — `CurrencyFormatter` with the short symbol, so `USD`
+//!   renders `"$1,234.56"` and the affix follows the locale
+//!   (`"1 234,56 $US"` in fr-FR). Note that ICU applies the *currency's*
+//!   CLDR fraction precision (2 for EUR, 0 for JPY), which overrides an
+//!   explicit [`NumberFormatter::fraction_digits`] — that is ECMA-402
+//!   behaviour. Grouping is likewise ICU's default for currency: the
+//!   `CurrencyFormatter` constructors build their own `DecimalFormatter`
+//!   and offer no seam to pass ours, so [`NumberFormatter::use_grouping`]
+//!   does not reach it.
 //! - **DateTime** — full ICU support via `CompositeDateTimeFieldSet`; date
 //!   style + time style runtime-selected.
+//!
+//! # The parse direction
+//!
+//! [`NumberSymbols`] recovers a locale's separators, signs and digits from
+//! ICU's own formatted output, and [`NumberSymbols::delocalize`] rewrites
+//! a locale-formatted string back into a C-locale one. That is what lets an
+//! editable numeric surface (`SpinBox`, a numeric `TextInput`, a table cell
+//! editor) display `"1 234,56"` and still read it back. See
+//! [`symbols`] for why the symbols are probed rather than read out of
+//! ICU's provider structs.
 
 use std::borrow::Cow;
 use std::cell::RefCell;
@@ -53,12 +67,19 @@ use icu_datetime::input::{DateTime as IcuDateTime, Time as IcuTime};
 use icu_datetime::options::{Length as DtLength, TimePrecision};
 use icu_decimal::DecimalFormatter;
 use icu_decimal::options::{DecimalFormatterOptions, GroupingStrategy};
+use icu_experimental::dimension::currency::CurrencyType;
+use icu_experimental::dimension::currency::formatter::CurrencyFormatter;
+use icu_experimental::dimension::percent::formatter::PercentFormatter;
 use icu_locale_core::Locale as IcuLocale;
 use intl_memoizer::Memoizable;
 use teksilo_core::signal::{Prop, Signal};
 use unic_langid::LanguageIdentifier;
 
 use crate::thread_local::{current_version_signal, with_active};
+
+pub mod symbols;
+
+pub use symbols::{NumberSymbols, delocalize_number};
 
 // ------------------------------------------------------------
 // Public enums (builder-facing)
@@ -219,19 +240,34 @@ fn lang_to_icu_locale(lang: &LanguageIdentifier) -> IcuLocale {
 // Memoizable wrappers — the cache layer
 // ------------------------------------------------------------
 
-/// ICU `DecimalFormatter` keyed by `(lang, NumberOptions)`. The memoizer
+/// The style-specific ICU formatter behind [`IcuNumberFormatter`].
+///
+/// `Percent` is handed *our* configured `DecimalFormatter`, so grouping
+/// settings survive. `Currency` cannot be: its constructors build their own
+/// with ICU defaults and expose no seam for ours (see the module docs).
+enum StyleFormatter {
+    Decimal(DecimalFormatter),
+    Percent(PercentFormatter<DecimalFormatter>),
+    /// Boxed: `CurrencyFormatter` is far larger than the other variants,
+    /// and this enum is stored per `(lang, opts)` in two caches.
+    Currency(Box<CurrencyFormatter<DecimalFormatter>>),
+}
+
+/// ICU number formatter keyed by `(lang, NumberOptions)`. The memoizer
 /// stores one instance per `(lang, opts)` combo across the bundle's lifetime.
 ///
-/// The decimal formatter only knows about grouping and digit shaping;
-/// percent/currency styling and fraction-digit padding/truncation are
-/// applied to the [`fixed_decimal::Decimal`] *before* handing it off.
+/// Fraction-digit padding/truncation is applied to the
+/// [`fixed_decimal::Decimal`] *before* handing it off; style (percent sign
+/// placement, currency affix) is ICU's.
 struct IcuNumberFormatter {
-    inner: DecimalFormatter,
+    style: StyleFormatter,
     opts: NumberOptions,
 }
 
 impl IcuNumberFormatter {
     fn format(&self, value: f64) -> String {
+        // ICU's `PercentFormatter` renders the sign and its placement but
+        // does not rescale, so the ×100 stays on our side.
         let scaled = if matches!(self.opts.style, NumberStyle::Percent) {
             value * 100.0
         } else {
@@ -248,7 +284,8 @@ impl IcuNumberFormatter {
 
         // Apply max-fraction-digits first (rounds half-to-even), then
         // min-fraction-digits (zero-pads). Order matters: rounding may
-        // strip trailing zeros that the min then re-adds.
+        // strip trailing zeros that the min then re-adds. For currency
+        // ICU re-applies the currency's own CLDR precision afterwards.
         if let Some(max) = self.opts.max_fraction_digits {
             decimal.round(-(max as i16));
         }
@@ -256,12 +293,10 @@ impl IcuNumberFormatter {
             decimal.pad_end(-(min as i16));
         }
 
-        let body = self.inner.format(&decimal).to_string();
-
-        match (&self.opts.style, &self.opts.currency) {
-            (NumberStyle::Percent, _) => format!("{body}%"),
-            (NumberStyle::Currency, Some(code)) => format!("{body} {code}"),
-            _ => body,
+        match &self.style {
+            StyleFormatter::Decimal(f) => f.format(&decimal).to_string(),
+            StyleFormatter::Percent(f) => f.format(&decimal).to_string(),
+            StyleFormatter::Currency(f) => f.format_fixed_decimal(&decimal).to_string(),
         }
     }
 }
@@ -279,9 +314,36 @@ impl Memoizable for IcuNumberFormatter {
         } else {
             GroupingStrategy::Never
         });
-        let inner =
+        let decimal =
             DecimalFormatter::try_new((&icu_locale).into(), decimal_opts).map_err(|_| ())?;
-        Ok(Self { inner, opts })
+
+        let style = match (&opts.style, opts.currency.as_deref()) {
+            (NumberStyle::Percent, _) => StyleFormatter::Percent(
+                PercentFormatter::try_new_with_decimal_formatter(
+                    (&icu_locale).into(),
+                    decimal,
+                    Default::default(),
+                )
+                .map_err(|_| ())?,
+            ),
+            // A currency style with no code, or a code ICU rejects, is a
+            // caller error we cannot render meaningfully — fall back to a
+            // bare decimal rather than emitting a wrong currency.
+            (NumberStyle::Currency, Some(code)) => match CurrencyType::try_from_str(code) {
+                Ok(currency) => StyleFormatter::Currency(Box::new(
+                    CurrencyFormatter::try_new_symbol(
+                        (&icu_locale).into(),
+                        currency,
+                        Default::default(),
+                    )
+                    .map_err(|_| ())?,
+                )),
+                Err(_) => StyleFormatter::Decimal(decimal),
+            },
+            _ => StyleFormatter::Decimal(decimal),
+        };
+
+        Ok(Self { style, opts })
     }
 }
 

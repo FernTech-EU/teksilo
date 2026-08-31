@@ -722,3 +722,179 @@ fn wheel_mode_disabled_ignores_the_notch() {
     wheel(&mut tree, id, 3.0);
     assert_eq!(value.get(), 50);
 }
+
+// ── Locale-aware display and input ─────────────────────────────────
+
+/// The SpinBox publishes its displayed text (number + suffix) as the AT
+/// node's value, so that is the observable for the rendered form.
+fn at_value(tree: &mut WidgetTree, id: teksilo_core::widget_id::WidgetId) -> String {
+    let update = tree.sync_accessibility();
+    let target = teksilo_core::accessibility::widget_id_to_node_id(id);
+    update
+        .nodes
+        .iter()
+        .find(|(nid, _)| *nid == target)
+        .and_then(|(_, n)| n.value().map(str::to_string))
+        .expect("spin box AT value")
+}
+
+fn with_locale<R>(tag: &str, f: impl FnOnce() -> R) -> R {
+    teksilo_i18n::thread_local::clear();
+    let cfg = teksilo_i18n::I18nConfig::test_only(tag, &[("x", "x")]);
+    teksilo_i18n::thread_local::install(teksilo_i18n::I18nManager::from_config(&cfg));
+    let out = f();
+    teksilo_i18n::thread_local::clear();
+    out
+}
+
+#[test]
+fn displays_the_locale_decimal_separator() {
+    with_locale("fr-FR", || {
+        let value = Signal::new(12.5_f64);
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let id = tree.add(SpinBox::new(value, 0.0, 100.0).decimals(1));
+        tree.layout(SizeProposal::exact(300.0, 60.0));
+        tick(&mut tree);
+        assert_eq!(at_value(&mut tree, id), "12,5");
+    });
+}
+
+#[test]
+fn grouping_is_off_by_default_and_opt_in() {
+    with_locale("en-US", || {
+        let value = Signal::new(1_234_567_i64);
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let plain = tree.add(SpinBox::new(value.clone(), 0, 9_999_999));
+        let grouped = tree.add(SpinBox::new(value, 0, 9_999_999).use_grouping(true));
+        tree.layout(SizeProposal::exact(600.0, 200.0));
+        tick(&mut tree);
+        assert_eq!(at_value(&mut tree, plain), "1234567");
+        assert_eq!(at_value(&mut tree, grouped), "1,234,567");
+    });
+}
+
+#[test]
+fn localized_false_pins_the_c_locale() {
+    // The escape hatch for a number that is an identifier rather than a
+    // quantity — a port, a version component, a database id.
+    with_locale("fr-FR", || {
+        let value = Signal::new(8080.5_f64);
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let id = tree.add(
+            SpinBox::new(value, 0.0, 99999.0)
+                .decimals(1)
+                .localized(false),
+        );
+        tree.layout(SizeProposal::exact(300.0, 60.0));
+        tick(&mut tree);
+        assert_eq!(at_value(&mut tree, id), "8080.5");
+    });
+}
+
+#[test]
+fn grouping_keeps_large_integers_exact() {
+    // The display path is a string transform over the value's own
+    // `Display`, never a round-trip through `f64`, so an i64 past 2^53
+    // survives being shown.
+    with_locale("en-US", || {
+        let value = Signal::new(9_007_199_254_740_993_i64);
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let id = tree.add(SpinBox::new(value, 0, i64::MAX).use_grouping(true));
+        tree.layout(SizeProposal::exact(400.0, 60.0));
+        tick(&mut tree);
+        assert_eq!(at_value(&mut tree, id), "9,007,199,254,740,993");
+    });
+}
+
+#[test]
+fn a_locale_switch_re_renders_the_number_in_place() {
+    // SpinBox already re-formats on `set_locale` via a `ctx.effect` on
+    // the locale signal — this pins that the effect now has something
+    // locale-dependent to re-render, and that it re-resolves the
+    // conventions rather than reusing the ones captured at build time.
+    with_locale("en-US", || {
+        let value = Signal::new(12.5_f64);
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        tree.set_locale("en-US".to_string());
+        let id = tree.add(SpinBox::new(value, 0.0, 100.0).decimals(1));
+        tree.layout(SizeProposal::exact(300.0, 60.0));
+        tick(&mut tree);
+        assert_eq!(at_value(&mut tree, id), "12.5");
+
+        teksilo_i18n::thread_local::clear();
+        let cfg = teksilo_i18n::I18nConfig::test_only("fr-FR", &[("x", "x")]);
+        teksilo_i18n::thread_local::install(teksilo_i18n::I18nManager::from_config(&cfg));
+        tree.set_locale("fr-FR".to_string());
+        tree.layout(SizeProposal::exact(300.0, 60.0));
+        tick(&mut tree);
+        assert_eq!(at_value(&mut tree, id), "12,5");
+    });
+}
+
+#[test]
+fn the_commit_path_reads_the_locale_form_back() {
+    // The display and parse directions share one `NumberPresentation`,
+    // so whatever the field shows, the commit can read.
+    with_locale("fr-FR", || {
+        let p = super::NumberPresentation::resolve(true, false);
+        assert_eq!(p.parse::<f64>("12,5"), Some(12.5));
+        assert_eq!(p.parse::<f64>("-12,5"), Some(-12.5));
+        // A numeric keypad still works: `.` is neither separator in
+        // fr-FR, so it reads as the decimal point.
+        assert_eq!(p.parse::<f64>("12.5"), Some(12.5));
+        assert_eq!(p.parse::<f64>("nope"), None);
+    });
+}
+
+#[test]
+fn the_commit_path_reads_grouped_input() {
+    with_locale("en-US", || {
+        let p = super::NumberPresentation::resolve(true, true);
+        assert_eq!(p.parse::<i64>("1,234,567"), Some(1_234_567));
+        // Past 2^53 — the parse never goes through f64 either.
+        assert_eq!(
+            p.parse::<i64>("9,007,199,254,740,993"),
+            Some(9_007_199_254_740_993)
+        );
+    });
+}
+
+#[test]
+fn the_input_filter_admits_the_locale_separator_and_ascii_both() {
+    with_locale("fr-FR", || {
+        let p = super::NumberPresentation::resolve(true, false);
+        assert!(p.accepts_char::<f64>(','), "the locale decimal separator");
+        assert!(p.accepts_char::<f64>('.'), "the numeric keypad dot");
+        assert!(p.accepts_char::<f64>('-'));
+        assert!(p.accepts_char::<f64>('7'));
+        assert!(!p.accepts_char::<f64>('q'));
+    });
+    with_locale("ar-EG", || {
+        let p = super::NumberPresentation::resolve(true, false);
+        assert!(p.accepts_char::<f64>('٧'), "an Arabic-Indic digit");
+        assert!(p.accepts_char::<f64>('٫'), "the locale decimal separator");
+        assert!(p.accepts_char::<f64>('7'), "an ASCII digit still types");
+    });
+}
+
+#[test]
+fn the_input_filter_admits_the_group_separator_only_when_grouping() {
+    // fr-FR groups with U+202F, a character `f64`'s own filter rejects,
+    // so the grouping flag is the only thing that can admit it.
+    with_locale("fr-FR", || {
+        let ungrouped = super::NumberPresentation::resolve(true, false);
+        let grouped = super::NumberPresentation::resolve(true, true);
+        assert!(!ungrouped.accepts_char::<f64>('\u{202f}'));
+        assert!(grouped.accepts_char::<f64>('\u{202f}'));
+    });
+}
+
+#[test]
+fn localized_false_neither_renders_nor_reads_the_locale_form() {
+    with_locale("fr-FR", || {
+        let p = super::NumberPresentation::resolve(false, false);
+        assert_eq!(p.parse::<f64>("12.5"), Some(12.5));
+        assert_eq!(p.parse::<f64>("12,5"), None);
+        assert!(!p.accepts_char::<f64>(','));
+    });
+}

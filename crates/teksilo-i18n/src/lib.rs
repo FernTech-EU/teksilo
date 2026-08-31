@@ -39,7 +39,8 @@ pub use display_names::language_endonym;
 pub use file_watcher::{FtlFileWatcher, ReloadSink};
 pub use fluent_bundle::FluentValue;
 pub use format::{
-    DateStyle, NumberFormatter, NumberStyle, TeksiloDateTime, TeksiloDateTimeFormatter, TimeStyle,
+    DateStyle, NumberFormatter, NumberStyle, NumberSymbols, TeksiloDateTime,
+    TeksiloDateTimeFormatter, TimeStyle, delocalize_number,
 };
 pub use localized_string::{LocalizedString, localized};
 pub use manager::{I18nManager, LocaleSwitchOutcome, ReloadError};

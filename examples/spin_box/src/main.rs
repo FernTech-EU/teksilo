@@ -18,22 +18,39 @@
 //! - A scientific-notation adaptive-step SpinBox over six orders of
 //!   magnitude.
 //! - A read-only SpinBox that mirrors one of the other values.
+//! - A **locale** section: a grouped large integer, an un-grouped
+//!   twin, and a `.localized(false)` port number.
 //!
 //! A `Reset all` button below returns every value to a sensible
 //! default so the demo can be re-played without restarting.
+//!
+//! # Trying the localization
+//!
+//! The title bar carries a `LanguageSwitcher`. Switch to **français**
+//! and every decimal separator becomes `,`, the grouped row starts
+//! separating with a narrow no-break space, and typing `12,5` commits
+//! — while the numeric keypad's `.` still works. Switch to **हिन्दी**
+//! to see the lakh grouping (`12,34,567`), or **العربية** for
+//! Arabic-Indic digits. The "Port" row stays C-locale throughout:
+//! it is an identifier, not a quantity.
+//!
+//! The whole page scrolls, so the locale section stays reachable at
+//! the default window size.
 
 use teksilo::core::WidgetPlacement;
 use teksilo::prelude::*;
 use teksilo::widgets::{
-    Button, ButtonVariant, Expand, HStack, Padding, Panel, Spacer, SpinBox, StepType, TextWidget,
-    ThemeSwitcher, Toolbar, VStack, WheelMode, WrapMode,
+    Button, ButtonVariant, Expand, HStack, LanguageSwitcher, Padding, Panel, ScrollArea, Spacer,
+    SpinBox, StepType, TextWidget, ThemeSwitcher, Toolbar, VStack, WheelMode, WrapMode,
 };
 
 fn dark_mode_toolbar() -> impl Widget {
     teksu!(
         Toolbar {
             HStack {
+                spacing: 8.0
                 Spacer
+                LanguageSwitcher::new()
                 ThemeSwitcher::new()
             }
         }
@@ -48,6 +65,11 @@ struct Values {
     timeout: Signal<i32>,
     frequency: Signal<f64>,
     mirror: Signal<i32>,
+    /// A quantity large enough for thousands separators to matter.
+    population: Signal<i64>,
+    /// An identifier rather than a quantity — deliberately *not*
+    /// localized, so it never grows a separator or changes digits.
+    port: Signal<i32>,
 }
 
 impl Values {
@@ -59,6 +81,8 @@ impl Values {
             timeout: Signal::new(0),
             frequency: Signal::new(440.0),
             mirror: font_size,
+            population: Signal::new(1_234_567),
+            port: Signal::new(8080),
         }
     }
 }
@@ -95,191 +119,245 @@ impl Widget for Root {
             }
         });
         let frequency_text = self.values.frequency.map(|v| format!("{:.2} Hz", v));
+        // The readouts are deliberately plain `format!` — they show the
+        // raw value so the SpinBox's *localized* rendering beside them
+        // is visibly different.
+        let population_text = self.values.population.map(|v| format!("{v} (raw)"));
 
         let reset_font = self.values.font_size.clone();
         let reset_gain = self.values.gain_db.clone();
         let reset_opacity = self.values.opacity.clone();
         let reset_timeout = self.values.timeout.clone();
         let reset_frequency = self.values.frequency.clone();
+        let reset_population = self.values.population.clone();
+        let reset_port = self.values.port.clone();
 
-        let root = teksu!(ctx => Padding::uniform(24.0) {
-                Panel {
-                    Padding::uniform(20.0) {
-                        VStack {
-                            spacing: 14.0
-                            // Heading.
-                            TextWidget::new(lit!("SpinBox gallery")) {
-                                style: TextStyleRole::BodyBold
-                                color: TextRole::Primary
-                            }
-                            TextWidget::new(lit!("Every SpinBox feature on one page. \
-                            Use arrow keys, Page↑/Page↓, mouse wheel, \
-                            or the ± buttons; press Enter or Tab to commit typed input.")) {
-                                style: TextStyleRole::Body
-                                color: TextRole::Secondary
-                            }
-                            // Row 1 — font size (integer, clamp, narrow width).
-                            child: row(
-                                "Font size (narrow 80 dp)",
-                                SpinBox::new(self.values.font_size.clone(), 4, 96)
-                                    .single_step(1)
-                                    .page_step(10)
-                                    .suffix(" pt")
-                                    .width(80.0)
-                                    .label(lit!("Font size")),
-                                font_size_text,
-                            )
-                            // Row 2 — gain dB (float, 1 decimal).
-                            child: row(
-                                "Gain",
-                                SpinBox::new(self.values.gain_db.clone(), -60.0, 12.0)
-                                    .single_step(0.5)
-                                    .page_step(6.0)
-                                    .decimals(1)
-                                    .suffix(" dB")
-                                    .value_from_text(|s| {
-                                        // Accept Unicode minus `−` (U+2212) as well as ASCII.
-                                        s.replace('\u{2212}', "-").trim().parse::<f64>().ok()
-                                    })
-                                    .label(lit!("Gain")),
-                                gain_text,
-                            )
-                            // Row 3 — opacity (integer, wrap mode for fun).
-                            child: row(
-                                "Opacity",
-                                SpinBox::new(self.values.opacity.clone(), 0, 100)
-                                    .single_step(5)
-                                    .page_step(25)
-                                    .suffix(" %")
-                                    .wrap_mode(WrapMode::Wrap)
-                                    .label(lit!("Opacity")),
-                                opacity_text,
-                            )
-                            // Row 4 — timeout with special value "Auto".
-                            child: row(
-                                "Timeout",
-                                SpinBox::new(self.values.timeout.clone(), 0, 3600)
-                                    .single_step(1)
-                                    .page_step(60)
-                                    .suffix(" s")
-                                    .special_value_text(lit!("Auto"))
-                                    .label(lit!("Timeout")),
-                                timeout_text,
-                            )
-                            // Row 5 — frequency (adaptive step, wider width).
-                            child: row(
-                                "Frequency (wider 180 dp)",
-                                SpinBox::new(self.values.frequency.clone(), 0.1, 20_000.0)
-                                    .single_step(1.0)
-                                    .decimals(2)
-                                    .suffix(" Hz")
-                                    .step_type(StepType::Adaptive)
-                                    .wheel_mode(WheelMode::Hover)
-                                    .width(180.0)
-                                    .label(lit!("Frequency")),
-                                frequency_text,
-                            )
-                            // Row 6 — Int UI-style dense field: buttons hidden.
-                            child: row(
-                                "Font size (no buttons, Int UI)",
-                                SpinBox::new(self.values.font_size.clone(), 4, 96)
-                                    .single_step(1)
-                                    .page_step(10)
-                                    .suffix(" pt")
-                                    .show_buttons(false)
-                                    .label(lit!("Font size, no buttons")),
-                                self.values.font_size.map(|v| format!("{} pt", v)),
-                            )
-                            // Row 7 — read-only mirror of font_size.
-                            child: row(
-                                "Font size (mirror, read-only)",
-                                SpinBox::new(self.values.mirror.clone(), 4, 96)
-                                    .suffix(" pt")
-                                    .read_only(true)
-                                    .label(lit!("Font size mirror")),
-                                self.values.mirror.map(|v| format!("{} pt", v)),
-                            )
-                            // ── Width gallery ──────────────────────
-                            //
-                            // Four SpinBoxes bound to the same `opacity`
-                            // signal so the different widths are easy to
-                            // compare side by side. Each row labels its
-                            // width policy.
-                            TextWidget::new(lit!("Width control")) {
-                                style: TextStyleRole::BodyBold
-                                color: TextRole::Primary
-                            }
-                            child: row(
-                                "Narrow — .width(64)",
-                                SpinBox::new(self.values.opacity.clone(), 0, 100)
-                                    .suffix(" %")
-                                    .width(64.0)
-                                    .label(lit!("Opacity (narrow)")),
-                                self.values.opacity.map(|v| format!("{} %", v)),
-                            )
-                            child: row(
-                                "Default — 120 dp cap",
-                                SpinBox::new(self.values.opacity.clone(), 0, 100)
-                                    .suffix(" %")
-                                    .label(lit!("Opacity (default)")),
-                                self.values.opacity.map(|v| format!("{} %", v)),
-                            )
-                            child: row(
-                                "Wider — .width(220)",
-                                SpinBox::new(self.values.opacity.clone(), 0, 100)
-                                    .suffix(" %")
-                                    .width(220.0)
-                                    .label(lit!("Opacity (wide)")),
-                                self.values.opacity.map(|v| format!("{} %", v)),
-                            )
-                            child: row(
-                                "Chars — .width_chars(3) (fits \"100 %\")",
-                                SpinBox::new(self.values.opacity.clone(), 0, 100)
-                                    .suffix(" %")
-                                    .width_chars(3)
-                                    .label(lit!("Opacity (3 chars)")),
-                                self.values.opacity.map(|v| format!("{} %", v)),
-                            )
-                            // `.fill_width()` needs a flex parent to
-                            // stretch into, so this row wraps the
-                            // SpinBox in `Expand::horizontal()`
-                            // instead of the normal `row` helper.
-                            HStack {
-                                spacing: 12.0
-                                MinSizeForLabel::new(TextWidget::new(lit!("Fill — .fill_width()"),
-                                )) {
-                                    width: 220.0
-                                }
-                                Expand::horizontal() {
-                                    SpinBox::new(self.values.opacity.clone(), 0, 100) {
-                                        suffix: " %"
-                                        fill_width
-                                        label: lit!("Opacity (fill)")
-                                    }
-                                }
-                                TextWidget::new(lit!("")) {
-                                    text: self.values.opacity.map(|v| format!("{} %", v))
-                                }
-                            }
-                            // Reset button.
-                            HStack {
-                                spacing: 8.0
-                                Button::new(lit!("Reset all")) {
-                                    variant: ButtonVariant::Plain
-                                    on_activate_fn: move |_ctx| {
-                                        reset_font.set(12);
-                                        reset_gain.set(0.0);
-                                        reset_opacity.set(50);
-                                        reset_timeout.set(0);
-                                        reset_frequency.set(440.0);
-                                    }
-                                }
-                            }
+        let column = teksu!(ctx => Padding::uniform(20.0) {
+            VStack {
+                spacing: 14.0
+                // Heading.
+                TextWidget::new(lit!("SpinBox gallery")) {
+                    style: TextStyleRole::BodyBold
+                    color: TextRole::Primary
+                }
+                TextWidget::new(lit!("Every SpinBox feature on one page. \
+                Use arrow keys, Page↑/Page↓, mouse wheel, \
+                or the ± buttons; press Enter or Tab to commit typed input.")) {
+                    style: TextStyleRole::Body
+                    color: TextRole::Secondary
+                }
+                // Row 1 — font size (integer, clamp, narrow width).
+                child: row(
+                    "Font size (narrow 80 dp)",
+                    SpinBox::new(self.values.font_size.clone(), 4, 96)
+                        .single_step(1)
+                        .page_step(10)
+                        .suffix(" pt")
+                        .width(80.0)
+                        .label(lit!("Font size")),
+                    font_size_text,
+                )
+                // Row 2 — gain dB (float, 1 decimal).
+                child: row(
+                    "Gain",
+                    SpinBox::new(self.values.gain_db.clone(), -60.0, 12.0)
+                        .single_step(0.5)
+                        .page_step(6.0)
+                        .decimals(1)
+                        .suffix(" dB")
+                        .value_from_text(|s| {
+                            // Accept Unicode minus `−` (U+2212) as well as ASCII.
+                            s.replace('\u{2212}', "-").trim().parse::<f64>().ok()
+                        })
+                        .label(lit!("Gain")),
+                    gain_text,
+                )
+                // Row 3 — opacity (integer, wrap mode for fun).
+                child: row(
+                    "Opacity",
+                    SpinBox::new(self.values.opacity.clone(), 0, 100)
+                        .single_step(5)
+                        .page_step(25)
+                        .suffix(" %")
+                        .wrap_mode(WrapMode::Wrap)
+                        .label(lit!("Opacity")),
+                    opacity_text,
+                )
+                // Row 4 — timeout with special value "Auto".
+                child: row(
+                    "Timeout",
+                    SpinBox::new(self.values.timeout.clone(), 0, 3600)
+                        .single_step(1)
+                        .page_step(60)
+                        .suffix(" s")
+                        .special_value_text(lit!("Auto"))
+                        .label(lit!("Timeout")),
+                    timeout_text,
+                )
+                // Row 5 — frequency (adaptive step, wider width).
+                child: row(
+                    "Frequency (wider 180 dp)",
+                    SpinBox::new(self.values.frequency.clone(), 0.1, 20_000.0)
+                        .single_step(1.0)
+                        .decimals(2)
+                        .suffix(" Hz")
+                        .step_type(StepType::Adaptive)
+                        .wheel_mode(WheelMode::Hover)
+                        .width(180.0)
+                        .label(lit!("Frequency")),
+                    frequency_text,
+                )
+                // Row 6 — Int UI-style dense field: buttons hidden.
+                child: row(
+                    "Font size (no buttons, Int UI)",
+                    SpinBox::new(self.values.font_size.clone(), 4, 96)
+                        .single_step(1)
+                        .page_step(10)
+                        .suffix(" pt")
+                        .show_buttons(false)
+                        .label(lit!("Font size, no buttons")),
+                    self.values.font_size.map(|v| format!("{} pt", v)),
+                )
+                // Row 7 — read-only mirror of font_size.
+                child: row(
+                    "Font size (mirror, read-only)",
+                    SpinBox::new(self.values.mirror.clone(), 4, 96)
+                        .suffix(" pt")
+                        .read_only(true)
+                        .label(lit!("Font size mirror")),
+                    self.values.mirror.map(|v| format!("{} pt", v)),
+                )
+                // ── Width gallery ──────────────────────
+                //
+                // Four SpinBoxes bound to the same `opacity`
+                // signal so the different widths are easy to
+                // compare side by side. Each row labels its
+                // width policy.
+                TextWidget::new(lit!("Width control")) {
+                    style: TextStyleRole::BodyBold
+                    color: TextRole::Primary
+                }
+                child: row(
+                    "Narrow — .width(64)",
+                    SpinBox::new(self.values.opacity.clone(), 0, 100)
+                        .suffix(" %")
+                        .width(64.0)
+                        .label(lit!("Opacity (narrow)")),
+                    self.values.opacity.map(|v| format!("{} %", v)),
+                )
+                child: row(
+                    "Default — 120 dp cap",
+                    SpinBox::new(self.values.opacity.clone(), 0, 100)
+                        .suffix(" %")
+                        .label(lit!("Opacity (default)")),
+                    self.values.opacity.map(|v| format!("{} %", v)),
+                )
+                child: row(
+                    "Wider — .width(220)",
+                    SpinBox::new(self.values.opacity.clone(), 0, 100)
+                        .suffix(" %")
+                        .width(220.0)
+                        .label(lit!("Opacity (wide)")),
+                    self.values.opacity.map(|v| format!("{} %", v)),
+                )
+                child: row(
+                    "Chars — .width_chars(3) (fits \"100 %\")",
+                    SpinBox::new(self.values.opacity.clone(), 0, 100)
+                        .suffix(" %")
+                        .width_chars(3)
+                        .label(lit!("Opacity (3 chars)")),
+                    self.values.opacity.map(|v| format!("{} %", v)),
+                )
+                // `.fill_width()` needs a flex parent to
+                // stretch into, so this row wraps the
+                // SpinBox in `Expand::horizontal()`
+                // instead of the normal `row` helper.
+                HStack {
+                    spacing: 12.0
+                    MinSizeForLabel::new(TextWidget::new(lit!("Fill — .fill_width()"),
+                    )) {
+                        width: 220.0
+                    }
+                    Expand::horizontal() {
+                        SpinBox::new(self.values.opacity.clone(), 0, 100) {
+                            suffix: " %"
+                            fill_width
+                            label: lit!("Opacity (fill)")
+                        }
+                    }
+                    TextWidget::new(lit!("")) {
+                        text: self.values.opacity.map(|v| format!("{} %", v))
+                    }
+                }
+                // ── Locale ─────────────────────────────
+                //
+                // Switch the language in the title bar and
+                // watch these three rows disagree on
+                // purpose.
+                TextWidget::new(lit!("Locale")) {
+                    style: TextStyleRole::BodyBold
+                    color: TextRole::Primary
+                }
+                TextWidget::new(lit!("The decimal separator, the digits and the \
+                minus sign follow the active language. Grouping is opt-in per \
+                SpinBox — it helps a large quantity and gets in the way of a \
+                field you type in.")) {
+                    style: TextStyleRole::Body
+                    color: TextRole::Secondary
+                }
+                child: row(
+                    "Population — .use_grouping(true)",
+                    SpinBox::new(self.values.population.clone(), 0, 99_999_999)
+                        .single_step(1000)
+                        .page_step(100_000)
+                        .use_grouping(true)
+                        .width(180.0)
+                        .label(lit!("Population")),
+                    population_text,
+                )
+                child: row(
+                    "Population — default (no grouping)",
+                    SpinBox::new(self.values.population.clone(), 0, 99_999_999)
+                        .single_step(1000)
+                        .page_step(100_000)
+                        .width(180.0)
+                        .label(lit!("Population, ungrouped")),
+                    self.values.population.map(|v| format!("{v}")),
+                )
+                child: row(
+                    "Port — .localized(false)",
+                    SpinBox::new(self.values.port.clone(), 1, 65_535)
+                        .single_step(1)
+                        .page_step(1000)
+                        .localized(false)
+                        .width(120.0)
+                        .label(lit!("Port")),
+                    self.values.port.map(|v| format!("{v}")),
+                )
+                // Reset button.
+                HStack {
+                    spacing: 8.0
+                    Button::new(lit!("Reset all")) {
+                        variant: ButtonVariant::Plain
+                        on_activate_fn: move |_ctx| {
+                            reset_font.set(12);
+                            reset_gain.set(0.0);
+                            reset_opacity.set(50);
+                            reset_timeout.set(0);
+                            reset_frequency.set(440.0);
+                            reset_population.set(1_234_567);
+                            reset_port.set(8080);
                         }
                     }
                 }
             }
-        );
+        });
+        // The gallery is taller than the default window once the locale
+        // section is on the page, so the content scrolls inside the
+        // Panel chrome rather than being clipped away — the same shape
+        // the internationalization demo uses.
+        let scroll = ctx.add(ScrollArea::from_id(column));
+        let root = ctx.add(Padding::uniform(24.0).child(Panel::new().child_id(scroll)));
         self.root_child_id = Some(root);
         vec![root]
     }
@@ -372,11 +450,37 @@ impl Widget for MinSizeForLabel {
     }
 }
 
+/// Locales chosen to make the SpinBox's number conventions visible:
+///
+/// - `fr-FR` — `,` decimal separator, U+202F narrow no-break space for
+///   groups (the character a naive `f64::from_str` chokes on).
+/// - `de-DE` — `.` is the *group* separator, so `1.234` is one thousand
+///   two hundred thirty-four.
+/// - `hi-IN` — the lakh system groups 3 then 2: `12,34,567`.
+/// - `ar-EG` — Arabic-Indic digits and its own separators.
+fn i18n_config() -> teksilo::i18n::I18nConfig {
+    let tag =
+        |t: &str| -> teksilo::i18n::LanguageIdentifier { t.parse().expect("hardcoded BCP-47 tag") };
+    teksilo::i18n::I18nConfig::new()
+        .source_locale(tag("en-US"))
+        .supported_locales([
+            tag("en-US"),
+            tag("fr-FR"),
+            tag("de-DE"),
+            tag("hi-IN"),
+            tag("ar-EG"),
+        ])
+        .auto_detect_os_locale(false)
+        .fallback_locale(tag("en-US"))
+        .framework_locales(teksilo::widgets::framework_locales())
+}
+
 fn main() {
     TeksiloAppBuilder::new()
         .install_automation_bridge_in_debug()
         .install_inspector_in_debug()
         .theme(teksilo::presets::intui::light())
+        .i18n(i18n_config())
         .initial_window(
             WindowConfig::new()
                 .title("Teksilo — SpinBox gallery")

@@ -1,0 +1,9 @@
+# SPDX-License-Identifier: MPL-2.0
+# SPDX-FileCopyrightText: 2026 FernTech
+
+[default.extend-words]
+# `writeable` is ICU4X's crate name (the `Writeable` / `PartsWrite` traits
+# `icu_decimal` formats through), not a misspelling of "writable". It
+# appears in `teksilo-i18n`'s number-symbol probe.
+writeable = "writeable"
+Writeable = "Writeable"

@@ -110,21 +110,84 @@ fn bundle_number_uses_locale_grouping() {
 }
 
 #[test]
-fn bundle_currency_appends_iso_code() {
-    // Currency is locale-naive in this implementation: it formats the
-    // value with locale grouping and appends the ISO-4217 code.
+fn bundle_currency_renders_the_locale_symbol_not_the_iso_code() {
+    // Backed by ICU's `CurrencyFormatter`: the short symbol, positioned
+    // where the locale puts it, with the currency's own CLDR precision.
     let mgr = install_en_fr();
     let s = mgr.resolve_app("cart-total", &[("price", 42.5_f64.into())]);
-    assert!(s.contains("USD"), "expected USD suffix in en-US; got `{s}`");
+    assert!(
+        s.contains("$42.50"),
+        "expected the USD symbol and 2 fraction digits in en-US; got `{s}`"
+    );
+    assert!(
+        !s.contains("USD"),
+        "expected the symbol, not the ISO code; got `{s}`"
+    );
     teksilo_i18n::thread_local::clear();
 }
 
 #[test]
-fn bundle_percent_appends_percent_sign() {
+fn bundle_currency_affix_follows_the_locale() {
+    // fr-FR writes the euro sign *after* the amount, with a no-break
+    // space — the case the old ISO-code suffix could not express.
+    let mgr = install_en_fr();
+    mgr.set_locale(lid("fr-FR"));
+    let s = mgr.resolve_app("cart-total", &[("price", 42.5_f64.into())]);
+    assert!(
+        s.contains('€'),
+        "expected the euro sign in fr-FR; got `{s}`"
+    );
+    assert!(
+        s.trim_end().ends_with('€'),
+        "expected a trailing euro sign in fr-FR; got `{s}`"
+    );
+    teksilo_i18n::thread_local::clear();
+}
+
+#[test]
+fn bundle_currency_uses_the_currencys_own_precision() {
+    // JPY has zero CLDR fraction digits, so ICU rounds rather than
+    // padding to two the way a hardcoded suffix would.
+    teksilo_i18n::thread_local::clear();
+    let cfg = I18nConfig::test_only(
+        "en-US",
+        &[(
+            "yen",
+            "{ NUMBER($v, style: \"currency\", currency: \"JPY\") }",
+        )],
+    );
+    let mgr = Rc::new(I18nManager::from_config(&cfg));
+    teksilo_i18n::thread_local::install(I18nManager::from_config(&cfg));
+    let s = mgr.resolve_app("yen", &[("v", 1234.5_f64.into())]);
+    assert!(
+        s.contains("1,235") && !s.contains(".50"),
+        "expected JPY rounded to whole yen; got `{s}`"
+    );
+    teksilo_i18n::thread_local::clear();
+}
+
+#[test]
+fn bundle_percent_renders_the_locale_percent_form() {
     let mgr = install_en_fr();
     let s = mgr.resolve_app("percent-done", &[("ratio", 0.125_f64.into())]);
-    // Percent multiplies by 100 and appends `%`.
+    // Percent multiplies by 100; ICU renders the sign.
     assert!(s.contains("12.5%"), "expected `12.5%` (en-US); got `{s}`");
+    teksilo_i18n::thread_local::clear();
+}
+
+#[test]
+fn bundle_percent_sign_placement_follows_the_locale() {
+    // tr-TR is the canonical prefix-percent locale — the case an
+    // unconditional ASCII `%` suffix got wrong.
+    teksilo_i18n::thread_local::clear();
+    let cfg = I18nConfig::test_only("tr-TR", &[("pct", "{ NUMBER($v, style: \"percent\") }")]);
+    let mgr = Rc::new(I18nManager::from_config(&cfg));
+    teksilo_i18n::thread_local::install(I18nManager::from_config(&cfg));
+    let s = mgr.resolve_app("pct", &[("v", 0.125_f64.into())]);
+    assert!(
+        s.trim().starts_with('%'),
+        "expected a leading percent sign in tr-TR; got `{s}`"
+    );
     teksilo_i18n::thread_local::clear();
 }
 

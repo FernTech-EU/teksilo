@@ -45,11 +45,27 @@
 //!   tracks the decimal magnitude of the current value (Qt's
 //!   `AdaptiveDecimalStepType`). Useful for values that span many
 //!   orders of magnitude in the same control.
+//! - **Locale**: the number follows the active locale's decimal
+//!   separator, digits and minus sign
+//!   ([`localized`](SpinBox::localized), on by default); thousands
+//!   separators are opt-in
+//!   ([`use_grouping`](SpinBox::use_grouping), off by default, as in
+//!   Qt). Display, commit parse and the per-character input filter
+//!   all resolve from one `NumberPresentation`, so they cannot
+//!   disagree about which separator the field is using — a French
+//!   user sees `12,5`, types `12,5`, and the numeric keypad's `.`
+//!   still works. Rendering is a string transform over the value's
+//!   own `Display`, never an `f64` round-trip, so a `SpinBox<i64>`
+//!   stays exact past 2^53. Turn it off for a number that is an
+//!   *identifier* rather than a quantity (port, version component,
+//!   database id). With no `I18nManager` installed the active locale
+//!   is the C locale and this is a no-op.
 //! - **Custom formatter / parser**: full override via
 //!   [`text_from_value`](SpinBox::text_from_value) and
 //!   [`value_from_text`](SpinBox::value_from_text); together they
 //!   let you implement currency, percentages with stored fraction,
-//!   hex, duration, anything.
+//!   hex, duration, anything. A custom formatter/parser owns the
+//!   whole convention — it is not re-punctuated by the locale layer.
 //!
 //! # Accessibility
 //!
@@ -220,6 +236,12 @@ pub struct SpinBox<T: SpinValue> {
     page_step: Option<T>,
     decimals: u8,
     suffix: String,
+    /// Whether the displayed number follows the active locale's
+    /// conventions. See [`localized`](SpinBox::localized).
+    localized: bool,
+    /// Whether the displayed number carries thousands separators.
+    /// Off by default — see [`use_grouping`](SpinBox::use_grouping).
+    use_grouping: bool,
     special_value_text: Option<LocalizedString>,
     wrap_mode: WrapMode,
     step_type: StepType,
@@ -291,6 +313,8 @@ impl<T: SpinValue> std::fmt::Debug for SpinBox<T> {
             .field("max", &self.max)
             .field("single_step", &self.single_step)
             .field("decimals", &self.decimals)
+            .field("localized", &self.localized)
+            .field("use_grouping", &self.use_grouping)
             .field("wrap_mode", &self.wrap_mode)
             .finish_non_exhaustive()
     }
@@ -313,6 +337,8 @@ impl<T: SpinValue> SpinBox<T> {
             page_step: None,
             decimals: if T::is_integer() { 0 } else { 2 },
             suffix: String::new(),
+            localized: true,
+            use_grouping: false,
             special_value_text: None,
             wrap_mode: WrapMode::Clamp,
             step_type: StepType::Fixed,
@@ -368,6 +394,46 @@ impl<T: SpinValue> SpinBox<T> {
     /// Ignored for integer types.
     pub fn decimals(mut self, decimals: u8) -> Self {
         self.decimals = decimals;
+        self
+    }
+
+    /// Whether the number follows the active locale's conventions —
+    /// decimal separator, digits, and minus sign. **On by default.**
+    ///
+    /// A French user sees `12,5`, not `12.5`, and can type either: the
+    /// commit path de-localizes before parsing, and the input filter
+    /// accepts both the locale's separator and the ASCII one, so a
+    /// numeric keypad still works.
+    ///
+    /// Turn it **off** for a number that is an identifier rather than a
+    /// quantity — a port number, a version component, a database id, a
+    /// pixel offset in a file format. Those read wrong grouped or
+    /// re-punctuated, and their conventional form is the C-locale one.
+    ///
+    /// Localization is a string transform over the value's own
+    /// `Display`, not a round-trip through `f64`, so a `SpinBox<i64>`
+    /// keeps full precision past 2^53.
+    ///
+    /// With no `I18nManager` installed the active locale resolves to the
+    /// C locale, so this is a no-op in tests and in apps that have not
+    /// opted into i18n.
+    pub fn localized(mut self, on: bool) -> Self {
+        self.localized = on;
+        self
+    }
+
+    /// Whether the displayed number carries thousands separators.
+    /// **Off by default**, matching Qt (`QAbstractSpinBox::
+    /// isGroupSeparatorShown` is false unless asked for).
+    ///
+    /// Separators help a large read-only quantity and get in the way of
+    /// a field being typed into, so this is opt-in per SpinBox rather
+    /// than a locale-wide default. Grouping follows the locale's own
+    /// group sizes, including the Indic lakh system (`12,34,567`).
+    ///
+    /// Has no effect when [`localized`](Self::localized) is off.
+    pub fn use_grouping(mut self, on: bool) -> Self {
+        self.use_grouping = on;
         self
     }
 
@@ -662,6 +728,18 @@ impl<T: SpinValue> Widget for SpinBox<T> {
         let read_only = self.read_only;
         let wheel_mode = self.wheel_mode;
 
+        // Resolve the locale's number conventions once, and hand the
+        // *same* value to the display path, the commit parse and the
+        // input filter. Split resolution would let the three disagree
+        // about which separator this field uses — the failure mode
+        // `DateEdit` avoids by deriving format, parse and mask from one
+        // `ParsedPattern`.
+        //
+        // Rebuild-level reactivity is not needed: the effect on
+        // `ctx.locale_signal()` below re-formats the text in place, and
+        // the closures below re-resolve on the next build.
+        let presentation = NumberPresentation::resolve(self.localized, self.use_grouping);
+
         // Seed the text signal from the current value.
         {
             let initial = format_for_display(
@@ -671,6 +749,7 @@ impl<T: SpinValue> Widget for SpinBox<T> {
                 text_from_value.as_deref(),
                 min,
                 false,
+                &presentation,
             );
             self.text_signal.set(initial);
         }
@@ -689,6 +768,7 @@ impl<T: SpinValue> Widget for SpinBox<T> {
             let can_down = self.can_step_down.clone();
             let min_cap = min;
             let max_cap = max;
+            let presentation = presentation.clone();
             ctx.effect(&self.value, move |new_value| {
                 // Update the can-step signals any time the value
                 // changes so the buttons and a11y reflect whether
@@ -709,6 +789,7 @@ impl<T: SpinValue> Widget for SpinBox<T> {
                         text_from_value.as_deref(),
                         min_cap,
                         false,
+                        &presentation,
                     );
                     if text_signal.get() != formatted {
                         text_signal.set(formatted);
@@ -726,7 +807,13 @@ impl<T: SpinValue> Widget for SpinBox<T> {
             let value_signal = self.value.clone();
             let focused = self.focused.clone();
             let locale_signal = ctx.locale_signal();
+            // A locale switch re-renders the number in place. The
+            // presentation resolved at build time is stale by then, so
+            // re-resolve inside the effect rather than capturing it.
+            let localized = self.localized;
+            let grouping = self.use_grouping;
             ctx.effect(&locale_signal, move |_| {
+                let presentation = NumberPresentation::resolve(localized, grouping);
                 let formatted = format_for_display(
                     value_signal.get(),
                     decimals,
@@ -734,6 +821,7 @@ impl<T: SpinValue> Widget for SpinBox<T> {
                     text_from_value.as_deref(),
                     min,
                     focused.get(),
+                    &presentation,
                 );
                 if text_signal.get() != formatted {
                     text_signal.set(formatted);
@@ -752,11 +840,15 @@ impl<T: SpinValue> Widget for SpinBox<T> {
             let text_from_value = text_from_value.clone();
             let special_text = special_text.clone();
             let on_value_changed = on_value_changed.clone();
+            let commit_presentation = presentation.clone();
             Rc::new(move |ctx: &mut EventContext| {
                 let raw = text_signal.get();
+                // A user-supplied parser gets the raw text: it owns the
+                // whole convention, and de-localizing first would hand it
+                // a string it never agreed to read.
                 let parsed: Option<T> = match value_from_text.as_deref() {
                     Some(f) => f(raw.trim()),
-                    None => T::parse(raw.trim()),
+                    None => commit_presentation.parse::<T>(&raw),
                 };
                 let old = value_signal.get();
                 let new_value = match parsed {
@@ -770,6 +862,7 @@ impl<T: SpinValue> Widget for SpinBox<T> {
                     text_from_value.as_deref(),
                     min,
                     false,
+                    &commit_presentation,
                 );
                 if text_signal.get() != formatted {
                     text_signal.set(formatted);
@@ -847,6 +940,7 @@ impl<T: SpinValue> Widget for SpinBox<T> {
             let text_signal = self.text_signal.clone();
             let text_from_value = text_from_value.clone();
             let special_text = special_text.clone();
+            let presentation = presentation.clone();
             Rc::new(move |dir: i32, page: bool| {
                 if read_only {
                     return None;
@@ -874,6 +968,7 @@ impl<T: SpinValue> Widget for SpinBox<T> {
                     text_from_value.as_deref(),
                     min,
                     false,
+                    &presentation,
                 );
                 if text_signal.get() != formatted {
                     text_signal.set(formatted);
@@ -914,7 +1009,10 @@ impl<T: SpinValue> Widget for SpinBox<T> {
             .read_only(read_only)
             .placeholder(self.placeholder.clone())
             .text_height(text_area_height)
-            .char_filter(T::is_valid_input_char);
+            .char_filter({
+                let presentation = presentation.clone();
+                move |c| presentation.accepts_char::<T>(c)
+            });
         // Suffix wiring:
         //   • plain static suffix              → `.suffix(..)` (no signal)
         //   • static suffix + special_value    → reactive: hide suffix when
@@ -1013,6 +1111,7 @@ impl<T: SpinValue> Widget for SpinBox<T> {
                         text_from_value.as_deref(),
                         min_cap,
                         true,
+                        &presentation,
                     );
                     if text_signal.get() != plain {
                         text_signal.set(plain);
@@ -1353,6 +1452,7 @@ impl<T: SpinValue> Widget for SpinBox<T> {
             self.text_from_value.as_deref(),
             self.min,
             false,
+            &NumberPresentation::resolve(self.localized, self.use_grouping),
         );
         let full = if !self.suffix.is_empty() && !using_special {
             format!("{}{}", display, self.suffix)
@@ -1461,12 +1561,91 @@ fn chevron_down_icon(size: f32) -> IconWidget {
     IconWidget::from_path(path, size)
 }
 
+/// How the number itself is rendered and read back: the locale's
+/// conventions, or the C locale.
+///
+/// Resolved once per `build()` and threaded through the format and
+/// parse paths together, so the two can never disagree about which
+/// separator this field is using — the same single-source discipline
+/// `DateEdit` gets from its one `ParsedPattern`.
+#[derive(Clone)]
+pub(crate) struct NumberPresentation {
+    symbols: Option<Rc<teksilo_i18n::NumberSymbols>>,
+    grouping: bool,
+}
+
+impl NumberPresentation {
+    /// Resolve against the active locale. `localized == false` yields a
+    /// presentation that is the identity in both directions.
+    pub(crate) fn resolve(localized: bool, grouping: bool) -> Self {
+        Self {
+            symbols: localized.then(teksilo_i18n::NumberSymbols::current),
+            grouping,
+        }
+    }
+
+    /// C-locale digits in, display string out.
+    fn render(&self, plain: String) -> String {
+        match &self.symbols {
+            Some(sym) => sym.localize(&plain, self.grouping),
+            None => plain,
+        }
+    }
+
+    /// Display string in, C-locale digits out. `None` when the text
+    /// cannot be a number in this locale.
+    fn read(&self, raw: &str) -> Option<String> {
+        match &self.symbols {
+            Some(sym) => sym.delocalize(raw),
+            None => Some(raw.trim().to_string()),
+        }
+    }
+
+    /// Parse user input into a value, going through the locale first.
+    fn parse<T: SpinValue>(&self, raw: &str) -> Option<T> {
+        T::parse(&self.read(raw)?)
+    }
+
+    /// Per-character input filter. Widens the type's own filter with the
+    /// characters this locale writes numbers with, so a French user can
+    /// type `,` and an Egyptian user can type `٫` or Arabic-Indic
+    /// digits — while the ASCII forms keep working everywhere, because
+    /// people type on the keyboard they have.
+    fn accepts_char<T: SpinValue>(&self, c: char) -> bool {
+        if T::is_valid_input_char(c) {
+            return true;
+        }
+        let Some(sym) = &self.symbols else {
+            return false;
+        };
+        if sym.has_non_ascii_digits() && sym.delocalize(&c.to_string()).is_some() {
+            return true;
+        }
+        // The group separator is only typeable when this field shows
+        // groups; otherwise it is noise the user cannot have meant.
+        [
+            Some(sym.decimal_separator()),
+            Some(sym.minus_sign()),
+            Some(sym.plus_sign()),
+            self.grouping.then(|| sym.group_separator()),
+        ]
+        .into_iter()
+        .flatten()
+        .any(|sep| sep.chars().any(|sc| sc == c))
+    }
+}
+
 /// Format `value` for display, honoring `special_value_text` when
 /// applicable and deferring to a user-supplied formatter when set.
 ///
 /// `force_plain` bypasses `special_value_text` even when the value
 /// equals `min` — used when the field is focused so the user can
 /// edit the number instead of a placeholder string.
+///
+/// A user-supplied `custom` formatter owns the whole string and is
+/// **not** localized afterwards: it already returns exactly what the
+/// caller wants shown, and re-punctuating it would corrupt formats the
+/// caller composed deliberately.
 fn format_for_display<T: SpinValue>(
     value: T,
     decimals: u8,
@@ -1474,6 +1653,7 @@ fn format_for_display<T: SpinValue>(
     custom: Option<&dyn Fn(T) -> LocalizedString>,
     min: T,
     force_plain: bool,
+    presentation: &NumberPresentation,
 ) -> String {
     if !force_plain
         && let Some(special_text) = special
@@ -1483,7 +1663,7 @@ fn format_for_display<T: SpinValue>(
     }
     match custom {
         Some(f) => f(value).resolve_now(),
-        None => value.format(decimals),
+        None => presentation.render(value.format(decimals)),
     }
 }
 
