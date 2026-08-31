@@ -5,7 +5,6 @@
 name = "over-constraint"
 edition = "2024"
 version.workspace = true
-license-file.workspace = true
 authors.workspace = true
 publish = false
 

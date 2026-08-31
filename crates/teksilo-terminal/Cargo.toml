@@ -7,7 +7,6 @@ description = "Embeddable, fully-accessible terminal-emulator (Console) widget f
 edition = "2024"
 version.workspace = true
 license.workspace = true
-license-file.workspace = true
 publish.workspace = true
 authors.workspace = true
 repository.workspace = true

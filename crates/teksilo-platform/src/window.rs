@@ -445,7 +445,7 @@ impl accesskit::ActivationHandler for TeksiloActivationHandler {
         let root = accesskit::Node::new(accesskit::Role::Window);
         Some(accesskit::TreeUpdate {
             nodes: vec![(accesskit::NodeId(0), root)],
-            tree: Some(accesskit::Tree::new(accesskit::NodeId(0))),
+            tree: Some(accesskit::TreeInfo::new(accesskit::NodeId(0))),
             tree_id: accesskit::TreeId::ROOT,
             focus: accesskit::NodeId(0),
         })

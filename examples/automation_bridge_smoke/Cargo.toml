@@ -5,7 +5,6 @@
 name = "automation_bridge_smoke"
 edition = "2024"
 version.workspace = true
-license-file.workspace = true
 publish = false
 authors.workspace = true
 repository.workspace = true

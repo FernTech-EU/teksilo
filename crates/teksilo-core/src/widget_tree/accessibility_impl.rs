@@ -420,7 +420,7 @@ impl WidgetTree {
         (
             accesskit::TreeUpdate {
                 nodes,
-                tree: Some(accesskit::Tree::new(root_node_id())),
+                tree: Some(accesskit::TreeInfo::new(root_node_id())),
                 tree_id: accesskit::TreeId::ROOT,
                 focus,
             },
@@ -2126,7 +2126,7 @@ mod tests {
         let actions = node.custom_actions();
         assert_eq!(actions.len(), 1);
         assert_eq!(actions[0].id, 0);
-        assert_eq!(actions[0].description.as_ref(), "Reply");
+        assert_eq!(actions[0].description.as_str(), "Reply");
     }
 
     // Test 24

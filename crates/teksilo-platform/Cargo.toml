@@ -6,7 +6,6 @@ name = "teksilo-platform"
 edition = "2024"
 version.workspace = true
 license.workspace = true
-license-file.workspace = true
 publish.workspace = true
 authors.workspace = true
 repository.workspace = true
@@ -20,7 +19,7 @@ teksilo-render = { workspace = true }
 winit = { workspace = true }
 wgpu = { workspace = true }
 accesskit = { workspace = true }
-accesskit_winit = "0.33.2"
+accesskit_winit = "0.34.0"
 arboard = { workspace = true, optional = true }
 raw-window-handle = "0.6"
 # rfd 0.17 dropped the `async-std` / `tokio` runtime-selection features: it no
