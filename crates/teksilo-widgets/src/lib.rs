@@ -272,15 +272,46 @@ pub use tree_view::{TreeRowContext, TreeView};
 /// `I18nConfig::framework_locales(teksilo_widgets::framework_locales())`
 /// at startup.
 ///
-/// teksilo-widgets currently ships `en-US` (source) and `fr-FR`. Keys
-/// missing from a locale's bundle fall back to the en-US source via
-/// fluent-bundle's per-key fallback. Applications that need a locale
-/// teksilo-widgets doesn't ship can fill the gap with
-/// `I18nConfig::override_widget_strings(...)`.
+/// teksilo-widgets ships `en-US` (the source language) plus 22
+/// translations. Keys missing from a locale's bundle fall back to the en-US
+/// source via `I18nManager::resolve_widget`'s fallback chain, so a partial
+/// translation degrades key-by-key rather than wholesale. Applications that
+/// need a locale teksilo-widgets doesn't ship — or that disagree with a
+/// shipped rendering — can fill the gap with
+/// `I18nConfig::override_widget_strings(...)`, which wins over this bundle.
+///
+/// `ar-SA` and `he-IL` are right-to-left; the layout flip is derived from the
+/// language tag by `teksilo_i18n::rtl_from_locale`, not from anything in the
+/// `.ftl` files themselves.
+///
+/// Every translation carries exactly the same message keys and the same
+/// `{ $variable }` placeables as `en-US.ftl`; `locale_parity` in
+/// `crates/teksilo-widgets/tests/locale_parity.rs` enforces that.
 pub fn framework_locales() -> &'static [(&'static str, &'static [&'static str])] {
     &[
-        ("en-US", &[include_str!("../locales/en-US.ftl")]),
-        ("fr-FR", &[include_str!("../locales/fr-FR.ftl")]),
+        ("en-US", &[include_str!("../locales/en-US.ftl")]), // source language
+        ("ar-SA", &[include_str!("../locales/ar-SA.ftl")]), // Arabic (RTL)
+        ("cs-CZ", &[include_str!("../locales/cs-CZ.ftl")]), // Czech
+        ("da-DK", &[include_str!("../locales/da-DK.ftl")]), // Danish
+        ("de-DE", &[include_str!("../locales/de-DE.ftl")]), // German
+        ("el-GR", &[include_str!("../locales/el-GR.ftl")]), // Greek
+        ("es-ES", &[include_str!("../locales/es-ES.ftl")]), // Spanish
+        ("fi-FI", &[include_str!("../locales/fi-FI.ftl")]), // Finnish
+        ("fr-FR", &[include_str!("../locales/fr-FR.ftl")]), // French
+        ("he-IL", &[include_str!("../locales/he-IL.ftl")]), // Hebrew (RTL)
+        ("hu-HU", &[include_str!("../locales/hu-HU.ftl")]), // Hungarian
+        ("it-IT", &[include_str!("../locales/it-IT.ftl")]), // Italian
+        ("ja-JP", &[include_str!("../locales/ja-JP.ftl")]), // Japanese
+        ("ko-KR", &[include_str!("../locales/ko-KR.ftl")]), // Korean
+        ("nb-NO", &[include_str!("../locales/nb-NO.ftl")]), // Norwegian Bokmål
+        ("nl-NL", &[include_str!("../locales/nl-NL.ftl")]), // Dutch
+        ("pl-PL", &[include_str!("../locales/pl-PL.ftl")]), // Polish
+        ("pt-PT", &[include_str!("../locales/pt-PT.ftl")]), // Portuguese (European)
+        ("ro-RO", &[include_str!("../locales/ro-RO.ftl")]), // Romanian
+        ("ru-RU", &[include_str!("../locales/ru-RU.ftl")]), // Russian
+        ("sv-SE", &[include_str!("../locales/sv-SE.ftl")]), // Swedish
+        ("tr-TR", &[include_str!("../locales/tr-TR.ftl")]), // Turkish
+        ("uk-UA", &[include_str!("../locales/uk-UA.ftl")]), // Ukrainian
     ]
 }
 

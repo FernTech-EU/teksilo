@@ -104,6 +104,10 @@ toml = { workspace = true }
 # `rich_text::paint` tests encode a tiny PNG so the inline-image pass has a
 # real, decodable resource to resolve rather than a hand-written byte blob.
 png = { workspace = true }
+# `tests/locale_parity.rs` parses every shipped `.ftl` with the real Fluent
+# grammar rather than a regex, so a syntax error or a dropped `{ $var }` in a
+# translation fails the build instead of degrading silently at runtime.
+fluent-syntax = { workspace = true }
 
 [package.metadata.docs.rs]
 all-features = true

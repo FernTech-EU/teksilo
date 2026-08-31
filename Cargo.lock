@@ -11335,6 +11335,7 @@ name = "teksilo-widgets"
 version = "0.8.0"
 dependencies = [
  "accesskit_consumer",
+ "fluent-syntax",
  "jiff",
  "open",
  "png",
