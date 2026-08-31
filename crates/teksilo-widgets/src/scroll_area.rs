@@ -153,6 +153,21 @@ pub struct ScrollArea {
     /// stands it down when the reader takes over, and that closure cannot borrow
     /// `self`.
     pending_restore_y: Rc<Cell<Option<f32>>>,
+    /// What the pending restore last wrote to `scroll_y`, so a write by anyone
+    /// else can be recognised on the following pass.
+    ///
+    /// The `on_scroll` handler stands the restore down for a wheel gesture and a
+    /// `ScrollIntoView`, which is every route that reaches *it* — but not every
+    /// route that moves the scroll. **A scroll bar holds a clone of `scroll_y`
+    /// and calls `set` on it directly** (`ScrollBar::new` is handed the signal in
+    /// `build`), so dragging the thumb never reaches that handler. With a pending
+    /// offset the content is too short to ever honour, the drag was undone by the
+    /// next layout pass and the reader was pinned at the clamped bottom with no
+    /// way out.
+    ///
+    /// Shared via `Rc` for the same reason as `pending_restore_y`: it is cleared
+    /// beside it, from a closure that cannot borrow `self`.
+    restore_wrote_y: Rc<Cell<Option<f32>>>,
 }
 
 impl Default for ScrollArea {
@@ -206,6 +221,7 @@ impl ScrollArea {
             viewport_size: Rc::new(Cell::new(Size::ZERO)),
             viewport_origin: Rc::new(Cell::new(Point::ZERO)),
             pending_restore_y: Rc::new(Cell::new(None)),
+            restore_wrote_y: Rc::new(Cell::new(None)),
         }
     }
 
@@ -411,6 +427,11 @@ impl ScrollArea {
         // captured this `Rc` when the area was constructed, and handing it a fresh
         // one would leave it standing down a slot nothing reads.
         self.pending_restore_y.set((offset > 0.0).then_some(offset));
+        // A fresh one-shot has written nothing yet. Left over from a previous
+        // arming on the same area, this would make the first pass mistake the
+        // *old* landing for somebody else's write and stand the new offset down
+        // before it had a chance.
+        self.restore_wrote_y.set(None);
         self
     }
 
@@ -622,9 +643,11 @@ impl Widget for ScrollArea {
             // offset the content is still too short to honour would be re-asserted
             // on every layout pass and fight them for it.
             let pending_restore_y = self.pending_restore_y.clone();
+            let restore_wrote_y = self.restore_wrote_y.clone();
             handlers = handlers.on_scroll(move |event, _ctx| match event {
                 WidgetEvent::Scroll { delta, .. } => {
                     pending_restore_y.set(None);
+                    restore_wrote_y.set(None);
                     let max_y = max_scroll_y.get();
                     let max_x = max_scroll_x.get();
                     let cur_y = scroll_y.get();
@@ -667,6 +690,7 @@ impl Widget for ScrollArea {
                     applied_scroll,
                 } => {
                     pending_restore_y.set(None);
+                    restore_wrote_y.set(None);
                     // `target_bounds` is in absolute tree coordinates (the
                     // arena stores screen-space rects). Convert to the
                     // content's local frame by subtracting the viewport's
@@ -1021,6 +1045,26 @@ impl Widget for ScrollArea {
         // range that has reached 500 puts the reader back at the top of a
         // chapter they were at the end of, which is indistinguishable from the
         // restore never having happened.
+        //
+        // **And only for as long as nothing else has moved the scroll.** The
+        // `on_scroll` handler stands the restore down for a wheel gesture and for
+        // a `ScrollIntoView`; a scroll bar reaches neither, because it holds a
+        // clone of `scroll_y` and writes it directly. Comparing against what this
+        // block last wrote catches every route rather than the two that happen to
+        // pass through a handler — and without it a pending offset the content is
+        // *never* long enough to honour is re-asserted for the life of the widget,
+        // so dragging the thumb away from the clamped bottom is undone on the very
+        // next layout pass and the reader is pinned there.
+        //
+        // `get()` and not `animation_target()`: the only writer that gets this far
+        // is a plain `set`. A wheel scroll animates, but it has already cleared the
+        // pending, so an in-flight animation cannot be reached from here.
+        if let Some(ours) = self.restore_wrote_y.get()
+            && (self.scroll_y.get() - ours).abs() > f32::EPSILON
+        {
+            self.pending_restore_y.set(None);
+            self.restore_wrote_y.set(None);
+        }
         if let Some(pending) = self.pending_restore_y.get()
             && max_y > 0.0
         {
@@ -1030,6 +1074,11 @@ impl Widget for ScrollArea {
             }
             if max_y >= pending {
                 self.pending_restore_y.set(None);
+                self.restore_wrote_y.set(None);
+            } else {
+                // Still short. Remember the clamped landing so the next pass can
+                // tell "the content has not grown yet" from "the reader has moved".
+                self.restore_wrote_y.set(Some(landed));
             }
         }
 
@@ -2636,6 +2685,81 @@ mod tests {
             70.0,
             "a one-shot restore must not re-arm itself on a later reflow"
         );
+    }
+
+    #[test]
+    fn a_restore_the_content_can_never_hold_does_not_pin_the_reader() {
+        // 150px of content in a 100px viewport: `max_scroll_y` is 50 and stays 50,
+        // so a pending 200 is never honoured and — before the stand-down below —
+        // was re-asserted on every layout pass for the life of the widget.
+        //
+        // A scroll bar is what makes that fatal rather than merely untidy. It holds
+        // a clone of `scroll_y` and calls `set` on it directly, so dragging the
+        // thumb never reaches the `on_scroll` handler that stands a restore down:
+        // the reader dragged away from the clamped bottom, the next pass put them
+        // straight back, and there was no gesture that could win.
+        let mut tree = WidgetTree::new();
+        let sa = ScrollArea::new()
+            .child(TallLeaf::new(200.0, 150.0))
+            .smooth_scrolling(false)
+            .restore_scroll_y(200.0);
+        let scroll_y = sa.scroll_y_signal().clone();
+        let _scroll = tree.add(sa);
+
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+        assert_eq!(
+            scroll_y.get(),
+            50.0,
+            "precondition: the offset lands clamped to the range that exists"
+        );
+
+        // Exactly what `ScrollBar`'s thumb drag does.
+        scroll_y.set(0.0);
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        assert_eq!(
+            scroll_y.get(),
+            0.0,
+            "a drag away from the clamped landing must stand the restore down, \
+             not be undone by the next layout pass"
+        );
+    }
+
+    #[test]
+    fn a_restore_still_waits_out_content_that_is_only_slow_to_measure() {
+        // The stand-down must not cost the case the re-apply exists for. A rich
+        // text editor reports its `min_lines` height until its own content has been
+        // typeset, so the range grows over several passes; the restore has to keep
+        // re-asserting through those, and only the *reader* moving may cancel it.
+        //
+        // The area is laid out three times against a child that grows underneath
+        // it, which is what "the content has not finished measuring" looks like
+        // from here.
+        let mut tree = WidgetTree::new();
+        let height = Rc::new(Cell::new(150.0));
+        let sa = ScrollArea::new()
+            .child(GrowingLeaf::new(200.0, height.clone()))
+            .smooth_scrolling(false)
+            .restore_scroll_y(200.0);
+        let scroll_y = sa.scroll_y_signal().clone();
+        let _scroll = tree.add(sa);
+
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+        assert_eq!(scroll_y.get(), 50.0, "clamped to the range measured so far");
+
+        height.set(400.0);
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+        assert_eq!(
+            scroll_y.get(),
+            200.0,
+            "the range grew past the offset, so the offset lands in full"
+        );
+
+        // And having landed, it is spent: a later reflow leaves the reader alone.
+        scroll_y.set(10.0);
+        height.set(900.0);
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+        assert_eq!(scroll_y.get(), 10.0, "a one-shot does not re-arm");
     }
 
     #[test]
