@@ -3,6 +3,8 @@
 
 # LanguageSwitcher
 
+![LanguageSwitcher preview](img/language_switcher.png)
+
 LanguageSwitcher — a drop-in UI-language picker for settings screens.
 
 A thin `ComboBox` preset that lists the application's supported

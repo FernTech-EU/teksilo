@@ -3,6 +3,8 @@
 
 # ColorPicker
 
+![ColorPicker preview](img/color_picker.png)
+
 `ColorPicker` — embeddable composite color selector.
 
 Combines a 2D HSV canvas, 1D hue and alpha strips, RGB and HSV

@@ -3,6 +3,8 @@
 
 # ZStack
 
+![ZStack preview](img/zstack.png)
+
 ZStack — a layout container that layers children on top of each other.
 
 The container sizes itself to the maximum width and maximum height across

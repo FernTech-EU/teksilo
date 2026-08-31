@@ -3,6 +3,8 @@
 
 # CodeEditorHandle
 
+![CodeEditorHandle preview](img/code_editor.png)
+
 Multi-line plain-text and code editing surfaces.
 
 Three faces over one core:
@@ -40,7 +42,7 @@ corrupts it silently.
 
 ## Builder methods at a glance
 
-`cursor_position`, `cursor_position_signal`, `caret_count`, `bracket_match`, `has_selection`, `can_undo`, `can_redo`, `document_version`, `scroll_y`
+`cursor_position`, `cursor_position_signal`, `caret_count`, `bracket_match`, `has_selection`, `can_undo`, `undo`, `redo`, `copy`, `cut`, `paste`, `select_all`, `is_read_only`, `can_redo`, `document_version`, `scroll_y`
 
 ## API reference
 
@@ -83,6 +85,39 @@ app can read it to drive its own overlay.
 #### `pub fn has_selection(&self) -> teksilo_core::Signal<bool>`
 
 #### `pub fn can_undo(&self) -> teksilo_core::Signal<bool>`
+
+#### `pub fn undo(&self)`
+
+Undo this editor's last edit.
+
+The handle could report `can_undo` long before it could
+*act* on it, which left a host able to light an Undo button here and
+unable to make it do anything. Ctrl+Z inside the widget always worked;
+this is the same command from outside.
+
+#### `pub fn redo(&self)`
+
+Redo this editor's last undone edit.
+
+#### `pub fn copy(&self, ctx: &teksilo_core::widget::EventContext<'_>)`
+
+Copy the selection to the clipboard.
+
+#### `pub fn cut(&self, ctx: &teksilo_core::widget::EventContext<'_>)`
+
+Cut the selection to the clipboard.
+
+#### `pub fn paste(&self, ctx: &teksilo_core::widget::EventContext<'_>)`
+
+Paste over the selection.
+
+#### `pub fn select_all(&self)`
+
+Select the whole document.
+
+#### `pub fn is_read_only(&self) -> bool`
+
+Is this editor refusing edits?
 
 #### `pub fn can_redo(&self) -> teksilo_core::Signal<bool>`
 

@@ -3,6 +3,8 @@
 
 # RichTextEditor
 
+![RichTextEditor preview](img/rich_text.png)
+
 Rich text editor and viewer widget.
 
 Two construction presets share the same implementation: `RichTextEditor::editor`
@@ -32,7 +34,7 @@ let editor = RichTextEditor::editor(doc)
 
 ## Builder methods at a glance
 
-`read_only`, `editor`, `style`, `content_padding`, `content_padding_symmetric`, `content_padding_each`, `content_padding_top`, `content_padding_right`, `content_padding_bottom`, `content_padding_left`, `wrap_mode`, `show_highlights`, `annotation_spans`, `set_highlight_mask`, `typography_defaults`, `background`, `selection_color`, `caret_color`, `text_color`, `v_scroll_policy`, `h_scroll_policy`, `estimate_height_before_layout`, `window_to_clip`, `scroll_policy`, `follow_caret_in_page`, `typewriter`, `overscroll_behavior`, `min_lines`, `max_lines`, `follow_text_scale`, `font_size_scale`, `context_menu`, `default_context_menu`, `font_registrar`, `on_change`, `on_text_inserted`, `document_version`, `cursor_position`, `cursor_anchor`, `is_composing`, `cursor_position_signal`, `cursor_anchor_signal`, `has_selection`, `can_undo`, `can_redo`, `caret_char_format`, `scroll_y`, `scroll_x`, `context_target_at`, `selected_text`, `select_all`, `deselect`, `insert_text`, `insert_html`, `insert_djot`, `insert_block`, `insert_image`, `delete_selection`, `select_word`, `select_line`, `set_caret_position`, `focused_signal`, `select_range`, `reveal_range`, `set_bold`, `set_italic`, `set_underline`, `set_strikethrough`, `set_font_size`, `set_font_family`, `toggle_bold`, `toggle_italic`, `toggle_underline`, `toggle_strikethrough`, `set_superscript`, `set_subscript`, `set_vertical_alignment`, `get_vertical_alignment`, `is_superscript`, `is_subscript`, `toggle_superscript`, `toggle_subscript`, `apply_block_format`, `apply_text_format`, `set_alignment`, `clear_direction`, `set_direction`, `set_heading_level`, `insert_list`, `create_list`, `indent`, `outdent`, `remove_from_list`, `is_in_blockquote`, `selection_spans_multiple_frames`, `toggle_blockquote`, `increase_blockquote_depth`, `decrease_blockquote_depth`, `insert_table`, `remove_current_table`, `insert_row_above`, `insert_row_below`, `insert_column_before`, `insert_column_after`, `remove_current_row`, `remove_current_column`, `is_in_table`, `is_bold`, `is_italic`, `set_link`, `clear_link`, `link_at_caret`, `is_link`, `is_underline`, `is_strikethrough`, `get_heading_level`, `get_alignment`, `get_direction`, `undo`, `redo`, `begin_edit_block`, `end_edit_block`, `edit_block`, `set_default_language`, `default_language`, `handle`, `copy`, `cut`, `paste`, `paste_unformatted`, `can_paste`, `set_font_size_scale`, `get_font_size_scale`, `set_typography_defaults`, `get_typography_defaults`, `set_typewriter`, `get_typewriter`, `set_command_filter`, `command_filter`, `set_caret_highlight`, `get_caret_highlight`, `caret_window_rect`, `format_version`, `document_loaded_count`, `on_link_activated`, `on_image_missing`, `on_files_dropped`, `on_image_resized`, `on_image_activated`
+`read_only`, `editor`, `style`, `content_padding`, `content_padding_symmetric`, `content_padding_each`, `content_padding_top`, `content_padding_right`, `content_padding_bottom`, `content_padding_left`, `wrap_mode`, `show_highlights`, `annotation_spans`, `set_highlight_mask`, `typography_defaults`, `background`, `selection_color`, `caret_color`, `text_color`, `v_scroll_policy`, `h_scroll_policy`, `estimate_height_before_layout`, `window_to_clip`, `scroll_policy`, `follow_caret_in_page`, `typewriter`, `overscroll_behavior`, `min_lines`, `max_lines`, `follow_text_scale`, `font_size_scale`, `context_menu`, `default_context_menu`, `font_registrar`, `on_change`, `on_text_inserted`, `document_version`, `cursor_position`, `cursor_anchor`, `is_composing`, `cursor_position_signal`, `cursor_anchor_signal`, `has_selection`, `can_undo`, `can_redo`, `caret_char_format`, `scroll_y`, `scroll_x`, `context_target_at`, `selected_text`, `select_all`, `deselect`, `insert_text`, `insert_html`, `insert_djot`, `insert_block`, `insert_image`, `delete_selection`, `select_word`, `select_line`, `set_caret_position`, `focused_signal`, `select_range`, `reveal_range`, `set_bold`, `set_italic`, `set_underline`, `set_strikethrough`, `set_font_size`, `set_font_family`, `toggle_bold`, `toggle_italic`, `toggle_underline`, `toggle_strikethrough`, `set_superscript`, `set_subscript`, `set_vertical_alignment`, `get_vertical_alignment`, `is_superscript`, `is_subscript`, `toggle_superscript`, `toggle_subscript`, `apply_block_format`, `apply_text_format`, `set_alignment`, `clear_direction`, `set_direction`, `set_heading_level`, `insert_list`, `create_list`, `indent`, `outdent`, `remove_from_list`, `is_in_blockquote`, `selection_spans_multiple_frames`, `toggle_blockquote`, `increase_blockquote_depth`, `decrease_blockquote_depth`, `insert_table`, `remove_current_table`, `insert_row_above`, `insert_row_below`, `insert_column_before`, `insert_column_after`, `remove_current_row`, `remove_current_column`, `is_in_table`, `is_bold`, `is_italic`, `set_link`, `clear_link`, `link_at_caret`, `is_link`, `is_underline`, `is_strikethrough`, `get_heading_level`, `get_alignment`, `get_direction`, `undo`, `break_undo_merge`, `redo`, `begin_edit_block`, `end_edit_block`, `edit_block`, `set_default_language`, `default_language`, `handle`, `copy`, `cut`, `paste`, `paste_unformatted`, `can_paste`, `set_font_size_scale`, `get_font_size_scale`, `set_typography_defaults`, `get_typography_defaults`, `set_typewriter`, `get_typewriter`, `set_command_filter`, `command_filter`, `set_caret_highlight`, `get_caret_highlight`, `caret_window_rect`, `format_version`, `document_loaded_count`, `on_link_activated`, `on_image_missing`, `on_files_dropped`, `on_image_resized`, `on_image_activated`
 
 ## API reference
 
@@ -990,6 +992,16 @@ The block's explicitly-set reading direction, if it has one.
 Undo the most recent edit. Mirrors Ctrl+Z. No-op when the undo
 stack is empty.
 
+#### `pub fn break_undo_merge(&self)`
+
+Close the current undo entry, so the next edit starts a new one.
+
+Typing coalesces into word-sized undo steps by looking only at the shape
+of two edits — adjacent, moments apart. It cannot see that the user did
+something else in between, somewhere else in the application, that they
+would remember as a dividing line. A host that knows one was crossed says
+so here, and the burst before it stops merging with the burst after.
+
 #### `pub fn redo(&self)`
 
 Redo the most recently undone edit. Mirrors Ctrl+Y /
@@ -1935,6 +1947,16 @@ Whether the caret is currently inside a table cell.
 #### `pub fn undo(&self)`
 
 Undo the most recent edit. No-op when the undo stack is empty.
+
+#### `pub fn break_undo_merge(&self)`
+
+Close the current undo entry, so the next edit starts a new one.
+
+Typing coalesces into word-sized undo steps by looking only at the shape
+of two edits — adjacent, moments apart. It cannot see that the user did
+something else in between, somewhere else in the application, that they
+would remember as a dividing line. A host that knows one was crossed says
+so here, and the burst before it stops merging with the burst after.
 
 #### `pub fn redo(&self)`
 

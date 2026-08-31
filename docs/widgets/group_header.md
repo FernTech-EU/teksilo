@@ -3,6 +3,8 @@
 
 # GroupHeader
 
+![GroupHeader preview](img/group_header.png)
+
 GroupHeader — a horizontal section header: label followed by a trailing
 rule line that fills the remaining width.
 

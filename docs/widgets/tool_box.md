@@ -3,6 +3,8 @@
 
 # ToolBox
 
+![ToolBox preview](img/tool_box.png)
+
 ToolBox — a vertical stack of collapsible sections, exactly one expanded
 at a time.
 

@@ -3,6 +3,8 @@
 
 # NotificationLog
 
+![NotificationLog preview](img/log.png)
+
 `NotificationLog` — a scrollable, day-bucketed list of archived notifications.
 
 Renders a `NotificationArchiveModel` as a scrollable column of

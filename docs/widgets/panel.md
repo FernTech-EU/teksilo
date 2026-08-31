@@ -3,6 +3,8 @@
 
 # Panel
 
+![Panel preview](img/panel.png)
+
 Panel — a themed single-child container that provides a background, border,
 corner radius, and padding.
 

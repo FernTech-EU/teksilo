@@ -3,6 +3,8 @@
 
 # GridView
 
+![GridView preview](img/grid_view.png)
+
 Virtualized 2D tile grid bound to a `ListModel<T>` / `ListDataSource`.
 
 `GridView` is the photo-gallery / icon-view / file-manager-grid /

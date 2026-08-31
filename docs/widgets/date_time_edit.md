@@ -3,6 +3,8 @@
 
 # DateTimeEdit
 
+![DateTimeEdit preview](img/date_time_edit.png)
+
 `DateTimeEdit` — single unified control for picking a `DateTime`.
 
 Visually one widget: a single bordered frame containing a date

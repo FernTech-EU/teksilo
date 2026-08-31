@@ -3,6 +3,8 @@
 
 # Splitter
 
+![Splitter preview](img/splitter.png)
+
 N-pane split container with draggable, collapsible dividers.
 
 `Splitter` arranges `N ≥ 2` panes along one axis (per `Orientation`)

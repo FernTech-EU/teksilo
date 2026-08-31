@@ -3,6 +3,8 @@
 
 # ColorSwatch
 
+![ColorSwatch preview](img/swatch.png)
+
 `ColorSwatch` — single clickable color cell with `Role::ColorWell`.
 
 Public widget so apps can compose their own swatch rows or palettes

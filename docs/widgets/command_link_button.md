@@ -3,6 +3,8 @@
 
 # CommandLinkButton
 
+![CommandLinkButton preview](img/command_link_button.png)
+
 CommandLinkButton — large two-line button with icon, title, and
 subtitle. Used for wizard landing screens, onboarding choices, and
 any "card-shaped CTA" pattern.

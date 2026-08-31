@@ -3,6 +3,8 @@
 
 # DateRangeEdit
 
+![DateRangeEdit preview](img/date_range_edit.png)
+
 `DateRangeEdit` — single unified control for picking a `DateRange`.
 
 Visually one widget: a single bordered frame containing two

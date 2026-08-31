@@ -3,6 +3,8 @@
 
 # StatusBar
 
+![StatusBar preview](img/status_bar.png)
+
 StatusBar — a horizontal chrome bar at the bottom of a window for status
 information.
 

@@ -3,6 +3,8 @@
 
 # MasonryLayout
 
+![MasonryLayout preview](img/masonry.png)
+
 MasonryLayout — a variable-height grid that packs children into the
 shortest column (Pinterest-style).
 

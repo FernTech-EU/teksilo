@@ -3,6 +3,8 @@
 
 # HStack
 
+![HStack preview](img/hstack.png)
+
 HStack — a horizontal layout container that distributes children left-to-right.
 
 Children are given their intrinsic width and the stack's cross-axis height.

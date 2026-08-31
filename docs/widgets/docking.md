@@ -3,6 +3,8 @@
 
 # DockingLayout
 
+![DockingLayout preview](img/docking.png)
+
 `DockingLayout` — a VS Code-style dockable layout: a fixed centre slot
 (the app's main content) surrounded by four collapsible, splittable,
 draggable side regions (leading / trailing / top / bottom), backed by a

@@ -3,6 +3,8 @@
 
 # Spacer
 
+![Spacer preview](img/spacer.png)
+
 Spacer — an invisible, flexible gap that claims all available space on the
 container's main axis.
 

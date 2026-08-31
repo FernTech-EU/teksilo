@@ -3,6 +3,8 @@
 
 # RadioButton
 
+![RadioButton preview](img/radio_button.png)
+
 RadioButton — mutually exclusive selection control.
 
 Multiple `RadioButton`s share a `Signal<usize>`; selecting one writes its

@@ -3,6 +3,8 @@
 
 # TextInput
 
+![TextInput preview](img/text_input.png)
+
 `TextInput` — styled single-line text field composite.
 
 Wraps the `TextInputField`
@@ -30,7 +32,7 @@ TextInput::new(search.clone())
 
 ## Builder methods at a glance
 
-`variant`, `style`, `placeholder`, `label`, `enabled`, `read_only`, `max_length`, `show_clear_button`, `min_width`, `leading_slot`, `trailing_slot`, `on_submit_fn`, `on_blur_fn`, `char_filter`, `suffix`, `input_mask`, `input_purpose`, `active_descendant`, `controls`, `validator`, `caret_position`, `caret_setter`, `validation_feedback_signal`, `validation`, `validation_feedback`, `tooltip`, `rich_tooltip_key`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`, `text`
+`variant`, `style`, `placeholder`, `label`, `enabled`, `read_only`, `max_length`, `show_clear_button`, `min_width`, `leading_slot`, `trailing_slot`, `on_submit_fn`, `on_blur_fn`, `char_filter`, `suffix`, `input_mask`, `input_purpose`, `active_descendant`, `controls`, `validator`, `caret_position`, `handle`, `caret_setter`, `validation_feedback_signal`, `validation`, `validation_feedback`, `tooltip`, `rich_tooltip_key`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`, `text`
 
 ## API reference
 
@@ -188,6 +190,20 @@ Reactive caret position. Mirrors the inner field's
 before `ctx.add(text_input)` — used by composing widgets
 (`DateEdit` segment-stepping) that need to know which
 segment Up/Down should step.
+
+#### `pub fn handle(&self) -> crate::primitives::TextFieldHandle`
+
+A live handle on the inner field — its text-editing commands, for a
+host outside the widget.
+
+Mirrors `TextInputField::handle`, and exists for the same reason: an
+application that routes Undo, Cut, Copy, Paste and Select All to
+"whichever text surface holds the caret" must be able to reach *every*
+such surface. A `TextInput` that could not be reached would silently
+lose its own Ctrl+Z to whatever the host routed the chord at instead.
+
+Like `caret_setter`, safe to take before `build`:
+the handle reaches the field through a slot the widget fills in.
 
 #### `pub fn caret_setter(&self) -> std::rc::Rc<dyn Fn(usize)>`
 

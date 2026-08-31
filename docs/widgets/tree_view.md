@@ -3,6 +3,8 @@
 
 # TreeView
 
+![TreeView preview](img/tree_view.png)
+
 TreeView — a virtualized, expandable/collapsible hierarchical list widget.
 
 Displays a `TreeModel<T>` as an indented tree.

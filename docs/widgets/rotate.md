@@ -3,6 +3,8 @@
 
 # Rotate
 
+![Rotate preview](img/rotate.png)
+
 `Rotate` — wraps a child and applies a 2D rotation to its entire
 subtree, driven by an external `Prop<f32>` of radians. Layout-
 stable: the wrapper reports the child's natural size at all

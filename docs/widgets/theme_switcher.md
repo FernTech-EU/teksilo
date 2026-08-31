@@ -3,6 +3,8 @@
 
 # ThemeSwitcher
 
+![ThemeSwitcher preview](img/theme_switcher.png)
+
 ThemeSwitcher — a drop-in app-theme picker for settings screens & toolbars.
 
 A thin `ComboBox` preset that switches the application theme. By default

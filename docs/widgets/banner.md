@@ -3,6 +3,8 @@
 
 # Banner
 
+![Banner preview](img/banner.png)
+
 Banner — persistent inline status strip (info / success / warning / error).
 
 A non-transient, full-width callout for app-level conditions: deprecation

@@ -55,7 +55,7 @@ ctx.add(
 
 ## Builder methods at a glance
 
-`placeholder`, `enabled`, `read_only`, `max_length`, `on_submit_fn`, `on_blur_fn`, `char_filter`, `suffix`, `text_height`, `interaction_signal`, `input_mask`, `mask_placeholder`, `validator`, `secure`, `input_purpose`, `active_descendant`, `controls`, `echo_char`, `revealed`, `at_reveal_policy`, `allow_copy`, `validation_feedback_signal`, `text`, `interaction`, `caret_position`, `caret_setter`
+`placeholder`, `enabled`, `read_only`, `max_length`, `on_submit_fn`, `on_blur_fn`, `char_filter`, `suffix`, `text_height`, `interaction_signal`, `input_mask`, `mask_placeholder`, `validator`, `secure`, `input_purpose`, `active_descendant`, `controls`, `echo_char`, `revealed`, `at_reveal_policy`, `allow_copy`, `validation_feedback_signal`, `text`, `share_handle`, `handle`, `interaction`, `caret_position`, `caret_setter`
 
 ## API reference
 
@@ -321,6 +321,31 @@ first commit (or forever if no validator is installed).
 
 The `Signal<String>` this field is bound to.
 
+#### `pub fn share_handle(mut self, handle: &TextFieldHandle) -> Self`
+
+Adopt an existing handle instead of minting one.
+
+For a composing widget — `TextInput` wraps this field — that must hand
+out a handle of its own **before** it builds the field it will delegate
+to. Sharing the slot and the focus signal makes the wrapper's handle and
+the field's the same handle, rather than two that agree by accident.
+
+#### `pub fn handle(&self) -> TextFieldHandle`
+
+A live handle on this field, valid before and after `build`.
+
+The counterpart of `RichTextEditor::handle`, and the reason it exists:
+an application that routes Undo, Cut, Copy, Paste and Select All to
+"whichever text surface holds the caret" has to be able to *drive* every
+such surface, not only the rich editors. Without this, a menu built for
+those commands can only grey them out over a rename field or a search
+box while the field's own key handling still works — a menu that lies
+about what the keyboard can do.
+
+Like `caret_setter`, the handle reaches its state through the slot the
+widget late-populates, so it may be taken while the tree is being
+described and used once it is live.
+
 #### `pub fn interaction(&self) -> Signal<InteractionState>`
 
 The interaction signal this field writes on focus changes.
@@ -348,6 +373,85 @@ after build it walks the field's inner state and moves the
 document cursor to `position`, clamped to the document
 length. Used by `DateEdit` / `TimeEdit` segment-stepping to
 keep the caret within its current segment after Up/Down.
+
+## `pub struct TextFieldHandle`
+
+A live handle on a `TextInputField` — its text-editing commands, for a
+caller outside the widget.
+
+Every method is a no-op before the field is built (and after it is
+destroyed), which is the honest answer rather than a panic: a menu row bound
+to a field that is no longer on screen should do nothing, not crash.
+
+```rust
+pub struct TextFieldHandle { /* fields */ }
+```
+
+### Methods
+
+#### `pub fn detached() -> Self`
+
+A handle not yet attached to any field — for a composing widget that
+hands one out before building the field it will delegate to. Every
+method answers "nothing" until `TextInputField::share_handle` binds it.
+
+#### `pub fn focused_signal(&self) -> Signal<bool>`
+
+`true` while this field holds the keyboard focus. Observable, so a
+router can follow the caret without polling.
+
+#### `pub fn is_live(&self) -> bool`
+
+Is the widget built and still alive?
+
+#### `pub fn text(&self) -> String`
+
+The field's current text.
+
+#### `pub fn has_selection(&self) -> bool`
+
+Is any text selected right now?
+
+#### `pub fn allows_copy(&self) -> bool`
+
+May this field's content be copied at all? A password field says no —
+see `TextInputField::allow_copy`.
+
+#### `pub fn is_read_only(&self) -> bool`
+
+Is the field refusing edits? Cut and Paste are meaningless when it is.
+
+#### `pub fn select_all(&self)`
+
+Select the whole field.
+
+#### `pub fn copy(&self, ctx: &EventContext)`
+
+Copy the selection to the clipboard.
+
+#### `pub fn cut(&self, ctx: &EventContext)`
+
+Cut the selection to the clipboard.
+
+#### `pub fn paste(&self, ctx: &EventContext)`
+
+Paste over the selection.
+
+#### `pub fn undo(&self)`
+
+Undo this field's own last edit.
+
+#### `pub fn redo(&self)`
+
+Redo this field's own last undone edit.
+
+#### `pub fn can_undo(&self) -> Signal<bool>`
+
+Is there anything to undo? Debounced like the editor's twin.
+
+#### `pub fn can_redo(&self) -> Signal<bool>`
+
+Is there anything to redo?
 
 ## `pub enum ValidationOutcome`
 

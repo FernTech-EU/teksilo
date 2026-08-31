@@ -3,6 +3,8 @@
 
 # Calendar
 
+![Calendar preview](img/calendar.png)
+
 `Calendar` — month-grid date picker, standalone widget.
 
 A self-contained calendar with month/year navigation, a 6×7 day grid,

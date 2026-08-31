@@ -3,6 +3,8 @@
 
 # ScrollBar
 
+![ScrollBar preview](img/scroll_bar.png)
+
 ScrollBar — pointer and keyboard affordance for a `ScrollArea`.
 
 `ScrollBar` reads and writes a shared `Signal<f32>` scroll position and a

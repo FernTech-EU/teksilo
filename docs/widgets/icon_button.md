@@ -3,6 +3,8 @@
 
 # IconButton
 
+![IconButton preview](img/icon_button.png)
+
 IconButton — a square, icon-only, flat-surface button.
 
 Five sizes covering both **embedded** use (inside another widget's

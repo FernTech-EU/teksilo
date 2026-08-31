@@ -3,6 +3,8 @@
 
 # Grid
 
+![Grid preview](img/grid.png)
+
 Grid — a 2D layout container with explicit row and column tracks.
 
 Columns and rows are declared as `TrackSize` slices supporting three

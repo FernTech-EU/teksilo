@@ -3,6 +3,8 @@
 
 # Wrap
 
+![Wrap preview](img/wrap.png)
+
 Wrap — a horizontal flow layout that wraps children to the next line when
 they exceed the available width.
 

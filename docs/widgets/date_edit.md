@@ -3,6 +3,8 @@
 
 # DateEdit
 
+![DateEdit preview](img/date_edit.png)
+
 `DateEdit` — text input + calendar popover, bound to `Signal<Option<Date>>`.
 
 A single-line editable date field. The underlying surface is a

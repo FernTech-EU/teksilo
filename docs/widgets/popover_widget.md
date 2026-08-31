@@ -53,6 +53,19 @@ everything else is shared by the generic.
 
 📖 [Full rustdoc API for this module](../api/teksilo_widgets/popover_widget/index.html)
 
+## `pub type PopoverCustom`
+
+A popover whose trigger is an arbitrary widget, wrapped in
+`OverlayTrigger`.
+
+The third stock shape beside `PopoverButton` and `PopoverIconButton`,
+and what replaced the standalone `Popover` widget: that type existed only
+because this generic could not take a non-button trigger.
+
+```rust
+pub type PopoverCustom = PopoverWidget<OverlayTrigger>;
+```
+
 ## `pub struct PopoverWidget`
 
 A trigger paired with a popover surface. See the module docs for the
@@ -178,7 +191,7 @@ double-chromed.
 
 Per-call `PopoverStyle` override for the surface (highest
 precedence over the theme slot and the built-in default). Mirrors
-`Popover::style`. No effect under
+the per-call override the standalone `Popover` used to offer. No effect under
 `bare`.
 
 #### `pub fn surface_name(mut self, name: impl Into<String>) -> Self`

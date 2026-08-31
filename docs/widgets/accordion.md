@@ -3,6 +3,8 @@
 
 # Accordion
 
+![Accordion preview](img/accordion.png)
+
 Accordion — a collapsible section with a clickable header that shows or hides
 its content when activated.
 

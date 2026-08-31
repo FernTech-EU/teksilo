@@ -3,6 +3,8 @@
 
 # ShortcutSettings
 
+![ShortcutSettings preview](img/shortcut_settings.png)
+
 ShortcutSettings — user-facing widget for browsing and rebinding
 application shortcuts.
 

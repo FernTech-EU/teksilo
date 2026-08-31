@@ -3,6 +3,8 @@
 
 # SpinBox
 
+![SpinBox preview](img/spin_box.png)
+
 `SpinBox` — numeric input with increment/decrement buttons.
 
 A generic composite over `SpinValue`

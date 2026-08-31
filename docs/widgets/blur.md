@@ -3,6 +3,8 @@
 
 # Blur
 
+![Blur preview](img/blur.png)
+
 `Blur` — a wrapper widget that applies a Gaussian-equivalent blur
 to its child subtree, driven by a `Prop<f32>` radius (in logical
 pixels).

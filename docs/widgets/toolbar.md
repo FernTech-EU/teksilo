@@ -3,6 +3,8 @@
 
 # Toolbar
 
+![Toolbar preview](img/toolbar.png)
+
 `Toolbar` — a command bar with automatic **overflow**.
 
 Excess actions collapse into a trailing chevron (`⌄`) that opens a popover

@@ -3,6 +3,8 @@
 
 # HexColorInput
 
+![HexColorInput preview](img/hex_color_input.png)
+
 `HexColorInput` — single-line `#RRGGBB[AA]` color editor.
 
 A specialization of `TextInput` that wires an input mask, a

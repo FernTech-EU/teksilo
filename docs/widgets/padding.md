@@ -3,6 +3,8 @@
 
 # Padding
 
+![Padding preview](img/padding.png)
+
 Padding — a single-child layout container that adds insets around its child.
 
 `Padding` shrink-wraps a child widget and enlarges it by configurable insets

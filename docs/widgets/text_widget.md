@@ -3,6 +3,8 @@
 
 # TextWidget
 
+![TextWidget preview](img/text_widget.png)
+
 TextWidget — a leaf widget that renders a localized text string.
 
 `TextWidget` is the building block for every visible label in the framework.

@@ -3,6 +3,8 @@
 
 # GroupBox
 
+![GroupBox preview](img/group_box.png)
+
 GroupBox — titled cluster of controls in Int UI / Jewel style.
 
 A bold title (optionally preceded by a checkbox) sits above an indented

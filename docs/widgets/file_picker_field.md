@@ -3,6 +3,8 @@
 
 # FilePickerField
 
+![FilePickerField preview](img/file_picker_field.png)
+
 `FilePickerField` — a text-input preset for path entry with a Browse button.
 
 Combines a `TextInput` with a trailing `IconButton` (the folder/browse glyph)

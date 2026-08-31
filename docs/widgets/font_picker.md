@@ -3,6 +3,8 @@
 
 # FontPicker
 
+![FontPicker preview](img/font_picker.png)
+
 FontPicker — a drop-in font-family selector.
 
 A `ComboBox` preset that lists every installed font family and lets

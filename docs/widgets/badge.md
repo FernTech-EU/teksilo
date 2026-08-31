@@ -3,6 +3,8 @@
 
 # Badge
 
+![Badge preview](img/badge.png)
+
 Badge — a pill-shaped label for tags, status indicators, and counts.
 
 `Badge` renders a short piece of text inside a rounded-pill container.

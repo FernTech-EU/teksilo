@@ -3,6 +3,8 @@
 
 # RadioTileGroup
 
+![RadioTileGroup preview](img/radio_tile_group.png)
+
 RadioTileGroup — an N-ary group of `RadioTile`s with single selection.
 
 Like `SegmentedControl`, the

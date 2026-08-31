@@ -3,6 +3,8 @@
 
 # TimeEdit
 
+![TimeEdit preview](img/time_edit.png)
+
 `TimeEdit` — text input for time-of-day, bound to `Signal<Option<Time>>`.
 
 Single-line editable time field with strftime-pattern parse/format

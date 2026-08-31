@@ -3,6 +3,8 @@
 
 # ValidationStrip
 
+![ValidationStrip preview](img/validation_strip.png)
+
 ValidationStrip — a small inline message shown below a text field to
 surface a validation outcome.
 

@@ -3,6 +3,8 @@
 
 # VStack
 
+![VStack preview](img/vstack.png)
+
 VStack — a vertical layout container that distributes children top-to-bottom.
 
 Each child is offered the full container width and its intrinsic preferred

@@ -3,6 +3,8 @@
 
 # ComboBox
 
+![ComboBox preview](img/combo_box.png)
+
 ComboBox — dropdown selection widget.
 
 Generic over the item type `T: Clone + PartialEq + 'static`. Selection is

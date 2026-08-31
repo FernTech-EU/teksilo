@@ -3,6 +3,8 @@
 
 # RadioTile
 
+![RadioTile preview](img/radio_tile.png)
+
 RadioTile — a "selectable card" radio option.
 
 A `RadioTile` behaves as a single radio button (`Role::RadioButton`,

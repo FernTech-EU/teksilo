@@ -3,6 +3,8 @@
 
 # ListView
 
+![ListView preview](img/list_view.png)
+
 ListView — a virtualized, scrollable list backed by a reactive data model.
 
 `ListView<T>` materializes widget subtrees only for the rows currently

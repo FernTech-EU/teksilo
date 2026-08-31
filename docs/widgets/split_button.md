@@ -3,6 +3,8 @@
 
 # SplitButton
 
+![SplitButton preview](img/split_button.png)
+
 SplitButton — a button split into two regions sharing a single frame.
 
 The left region is the **default action**: it shows the label of the

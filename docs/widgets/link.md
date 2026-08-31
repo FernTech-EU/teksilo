@@ -3,6 +3,8 @@
 
 # Link
 
+![Link preview](img/link.png)
+
 Link — a clickable text label rendered as underlined inline text.
 
 `Link` is Teksilo's hyperlink control: it responds to tap, Enter, and

@@ -3,6 +3,8 @@
 
 # Spinner
 
+![Spinner preview](img/spinner.png)
+
 `Spinner` — a shader-driven circular-arc loading indicator.
 
 Uses the same per-slot uniform-buffer pipeline as

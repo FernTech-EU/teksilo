@@ -3,6 +3,8 @@
 
 # FormLayout
 
+![FormLayout preview](img/form_layout.png)
+
 FormLayout — a two-column settings or preferences form layout.
 
 Children are added as label/field pairs via `FormLayout::line` (inline

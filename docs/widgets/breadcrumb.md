@@ -3,6 +3,8 @@
 
 # Breadcrumb
 
+![Breadcrumb preview](img/breadcrumb.png)
+
 Breadcrumb — a navigational trail with automatic overflow into a `…` menu.
 
 `Breadcrumb` renders a horizontal row of labelled segments separated by

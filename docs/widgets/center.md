@@ -3,6 +3,8 @@
 
 # Center
 
+![Center preview](img/center.png)
+
 Center — a single-child wrapper that centers its child within the available
 space.
 

@@ -3,6 +3,8 @@
 
 # IconWidget
 
+![IconWidget preview](img/icon_widget.png)
+
 IconWidget — a vector or raster icon rendered at a configurable size.
 
 Supports multiple source formats: programmatic `Path` (checkmarks,

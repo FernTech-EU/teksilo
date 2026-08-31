@@ -3,6 +3,8 @@
 
 # ProgressBar
 
+![ProgressBar preview](img/progress_bar.png)
+
 ProgressBar — a bar showing progress from 0.0 to 1.0.
 
 Supports determinate (fixed or reactive value), indeterminate (animated

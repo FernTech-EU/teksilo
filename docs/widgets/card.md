@@ -3,6 +3,8 @@
 
 # Card
 
+![Card preview](img/card.png)
+
 Card — a surface container with optional header, content, and footer slots.
 
 `Card` renders an opaque or tinted rounded-rectangle backdrop, an optional

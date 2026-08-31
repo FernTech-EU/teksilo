@@ -3,6 +3,8 @@
 
 # StandardListItem
 
+![StandardListItem preview](img/standard_item.png)
+
 Canonical row layout for `ListView` / `TreeView` delegates.
 
 Two widgets:

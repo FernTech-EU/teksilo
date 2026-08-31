@@ -3,6 +3,8 @@
 
 # Divider
 
+![Divider preview](img/divider.png)
+
 Divider — a themed separator line that visually partitions content.
 
 `Divider` renders a single hairline stroke (`DIVIDER_THICKNESS` = 1 dp by

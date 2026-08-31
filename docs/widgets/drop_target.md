@@ -3,6 +3,8 @@
 
 # DropTarget
 
+![DropTarget preview](img/drop_target.png)
+
 `DropTarget` — a transparent wrapping drop container.
 
 Where `DropZone` is a *standalone* "drop files

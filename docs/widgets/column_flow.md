@@ -3,6 +3,8 @@
 
 # ColumnFlow
 
+![ColumnFlow preview](img/column_flow.png)
+
 `ColumnFlow` — flows children into as many columns as the width affords,
 re-partitioning every child when a column is gained or lost.
 

@@ -3,6 +3,8 @@
 
 # Dialog
 
+![Dialog preview](img/dialog.png)
+
 Modal dialogs — a trigger button that presents a centered modal panel.
 
 Three cooperating types cover the common dialog use-case. `Dialog` is the

@@ -3,6 +3,8 @@
 
 # SearchField
 
+![SearchField preview](img/search_field.png)
+
 SearchField — a `TextInput` preset
 configured for search workflows: leading magnifier glyph, default-on
 clear-X, and an optional anchored suggestions popover with keyboard

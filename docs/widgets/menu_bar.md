@@ -3,6 +3,8 @@
 
 # MenuBar
 
+![MenuBar preview](img/menu_bar.png)
+
 MenuBar — a horizontal application menu bar with keyboard-driven dropdowns.
 
 `MenuBar` renders a row of labelled trigger buttons; activating one opens a

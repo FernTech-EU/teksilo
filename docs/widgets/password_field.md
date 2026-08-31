@@ -3,6 +3,8 @@
 
 # PasswordField
 
+![PasswordField preview](img/password_field.png)
+
 `PasswordField` — secure single-line text entry with a reveal
 toggle, masking, Caps Lock warning, and clipboard protection.
 

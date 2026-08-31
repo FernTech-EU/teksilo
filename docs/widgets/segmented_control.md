@@ -3,6 +3,8 @@
 
 # SegmentedControl
 
+![SegmentedControl preview](img/segmented_control.png)
+
 SegmentedControl — mutually exclusive segments in a horizontal row.
 
 Each segment is a real composed widget — a centered icon + label with

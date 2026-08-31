@@ -3,6 +3,8 @@
 
 # Stepper
 
+![Stepper preview](img/stepper.png)
+
 `Stepper` — a modern, embeddable step-flow widget (Material/Ant/Flutter
 "stepper"), and `Wizard`, a thin modal launcher built on it.
 

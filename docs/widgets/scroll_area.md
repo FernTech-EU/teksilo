@@ -3,6 +3,8 @@
 
 # ScrollArea
 
+![ScrollArea preview](img/scroll_area.png)
+
 ScrollArea — a clipping viewport that scrolls its content on wheel, touch,
 and assistive-technology actions.
 

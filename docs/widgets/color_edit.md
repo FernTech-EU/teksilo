@@ -3,6 +3,8 @@
 
 # ColorEdit
 
+![ColorEdit preview](img/color_edit.png)
+
 `ColorEdit` — compact field-style color picker trigger that opens
 a popover containing a `ColorPicker`.
 

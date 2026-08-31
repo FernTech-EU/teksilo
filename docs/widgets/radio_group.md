@@ -3,6 +3,8 @@
 
 # RadioGroup
 
+![RadioGroup preview](img/radio_group.png)
+
 RadioGroup — invisible layout container that groups `RadioButton`s
 and wires their accessibility metadata.
 

@@ -3,6 +3,8 @@
 
 # TabWidget
 
+![TabWidget preview](img/tab_widget.png)
+
 Tabbed-container widgets.
 
 Two public entry points:

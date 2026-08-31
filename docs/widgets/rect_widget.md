@@ -3,6 +3,8 @@
 
 # RectWidget
 
+![RectWidget preview](img/rect_widget.png)
+
 RectWidget — a leaf widget that paints a filled and/or stroked rounded rectangle.
 
 `RectWidget` has no intrinsic content: it fills whatever space its parent

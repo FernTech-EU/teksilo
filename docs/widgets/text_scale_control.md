@@ -3,6 +3,8 @@
 
 # TextScaleControl
 
+![TextScaleControl preview](img/text_scale_control.png)
+
 `TextScaleControl` — the settings control that grows all text in the app.
 
 Drop this into a preferences/settings window to let low-vision users scale

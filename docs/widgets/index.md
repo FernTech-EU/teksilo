@@ -127,7 +127,6 @@ Every public widget in `teksilo-widgets`, grouped by category. Each page links t
 - [MessageBox](message_box.md) — MessageBox — QMessageBox-style alert dialog
 - [NotificationCenterButton](center_button.md) — `NotificationCenterButton` — bell icon with an unread-count badge that
 - [NotificationLog](log.md) — `NotificationLog` — a scrollable, day-bucketed list of archived notifications
-- [Popover](popover.md) — `Popover` — a button that opens a floating panel anchored to itself
 - [Snackbar](snackbar.md) — Snackbar — a transient, button-triggered floating notification surface
 - [Toast](toast.md) — Toast notification — stackable, action-rich, severity-aware floating
 - [ToastHost](host.md) — `ToastHost` — invisible sibling widget that owns the toast queue
@@ -176,6 +175,8 @@ Every public widget in `teksilo-widgets`, grouped by category. Each page links t
 - [CodeEditorHandle](code_editor.md) — Multi-line plain-text and code editing surfaces
 - [CommandPalette](command_palette.md) — CommandPalette — type-to-run access to every command an app has registered
 - [NotificationEntry](notification.md) — Persistent notification archive — the storage and data-model layer
+- [OverlayTrigger](overlay_trigger.md)
+- [PopoverSurface](popover_surface.md) — `PopoverSurface` — the themed panel a popover's content sits in
 - [PopoverWidget](popover_widget.md) — `PopoverWidget<T>` — a generic trigger that opens a popover when
 - [TreeRowMeta](tree_source.md) — Type-erased data source adapter for `TreeView`
 

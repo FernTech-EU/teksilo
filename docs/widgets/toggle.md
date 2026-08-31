@@ -3,6 +3,8 @@
 
 # Toggle
 
+![Toggle preview](img/toggle.png)
+
 Toggle — an animated on/off switch bound to a `Signal<bool>`.
 
 Renders as a sliding-knob switch (IntUI default) or one of the alternate

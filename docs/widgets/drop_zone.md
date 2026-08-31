@@ -3,6 +3,8 @@
 
 # DropZone
 
+![DropZone preview](img/drop_zone.png)
+
 `DropZone` — a "drop files here" target for external (OS) drag-and-drop.
 
 A bordered, tinted region that accepts files / text / URLs dragged in from

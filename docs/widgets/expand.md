@@ -3,6 +3,8 @@
 
 # Expand
 
+![Expand preview](img/expand.png)
+
 Expand — a layout modifier that claims slack space in a stack and
 stretches its child to fill the allocated bounds.
 

@@ -3,6 +3,8 @@
 
 # TooltipWidget
 
+![TooltipWidget preview](img/tooltip.png)
+
 Tooltip system — hover-triggered overlays with configurable delay.
 
 Three tiers, increasing in expressive power:

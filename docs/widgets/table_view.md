@@ -3,6 +3,8 @@
 
 # TableView
 
+![TableView preview](img/table_view.png)
+
 `TableView<T>` — generic, virtualized, accessible tabular widget.
 
 Built atop the `ListModel<T>` /
@@ -47,7 +49,7 @@ let _table = TableView::new(model)
 
 ## Builder methods at a glance
 
-`from_source`, `from_source_keyed`, `enabled`, `overscroll_behavior`, `smooth_scrolling`, `type_ahead_label`, `type_ahead_timeout`, `smooth_scroll_duration`, `scroll_bar_style`, `add_column`, `columns`, `row_height`, `row_height_fn`, `auto_row_height`, `header_height`, `show_header`, `column_resize_policy`, `tab_traversal`, `edit_trigger`, `on_cell_edit_request`, `on_row_activate`, `reorderable`, `reorderable_rows`, `exportable`, `export_external`, `on_rows_transferred_out`, `accept_foreign_rows`, `on_rows_received`, `activate_on`, `selection_mode`, `selection`, `cell_selection`, `alternating_rows`, `grid_lines`, `a11y_label`, `show_internal_scrollbars`, `empty_view`, `scroll_y_signal`, `max_scroll_y_signal`, `viewport_ratio_y_signal`, `scroll_x_signal`, `max_scroll_x_signal`, `viewport_ratio_x_signal`, `sort_signal`, `column_widths_signal`, `column_order_signal`, `column_pinning_signal`, `focused_cell_signal`, `set_focused_cell`, `clear_focused_cell`, `editing_cell_signal`, `begin_edit`, `end_edit`, `filters_signal`, `set_filter`, `clear_filters`, `scroll_to_row`, `set_sort`, `clear_sort`, `set_column_width`, `set_column_widths`, `set_column_order`, `set_column_pinning`, `ensure_row_visible`
+`from_source`, `from_source_keyed`, `enabled`, `overscroll_behavior`, `smooth_scrolling`, `type_ahead_label`, `type_ahead_timeout`, `smooth_scroll_duration`, `scroll_bar_style`, `add_column`, `columns`, `row_height`, `row_height_fn`, `auto_row_height`, `header_height`, `show_header`, `column_resize_policy`, `tab_traversal`, `edit_triggers`, `on_cell_edit_request`, `on_cell_edit_dismissed`, `on_row_activate`, `reorderable`, `reorderable_rows`, `exportable`, `export_external`, `on_rows_transferred_out`, `accept_foreign_rows`, `on_rows_received`, `activate_on`, `selection_mode`, `selection`, `cell_selection`, `alternating_rows`, `grid_lines`, `a11y_label`, `show_internal_scrollbars`, `empty_view`, `scroll_y_signal`, `max_scroll_y_signal`, `viewport_ratio_y_signal`, `scroll_x_signal`, `max_scroll_x_signal`, `viewport_ratio_x_signal`, `sort_signal`, `column_widths_signal`, `column_order_signal`, `column_pinning_signal`, `focused_cell_signal`, `set_focused_cell`, `clear_focused_cell`, `editing_cell_signal`, `begin_edit`, `end_edit`, `filters_signal`, `set_filter`, `clear_filters`, `scroll_to_row`, `set_sort`, `clear_sort`, `set_column_width`, `set_column_widths`, `set_column_order`, `set_column_pinning`, `ensure_row_visible`
 
 ## API reference
 
@@ -117,7 +119,7 @@ around (Qt `keyboardSearch` / macOS & Windows type-select).
 ASCII-case-insensitive. A pause longer than the
 `type_ahead_timeout` starts a fresh term.
 
-On an editable column whose `EditTrigger` is type-to-edit, typing
+On an editable column whose `EditTriggers` is type-to-edit, typing
 starts an edit instead — type-ahead applies on non-editable columns
 (or when no type-to-edit trigger is configured).
 
@@ -189,14 +191,34 @@ added, resized, or the table's own width changes. See
 Control how Tab / Shift+Tab navigate between cells. See
 `TabTraversal`.
 
-#### `pub fn edit_trigger(mut self, trigger: EditTrigger) -> Self`
+#### `pub fn edit_triggers(mut self, trigger: EditTriggers) -> Self`
 
-Set which user action opens a cell editor. See `EditTrigger`.
+Set which user action opens a cell editor. See `EditTriggers`.
 
 #### `pub fn on_cell_edit_request( mut self, f: impl Fn(usize, &str, &mut teksilo_core::widget::EventContext) + 'static, ) -> Self`
 
 Hook fired by the keyboard handler when an edit trigger fires
 on the focused cell. Receives `(row_index, col_id, ctx)`.
+
+#### `pub fn on_cell_edit_dismissed( mut self, f: impl Fn(usize, &str, &mut teksilo_core::widget::EventContext) + 'static, ) -> Self`
+
+Callback invoked when an **open** cell editor should end because the
+pointer went somewhere else: a press that lands on any cell other than
+the one being edited. Receives the editing cell's flat row index and
+column id, so the owner can commit (or discard) whatever is in its
+buffer, then clear its own editing state.
+
+The counterpart of `on_cell_edit_request`,
+and the view cannot do it alone: the framework owns *which* cell is being
+edited, but only the owner knows what an ended edit means — commit,
+discard, or refuse a value that will not parse.
+
+**Why a press and not a focus change.** "The editor lost focus" is the
+obvious signal and it cannot be used: a body pane rebuilds constantly —
+selection, filtering, scroll, a reload from elsewhere — and every rebuild
+destroys and re-creates the open editor, so focus leaves it many times
+during an edit the writer never interrupted. A press on another cell is
+unambiguous and happens exactly once.
 
 #### `pub fn on_row_activate( mut self, f: impl Fn(usize, &mut teksilo_core::widget::EventContext) + 'static, ) -> Self`
 
@@ -582,22 +604,76 @@ pub enum ColumnResizePolicy { /* variants */ }
 - **`Live`**
 - **`OnRelease`**
 
-## `pub enum EditTrigger`
+## `pub struct EditTriggers`
 
-Triggers that cause the table to fire `on_cell_edit_request` on the
-focused cell.
+Which gestures open a cell editor — a **set**, composed with `|`, after
+Qt's `QAbstractItemView::EditTriggers`.
+
+A set rather than an enum of named combinations, because the combinations
+are the caller's to choose: "one click" and "F2 or one click" are ordinary
+requests that a closed enum of `F2 / F2OrType / F2OrTypeOrDoubleClick /
+DoubleClick / None` could not express at all.
+
+Set table-wide with `TableView::edit_triggers`
+/ `TreeTableView::edit_triggers`, and
+per column with `Column::edit_triggers` — the column wins where it sets
+one. Only cells of an `editable` column ever open an
+editor, whatever the triggers say; the two are the same split Qt makes
+between a view's `editTriggers` and an item's `ItemIsEditable`.
+
+**`SINGLE_CLICK` claims the press.** A cell that edits on one click does not
+also select its row — the same trade any interactive cell content already
+makes, and the reason it is per column: put it on the columns that are
+nothing but a value, and leave the row's own column alone.
 
 ```rust
-pub enum EditTrigger { /* variants */ }
+pub struct EditTriggers(u8);
 ```
 
-### Variants
+### Methods
 
-- **`F2OrTypeOrDoubleClick`** — All three triggers active. **Default.**
-- **`F2`**
-- **`F2OrType`**
-- **`DoubleClick`**
-- **`None`** — Editing disabled — the table does not fire `on_cell_edit_request`.
+#### `pub const NONE: Self = Self(0);`
+
+Editing is never opened by the view. Cells of an editable column still
+render normally; nothing reaches `on_cell_edit_request`.
+
+#### `pub const F2: Self = Self(1 << 0);`
+
+**F2** on the focused cell.
+
+#### `pub const ANY_KEY: Self = Self(1 << 1);`
+
+Any printable character typed on the focused cell. Note that the
+keystroke that opens the editor is **not** delivered into it — the
+editor does not exist until the next build — so this reads as "F2 with
+an extra key", and it shadows type-ahead on every editable column.
+
+#### `pub const SINGLE_CLICK: Self = Self(1 << 2);`
+
+A single click on the cell. Claims the press, so that cell no longer
+selects its row.
+
+#### `pub const DOUBLE_CLICK: Self = Self(1 << 3);`
+
+A double click on the cell. It takes the gesture from row activation on
+**this column** — a column that edits on double-click must not also open
+its row on the same click — while every other column still activates.
+
+#### `pub const ALL: Self = Self(0b0000_1111);`
+
+Every trigger at once.
+
+#### `pub const fn contains(self, other: Self) -> bool`
+
+`true` when every trigger in `other` is present.
+
+#### `pub const fn is_empty(self) -> bool`
+
+`true` when nothing opens an editor.
+
+#### `pub const fn union(self, other: Self) -> Self`
+
+#### `pub const fn intersection(self, other: Self) -> Self`
 
 ## `pub enum TabTraversal`
 
@@ -672,6 +748,24 @@ only enter edit mode on cells of editable columns; the
 `on_cell_edit_request` hook also fires only for these. Cells of
 non-editable columns continue to render their static delegate
 regardless of `editing_cell`.
+
+#### `pub fn edit_triggers(mut self, triggers: EditTriggers) -> Self`
+
+Override the view's `EditTriggers` for this column alone.
+
+The reason the set is not only table-wide: a table's columns rarely
+want the same gesture. A tree column has to keep click-to-select and
+double-click-to-open, while the plain value columns beside it are
+exactly where one click to edit belongs. Unset columns inherit the
+view's set.
+
+#### `pub fn effective_edit_triggers(&self, view: EditTriggers) -> EditTriggers`
+
+The triggers in force for this column, given the view's set — the
+question the body pane and the key handler both ask, and the one an
+application's own tests want to ask about their column set.
+
+A non-editable column never opens an editor, whatever either says.
 
 #### `pub fn pinned(mut self, side: PinnedSide) -> Self`
 

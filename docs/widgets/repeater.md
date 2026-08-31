@@ -3,6 +3,8 @@
 
 # Repeater
 
+![Repeater preview](img/repeater.png)
+
 Repeater — non-virtualized dynamic widget list driven by a `ListModel<T>`.
 
 `Repeater` creates one child widget per item in a `ListModel<T>`

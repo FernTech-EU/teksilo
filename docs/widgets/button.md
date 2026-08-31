@@ -3,6 +3,8 @@
 
 # Button
 
+![Button preview](img/button.png)
+
 Button — a labelled, activatable action trigger.
 
 `Button` is the primary action surface in Teksilo. It renders a text
@@ -36,7 +38,7 @@ let _btn = Button::new(lit!("Save"))
 
 ## Builder methods at a glance
 
-`current_variant`, `share_interaction`, `variant`, `style`, `label`, `on_activate_fn`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`, `enabled`, `text_role`, `text_style`, `icon`, `has_popup`, `expanded_when`, `leading`, `trailing`
+`current_variant`, `share_interaction`, `variant`, `style`, `label`, `on_activate_fn`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`, `enabled`, `text_role`, `text_style`, `icon`, `icon_keeps_color`, `has_popup`, `expanded_when`, `leading`, `trailing`
 
 ## API reference
 
@@ -212,6 +214,26 @@ Orthogonal to `Button::text_role`, which only sets the color.
 #### `pub fn icon(mut self, icon: IconWidget, location: IconLocation) -> Self`
 
 Add an icon to the button at the specified location.
+
+#### `pub fn icon_keeps_color(mut self) -> Self`
+
+Keep the icon's own colour instead of tinting it to the label's.
+
+The mirror of `MenuItem::icon_keeps_color`,
+and it exists for the same reason: an icon whose colour *is* the information.
+A filter chip carrying a user-chosen tag colour, a legend swatch, a status
+disc — tinting those to the label's foreground destroys the one thing they
+carry, while tinting is exactly right for a glyph that merely repeats the
+label.
+
+Two consequences worth knowing, both inherited from
+`ColorProp`'s own rules rather than
+special-cased here:
+
+* The colour must clear contrast against **every** fill the button takes —
+  an accent-filled selected state as well as the resting surface.
+* A literal colour **does not dim when the button is disabled**. An icon
+  that should dim wants a role instead, and then it does not need this.
 
 #### `pub fn has_popup(mut self, kind: teksilo_core::accesskit::HasPopup) -> Self`
 

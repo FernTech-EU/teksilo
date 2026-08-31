@@ -3,6 +3,8 @@
 
 # TwistArrow
 
+![TwistArrow preview](img/twist_arrow.png)
+
 TwistArrow — a small chevron that indicates and toggles a tree node's expansion.
 
 Renders a right-pointing arrow when collapsed and a down-pointing arrow when

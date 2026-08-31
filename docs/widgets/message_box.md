@@ -3,6 +3,8 @@
 
 # MessageBox
 
+![MessageBox preview](img/message_box.png)
+
 MessageBox — QMessageBox-style alert dialog.
 
 A higher-level surface built on top of `ModalContainer`

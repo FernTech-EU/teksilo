@@ -3,6 +3,8 @@
 
 # MenuItem
 
+![MenuItem preview](img/menu_item.png)
+
 MenuItem — a single command row in a menu or context menu.
 
 Each item consists of an optional leading icon, a label, an optional

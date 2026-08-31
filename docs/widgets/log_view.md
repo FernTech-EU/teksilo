@@ -3,6 +3,8 @@
 
 # LogView
 
+![LogView preview](img/log_view.png)
+
 `LogView` — a read-only, append-only, tail-following streaming view.
 
 The third face of the editor core, and the one that is *not* an editor. A

@@ -3,6 +3,8 @@
 
 # Checkbox
 
+![Checkbox preview](img/checkbox.png)
+
 Checkbox — a two-state or tristate checkbox with an optional label.
 
 `Checkbox` renders a square (or rounded-square / circle) toggle box

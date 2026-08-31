@@ -3,6 +3,8 @@
 
 # NotificationCenterButton
 
+![NotificationCenterButton preview](img/center_button.png)
+
 `NotificationCenterButton` — bell icon with an unread-count badge that
 opens a `NotificationLog` popover when clicked.
 

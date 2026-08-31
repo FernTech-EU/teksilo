@@ -3,6 +3,8 @@
 
 # AspectRatio
 
+![AspectRatio preview](img/aspect_ratio.png)
+
 AspectRatio — a single-child wrapper that constrains layout to a fixed
 width-to-height ratio.
 

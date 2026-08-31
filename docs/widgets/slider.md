@@ -3,6 +3,8 @@
 
 # Slider
 
+![Slider preview](img/slider.png)
+
 Slider — a draggable value selector bound to a `Signal<f32>`.
 
 The widget owns all input handling: pointer drag (click-to-jump and

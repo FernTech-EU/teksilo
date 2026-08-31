@@ -3,6 +3,8 @@
 
 # Snackbar
 
+![Snackbar preview](img/snackbar.png)
+
 Snackbar — a transient, button-triggered floating notification surface.
 
 A `Snackbar` pairs a trigger (a `Button` by default, or any custom

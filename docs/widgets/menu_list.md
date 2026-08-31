@@ -3,6 +3,8 @@
 
 # MenuList
 
+![MenuList preview](img/menu_list.png)
+
 MenuList — a themed vertical menu container with keyboard navigation.
 
 `MenuList` is the dropdown panel used by `MenuBar`, `MenuContext`, and
