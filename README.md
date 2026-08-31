@@ -72,7 +72,7 @@ A widget catalog example is available if you run `cargo run -p widget-catalog` i
 
 ## Documentation
 
-Available in `docs/` and on [Cloudflare Pages](https://teksilo.pages.dev).
+Available in `docs/` and on [Cloudflare Pages](https://teksilo-docs.pages.dev).
 
 ## Who is this for
 
