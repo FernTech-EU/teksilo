@@ -13,6 +13,162 @@ by crate for clarity, not because crates version independently.
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-08-31
+
+### Added — `teksilo-widgets`: the framework's own strings speak twenty-one more languages
+
+`teksilo-widgets` shipped its 308 user-facing strings — accessibility names,
+MessageBox buttons, the GDPR privacy panel, calendar and keystroke names, the
+command palette — in English and French only. Nineteen European locales plus
+Japanese and Korean are now registered in `framework_locales()`: ar-SA, cs-CZ,
+da-DK, de-DE, el-GR, es-ES, fi-FI, he-IL, hu-HU, it-IT, ja-JP, ko-KR, nb-NO,
+nl-NL, pl-PL, pt-PT, ro-RO, ru-RU, sv-SE, tr-TR and uk-UA.
+
+Each carries its real CLDR cardinal plural categories rather than a copy of
+English's one/other shape, so a count-bearing message declines correctly where
+the language demands it — one/few/many/other in the Slavic locales, one/few/other
+in Romanian, the full zero/one/two/few/many/other in Arabic, and a bare other in
+Japanese and Korean. Strings whose singular/plural split is chosen in Rust
+rather than by Fluent were rephrased where a two-way split would be
+ungrammatical at n = 2 or n = 5.
+
+### Added — `teksilo-i18n`: a runtime override can watch a locale's whole directory
+
+`runtime_override` accepted a single `.ftl` file, and a reload replaced the
+locale's entire bundle with it. For a catalogue split across several files per
+locale that is silently destructive: a bundle is the merge of every resource
+registered for the locale, so saving `main.ftl` dropped every key
+`tooltips.ftl` and its siblings defined, and those keys fell back to the source
+locale with nothing printed anywhere. The translator sees most of the app
+revert to English and has no reason to suspect the flag rather than their file.
+
+`runtime_override` now takes a directory as well as a file, and the watcher
+follows every resource under it.
+
+### Added — `teksilo-i18n`: a number can be read back in the locale it was written in
+
+`NumberFormatter` was a one-way street: it rendered a value for display and
+offered nothing for the return trip, so an editable numeric surface could not
+use it. Show a French user `1 234,56` and the commit path hands
+`f64::from_str` a narrow no-break space and gets `None` — so every numeric
+field was C-locale, and `SpinBox` showed `12.5` to a user whose numeric keypad
+has no `.`.
+
+`NumberSymbols` recovers a locale's separators, signs and digits *from ICU's
+own formatted output*, so the display and parse directions cannot drift, and it
+works in strings rather than `f64` so an `i64` past 2^53 keeps its precision.
+`SpinBox` gained `.localized(bool)` (**default on**) and `.use_grouping(bool)`
+(default off, matching Qt): display, commit parse and the per-character input
+filter all resolve from one presentation, so they cannot disagree.
+
+### Fixed — `teksilo-widgets`: a language switch reaches the date and time fields
+
+Every datetime editing widget derives a display convention from the locale — a
+strftime-subset pattern, a first day of week, a 12-vs-24-hour clock — and each
+read it once, in `build()`. `set_locale` marks the tree dirty for layout and
+paint and deliberately leaves `build()` alone, the same choice `set_theme`
+makes, so nothing re-ran that read and a language switch left every date field
+in the old convention.
+
+### Added — docs: the widget catalog renders its own pictures
+
+`extract_widget_api.py` has always emitted a preview image link on a catalog
+page when the file exists, and nothing ever produced one. `teksilo-widgets-previewer
+--export-docs` is the producer: it renders every registered widget through the
+production wgpu renderer into `docs/widgets/img/`, headless, with no display
+server. 95 of the 136 catalog pages now open with a preview. The images are
+committed rather than built in CI, because the export needs a GPU adapter that
+`ubuntu-latest` does not have.
+
+### Added — `teksilo-core`: the framework answers "is the focused widget a text surface?"
+
+An application that wants one Undo command routed to whatever the user is
+actually editing must register `Ctrl+Z` globally — shortcuts resolve before any
+widget sees the raw key — and the moment it does, it has taken that chord from
+every text widget in the tree and owes each of them an answer. It cannot
+produce one alone: it recognises the surfaces it built and is blind to the
+rest, such as a rename box inside a table cell.
+
+New API: `WidgetTree::text_surfaces()`, `focused_text_surface()` and
+`focused_is_text_surface()`.
+
+### Fixed — `teksilo-widgets`: Escape reaches past a tooltip, and out of a text field
+
+Two independent bugs, both found chasing "Escape does nothing" in a table cell
+editor. A *shown tooltip consumed Escape*: the dismissal path treats a
+hover-shown overlay as a dismissal target and returns, so the key never reached
+the focused widget — and a tooltip is up far more often than anyone realises.
+And a focused `TextInputField` *swallowed* it: winit gives Escape
+`text: Some("\u{1b}")`, `handle_key` had no `Escape` arm, so it fell into the
+printable-character branch where the filter stripped the control character and
+the empty result read as "input rejected". Every dialog whose cancel sits
+outside a field had the same hole.
+
+### Fixed — `teksilo-widgets`: a menu row activated by keyboard keeps the window sink
+
+Enter on a menu item panicked the app with `open_window called on a standalone
+WidgetTree (no app context)`, while the same item opened its window fine by
+mouse. A keyboard activation does not dispatch the click a pointer would: the
+menu queues a synthetic click and the tree drained it through
+`WidgetTree::click` — the *test* entry point, which installs `NoopWindowOps`.
+
+### Added — `teksilo-widgets`: cell editing with click triggers and persistent focus
+
+Cell editors now activate on single or double click, configurable per column
+through the new `EditTriggers` bitmask, and `on_cell_edit_dismissed` ends an
+active edit when the user clicks away — on another cell or on empty table
+space. In tree tables, keyboard focus now moves into the editor and *stays*
+there across rebuilds, via the new `BuildContext::focus_into`. Tap ownership in
+the dispatcher was refined so double-click-to-edit no longer costs the row
+selection on the first click.
+
+### Added — `teksilo-widgets`: a button icon may keep its own colour
+
+`Button` binds every icon's tint to the label's colour, which is right for a
+glyph that repeats the label and wrong for one whose colour *is* the
+information: a filter chip carrying a user-chosen tag colour, a legend swatch,
+a status disc. `icon_keeps_color` is the same opt-out `MenuItem` has had, on
+the same reasoning, so a tag reads the same in a chip as in the menu that filed
+it.
+
+### Changed — `teksilo-core`: overlay and tooltip bodies are built on first use
+
+A widget owning overlay content — a popover's panel, a dropdown, a submenu, a
+calendar, a tooltip body — wrote `ctx.add(panel)` followed by
+`ctx.set_dormant(id)`. That is correct, and it is what dormancy documents:
+parking is about activation, not construction. What it costs is a full
+`build()` of content the user may never open, on every rebuild of the owner —
+invisible in a dialog, dominant in a virtualized collection where the owner is
+a per-row delegate.
+
+New API: `BuildContext::add_deferred` / `add_deferred_boxed` and
+`DeferredSubtree`, which materializes its child on first reveal.
+
+### Fixed — `teksilo-widgets`: a drop into a folder no longer looks like a drop after it
+
+Dragging a row over a container offered three verdicts and one visual. The
+`Into` box was painted at the target row's exact bounds, so its top edge
+occupied the pixels a `Before` line does and its bottom edge those of an
+`After` line; its wash was alpha 0.18 of the accent, invisible on light chrome;
+and the drag ghost covers the row's right half, hiding the vertical sides that
+were the only thing saying "box" rather than "line". Whichever third of the row
+you hovered, you read an accent bar at a row boundary.
+
+### Fixed — accessibility: the four Level-A findings of the internal assessment
+
+The 2026-08-28 internal assessment raised four Level-A defects in four
+different crates. They share a shape: the toolkit advertised a capability it
+did not provide. The clearest is a keyboard trap (WCAG 2.1.2) — `Terminal` sets
+`keyboard_capture(true)` and answered `Handled` to every `KeyDown` after
+encoding Tab and Shift+Tab for the child, so no chord could leave the widget.
+
+The audit document itself was re-checked against source and reframed as an
+internal engineering assessment — not an ACR, not a VPAT, not a conformance
+claim, not third-party verified — with a scope-and-method section stating what
+was *not* done: no live AT testing, no colorimetry, some widgets unassessed.
+
+## [0.8.0] - 2026-08-27
+
 ### Fixed — `teksilo-widgets`: caret motion follows the platform's own layout
 
 Word-jump, the line edge and the document edge do not merely sit on a different
@@ -360,6 +516,8 @@ from an inline `match` to a named `theme_from_id`, and the example gained its
 first tests — including one that walks every offered preset through a
 persist/restore round trip, the failure mode where a new theme persists happily
 and then silently reverts on the next launch.
+
+## [0.7.0] - 2026-08-08
 
 ### Added — `teksilo-widgets` docking: rail actions + Strip bar slots
 
