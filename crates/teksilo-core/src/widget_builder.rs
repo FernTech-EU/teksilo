@@ -250,7 +250,7 @@ impl AccessibilityOverrides {
                 .enumerate()
                 .map(|(i, (label, _))| accesskit::CustomAction {
                     id: i as i32,
-                    description: label.get().into(),
+                    description: label.get(),
                 })
                 .collect();
             b.set_custom_actions(custom);

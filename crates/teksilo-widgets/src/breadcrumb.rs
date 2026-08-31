@@ -548,7 +548,7 @@ impl Widget for BreadcrumbSeparator {
 }
 
 enum BreadcrumbSlot {
-    Entry(BreadcrumbEntry),
+    Entry(Box<BreadcrumbEntry>),
     Id(WidgetId),
 }
 
@@ -626,14 +626,15 @@ impl Breadcrumb {
     /// in insertion order, separated by chevron glyphs. Middle items (neither
     /// root nor current) may be collapsed into the `…` overflow menu.
     pub fn item(mut self, item: BreadcrumbItem) -> Self {
-        self.slots.push(BreadcrumbSlot::Entry(BreadcrumbEntry {
-            label: item.label,
-            action: item.action,
-            current: item.current,
-            tooltip_text: item.tooltip_text,
-            rich_tooltip_source: item.rich_tooltip_source,
-            composite_tooltip_content: item.composite_tooltip_content,
-        }));
+        self.slots
+            .push(BreadcrumbSlot::Entry(Box::new(BreadcrumbEntry {
+                label: item.label,
+                action: item.action,
+                current: item.current,
+                tooltip_text: item.tooltip_text,
+                rich_tooltip_source: item.rich_tooltip_source,
+                composite_tooltip_content: item.composite_tooltip_content,
+            })));
         self
     }
 

@@ -395,7 +395,7 @@ impl PlatformWindow {
             format,
             wgpu::TextureFormat::Bgra8Unorm | wgpu::TextureFormat::Bgra8UnormSrgb
         ) {
-            for px in bytes.chunks_exact_mut(4) {
+            for px in bytes.as_chunks_mut::<4>().0 {
                 px.swap(0, 2);
             }
         }

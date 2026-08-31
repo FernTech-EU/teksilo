@@ -192,7 +192,7 @@ impl RasterIcon {
         // (CMYK/YCCK) JPEG — what Adobe and most print workflows emit — the
         // decoder's RGBA path leaves a colour channel sitting in the alpha
         // slot, and the photo composites semi-transparently over the page.
-        for px in pixels.chunks_exact_mut(4) {
+        for px in pixels.as_chunks_mut::<4>().0 {
             px[3] = 255;
         }
         let info = decoder

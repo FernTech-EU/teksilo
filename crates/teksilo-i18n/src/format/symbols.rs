@@ -213,9 +213,7 @@ impl NumberSymbols {
                 // Reachable only when `.` is neither separator for this
                 // locale — accept it as the numpad decimal point.
                 out.push('.');
-            } else if c == '-' || c == '+' {
-                out.push(c);
-            } else if c == 'e' || c == 'E' {
+            } else if matches!(c, '-' | '+' | 'e' | 'E') {
                 out.push(c);
             } else {
                 return None;

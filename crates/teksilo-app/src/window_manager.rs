@@ -1244,7 +1244,7 @@ impl WindowManager {
     /// for multi-window apps: each pending close consults only its own
     /// window's guard.
     pub fn process_pending(&mut self, target: &winit::event_loop::ActiveEventLoop) {
-        let closes: Vec<PendingClose> = self.pending_closes.drain(..).collect();
+        let closes = std::mem::take(&mut self.pending_closes);
         for pending in closes {
             if pending.force || self.evaluate_close_guard(pending.id, target) {
                 self.close_window(pending.id);

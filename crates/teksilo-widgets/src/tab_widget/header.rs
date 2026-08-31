@@ -1089,13 +1089,13 @@ impl Widget for TabHeader {
             if self.index > 0 {
                 actions.push(teksilo_core::accesskit::CustomAction {
                     id: 0,
-                    description: prev_label.into(),
+                    description: prev_label,
                 });
             }
             if self.index + 1 < total {
                 actions.push(teksilo_core::accesskit::CustomAction {
                     id: 1,
-                    description: next_label.into(),
+                    description: next_label,
                 });
             }
             if !actions.is_empty() {

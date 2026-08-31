@@ -669,25 +669,25 @@ impl KnobValues {
                 (KnobKind::OptBool { default }, _) => {
                     values.opt_bools.insert(decl.id, Signal::new(*default));
                 }
-                (KnobKind::I32 { default: _, .. }, Some(KnobValue::I32(v))) => {
+                (KnobKind::I32 { .. }, Some(KnobValue::I32(v))) => {
                     values.i32s.insert(decl.id, Signal::new(*v));
                 }
                 (KnobKind::I32 { default, .. }, _) => {
                     values.i32s.insert(decl.id, Signal::new(*default));
                 }
-                (KnobKind::OptI32 { default: _, .. }, Some(KnobValue::OptI32(v))) => {
+                (KnobKind::OptI32 { .. }, Some(KnobValue::OptI32(v))) => {
                     values.opt_i32s.insert(decl.id, Signal::new(*v));
                 }
                 (KnobKind::OptI32 { default, .. }, _) => {
                     values.opt_i32s.insert(decl.id, Signal::new(*default));
                 }
-                (KnobKind::F32 { default: _, .. }, Some(KnobValue::F32(v))) => {
+                (KnobKind::F32 { .. }, Some(KnobValue::F32(v))) => {
                     values.f32s.insert(decl.id, Signal::new(*v));
                 }
                 (KnobKind::F32 { default, .. }, _) => {
                     values.f32s.insert(decl.id, Signal::new(*default));
                 }
-                (KnobKind::OptF32 { default: _, .. }, Some(KnobValue::OptF32(v))) => {
+                (KnobKind::OptF32 { .. }, Some(KnobValue::OptF32(v))) => {
                     values.opt_f32s.insert(decl.id, Signal::new(*v));
                 }
                 (KnobKind::OptF32 { default, .. }, _) => {
@@ -707,14 +707,14 @@ impl KnobValues {
                         .opt_texts
                         .insert(decl.id, Signal::new(default.clone()));
                 }
-                (KnobKind::Choice { default: _, .. }, Some(KnobValue::Choice(v))) => {
+                (KnobKind::Choice { .. }, Some(KnobValue::Choice(v))) => {
                     values.choices.insert(decl.id, Signal::new(*v));
                 }
                 (KnobKind::Choice { default, .. }, _) => {
                     values.choices.insert(decl.id, Signal::new(*default));
                 }
                 // Enum knobs share the Choice storage (a usize index).
-                (KnobKind::Enum { default: _, .. }, Some(KnobValue::Enum(v))) => {
+                (KnobKind::Enum { .. }, Some(KnobValue::Enum(v))) => {
                     values.choices.insert(decl.id, Signal::new(*v));
                 }
                 (KnobKind::Enum { default, .. }, _) => {

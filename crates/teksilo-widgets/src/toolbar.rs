@@ -124,7 +124,7 @@ pub struct ToolbarAction {
     /// Mutually exclusive with `tooltip` — every tooltip setter clears
     /// the other so last-call wins. Boxed because the inline
     /// `TooltipContent` payload is large and rarely set, and
-    /// `ToolbarAction` is embedded by value in `ToolbarItemKind` /
+    /// `ToolbarAction` is boxed in `ToolbarItemKind` /
     /// `OverflowMenuForm` (keeps those enums compact).
     rich_tooltip_source: Option<Box<crate::tooltip::RichTooltipSource>>,
     /// Optional composite tooltip body, stored as a factory because
@@ -380,7 +380,7 @@ enum OverflowMenuForm {
     /// item's leading glyph), and the action's activation. Used by actions
     /// and by custom widgets that opt in via
     /// [`ToolbarItem::overflow_as`] / [`ToolbarItem::collapsible`].
-    Action(ToolbarAction),
+    Action(Box<ToolbarAction>),
     /// A live widget embedded directly in the menu — e.g. the same
     /// `ComboBox` (bound to the same signal) the inline slot shows, so the
     /// control stays fully usable while collapsed. Built by the factory when
@@ -397,7 +397,7 @@ struct CollapsibleMeta {
 }
 
 enum ToolbarItemKind {
-    Action(ToolbarAction),
+    Action(Box<ToolbarAction>),
     /// Arbitrary widget. `menu_form == None` → pinned (never collapses);
     /// `Some(form)` → collapsible, shown as that menu row (or embedded widget)
     /// when overflowed.
@@ -418,7 +418,7 @@ impl ToolbarItem {
     /// A collapsible command.
     pub fn action(action: ToolbarAction) -> Self {
         Self {
-            kind: ToolbarItemKind::Action(action),
+            kind: ToolbarItemKind::Action(Box::new(action)),
         }
     }
 
@@ -451,7 +451,7 @@ impl ToolbarItem {
         Self {
             kind: ToolbarItemKind::Custom {
                 pending: PendingChild::Deferred(Box::new(widget)),
-                menu_form: Some(OverflowMenuForm::Action(menu_form)),
+                menu_form: Some(OverflowMenuForm::Action(Box::new(menu_form))),
             },
         }
     }
@@ -463,7 +463,7 @@ impl ToolbarItem {
     /// menu item's leading glyph (pass it to [`ToolbarAction::new`]).
     pub fn overflow_as(mut self, menu_form: ToolbarAction) -> Self {
         if let ToolbarItemKind::Custom { menu_form: mf, .. } = &mut self.kind {
-            *mf = Some(OverflowMenuForm::Action(menu_form));
+            *mf = Some(OverflowMenuForm::Action(Box::new(menu_form)));
         }
         self
     }

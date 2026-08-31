@@ -41,7 +41,7 @@ pub struct OverlayTrigger {
     /// gated — the same treatment a stock `Button` gets. Default
     /// `Prop::Static(true)`.
     enabled: Prop<bool>,
-    /// Installed by [`PopoverTrigger::with_on_activate`]. Routed onto the child
+    /// Installed by [`crate::popover_widget::PopoverTrigger::with_on_activate`]. Routed onto the child
     /// in `build` as pointer-tap, Enter/Space and the AT `Click` action, so a
     /// custom trigger is reachable exactly the ways a `Button` trigger is.
     on_activate: Option<std::rc::Rc<dyn Fn(&mut teksilo_core::widget::EventContext)>>,

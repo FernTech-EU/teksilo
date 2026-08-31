@@ -5413,7 +5413,7 @@ impl teksilo_core::text_surface::TextSurface for EditorHandle {
         EditorHandle::redo(self);
     }
 
-    /// The editor's own [`CommandFilter`](crate::common::editor_runtime::CommandFilter)
+    /// The editor's own [`CommandFilter`]
     /// is the authority: a host that has imposed `ForwardOnly` or `ReadOnly` on
     /// this editor must not be able to route around it from a menu.
     fn history_frozen(&self) -> bool {

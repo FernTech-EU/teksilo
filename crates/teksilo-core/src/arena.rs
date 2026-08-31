@@ -885,13 +885,10 @@ impl WidgetArena {
             .map(|p| p.get())
             .filter(|t| !t.is_identity());
         let content_transform = self.get(id).map(|n| n.content_transform).unwrap_or(false);
+        // A degenerate transform (collapsed axis) hides the entire subtree
+        // visually; `inverse()` returning None mirrors that for hit-testing.
         let child_point = match transform {
-            Some(t) => match t.inverse() {
-                Some(inv) => inv.apply_point(point),
-                // A degenerate transform (collapsed axis) hides the
-                // entire subtree visually; mirror that for hit-testing.
-                None => return None,
-            },
+            Some(t) => t.inverse()?.apply_point(point),
             None => point,
         };
         // Content-transform nodes test their (parent-space) viewport against

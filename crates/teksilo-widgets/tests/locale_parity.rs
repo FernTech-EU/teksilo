@@ -66,14 +66,15 @@ fn variables_in_inline(inline: &ast::InlineExpression<&str>, out: &mut BTreeSet<
                 variables_in_inline(&named.value, out);
             }
         }
-        ast::InlineExpression::TermReference { arguments, .. } => {
-            if let Some(arguments) = arguments {
-                for positional in &arguments.positional {
-                    variables_in_inline(positional, out);
-                }
-                for named in &arguments.named {
-                    variables_in_inline(&named.value, out);
-                }
+        ast::InlineExpression::TermReference {
+            arguments: Some(arguments),
+            ..
+        } => {
+            for positional in &arguments.positional {
+                variables_in_inline(positional, out);
+            }
+            for named in &arguments.named {
+                variables_in_inline(&named.value, out);
             }
         }
         ast::InlineExpression::Placeable { expression } => {

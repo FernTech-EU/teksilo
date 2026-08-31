@@ -959,10 +959,7 @@ impl TeksiloAppHandler {
     ) -> Result<(), Box<dyn std::any::Any + Send>> {
         use teksilo_automation::dto::{AutomationOp, AutomationReply, WindowInfo, codes};
 
-        let payload = match payload.downcast::<crate::automation_bridge::AutomationPayload>() {
-            Ok(b) => *b,
-            Err(other) => return Err(other),
-        };
+        let payload = *payload.downcast::<crate::automation_bridge::AutomationPayload>()?;
 
         // Resolve target window: explicit id, else focused, else primary.
         let bid = match payload.window_id {
@@ -1241,10 +1238,7 @@ impl TeksiloAppHandler {
         {
             use teksilo_platform::file_dialog::{FileDialogEventPayload, FileDialogHandle};
 
-            let payload = match payload.downcast::<FileDialogEventPayload>() {
-                Ok(boxed) => *boxed,
-                Err(other) => return Err(other),
-            };
+            let payload = *payload.downcast::<FileDialogEventPayload>()?;
 
             // Find the originating window.
             let target_winit = self
@@ -1341,10 +1335,7 @@ impl TeksiloAppHandler {
         {
             use teksilo_webview::{WebViewEventPayload, WebViewRegistry};
 
-            let payload = match payload.downcast::<WebViewEventPayload>() {
-                Ok(boxed) => *boxed,
-                Err(other) => return Err(other),
-            };
+            let payload = *payload.downcast::<WebViewEventPayload>()?;
 
             let target_winit = self
                 .wm
@@ -1392,10 +1383,7 @@ impl TeksiloAppHandler {
     ) -> Result<(), Box<dyn std::any::Any + Send>> {
         use teksilo_core::{AsyncCompletionHandle, AsyncCompletionPayload};
 
-        let payload = match payload.downcast::<AsyncCompletionPayload>() {
-            Ok(boxed) => *boxed,
-            Err(other) => return Err(other),
-        };
+        let payload = *payload.downcast::<AsyncCompletionPayload>()?;
 
         let target_winit = self
             .wm
@@ -1532,10 +1520,7 @@ impl TeksiloAppHandler {
         use teksilo_core::telemetry::IntentSource;
         use teksilo_platform::native_menu::{NativeMenuEventPayload, NativeMenuHandle};
 
-        let payload = match payload.downcast::<NativeMenuEventPayload>() {
-            Ok(boxed) => *boxed,
-            Err(other) => return Err(other),
-        };
+        let payload = *payload.downcast::<NativeMenuEventPayload>()?;
 
         let target_winit = self
             .wm
@@ -1632,10 +1617,7 @@ impl TeksiloAppHandler {
             Err(other) => other,
         };
 
-        let payload = match payload.downcast::<ExternalDndEventPayload>() {
-            Ok(boxed) => *boxed,
-            Err(other) => return Err(other),
-        };
+        let payload = *payload.downcast::<ExternalDndEventPayload>()?;
 
         let Some(winit_id) = self
             .wm

@@ -179,7 +179,7 @@ mod tests {
             .collect();
         let chain = build_mip_chain(&px, 4, 4);
         for (_, _, data) in &chain {
-            for texel in data.chunks_exact(4) {
+            for texel in data.as_chunks::<4>().0 {
                 assert!(
                     (texel[0] as i32 - 37).abs() <= 1
                         && (texel[1] as i32 - 150).abs() <= 1

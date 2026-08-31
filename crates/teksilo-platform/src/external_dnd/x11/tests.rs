@@ -32,9 +32,7 @@ use raw_window_handle::{
 };
 use teksilo_core::window::TeksiloWindowId;
 use teksilo_core::{AppEventPoster, SubscriptionId};
-use x11rb::protocol::xproto::{
-    ConnectionExt as _, CreateWindowAux, EventMask, SelectionNotifyEvent, WindowClass,
-};
+use x11rb::protocol::xproto::{CreateWindowAux, EventMask, SelectionNotifyEvent, WindowClass};
 use x11rb::wrapper::ConnectionExt as _;
 
 use super::*;
