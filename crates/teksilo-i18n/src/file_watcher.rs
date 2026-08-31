@@ -6,6 +6,11 @@
 //! Architecture §12.6: the translator workflow starts the application
 //! with one or more `--translation-dev LOCALE=PATH` flags, each of which
 //! translates into an `I18nConfig::runtime_override(locale, path)` call.
+//! `PATH` is either a single `.ftl` file or a **directory** of them; the
+//! directory form is what an application whose catalogue is split across
+//! several files per locale needs, because reloading one file of such a
+//! set replaces the locale's whole bundle (see
+//! [`I18nManager::reload_from_path`](crate::I18nManager::reload_from_path)).
 //! `TeksiloAppBuilder::run` then spins up a single `FtlFileWatcher` that
 //! watches every registered path and forwards file-changed events to the
 //! UI thread via an event sink callback.
@@ -49,7 +54,8 @@ pub struct FtlFileWatcher {
 
 impl FtlFileWatcher {
     /// Build a watcher from a list of `(locale, path)` pairs and a sink
-    /// callback. Non-existent paths are logged and skipped (they can
+    /// callback. Each path is either a single `.ftl` file or a directory
+    /// of them. Non-existent paths are logged and skipped (they can
     /// legitimately be missing at startup; the application logs but
     /// carries on). The returned `FtlFileWatcher` must be kept alive
     /// for the duration of hot-reload observation.
@@ -58,7 +64,11 @@ impl FtlFileWatcher {
         sink: ReloadSink,
     ) -> Result<Self, notify::Error> {
         // Canonicalize each path so that filesystem events (which arrive
-        // with canonical paths on every platform) match our map.
+        // with canonical paths on every platform) match our map. The map
+        // is keyed on what was *registered*: a file for a file override, the
+        // directory itself for a directory one. That is the path handed back
+        // to `reload_from_path`, which needs the whole directory to rebuild
+        // the locale's bundle from all of its files.
         let mut path_map: HashMap<PathBuf, LanguageIdentifier> = HashMap::new();
         let mut watch_targets: Vec<PathBuf> = Vec::new();
         for (locale, path) in entries {
@@ -84,8 +94,8 @@ impl FtlFileWatcher {
             move |res: Result<notify::Event, notify::Error>| match res {
                 Ok(event) if should_reload(&event.kind) => {
                     for path in &event.paths {
-                        if let Some(locale) = map_for_closure.get(path) {
-                            (sink_handle)(locale.clone(), path.clone());
+                        if let Some((target, locale)) = resolve_target(&map_for_closure, path) {
+                            (sink_handle)(locale, target);
                         }
                     }
                 }
@@ -97,14 +107,22 @@ impl FtlFileWatcher {
         )?;
 
         for target in &watch_targets {
-            // Watch the parent directory rather than the file itself.
-            // Many editors save by writing to a temp file and renaming,
-            // which invalidates the original inode watch. Watching the
-            // parent catches both the rename and the direct write,
-            // while the closure's path filter keeps us focused on the
-            // specific .ftl files we registered.
-            let parent = target.parent().unwrap_or_else(|| Path::new("."));
-            watcher.watch(parent, RecursiveMode::NonRecursive)?;
+            // For a *file* target, watch the parent directory rather than
+            // the file itself. Many editors save by writing to a temp file
+            // and renaming, which invalidates the original inode watch.
+            // Watching the parent catches both the rename and the direct
+            // write, while `resolve_target`'s filter keeps us focused on
+            // the specific .ftl files we registered.
+            //
+            // A *directory* target is already that directory, so watch it
+            // as-is: climbing to its parent would watch `locales/` and
+            // wake every locale on any locale's save.
+            let watch_at = if target.is_dir() {
+                target.as_path()
+            } else {
+                target.parent().unwrap_or_else(|| Path::new("."))
+            };
+            watcher.watch(watch_at, RecursiveMode::NonRecursive)?;
         }
 
         Ok(Self {
@@ -112,6 +130,37 @@ impl FtlFileWatcher {
             _path_map: path_map,
         })
     }
+}
+
+/// Map a filesystem event path back to the override it belongs to,
+/// returning the *registered* path (what `reload_from_path` must be given)
+/// and its locale.
+///
+/// Two shapes, tried in that order:
+///
+/// 1. **Exact hit**: the event names a registered file override.
+/// 2. **Parent hit**: the event names a `.ftl` file inside a registered
+///    *directory* override, so the whole directory reloads.
+///
+/// The `.ftl` extension test guards the second case only. A directory watch
+/// reports every write in the folder, and editors litter it with swap files,
+/// `.ftl~` backups and atomic-rename temporaries; without the filter each of
+/// those would trigger a full re-parse of the locale. A file override needs
+/// no such test, having matched a path we registered by name.
+fn resolve_target(
+    map: &HashMap<PathBuf, LanguageIdentifier>,
+    event_path: &Path,
+) -> Option<(PathBuf, LanguageIdentifier)> {
+    if let Some(locale) = map.get(event_path) {
+        return Some((event_path.to_path_buf(), locale.clone()));
+    }
+    if event_path.extension().is_some_and(|ext| ext == "ftl")
+        && let Some(dir) = event_path.parent()
+        && let Some(locale) = map.get(dir)
+    {
+        return Some((dir.to_path_buf(), locale.clone()));
+    }
+    None
 }
 
 /// Return `true` for event kinds that mean a file's content may have

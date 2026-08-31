@@ -215,7 +215,25 @@ impl I18nManager {
     /// locale and direction are unchanged — only the bundle content
     /// changed, and reactive bindings are sufficient to propagate).
     ///
-    /// On parse error the previous bundle is kept and the error is
+    /// `path` may be **either a single `.ftl` file or a directory of
+    /// them**, and the distinction is not cosmetic. A locale's bundle is
+    /// built by merging every resource `compile_in` registered for it, so
+    /// an application that ships `main.ftl` + `tooltips.ftl` + ... has one
+    /// bundle assembled from five files. Reloading a single file *replaces*
+    /// that whole bundle, which silently drops every key the other four
+    /// defined. Those keys fall back to the source locale, so a translator
+    /// saving `main.ftl` watches every tooltip revert to English with no
+    /// error anywhere. Point `runtime_override` at the locale's
+    /// **directory** and the bundle is rebuilt from all of its `.ftl`
+    /// files on every save, which is the only form that mirrors what the
+    /// shipped binary does.
+    ///
+    /// Directory mode reads the `.ftl` files directly inside `path` (no
+    /// recursion), **sorted by file name** so the merge order is the same on
+    /// every platform and every save. That order decides which definition of
+    /// a duplicated key wins, since Fluent keeps the first.
+    ///
+    /// On I/O or parse error the previous bundle is kept and the error is
     /// returned; no version bump happens. The file watcher wrapper in
     /// `file_watcher.rs` handles logging.
     pub fn reload_from_path(
@@ -223,14 +241,48 @@ impl I18nManager {
         locale: &LanguageIdentifier,
         path: &std::path::Path,
     ) -> Result<(), ReloadError> {
-        let contents = std::fs::read_to_string(path).map_err(ReloadError::Io)?;
-        let resource =
-            FluentResource::try_new(contents).map_err(|(_, errs)| ReloadError::Parse(errs))?;
+        let sources = if path.is_dir() {
+            let files = ftl_files_in(path)?;
+            if files.is_empty() {
+                return Err(ReloadError::NoFtlFiles(path.to_path_buf()));
+            }
+            files
+        } else {
+            vec![path.to_path_buf()]
+        };
+
+        // Parse everything *before* touching `app_bundles`: a half-applied
+        // reload is worse than none, since the writer would be looking at a
+        // bundle that never existed in any build.
+        let mut resources = Vec::with_capacity(sources.len());
+        for file in &sources {
+            let contents = std::fs::read_to_string(file).map_err(ReloadError::Io)?;
+            resources.push(
+                FluentResource::try_new(contents).map_err(|(_, errs)| ReloadError::Parse(errs))?,
+            );
+        }
+
         let mut bundle = FluentBundle::new(vec![locale.clone()]);
         configure_bundle(&mut bundle);
-        bundle
-            .add_resource(resource)
-            .map_err(ReloadError::AddResource)?;
+        for (resource, file) in resources.into_iter().zip(&sources) {
+            match bundle.add_resource(resource) {
+                Ok(()) => {}
+                // A single-file override has no merge to model, so a
+                // collision there can only be a duplicate *within* the file
+                // and stays fatal, the caller's contract since this function
+                // existed. Across a directory it is the same cross-file
+                // collision `build_bundle_from_resources` already tolerates
+                // at startup, and hot-reload's whole job is to reproduce what
+                // the shipped binary does: refusing here would leave the
+                // translator staring at a stale bundle over a duplicate the
+                // compiled build loads happily.
+                Err(errs) if sources.len() == 1 => return Err(ReloadError::AddResource(errs)),
+                Err(errs) => eprintln!(
+                    "teksilo-i18n: errors adding `{}` for {locale}: {errs:?}",
+                    file.display()
+                ),
+            }
+        }
         self.app_bundles.borrow_mut().insert(locale.clone(), bundle);
         self.bump_version();
         Ok(())
@@ -379,6 +431,31 @@ pub enum ReloadError {
     Parse(Vec<fluent_syntax::parser::ParserError>),
     #[error("errors adding resource to bundle: {0:?}")]
     AddResource(Vec<fluent_bundle::FluentError>),
+    #[error("no .ftl files in directory: {0}")]
+    NoFtlFiles(std::path::PathBuf),
+}
+
+/// Every `.ftl` file directly inside `dir`, sorted by path.
+///
+/// Not recursive: a locale directory is a flat set of topic files
+/// (`main.ftl`, `tooltips.ftl`, ...), and descending would sweep in a
+/// *sibling locale's* directory the moment someone pointed an override at
+/// `locales/` instead of `locales/fr-FR/`, quietly loading French strings
+/// into the English bundle instead of failing.
+///
+/// Sorted because Fluent keeps the **first** definition of a key, so merge
+/// order decides collisions and `read_dir` order is unspecified. Without
+/// this, a duplicated key would resolve differently between two saves of
+/// the same unchanged files.
+fn ftl_files_in(dir: &std::path::Path) -> Result<Vec<std::path::PathBuf>, ReloadError> {
+    let mut files: Vec<std::path::PathBuf> = std::fs::read_dir(dir)
+        .map_err(ReloadError::Io)?
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| path.is_file() && path.extension().is_some_and(|ext| ext == "ftl"))
+        .collect();
+    files.sort();
+    Ok(files)
 }
 
 /// Apply the framework-wide bundle configuration: turn off isolating

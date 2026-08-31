@@ -170,6 +170,21 @@ impl I18nConfig {
         self
     }
 
+    /// Watch `path` on disk and rebuild `loc`'s bundle on every change. This
+    /// is the translator hot-reload workflow, development only.
+    ///
+    /// `path` is either a single `.ftl` file **or a directory of them**.
+    /// Prefer the directory whenever the locale's catalogue is split across
+    /// several files: a bundle is the merge of every resource registered for
+    /// its locale, so reloading one file of a set replaces the whole bundle
+    /// and every key the other files defined silently falls back to the
+    /// source locale. See
+    /// [`I18nManager::reload_from_path`](crate::I18nManager::reload_from_path).
+    ///
+    /// Accumulates, so several locales can be watched at once. Registering
+    /// two paths for the *same* locale does not merge them: each change
+    /// rebuilds that locale from whichever path fired, so pass the
+    /// directory that holds both instead.
     pub fn runtime_override(mut self, loc: LanguageIdentifier, path: PathBuf) -> Self {
         self.runtime_overrides.push((loc, path));
         self
