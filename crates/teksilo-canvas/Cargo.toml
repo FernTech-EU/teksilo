@@ -5,10 +5,12 @@
 name = "teksilo-canvas"
 edition = "2024"
 version.workspace = true
+license.workspace = true
 license-file.workspace = true
 publish.workspace = true
 authors.workspace = true
 repository.workspace = true
+description = "Canvas and geometry layer for Teksilo — RenderFrame, Path, Paint and the TextBackend trait."
 
 [dependencies]
 teksilo-tokens = { workspace = true }
@@ -20,3 +22,6 @@ zune-core = { workspace = true }
 thiserror = { workspace = true }
 bytemuck = { workspace = true }
 serde = { workspace = true }
+
+[package.metadata.docs.rs]
+all-features = true

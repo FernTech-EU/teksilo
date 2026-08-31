@@ -5,10 +5,12 @@
 name = "teksilo-theme-macos"
 edition = "2024"
 version.workspace = true
+license.workspace = true
 license-file.workspace = true
 publish.workspace = true
 authors.workspace = true
 repository.workspace = true
+description = "macOS Aqua and Dark Aqua theme preset for Teksilo — tokens plus widget chrome."
 
 [features]
 # Off by default. Switches the theme's typography families to the macOS
@@ -37,3 +39,6 @@ teksilo-widgets = { workspace = true }
 # `tests/mount.rs` builds a real `WidgetTree` per widget; `lit!` supplies
 # the untranslated labels those constructors take.
 teksilo-i18n = { workspace = true }
+
+[package.metadata.docs.rs]
+all-features = true

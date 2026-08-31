@@ -5,6 +5,7 @@
 name = "cargo-teksilo-fmt"
 edition = "2024"
 version.workspace = true
+license.workspace = true
 license-file.workspace = true
 publish.workspace = true
 authors.workspace = true
@@ -22,3 +23,6 @@ thiserror = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
+
+[package.metadata.docs.rs]
+all-features = true

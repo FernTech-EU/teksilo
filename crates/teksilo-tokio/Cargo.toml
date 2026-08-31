@@ -5,6 +5,7 @@
 name = "teksilo-tokio"
 edition = "2024"
 version.workspace = true
+license.workspace = true
 license-file.workspace = true
 publish.workspace = true
 authors.workspace = true
@@ -19,3 +20,6 @@ teksilo-async = { workspace = true }
 # (same policy as tokio in teksilo-analytics-native). `enable_all` needs the
 # time + net drivers so apps can `.await` timers and sockets (reqwest, …).
 tokio = { version = "1", features = ["rt-multi-thread", "time", "net", "sync"] }
+
+[package.metadata.docs.rs]
+all-features = true

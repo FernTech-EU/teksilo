@@ -5,6 +5,7 @@
 name = "teksilo-async"
 edition = "2024"
 version.workspace = true
+license.workspace = true
 license-file.workspace = true
 publish.workspace = true
 authors.workspace = true
@@ -20,3 +21,6 @@ thiserror = { workspace = true }
 # choice should not leak to consumers (same policy as tokio in
 # `teksilo-analytics-native` and async-std in `teksilo-platform`).
 async-channel = "2"
+
+[package.metadata.docs.rs]
+all-features = true

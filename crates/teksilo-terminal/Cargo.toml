@@ -6,6 +6,7 @@ name = "teksilo-terminal"
 description = "Embeddable, fully-accessible terminal-emulator (Console) widget for Teksilo — the VT view; PTY + parsing delegated to portable-pty + alacritty_terminal behind a swappable engine trait."
 edition = "2024"
 version.workspace = true
+license.workspace = true
 license-file.workspace = true
 publish.workspace = true
 authors.workspace = true
@@ -50,3 +51,6 @@ alacritty = ["dep:portable-pty", "dep:alacritty_terminal"]
 # hit-test, a11y tree) against the `MemoryEngine` test backend, plus the
 # `alacritty` backend end-to-end where a real shell is available.
 teksilo-core = { workspace = true }
+
+[package.metadata.docs.rs]
+all-features = true

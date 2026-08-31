@@ -5,10 +5,12 @@
 name = "teksilo-settings"
 edition = "2024"
 version.workspace = true
+license.workspace = true
 license-file.workspace = true
 publish.workspace = true
 authors.workspace = true
 repository.workspace = true
+description = "Persistent reactive settings for Teksilo — key-value store, versioned setting files, MRU lists and window state."
 
 [dependencies]
 teksilo-core = { workspace = true }
@@ -23,3 +25,6 @@ notify = { workspace = true }
 
 [dev-dependencies]
 serde = { workspace = true }
+
+[package.metadata.docs.rs]
+all-features = true

@@ -5,6 +5,7 @@
 name = "teksilo-automation"
 edition = "2024"
 version.workspace = true
+license.workspace = true
 license-file.workspace = true
 publish.workspace = true
 authors.workspace = true
@@ -28,3 +29,6 @@ serde_json = { workspace = true }
 # (never promoted to a normal dep) so the consumer never enters the release
 # graph.
 accesskit_consumer = { workspace = true }
+
+[package.metadata.docs.rs]
+all-features = true

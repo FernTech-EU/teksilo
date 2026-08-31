@@ -5,10 +5,12 @@
 name = "teksilo-telemetry"
 edition = "2024"
 version.workspace = true
+license.workspace = true
 license-file.workspace = true
 publish.workspace = true
 authors.workspace = true
 repository.workspace = true
+description = "Privacy-respecting, consent-gated product analytics for Teksilo applications."
 
 [dependencies]
 teksilo-core = { workspace = true }
@@ -21,3 +23,6 @@ thiserror = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
+
+[package.metadata.docs.rs]
+all-features = true

@@ -6,6 +6,7 @@ name = "teksilo-webview"
 description = "Embeddable WebView widget for Teksilo — pluggable native engine backend (wry / Servo) behind a Teksilo-native widget."
 edition = "2024"
 version.workspace = true
+license.workspace = true
 license-file.workspace = true
 publish.workspace = true
 authors.workspace = true

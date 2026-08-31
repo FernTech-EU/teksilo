@@ -5,10 +5,12 @@
 name = "teksilo-theme-material3"
 edition = "2024"
 version.workspace = true
+license.workspace = true
 license-file.workspace = true
 publish.workspace = true
 authors.workspace = true
 repository.workspace = true
+description = "Material 3 theme preset for Teksilo — tokens plus widget chrome."
 
 [features]
 # Off by default. When enabled, embeds the Roboto Flex font (Apache-2.0,
@@ -27,3 +29,6 @@ teksilo-canvas = { workspace = true }
 teksilo-widgets = { workspace = true }
 # Only pulled in under `bundled-fonts` (for the FontRegistrar types).
 teksilo-text = { workspace = true, optional = true }
+
+[package.metadata.docs.rs]
+all-features = true

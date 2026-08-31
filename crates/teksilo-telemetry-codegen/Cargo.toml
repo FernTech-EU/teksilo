@@ -5,10 +5,12 @@
 name = "teksilo-telemetry-codegen"
 edition = "2024"
 version.workspace = true
+license.workspace = true
 license-file.workspace = true
 publish.workspace = true
 authors.workspace = true
 repository.workspace = true
+description = "Proc macro that expands a YAML event manifest into typed emitters for teksilo-telemetry."
 
 [lib]
 proc-macro = true
@@ -19,3 +21,6 @@ quote = "1"
 syn = { version = "3", features = ["full"] }
 serde = { workspace = true }
 serde_yaml = "0.9"
+
+[package.metadata.docs.rs]
+all-features = true

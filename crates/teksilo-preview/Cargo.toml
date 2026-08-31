@@ -5,12 +5,17 @@
 name = "teksilo-preview"
 edition = "2024"
 version.workspace = true
+license.workspace = true
 license-file.workspace = true
 publish.workspace = true
 authors.workspace = true
 repository.workspace = true
+description = "Storybook-style preview registry for Teksilo widgets — catalog trait, typed knobs and variants, with no GUI dependency."
 
 [dependencies]
 teksilo-core = { workspace = true }
 teksilo-tokens = { workspace = true }
 inventory = { workspace = true }
+
+[package.metadata.docs.rs]
+all-features = true

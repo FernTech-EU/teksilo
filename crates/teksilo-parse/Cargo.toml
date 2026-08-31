@@ -5,11 +5,16 @@
 name = "teksilo-parse"
 edition = "2024"
 version.workspace = true
+license.workspace = true
 license-file.workspace = true
 publish.workspace = true
 authors.workspace = true
 repository.workspace = true
+description = "Parser and IR for Teksilo's teksu! widget-tree DSL, shared by the proc macro and the formatter."
 
 [dependencies]
 proc-macro2 = "1"
 syn = { version = "3", features = ["full", "extra-traits"] }
+
+[package.metadata.docs.rs]
+all-features = true

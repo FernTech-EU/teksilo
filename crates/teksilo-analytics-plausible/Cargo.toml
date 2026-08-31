@@ -5,10 +5,12 @@
 name = "teksilo-analytics-plausible"
 edition = "2024"
 version.workspace = true
+license.workspace = true
 license-file.workspace = true
 publish.workspace = true
 authors.workspace = true
 repository.workspace = true
+description = "Teksilo analytics adapter for Plausible in anonymous mode, with retry, backoff and an on-disk queue."
 
 [dependencies]
 teksilo-core = { workspace = true }
@@ -20,3 +22,6 @@ ureq = { workspace = true }
 [dev-dependencies]
 tempfile = { workspace = true }
 teksilo-settings = { workspace = true }
+
+[package.metadata.docs.rs]
+all-features = true

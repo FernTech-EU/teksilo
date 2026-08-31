@@ -5,10 +5,12 @@
 name = "teksilo-platform"
 edition = "2024"
 version.workspace = true
+license.workspace = true
 license-file.workspace = true
 publish.workspace = true
 authors.workspace = true
 repository.workspace = true
+description = "Platform integration for Teksilo — winit and AccessKit adapters, clipboard, OS theme, native file dialogs, drag-and-drop and menus."
 
 [dependencies]
 teksilo-tokens = { workspace = true }
@@ -148,3 +150,6 @@ libc = "0.2"
 # unified and cargo does not build two copies. `just check-x11rb-unified` (and
 # the CI job of the same name) fails the build if it ever forks.
 x11rb = "0.13"
+
+[package.metadata.docs.rs]
+all-features = true

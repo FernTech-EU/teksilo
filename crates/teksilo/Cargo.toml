@@ -5,10 +5,16 @@
 name = "teksilo"
 edition = "2024"
 version.workspace = true
+license.workspace = true
 license-file.workspace = true
 publish.workspace = true
 authors.workspace = true
 repository.workspace = true
+description = "A pure-Rust GUI framework for serious desktop applications — retained widget tree, SwiftUI-style layout, AccessKit accessibility, wgpu rendering."
+readme = "README.md"
+homepage = "https://github.com/ferntech-eu/teksilo"
+keywords = ["gui", "desktop", "widgets", "accessibility", "wgpu"]
+categories = ["gui", "accessibility"]
 
 [features]
 # Default set: widgets, text backend, i18n runtime, plus Arabic and
@@ -213,3 +219,9 @@ trybuild = "1"
 # Toast install tests build a builder with a `Persistent` archive
 # against a temp directory.
 tempfile = { workspace = true }
+
+[package.metadata.docs.rs]
+# Everything except the WebView engine backends, which need
+# WebKitGTK / Servo system libraries docs.rs does not have.
+features = ["automation", "async", "terminal", "theme-fluent",
+            "theme-macos", "theme-material3", "web-view-headless"]

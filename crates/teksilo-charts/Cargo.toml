@@ -5,10 +5,12 @@
 name = "teksilo-charts"
 edition = "2024"
 version.workspace = true
+license.workspace = true
 license-file.workspace = true
 publish.workspace = true
 authors.workspace = true
 repository.workspace = true
+description = "Bar, line and pie charts for Teksilo, driven by a reactive chart model."
 
 [features]
 preview = ["dep:teksilo-preview"]
@@ -26,3 +28,6 @@ teksilo-preview = { workspace = true, optional = true }
 # placement). Not part of the runtime dep graph — keeps the public
 # layering (charts at the same tier as widgets).
 teksilo-widgets = { workspace = true }
+
+[package.metadata.docs.rs]
+all-features = true

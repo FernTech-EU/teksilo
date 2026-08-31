@@ -5,10 +5,12 @@
 name = "teksilo-render"
 edition = "2024"
 version.workspace = true
+license.workspace = true
 license-file.workspace = true
 publish.workspace = true
 authors.workspace = true
 repository.workspace = true
+description = "wgpu renderer for Teksilo — rect, SDF and path pipelines with a glyph atlas."
 
 [dependencies]
 teksilo-canvas = { workspace = true }
@@ -19,3 +21,6 @@ bytemuck = { workspace = true }
 [dev-dependencies]
 teksilo-tokens = { workspace = true }
 pollster = { workspace = true }
+
+[package.metadata.docs.rs]
+all-features = true

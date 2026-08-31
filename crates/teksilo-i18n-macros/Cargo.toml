@@ -5,10 +5,12 @@
 name = "teksilo-i18n-macros"
 edition = "2024"
 version.workspace = true
+license.workspace = true
 license-file.workspace = true
 publish.workspace = true
 authors.workspace = true
 repository.workspace = true
+description = "Compile-time tr! / tr_signal! localization macros for Teksilo, with .ftl validation at build time."
 
 [lib]
 proc-macro = true
@@ -18,3 +20,6 @@ proc-macro2 = "1"
 quote = "1"
 syn = { version = "3", features = ["full"] }
 fluent-syntax = { workspace = true }
+
+[package.metadata.docs.rs]
+all-features = true

@@ -5,11 +5,12 @@
 name = "teksilo-fmt-lsp"
 edition = "2024"
 version.workspace = true
+license.workspace = true
 license-file.workspace = true
 publish.workspace = true
 authors.workspace = true
 repository.workspace = true
-description = "LSP server for the basti! DSL formatter"
+description = "LSP server for the teksu! DSL formatter."
 
 [[bin]]
 name = "teksilo-fmt-lsp"
@@ -19,3 +20,6 @@ path = "src/main.rs"
 teksilo-fmt = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+
+[package.metadata.docs.rs]
+all-features = true

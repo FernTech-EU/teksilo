@@ -5,10 +5,12 @@
 name = "teksilo-macros"
 edition = "2024"
 version.workspace = true
+license.workspace = true
 license-file.workspace = true
 publish.workspace = true
 authors.workspace = true
 repository.workspace = true
+description = "Proc macros for Teksilo — the teksu! widget-tree DSL and #[derive(IntentKind)]."
 
 [lib]
 proc-macro = true
@@ -18,3 +20,6 @@ teksilo-parse = { workspace = true }
 proc-macro2 = "1"
 quote = "1"
 syn = { version = "3", features = ["full", "extra-traits"] }
+
+[package.metadata.docs.rs]
+all-features = true

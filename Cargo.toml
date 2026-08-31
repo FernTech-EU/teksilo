@@ -27,6 +27,7 @@ exclude = [
 [workspace.package]
 version = "0.8.0"
 edition = "2024"
+license = "MPL-2.0"
 license-file = "LICENSE"
 publish = true
 authors = ["Cyril Jacquet <cyril.jacquet@ferntech.eu>"]

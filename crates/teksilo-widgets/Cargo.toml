@@ -5,10 +5,12 @@
 name = "teksilo-widgets"
 edition = "2024"
 version.workspace = true
+license.workspace = true
 license-file.workspace = true
 publish.workspace = true
 authors.workspace = true
 repository.workspace = true
+description = "Widget library for Teksilo — over a hundred widgets and layout primitives, from Button to TreeTableView."
 
 [features]
 # Diagnostic traces, compiled out unless asked for. Each is additionally gated on
@@ -103,3 +105,6 @@ toml = { workspace = true }
 # `rich_text::paint` tests encode a tiny PNG so the inline-image pass has a
 # real, decodable resource to resolve rather than a hand-written byte blob.
 png = { workspace = true }
+
+[package.metadata.docs.rs]
+all-features = true

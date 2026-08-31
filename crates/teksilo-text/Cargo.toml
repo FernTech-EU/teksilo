@@ -5,10 +5,12 @@
 name = "teksilo-text"
 edition = "2024"
 version.workspace = true
+license.workspace = true
 license-file.workspace = true
 publish.workspace = true
 authors.workspace = true
 repository.workspace = true
+description = "Text backend for Teksilo — shaping, line breaking and glyph rasterization via text-typeset."
 
 [features]
 # Default set: Latin/Cyrillic/Greek via Inter (always embedded), plus

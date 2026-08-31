@@ -5,10 +5,12 @@
 name = "teksilo-data"
 edition = "2024"
 version.workspace = true
+license.workspace = true
 license-file.workspace = true
 publish.workspace = true
 authors.workspace = true
 repository.workspace = true
+description = "Reactive data models for Teksilo — list, tree, selection and sort-filter projections, with no GUI dependency."
 
 [dependencies]
 teksilo-core = { workspace = true }
@@ -24,3 +26,6 @@ proptest = { workspace = true }
 # Not a production dependency — teksilo-data's own code only ever takes
 # `impl Into<ColorProp>` and never names `Color`.
 teksilo-tokens = { workspace = true }
+
+[package.metadata.docs.rs]
+all-features = true

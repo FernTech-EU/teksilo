@@ -5,10 +5,12 @@
 name = "teksilo-app"
 edition = "2024"
 version.workspace = true
+license.workspace = true
 license-file.workspace = true
 publish.workspace = true
 authors.workspace = true
 repository.workspace = true
+description = "Application shell for Teksilo — app builder, window manager and event loop."
 
 [features]
 default = ["text"]
@@ -89,3 +91,6 @@ uuid = { workspace = true, optional = true }
 [dev-dependencies]
 tempfile = { workspace = true }
 serde = { workspace = true }
+
+[package.metadata.docs.rs]
+all-features = true

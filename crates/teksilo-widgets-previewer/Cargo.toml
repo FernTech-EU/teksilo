@@ -5,10 +5,12 @@
 name = "teksilo-widgets-previewer"
 edition = "2024"
 version.workspace = true
+license.workspace = true
 license-file.workspace = true
 publish.workspace = true
 authors.workspace = true
 repository.workspace = true
+description = "Storybook-style previewer for the stock Teksilo widget catalog."
 
 # teksilo-widgets-previewer is the Teksilo-side previewer binary. It links
 # teksilo-widgets with the `preview` feature so all `WidgetCatalog` impls
@@ -28,3 +30,6 @@ teksilo-preview = { workspace = true }
 teksilo-core = { workspace = true }
 teksilo-canvas = { workspace = true }
 teksilo-tokens = { workspace = true }
+
+[package.metadata.docs.rs]
+all-features = true

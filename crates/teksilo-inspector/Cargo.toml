@@ -5,10 +5,12 @@
 name = "teksilo-inspector"
 edition = "2024"
 version.workspace = true
+license.workspace = true
 license-file.workspace = true
 publish.workspace = true
 authors.workspace = true
 repository.workspace = true
+description = "In-app debug inspector for Teksilo — widget tree, properties, theme, focus and accessibility panels."
 
 # In-app debug inspector for Teksilo. Active only in debug builds
 # (`cfg(debug_assertions)`); release builds compile to no-ops.
@@ -43,3 +45,6 @@ teksilo-widgets = { workspace = true }
 serde_json = { workspace = true }
 
 [dev-dependencies]
+
+[package.metadata.docs.rs]
+all-features = true
