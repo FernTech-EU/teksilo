@@ -80,44 +80,21 @@ shape any indent-stored outline already has.
 pub struct TreeRow<K, T> { /* fields */ }
 ```
 
-Whether a row has children is normally **derived from the stream**: a row has
-children if any row names it as parent. That is right for a source that hands
-over the whole tree, which is what most of them do.
-
-It deadlocks a source that wants to materialise a branch only when it is opened:
-no children are emitted, so the row is derived childless, so no chevron is drawn,
-so there is nothing to click, so it is never expanded. `has_children` is how such
-a source breaks the cycle — it **declares** children that are not there yet.
-
-### Fields
-
-#### `pub has_children: Option<bool>`
-
-`None` (the default, and every existing source) means derive it from the stream.
-`Some(true)` promises children the stream has not delivered; `Some(false)`
-declares a leaf even if rows follow beneath it.
-
-⚠ A **promise, not a projection**. A row that claims children and produces none
-on expand opens onto nothing, and the engine cannot detect that for you.
-
 ### Methods
 
 #### `pub fn new(key: K, item: T, depth: usize) -> Self`
 
-Convenience constructor, leaving `has_children` as `None`.
+Convenience constructor, leaving `has_children` to be derived from the
+stream — see the field, and `with_children` for the
+case where it cannot be.
 
-#### `pub fn with_children(self, has_children: bool) -> Self`
+#### `pub fn with_children(mut self, has_children: bool) -> Self`
 
-Declare the answer instead of letting the stream give it.
+Declare whether this row has children, rather than letting the stream say.
 
-```rust
-// A search result tree that loads a scene's occurrences only when it is opened.
-TreeRow::new(key, scene, 0).with_children(hit_count > 0)
-```
-
-The load itself hangs off `StandardTreeItem::on_toggle`: declare, let the toggle
-reach the app, re-source with the branch filled in. Expand state survives the
-reload, so the branch opens in the same gesture.
+For a source that materialises a branch on expand. See
+`has_children` for why a lazy source cannot work
+without it.
 
 ## `pub struct TreeDataSlice`
 

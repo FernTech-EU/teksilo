@@ -45,7 +45,7 @@ assert_eq!(model.point_count(s), 3);
 
 ## Builder methods at a glance
 
-`from_series_vec`, `from_points`, `only_series`, `add_series`, `insert_series`, `remove_series`, `rename_series`, `set_series_color`, `clear_series_color`, `set_series_visible`, `move_series`, `clear`, `push_point`, `insert_point`, `remove_point`, `update_point`, `replace_series_data`, `series_count`, `series_ids`, `series_id_at`, `series_index_of`, `point_count`, `with_series`, `with_point`, `with_series_view`, `with_all_series`, `structure_version`, `style_version`, `observe_changes`, `debug_named`
+`from_series_vec`, `from_points`, `only_series`, `add_series`, `insert_series`, `remove_series`, `rename_series`, `set_series_color`, `clear_series_color`, `set_series_pattern`, `clear_series_pattern`, `set_series_visible`, `move_series`, `clear`, `push_point`, `insert_point`, `remove_point`, `update_point`, `replace_series_data`, `series_count`, `series_ids`, `series_id_at`, `series_index_of`, `point_count`, `with_series`, `with_point`, `with_series_view`, `with_all_series`, `structure_version`, `style_version`, `observe_changes`, `debug_named`
 
 ## API reference
 
@@ -87,6 +87,11 @@ pub struct ChartSeries<T> { /* fields */ }
 #### `pub fn new(name: impl Into<String>) -> Self`
 
 #### `pub fn color(mut self, color: impl Into<ColorProp>) -> Self`
+
+#### `pub fn pattern(mut self, pattern: SeriesPattern) -> Self`
+
+Pin this series' non-colour channel instead of taking the one its
+position implies. See `SeriesPattern`.
 
 #### `pub fn visibility(mut self, visible: bool) -> Self`
 
@@ -178,6 +183,23 @@ Panics if `series` is unknown.
 Clear a series' explicit color (falls back to the chart's palette).
 Bumps `Self::style_version`. A no-op (no notify, no version bump)
 if the series already has no explicit color.
+
+# Panics
+Panics if `series` is unknown.
+
+#### `pub fn set_series_pattern(&self, series: SeriesId, pattern: SeriesPattern)`
+
+Set a series' explicit `SeriesPattern` — the non-colour channel that
+identifies it. Bumps `Self::style_version` (paint-only), like
+`set_series_color`. A no-op if unchanged.
+
+# Panics
+Panics if `series` is unknown.
+
+#### `pub fn clear_series_pattern(&self, series: SeriesId)`
+
+Clear a series' explicit pattern, falling back to the one its position
+implies. Bumps `Self::style_version`. A no-op if already unset.
 
 # Panics
 Panics if `series` is unknown.

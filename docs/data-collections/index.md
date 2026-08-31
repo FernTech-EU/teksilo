@@ -21,6 +21,7 @@ Every public type in `teksilo-data`, grouped by category. Each page links to its
 - [ListDataSource](list_data_source.md) — `ListDataSource` — read-and-command interface for a flat collection behind a `ListView` /
 - [ListModel](list_model.md) — `ListModel<T>` — concrete reactive list backed by a `Vec<T>`
 - [SelectionModel](selection_model.md) — SelectionModel — index-based selection state for collection widgets
+- [SeriesPattern](series_pattern.md) — `SeriesPattern` — the non-colour channel that identifies a chart series
 - [SortFilterListModel](sort_filter_list_model.md) — Composable sort + filter projection over a flat list source
 - [SortFilterTreeModel](sort_filter_tree_model.md) — Composable sort + filter projection over a hierarchical tree
 - [TreeChange](tree_change.md) — TreeChange — change notifications and stable node identifiers for tree collections

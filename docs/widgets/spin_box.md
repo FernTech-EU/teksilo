@@ -49,11 +49,27 @@ are a synthesis of Qt's `QSpinBox` / `QDoubleSpinBox`, WinUI 3's
   tracks the decimal magnitude of the current value (Qt's
   `AdaptiveDecimalStepType`). Useful for values that span many
   orders of magnitude in the same control.
+- **Locale**: the number follows the active locale's decimal
+  separator, digits and minus sign
+  (`localized`, on by default); thousands
+  separators are opt-in
+  (`use_grouping`, off by default, as in
+  Qt). Display, commit parse and the per-character input filter
+  all resolve from one `NumberPresentation`, so they cannot
+  disagree about which separator the field is using — a French
+  user sees `12,5`, types `12,5`, and the numeric keypad's `.`
+  still works. Rendering is a string transform over the value's
+  own `Display`, never an `f64` round-trip, so a `SpinBox<i64>`
+  stays exact past 2^53. Turn it off for a number that is an
+  *identifier* rather than a quantity (port, version component,
+  database id). With no `I18nManager` installed the active locale
+  is the C locale and this is a no-op.
 - **Custom formatter / parser**: full override via
   `text_from_value` and
   `value_from_text`; together they
   let you implement currency, percentages with stored fraction,
-  hex, duration, anything.
+  hex, duration, anything. A custom formatter/parser owns the
+  whole convention — it is not re-punctuated by the locale layer.
 
 # Accessibility
 
@@ -93,7 +109,7 @@ ctx.add(
 
 ## Builder methods at a glance
 
-`style`, `single_step`, `page_step`, `decimals`, `suffix`, `special_value_text`, `wrap_mode`, `step_type`, `button_layout`, `show_buttons`, `wheel_mode`, `width`, `width_chars`, `fill_width`, `label`, `placeholder`, `enabled`, `read_only`, `text_from_value`, `value_from_text`, `on_value_changed`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`, `value`
+`style`, `single_step`, `page_step`, `decimals`, `localized`, `use_grouping`, `suffix`, `special_value_text`, `wrap_mode`, `step_type`, `button_layout`, `show_buttons`, `wheel_mode`, `width`, `width_chars`, `fill_width`, `label`, `placeholder`, `enabled`, `read_only`, `text_from_value`, `value_from_text`, `on_value_changed`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`, `value`
 
 ## API reference
 
@@ -201,6 +217,42 @@ defaults to `10 × single_step` at build time.
 
 Number of decimal places shown for floating-point types.
 Ignored for integer types.
+
+#### `pub fn localized(mut self, on: bool) -> Self`
+
+Whether the number follows the active locale's conventions —
+decimal separator, digits, and minus sign. **On by default.**
+
+A French user sees `12,5`, not `12.5`, and can type either: the
+commit path de-localizes before parsing, and the input filter
+accepts both the locale's separator and the ASCII one, so a
+numeric keypad still works.
+
+Turn it **off** for a number that is an identifier rather than a
+quantity — a port number, a version component, a database id, a
+pixel offset in a file format. Those read wrong grouped or
+re-punctuated, and their conventional form is the C-locale one.
+
+Localization is a string transform over the value's own
+`Display`, not a round-trip through `f64`, so a `SpinBox<i64>`
+keeps full precision past 2^53.
+
+With no `I18nManager` installed the active locale resolves to the
+C locale, so this is a no-op in tests and in apps that have not
+opted into i18n.
+
+#### `pub fn use_grouping(mut self, on: bool) -> Self`
+
+Whether the displayed number carries thousands separators.
+**Off by default**, matching Qt (`QAbstractSpinBox::
+isGroupSeparatorShown` is false unless asked for).
+
+Separators help a large read-only quantity and get in the way of
+a field being typed into, so this is opt-in per SpinBox rather
+than a locale-wide default. Grouping follows the locale's own
+group sizes, including the Indic lakh system (`12,34,567`).
+
+Has no effect when `localized` is off.
 
 #### `pub fn suffix(mut self, text: impl Into<String>) -> Self`
 
