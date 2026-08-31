@@ -126,3 +126,37 @@ fn time_edit_validation_feedback_signal_starts_pristine() {
     let feedback = editor.validation_feedback_signal();
     assert!(matches!(feedback.get(), ValidationFeedback::Pristine));
 }
+
+#[test]
+fn time_edit_re_derives_its_clock_when_the_locale_switches() {
+    // Regression, same class as `DateEdit`: the 12-vs-24-hour choice is
+    // read from the locale in `build()`, which a `set_locale` relayout
+    // never re-runs.
+    use crate::common::locale_switch_test::displayed_text;
+
+    let mut tree = light_tree();
+    tree.set_locale("en-US".to_string());
+    let value = Signal::new(Some(Time::constant(14, 30, 0, 0)));
+    let id = tree.add(TimeEdit::new(value));
+    tree.layout(SizeProposal {
+        width: Some(300.0),
+        height: None,
+    });
+    let en = displayed_text(&mut tree, id).expect("time text");
+    assert!(
+        en.contains("02") && (en.contains("PM") || en.contains("pm")),
+        "en-US should render a 12-hour clock; got `{en}`"
+    );
+
+    // fr-FR is a 24-hour locale.
+    tree.set_locale("fr-FR".to_string());
+    tree.layout(SizeProposal {
+        width: Some(300.0),
+        height: None,
+    });
+    let fr = displayed_text(&mut tree, id).expect("time text");
+    assert!(
+        fr.starts_with("14") && !fr.contains("PM"),
+        "fr-FR should render a 24-hour clock after the switch; got `{fr}`"
+    );
+}

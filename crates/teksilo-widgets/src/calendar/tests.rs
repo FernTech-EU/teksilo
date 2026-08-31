@@ -480,3 +480,58 @@ fn calendar_title_button_clickable_across_centered_band() {
         );
     }
 }
+
+/// The label of the first weekday column header — the observable form of
+/// the calendar's first-day-of-week.
+fn first_weekday_header(tree: &mut WidgetTree, root: WidgetId) -> Option<String> {
+    fn collect(tree: &WidgetTree, id: WidgetId, out: &mut Vec<WidgetId>) {
+        out.push(id);
+        for c in tree.children(id) {
+            collect(tree, c, out);
+        }
+    }
+    let mut ids = Vec::new();
+    collect(tree, root, &mut ids);
+
+    let update = tree.sync_accessibility();
+    ids.iter().find_map(|id| {
+        let target = teksilo_core::accessibility::widget_id_to_node_id(*id);
+        update
+            .nodes
+            .iter()
+            .find(|(nid, _)| *nid == target)
+            .filter(|(_, n)| n.role() == teksilo_core::accesskit::Role::ColumnHeader)
+            .and_then(|(_, n)| n.label().map(|s| s.to_string()))
+    })
+}
+
+#[test]
+fn calendar_re_derives_its_first_day_of_week_when_the_locale_switches() {
+    // Regression, same class as `DateEdit`: the first day of week is read
+    // from the locale in `build()`, and `set_locale` only marks layout +
+    // paint. en-US starts the week on Sunday, fr-FR on Monday.
+    let mut tree = light_tree();
+    tree.set_locale("en-US".to_string());
+    let date = Signal::new(Some(Date::constant(2026, 5, 2)));
+    let id = tree.add(Calendar::single(date));
+    tree.layout(SizeProposal {
+        width: Some(400.0),
+        height: Some(400.0),
+    });
+    let en = first_weekday_header(&mut tree, id).expect("weekday header");
+    assert!(
+        en.contains("sunday"),
+        "en-US should start the week on Sunday; got `{en}`"
+    );
+
+    tree.set_locale("fr-FR".to_string());
+    tree.layout(SizeProposal {
+        width: Some(400.0),
+        height: Some(400.0),
+    });
+    let fr = first_weekday_header(&mut tree, id).expect("weekday header");
+    assert!(
+        fr.contains("monday"),
+        "fr-FR should start the week on Monday after the switch; got `{fr}`"
+    );
+}

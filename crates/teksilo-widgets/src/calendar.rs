@@ -423,6 +423,20 @@ impl Widget for Calendar {
             _ => cal_recipe::CALENDAR_WEEK_NUMBER_COLUMN_WIDTH * scale,
         };
 
+        // A locale switch must re-derive the first day of week: it is read from
+        // `ctx.locale_signal()` at build time, and `WidgetTree::set_locale`
+        // only calls `mark_all_dirty` (layout + paint), which never re-runs
+        // `build()`. Without this binding the widget keeps rendering with
+        // the pattern of whatever locale was active when it was first
+        // built. Bound at `Rebuild` for the same reason `Calendar` binds
+        // the text scale there — the value is a build-time constant, so a
+        // relayout cannot pick it up.
+        ctx.locale_signal().bind_to(
+            ctx.self_id(),
+            ctx.binding_registry(),
+            teksilo_core::binding::BindingLevel::Rebuild,
+        );
+
         // Resolve first day of week: explicit override → locale default → Monday.
         let first_dow = self.first_day_of_week_override.unwrap_or_else(|| {
             let tag = ctx.locale_signal().get().unwrap_or_default();

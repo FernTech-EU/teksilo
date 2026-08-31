@@ -133,3 +133,42 @@ fn date_range_edit_value_iso_in_at_tree() {
     assert!(v.contains("2026-05-10"));
     assert!(v.contains("/"));
 }
+
+#[test]
+fn date_range_edit_re_derives_its_pattern_when_the_locale_switches() {
+    // Both ends of the range render through the same locale-derived
+    // pattern, so both must follow a `set_locale`.
+    use crate::common::locale_switch_test::displayed_texts;
+
+    let mut tree = light_tree();
+    tree.set_locale("en-US".to_string());
+    let value = Signal::new(Some(DateRange::new(
+        Date::constant(2026, 5, 2),
+        Date::constant(2026, 6, 3),
+    )));
+    let id = tree.add(DateRangeEdit::new(value));
+    tree.layout(SizeProposal {
+        width: Some(480.0),
+        height: None,
+    });
+    let en = displayed_texts(&mut tree, id);
+    assert!(
+        en.iter().any(|t| t.starts_with("05/02/2026")),
+        "en-US should render month-first; got {en:?}"
+    );
+
+    tree.set_locale("fr-FR".to_string());
+    tree.layout(SizeProposal {
+        width: Some(480.0),
+        height: None,
+    });
+    let fr = displayed_texts(&mut tree, id);
+    assert!(
+        fr.iter().any(|t| t.starts_with("02/05/2026")),
+        "fr-FR should render day-first after the switch; got {fr:?}"
+    );
+    assert!(
+        fr.iter().any(|t| t.starts_with("03/06/2026")),
+        "the range end must follow too; got {fr:?}"
+    );
+}

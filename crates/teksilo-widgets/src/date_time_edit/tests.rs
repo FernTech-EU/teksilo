@@ -150,3 +150,44 @@ fn tooltip_appears_on_hover() {
     );
     assert!(tree.find_by_label("Tip").is_some());
 }
+
+#[test]
+fn date_time_edit_re_derives_pattern_and_clock_when_the_locale_switches() {
+    // This widget snapshots *two* locale-derived conventions in `build()`
+    // — the date pattern and the 12-vs-24-hour clock — so both must
+    // follow a `set_locale`.
+    use crate::common::locale_switch_test::displayed_texts;
+
+    let mut tree = light_tree();
+    tree.set_locale("en-US".to_string());
+    let value = Signal::new(Some(Date::constant(2026, 5, 2).at(14, 30, 0, 0)));
+    let id = tree.add(DateTimeEdit::new(value));
+    tree.layout(SizeProposal {
+        width: Some(420.0),
+        height: None,
+    });
+    let en = displayed_texts(&mut tree, id);
+    assert!(
+        en.iter().any(|t| t.starts_with("05/02/2026")),
+        "en-US should render month-first; got {en:?}"
+    );
+    assert!(
+        en.iter().any(|t| t.contains("PM") || t.contains("pm")),
+        "en-US should render a 12-hour clock; got {en:?}"
+    );
+
+    tree.set_locale("fr-FR".to_string());
+    tree.layout(SizeProposal {
+        width: Some(420.0),
+        height: None,
+    });
+    let fr = displayed_texts(&mut tree, id);
+    assert!(
+        fr.iter().any(|t| t.starts_with("02/05/2026")),
+        "fr-FR should render day-first after the switch; got {fr:?}"
+    );
+    assert!(
+        fr.iter().any(|t| t.starts_with("14")) && !fr.iter().any(|t| t.contains("PM")),
+        "fr-FR should render a 24-hour clock after the switch; got {fr:?}"
+    );
+}

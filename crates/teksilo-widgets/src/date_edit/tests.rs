@@ -272,3 +272,63 @@ fn rebuilding_a_date_edit_reaps_its_calendar() {
         "the calendar must die with the field that owns it"
     );
 }
+
+use crate::common::locale_switch_test::displayed_text;
+
+#[test]
+fn date_edit_re_derives_its_pattern_when_the_locale_switches() {
+    // Regression: the locale-derived pattern is read once in `build()`,
+    // and `WidgetTree::set_locale` only marks layout + paint. Without a
+    // `Rebuild` binding on the locale signal the field kept rendering
+    // en-US `MM/DD/YYYY` after a switch to fr-FR.
+    let mut tree = light_tree();
+    tree.set_locale("en-US".to_string());
+    let value = Signal::new(Some(Date::constant(2026, 5, 2)));
+    let id = tree.add(DateEdit::new(value));
+    tree.layout(SizeProposal {
+        width: Some(300.0),
+        height: None,
+    });
+    assert_eq!(
+        displayed_text(&mut tree, id).as_deref(),
+        Some("05/02/2026"),
+        "en-US should render month-first"
+    );
+
+    tree.set_locale("fr-FR".to_string());
+    tree.layout(SizeProposal {
+        width: Some(300.0),
+        height: None,
+    });
+    assert_eq!(
+        displayed_text(&mut tree, id).as_deref(),
+        Some("02/05/2026"),
+        "fr-FR should render day-first after the locale switch"
+    );
+}
+
+#[test]
+fn date_edit_explicit_pattern_survives_a_locale_switch() {
+    // The `Rebuild` binding fires for every DateEdit, so an explicit
+    // override must not be re-derived out from under the caller.
+    let mut tree = light_tree();
+    tree.set_locale("en-US".to_string());
+    let value = Signal::new(Some(Date::constant(2026, 5, 2)));
+    let id = tree.add(DateEdit::new(value).format_pattern("%Y-%m-%d"));
+    tree.layout(SizeProposal {
+        width: Some(300.0),
+        height: None,
+    });
+    assert_eq!(displayed_text(&mut tree, id).as_deref(), Some("2026-05-02"));
+
+    tree.set_locale("fr-FR".to_string());
+    tree.layout(SizeProposal {
+        width: Some(300.0),
+        height: None,
+    });
+    assert_eq!(
+        displayed_text(&mut tree, id).as_deref(),
+        Some("2026-05-02"),
+        "an explicit pattern is not locale-derived"
+    );
+}

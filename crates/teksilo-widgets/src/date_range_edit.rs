@@ -345,6 +345,20 @@ impl Widget for DateRangeEdit {
         let read_only = self.read_only;
 
         // Resolve pattern — locale default unless overridden.
+        // A locale switch must re-derive the date pattern: it is read from
+        // `ctx.locale_signal()` at build time, and `WidgetTree::set_locale`
+        // only calls `mark_all_dirty` (layout + paint), which never re-runs
+        // `build()`. Without this binding the widget keeps rendering with
+        // the pattern of whatever locale was active when it was first
+        // built. Bound at `Rebuild` for the same reason `Calendar` binds
+        // the text scale there — the value is a build-time constant, so a
+        // relayout cannot pick it up.
+        ctx.locale_signal().bind_to(
+            ctx.self_id(),
+            ctx.binding_registry(),
+            teksilo_core::binding::BindingLevel::Rebuild,
+        );
+
         let pattern_string = self.pattern.clone().unwrap_or_else(|| {
             let tag = ctx.locale_signal().get().unwrap_or_default();
             crate::common::datetime::format_pattern_for_locale(&tag).to_string()
