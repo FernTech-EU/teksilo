@@ -1459,17 +1459,29 @@ impl DndThread {
 
     /// Remove everything we published, so the toplevel does not outlive its
     /// proxy pointing at a destroyed window.
+    ///
+    /// Both requests go through [`ignore_errors`], which **round-trips** rather
+    /// than firing and forgetting. Flushing is not enough here: this is the
+    /// last thing the thread does, so the connection closes the moment it
+    /// returns, and a server that observes the disconnect before it has
+    /// dispatched the tail of our input queue drops those requests. Losing the
+    /// delete is not cosmetic — `XdndProxy` would keep pointing at a destroyed
+    /// window, and every later source that skips the spec's self-pointing
+    /// validation would send the whole handshake into it. The proxy window
+    /// itself is freed by the disconnect either way; the round trip is what
+    /// makes the property delete land, and it costs one exchange per window
+    /// close.
     fn teardown(&mut self) {
         if self.outbound.is_some() {
             self.finish_outbound(DropOutcome::Cancelled);
         }
         let atoms = self.conn.atoms().clone();
-        let _ = self
-            .conn
-            .conn()
-            .delete_property(self.toplevel, atoms.xdnd_proxy);
-        let _ = self.conn.conn().destroy_window(self.proxy);
-        let _ = self.conn.flush();
+        ignore_errors(
+            self.conn
+                .conn()
+                .delete_property(self.toplevel, atoms.xdnd_proxy),
+        );
+        ignore_errors(self.conn.conn().destroy_window(self.proxy));
     }
 }
 
