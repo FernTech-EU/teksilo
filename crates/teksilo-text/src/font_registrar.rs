@@ -14,13 +14,28 @@
 
 use text_typeset::{FontFaceId, TextFontService};
 
-/// A single font face to register with a typesetter. Owned byte
-/// buffer so the registrar can outlive any borrow of the source
-/// data (e.g. from a file on disk or a memory-mapped archive).
+/// A single font face to register with a typesetter. The bytes are held in a
+/// shared container so the registrar can outlive any borrow of the source data
+/// (a file on disk, a memory-mapped archive) without copying it.
+///
+/// [`SharedFontData`](text_typeset::SharedFontData) is
+/// `Arc<dyn AsRef<[u8]> + Sync + Send>`, so a face
+/// compiled into the binary costs nothing to register: `Arc::new(bytes)` over a
+/// `&'static [u8]` shares the rodata rather than duplicating it onto the heap.
+/// An owned buffer still works, because `Arc<Vec<u8>>` coerces to the same type.
+/// Share a face compiled into the binary rather than copying it.
+///
+/// An `include_bytes!`-ed face is already resident in the binary's rodata, so
+/// wrapping the static slice registers it as-is. `register_font` would put a
+/// second copy of every face on the heap for the life of the process.
+pub(crate) fn shared_static(bytes: &'static [u8]) -> text_typeset::SharedFontData {
+    std::sync::Arc::new(bytes)
+}
+
 #[derive(Clone)]
 pub struct FontFaceSpec {
     /// Raw TTF/OTF/WOFF data.
-    pub data: std::sync::Arc<Vec<u8>>,
+    pub data: text_typeset::SharedFontData,
     /// Whether this face should be the default used for
     /// unattributed text. Exactly one face per registrar should
     /// set this to `true`.
@@ -33,7 +48,7 @@ pub struct FontFaceSpec {
 impl std::fmt::Debug for FontFaceSpec {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("FontFaceSpec")
-            .field("data_len", &self.data.len())
+            .field("data_len", &self.data.as_ref().as_ref().len())
             .field("is_default", &self.is_default)
             .field("default_size_px", &self.default_size_px)
             .finish()
@@ -102,17 +117,20 @@ impl Default for EmbeddedInterRegistrar {
 
 impl FontRegistrar for EmbeddedInterRegistrar {
     fn register_on_service(&self, service: &mut TextFontService) -> Option<FontFaceId> {
-        let face = service.register_font(self.data);
+        // Every face here is `include_bytes!`-ed, so it is already resident in
+        // the binary's rodata. Sharing the static slice registers it without a
+        // second copy on the heap; `register_font` would duplicate all four.
+        let face = service.register_font_shared(shared_static(self.data));
         service.set_default_font(face, self.default_size_px);
-        let _ = service.register_font(self.data_italic);
+        let _ = service.register_font_shared(shared_static(self.data_italic));
         // `InterVariable.ttf` registers under family "Inter Variable"; the
         // default theme requests "Inter". Alias so the request resolves to
         // the bundled face (see `TypesetterBridge::register_default_font`).
         service.set_generic_family("Inter", "Inter Variable");
         // Register the monospace faces (upright + italic) for the theme's
         // `mono` typography token.
-        let _ = service.register_font(self.mono_data);
-        let _ = service.register_font(self.mono_data_italic);
+        let _ = service.register_font_shared(shared_static(self.mono_data));
+        let _ = service.register_font_shared(shared_static(self.mono_data_italic));
         Some(face)
     }
 }
@@ -135,12 +153,65 @@ impl FontRegistrar for VecFontRegistrar {
     fn register_on_service(&self, service: &mut TextFontService) -> Option<FontFaceId> {
         let mut default = None;
         for spec in &self.faces {
-            let face = service.register_font(&spec.data);
+            // `register_font_shared`, never `register_font`: the latter copies
+            // the whole face onto the heap, and every registrar here already
+            // holds its bytes in a shareable container. On the app's bundled
+            // writing serifs that copy was 6.4 MB, resident for the session.
+            let face = service.register_font_shared(spec.data.clone());
             if spec.is_default && default.is_none() {
                 service.set_default_font(face, spec.default_size_px);
                 default = Some(face);
             }
         }
         default
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A face compiled into the binary must be *shared*, never copied.
+    ///
+    /// Both halves of this were regressions: `FontFaceSpec` held an
+    /// `Arc<Vec<u8>>`, so describing a static face required copying it out of
+    /// rodata, and `FontRegistry::register_font` then copied it again. On the
+    /// downstream writing app, with eight bundled serifs, that was 12.8 MB
+    /// resident for the life of the process.
+    ///
+    /// Comparing the pointer is what makes this a real guard: an
+    /// `Arc<Vec<u8>>` built from the same bytes compares equal by value and
+    /// would pass a content check while allocating exactly what this forbids.
+    #[test]
+    fn a_static_face_is_shared_rather_than_copied() {
+        static FACE: &[u8] = b"not really a font, but the bytes are the point";
+
+        let spec = FontFaceSpec {
+            data: std::sync::Arc::new(FACE),
+            is_default: false,
+            default_size_px: 14.0,
+        };
+
+        let held: &[u8] = spec.data.as_ref().as_ref();
+        assert_eq!(
+            held.as_ptr(),
+            FACE.as_ptr(),
+            "the spec must point at the original bytes, not a copy of them"
+        );
+        assert_eq!(held.len(), FACE.len());
+    }
+
+    /// The owned case still has to work: a face read from disk or out of an
+    /// archive has no static lifetime, and `Arc<Vec<u8>>` must keep coercing.
+    #[test]
+    fn an_owned_face_still_describes_itself() {
+        let bytes = vec![1u8, 2, 3, 4];
+        let spec = FontFaceSpec {
+            data: std::sync::Arc::new(bytes),
+            is_default: true,
+            default_size_px: 18.0,
+        };
+        assert_eq!(spec.data.as_ref().as_ref(), &[1u8, 2, 3, 4]);
+        assert!(spec.is_default);
     }
 }

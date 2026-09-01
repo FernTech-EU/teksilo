@@ -20,7 +20,10 @@ pub use shared_typesetter::SharedTypesetter;
 pub use typesetter_bridge::TypesetterBridge;
 
 pub use font_registrar::{EmbeddedInterRegistrar, FontFaceSpec, FontRegistrar, VecFontRegistrar};
+// `FontFaceSpec::data` is a public field of this type, so its type has to be
+// nameable by anyone constructing one.
 pub use rich_text_engine::{RichTextEngine, WrapMode};
+pub use text_typeset::SharedFontData;
 pub use typography_defaults::EditorTypographyDefaults;
 
 pub use text_typeset::{

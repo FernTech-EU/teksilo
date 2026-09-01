@@ -8,6 +8,8 @@ use teksilo_canvas::text_backend::{
     AtlasInfo, GlyphValidation, TextBackend, TextLayout, TextLayoutSpan, TextSpanKind,
 };
 use teksilo_tokens::TextStyle;
+
+use crate::font_registrar::shared_static;
 use text_typeset::atlas::cache::GlyphCacheKey;
 use text_typeset::{
     DocumentFlow, FontFaceId, InlineMarkup, LaidOutSpanKind, ParagraphResult, SingleLineResult,
@@ -263,11 +265,13 @@ impl TypesetterBridge {
         // UI text shapes from real italic outlines instead of falling
         // back to the upright (an italic request would otherwise miss).
         let inter_data = include_bytes!("../fonts/InterVariable.ttf");
-        let face_id = self.service.register_font(inter_data);
+        let face_id = self.service.register_font_shared(shared_static(inter_data));
         self.service.set_default_font(face_id, 14.0);
         self.default_font = Some(face_id);
         let inter_italic = include_bytes!("../fonts/InterVariable-Italic.ttf");
-        let _ = self.service.register_font(inter_italic);
+        let _ = self
+            .service
+            .register_font_shared(shared_static(inter_italic));
 
         // The bundled Inter faces report their family name as "Inter
         // Variable" (name id 1; they have no typographic-family name
@@ -284,44 +288,46 @@ impl TypesetterBridge {
         // "JetBrains Mono"), so the theme's request — upright or italic —
         // resolves directly.
         let mono_data = include_bytes!("../fonts/JetBrainsMono.ttf");
-        let _ = self.service.register_font(mono_data);
+        let _ = self.service.register_font_shared(shared_static(mono_data));
         let mono_italic = include_bytes!("../fonts/JetBrainsMono-Italic.ttf");
-        let _ = self.service.register_font(mono_italic);
+        let _ = self
+            .service
+            .register_font_shared(shared_static(mono_italic));
 
         #[cfg(feature = "fonts-arabic")]
         {
             let data = include_bytes!("../fonts/NotoSansArabic-VariableFont_wdth,wght.ttf");
-            let _ = self.service.register_font(data);
+            let _ = self.service.register_font_shared(shared_static(data));
         }
         #[cfg(feature = "fonts-hebrew")]
         {
             let data = include_bytes!("../fonts/NotoSansHebrew-VariableFont_wdth,wght.ttf");
-            let _ = self.service.register_font(data);
+            let _ = self.service.register_font_shared(shared_static(data));
         }
         #[cfg(feature = "fonts-thai")]
         {
             let data = include_bytes!("../fonts/NotoSansThai-VariableFont_wdth,wght.ttf");
-            let _ = self.service.register_font(data);
+            let _ = self.service.register_font_shared(shared_static(data));
         }
         #[cfg(feature = "fonts-devanagari")]
         {
             let data = include_bytes!("../fonts/NotoSansDevanagari-VariableFont_wdth,wght.ttf");
-            let _ = self.service.register_font(data);
+            let _ = self.service.register_font_shared(shared_static(data));
         }
         #[cfg(feature = "fonts-cjk-sc")]
         {
             let data = include_bytes!("../fonts/NotoSansSC-VariableFont_wght.ttf");
-            let _ = self.service.register_font(data);
+            let _ = self.service.register_font_shared(shared_static(data));
         }
         #[cfg(feature = "fonts-cjk-jp")]
         {
             let data = include_bytes!("../fonts/NotoSansJP-VariableFont_wght.ttf");
-            let _ = self.service.register_font(data);
+            let _ = self.service.register_font_shared(shared_static(data));
         }
         #[cfg(feature = "fonts-cjk-kr")]
         {
             let data = include_bytes!("../fonts/NotoSansKR-VariableFont_wght.ttf");
-            let _ = self.service.register_font(data);
+            let _ = self.service.register_font_shared(shared_static(data));
         }
 
         // Optional runtime color-emoji fallback. Reads the platform's
