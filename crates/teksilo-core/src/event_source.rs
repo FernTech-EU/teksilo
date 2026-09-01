@@ -200,8 +200,23 @@ type CtxSubscriptionCallback = Rc<dyn Fn(&dyn Any, &mut EventContext)>;
 pub struct TreeAppContext {
     pub(crate) poster: Option<Arc<dyn AppEventPoster>>,
     pub(crate) event_source: Option<EventSourceAdapter>,
+    /// Plain (context-free) subscription callbacks and the window each was registered
+    /// from. Populated by
+    /// [`BuildContext::subscribe_event`](crate::build_context::BuildContext::subscribe_event).
+    ///
+    /// The window is recorded for the same reason `subscription_ctx_callbacks` below
+    /// records one: this map is shared by every window's tree (one `TreeAppContext`, one
+    /// `Rc` handed to each tree), while a closing window's tree is dropped wholesale with
+    /// no per-widget destroy pass. Without a window key the entries a closed window
+    /// installed could not be purged even in principle, and each would hold whatever its
+    /// closure captured for the rest of the process. See
+    /// [`purge_subscriptions_for_window`](Self::purge_subscriptions_for_window).
+    ///
+    /// `None` for a registration from a windowless tree (headless / tests). No window
+    /// purge ever touches those; only the per-widget teardown in `WidgetTree` does.
     #[allow(clippy::type_complexity)]
-    pub(crate) subscription_callbacks: RefCell<HashMap<SubscriptionId, Box<dyn Fn(&dyn Any)>>>,
+    pub(crate) subscription_callbacks:
+        RefCell<HashMap<SubscriptionId, (Option<TeksiloWindowId>, Box<dyn Fn(&dyn Any)>)>>,
     /// Context-bearing subscription callbacks + the window they target.
     /// Populated by [`BuildContext::subscribe_event_with_ctx`](crate::build_context::BuildContext::subscribe_event_with_ctx);
     /// dispatched by teksilo-app with a freshly-minted [`EventContext`]. A given
@@ -298,7 +313,7 @@ impl TreeAppContext {
     /// event. Returns `true` if a callback was found and invoked.
     pub fn dispatch_subscription_event(&self, sub_id: SubscriptionId, event: &dyn Any) -> bool {
         let callbacks = self.subscription_callbacks.borrow();
-        if let Some(callback) = callbacks.get(&sub_id) {
+        if let Some((_window_id, callback)) = callbacks.get(&sub_id) {
             callback(event);
             true
         } else {
@@ -361,6 +376,27 @@ impl TreeAppContext {
     /// Mirrors [`AsyncCompletionHandle::purge_window`](crate::AsyncCompletionHandle::purge_window).
     pub fn purge_ctx_subscriptions_for_window(&self, window_id: TeksiloWindowId) {
         self.subscription_ctx_callbacks
+            .borrow_mut()
+            .retain(|_, (win, _)| *win != Some(window_id));
+    }
+
+    /// Drop every *plain* (context-free) subscription callback registered from
+    /// `window_id`. Called by teksilo-app when a window closes, beside
+    /// [`purge_ctx_subscriptions_for_window`](Self::purge_ctx_subscriptions_for_window).
+    ///
+    /// The two maps need two purges for the same reason they need two dispatch
+    /// functions: a given `SubscriptionId` lives in exactly one of them. Without this
+    /// one, every callback the closed window's widgets installed stays in the shared map
+    /// for the life of the process, holding strong references to whatever it captured
+    /// (view-models, document stores, context handles), because a closing window's tree
+    /// is dropped wholesale and nothing runs the per-widget removal in
+    /// `WidgetTree::destroy_subtree_inner`.
+    ///
+    /// A registration made from a windowless tree records `None` and is never purged
+    /// here; only [`WidgetTree::destroy_subtree`](crate::WidgetTree::destroy_subtree)
+    /// reaches it.
+    pub fn purge_subscriptions_for_window(&self, window_id: TeksiloWindowId) {
+        self.subscription_callbacks
             .borrow_mut()
             .retain(|_, (win, _)| *win != Some(window_id));
     }
@@ -804,6 +840,117 @@ mod tests {
         assert_eq!(tree.app_context().subscription_count(), 1);
         tree.destroy_subtree(id);
         assert_eq!(tree.app_context().subscription_count(), 0);
+    }
+
+    /// The window-closing twin of [`destroying_widget_removes_ui_callback`].
+    ///
+    /// Closing a window drops its whole tree at once: nothing calls `destroy_subtree`,
+    /// so the per-widget removal the test above pins never runs for a single one of the
+    /// widgets that window built. The callback map is shared by every window in the
+    /// process (one `TreeAppContext`, one `Rc` per tree), so without a window key those
+    /// closures stay live for the rest of the session holding everything they captured.
+    /// `purge_subscriptions_for_window` is what the app-side close path calls instead,
+    /// and this test is the only place that says so about the plain map.
+    ///
+    /// Three trees stand in for the three cases that must be told apart: the window
+    /// being closed, a window that stays open, and a windowless (headless) registration
+    /// that no window purge may ever touch.
+    #[test]
+    fn closing_a_window_removes_its_ui_callbacks() {
+        use crate::WindowStateInit;
+        use crate::window::{TeksiloWindowId, WindowPlacement, WindowState};
+
+        fn window_state(id: u64) -> WindowState {
+            WindowState::new(WindowStateInit {
+                id: TeksiloWindowId::new(id),
+                string_id: None,
+                placement: WindowPlacement::Floating,
+                title: String::new(),
+                size: (800, 600),
+                position: (0, 0),
+                focused: true,
+                resizable: true,
+                always_on_top: false,
+            })
+        }
+
+        // Window 1 installs the shared context; window 2 and the headless tree get a
+        // clone of the same `Rc`, exactly as `WindowManager` hands out its
+        // `app_context_template`.
+        let mut tree_one = WidgetTree::new();
+        tree_one.set_window_state(window_state(1));
+        let (source, poster) = install_source(&mut tree_one, MockEventSource::default());
+
+        let mut tree_two = WidgetTree::new();
+        tree_two.set_window_state(window_state(2));
+        tree_two.set_app_context(tree_one.app_context().clone());
+
+        let mut tree_headless = WidgetTree::new();
+        tree_headless.set_app_context(tree_one.app_context().clone());
+
+        let one = Signal::new(String::new());
+        let two = Signal::new(String::new());
+        let headless = Signal::new(String::new());
+        tree_one.add(SubscribingWidget {
+            origin: TestOrigin::Created,
+            last_message: one.clone(),
+        });
+        tree_two.add(SubscribingWidget {
+            origin: TestOrigin::Created,
+            last_message: two.clone(),
+        });
+        tree_headless.add(SubscribingWidget {
+            origin: TestOrigin::Created,
+            last_message: headless.clone(),
+        });
+
+        let app_ctx = tree_one.app_context().clone();
+        assert_eq!(app_ctx.subscription_count(), 3);
+        assert_eq!(source.subscriber_count(), 3);
+
+        // Close window 1 the way `WindowManager::close_window` does: purge first, then
+        // drop the tree (which drops the arena's subscription handles and so
+        // unregisters that window from the source).
+        app_ctx.purge_subscriptions_for_window(TeksiloWindowId::new(1));
+        drop(tree_one);
+
+        assert_eq!(
+            app_ctx.subscription_count(),
+            2,
+            "the closed window's callback must be gone, and neither the other window's \
+             nor the windowless one may go with it"
+        );
+        assert_eq!(
+            source.subscriber_count(),
+            2,
+            "dropping the tree unregisters the closed window from the source"
+        );
+
+        source.publish(
+            TestOrigin::Created,
+            TestEvent {
+                id: 1,
+                message: "after the close".to_string(),
+            },
+        );
+        drain_and_dispatch(&tree_two, &poster);
+
+        assert_eq!(one.get(), "", "a closed window's callback must not run");
+        assert_eq!(
+            two.get(),
+            "after the close",
+            "a window that stayed open keeps receiving"
+        );
+        assert_eq!(
+            headless.get(),
+            "after the close",
+            "a windowless registration is not purged by any window id"
+        );
+
+        // And the surviving window purges on its own close, leaving only the
+        // windowless entry, which nothing but a widget destroy can reach.
+        app_ctx.purge_subscriptions_for_window(TeksiloWindowId::new(2));
+        assert_eq!(app_ctx.subscription_count(), 1);
     }
 
     #[test]

@@ -1128,6 +1128,13 @@ impl<'a> BuildContext<'a> {
     /// handle (unregistering from the source) and removes the UI-side
     /// callback.
     ///
+    /// It is scoped to the window it was registered from as well. A closing window's
+    /// tree is dropped wholesale, with no per-widget destroy pass, so teksilo-app calls
+    /// [`TreeAppContext::purge_subscriptions_for_window`](crate::event_source::TreeAppContext::purge_subscriptions_for_window)
+    /// to drop the callbacks that window installed. A registration from a windowless
+    /// tree (headless / tests) records no window, and only the per-widget path above
+    /// removes such a callback.
+    ///
     /// # Panics
     ///
     /// Panics if no event source has been registered on the
@@ -1171,6 +1178,14 @@ impl<'a> BuildContext<'a> {
         use std::any::{Any, TypeId};
         use std::sync::Arc;
 
+        // Recorded so `TreeAppContext::purge_subscriptions_for_window` can drop this
+        // entry when the window closes. A closing window's tree is dropped wholesale,
+        // with no per-widget destroy pass, so nothing else ever reaches the entry and
+        // the callback (plus everything it captured) would stay live for the rest of
+        // the process. `None` from a windowless tree (headless / tests), which no
+        // window purge touches. Mirrors `subscribe_event_with_ctx` below.
+        let window_id = self.window().map(|w| w.id());
+
         let app_context = self.tree.app_context.clone();
 
         let adapter = app_context.event_source.as_ref().expect(
@@ -1207,7 +1222,7 @@ impl<'a> BuildContext<'a> {
         app_context
             .subscription_callbacks
             .borrow_mut()
-            .insert(sub_id, stored_callback);
+            .insert(sub_id, (window_id, stored_callback));
 
         // Build the wrapper that the source will invoke from its
         // publisher thread. It carries only the sub_id (Copy) and an

@@ -1037,12 +1037,20 @@ impl WindowManager {
         {
             handle.purge_window(teksilo_id);
         }
-        // Drop any context-bearing subscription callbacks (subscribe_event_with_ctx)
-        // owned by the closing window, so the shared TreeAppContext map doesn't
-        // retain inert closures per closed window (the tree is dropped without a
-        // per-widget destroy pass). A late backend event then finds nothing.
+        // Drop every subscription callback owned by the closing window: the
+        // context-bearing ones (subscribe_event_with_ctx) and the plain ones
+        // (subscribe_event) alike, so the shared TreeAppContext maps do not retain
+        // inert closures per closed window. The window's tree is dropped wholesale
+        // below, with no per-widget destroy pass, so these two calls are the only
+        // thing that ever reaches those entries. A late backend event then finds
+        // nothing.
+        //
+        // Neither purge may be the last owner of anything the `on_removed` hook at
+        // the bottom of this function needs: that hook runs after the tree is gone,
+        // and its callables are held separately by whoever registered them.
         if let Some(template) = self.app_context_template.as_ref() {
             template.purge_ctx_subscriptions_for_window(teksilo_id);
+            template.purge_subscriptions_for_window(teksilo_id);
         }
         // Revoke the window's OS drop-target registration (drops the platform
         // guard — RevokeDragDrop / removeFromSuperview / data-device teardown).
@@ -2437,5 +2445,126 @@ mod ime_dedup_tests {
         assert!(!last_empty);
         assert!(!ime_should_skip_empty_preedit(&mut last_empty, true));
         assert!(ime_should_skip_empty_preedit(&mut last_empty, true));
+    }
+}
+
+#[cfg(test)]
+mod window_close_subscription_purge_tests {
+    use std::any::Any;
+    use std::rc::Rc;
+    use std::sync::Arc;
+
+    use teksilo_canvas::SizeProposal;
+    use teksilo_core::build_context::BuildContext;
+    use teksilo_core::event_source::{
+        AppEventPoster, EventSource, EventSourceAdapter, SubscriptionHandle, SubscriptionId,
+        TreeAppContext,
+    };
+    use teksilo_core::widget::{LayoutContext, LayoutResponse, Widget};
+    use teksilo_core::widget_id::WidgetId;
+    use teksilo_core::{
+        TeksiloWindowId, WidgetTree, WindowPlacement, WindowState, WindowStateInit,
+    };
+
+    use super::WindowManager;
+
+    /// Accepts subscriptions and publishes nothing: this test is about the bookkeeping,
+    /// not about delivery, so it never needs a token that unsubscribes.
+    struct SilentSource;
+
+    impl EventSource for SilentSource {
+        type Origin = u32;
+        type Event = u32;
+
+        fn subscribe(
+            &self,
+            _origin: Self::Origin,
+            _callback: Arc<dyn Fn(Self::Event) + Send + Sync + 'static>,
+        ) -> SubscriptionHandle {
+            SubscriptionHandle::empty()
+        }
+    }
+
+    /// `subscribe_event` panics without a poster installed, and nothing here posts.
+    struct SilentPoster;
+
+    impl AppEventPoster for SilentPoster {
+        fn post_subscription_event(&self, _sub_id: SubscriptionId, _event: Box<dyn Any + Send>) {}
+    }
+
+    /// Subscribes once in `build()`, the way every real widget does.
+    #[derive(Debug)]
+    struct Subscriber;
+
+    impl Widget for Subscriber {
+        fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+            ctx.subscribe_event(0u32, |_event: &u32| {});
+            Vec::new()
+        }
+
+        fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> LayoutResponse {
+            proposal.resolve(0.0, 0.0).into()
+        }
+    }
+
+    fn window_state(id: u64) -> WindowState {
+        WindowState::new(WindowStateInit {
+            id: TeksiloWindowId::new(id),
+            string_id: None,
+            placement: WindowPlacement::Floating,
+            title: String::new(),
+            size: (800, 600),
+            position: (0, 0),
+            focused: true,
+            resizable: true,
+            always_on_top: false,
+        })
+    }
+
+    /// `close_window` must purge the plain subscription map, not only the
+    /// context-bearing one. The purge itself is unit-tested in
+    /// `teksilo_core::event_source`; what this pins is the call site, which is the half
+    /// that silently does not happen and that no core test can see.
+    ///
+    /// A real `ManagedWindow` needs a live `PlatformWindow`, which a headless test
+    /// cannot stand up. It does not need one: the purge block sits above the `windows`
+    /// lookup in `close_window`, so it runs for an id the manager never saw (the same
+    /// property `close_window_on_an_unknown_id_is_a_harmless_no_op` relies on).
+    #[test]
+    fn closing_a_window_purges_the_plain_subscription_callbacks_it_installed() {
+        let poster: Arc<dyn AppEventPoster> = Arc::new(SilentPoster);
+        let template = Rc::new(TreeAppContext::with_source_and_poster(
+            EventSourceAdapter::new(SilentSource),
+            poster,
+        ));
+
+        let mut tree_one = WidgetTree::new();
+        tree_one.set_window_state(window_state(1));
+        tree_one.set_app_context(template.clone());
+        tree_one.add(Subscriber);
+
+        let mut tree_two = WidgetTree::new();
+        tree_two.set_window_state(window_state(2));
+        tree_two.set_app_context(template.clone());
+        tree_two.add(Subscriber);
+
+        assert_eq!(template.subscription_count(), 2);
+
+        let mut wm = WindowManager::new(teksilo_core::presets::intui::light());
+        wm.set_app_context_template(template.clone());
+
+        wm.close_window(TeksiloWindowId::new(1));
+        assert_eq!(
+            template.subscription_count(),
+            1,
+            "close_window must drop window 1's plain callback and keep window 2's"
+        );
+
+        wm.close_window(TeksiloWindowId::new(2));
+        assert_eq!(
+            template.subscription_count(),
+            0,
+            "and the second window's on its own close"
+        );
     }
 }
