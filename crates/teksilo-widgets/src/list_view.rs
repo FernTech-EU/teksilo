@@ -2295,12 +2295,12 @@ mod tests {
         tree.dispatch_event(teksilo_core::event::WidgetEvent::PointerDown {
             position: center,
             button: teksilo_core::event::PointerButton::Primary,
-            modifiers: Modifiers::CTRL,
+            modifiers: Modifiers::COMMAND,
         });
         tree.dispatch_event(teksilo_core::event::WidgetEvent::PointerUp {
             position: center,
             button: teksilo_core::event::PointerButton::Primary,
-            modifiers: Modifiers::CTRL,
+            modifiers: Modifiers::COMMAND,
         });
 
         assert!(selection.is_selected(0), "item 0 should still be selected");
@@ -2570,7 +2570,7 @@ mod tests {
         );
         tree.layout(SizeProposal::exact(400.0, 200.0));
         tree.focus(lv);
-        tree.press_key(Key::A, Modifiers::CTRL);
+        tree.press_key(Key::A, Modifiers::COMMAND);
         assert_eq!(selection.selected_indices().len(), 6, "Ctrl+A selects all");
     }
 

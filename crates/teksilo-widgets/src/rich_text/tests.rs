@@ -259,7 +259,7 @@ fn read_only_editor_arrow_keys_move_caret_and_preserve_selection() {
 
     tree.dispatch_event(WidgetEvent::KeyDown {
         key: Key::A,
-        modifiers: Modifiers::CTRL,
+        modifiers: Modifiers::COMMAND,
         text: None,
     });
     assert!(has_sel.get(), "Ctrl+A must set has_selection");
@@ -661,7 +661,7 @@ fn editor_undo_redo_round_trip_restores_can_undo_signal() {
     press_key(
         &mut tree,
         teksilo_core::event::Key::End,
-        teksilo_core::event::Modifiers::CTRL,
+        teksilo_core::event::Modifiers::COMMAND,
     );
     for ch in ['!', '!'] {
         press_char(&mut tree, ch);
@@ -680,7 +680,7 @@ fn editor_undo_redo_round_trip_restores_can_undo_signal() {
     press_key(
         &mut tree,
         teksilo_core::event::Key::Z,
-        teksilo_core::event::Modifiers::CTRL,
+        teksilo_core::event::Modifiers::COMMAND,
     );
     tick_past_debounce(&mut tree);
     tick_past_debounce(&mut tree);
@@ -697,7 +697,7 @@ fn editor_undo_redo_round_trip_restores_can_undo_signal() {
     press_key(
         &mut tree,
         teksilo_core::event::Key::Y,
-        teksilo_core::event::Modifiers::CTRL,
+        teksilo_core::event::Modifiers::COMMAND,
     );
     tick_past_debounce(&mut tree);
     tick_past_debounce(&mut tree);
@@ -730,13 +730,13 @@ fn editor_bold_toggle_applies_to_selection() {
     press_key(
         &mut tree,
         teksilo_core::event::Key::A,
-        teksilo_core::event::Modifiers::CTRL,
+        teksilo_core::event::Modifiers::COMMAND,
     );
 
     press_key(
         &mut tree,
         teksilo_core::event::Key::B,
-        teksilo_core::event::Modifiers::CTRL,
+        teksilo_core::event::Modifiers::COMMAND,
     );
 
     // Read format at the document start via an independent cursor
@@ -761,12 +761,12 @@ fn editor_bold_toggle_applies_to_selection() {
     press_key(
         &mut tree,
         teksilo_core::event::Key::A,
-        teksilo_core::event::Modifiers::CTRL,
+        teksilo_core::event::Modifiers::COMMAND,
     );
     press_key(
         &mut tree,
         teksilo_core::event::Key::B,
-        teksilo_core::event::Modifiers::CTRL,
+        teksilo_core::event::Modifiers::COMMAND,
     );
 
     probe.set_position(1, teksilo_text::text_document::MoveMode::MoveAnchor);
@@ -1074,12 +1074,12 @@ fn editor_copy_sets_system_clipboard_plain_text() {
     press_key(
         &mut tree,
         teksilo_core::event::Key::A,
-        teksilo_core::event::Modifiers::CTRL,
+        teksilo_core::event::Modifiers::COMMAND,
     );
     press_key(
         &mut tree,
         teksilo_core::event::Key::C,
-        teksilo_core::event::Modifiers::CTRL,
+        teksilo_core::event::Modifiers::COMMAND,
     );
 
     assert_eq!(
@@ -1104,12 +1104,12 @@ fn editor_cut_removes_selection_and_fills_clipboard() {
     press_key(
         &mut tree,
         teksilo_core::event::Key::A,
-        teksilo_core::event::Modifiers::CTRL,
+        teksilo_core::event::Modifiers::COMMAND,
     );
     press_key(
         &mut tree,
         teksilo_core::event::Key::X,
-        teksilo_core::event::Modifiers::CTRL,
+        teksilo_core::event::Modifiers::COMMAND,
     );
     tick_past_debounce(&mut tree);
 
@@ -1140,12 +1140,12 @@ fn editor_paste_inserts_system_clipboard_text() {
     press_key(
         &mut tree,
         teksilo_core::event::Key::End,
-        teksilo_core::event::Modifiers::CTRL,
+        teksilo_core::event::Modifiers::COMMAND,
     );
     press_key(
         &mut tree,
         teksilo_core::event::Key::V,
-        teksilo_core::event::Modifiers::CTRL,
+        teksilo_core::event::Modifiers::COMMAND,
     );
     tick_past_debounce(&mut tree);
 
@@ -1173,7 +1173,7 @@ fn editor_copy_paste_round_trip_uses_stored_fragment() {
     press_key(
         &mut tree,
         teksilo_core::event::Key::Home,
-        teksilo_core::event::Modifiers::CTRL,
+        teksilo_core::event::Modifiers::COMMAND,
     );
     for _ in 0..3 {
         press_key(
@@ -1185,7 +1185,7 @@ fn editor_copy_paste_round_trip_uses_stored_fragment() {
     press_key(
         &mut tree,
         teksilo_core::event::Key::C,
-        teksilo_core::event::Modifiers::CTRL,
+        teksilo_core::event::Modifiers::COMMAND,
     );
 
     // After copy the stored fragment is set.
@@ -1212,12 +1212,12 @@ fn editor_copy_paste_round_trip_uses_stored_fragment() {
     press_key(
         &mut tree,
         teksilo_core::event::Key::End,
-        teksilo_core::event::Modifiers::CTRL,
+        teksilo_core::event::Modifiers::COMMAND,
     );
     press_key(
         &mut tree,
         teksilo_core::event::Key::V,
-        teksilo_core::event::Modifiers::CTRL,
+        teksilo_core::event::Modifiers::COMMAND,
     );
     tick_past_debounce(&mut tree);
 
@@ -1385,7 +1385,7 @@ fn ctrl_a_outside_table_is_single_shot_document() {
     press_key(
         &mut tree,
         teksilo_core::event::Key::A,
-        teksilo_core::event::Modifiers::CTRL,
+        teksilo_core::event::Modifiers::COMMAND,
     );
     let first = state.borrow().cursor.selected_text().unwrap_or_default();
     let first_level = state.borrow().select_all_level;
@@ -1398,7 +1398,7 @@ fn ctrl_a_outside_table_is_single_shot_document() {
     press_key(
         &mut tree,
         teksilo_core::event::Key::A,
-        teksilo_core::event::Modifiers::CTRL,
+        teksilo_core::event::Modifiers::COMMAND,
     );
     let second = state.borrow().cursor.selected_text().unwrap_or_default();
     assert_eq!(second, "alpha bravo charlie");
@@ -1423,7 +1423,7 @@ fn ctrl_a_reset_on_other_key() {
     press_key(
         &mut tree,
         teksilo_core::event::Key::A,
-        teksilo_core::event::Modifiers::CTRL,
+        teksilo_core::event::Modifiers::COMMAND,
     );
     press_key(
         &mut tree,
@@ -1439,7 +1439,7 @@ fn ctrl_a_reset_on_other_key() {
     press_key(
         &mut tree,
         teksilo_core::event::Key::A,
-        teksilo_core::event::Modifiers::CTRL,
+        teksilo_core::event::Modifiers::COMMAND,
     );
     assert_eq!(state.borrow().select_all_level, 0);
     assert_eq!(
@@ -1479,12 +1479,12 @@ fn editor_copy_writes_both_plain_text_and_html() {
     press_key(
         &mut tree,
         teksilo_core::event::Key::A,
-        teksilo_core::event::Modifiers::CTRL,
+        teksilo_core::event::Modifiers::COMMAND,
     );
     press_key(
         &mut tree,
         teksilo_core::event::Key::C,
-        teksilo_core::event::Modifiers::CTRL,
+        teksilo_core::event::Modifiers::COMMAND,
     );
 
     assert_eq!(
@@ -1529,7 +1529,7 @@ fn editor_paste_prefers_self_round_trip_over_html() {
     press_key(
         &mut tree,
         teksilo_core::event::Key::Home,
-        teksilo_core::event::Modifiers::CTRL,
+        teksilo_core::event::Modifiers::COMMAND,
     );
     for _ in 0..3 {
         press_key(
@@ -1541,7 +1541,7 @@ fn editor_paste_prefers_self_round_trip_over_html() {
     press_key(
         &mut tree,
         teksilo_core::event::Key::C,
-        teksilo_core::event::Modifiers::CTRL,
+        teksilo_core::event::Modifiers::COMMAND,
     );
 
     // State now holds the fragment.
@@ -1555,12 +1555,12 @@ fn editor_paste_prefers_self_round_trip_over_html() {
     press_key(
         &mut tree,
         teksilo_core::event::Key::End,
-        teksilo_core::event::Modifiers::CTRL,
+        teksilo_core::event::Modifiers::COMMAND,
     );
     press_key(
         &mut tree,
         teksilo_core::event::Key::V,
-        teksilo_core::event::Modifiers::CTRL,
+        teksilo_core::event::Modifiers::COMMAND,
     );
     tick_past_debounce(&mut tree);
 
@@ -1596,12 +1596,12 @@ fn editor_paste_from_external_html_inserts_rich_content() {
     press_key(
         &mut tree,
         teksilo_core::event::Key::End,
-        teksilo_core::event::Modifiers::CTRL,
+        teksilo_core::event::Modifiers::COMMAND,
     );
     press_key(
         &mut tree,
         teksilo_core::event::Key::V,
-        teksilo_core::event::Modifiers::CTRL,
+        teksilo_core::event::Modifiers::COMMAND,
     );
     tick_past_debounce(&mut tree);
 
@@ -1668,12 +1668,12 @@ fn editor_paste_falls_back_to_plain_when_html_unsupported() {
     press_key(
         &mut tree,
         teksilo_core::event::Key::End,
-        teksilo_core::event::Modifiers::CTRL,
+        teksilo_core::event::Modifiers::COMMAND,
     );
     press_key(
         &mut tree,
         teksilo_core::event::Key::V,
-        teksilo_core::event::Modifiers::CTRL,
+        teksilo_core::event::Modifiers::COMMAND,
     );
     tick_past_debounce(&mut tree);
 
@@ -1706,12 +1706,12 @@ fn editor_paste_unformatted_strips_html_to_plain() {
     press_key(
         &mut tree,
         teksilo_core::event::Key::End,
-        teksilo_core::event::Modifiers::CTRL,
+        teksilo_core::event::Modifiers::COMMAND,
     );
     press_key(
         &mut tree,
         teksilo_core::event::Key::V,
-        teksilo_core::event::Modifiers::CTRL | teksilo_core::event::Modifiers::SHIFT,
+        teksilo_core::event::Modifiers::COMMAND | teksilo_core::event::Modifiers::SHIFT,
     );
     tick_past_debounce(&mut tree);
 
@@ -2140,7 +2140,7 @@ fn editor_paste_external_identical_plain_does_not_reuse_stale_fragment() {
     press_key(
         &mut tree,
         teksilo_core::event::Key::Home,
-        teksilo_core::event::Modifiers::CTRL,
+        teksilo_core::event::Modifiers::COMMAND,
     );
     for _ in 0..3 {
         press_key(
@@ -2152,12 +2152,12 @@ fn editor_paste_external_identical_plain_does_not_reuse_stale_fragment() {
     press_key(
         &mut tree,
         teksilo_core::event::Key::B,
-        teksilo_core::event::Modifiers::CTRL,
+        teksilo_core::event::Modifiers::COMMAND,
     );
     press_key(
         &mut tree,
         teksilo_core::event::Key::C,
-        teksilo_core::event::Modifiers::CTRL,
+        teksilo_core::event::Modifiers::COMMAND,
     );
 
     // Step 2: simulate another app overwriting the clipboard with the
@@ -2169,12 +2169,12 @@ fn editor_paste_external_identical_plain_does_not_reuse_stale_fragment() {
     press_key(
         &mut tree,
         teksilo_core::event::Key::End,
-        teksilo_core::event::Modifiers::CTRL,
+        teksilo_core::event::Modifiers::COMMAND,
     );
     press_key(
         &mut tree,
         teksilo_core::event::Key::V,
-        teksilo_core::event::Modifiers::CTRL,
+        teksilo_core::event::Modifiers::COMMAND,
     );
     tick_past_debounce(&mut tree);
 
@@ -2220,7 +2220,7 @@ fn editor_paste_plain_text_with_newlines_splits_into_blocks() {
     press_key(
         &mut tree,
         teksilo_core::event::Key::V,
-        teksilo_core::event::Modifiers::CTRL,
+        teksilo_core::event::Modifiers::COMMAND,
     );
     tick_past_debounce(&mut tree);
 
@@ -2251,7 +2251,7 @@ fn editor_paste_plain_normalises_crlf() {
     press_key(
         &mut tree,
         teksilo_core::event::Key::V,
-        teksilo_core::event::Modifiers::CTRL,
+        teksilo_core::event::Modifiers::COMMAND,
     );
     tick_past_debounce(&mut tree);
 
@@ -2354,7 +2354,7 @@ fn editor_context_menu_copy_item_copies_selection_to_clipboard() {
     press_key(
         &mut tree,
         teksilo_core::event::Key::A,
-        teksilo_core::event::Modifiers::CTRL,
+        teksilo_core::event::Modifiers::COMMAND,
     );
 
     // Open the context menu via right-click. Two layout passes so
@@ -2650,7 +2650,7 @@ fn editor_right_click_does_not_collapse_selection() {
     press_key(
         &mut tree,
         teksilo_core::event::Key::A,
-        teksilo_core::event::Modifiers::CTRL,
+        teksilo_core::event::Modifiers::COMMAND,
     );
     assert!(has_sel.get(), "Ctrl+A must flip has_selection");
 
@@ -3604,7 +3604,7 @@ fn editor_ctrl_enter_always_inserts_block_in_table() {
     press_key(
         &mut tree,
         teksilo_core::event::Key::Enter,
-        teksilo_core::event::Modifiers::CTRL,
+        teksilo_core::event::Modifiers::COMMAND,
     );
     tick_past_debounce(&mut tree);
 
@@ -4278,12 +4278,12 @@ fn format_version_bumps_on_format_only_edits() {
     press_key(
         &mut tree,
         teksilo_core::event::Key::A,
-        teksilo_core::event::Modifiers::CTRL,
+        teksilo_core::event::Modifiers::COMMAND,
     );
     press_key(
         &mut tree,
         teksilo_core::event::Key::B,
-        teksilo_core::event::Modifiers::CTRL,
+        teksilo_core::event::Modifiers::COMMAND,
     );
     tick_past_debounce(&mut tree);
 
@@ -4659,7 +4659,7 @@ fn editor_on_change_fires_on_backspace_paragraph_merge() {
     press_key(
         &mut tree,
         teksilo_core::event::Key::End,
-        teksilo_core::event::Modifiers::CTRL,
+        teksilo_core::event::Modifiers::COMMAND,
     );
     press_key(
         &mut tree,
@@ -5128,7 +5128,7 @@ mod affinity_tests {
         press_key(
             &mut we.tree,
             teksilo_core::event::Key::Home,
-            teksilo_core::event::Modifiers::CTRL,
+            teksilo_core::event::Modifiers::COMMAND,
         );
         let st = we.state.borrow();
         assert_eq!(st.cursor.position(), 0, "Ctrl+Home goes to document start");
@@ -8171,7 +8171,7 @@ fn forward_only_undo_is_blocked_but_history_survives_the_mode() {
     tick_past_debounce(&mut tree);
     assert_eq!(doc.to_plain_text().unwrap_or_default(), "start!");
 
-    press_key(&mut tree, Key::Z, Modifiers::CTRL);
+    press_key(&mut tree, Key::Z, Modifiers::COMMAND);
     tick_past_debounce(&mut tree);
     assert_eq!(
         doc.to_plain_text().unwrap_or_default(),
@@ -8180,7 +8180,7 @@ fn forward_only_undo_is_blocked_but_history_survives_the_mode() {
     );
 
     handle.set_command_filter(super::policy::CommandFilter::All);
-    press_key(&mut tree, Key::Z, Modifiers::CTRL);
+    press_key(&mut tree, Key::Z, Modifiers::COMMAND);
     tick_past_debounce(&mut tree);
     assert_eq!(
         doc.to_plain_text().unwrap_or_default(),
@@ -8352,7 +8352,7 @@ fn ctrl_click_on_a_link_follows_it() {
     tree.dispatch_event(WidgetEvent::PointerDown {
         position: Point::new(60.0, 20.0),
         button: PointerButton::Primary,
-        modifiers: Modifiers::CTRL,
+        modifiers: Modifiers::COMMAND,
     });
 
     assert_eq!(seen.borrow().as_str(), "https://example.com");
@@ -8504,7 +8504,7 @@ fn typing_over_a_selection_counts_what_was_typed_not_the_net_change() {
     press_key(
         &mut tree,
         teksilo_core::event::Key::A,
-        teksilo_core::event::Modifiers::CTRL,
+        teksilo_core::event::Modifiers::COMMAND,
     );
 
     for ch in ['h', 'i'] {
@@ -8668,7 +8668,7 @@ fn an_editor_ignores_a_plain_click_on_a_link() {
 fn an_editor_follows_a_link_on_ctrl_click() {
     let hrefs = hrefs_after_click(
         RichTextEditor::editor(link_only_doc()),
-        teksilo_core::event::Modifiers::CTRL,
+        teksilo_core::event::Modifiers::COMMAND,
     );
     assert_eq!(
         hrefs,
@@ -9027,11 +9027,11 @@ mod regression_clipboard_internal {
         tree.layout(SizeProposal::exact(400.0, 300.0));
         focus_editor(&mut tree, id);
 
-        press_key(&mut tree, Key::V, Modifiers::CTRL);
+        press_key(&mut tree, Key::V, Modifiers::COMMAND);
         tick_past_debounce(&mut tree);
         assert_eq!(doc.to_plain_text().unwrap_or_default(), "a\nb\nc\nd");
 
-        press_key(&mut tree, Key::Z, Modifiers::CTRL);
+        press_key(&mut tree, Key::Z, Modifiers::COMMAND);
         tick_past_debounce(&mut tree);
         assert_eq!(
             doc.to_plain_text().unwrap_or_default().trim(),
@@ -9101,7 +9101,7 @@ mod regression_clipboard_internal {
         tree.layout(SizeProposal::exact(400.0, 300.0));
         focus_editor(&mut tree, id);
 
-        press_key(&mut tree, Key::V, Modifiers::CTRL | Modifiers::SHIFT);
+        press_key(&mut tree, Key::V, Modifiers::COMMAND | Modifiers::SHIFT);
         tick_past_debounce(&mut tree);
         assert!(
             !doc.to_plain_text().unwrap_or_default().is_empty(),
@@ -9127,7 +9127,7 @@ mod regression_clipboard_external {
         let id = tree.add(editor);
         tree.layout(SizeProposal::exact(400.0, 300.0));
         focus_editor(&mut tree, id);
-        press_key(&mut tree, Key::V, Modifiers::CTRL);
+        press_key(&mut tree, Key::V, Modifiers::COMMAND);
         tick_past_debounce(&mut tree);
         doc
     }
@@ -9196,7 +9196,7 @@ mod regression_clipboard_external {
         focus_editor(&mut tree, id);
 
         handle.select_range(0, 5);
-        press_key(&mut tree, Key::C, Modifiers::CTRL);
+        press_key(&mut tree, Key::C, Modifiers::COMMAND);
 
         // Re-publish exactly what NSPasteboard would hand back on macOS.
         let written = clipboard.get_html().expect("copy wrote an html payload");
@@ -9210,8 +9210,8 @@ mod regression_clipboard_external {
             )
             .unwrap();
 
-        press_key(&mut tree, Key::End, Modifiers::CTRL);
-        press_key(&mut tree, Key::V, Modifiers::CTRL);
+        press_key(&mut tree, Key::End, Modifiers::COMMAND);
+        press_key(&mut tree, Key::V, Modifiers::COMMAND);
         tick_past_debounce(&mut tree);
 
         let plain = doc.to_plain_text().unwrap_or_default();

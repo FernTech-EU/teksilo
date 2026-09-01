@@ -3445,7 +3445,7 @@ mod tests {
                     key: Key::S,
                     modifiers,
                     ..
-                } if modifiers.ctrl()
+                } if modifiers.command()
             ) {
                 kf.set(true);
                 return EventResponse::Handled;
@@ -3496,9 +3496,10 @@ mod tests {
         use std::rc::Rc;
 
         // A focused keyboard-capture surface (e.g. a terminal) must receive
-        // Ctrl+S itself, even though an ENABLED global shortcut binds it — the
-        // whole point of GAP 1. A non-capturing widget must yield to the
-        // shortcut (the control case).
+        // the accelerator chord itself (⌘S on macOS, Ctrl+S elsewhere), even
+        // though an ENABLED global shortcut binds it — the whole point of
+        // GAP 1. A non-capturing widget must yield to the shortcut (the
+        // control case).
         fn run(capture: bool) -> (bool, bool) {
             let action_fired = Rc::new(Cell::new(false));
             let on_key_fired = Rc::new(Cell::new(false));
@@ -3513,7 +3514,7 @@ mod tests {
                     .on_key(move |event, _ctx| {
                         if matches!(
                             event,
-                            WidgetEvent::KeyDown { key: Key::S, modifiers, .. } if modifiers.ctrl()
+                            WidgetEvent::KeyDown { key: Key::S, modifiers, .. } if modifiers.command()
                         ) {
                             kf.set(true);
                             return EventResponse::Handled;

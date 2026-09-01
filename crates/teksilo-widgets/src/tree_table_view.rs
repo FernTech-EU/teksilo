@@ -4531,7 +4531,7 @@ mod tests {
         );
 
         // Ctrl+Home returns focus AND scroll to the top.
-        tree.press_key(Key::Home, Modifiers::CTRL);
+        tree.press_key(Key::Home, Modifiers::COMMAND);
         tree.layout(proposal);
         assert_eq!(read_focus(&tree), Some((0, 0)));
         assert_eq!(read_scroll(&tree), 0.0, "Ctrl+Home scrolls to top");

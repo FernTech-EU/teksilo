@@ -1051,9 +1051,9 @@ fn home_end_jump_within_row() {
 fn ctrl_home_end_jump_to_corners() {
     let (mut tree, table, _) = build_table(5);
     focus_at(&mut tree, table, 2, 1);
-    tree.press_key(Key::End, Modifiers::CTRL);
+    tree.press_key(Key::End, Modifiers::COMMAND);
     assert_eq!(read_focused_cell(&tree, table), Some((4, 1)));
-    tree.press_key(Key::Home, Modifiers::CTRL);
+    tree.press_key(Key::Home, Modifiers::COMMAND);
     assert_eq!(read_focused_cell(&tree, table), Some((0, 0)));
 }
 
@@ -1099,7 +1099,7 @@ fn arrow_nav_scroll_follows_focused_row() {
     );
 
     // Ctrl+Home returns focus AND scroll to the very top.
-    tree.press_key(Key::Home, Modifiers::CTRL);
+    tree.press_key(Key::Home, Modifiers::COMMAND);
     tree.layout(proposal);
     assert_eq!(read_focused_cell(&tree, table), Some((0, 0)));
     assert_eq!(
@@ -1109,7 +1109,7 @@ fn arrow_nav_scroll_follows_focused_row() {
     );
 
     // Ctrl+End jumps focus AND scroll to reveal the last row.
-    tree.press_key(Key::End, Modifiers::CTRL);
+    tree.press_key(Key::End, Modifiers::COMMAND);
     tree.layout(proposal);
     assert_eq!(read_focused_cell(&tree, table), Some((99, 1)));
     assert!(
@@ -1346,7 +1346,7 @@ fn ctrl_a_selects_all_rows_in_multi_mode() {
         height: Some(200.0),
     });
     focus_at(&mut tree, table, 0, 0);
-    tree.press_key(Key::A, Modifiers::CTRL);
+    tree.press_key(Key::A, Modifiers::COMMAND);
     assert_eq!(sel.count(), 5);
 }
 

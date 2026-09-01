@@ -540,7 +540,7 @@ fn ctrl_a_selects_all() {
     tree.focus(id);
     tree.dispatch_event(WidgetEvent::KeyDown {
         key: Key::A,
-        modifiers: Modifiers::CTRL,
+        modifiers: Modifiers::COMMAND,
         text: None,
     });
     assert_eq!(selection.count(), 12, "Ctrl+A selects every item");

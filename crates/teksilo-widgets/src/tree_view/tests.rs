@@ -500,7 +500,7 @@ fn ctrl_a_selects_all_visible_in_multi_mode() {
     let (mut wtree, tv, selection) = flat_tree_view(7, teksilo_data::SelectionMode::Multi);
     wtree.layout(SizeProposal::exact(400.0, 300.0));
     wtree.focus(tv);
-    wtree.press_key(Key::A, Modifiers::CTRL);
+    wtree.press_key(Key::A, Modifiers::COMMAND);
     assert_eq!(selection.selected_indices().len(), 7, "Ctrl+A selects all");
 }
 

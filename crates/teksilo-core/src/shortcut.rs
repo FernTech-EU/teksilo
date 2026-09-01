@@ -100,7 +100,23 @@ impl KeyStroke {
     /// Idempotent, and a no-op for a chord that already names `Super`, so
     /// `Ctrl+Super` survives as the genuine ⌃⌘ two-modifier chord.
     pub fn with_command_convention(self) -> Self {
-        Self::new(self.key, self.modifiers.with_command_convention())
+        self.with_command_convention_using(Modifiers::COMMAND)
+    }
+
+    /// The accelerator-parameterised core of
+    /// [`with_command_convention`](Self::with_command_convention) — pass
+    /// [`Modifiers::SUPER`] to ask how macOS reads the chord, [`Modifiers::CTRL`]
+    /// for Windows and Linux.
+    ///
+    /// Split out for the same reason as
+    /// [`Modifiers::with_command_convention_using`]: the convention's whole
+    /// purpose is behaviour that differs by platform, so both branches have to
+    /// stay reachable from one host's test run.
+    pub(crate) fn with_command_convention_using(self, command: Modifiers) -> Self {
+        Self::new(
+            self.key,
+            self.modifiers.with_command_convention_using(command),
+        )
     }
 }
 
@@ -347,7 +363,13 @@ impl Shortcut {
     /// declared `Ctrl+S` matches a pressed ⌘S — see
     /// [`declared_keystrokes`](Self::declared_keystrokes).
     pub fn matches_default(&self, keystroke: KeyStroke) -> bool {
-        let (primary, secondary) = self.declared_keystrokes();
+        self.matches_default_using(keystroke, Modifiers::COMMAND)
+    }
+
+    /// [`matches_default`](Self::matches_default) against an explicit
+    /// accelerator — see [`declared_keystrokes_using`](Self::declared_keystrokes_using).
+    pub(crate) fn matches_default_using(&self, keystroke: KeyStroke, command: Modifiers) -> bool {
+        let (primary, secondary) = self.declared_keystrokes_using(command);
         primary == Some(keystroke) || secondary == Some(keystroke)
     }
 
@@ -360,12 +382,29 @@ impl Shortcut {
     /// The registry layers user overrides on top of these; an override is
     /// never rewritten.
     pub fn declared_keystrokes(&self) -> (Option<KeyStroke>, Option<KeyStroke>) {
+        self.declared_keystrokes_using(Modifiers::COMMAND)
+    }
+
+    /// [`declared_keystrokes`](Self::declared_keystrokes) resolved against an
+    /// explicit accelerator: [`Modifiers::SUPER`] reads the declaration the way
+    /// macOS does, [`Modifiers::CTRL`] the way Windows and Linux do.
+    ///
+    /// The registry always calls the current platform's form. This twin exists
+    /// so both branches are testable from either host — notably the one a
+    /// Linux CI can never observe, that a declared `Ctrl` chord resolves *away*
+    /// from physical ⌃ on macOS and so must not fire on it.
+    pub(crate) fn declared_keystrokes_using(
+        &self,
+        command: Modifiers,
+    ) -> (Option<KeyStroke>, Option<KeyStroke>) {
         if self.literal_modifiers {
             (self.primary, self.secondary)
         } else {
             (
-                self.primary.map(KeyStroke::with_command_convention),
-                self.secondary.map(KeyStroke::with_command_convention),
+                self.primary
+                    .map(|k| k.with_command_convention_using(command)),
+                self.secondary
+                    .map(|k| k.with_command_convention_using(command)),
             )
         }
     }
@@ -1849,5 +1888,154 @@ mod tests {
             .primary(KeyStroke::ctrl(Key::Tab))
             .build();
         assert!(literal.matches_default(KeyStroke::new(Key::Tab, Modifiers::CTRL)));
+    }
+
+    // -----------------------------------------------------------------------
+    // Both branches of the primary-accelerator convention, from either host.
+    //
+    // Every test above reads the declaration through the *current* platform,
+    // so on a Linux CI they compare `Ctrl` against `Ctrl` and the macOS half
+    // of the convention is never observed. The `_using` twins take the
+    // accelerator explicitly — the same split `common::text_nav` uses for
+    // caret motion — so the branch that matters most is pinned everywhere:
+    // on macOS a declared `Ctrl` chord resolves *away* from physical ⌃, and
+    // so must not fire on it.
+    // -----------------------------------------------------------------------
+
+    /// The accelerator macOS carries application commands on.
+    const MAC: Modifiers = Modifiers::SUPER;
+    /// The accelerator Windows and Linux carry them on.
+    const PC: Modifiers = Modifiers::CTRL;
+
+    #[test]
+    fn the_mac_branch_moves_a_declared_ctrl_chord_off_physical_control() {
+        let save = Shortcut::new("app.save")
+            .primary(KeyStroke::ctrl(Key::S))
+            .build();
+        let physical_control = KeyStroke::new(Key::S, Modifiers::CTRL);
+
+        assert_eq!(
+            save.declared_keystrokes_using(MAC).0,
+            Some(KeyStroke::new(Key::S, Modifiers::SUPER)),
+            "a declared Ctrl chord is the platform accelerator: ⌘S on macOS"
+        );
+        assert!(
+            save.matches_default_using(KeyStroke::new(Key::S, Modifiers::SUPER), MAC),
+            "⌘S must fire the shortcut the app declared as Ctrl+S"
+        );
+        assert!(
+            !save.matches_default_using(physical_control, MAC),
+            "⌃S must NOT fire it — Control is the macOS text system's, and \
+             dispatch matches the resolved chord by equality"
+        );
+    }
+
+    #[test]
+    fn the_pc_branch_leaves_a_declared_ctrl_chord_on_physical_control() {
+        // The control case for the test above: off macOS the accelerator *is*
+        // Control, so the very chord that misses there is the one that hits.
+        let save = Shortcut::new("app.save")
+            .primary(KeyStroke::ctrl(Key::S))
+            .build();
+        let physical_control = KeyStroke::new(Key::S, Modifiers::CTRL);
+
+        assert_eq!(
+            save.declared_keystrokes_using(PC).0,
+            Some(physical_control),
+            "nothing is rewritten where Ctrl already is the accelerator"
+        );
+        assert!(save.matches_default_using(physical_control, PC));
+        assert!(
+            !save.matches_default_using(KeyStroke::new(Key::S, Modifiers::SUPER), PC),
+            "Super is a distinct modifier on Windows and Linux, not the accelerator"
+        );
+    }
+
+    #[test]
+    fn literal_modifiers_keeps_physical_control_reachable_on_the_mac_branch() {
+        // Ctrl+Tab cycles tabs on macOS too — ⌘⇥ is the application switcher
+        // and never reaches an app. The opt-out has to hold under the branch
+        // that would otherwise rewrite it, which is the one Linux can't see.
+        let next_tab = Shortcut::new("view.next_tab")
+            .literal_modifiers()
+            .primary(KeyStroke::ctrl(Key::Tab))
+            .build();
+
+        assert!(
+            next_tab.matches_default_using(KeyStroke::new(Key::Tab, Modifiers::CTRL), MAC),
+            "literal_modifiers must keep ⌃⇥ firing on macOS"
+        );
+        assert!(
+            !next_tab.matches_default_using(KeyStroke::new(Key::Tab, Modifiers::SUPER), MAC),
+            "and must not silently answer to ⌘⇥, which the OS takes first"
+        );
+    }
+
+    #[test]
+    fn an_explicit_super_or_ctrl_super_declaration_survives_the_mac_branch() {
+        let super_only = Shortcut::new("a")
+            .primary(KeyStroke::new(Key::S, Modifiers::SUPER))
+            .build();
+        assert_eq!(
+            super_only.declared_keystrokes_using(MAC).0,
+            Some(KeyStroke::new(Key::S, Modifiers::SUPER)),
+            "already the accelerator — the rewrite is idempotent, not additive"
+        );
+
+        let both = Shortcut::new("b")
+            .primary(KeyStroke::new(Key::B, Modifiers::CTRL | Modifiers::SUPER))
+            .build();
+        assert_eq!(
+            both.declared_keystrokes_using(MAC).0,
+            Some(KeyStroke::new(Key::B, Modifiers::CTRL | Modifiers::SUPER)),
+            "⌃⌘B is a genuine two-modifier chord, not a Ctrl awaiting rewrite"
+        );
+    }
+
+    #[test]
+    fn the_secondary_chord_follows_the_same_branch() {
+        let find = Shortcut::new("editor.find")
+            .primary(KeyStroke::ctrl(Key::F))
+            .secondary(KeyStroke::ctrl_shift(Key::F))
+            .build();
+        assert_eq!(
+            find.declared_keystrokes_using(MAC).1,
+            Some(KeyStroke::new(Key::F, Modifiers::SUPER | Modifiers::SHIFT)),
+            "the secondary slot is resolved too, not just the primary"
+        );
+        assert!(
+            !find.matches_default_using(
+                KeyStroke::new(Key::F, Modifiers::CTRL | Modifiers::SHIFT),
+                MAC
+            ),
+            "⌃⇧F must miss on macOS for the same reason ⌃F does"
+        );
+    }
+
+    #[test]
+    fn the_registry_dispatches_the_current_platform_accelerator_and_only_that() {
+        // The end-to-end half: `resolved_keystrokes` is the single place the
+        // convention enters the registry, and everything downstream compares
+        // against what it returns. Asserting through `find_by_keystroke` pins
+        // that composition — expectations differ by host precisely because the
+        // behaviour does.
+        let mut reg = ShortcutRegistry::new();
+        reg.register(
+            Shortcut::new("app.save")
+                .primary(KeyStroke::ctrl(Key::S))
+                .build(),
+        );
+
+        assert!(
+            reg.find_by_keystroke(KeyStroke::command(Key::S)).is_some(),
+            "the platform accelerator must fire a Ctrl-declared shortcut"
+        );
+        assert_eq!(
+            reg.find_by_keystroke(KeyStroke::new(Key::S, Modifiers::CTRL))
+                .is_some(),
+            !cfg!(target_os = "macos"),
+            "physical Control fires it only where Control is the accelerator; \
+             on macOS the chord is ⌘S and ⌃S belongs to the text system"
+        );
     }
 }

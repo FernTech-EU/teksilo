@@ -382,7 +382,13 @@ impl Modifiers {
     /// [`with_command_convention`](Self::with_command_convention). Split out so
     /// the macOS branch is exercised by tests running on any host — the whole
     /// point of the convention is behaviour a Linux CI cannot otherwise see.
-    fn with_command_convention_using(self, command: Modifiers) -> Modifiers {
+    ///
+    /// `pub(crate)` rather than private because the same split continues up the
+    /// stack: [`KeyStroke`](crate::shortcut::KeyStroke) and
+    /// [`Shortcut`](crate::shortcut::Shortcut) each carry a `_using` twin that
+    /// bottoms out here, so a shortcut's resolution can be asked "as macOS
+    /// would read it" from a Linux host without restating the rule.
+    pub(crate) fn with_command_convention_using(self, command: Modifiers) -> Modifiers {
         if self.ctrl() && !self.super_key() {
             self.without(Self::CTRL) | command
         } else {

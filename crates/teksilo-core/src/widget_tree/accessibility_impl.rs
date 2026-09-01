@@ -1868,17 +1868,32 @@ mod tests {
         let id = tree.add(ClickableWidget.access_shortcut_id("app.save"));
         tree.layout(SizeProposal::exact(50.0, 50.0));
 
+        // The chord is declared on the primary accelerator, so the announced
+        // name is the key the user is actually looking at: ⌘ on macOS, Ctrl
+        // everywhere else (see `Modifiers`' `Display`).
+        let accel = if cfg!(target_os = "macos") {
+            "Cmd"
+        } else {
+            "Ctrl"
+        };
+
         // Initial registration: AT announces the default keystroke.
         let update = tree.sync_accessibility();
         let node = find_node(&update, id).unwrap();
-        assert_eq!(node.keyboard_shortcut(), Some("Ctrl+S"));
+        assert_eq!(
+            node.keyboard_shortcut(),
+            Some(format!("{accel}+S").as_str())
+        );
 
         // Simulate a user rebind: the AT announcement should track it.
         tree.shortcut_registry_mut()
             .rebind_primary("app.save", Some(KeyStroke::command(Key::Q)));
         let update = tree.sync_accessibility();
         let node = find_node(&update, id).unwrap();
-        assert_eq!(node.keyboard_shortcut(), Some("Ctrl+Q"));
+        assert_eq!(
+            node.keyboard_shortcut(),
+            Some(format!("{accel}+Q").as_str())
+        );
     }
 
     // Test 7c — silently omits the announcement when the id has no
