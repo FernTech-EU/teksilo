@@ -169,6 +169,13 @@ pub struct PlotGeometry {
     pub y_ticks: Vec<f32>,
     pub y_lo: f32,
     pub y_hi: f32,
+    /// The vertical room the x-axis labels were actually **granted**, which is not always
+    /// the room they asked for: a tilted band is capped at
+    /// [`crate::style::MAX_X_LABEL_BAND_FRACTION`] of the chart's height so the plot can
+    /// never be starved to nothing. Paint reads it back to elide labels to the band that
+    /// exists rather than drawing them outside the widget. See
+    /// [`crate::axis::label_width_budget`].
+    pub x_label_band: f32,
 }
 
 /// Inputs for [`compute_plot_geometry`].
@@ -228,6 +235,7 @@ pub fn compute_plot_geometry(p: &PlotGeometryParams) -> PlotGeometry {
         })
     };
     let mut area = carve(label_height);
+    let mut x_label_band = label_height;
     if p.axis_x.show_labels && !p.x_labels.is_empty() {
         let widest = p
             .x_labels
@@ -241,9 +249,20 @@ pub fn compute_plot_geometry(p: &PlotGeometryParams) -> PlotGeometry {
             label_height,
             p.axis_x.label_angle,
         );
-        let band = crate::axis::label_band_height(layout, widest, label_height);
+        // **The labels give way before the plot does.** A tilted band grows with the
+        // widest label and is subtracted from a fixed height, so without this cap a long
+        // enough category name leaves `plot.height == 0`, and a chart with a zero-height
+        // plot paints nothing whatsoever, silently. `MAX_X_LABEL_BAND_FRACTION` carries
+        // the case that proved it.
+        //
+        // The cap is never below the upright height: an axis that fits its labels
+        // horizontally is not asking for room it might be denied, and clamping *that*
+        // would break every short-but-not-tall chart to fix a case it does not have.
+        let ceiling = (p.bounds.height * cs::MAX_X_LABEL_BAND_FRACTION).max(label_height);
+        let band = crate::axis::label_band_height(layout, widest, label_height).min(ceiling);
         if band > label_height {
             area = carve(band);
+            x_label_band = band;
         }
     }
 
@@ -263,6 +282,7 @@ pub fn compute_plot_geometry(p: &PlotGeometryParams) -> PlotGeometry {
         y_ticks,
         y_lo,
         y_hi,
+        x_label_band,
     }
 }
 
@@ -481,5 +501,113 @@ mod tests {
         p.y_label_max_width = 0.0;
         let area_without = carve_plot_area(&p);
         assert!(area_without.plot.width > area_with.plot.width);
+    }
+
+    // ── the label band never starves the plot ────────────────────────────────
+
+    fn geometry_params<'a>(
+        bounds: Rect,
+        style: &'a TextStyle,
+        labels: &'a [String],
+        axis: &'a AxisConfig,
+    ) -> PlotGeometryParams<'a> {
+        PlotGeometryParams {
+            bounds,
+            axis_x: axis,
+            axis_y: axis,
+            y_domain: (0.0, 1000.0),
+            legend_size: 0.0,
+            legend_position: None,
+            text_backend: None,
+            label_style: style,
+            x_labels: labels,
+        }
+    }
+
+    fn tiny() -> TextStyle {
+        TextStyle {
+            size: 11.0,
+            ..Default::default()
+        }
+    }
+
+    /// **The bug this whole cap exists for.**
+    ///
+    /// 37 chapters titled in whole sentences, on the 360-pixel chart Skribisto's Analysis
+    /// pane draws. Before the cap the tilted band came out larger than the chart itself,
+    /// the plot was carved down to *zero* height, and `BarChart::paint` returned before
+    /// drawing anything at all: no bars, no grid, no axis, no reference line. The pane
+    /// showed a blank rectangle under a caption still quoting the book's median scene.
+    #[test]
+    fn sentence_long_category_labels_never_starve_the_plot() {
+        let verne: Vec<String> = (0..37)
+            .map(|i| {
+                format!(
+                    "{i}. Dans lequel Phileas Fogg et Passepartout s\u{2019}acceptent \
+                     réciproquement, l\u{2019}un comme maître, l\u{2019}autre comme domestique"
+                )
+            })
+            .collect();
+        let style = tiny();
+        let axis = AxisConfig::new();
+        let bounds = Rect::new(0.0, 0.0, 1036.0, 360.0);
+        let g = compute_plot_geometry(&geometry_params(bounds, &style, &verne, &axis));
+
+        assert!(
+            g.plot.height > 0.0,
+            "a chart whose plot has no height paints nothing at all"
+        );
+        assert!(
+            g.plot.height >= bounds.height * 0.25,
+            "the labels give way before the plot does; got {} of {}",
+            g.plot.height,
+            bounds.height
+        );
+        assert!(
+            g.x_label_band <= bounds.height * cs::MAX_X_LABEL_BAND_FRACTION + 0.01,
+            "the band is capped: {}",
+            g.x_label_band
+        );
+    }
+
+    /// The same guarantee on the shorter of the two charts that pane draws, where there
+    /// is least height to give away.
+    #[test]
+    fn the_cap_holds_on_a_short_chart_too() {
+        let long: Vec<String> = (0..37)
+            .map(|i| format!("{i} {}", "verylongword ".repeat(8)))
+            .collect();
+        let style = tiny();
+        let axis = AxisConfig::new();
+        for height in [120.0_f32, 180.0, 260.0, 360.0] {
+            let bounds = Rect::new(0.0, 0.0, 1036.0, height);
+            let g = compute_plot_geometry(&geometry_params(bounds, &style, &long, &axis));
+            assert!(
+                g.plot.height > 0.0,
+                "a {height}px chart was starved to a {}px plot",
+                g.plot.height
+            );
+        }
+    }
+
+    /// An axis whose labels fit horizontally is untouched by the cap.
+    ///
+    /// The cap only ever applies to a band the labels *asked* to grow, so the ordinary
+    /// case (dates, chapter numbers, short names) resolves exactly as before, and the
+    /// reported band is the plain line height.
+    #[test]
+    fn a_short_axis_is_not_capped_and_keeps_its_upright_band() {
+        let short: Vec<String> = (1..=8).map(|i| format!("Ch {i}")).collect();
+        let style = tiny();
+        let axis = AxisConfig::new();
+        let bounds = Rect::new(0.0, 0.0, 600.0, 300.0);
+        let g = compute_plot_geometry(&geometry_params(bounds, &style, &short, &axis));
+
+        assert_eq!(
+            g.x_label_band,
+            style.size * 1.2,
+            "upright labels need exactly one line"
+        );
+        assert!(g.plot.height > 200.0, "and the plot keeps the rest");
     }
 }

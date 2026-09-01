@@ -26,6 +26,27 @@ pub const AXIS_TITLE_GAP: f32 = 8.0;
 /// Grid-line stroke width inside the plot area.
 pub const GRIDLINE_WIDTH: f32 = 1.0;
 
+/// The most of a chart's own height the x-axis labels may take.
+///
+/// A tilted label's band grows with the **widest** label (about `0.707 × its width` at
+/// the auto 45°), and that band is carved off the chart's height before there is a plot
+/// to draw in. With nothing bounding it, a long enough category name leaves a plot of
+/// zero height, and a chart with a zero-height plot paints *nothing*: no bars, no grid,
+/// no axis, no reference line. Not an error and not an empty state, but a blank rectangle
+/// where the reader was promised a chart.
+///
+/// That is not hypothetical. A book whose chapters are titled in whole sentences (Verne's
+/// "Dans lequel Phileas Fogg et Passepartout s'acceptent réciproquement, l'un comme
+/// maître, l'autre comme domestique") asks for a 430-pixel band on a 360-pixel chart, and
+/// the chart came out empty with no diagnostic anywhere.
+///
+/// So the labels give way before the plot does. Half is the split: it leaves any chart
+/// enough room that its bars are still comparable, and it is generous enough that no
+/// ordinary axis (dates, chapter numbers, short names) ever reaches it. Labels that no
+/// longer fit the granted band are elided rather than drawn outside the widget; see
+/// [`crate::axis::label_width_budget`].
+pub const MAX_X_LABEL_BAND_FRACTION: f32 = 0.5;
+
 /// Bar floor — minimum drawn width per bar so 1px-wide bars stay
 /// visible at large data sets.
 pub const BAR_MIN_WIDTH: f32 = 4.0;

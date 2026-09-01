@@ -384,6 +384,27 @@ pub fn label_band_height(layout: LabelLayout, max_label_width: f32, label_height
     }
 }
 
+/// The widest label that fits in `band` at this layout: [`label_band_height`] solved for
+/// its `max_label_width`.
+///
+/// The band a chart *asks* for is not always the band it *gets*: the plot keeps a floor
+/// under it ([`crate::style::MAX_X_LABEL_BAND_FRACTION`]), and a very long category name
+/// is capped there. Drawing at the label's own width regardless would paint the overflow
+/// outside the widget, over whatever sits beneath the chart. Sizing the text rect to this
+/// instead makes `Canvas::draw_text` end the label in an ellipsis, which says "there is
+/// more of this name" where running off the edge says nothing at all.
+///
+/// `f32::INFINITY` for an upright layout: an upright label's band does not depend on its
+/// width, so nothing about it is bounded here and a caller should use the label's own
+/// measured width.
+pub fn label_width_budget(layout: LabelLayout, band: f32, label_height: f32) -> f32 {
+    let sin = layout.angle.sin().abs();
+    if layout.angle.abs() < f32::EPSILON || sin <= f32::EPSILON {
+        return f32::INFINITY;
+    }
+    ((band - label_height * layout.angle.cos().abs()) / sin).max(0.0)
+}
+
 /// Draw one category label under the tick at `center_x`, `top` being the top edge of the
 /// label band. Shared by both charts so the tilted case exists once.
 ///
@@ -451,6 +472,41 @@ mod label_layout_tests {
         // 5 labels of 40px in 600px — 120px slots, no crowding.
         let l = resolve_label_layout(5, 600.0, 40.0, 12.0, None);
         assert_eq!(l, LabelLayout::upright());
+    }
+
+    /// [`label_width_budget`] is [`label_band_height`] read backwards: give it the band a
+    /// layout needs and it hands back the width that produced it.
+    #[test]
+    fn the_width_budget_inverts_the_band_height() {
+        let tilted = LabelLayout {
+            angle: 45.0_f32.to_radians(),
+            stride: 1,
+        };
+        let band = label_band_height(tilted, 300.0, 12.0);
+        let back = label_width_budget(tilted, band, 12.0);
+        assert!(
+            (back - 300.0).abs() < 0.01,
+            "round trip lost the width: {back}"
+        );
+    }
+
+    /// A capped band buys a narrower label, never a negative one. An upright layout has
+    /// no width the band constrains, so it is unbounded.
+    #[test]
+    fn a_capped_band_yields_a_smaller_positive_budget() {
+        let tilted = LabelLayout {
+            angle: 45.0_f32.to_radians(),
+            stride: 1,
+        };
+        let full = label_width_budget(tilted, label_band_height(tilted, 600.0, 12.0), 12.0);
+        let capped = label_width_budget(tilted, 130.0, 12.0);
+        assert!(capped > 0.0 && capped < full, "{capped} vs {full}");
+
+        // Even a band too small for the line height alone stays at zero, never negative:
+        // a negative text-rect width is a panic waiting in the canvas.
+        assert_eq!(label_width_budget(tilted, 1.0, 12.0), 0.0);
+
+        assert!(label_width_budget(LabelLayout::upright(), 130.0, 12.0).is_infinite());
     }
 
     /// The case from the bug report: 37 chapters in a 400px pane.

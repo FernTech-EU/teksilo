@@ -620,6 +620,7 @@ impl<T: Clone + std::fmt::Display + 'static> Widget for BarChart<T> {
             geometry.y_lo,
             geometry.y_hi,
             &label_style,
+            geometry.x_label_band,
         );
 
         // ─── Hover marker + tooltip ─────────────────────────────────────
@@ -998,6 +999,8 @@ impl<T: Clone + std::fmt::Display + 'static> BarChart<T> {
         y_lo: f32,
         y_hi: f32,
         label_style: &TextStyle,
+        // The room the carve granted the x labels; see `PlotGeometry::x_label_band`.
+        x_label_band: f32,
     ) {
         use crate::style as cs;
         let axis_color = BorderRole::Default.resolve(&theme.colors);
@@ -1058,11 +1061,16 @@ impl<T: Clone + std::fmt::Display + 'static> BarChart<T> {
                 label_style.size * 1.2,
                 self.axis_x.label_angle,
             );
+            // What the carve actually granted the labels, which is capped; see
+            // `PlotGeometry::x_label_band`. A label wider than fits in it is elided
+            // rather than painted off the bottom of the widget.
+            let budget =
+                crate::axis::label_width_budget(layout, x_label_band, label_style.size * 1.2);
             for (i, label) in x_labels.iter().enumerate() {
                 if i % layout.stride != 0 {
                     continue;
                 }
-                let w = measure_text_width(canvas, label, label_style);
+                let w = measure_text_width(canvas, label, label_style).min(budget);
                 let h = label_style.size * 1.2;
                 let center_x = plot.x + slot_w * (i as f32 + 0.5);
                 let top = plot.bottom() + cs::AXIS_TICK_LENGTH + cs::AXIS_LABEL_GAP;
@@ -1294,6 +1302,41 @@ mod tests {
         assert!(
             always > 0,
             "Always must hatch a single-series chart that pinned a hatched pattern"
+        );
+    }
+
+    /// **A chart with data always draws it, however long its category names are.**
+    ///
+    /// The end-to-end half of `layout::tests::sentence_long_category_labels_never_starve_
+    /// the_plot`. A tilted label band grows with the widest label and is carved off a
+    /// fixed height; unbounded, a book whose chapters are titled in whole sentences left
+    /// `plot.height == 0`, and `paint` returns before drawing on a zero-height plot. The
+    /// result was a chart with no bars, no grid, no axis and no diagnostic: 37 scenes of
+    /// measured prose rendering as a blank rectangle.
+    #[test]
+    fn sentence_long_categories_still_draw_their_bars() {
+        let points: Vec<ChartDatum<String>> = (0..37)
+            .map(|i| {
+                ChartDatum::new(
+                    format!(
+                        "{i}. Dans lequel Phileas Fogg et Passepartout s\u{2019}acceptent \
+                         réciproquement, l\u{2019}un comme maître, l\u{2019}autre comme domestique"
+                    ),
+                    1000.0 + i as f32 * 50.0,
+                )
+            })
+            .collect();
+        let model =
+            ChartModel::from_series_vec(vec![ChartSeries::new("Words per scene").data(points)]);
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        tree.add(BarChart::new(model).grid(true));
+        tree.layout(SizeProposal::exact(1036.0, 360.0));
+        let frame = tree.render();
+
+        assert!(
+            frame.decorations.len() >= 37,
+            "every measured scene must get a bar; drew {} decorations",
+            frame.decorations.len()
         );
     }
 

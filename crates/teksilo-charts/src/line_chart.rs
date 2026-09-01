@@ -624,6 +624,7 @@ impl<T: Clone + std::fmt::Display + 'static> Widget for LineChart<T> {
             geometry.y_lo,
             geometry.y_hi,
             &label_style,
+            geometry.x_label_band,
         );
 
         // ─── Hover marker + tooltip ─────────────────────────────────────
@@ -838,6 +839,8 @@ impl<T: Clone + std::fmt::Display + 'static> LineChart<T> {
         y_lo: f32,
         y_hi: f32,
         label_style: &TextStyle,
+        // The room the carve granted the x labels; see `PlotGeometry::x_label_band`.
+        x_label_band: f32,
     ) {
         use crate::style as cs;
         let axis_color = BorderRole::Default.resolve(&theme.colors);
@@ -899,11 +902,16 @@ impl<T: Clone + std::fmt::Display + 'static> LineChart<T> {
                 label_style.size * 1.2,
                 self.axis_x.label_angle,
             );
+            // What the carve actually granted the labels, which is capped; see
+            // `PlotGeometry::x_label_band`. A label wider than fits in it is elided
+            // rather than painted off the bottom of the widget.
+            let budget =
+                crate::axis::label_width_budget(layout, x_label_band, label_style.size * 1.2);
             for (i, label) in x_labels.iter().enumerate() {
                 if i % layout.stride != 0 {
                     continue;
                 }
-                let w = measure_text_width(canvas, label, label_style);
+                let w = measure_text_width(canvas, label, label_style).min(budget);
                 let h = label_style.size * 1.2;
                 let center_x = plot.x + slot_w * (i as f32 + 0.5);
                 let top = plot.bottom() + cs::AXIS_TICK_LENGTH + cs::AXIS_LABEL_GAP;
