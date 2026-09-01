@@ -120,6 +120,36 @@ struct ObserverEntry<T> {
     callback: Rc<dyn Fn(&T)>,
 }
 
+/// Register `callback` on a mutable root and hand back the RAII guard that
+/// unregisters it.
+///
+/// Shared by [`Signal::try_observe`] and by the `subscribe` hook a mutable
+/// root publishes on its [`DerivedSource`], so a derived signal's observer
+/// attaches by exactly the same mechanism as a direct one — there is no
+/// second registration path that could drift from this one.
+fn observe_inner<T: 'static>(
+    inner: &Rc<RefCell<MutableInner<T>>>,
+    callback: Rc<dyn Fn(&T)>,
+) -> ObserverHandle {
+    let id = {
+        let mut guard = inner.borrow_mut();
+        let id = guard.next_observer_id;
+        guard.next_observer_id += 1;
+        guard.observers.push(ObserverEntry { id, callback });
+        id
+    };
+    ObserverHandle {
+        _signal: inner.clone(),
+        observer_id: id,
+        remover: {
+            let inner = inner.clone();
+            Rc::new(move |observer_id| {
+                inner.borrow_mut().observers.retain(|e| e.id != observer_id);
+            })
+        },
+    }
+}
+
 struct MutableInner<T> {
     value: T,
     /// Monotonic change counter, advanced by every write (`try_set`, and
@@ -243,6 +273,11 @@ impl WeakAnimatedSignal {
 /// it is what lets [`Signal::generation`] fold a multi-source derived
 /// signal down to a single `u64` by summing, with no risk that one
 /// source's advance is cancelled by another's retreat.
+///
+/// Alongside the poll-based `generation`, a source may publish a
+/// **push**-based `subscribe`. Generation polling serves the frame loop,
+/// which asks every binding once a frame anyway; an observer has no frame
+/// loop behind it and has to be told. See [`Signal::try_observe`].
 #[derive(Clone)]
 struct DerivedSource {
     /// Current generation of this upstream. Compare against a remembered
@@ -251,7 +286,25 @@ struct DerivedSource {
     /// Stable identity of the upstream mutable root — used by
     /// [`BindingRegistry`] to dedup repeated `bind_to` calls.
     source_id: usize,
+    /// Register a nullary change callback on this upstream, returning the
+    /// guard that unregisters it.
+    ///
+    /// `None` where the set of roots is chosen *dynamically* and so cannot
+    /// be subscribed to once and for all — [`Signal::flat_map`], whose
+    /// inner signal is re-selected on every poll. A derived signal with any
+    /// such source stays unobservable, and [`Signal::try_observe`] says so
+    /// with [`SignalAccessError::ReadOnly`] rather than attaching an
+    /// observer that would go quiet the moment the inner switched.
+    subscribe: Option<SubscribeHook>,
 }
+
+/// A [`DerivedSource`]'s push-side registration: takes the callback to run
+/// on every change of the upstream, returns the guard that detaches it.
+///
+/// Type-erased over the upstream's own `T` — a derived signal recomputes
+/// its own value rather than reading the root's, so the notification only
+/// has to say *that* something moved.
+type SubscribeHook = Rc<dyn Fn(Rc<dyn Fn()>) -> ObserverHandle>;
 
 /// Fold an arbitrary — and possibly *changing* — set of upstream
 /// generations into ONE monotone counter, presented as a single
@@ -277,7 +330,10 @@ struct DerivedSource {
 /// last-seen. That is what makes one composite safe to share between N
 /// independently-reconciled `WidgetTree`s — the property the whole
 /// generation scheme exists to provide.
-fn coalesced_source(inputs: Rc<dyn Fn() -> Vec<u64>>) -> DerivedSource {
+fn coalesced_source(
+    inputs: Rc<dyn Fn() -> Vec<u64>>,
+    subscribe: Option<SubscribeHook>,
+) -> DerivedSource {
     // The token anchors a unique heap address used as `source_id`; the
     // closure below owns it, so the address stays valid — and therefore
     // unambiguous — for exactly as long as this source is reachable.
@@ -298,7 +354,26 @@ fn coalesced_source(inputs: Rc<dyn Fn() -> Vec<u64>>) -> DerivedSource {
             own.get()
         }),
         source_id,
+        subscribe,
     }
+}
+
+/// Build one [`SubscribeHook`] that fans a single callback out to every
+/// source in `sources`, or `None` if any of them is poll-only.
+///
+/// All-or-nothing on purpose: a partial subscription is the worst outcome
+/// available here — it would report *some* changes and silently miss the
+/// rest, which reads as a stale UI with no error anywhere to explain it.
+fn fan_out_subscribe(sources: &[DerivedSource]) -> Option<SubscribeHook> {
+    let hooks: Option<Vec<SubscribeHook>> = sources.iter().map(|s| s.subscribe.clone()).collect();
+    let hooks = hooks?;
+    Some(Rc::new(move |notify: Rc<dyn Fn()>| {
+        let handles: Vec<ObserverHandle> = hooks.iter().map(|hook| hook(notify.clone())).collect();
+        // The keeper owns every per-source guard, so dropping the composite
+        // handle detaches all of them; there is no observer of its own to
+        // remove, hence the no-op remover.
+        ObserverHandle::new(Rc::new(handles), 0, Rc::new(|_| {}))
+    }))
 }
 
 enum SignalKind<T> {
@@ -376,36 +451,46 @@ impl<T: 'static> Signal<T> {
 
     /// Register an observer callback. Returns an `ObserverHandle` — dropping
     /// the handle removes the callback.
+    ///
+    /// Works on a derived signal too; see [`try_observe`](Self::try_observe)
+    /// for the one shape that does not, and panics here.
     pub fn observe(&self, f: impl Fn(&T) + 'static) -> ObserverHandle {
         self.try_observe(f)
-            .expect("observe() is only supported on mutable signals")
+            .expect("observe() needs a signal with fixed mutable roots")
     }
 
+    /// Fallible [`observe`](Self::observe).
+    ///
+    /// A **derived** signal is observable as well as readable: it keeps the
+    /// mutable roots it was built from, so this registers on each of them and
+    /// recomputes on any change. That matters because `enabled(..)`,
+    /// `checked(..)` and every other `Prop` accept a derived signal
+    /// everywhere else — a consumer that pushes instead of polling (the
+    /// macOS native menu bridge is the one in the tree) would otherwise
+    /// reject exactly the bindings the rest of the framework invites.
+    ///
+    /// The callback is handed the derived signal's own recomputed value, not
+    /// the root's. It may fire more than once for a single logical change: a
+    /// derived signal over N roots has N registrations, and a caller writing
+    /// two of them notifies twice. Deltas applied by an observer should
+    /// therefore be idempotent — which is the same discipline
+    /// [`set`](Self::set) already imposes, since it fans out unconditionally.
+    ///
+    /// Returns [`SignalAccessError::ReadOnly`] only for a signal whose roots
+    /// are re-chosen as it is read — [`flat_map`](Self::flat_map) — where
+    /// there is nothing stable to attach to.
     pub fn try_observe(
         &self,
         f: impl Fn(&T) + 'static,
     ) -> Result<ObserverHandle, SignalAccessError> {
         match &self.kind {
-            SignalKind::Mutable { inner, .. } => {
-                let mut guard = inner.borrow_mut();
-                let id = guard.next_observer_id;
-                guard.next_observer_id += 1;
-                guard.observers.push(ObserverEntry {
-                    id,
-                    callback: Rc::new(f),
-                });
-                Ok(ObserverHandle {
-                    _signal: inner.clone(),
-                    observer_id: id,
-                    remover: {
-                        let inner = inner.clone();
-                        Rc::new(move |observer_id| {
-                            inner.borrow_mut().observers.retain(|e| e.id != observer_id);
-                        })
-                    },
-                })
+            SignalKind::Mutable { inner, .. } => Ok(observe_inner(inner, Rc::new(f))),
+            SignalKind::Derived { compute, sources } => {
+                let subscribe = fan_out_subscribe(sources).ok_or(SignalAccessError::ReadOnly)?;
+                let compute = compute.clone();
+                let f = Rc::new(f);
+                Ok(subscribe(Rc::new(move || f(&compute()))))
             }
-            SignalKind::Derived { .. } => Err(SignalAccessError::ReadOnly),
         }
     }
 
@@ -628,9 +713,14 @@ impl<T: Clone + 'static> Signal<T> {
             // to plain map to avoid an extra indirection.
             return self.map(f);
         }
-        let coalesced = coalesced_source(Rc::new(move || {
-            underlying.iter().map(|s| (s.generation)()).collect()
-        }));
+        // The coalesced source stands in for a *fixed* set of roots, so it
+        // can still be subscribed to — one registration per root, behind the
+        // one hook. (`flat_map` below is the case that cannot.)
+        let subscribe = fan_out_subscribe(&underlying);
+        let coalesced = coalesced_source(
+            Rc::new(move || underlying.iter().map(|s| (s.generation)()).collect()),
+            subscribe,
+        );
         Signal {
             kind: SignalKind::Derived {
                 compute: Rc::new(move || f(&compute())),
@@ -683,20 +773,26 @@ impl<T: Clone + 'static> Signal<T> {
         // from a 1-source inner to a 2-source one is a change even if
         // the numbers happen to line up. `coalesced_source` turns the
         // whole vector back into a monotone counter.
-        let composite = coalesced_source({
-            let f = f.clone();
-            let outer_compute = outer_compute.clone();
-            Rc::new(move || {
-                let mut gens: Vec<u64> = outer_sources.iter().map(|s| (s.generation)()).collect();
-                gens.extend(
-                    f(&outer_compute())
-                        .as_sources()
-                        .iter()
-                        .map(|s| (s.generation)()),
-                );
-                gens
-            })
-        });
+        let composite = coalesced_source(
+            {
+                let f = f.clone();
+                let outer_compute = outer_compute.clone();
+                Rc::new(move || {
+                    let mut gens: Vec<u64> =
+                        outer_sources.iter().map(|s| (s.generation)()).collect();
+                    gens.extend(
+                        f(&outer_compute())
+                            .as_sources()
+                            .iter()
+                            .map(|s| (s.generation)()),
+                    );
+                    gens
+                })
+            },
+            // Poll-only: `f` re-selects the inner signal on every poll, so
+            // there is no stable set of roots to attach an observer to.
+            None,
+        );
 
         Signal {
             kind: SignalKind::Derived {
@@ -748,6 +844,7 @@ impl<T: Clone + 'static> Signal<T> {
         match &self.kind {
             SignalKind::Mutable { inner, .. } => {
                 let gen_src = inner.clone();
+                let sub_src = inner.clone();
                 let source_id = Rc::as_ptr(inner) as *const () as usize;
                 vec![DerivedSource {
                     // The closure owns an `Rc` clone of the inner, so the
@@ -755,6 +852,13 @@ impl<T: Clone + 'static> Signal<T> {
                     // different signal while this source is reachable.
                     generation: Rc::new(move || gen_src.borrow().generation),
                     source_id,
+                    // A mutable root can be pushed from, so it publishes the
+                    // hook. The callback discards the root's value: whoever
+                    // registered it is downstream of a `map`/`zip` and wants
+                    // its own recomputed value, not this one.
+                    subscribe: Some(Rc::new(move |notify: Rc<dyn Fn()>| {
+                        observe_inner(&sub_src, Rc::new(move |_: &T| notify()))
+                    })),
                 }]
             }
             SignalKind::Derived { sources, .. } => sources.clone(),
@@ -1874,6 +1978,95 @@ mod tests {
         let b = s.observe(|_| {});
         *b_slot.borrow_mut() = Some(b);
         s.set(1);
+    }
+
+    /// The bug this exists to stop: `MenuEntry::enabled(..)` takes any
+    /// `Prop<bool>`, so a caller reasonably passes `unsaved.and(&mode.not())`
+    /// — and the macOS native-menu bridge, which pushes rather than polls,
+    /// used to abort the process on it.
+    #[test]
+    fn observing_a_derived_signal_reports_every_root() {
+        use std::cell::RefCell;
+
+        let unsaved = Signal::new(false);
+        let backup_mode = Signal::new(false);
+        let can_save = unsaved.and(&backup_mode.not());
+
+        let seen: Rc<RefCell<Vec<bool>>> = Rc::new(RefCell::new(Vec::new()));
+        let sink = seen.clone();
+        let _h = can_save.observe(move |v| sink.borrow_mut().push(*v));
+
+        unsaved.set(true);
+        assert_eq!(*seen.borrow(), vec![true], "the first root pushes through");
+
+        backup_mode.set(true);
+        assert_eq!(
+            *seen.borrow(),
+            vec![true, false],
+            "so does the second — a derived signal observes ALL its roots, \
+             not just the one it was built from first"
+        );
+    }
+
+    #[test]
+    fn dropping_a_derived_observer_detaches_from_every_root() {
+        use std::cell::RefCell;
+
+        let a = Signal::new(0_i32);
+        let b = Signal::new(0_i32);
+        let sum = a.zip(&b).map(|(x, y)| *x + *y);
+
+        let count: Rc<RefCell<usize>> = Rc::new(RefCell::new(0));
+        let sink = count.clone();
+        let h = sum.observe(move |_| *sink.borrow_mut() += 1);
+
+        a.set(1);
+        b.set(1);
+        assert_eq!(*count.borrow(), 2);
+        assert_eq!(a.observer_count(), 1);
+        assert_eq!(b.observer_count(), 1);
+
+        drop(h);
+        assert_eq!(a.observer_count(), 0, "no root keeps a stale observer");
+        assert_eq!(b.observer_count(), 0);
+
+        a.set(2);
+        b.set(2);
+        assert_eq!(*count.borrow(), 2, "and none of them still fires");
+    }
+
+    /// `flat_map` re-selects its inner signal as it is read, so there is no
+    /// fixed root to attach to. It reports that rather than attaching an
+    /// observer that would go quiet the moment the inner switched.
+    #[test]
+    fn observing_a_flat_mapped_signal_is_refused() {
+        let which = Signal::new(0_usize);
+        let inners = [Signal::new(1_i32), Signal::new(2_i32)];
+        let picked = which.flat_map(move |i| inners[*i].clone());
+
+        assert!(matches!(
+            picked.try_observe(|_| {}),
+            Err(SignalAccessError::ReadOnly)
+        ));
+    }
+
+    /// `map_coalesced` folds a *fixed* set of roots into one source, so
+    /// unlike `flat_map` it stays observable.
+    #[test]
+    fn observing_a_coalesced_signal_still_works() {
+        use std::cell::RefCell;
+
+        let x = Signal::new(0_i32);
+        let y = Signal::new(0_i32);
+        let both = x.zip(&y).map_coalesced(|(a, b)| *a + *b);
+
+        let seen: Rc<RefCell<Vec<i32>>> = Rc::new(RefCell::new(Vec::new()));
+        let sink = seen.clone();
+        let _h = both.observe(move |v| sink.borrow_mut().push(*v));
+
+        x.set(3);
+        y.set(4);
+        assert_eq!(*seen.borrow(), vec![3, 7]);
     }
 
     #[test]

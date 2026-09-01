@@ -16,7 +16,7 @@ use teksilo_core::ObserverHandle;
 use teksilo_core::build_context::BuildContext;
 use teksilo_core::event::{Key, Modifiers};
 use teksilo_core::shortcut::KeyStroke;
-use teksilo_core::signal::Prop;
+use teksilo_core::signal::{Prop, Signal};
 use teksilo_data::CheckState;
 use teksilo_i18n::LocalizedString;
 use teksilo_platform::native_menu::{
@@ -128,7 +128,7 @@ pub(crate) fn install(model: &MenuModel, ctx: &BuildContext) -> Option<NativeMen
             let sig = item.title.to_signal();
             let h = handle.clone();
             let id = item.id;
-            observers.push(sig.observe(move |v| {
+            push_observer(&mut observers, &sig, move |v| {
                 h.update_item(
                     id,
                     MenuItemDelta {
@@ -136,12 +136,12 @@ pub(crate) fn install(model: &MenuModel, ctx: &BuildContext) -> Option<NativeMen
                         ..Default::default()
                     },
                 );
-            }));
+            });
         }
         if let Prop::Bound(sig) = item.enabled {
             let h = handle.clone();
             let id = item.id;
-            observers.push(sig.observe(move |v| {
+            push_observer(&mut observers, &sig, move |v| {
                 h.update_item(
                     id,
                     MenuItemDelta {
@@ -149,7 +149,7 @@ pub(crate) fn install(model: &MenuModel, ctx: &BuildContext) -> Option<NativeMen
                         ..Default::default()
                     },
                 );
-            }));
+            });
         }
         match item.state {
             MenuItemState::Plain => {}
@@ -158,7 +158,7 @@ pub(crate) fn install(model: &MenuModel, ctx: &BuildContext) -> Option<NativeMen
             MenuItemState::Check(sig) | MenuItemState::ReflectCheck(sig) => {
                 let h = handle.clone();
                 let id = item.id;
-                observers.push(sig.observe(move |v| {
+                push_observer(&mut observers, &sig, move |v| {
                     h.update_item(
                         id,
                         check_delta(if *v {
@@ -167,26 +167,26 @@ pub(crate) fn install(model: &MenuModel, ctx: &BuildContext) -> Option<NativeMen
                             NativeCheck::Off
                         }),
                     );
-                }));
+                });
             }
             MenuItemState::TriCheck(sig) => {
                 let h = handle.clone();
                 let id = item.id;
-                observers.push(sig.observe(move |v| {
+                push_observer(&mut observers, &sig, move |v| {
                     h.update_item(id, check_delta(tri_to_native(*v)));
-                }));
+                });
             }
             MenuItemState::Radio { value, selected } => {
                 let h = handle.clone();
                 let id = item.id;
-                observers.push(selected.observe(move |sel| {
+                push_observer(&mut observers, &selected, move |sel| {
                     let check = if *sel == value {
                         NativeCheck::On
                     } else {
                         NativeCheck::Off
                     };
                     h.update_item(id, check_delta(check));
-                }));
+                });
             }
         }
     }
@@ -194,6 +194,30 @@ pub(crate) fn install(model: &MenuModel, ctx: &BuildContext) -> Option<NativeMen
     Some(NativeMenuBinding {
         _observers: observers,
     })
+}
+
+/// Attach one live-update observer, or leave the row at the value already
+/// baked into the native snapshot.
+///
+/// Fallible on purpose. This bridge runs inside `applicationDidFinishLaunching`
+/// on macOS, an Objective-C frame a Rust panic cannot unwind through: a panic
+/// here does not surface as an error, it aborts the process before the first
+/// window is drawn. `Signal::try_observe` covers every signal with fixed
+/// mutable roots — a plain one, and anything derived from them with `map` /
+/// `zip` / `and` / `not`, which is what a caller building
+/// `enabled(unsaved.and(&backup_mode.not()))` gets. The remaining shape is
+/// `flat_map`, whose roots are re-chosen as it is read; for that the row keeps
+/// the state it was resolved with and simply does not follow later changes,
+/// in the global bar only. The in-window menu binds it directly and stays live
+/// either way.
+fn push_observer<T: 'static>(
+    observers: &mut Vec<ObserverHandle>,
+    signal: &Signal<T>,
+    f: impl Fn(&T) + 'static,
+) {
+    if let Ok(handle) = signal.try_observe(f) {
+        observers.push(handle);
+    }
 }
 
 /// One item's reactive sources, gathered during resolution.

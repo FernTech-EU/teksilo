@@ -117,6 +117,13 @@ can_save.set(true);     // greys in/out live, in-window AND native
 signal-driven and update without a rebuild (the native path observes the signal
 and calls `update_item`; the in-window path binds it directly).
 
+A **derived** signal works here too — `enabled(unsaved.and(&backup_mode.not()))`
+is a normal binding, not a special case: `Signal::observe` registers on the
+mutable roots a derived signal was built from. The one shape it cannot follow is
+`flat_map`, whose inner signal is re-selected as it is read; such a row keeps the
+state it was installed with in the *global* bar and does not follow later
+changes. The in-window menu binds it directly and stays live either way.
+
 ## Dynamic structure (add / remove items at runtime)
 
 `MenuModel` is a cloneable handle with `&self` mutators. Each bumps `version`;
