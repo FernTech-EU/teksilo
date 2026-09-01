@@ -5,7 +5,9 @@
 """Analyze inter-crate dependencies across the Teksilo workspace.
 
 Scans every crate's ``Cargo.toml``, extracts dependencies on *other*
-``teksilo-*`` crates (split into normal/build vs dev), then:
+internal workspace crates — every ``teksilo-*`` crate plus the bare
+``teksilo`` umbrella crate itself — (split into normal/build vs dev),
+then:
 
   * flags **release-blocking cycles** — cycles in the normal + build
     dependency graph that make a clean ``cargo publish`` impossible.
@@ -14,14 +16,17 @@ Scans every crate's ``Cargo.toml``, extracts dependencies on *other*
     cannot be released in any order.
   * reports **dev-dependency back-edges** separately — a dev-dependency
     that points "backwards" (at a crate that already depends on this one
-    through normal deps). cargo *allows* these: dev-deps are stripped
-    from the package a downstream crate consumes, so they never
-    participate in the publish-time resolution. They're listed for
-    awareness, not as blockers.
+    through normal deps). A downstream consumer never sees these (dev-deps
+    are stripped from the package it resolves), but the dependency's *own*
+    ``cargo publish`` still runs a verification build by default, which
+    does compile dev-dependencies — so a back-edge here is only escapable
+    with ``--no-verify`` on one side, not a free pass.
   * prints a valid **release order** (topological sort, dependencies
-    first), grouped into "waves" — every crate in a wave has all of its
-    dependencies satisfied by earlier waves, so a wave can be published
-    in any order / in parallel.
+    first, normal/build *and* dev edges both counted as ordering
+    constraints — matching what a default, verified ``cargo publish``
+    actually needs resolvable), grouped into "waves" — every crate in a
+    wave has all of its dependencies satisfied by earlier waves, so a
+    wave can be published in any order / in parallel.
 
 Pure standard library; no ``tomllib`` needed (works on Python 3.9). The
 TOML reading is intentionally minimal — it understands the dependency
@@ -62,8 +67,6 @@ import os
 import re
 import sys
 from dataclasses import dataclass, field
-
-INTERNAL_PREFIX = "teksilo-"
 
 # A dependency line's left-hand side: `name`, `name.workspace`, `name.path`, ...
 # We only need the bare crate name (everything before the first '.' or '=').
@@ -243,8 +246,14 @@ def parse_cargo_toml(text: str, workspace_publish: bool) -> tuple[str | None, bo
             key = km.group(1).split(".")[0]
             rename = _PACKAGE_RENAME_RE.search(line)
             dep_name = rename.group(1) if rename else key
-            if dep_name.startswith(INTERNAL_PREFIX):
-                (normal if current == "normal" else dev).add(dep_name)
+            # Collect every dependency name here, external crates (serde,
+            # tokio, ...) included — `main()` is the sole authority on what
+            # counts as "internal", filtering against the actual discovered
+            # workspace crate names (`name_set`). A prefix guess here
+            # (`teksilo-*`) used to also gate this step and silently
+            # dropped the bare `teksilo` umbrella crate, which has no
+            # trailing hyphen — a real dependency on it went untracked.
+            (normal if current == "normal" else dev).add(dep_name)
 
     return name, publish, normal, dev
 
@@ -457,8 +466,14 @@ def main() -> int:
             if a in reachable(b, normal_edges, name_set):
                 dev_back_edges.append((a, b))
 
-    # --- Release order over the publishable normal graph ---
-    waves, leftover = release_waves(names, normal_edges)
+    # --- Release order over normal + dev edges ---
+    # A default, verified `cargo publish` compiles a crate's dev-deps too,
+    # so they are real ordering constraints even though they never gate a
+    # *downstream consumer's* publish (only the release-blocking-cycle
+    # check above stays normal-only, since only a normal-dep cycle is
+    # unbreakable in every case).
+    order_edges = {n: normal_edges[n] | dev_edges.get(n, set()) for n in names}
+    waves, leftover = release_waves(names, order_edges)
     flat = [n for wave in waves for n in wave]
     publishable_order = [n for n in flat if crates[n].publish]
 
@@ -475,8 +490,8 @@ def main() -> int:
 
     if args.list:
         if leftover:
-            print("error: cannot order crates — release-blocking cycle "
-                  f"involving: {', '.join(leftover)}", file=sys.stderr)
+            print("error: cannot order crates — a normal or dev dependency "
+                  f"cycle involves: {', '.join(leftover)}", file=sys.stderr)
             return 1
         for n in publishable_order:
             print(n)
@@ -506,7 +521,7 @@ def main() -> int:
             "unordered_due_to_cycle": leftover,
         }
         print(json.dumps(payload, indent=2))
-        return 1 if blocking_cycles else 0
+        return 1 if (blocking_cycles or leftover) else 0
 
     # --- Human-readable report ---
     print(f"Teksilo dependency report  ({len(names)} internal crates under {root})")
@@ -541,11 +556,14 @@ def main() -> int:
         print("No release-blocking cycles in the normal/build dependency graph. OK")
 
     if dev_back_edges:
-        print("\nDev-dependency back-edges (allowed by cargo, informational):")
+        print("\nDev-dependency back-edges:")
         for a, b in dev_back_edges:
             print(f"  i   {a}  --dev-->  {b}   ({b} already depends on {a} via normal deps)")
-        print("  These are fine: dev-deps are not part of the published")
-        print("  dependency graph, so they never block `cargo publish`.")
+        print("  A downstream consumer never sees these (dev-deps are stripped")
+        print("  from the package it resolves), but the crate's own default,")
+        print("  verified `cargo publish` still compiles its dev-deps — so this")
+        print("  pair has no valid order without `--no-verify` on one side.")
+        print("  See NOT ORDERED below if that leaves them unorderable.")
 
     print("\n" + "-" * 72)
     print("Release order (publish dependencies first; crates in a wave are")
@@ -557,7 +575,7 @@ def main() -> int:
                 tag = "" if crates[n].publish else "  [publish=false]"
                 print(f"      {n}{tag}")
     if leftover:
-        print("\n  NOT ORDERED (caught in a cycle):")
+        print("\n  NOT ORDERED (caught in a normal or dev dependency cycle):")
         for n in leftover:
             print(f"      {n}")
 
@@ -578,7 +596,7 @@ def main() -> int:
         print("  " + (" ".join(publishable_order) or "-"))
         print("  (`--list` prints just these, one per line)")
 
-    return 1 if blocking_cycles else 0
+    return 1 if (blocking_cycles or leftover) else 0
 
 
 if __name__ == "__main__":
