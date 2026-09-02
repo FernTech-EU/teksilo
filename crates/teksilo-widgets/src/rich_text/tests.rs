@@ -10116,3 +10116,51 @@ fn reveal_widget_refuses_from_a_dormant_editor_and_before_the_first_build() {
         "and it must come back when the tab does"
     );
 }
+
+/// **A handler the editor stores must not own the editor.**
+///
+/// `on_image_activated` and its siblings are kept on the editor's own state, so a
+/// handler that captured an `EditorHandle` by value made the state own itself:
+/// an `Rc` ring with no owner outside it, which no teardown can break. The widget
+/// could be destroyed, its tree dropped and its window closed, and the editor —
+/// with its document, its cursor and its shaped layout — stayed resident for the
+/// life of the process. An application that mounts one editor per scene therefore
+/// leaked a whole manuscript every time a project was opened and closed, and the
+/// only visible symptom was the process growing.
+///
+/// [`WeakEditorHandle`](super::WeakEditorHandle) is what such a handler captures
+/// instead. This pins the property that makes it work: with the weak handle held
+/// by a handler the editor owns, dropping the editor still frees it.
+#[test]
+fn a_stored_handler_holding_a_weak_handle_does_not_keep_the_editor_alive() {
+    let doc = TextDocument::new();
+    let editor = RichTextEditor::editor(doc);
+    let weak = editor.handle().downgrade();
+    let ran = Rc::new(Cell::new(0));
+    let editor = editor.on_image_activated({
+        let weak = weak.clone();
+        let ran = ran.clone();
+        move |activation, _ctx| {
+            let Some(handle) = weak.upgrade() else {
+                return;
+            };
+            handle.select_range(activation.offset, activation.offset + 1);
+            ran.set(ran.get() + 1);
+        }
+    });
+
+    assert!(
+        weak.upgrade().is_some(),
+        "the handle resolves while the editor is alive"
+    );
+    drop(editor);
+    assert!(
+        weak.upgrade().is_none(),
+        "the editor's own handler must not be the thing that keeps it alive"
+    );
+    assert_eq!(
+        ran.get(),
+        0,
+        "the handler never ran; only the ring is tested"
+    );
+}

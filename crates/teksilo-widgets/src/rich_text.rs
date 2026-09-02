@@ -2123,6 +2123,55 @@ impl std::fmt::Debug for EditorHandle {
     }
 }
 
+/// An [`EditorHandle`] that does not keep its editor alive.
+///
+/// **For a callback the editor itself stores.** `on_image_activated`,
+/// `on_image_resized`, `on_link_activated`, `on_files_dropped`, `on_change`,
+/// `on_text_inserted` and the image resolver are all kept on the editor's own
+/// state, so a handler that captures an [`EditorHandle`] by value makes the state
+/// own itself. Nothing can break that ring afterwards: the widget can be
+/// destroyed, its tree dropped and its window closed, and the editor — with its
+/// document, its cursor and its shaped layout — stays resident for the life of
+/// the process. It is a leak with no owner left to blame, and it is easy to write,
+/// because reaching for `editor.handle()` is the obvious way for such a handler to
+/// act on the editor it belongs to.
+///
+/// Capture this instead and [`upgrade`](Self::upgrade) inside the handler. The
+/// handler runs only while the editor is alive, which is the only time it could
+/// have done anything anyway.
+///
+/// ```ignore
+/// let editor = RichTextEditor::editor(doc);
+/// let weak = editor.handle().downgrade();
+/// let editor = editor.on_image_activated(move |activation, _ctx| {
+///     let Some(handle) = weak.upgrade() else { return };
+///     handle.select_range(activation.offset, activation.offset + 1);
+/// });
+/// ```
+///
+/// A factory the *builder* stores rather than the state —
+/// [`context_menu`](RichTextEditor::context_menu) is the one today — may hold a
+/// strong handle safely, because it dies with the widget.
+#[derive(Clone)]
+pub struct WeakEditorHandle {
+    state: std::rc::Weak<std::cell::RefCell<EditorState>>,
+}
+
+impl WeakEditorHandle {
+    /// The handle, if its editor is still alive.
+    pub fn upgrade(&self) -> Option<EditorHandle> {
+        self.state.upgrade().map(|state| EditorHandle { state })
+    }
+}
+
+impl std::fmt::Debug for WeakEditorHandle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("WeakEditorHandle")
+            .field("alive", &self.state.strong_count().min(1))
+            .finish()
+    }
+}
+
 /// An inline image the user clicked.
 ///
 /// Carries the offset as well as the name because a document may hold the same
@@ -2209,6 +2258,16 @@ pub struct ImageResize {
 }
 
 impl EditorHandle {
+    /// A handle that does not keep this editor alive.
+    ///
+    /// Capture this, not `self`, in any handler the editor stores — see
+    /// [`WeakEditorHandle`] for which those are and what a strong capture costs.
+    pub fn downgrade(&self) -> WeakEditorHandle {
+        WeakEditorHandle {
+            state: Rc::downgrade(&self.state),
+        }
+    }
+
     // --- Search / find-banner support (B3, handle mirror) ------------------
     //
     // These mirror the same-named [`RichTextEditor`] methods (which operate on
