@@ -13,6 +13,35 @@ by crate for clarity, not because crates version independently.
 
 ## [Unreleased]
 
+### Changed — a failed `assert_node` is a failure, on every transport
+
+`AutomationOp::AssertNode` returned a false assertion as
+`Ok(AssertionResult { passed: false })`. A caller that forgot to unwrap the
+payload and check `.passed` got a green result for a failed assertion, which is
+the worst possible default for a testing tool.
+
+The MCP server carried a bolt-on that re-read its own JSON payload to set
+`is_error`; the socket bridge and every direct `execute` caller had nothing at
+all. The decision now happens in the toolkit, so every transport inherits it:
+`AutomationReply::Err { code: "ASSERTION_FAILED", message }`, which rmcp already
+maps to `CallToolResult::error`, so `isError` falls out with no special case and
+the bolt-on is deleted rather than patched.
+
+`Ok(CallToolResult::error(..))` rather than `Err(ErrorData)` is deliberate and
+is what rmcp's own documentation prescribes (`rmcp-2.2.0/src/model.rs:3006-3026`):
+the caller sees the message, where an `ErrorData` is rendered opaquely.
+
+**"Assertion false" and "node does not exist" stop looking identical.** A
+property assertion against a node that is not in the tree is `NOT_FOUND` — a bad
+node reference, not a property mismatch — while a real node whose property did
+not match is `ASSERTION_FAILED`, with the actual and expected values in the
+message. `kind: "exists"` against a missing node is the one case that stays
+`ASSERTION_FAILED`: asking whether something exists and being told it does not
+is an answer, not a lookup error.
+
+Callers that matched on `Ok` and read `.passed` need updating. A passing
+assertion is unchanged.
+
 ### Fixed — no Teksilo collection ever announced "of N", and ListView announced nothing at all
 
 AccessKit puts `size_of_set` on the **container**, unlike ARIA's per-item

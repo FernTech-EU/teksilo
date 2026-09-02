@@ -271,6 +271,22 @@ pub struct AssertionResult {
     pub detail: Option<String>,
 }
 
+impl AssertionResult {
+    pub fn passed() -> Self {
+        Self {
+            passed: true,
+            detail: None,
+        }
+    }
+
+    pub fn failed(detail: impl Into<String>) -> Self {
+        Self {
+            passed: false,
+            detail: Some(detail.into()),
+        }
+    }
+}
+
 /// A predicate `wait_for_condition` polls until satisfied or it times out.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -601,4 +617,9 @@ pub mod codes {
     pub const GPU_UNAVAILABLE: &str = "GPU_UNAVAILABLE";
     /// `execute` cannot produce pixels / window lists — the host must.
     pub const HOST_REQUIRED: &str = "HOST_REQUIRED";
+    /// An `assert_node` assertion evaluated to false against a node that does
+    /// exist. Deliberately distinct from [`NOT_FOUND`]: "the button is not
+    /// focused" and "there is no such button" are different bugs, and a caller
+    /// that cannot tell them apart chases the wrong one.
+    pub const ASSERTION_FAILED: &str = "ASSERTION_FAILED";
 }

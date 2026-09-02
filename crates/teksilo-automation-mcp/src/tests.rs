@@ -169,6 +169,11 @@ async fn server_handler_snapshot_find_invoke_round_trip() {
 async fn assert_node_failure_is_tool_error() {
     // Regression: a failed assertion must surface as an MCP tool error
     // (is_error = true), not a success with a {passed:false} body.
+    //
+    // This is now decided in the toolkit rather than here, so the socket
+    // bridge and every direct `execute` caller inherit it too — the MCP server
+    // used to re-read its own JSON payload to set the flag, and was the only
+    // transport that did.
     let tx = setup();
     let server = AutomationServer::new(tx);
     let found = server
@@ -199,12 +204,23 @@ async fn assert_node_failure_is_tool_error() {
         "failed assertion must be a tool error: {}",
         text_of(&fail)
     );
-    // The result is also machine-readable via structured_content.
+    // Machine-readable via structured_content, and now says *which* kind of
+    // failure it was: ASSERTION_FAILED is a real node whose property did not
+    // match, NOT_FOUND is a node reference that names nothing. Those are
+    // different bugs.
     let sc = fail
         .structured_content
         .as_ref()
         .expect("structured_content present");
-    assert_eq!(sc["passed"], serde_json::json!(false));
+    assert_eq!(
+        sc["code"],
+        serde_json::json!(teksilo_automation::dto::codes::ASSERTION_FAILED)
+    );
+    let message = sc["message"].as_str().expect("a message");
+    assert!(
+        message.contains("Button") && message.contains("Slider"),
+        "the message must carry actual and expected: {message}"
+    );
 
     let pass = server
         .assert_node(Parameters(AssertParams {

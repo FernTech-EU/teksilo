@@ -122,6 +122,17 @@ carries the usual label fragility) rather than reuse a possibly-stale id.
 **Query** — `snapshot_tree`, `read_node`, `find_node`, `assert_node`,
 `list_windows`
 
+A failed `assert_node` is a **tool error** (`isError = true`) carrying
+`code: "ASSERTION_FAILED"` and a message with the actual and expected values.
+A node reference that names nothing comes back as `code: "NOT_FOUND"` instead,
+because "the button is not focused" and "there is no such button" are different
+bugs and a probe that cannot tell them apart chases the wrong one. The one
+exception is `kind: "exists"`, where a missing node is a genuine answer and so
+reports `ASSERTION_FAILED`.
+
+The decision is made in the toolkit, not in this server, so the socket bridge
+and any direct `execute` caller behave identically.
+
 **Layout / geometry** — `layout_tree`, `inspect_node`
 
 **Drive (AT actions)** — `invoke_action`, `focus_node`, `set_value`,

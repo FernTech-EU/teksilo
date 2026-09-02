@@ -78,7 +78,23 @@ pub fn execute(
         }
         AutomationOp::AssertNode { node, assertion } => {
             let update = tree.sync_accessibility();
-            AutomationReply::ok_json(&evaluate_assertion(&update, *node, assertion))
+            // A false assertion is a *failure*, not a successful report of one.
+            //
+            // It used to come back as `Ok(AssertionResult { passed: false })`,
+            // which every transport and every caller had to remember to unwrap
+            // and check — and a caller that forgot got a green result for a
+            // failed assertion, which is the worst possible default for a
+            // testing tool. The MCP server carried a bolt-on that re-read its
+            // own JSON payload to set `is_error`; the socket bridge and every
+            // direct `execute` caller had nothing.
+            //
+            // Deciding it here means every transport inherits it: rmcp already
+            // maps `AutomationReply::Err` to `CallToolResult::error`, so
+            // `isError` falls out with no special case.
+            match evaluate_assertion(&update, *node, assertion) {
+                Ok(result) => AutomationReply::ok_json(&result),
+                Err(reply) => reply,
+            }
         }
         AutomationOp::ListWindows => AutomationReply::err(
             codes::HOST_REQUIRED,
@@ -841,18 +857,38 @@ fn snapshot_json(update: &accesskit::TreeUpdate, max_depth: Option<usize>) -> se
     })
 }
 
+/// Evaluate an assertion, distinguishing three outcomes rather than two.
+///
+/// `Ok` is a passing assertion. `Err` is either a genuinely false assertion
+/// (`ASSERTION_FAILED`) or a node reference that names nothing
+/// (`NOT_FOUND`) — and telling those apart is the point. "The button is not
+/// focused" and "there is no such button" are different bugs, and a caller that
+/// sees one message for both chases the wrong one.
+///
+/// `Assertion::Exists` against a missing node is `ASSERTION_FAILED`, not
+/// `NOT_FOUND`: asking whether something exists and being told it does not is
+/// an answer, not a lookup error.
 fn evaluate_assertion(
     update: &accesskit::TreeUpdate,
     node: NodeRef,
     assertion: &Assertion,
-) -> AssertionResult {
+) -> Result<AssertionResult, AutomationReply> {
     let found = update.nodes.iter().find(|(id, _)| id.0 == node);
     let pass = |passed: bool, detail: Option<String>| AssertionResult { passed, detail };
     let Some((id, n)) = found else {
-        // Only `Exists` can pass on a missing node (as `false`).
-        return pass(false, Some(format!("node {node} not present")));
+        return Err(if matches!(assertion, Assertion::Exists) {
+            AutomationReply::err(
+                codes::ASSERTION_FAILED,
+                format!("assertion 'exists' failed: node {node} is not in the tree"),
+            )
+        } else {
+            AutomationReply::err(
+                codes::NOT_FOUND,
+                format!("node {node} is not in the tree, so nothing could be asserted about it"),
+            )
+        });
     };
-    match assertion {
+    let result = match assertion {
         Assertion::Exists => pass(true, None),
         Assertion::Focused => {
             let ok = id.0 == update.focus.0;
@@ -934,6 +970,21 @@ fn evaluate_assertion(
                 (!ok).then(|| format!("disabled is {actual}, expected {value}")),
             )
         }
+    };
+    if result.passed {
+        Ok(result)
+    } else {
+        // The detail is the whole value of the failure — "label is None,
+        // expected 'Save'" is what tells the caller what to fix. It goes in the
+        // message rather than being dropped, and the code says this was a real
+        // node whose property did not match.
+        Err(AutomationReply::err(
+            codes::ASSERTION_FAILED,
+            match result.detail {
+                Some(detail) => format!("assertion failed on node {node}: {detail}"),
+                None => format!("assertion failed on node {node}"),
+            },
+        ))
     }
 }
 

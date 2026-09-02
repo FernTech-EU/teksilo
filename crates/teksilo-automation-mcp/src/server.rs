@@ -373,23 +373,20 @@ impl AutomationServer {
         Parameters(p): Parameters<AssertParams>,
     ) -> Result<CallToolResult, McpError> {
         let assertion = build_assertion(&p)?;
-        let mut result = self
-            .run(
-                p.window_id,
-                AutomationOp::AssertNode {
-                    node: p.node,
-                    assertion,
-                },
-                SettleSpec::default(),
-            )
-            .await?;
-        // A failed assertion (`{"passed": false}`) is a tool error: the toolkit
-        // returns it as an Ok payload, but MCP clients rely on `is_error` to
-        // detect failure, so surface it here.
-        if result.is_error != Some(true) && assertion_failed(&result) {
-            result.is_error = Some(true);
-        }
-        Ok(result)
+        // No special case: the toolkit returns a false assertion as
+        // `AutomationReply::Err { code: ASSERTION_FAILED, .. }`, and `to_result`
+        // maps every `Err` to `CallToolResult::error`. This used to re-read its
+        // own JSON payload here to set `is_error`, which meant the socket
+        // bridge and every direct `execute` caller had no such protection.
+        self.run(
+            p.window_id,
+            AutomationOp::AssertNode {
+                node: p.node,
+                assertion,
+            },
+            SettleSpec::default(),
+        )
+        .await
     }
 
     #[tool(description = "List the app's managed windows with ids, labels, and titles.")]
@@ -778,7 +775,7 @@ or the shortcuts `set_value` / `type_text` / `focus_node` / `expand` / \
 3. Verify. Re-`snapshot_tree`, `read_node {node}`, or `assert_node {node, kind, \
 value?/flag?}` where kind is role_equals, label_equals, label_contains, \
 value_equals, toggled, expanded, selected, disabled, exists, or focused. A \
-FAILED assert_node comes back as a tool error (isError=true).
+A failed assert_node comes back as a tool error (isError=true) with code ASSERTION_FAILED, and a node reference that names nothing comes back as NOT_FOUND — those are different bugs and the code tells you which.
 
 Error results carry a stable `code` (in the text body and in structured_content) \
 — branch on it, not just on isError: NOT_FOUND / BAD_ARGUMENT / UNKNOWN_NAME are \
@@ -849,16 +846,6 @@ pub fn to_result(reply: HostReply) -> CallToolResult {
             CallToolResult::success(content)
         }
     }
-}
-
-/// Whether an `assert_node` result's text payload says `"passed": false`.
-fn assertion_failed(result: &CallToolResult) -> bool {
-    result.content.iter().any(|c| {
-        c.as_text()
-            .and_then(|t| serde_json::from_str::<serde_json::Value>(&t.text).ok())
-            .and_then(|v| v.get("passed").and_then(|p| p.as_bool()))
-            .is_some_and(|passed| !passed)
-    })
 }
 
 fn build_assertion(p: &AssertParams) -> Result<Assertion, McpError> {

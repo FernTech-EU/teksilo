@@ -599,12 +599,46 @@ fn assert_node_role_pass_and_fail() {
         },
         &default_settle(),
     );
-    let AutomationReply::Ok { data } = fail else {
-        panic!();
+    // A false assertion is a failure, not a successful report of one. The
+    // detail survives into the message, because "role is 'Button', expected
+    // 'Slider'" is the whole value of the failure.
+    let AutomationReply::Err { code, message } = fail else {
+        panic!("a false assertion must be an Err, got {fail:?}");
     };
-    let res: AssertionResult = serde_json::from_value(data).unwrap();
-    assert!(!res.passed);
-    assert!(res.detail.is_some());
+    assert_eq!(code, codes::ASSERTION_FAILED);
+    assert!(
+        message.contains("Button") && message.contains("Slider"),
+        "the message must carry actual and expected: {message}"
+    );
+}
+
+/// The distinction the error code exists for. "The button is not focused" and
+/// "there is no such button" are different bugs, and a caller that sees one
+/// message for both chases the wrong one.
+#[test]
+fn a_missing_node_is_not_found_rather_than_a_failed_assertion() {
+    let (mut tree, _id) = laid_out(Probe::new(accesskit::Role::Button, "B"));
+    let mut ops = RecordingWindowOps::new();
+    let reply = execute(
+        &mut tree,
+        &mut ops,
+        &AutomationOp::AssertNode {
+            node: 12345,
+            assertion: Assertion::RoleEquals {
+                value: "Button".into(),
+            },
+        },
+        &default_settle(),
+    );
+    let AutomationReply::Err { code, .. } = reply else {
+        panic!("{reply:?}");
+    };
+    assert_eq!(
+        code,
+        codes::NOT_FOUND,
+        "asserting a property of a node that does not exist is a bad node \
+         reference, not a property mismatch"
+    );
 }
 
 #[test]
@@ -620,11 +654,12 @@ fn assert_exists_on_missing_node_fails_gracefully() {
         },
         &default_settle(),
     );
-    let AutomationReply::Ok { data } = reply else {
+    // Asking whether something exists and being told it does not is an answer,
+    // so this is a failed assertion rather than a bad node reference.
+    let AutomationReply::Err { code, .. } = reply else {
         panic!("{reply:?}");
     };
-    let res: AssertionResult = serde_json::from_value(data).unwrap();
-    assert!(!res.passed);
+    assert_eq!(code, codes::ASSERTION_FAILED);
 }
 
 #[test]
@@ -905,15 +940,14 @@ fn assert_toggled_false_fails_on_mixed() {
             },
             &default_settle(),
         );
-        let AutomationReply::Ok { data } = reply else {
-            panic!("{reply:?}");
+        let AutomationReply::Err { code, message } = reply else {
+            panic!("Mixed must not satisfy Toggled {{ value: {value} }}: {reply:?}");
         };
-        let res: AssertionResult = serde_json::from_value(data).unwrap();
+        assert_eq!(code, codes::ASSERTION_FAILED);
         assert!(
-            !res.passed,
-            "Mixed must not satisfy Toggled {{ value: {value} }}"
+            message.contains("mixed"),
+            "the message must name the tristate state: {message}"
         );
-        assert!(res.detail.unwrap().contains("mixed"));
     }
 }
 
