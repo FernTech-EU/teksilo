@@ -218,6 +218,9 @@ fn translate_named_key(key: winit::keyboard::NamedKey) -> Option<Key> {
         // tracks the active state itself on the key-down edge (drives
         // `WindowState::caps_lock` for the password-field warning).
         NamedKey::CapsLock => Some(Key::CapsLock),
+        // Windows `VK_APPS`, X11/Wayland `keysyms::Menu`. macOS produces this
+        // zero times, which is why the dispatcher also reserves a chord.
+        NamedKey::ContextMenu => Some(Key::ContextMenu),
         _ => None,
     }
 }

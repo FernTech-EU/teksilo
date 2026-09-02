@@ -13,6 +13,50 @@ by crate for clarity, not because crates version independently.
 
 ## [Unreleased]
 
+### Added — a context menu can be opened from the keyboard
+
+There was no keyboard route to a context menu at all. `Key` had no
+`ContextMenu` variant, nothing listened for Shift+F10, and the assistive-
+technology route is dead too: `Action::ShowContextMenu` appears in **zero** of
+`accesskit_windows-0.35.0`, `accesskit_macos-0.27.0` and
+`accesskit_atspi_common-0.20.0`. A menu reachable only by right-click is a menu
+a keyboard user does not have.
+
+Three chords are now reserved at the dispatcher, so every widget with a
+`.context_menu(..)` gets one without opting in:
+
+- **The dedicated Menu key** (`Key::ContextMenu`, new): `VK_APPS` on Windows,
+  `keysyms::Menu` on X11 and Wayland. macOS never produces it —
+  `winit-0.30.13`'s AppKit backend references the variant zero times.
+- **Shift+F10**, the convention Windows, GTK and Qt all honour, and the only
+  route on a PC keyboard with no Menu key.
+- **Ctrl+Shift+M on macOS**, where neither of the above exists: Mac keyboards
+  have no Menu key, and F10 is a media key under the default function-key
+  setting, so Shift+F10 may never arrive as F10 at all.
+
+Modifiers are matched exactly, so Ctrl+Shift+F10 still belongs to the
+application, and the chords sit *below* shortcut resolution, so an application
+that deliberately binds Shift+F10 keeps it. When nothing on the ancestor chain
+owns a factory the key falls through to normal dispatch untouched.
+
+**Data views nominate the row, not themselves.** A `ListView`, `TreeView`,
+`TableView`, `TreeTableView` or `GridView` is focusable as a whole and its rows
+deliberately are not — the container owns focus and `set_selected` is what tells
+assistive technology which row is current. So "open the focused widget's menu"
+would have opened the *list's* menu, in exactly the widget family where a
+per-row menu matters most. A new `Widget::context_menu_key_target` (default
+`None`) lets a widget nominate a descendant instead; all five views implement it
+against their keyboard cursor, falling back to the first selected row. The menu
+is anchored at the target's own bounds, because a keyboard user has no pointer
+position and the stale one would put the menu somewhere unrelated.
+
+**Semver.** `Key` is public and not `#[non_exhaustive]`, so a new variant breaks
+an exhaustive match. More importantly it derives `Serialize`/`Deserialize` and
+is persisted in shortcut settings: a settings file written by this build that
+contains `ContextMenu` **fails to load on an older build**. That is a real
+hazard for anyone who downgrades, and there is no forward-compatible encoding
+available without changing the settings format.
+
 ### Fixed — every position, index and level Teksilo published was one too high
 
 `AccessNodeBuilder` forwarded ARIA-shaped ordinals straight into AccessKit

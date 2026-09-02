@@ -403,6 +403,21 @@ impl WidgetTree {
             }
         }
 
+        // A keyboard route to the context menu, reserved at the dispatcher so
+        // every widget with a `.context_menu(..)` gets one without opting in.
+        //
+        // It has to be here rather than in a widget, and it cannot be a
+        // `Shortcut`: shortcut resolution runs above this point, so a global
+        // binding would fire while the user was typing in a modal. Sitting
+        // below it means an application that deliberately binds Shift+F10 to
+        // something else still wins.
+        if let WidgetEvent::KeyDown { key, modifiers, .. } = &event
+            && is_context_menu_chord(*key, *modifiers)
+            && self.open_context_menu_from_keyboard(&mut *ops)
+        {
+            return;
+        }
+
         match &event {
             WidgetEvent::PointerMove { position } => {
                 if let Some(captured) = self.pointer_captured_by {
@@ -599,6 +614,40 @@ impl WidgetTree {
         // before commands are flushed, so commands emitted from
         // action handlers land on the same tick.
         self.drain_pending_intents(&mut *ops);
+    }
+
+    /// Open the context menu the keyboard just asked for, and report whether
+    /// one appeared.
+    ///
+    /// Targets the focused widget, or whatever its
+    /// [`context_menu_key_target`](crate::widget::Widget::context_menu_key_target)
+    /// nominates instead — for a data view, the selected row. Anchors the menu
+    /// at the target's own bounds rather than at the last pointer position,
+    /// which may be anywhere on screen or nowhere at all.
+    ///
+    /// Returns `false` when nothing on the ancestor chain owns a factory, so
+    /// the key falls through to normal dispatch and a widget that wants to
+    /// handle it itself still can.
+    fn open_context_menu_from_keyboard(&mut self, ops: &mut dyn crate::window::WindowOps) -> bool {
+        let Some(focused) = self.focused else {
+            return false;
+        };
+        let target = self
+            .arena
+            .get(focused)
+            .and_then(|node| node.widget.context_menu_key_target())
+            .filter(|id| self.arena.is_active(*id))
+            .unwrap_or(focused);
+
+        // The menu belongs where the thing it is about is. A keyboard user has
+        // no pointer position, and the stale one is worse than useless: it
+        // would put the menu over an unrelated part of the window.
+        let bounds = self.bounds(target);
+        let anchor = Point {
+            x: bounds.x + bounds.width / 2.0,
+            y: bounds.y + bounds.height / 2.0,
+        };
+        self.show_context_menu_for(target, anchor, ops)
     }
 
     fn show_context_menu_for(
@@ -2126,6 +2175,33 @@ impl WidgetTree {
         // Delegates to WidgetArena::hit_test_at, which honors
         // event_pass_through and clips_children correctly.
         self.arena.hit_test_at(point, exclude_widget)
+    }
+}
+
+/// Whether this keystroke is one of the chords that ask for a context menu.
+///
+/// Three routes, because no single one exists on every platform:
+///
+/// * **The dedicated key.** `VK_APPS` on Windows, `keysyms::Menu` on X11 and
+///   Wayland. `winit-0.30.13`'s AppKit backend references
+///   `NamedKey::ContextMenu` zero times, so macOS never produces it.
+/// * **Shift+F10.** The convention Windows, GTK and Qt all honour, and the one
+///   thing a Windows or Linux keyboard without a Menu key can still reach.
+/// * **Ctrl+Shift+M on macOS.** Neither of the above is available there: Mac
+///   keyboards have no Menu key, and F10 is a media key under the default
+///   "Use F1, F2 etc. as standard function keys = off" setting, so Shift+F10
+///   may never arrive as F10 at all. Kept off the other platforms, where
+///   Ctrl+Shift+M is a plausible application binding.
+///
+/// Modifiers are matched exactly. Shift+F10 with Ctrl held is a different
+/// gesture and must reach the application unchanged.
+fn is_context_menu_chord(key: Key, modifiers: Modifiers) -> bool {
+    match key {
+        Key::ContextMenu => modifiers == Modifiers::NONE,
+        Key::F10 => modifiers == Modifiers::SHIFT,
+        #[cfg(target_os = "macos")]
+        Key::M => modifiers == Modifiers::CTRL | Modifiers::SHIFT,
+        _ => false,
     }
 }
 
@@ -4265,6 +4341,193 @@ mod tests {
         ) -> crate::widget::LayoutResponse {
             teksilo_canvas::Size::new(100.0, 40.0).into()
         }
+    }
+
+    // The keyboard route to a context menu.
+    //
+    // Until this existed there was none at all: no `Key::ContextMenu`, no
+    // Shift+F10, and `Action::ShowContextMenu` appears in zero of the three
+    // AccessKit adapters, so the assistive-technology route is dead on every
+    // platform too. A menu reachable only by right-click is a menu a keyboard
+    // user does not have.
+
+    /// A widget that hands the keyboard a different target than itself, the way
+    /// every data view does: the container has focus, the row is what the menu
+    /// is about.
+    #[derive(Debug)]
+    struct NominatingWidget {
+        row: std::cell::Cell<Option<WidgetId>>,
+    }
+
+    impl crate::widget::Widget for NominatingWidget {
+        fn layout_response(
+            &self,
+            proposal: SizeProposal,
+            _ctx: &LayoutContext,
+        ) -> crate::widget::LayoutResponse {
+            proposal.resolve(50.0, 20.0).into()
+        }
+
+        fn build(&mut self, ctx: &mut crate::build_context::BuildContext) -> Vec<WidgetId> {
+            ctx.apply_self_handlers(crate::widget_builder::HandlerSet::new().focusable(true));
+            Vec::new()
+        }
+
+        fn context_menu_key_target(&self) -> Option<WidgetId> {
+            self.row.get()
+        }
+    }
+
+    fn press(tree: &mut WidgetTree, key: Key, modifiers: Modifiers) {
+        tree.dispatch_event(WidgetEvent::KeyDown {
+            key,
+            modifiers,
+            text: None,
+        });
+    }
+
+    #[test]
+    fn the_context_menu_key_opens_the_focused_widget_menu() {
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        let opened = Rc::new(Cell::new(false));
+        let flag = opened.clone();
+        let mut tree = WidgetTree::new();
+        let widget = tree.add(
+            FillWidget::new()
+                .focusable()
+                .context_menu(move |_pos, _ctx| {
+                    flag.set(true);
+                    Some(Box::new(StubMenu) as Box<dyn crate::widget::Widget>)
+                }),
+        );
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+        tree.focus(widget);
+
+        press(&mut tree, Key::ContextMenu, Modifiers::NONE);
+        assert!(opened.get(), "the dedicated Menu key must open the menu");
+    }
+
+    /// The chord every Windows and Linux keyboard can reach, including the many
+    /// that have no dedicated Menu key at all.
+    #[test]
+    fn shift_f10_opens_the_focused_widget_menu() {
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        let opened = Rc::new(Cell::new(false));
+        let flag = opened.clone();
+        let mut tree = WidgetTree::new();
+        let widget = tree.add(
+            FillWidget::new()
+                .focusable()
+                .context_menu(move |_pos, _ctx| {
+                    flag.set(true);
+                    Some(Box::new(StubMenu) as Box<dyn crate::widget::Widget>)
+                }),
+        );
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+        tree.focus(widget);
+
+        press(&mut tree, Key::F10, Modifiers::SHIFT);
+        assert!(opened.get(), "Shift+F10 must open the menu");
+    }
+
+    /// Modifiers are matched exactly. Ctrl+Shift+F10 is a different gesture and
+    /// belongs to the application.
+    #[test]
+    fn a_near_miss_chord_is_not_a_context_menu_request() {
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        let opened = Rc::new(Cell::new(false));
+        let flag = opened.clone();
+        let mut tree = WidgetTree::new();
+        let widget = tree.add(
+            FillWidget::new()
+                .focusable()
+                .context_menu(move |_pos, _ctx| {
+                    flag.set(true);
+                    Some(Box::new(StubMenu) as Box<dyn crate::widget::Widget>)
+                }),
+        );
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+        tree.focus(widget);
+
+        press(&mut tree, Key::F10, Modifiers::SHIFT | Modifiers::CTRL);
+        press(&mut tree, Key::F10, Modifiers::NONE);
+        assert!(!opened.get(), "only Shift+F10 exactly asks for a menu");
+    }
+
+    /// The correction the design needed. A data view is focusable and its rows
+    /// are not, so "the focused widget" is the list, and the menu a user asked
+    /// for on row 4 would have been the list's own.
+    #[test]
+    fn the_keyboard_target_can_be_a_row_rather_than_the_focused_container() {
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        let menu_owner = Rc::new(Cell::new(None::<&'static str>));
+
+        let row_flag = menu_owner.clone();
+        let container_flag = menu_owner.clone();
+
+        let mut tree = WidgetTree::new();
+        let row = tree.add(FillWidget::new().context_menu(move |_pos, _ctx| {
+            row_flag.set(Some("row"));
+            Some(Box::new(StubMenu) as Box<dyn crate::widget::Widget>)
+        }));
+        let container = tree.add(
+            crate::test_widgets::StackWidget::new()
+                .add_child(row)
+                .context_menu(move |_pos, _ctx| {
+                    container_flag.set(Some("container"));
+                    Some(Box::new(StubMenu) as Box<dyn crate::widget::Widget>)
+                }),
+        );
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        // The container is focused, and nominates the row.
+        let nominator = tree.add(NominatingWidget {
+            row: std::cell::Cell::new(Some(row)),
+        });
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+        tree.focus(nominator);
+        let _ = container;
+
+        press(&mut tree, Key::ContextMenu, Modifiers::NONE);
+        assert_eq!(
+            menu_owner.get(),
+            Some("row"),
+            "the nominated row's factory must be the one that runs"
+        );
+    }
+
+    /// Nothing on the chain owns a factory, so the framework must not swallow
+    /// the key: a widget that wants to handle Shift+F10 itself still can.
+    #[test]
+    fn the_chord_falls_through_when_there_is_no_menu_to_show() {
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        let saw_key = Rc::new(Cell::new(false));
+        let flag = saw_key.clone();
+        let mut tree = WidgetTree::new();
+        let widget = tree.add(FillWidget::new().focusable().on_key(move |ev, _ctx| {
+            if matches!(ev, WidgetEvent::KeyDown { key: Key::F10, .. }) {
+                flag.set(true);
+            }
+            crate::event::EventResponse::Ignored
+        }));
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+        tree.focus(widget);
+
+        press(&mut tree, Key::F10, Modifiers::SHIFT);
+        assert!(
+            saw_key.get(),
+            "with no factory anywhere, the key must reach the widget"
+        );
     }
 
     #[test]

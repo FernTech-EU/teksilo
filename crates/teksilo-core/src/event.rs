@@ -215,6 +215,16 @@ pub enum Key {
     /// need the *active* lock state track it themselves on the
     /// key-down edge. See `WindowState::caps_lock`.
     CapsLock,
+    /// The dedicated context-menu key: `VK_APPS` on Windows (the key between
+    /// the right Alt and the right Ctrl on most PC layouts), `keysyms::Menu` on
+    /// X11 and Wayland.
+    ///
+    /// **macOS never produces it.** Its keyboards have no such key and
+    /// `winit-0.30.13`'s AppKit backend references the variant zero times, so
+    /// on that platform the only keyboard route to a context menu is a chord.
+    /// See the dispatcher's context-menu handling for the chords Teksilo
+    /// reserves.
+    ContextMenu,
     Character(char),
 }
 
@@ -466,6 +476,7 @@ impl std::fmt::Display for Key {
             Key::F23 => f.write_str("F23"),
             Key::F24 => f.write_str("F24"),
             Key::CapsLock => f.write_str("CapsLock"),
+            Key::ContextMenu => f.write_str("Menu"),
             Key::Character(c) => write!(f, "{}", c.to_uppercase()),
         }
     }

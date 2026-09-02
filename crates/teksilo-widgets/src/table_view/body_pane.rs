@@ -150,6 +150,10 @@ pub(crate) struct BodyPane<T: 'static> {
 
     // Build state
     pub(crate) row_entries: Vec<(usize, WidgetId)>,
+    /// The realized `(row index -> row wrapper id)` map, shared with the owning
+    /// view so its `&self` methods can resolve a row index to a widget without
+    /// reaching into this pane.
+    pub(crate) row_map: Rc<RefCell<Vec<(usize, WidgetId)>>>,
     /// `(row, display_pos) -> WidgetId` for every realized cell, shared
     /// with the `TableView` root (the GridView `tile_map` pattern).
     /// Overwritten wholesale at the end of every `build()`; the root's
@@ -694,6 +698,9 @@ impl<T: 'static> Widget for BodyPane<T> {
         ctx.end_view_focus();
 
         *self.cell_map.borrow_mut() = cell_entries;
+
+        // Publish the realized (index -> row wrapper id) map for the view.
+        *self.row_map.borrow_mut() = self.row_entries.clone();
 
         self.row_entries.iter().map(|(_, id)| *id).collect()
     }

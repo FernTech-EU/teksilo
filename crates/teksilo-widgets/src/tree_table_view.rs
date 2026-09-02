@@ -227,6 +227,10 @@ pub struct TreeTableView<T: 'static> {
     column_pinning_signal: Signal<HashMap<String, PinnedSide>>,
     filters_signal: Signal<HashMap<String, String>>,
     focused_cell: Signal<Option<(usize, usize)>>,
+    /// The realized `(row index -> row wrapper id)` map, filled by the body
+    /// pane each build. Lets this widget's `&self` methods resolve a row index
+    /// to a widget without reaching into the pane. Mirrors `ListView::row_map`.
+    row_map: Rc<RefCell<Vec<(usize, WidgetId)>>>,
     editing_cell: Signal<Option<(usize, usize)>>,
     /// Type-ahead ("type to jump") label extractor — opt-in via
     /// [`type_ahead_label`](Self::type_ahead_label).
@@ -474,6 +478,7 @@ impl<T: 'static> TreeTableView<T> {
             column_pinning_signal: Signal::new(HashMap::new()),
             filters_signal: Signal::new(HashMap::new()),
             focused_cell: Signal::new(None),
+            row_map: Rc::new(RefCell::new(Vec::new())),
             type_ahead_label: None,
             type_ahead_timeout: crate::common::type_ahead::DEFAULT_TYPE_AHEAD_TIMEOUT,
             type_ahead: crate::common::type_ahead::TypeAheadState::new(),
@@ -2181,6 +2186,7 @@ impl<T: 'static> Widget for TreeTableView<T> {
                 prev_built_end: self.pane_built_end.clone(),
                 total_refresh: self.pane_total_refresh.clone(),
                 row_entries: Vec::new(),
+                row_map: self.row_map.clone(),
                 cell_map: self.cell_map.clone(),
             };
             self.body_pane_id = Some(ctx.add(pane));
@@ -2749,6 +2755,29 @@ impl<T: 'static> Widget for TreeTableView<T> {
                 BorderRole::Focused.resolve(colors),
             );
         }
+    }
+
+    /// The context-menu key opens the *current row's* menu, not the view's.
+    ///
+    /// A `TreeTableView` is focusable and its rows deliberately are not — the
+    /// container owns focus and `set_selected` is what tells assistive
+    /// technology which row is current. So the dispatcher's default of "the
+    /// focused widget" would open the view's own menu, in the widget family
+    /// where a per-row menu matters most.
+    ///
+    /// The row the user means is the focused cell's row if they have navigated,
+    /// else the first selected row. Only realized rows have a widget, so a
+    /// cursor scrolled outside the virtualization window resolves to nothing
+    /// and the menu falls back to the view — right, because there is no row on
+    /// screen for it to be about.
+    fn context_menu_key_target(&self) -> Option<WidgetId> {
+        let index = self.focused_cell.get().map(|(row, _col)| row).or_else(|| {
+            self.row_selection
+                .as_ref()
+                .and_then(|s| s.selected_indices().first().copied())
+        })?;
+        let map = self.row_map.borrow();
+        map.iter().find(|(i, _)| *i == index).map(|(_, id)| *id)
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {

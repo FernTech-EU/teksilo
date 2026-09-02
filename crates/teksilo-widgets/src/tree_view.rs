@@ -167,6 +167,10 @@ pub struct TreeView<T: 'static> {
     /// `crate::data_views::RowAnchor` and `reconcile_editing_row`, which
     /// plays the same role for `TableView`'s `editing_cell`.
     focused_anchor: Rc<RefCell<Option<crate::data_views::RowAnchor>>>,
+    /// The realized `(flat index -> row wrapper id)` map, filled by the body
+    /// pane each build. Lets this widget's `&self` methods resolve a row index
+    /// to a widget without reaching into the pane. Mirrors `ListView::row_map`.
+    row_map: Rc<RefCell<Vec<(usize, WidgetId)>>>,
 
     /// Type-ahead ("type to jump") label extractor — opt-in via
     /// [`type_ahead_label`](Self::type_ahead_label).

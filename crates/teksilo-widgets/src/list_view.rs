@@ -1612,6 +1612,32 @@ impl<T: 'static> Widget for ListView<T> {
         }
     }
 
+    /// The context-menu key opens the *current row's* menu, not the list's.
+    ///
+    /// A `ListView` is focusable and its rows deliberately are not — the
+    /// container owns focus and `set_selected` is what tells assistive
+    /// technology which row is current (see `list_item_a11y`). So the
+    /// dispatcher's default of "the focused widget" would open the list's own
+    /// menu, in the widget family where a per-row menu matters most.
+    ///
+    /// The row the user means is the keyboard cursor if they have navigated
+    /// (`focused_index`), else the first selected row. Both are indices into
+    /// the model, and only realized rows have a widget, so a cursor scrolled
+    /// outside the virtualization window resolves to nothing and the menu falls
+    /// back to the list — which is the right answer, since there is no row on
+    /// screen for it to be about.
+    fn context_menu_key_target(&self) -> Option<WidgetId> {
+        let index = self.focused_index.get().or_else(|| {
+            self.row_selection
+                .as_ref()
+                .and_then(|s| s.selected_indices().first().copied())
+        })?;
+        let map = self.row_map.borrow();
+        map.iter()
+            .find(|(i, _)| *i == index)
+            .map(|(_, widget)| *widget)
+    }
+
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         builder.set_role(teksilo_core::accesskit::Role::ListBox);
     }

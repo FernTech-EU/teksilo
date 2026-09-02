@@ -97,6 +97,11 @@ pub(crate) struct TreeViewBodyPane<T: 'static> {
 
     // Build state
     pub(crate) item_entries: Vec<(usize, WidgetId)>,
+    /// The realized `(flat index -> row wrapper id)` map, shared with the
+    /// owning [`TreeView`](crate::TreeView) so that its `&self` methods — the
+    /// a11y walk, the context-menu key target — can resolve a row index to a
+    /// widget without reaching into this pane. Mirrors `ListView`'s `row_map`.
+    pub(crate) row_map: Rc<RefCell<Vec<(usize, WidgetId)>>>,
 }
 
 impl<T: 'static> TreeViewBodyPane<T> {
@@ -569,6 +574,9 @@ impl<T: 'static> Widget for TreeViewBodyPane<T> {
             }
         }
         ctx.end_view_focus();
+
+        // Publish the realized (index -> wrapper id) map for the root.
+        *self.row_map.borrow_mut() = self.item_entries.clone();
 
         self.item_entries.iter().map(|(_, id)| *id).collect()
     }

@@ -1624,6 +1624,28 @@ impl<T: 'static> Widget for GridView<T> {
         }
     }
 
+    /// The context-menu key opens the *focused tile's* menu, not the grid's.
+    ///
+    /// A `GridView` is focusable and its tiles are not — the container owns
+    /// focus and `active_descendant` above is what points assistive technology
+    /// at the current tile. So the dispatcher's default of "the focused widget"
+    /// would open the grid's own menu.
+    ///
+    /// The tile the user means is the roving cursor, else the first selected
+    /// tile. Only realized tiles have a widget, so a cursor scrolled outside
+    /// the virtualization window resolves to nothing and the menu falls back to
+    /// the grid — which is right, since there is no tile on screen for it to be
+    /// about.
+    fn context_menu_key_target(&self) -> Option<WidgetId> {
+        let index = self.focused_index.get().or_else(|| {
+            self.selection
+                .as_ref()
+                .and_then(|s| s.selected_indices().first().copied())
+        })?;
+        let map = self.tile_map.borrow();
+        map.iter().find(|(i, _)| *i == index).map(|(_, id)| *id)
+    }
+
     fn as_any(&self) -> Option<&dyn std::any::Any> {
         Some(self)
     }

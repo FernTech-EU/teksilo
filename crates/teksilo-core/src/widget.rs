@@ -420,6 +420,27 @@ pub trait Widget: std::fmt::Debug + std::any::Any {
         None
     }
 
+    /// Which descendant a keyboard request for a context menu should target.
+    ///
+    /// The context-menu key (and Shift+F10) opens the menu of the **focused**
+    /// widget. For a data view that is the wrong node: `ListView`, `TreeView`,
+    /// `TableView`, `TreeTableView` and `GridView` are focusable as a whole and
+    /// their rows deliberately are not — the container owns focus and
+    /// `set_selected` is what tells assistive technology which row is current
+    /// (see `list_item_a11y`). Without this hook the chord would open the
+    /// *list's* menu rather than the selected row's, in exactly the widget
+    /// family where a per-row menu matters most.
+    ///
+    /// Return the widget id of the row (or cell, or tile) the menu should be
+    /// about. The dispatcher then walks up from there, so a view whose rows
+    /// carry no factory of their own still finds the container's.
+    ///
+    /// Default: `None` — the focused widget is the target, which is right for
+    /// every widget that is itself the thing the user is pointing at.
+    fn context_menu_key_target(&self) -> Option<WidgetId> {
+        None
+    }
+
     /// Return the child widget IDs that this widget manages.
     fn children(&self) -> Vec<WidgetId> {
         Vec::new()

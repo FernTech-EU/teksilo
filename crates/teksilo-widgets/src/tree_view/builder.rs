@@ -158,6 +158,7 @@ impl<T: 'static> TreeView<T> {
             row_selection: None,
             focused_index: Rc::new(Cell::new(None)),
             focused_anchor: Rc::new(RefCell::new(None)),
+            row_map: Rc::new(RefCell::new(Vec::new())),
             row_tooltips: Default::default(),
             type_ahead_label: None,
             type_ahead_timeout: crate::common::type_ahead::DEFAULT_TYPE_AHEAD_TIMEOUT,
