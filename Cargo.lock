@@ -345,14 +345,14 @@ dependencies = [
 
 [[package]]
 name = "animations"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "teksilo",
 ]
 
 [[package]]
 name = "animations-kit"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "teksilo",
 ]
@@ -561,7 +561,7 @@ dependencies = [
 
 [[package]]
 name = "async-demo"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "teksilo",
 ]
@@ -814,7 +814,7 @@ checksum = "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53"
 
 [[package]]
 name = "automation_bridge_smoke"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "serde_json",
  "teksilo",
@@ -1265,7 +1265,7 @@ dependencies = [
 
 [[package]]
 name = "cargo-teksilo-fmt"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "teksilo-fmt",
  "tempfile",
@@ -1274,7 +1274,7 @@ dependencies = [
 
 [[package]]
 name = "cargo-teksilo-telemetry-lint"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -1402,7 +1402,7 @@ dependencies = [
 
 [[package]]
 name = "chart-demo"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "teksilo",
  "teksilo-charts",
@@ -1466,7 +1466,7 @@ dependencies = [
 
 [[package]]
 name = "close-confirmation"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "teksilo",
 ]
@@ -1497,7 +1497,7 @@ dependencies = [
 
 [[package]]
 name = "code_editor"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "teksilo",
 ]
@@ -1515,7 +1515,7 @@ dependencies = [
 
 [[package]]
 name = "collapsible-menu-bar"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "teksilo",
 ]
@@ -1531,7 +1531,7 @@ dependencies = [
 
 [[package]]
 name = "color-picker-demo"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "teksilo",
 ]
@@ -2023,7 +2023,7 @@ dependencies = [
 
 [[package]]
 name = "data-collections"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "teksilo",
 ]
@@ -2036,7 +2036,7 @@ checksum = "4583a4551df46e2792f82ceeac45e850d2e2d5debba0b91f102385cda5b11f06"
 
 [[package]]
 name = "data-grid"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "teksilo",
 ]
@@ -2049,7 +2049,7 @@ checksum = "be1e0bca6c3637f992fc1cc7cbc52a78c1ef6db076dbf1059c4323d6a2048376"
 
 [[package]]
 name = "datetime-pickers"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "jiff",
  "teksilo",
@@ -2155,7 +2155,7 @@ dependencies = [
 
 [[package]]
 name = "dialogs-and-popovers"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "teksilo",
 ]
@@ -2277,7 +2277,7 @@ dependencies = [
 
 [[package]]
 name = "docking"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "teksilo",
 ]
@@ -2337,7 +2337,7 @@ checksum = "d8b14ccef22fc6f5a8f4d7d768562a182c04ce9a3b3157b91390b52ddfdf1a76"
 
 [[package]]
 name = "drag-and-drop"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "teksilo",
 ]
@@ -2797,14 +2797,14 @@ dependencies = [
 
 [[package]]
 name = "file-dialogs"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "teksilo",
 ]
 
 [[package]]
 name = "file-drop"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "teksilo",
 ]
@@ -2949,7 +2949,7 @@ checksum = "77ce24cb58228fbb8aa041425bb1050850ac19177686ea6e0f41a70416f56fdb"
 
 [[package]]
 name = "font-picker"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "teksilo",
 ]
@@ -3580,7 +3580,7 @@ checksum = "b40ca9252762c466af32d0b1002e91e4e1bc5398f77455e55474deb466355ff5"
 
 [[package]]
 name = "grid-view"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "teksilo",
 ]
@@ -4896,7 +4896,7 @@ checksum = "65b27460c2c92b037f3f94c538ed9a3342f3fdf923606781629ccb35f82d042a"
 
 [[package]]
 name = "ime-playground"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "teksilo",
 ]
@@ -4964,7 +4964,7 @@ dependencies = [
 
 [[package]]
 name = "internationalization"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "jiff",
  "teksilo",
@@ -5519,7 +5519,7 @@ dependencies = [
 
 [[package]]
 name = "log_view"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "teksilo",
 ]
@@ -5616,7 +5616,7 @@ dependencies = [
 
 [[package]]
 name = "menus-and-dropdowns"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "teksilo",
  "teksilo-data",
@@ -5776,7 +5776,7 @@ dependencies = [
 
 [[package]]
 name = "multi-window"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "teksilo",
 ]
@@ -5821,7 +5821,7 @@ dependencies = [
 
 [[package]]
 name = "native-menu"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "teksilo",
 ]
@@ -5858,7 +5858,7 @@ dependencies = [
 
 [[package]]
 name = "new-widgets-kit"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "teksilo",
 ]
@@ -6626,7 +6626,7 @@ dependencies = [
 
 [[package]]
 name = "over-constraint"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "teksilo",
 ]
@@ -6737,7 +6737,7 @@ dependencies = [
 
 [[package]]
 name = "password-field"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "teksilo",
 ]
@@ -7444,7 +7444,7 @@ checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
 
 [[package]]
 name = "radio-tile"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "teksilo",
 ]
@@ -7662,7 +7662,7 @@ checksum = "03251193000f4bd3b042892be858ee50e8b3719f2b08e5833ac4353724632430"
 
 [[package]]
 name = "recent-projects"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "serde",
  "teksilo",
@@ -7845,14 +7845,14 @@ dependencies = [
 
 [[package]]
 name = "rich-text-editor"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "teksilo",
 ]
 
 [[package]]
 name = "rich-text-viewer"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "teksilo",
 ]
@@ -8163,7 +8163,7 @@ dependencies = [
 
 [[package]]
 name = "scene-corkboard"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "accesskit 0.25.0",
  "teksilo",
@@ -8172,7 +8172,7 @@ dependencies = [
 
 [[package]]
 name = "scene-magnetism"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "teksilo",
  "teksilo-scene",
@@ -8180,7 +8180,7 @@ dependencies = [
 
 [[package]]
 name = "scene-showcase"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "teksilo",
  "teksilo-scene",
@@ -10109,7 +10109,7 @@ checksum = "f8fadd59c855ef2080decdef8ff161eb6661b86933c9d82e5ba29dc602a55aba"
 
 [[package]]
 name = "shortcuts-demo"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "teksilo",
 ]
@@ -10177,7 +10177,7 @@ checksum = "e3a9fe34e3e7a50316060351f37187a3f546bce95496156754b601a5fa71b76e"
 
 [[package]]
 name = "simple-button"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "teksilo",
 ]
@@ -10344,7 +10344,7 @@ dependencies = [
 
 [[package]]
 name = "spin-box"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "teksilo",
 ]
@@ -10370,7 +10370,7 @@ dependencies = [
 
 [[package]]
 name = "splitter"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "teksilo",
 ]
@@ -10769,14 +10769,14 @@ dependencies = [
 
 [[package]]
 name = "tab-migration"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "teksilo",
 ]
 
 [[package]]
 name = "tab-widget"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "teksilo",
 ]
@@ -10829,7 +10829,7 @@ checksum = "c3a6bfce3d99adfa72d24750a61f782f3036a81e7f86d8841ee1326deaebd171"
 
 [[package]]
 name = "teksilo"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "teksilo-app",
  "teksilo-async",
@@ -10860,7 +10860,7 @@ dependencies = [
 
 [[package]]
 name = "teksilo-analytics-otlp"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -10873,7 +10873,7 @@ dependencies = [
 
 [[package]]
 name = "teksilo-analytics-plausible"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -10886,7 +10886,7 @@ dependencies = [
 
 [[package]]
 name = "teksilo-app"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "base64 0.22.1",
  "png",
@@ -10912,7 +10912,7 @@ dependencies = [
 
 [[package]]
 name = "teksilo-async"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "async-channel 2.5.0",
  "teksilo-app",
@@ -10922,7 +10922,7 @@ dependencies = [
 
 [[package]]
 name = "teksilo-async-std"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "async-std",
  "teksilo-app",
@@ -10932,7 +10932,7 @@ dependencies = [
 
 [[package]]
 name = "teksilo-automation"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "accesskit_consumer",
  "serde",
@@ -10943,7 +10943,7 @@ dependencies = [
 
 [[package]]
 name = "teksilo-automation-mcp"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -10964,7 +10964,7 @@ dependencies = [
 
 [[package]]
 name = "teksilo-canvas"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "bytemuck",
  "image-webp",
@@ -10979,7 +10979,7 @@ dependencies = [
 
 [[package]]
 name = "teksilo-charts"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "teksilo-canvas",
  "teksilo-core",
@@ -10992,7 +10992,7 @@ dependencies = [
 
 [[package]]
 name = "teksilo-core"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "accesskit 0.25.0",
  "accesskit_consumer",
@@ -11007,7 +11007,7 @@ dependencies = [
 
 [[package]]
 name = "teksilo-data"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "proptest",
  "slotmap",
@@ -11017,7 +11017,7 @@ dependencies = [
 
 [[package]]
 name = "teksilo-fmt"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -11028,7 +11028,7 @@ dependencies = [
 
 [[package]]
 name = "teksilo-fmt-lsp"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -11037,7 +11037,7 @@ dependencies = [
 
 [[package]]
 name = "teksilo-i18n"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "fixed_decimal 0.7.2",
  "fluent-bundle",
@@ -11061,7 +11061,7 @@ dependencies = [
 
 [[package]]
 name = "teksilo-i18n-macros"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "fluent-syntax",
  "proc-macro2",
@@ -11071,7 +11071,7 @@ dependencies = [
 
 [[package]]
 name = "teksilo-inspector"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "serde_json",
  "teksilo-app",
@@ -11087,7 +11087,7 @@ dependencies = [
 
 [[package]]
 name = "teksilo-macros"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -11097,7 +11097,7 @@ dependencies = [
 
 [[package]]
 name = "teksilo-parse"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "proc-macro2",
  "syn 3.0.4",
@@ -11105,7 +11105,7 @@ dependencies = [
 
 [[package]]
 name = "teksilo-platform"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "accesskit 0.25.0",
  "accesskit_winit",
@@ -11134,7 +11134,7 @@ dependencies = [
 
 [[package]]
 name = "teksilo-preview"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "inventory",
  "teksilo-core",
@@ -11143,7 +11143,7 @@ dependencies = [
 
 [[package]]
 name = "teksilo-preview-ui"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "png",
  "pollster 1.0.1",
@@ -11163,7 +11163,7 @@ dependencies = [
 
 [[package]]
 name = "teksilo-render"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "bytemuck",
  "pollster 1.0.1",
@@ -11175,7 +11175,7 @@ dependencies = [
 
 [[package]]
 name = "teksilo-resources"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -11185,7 +11185,7 @@ dependencies = [
 
 [[package]]
 name = "teksilo-scene"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "accesskit 0.25.0",
  "proptest",
@@ -11199,7 +11199,7 @@ dependencies = [
 
 [[package]]
 name = "teksilo-settings"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "etcetera",
  "fs2",
@@ -11214,7 +11214,7 @@ dependencies = [
 
 [[package]]
 name = "teksilo-telemetry"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "redb",
  "serde",
@@ -11228,7 +11228,7 @@ dependencies = [
 
 [[package]]
 name = "teksilo-telemetry-codegen"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -11239,7 +11239,7 @@ dependencies = [
 
 [[package]]
 name = "teksilo-terminal"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "accesskit 0.25.0",
  "alacritty_terminal",
@@ -11253,7 +11253,7 @@ dependencies = [
 
 [[package]]
 name = "teksilo-text"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "memmap2",
  "teksilo-canvas",
@@ -11264,7 +11264,7 @@ dependencies = [
 
 [[package]]
 name = "teksilo-theme-fluent"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "teksilo-canvas",
  "teksilo-core",
@@ -11275,7 +11275,7 @@ dependencies = [
 
 [[package]]
 name = "teksilo-theme-macos"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "teksilo-canvas",
  "teksilo-core",
@@ -11286,7 +11286,7 @@ dependencies = [
 
 [[package]]
 name = "teksilo-theme-material3"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "teksilo-canvas",
  "teksilo-core",
@@ -11297,7 +11297,7 @@ dependencies = [
 
 [[package]]
 name = "teksilo-tokens"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "proptest",
  "serde",
@@ -11306,7 +11306,7 @@ dependencies = [
 
 [[package]]
 name = "teksilo-tokio"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "teksilo-app",
  "teksilo-async",
@@ -11316,7 +11316,7 @@ dependencies = [
 
 [[package]]
 name = "teksilo-webview"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "dpi",
  "gtk",
@@ -11332,7 +11332,7 @@ dependencies = [
 
 [[package]]
 name = "teksilo-widgets"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "accesskit_consumer",
  "fluent-syntax",
@@ -11360,7 +11360,7 @@ dependencies = [
 
 [[package]]
 name = "teksilo-widgets-previewer"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "teksilo-canvas",
  "teksilo-core",
@@ -11372,7 +11372,7 @@ dependencies = [
 
 [[package]]
 name = "telemetry-codegen"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "teksilo-telemetry",
  "teksilo-telemetry-codegen",
@@ -11380,7 +11380,7 @@ dependencies = [
 
 [[package]]
 name = "telemetry-plausible"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "teksilo",
  "teksilo-analytics-plausible",
@@ -11423,14 +11423,14 @@ dependencies = [
 
 [[package]]
 name = "terminal-demo"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "teksilo",
 ]
 
 [[package]]
 name = "text-and-layout"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "teksilo",
 ]
@@ -11609,7 +11609,7 @@ dependencies = [
 
 [[package]]
 name = "theme-styles"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "teksilo",
 ]
@@ -11824,7 +11824,7 @@ checksum = "1f3ccbac311fea05f86f61904b462b55fb3df8837a366dfc601a0161d0532f20"
 
 [[package]]
 name = "title-bar-demo"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "teksilo",
 ]
@@ -11858,7 +11858,7 @@ dependencies = [
 
 [[package]]
 name = "toast-demo"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "teksilo",
 ]
@@ -12022,14 +12022,14 @@ checksum = "7d56353a2a665ad0f41a421187180aab746c8c325620617ad883a99a1cbe66d2"
 
 [[package]]
 name = "tool-box"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "teksilo",
 ]
 
 [[package]]
 name = "tooltips-showcase"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "teksilo",
 ]
@@ -12105,7 +12105,7 @@ checksum = "ce607aae8ab0ab3abf3a2723a9ab6f09bb8639ed83fdd888d857b8e556c868d8"
 
 [[package]]
 name = "tree-table-view"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "teksilo",
 ]
@@ -12821,7 +12821,7 @@ dependencies = [
 
 [[package]]
 name = "web-view-demo"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "teksilo",
 ]
@@ -13204,7 +13204,7 @@ dependencies = [
 
 [[package]]
 name = "widget-catalog"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "jiff",
  "pollster 1.0.1",
