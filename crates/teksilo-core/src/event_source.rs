@@ -406,8 +406,8 @@ impl TreeAppContext {
     /// `WidgetTree::destroy_subtree_inner`.
     ///
     /// A registration made from a windowless tree records `None` and is never purged
-    /// here; only [`WidgetTree::destroy_subtree`](crate::WidgetTree::destroy_subtree)
-    /// reaches it.
+    /// here; only the per-widget teardown reaches it, which an application drives
+    /// through [`BuildContext::destroy_subtree`](crate::BuildContext::destroy_subtree).
     pub fn purge_subscriptions_for_window(&self, window_id: TeksiloWindowId) {
         self.subscription_callbacks
             .borrow_mut()
