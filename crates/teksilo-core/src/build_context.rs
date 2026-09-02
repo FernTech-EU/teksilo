@@ -1176,6 +1176,7 @@ impl<'a> BuildContext<'a> {
         F: Fn(&E) + 'static,
     {
         use std::any::{Any, TypeId};
+        use std::rc::Rc;
         use std::sync::Arc;
 
         // Recorded so `TreeAppContext::purge_subscriptions_for_window` can drop this
@@ -1213,7 +1214,7 @@ impl<'a> BuildContext<'a> {
         // The UI-side callback that runs after an event posted from the
         // source thread is delivered back to the UI thread. It downcasts
         // the type-erased payload back to `&E` and invokes the user's `F`.
-        let stored_callback: Box<dyn Fn(&dyn Any)> = Box::new(move |event_any| {
+        let stored_callback: Rc<dyn Fn(&dyn Any)> = Rc::new(move |event_any| {
             let event = event_any
                 .downcast_ref::<E>()
                 .expect("subscription event downcast failed — framework bug");

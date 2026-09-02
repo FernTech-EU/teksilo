@@ -216,7 +216,7 @@ pub struct TreeAppContext {
     /// purge ever touches those; only the per-widget teardown in `WidgetTree` does.
     #[allow(clippy::type_complexity)]
     pub(crate) subscription_callbacks:
-        RefCell<HashMap<SubscriptionId, (Option<TeksiloWindowId>, Box<dyn Fn(&dyn Any)>)>>,
+        RefCell<HashMap<SubscriptionId, (Option<TeksiloWindowId>, Rc<dyn Fn(&dyn Any)>)>>,
     /// Context-bearing subscription callbacks + the window they target.
     /// Populated by [`BuildContext::subscribe_event_with_ctx`](crate::build_context::BuildContext::subscribe_event_with_ctx);
     /// dispatched by teksilo-app with a freshly-minted [`EventContext`]. A given
@@ -311,13 +311,26 @@ impl TreeAppContext {
 
     /// Look up and invoke the UI-side callback for a posted subscription
     /// event. Returns `true` if a callback was found and invoked.
+    /// The `Rc` handle is **cloned and the map borrow released before the call**, for
+    /// the same reason [`dispatch_subscription_event_with_ctx`](Self::dispatch_subscription_event_with_ctx)
+    /// does it: the callback may re-enter this map. It re-enters on two paths that both
+    /// exist today — a widget built from inside a handler registers its own
+    /// subscription (`borrow_mut` to insert), and a window closed from inside one is
+    /// purged by [`purge_subscriptions_for_window`](Self::purge_subscriptions_for_window)
+    /// (`borrow_mut` to retain). Holding the borrow across the call turns either into a
+    /// `BorrowMutError` panic; hence `Rc`, not `Box`.
     pub fn dispatch_subscription_event(&self, sub_id: SubscriptionId, event: &dyn Any) -> bool {
-        let callbacks = self.subscription_callbacks.borrow();
-        if let Some((_window_id, callback)) = callbacks.get(&sub_id) {
-            callback(event);
-            true
-        } else {
-            false
+        let callback = self
+            .subscription_callbacks
+            .borrow()
+            .get(&sub_id)
+            .map(|(_window_id, callback)| Rc::clone(callback));
+        match callback {
+            Some(callback) => {
+                callback(event);
+                true
+            }
+            None => false,
         }
     }
 

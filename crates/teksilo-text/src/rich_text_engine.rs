@@ -380,9 +380,16 @@ impl RichTextEngine {
         }
         let block_id = snap.block_id;
         let spans = text_typeset::bridge::convert_paint_spans(&snap);
-        self.flow
-            .apply_block_paint_spans(block_id, &spans)
-            .then_some(block_id)
+        // `false` means "nothing was recoloured", which has two causes and only one of
+        // them is a miss. An EMPTY span set on a block that carries no overlay changes
+        // nothing because there is nothing to clear — the scoped path has done its job,
+        // and answering `None` there would send every such event through
+        // `flow_snapshot()`, which materialises the text and fragments of every block in
+        // the document. That is the per-keystroke cost this path exists to avoid, and it
+        // would buy nothing: a whole-flow recolor of a block with no spans is the same
+        // no-op, on every other block as well.
+        let recoloured = self.flow.apply_block_paint_spans(block_id, &spans);
+        (recoloured || spans.is_empty()).then_some(block_id)
     }
 
     /// Incremental relayout of a single block. Falls back to
