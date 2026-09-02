@@ -106,8 +106,8 @@ bytemuck = { version = "1", features = ["derive"] }
 # Default features enable tzdb + tz-system so `Zoned::now()` resolves
 # the user's local "today" from the OS.
 jiff = "0.2"
-text-document = { path = "../text-document/crates/public_api", version = "1.11.1" }
-text-typeset = { path = "../text-typeset", version = "1.9.1" }
+text-document = { path = "../text-document/crates/public_api", version = "1.12" }
+text-typeset = { path = "../text-typeset", version = "1.10" }
 
 # Terminal engine (consumed only by the opt-in `teksilo-terminal` crate,
 # feature-gated so a default workspace build never pulls them). `portable-pty`
