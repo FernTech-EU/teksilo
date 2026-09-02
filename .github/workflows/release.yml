@@ -27,6 +27,23 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v6
 
+      # Stdlib-only Python, no toolchain needed, so it runs first and fails a
+      # bad graph in seconds. It exits non-zero on a cycle in the normal/build
+      # dependency graph, and on a dev-dependency cycle that leaves crates
+      # unorderable. A verified `cargo publish` compiles dev-dependencies, so
+      # both are real. `cargo publish --workspace` finds either one only
+      # partway through, after earlier crates are already on the registry and
+      # the version is burned; three crates failed that way during 0.9.0.
+      - name: Check crate publish order
+        run: |
+          echo "::group::Internal crate dependency report"
+          python3 tools/check_release_order.py && rc=0 || rc=$?
+          echo "::endgroup::"
+          if [[ $rc -ne 0 ]]; then
+            echo "::error::Release-blocking dependency cycle. Fix the graph before tagging: a partial publish cannot be undone, and the version cannot be reused."
+            exit $rc
+          fi
+
       - name: Install Linux system dependencies
         uses: ./.github/actions/install-linux-deps
 
