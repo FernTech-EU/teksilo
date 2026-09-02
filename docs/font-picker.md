@@ -121,8 +121,11 @@ The control inherits `ComboBox`'s complete AccessKit surface: `Role::ComboBox`
 with `HasPopup::Listbox`, the selected family announced via `set_value` (the
 placeholder via `set_placeholder` when empty), `set_expanded`, `aria-controls`
 to the open listbox, and `AutoComplete::List` in searchable mode; the popup is
-`Role::ListBox` and each row `Role::ListBoxOption` with
-`set_selected`/`position_in_set`/`size_of_set`. The in-font sample on each row
+`Role::ListBox`, carrying the currently visible option count as `size_of_set`,
+and each row is a `Role::ListBoxOption` with `set_selected` and its own
+`position_in_set`. The count belongs on the container, not the row: AccessKit
+resolves an item's set size by walking *up* from it, so a `size_of_set` written
+on the option is read by no adapter. The in-font sample on each row
 is decorative and hidden from assistive technology — the row's accessible name
 is the plain family string, so a screen reader reads "DejaVu Sans", never the
 sample text or a tofu glyph.

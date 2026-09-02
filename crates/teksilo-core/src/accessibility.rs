@@ -924,9 +924,13 @@ impl AccessNodeBuilder {
     /// deterministic synthetic `NodeId` allocated for the
     /// `(owner, element_id, kind)` tuple.
     ///
-    /// `kind` must be [`SyntheticKind::SceneItem`] or
-    /// [`SyntheticKind::SceneGroup`]; passing any other variant
-    /// panics in debug.
+    /// `kind` must be one of the synthetic kinds this path
+    /// allocates: [`SyntheticKind::SceneItem`],
+    /// [`SyntheticKind::SceneGroup`], [`SyntheticKind::SceneMagnet`],
+    /// [`SyntheticKind::ChartMark`] or [`SyntheticKind::LaneMark`];
+    /// passing any other variant panics in debug. The last two are
+    /// how a chart or a margin lane emits one node per datum from
+    /// its own `accessibility()`.
     ///
     /// Any further synthetic children the closure pushes (a
     /// `SceneGroup` containing nested `SceneItem`s) are forwarded into the parent's

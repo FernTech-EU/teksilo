@@ -20,8 +20,9 @@
 //! The gutter reports `set_hidden()` and nothing else. A screen-reader user does
 //! want to know which line they are on, but not by hearing thirty numbers they
 //! must arrow past to reach the text. Line position belongs on the *paragraph*
-//! nodes as `position_in_set` / `size_of_set` — "line 42 of 200", spoken with
-//! the line — which the accessibility walk supplies.
+//! nodes as `position_in_set`, against the `size_of_set` on their container,
+//! which is where AccessKit reads a set size from; "line 42 of 200", spoken
+//! with the line, is what the accessibility walk supplies.
 //!
 //! `accesskit` offers no `Role::Line`, and `is_line_breaking_object` is a
 //! schema-only flag no platform adapter reads, so there is no role-based

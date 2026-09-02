@@ -1141,27 +1141,6 @@ impl<'a> BuildContext<'a> {
         self.tree.push_access_described_by(id, target_id);
     }
 
-    /// Subscribe to events from the registered application event source.
-    /// The callback runs on the UI thread when the source publishes an
-    /// event with a matching origin.
-    ///
-    /// The subscription is scoped to the current widget's lifetime: when
-    /// the widget is rebuilt or destroyed, the framework drops the source
-    /// handle (unregistering from the source) and removes the UI-side
-    /// callback.
-    ///
-    /// It is scoped to the window it was registered from as well. A closing window's
-    /// tree is dropped wholesale, with no per-widget destroy pass, so teksilo-app calls
-    /// [`TreeAppContext::purge_subscriptions_for_window`](crate::event_source::TreeAppContext::purge_subscriptions_for_window)
-    /// to drop the callbacks that window installed. A registration from a windowless
-    /// tree (headless / tests) records no window, and only the per-widget path above
-    /// removes such a callback.
-    ///
-    /// # Panics
-    ///
-    /// Panics if no event source has been registered on the
-    /// `TeksiloAppBuilder`. In debug builds, also asserts that the `Origin`
-    /// and `Event` types match the registered source.
     /// The id this subscription should carry: the one the previous build used at this
     /// same position, or a fresh one.
     ///
@@ -1191,6 +1170,27 @@ impl<'a> BuildContext<'a> {
             .unwrap_or_else(|| app_context.allocate_subscription_id())
     }
 
+    /// Subscribe to events from the registered application event source.
+    /// The callback runs on the UI thread when the source publishes an
+    /// event with a matching origin.
+    ///
+    /// The subscription is scoped to the current widget's lifetime: when
+    /// the widget is rebuilt or destroyed, the framework drops the source
+    /// handle (unregistering from the source) and removes the UI-side
+    /// callback.
+    ///
+    /// It is scoped to the window it was registered from as well. A closing window's
+    /// tree is dropped wholesale, with no per-widget destroy pass, so teksilo-app calls
+    /// [`TreeAppContext::purge_subscriptions_for_window`](crate::event_source::TreeAppContext::purge_subscriptions_for_window)
+    /// to drop the callbacks that window installed. A registration from a windowless
+    /// tree (headless / tests) records no window, and only the per-widget path above
+    /// removes such a callback.
+    ///
+    /// # Panics
+    ///
+    /// Panics if no event source has been registered on the
+    /// `TeksiloAppBuilder`. In debug builds, also asserts that the `Origin`
+    /// and `Event` types match the registered source.
     pub fn subscribe_event<O, E, F>(&mut self, origin: O, callback: F)
     where
         O: 'static,

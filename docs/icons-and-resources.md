@@ -60,12 +60,12 @@ let save = teksilo::res!("resources/icons/save.svg");
 // Leading icon — most common
 Button::new(lit!("Save"))
     .icon(IconWidget::from_svg_icon(save), IconLocation::Leading)
-    .style(ButtonVariant::Plain)
+    .variant(ButtonVariant::Plain)
 
 // Icon only — toolbars
 Button::new(lit!("Save"))
     .icon(IconWidget::from_svg_icon(save), IconLocation::IconOnly)
-    .style(ButtonVariant::Ghost)
+    .variant(ButtonVariant::Ghost)
 
 // Raster icon
 let star = teksilo::res!("resources/icons/star.png");

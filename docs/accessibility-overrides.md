@@ -265,7 +265,7 @@ button
 
 flows through unchanged. The user-visible string overrides (`access_label`, `access_description`, `access_hint`, `access_value`, `access_custom_action`) take `impl Into<Prop<String>>` and store a `Prop<String>`, so `tr!(...)` stays **locale-reactive**: the accessibility tree re-walks on a locale change and re-resolves the announced value — no composite rebuild required. (`AccessibilityOverrides` lives in `teksilo-core`, which can't name `LocalizedString`; the bridge is `From<LocalizedString> for Prop<String>`.)
 
-For explicitly-untranslated AT strings, wrap with `lit!(...)` — `access_label(lit!("Debug"))`. A bare `&str` no longer compiles (it doesn't convert to `Prop<String>`), so the marker is mandatory. The `#[doc(hidden)]` `_literal` twins (`access_label_literal`, etc.) remain only as the literal path reachable from inside `teksilo-core` itself (where `lit!` isn't available); application code uses `lit!`.
+For explicitly-untranslated AT strings, wrap with `lit!(...)`: `access_label(lit!("Debug"))`. A bare `&str` still compiles, because [`impl From<&str> for Prop<String>`](../crates/teksilo-core/src/signal.rs) exists so that call sites written against the older `impl Into<String>` setters kept working when the setters widened. `lit!` is therefore a convention, not a compiler-enforced requirement. Use it anyway: it is what makes an untranslated AT string greppable in a one-pass audit, and it records the omission as a decision rather than an oversight. The `#[doc(hidden)]` `_literal` twins (`access_label_literal`, etc.) remain only as the literal path reachable from inside `teksilo-core` itself (where `lit!` isn't available); application code uses `lit!`.
 
 ---
 

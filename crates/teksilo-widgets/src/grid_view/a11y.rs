@@ -4,10 +4,11 @@
 //! Accessibility wrappers for `GridView` tiles.
 //!
 //! Each realized tile is wrapped in a [`TileA11y`] node carrying
-//! `Role::GridCell` plus the ARIA grid coordinates (row/column index,
-//! position-in-set / size-of-set) so screen readers announce
-//! "row R, column C — N of M". The container itself emits `Role::Grid`
-//! with the *logical* row/column totals (see `GridView::accessibility`).
+//! `Role::GridCell` plus the ARIA grid coordinates (row/column index and
+//! position-in-set). The container itself emits `Role::Grid` with the
+//! *logical* row/column totals and the `size_of_set` its tiles resolve
+//! upward to (see `GridView::accessibility`), so screen readers announce
+//! "row R, column C, N of M".
 
 use teksilo_canvas::{Rect, SizeProposal};
 
@@ -17,17 +18,17 @@ use teksilo_core::widget_id::WidgetId;
 
 /// Wraps a tile's delegate widget with `Role::GridCell` + grid coordinates.
 ///
-/// 1-based `row_index` / `col_index` follow the ARIA convention. The
-/// `position` / `total` pair (`aria-posinset` / `aria-setsize`) report the
-/// flat 1-based index and the *logical* item count — not the realized
-/// window — so virtualization stays invisible to assistive tech.
+/// 1-based `row_index` / `col_index` follow the ARIA convention. `position`
+/// (`aria-posinset`) is the flat 1-based index in the *logical* set, not in
+/// the realized window, so virtualization stays invisible to assistive tech.
+/// Its `aria-setsize` half is not here: AccessKit reads a set size from the
+/// container, so `GridView`'s own `Role::Grid` node publishes it.
 #[derive(Debug)]
 pub(crate) struct TileA11y {
     child: WidgetId,
     row_index: usize, // 1-based
     col_index: usize, // 1-based
     position: usize,  // 1-based flat index
-    total: usize,     // logical item count
     selected: bool,
     /// Concise per-item name (`GridView::tile_a11y_label`); `None` leaves the
     /// cell's name to its contents.
@@ -40,7 +41,6 @@ impl TileA11y {
         row_index_1based: usize,
         col_index_1based: usize,
         position_1based: usize,
-        total: usize,
         selected: bool,
         name: Option<String>,
     ) -> Self {
@@ -49,7 +49,6 @@ impl TileA11y {
             row_index: row_index_1based,
             col_index: col_index_1based,
             position: position_1based,
-            total,
             selected,
             name,
         }

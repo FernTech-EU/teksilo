@@ -350,12 +350,15 @@ pub trait Widget: std::fmt::Debug + std::any::Any {
 
     /// Optional redirection hook for AT-tree placement of a child.
     ///
-    /// The accessibility walker calls this on the immediate arena
-    /// parent of each child — and, if the parent
-    /// [`wants_descendant_redirects`](Self::wants_descendant_redirects)
-    /// returns `false`, on every opt-in ancestor walking up the
-    /// arena from that parent. First `Some(_)` wins, scanned
-    /// bottom-up (closest ancestor takes priority). Returning
+    /// The accessibility walker consults every ancestor that opts
+    /// in via
+    /// [`wants_descendant_redirects`](Self::wants_descendant_redirects),
+    /// starting at the child's immediate arena parent and walking
+    /// up to the root. An ancestor whose flag is `false` is
+    /// skipped without its hook ever being called, the immediate
+    /// parent included, and the walk carries on past it. First
+    /// `Some(_)` wins, scanned bottom-up (closest opted-in
+    /// ancestor takes priority). Returning
     /// `Some(_)` tells the walker that this widget has *already*
     /// placed `descendant`'s `NodeId` somewhere else (typically
     /// under a synthetic node it emitted in its own

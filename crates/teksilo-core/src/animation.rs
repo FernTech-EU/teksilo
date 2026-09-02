@@ -95,10 +95,12 @@ struct ActiveAnimation {
 /// Default frame interval for animations: 60 Hz (16.667 ms). Matches
 /// the most common display refresh rate, so a tween advances once per
 /// vsync on a 60 Hz panel and every other frame on 120 Hz. Individual
-/// animations can override via `animate_with_frame_interval` — slow
-/// or wide loops where the eye can't resolve sub-30-Hz detail (e.g.
-/// `ProgressBar::indeterminate` at 15 Hz) deliberately throttle to
-/// halve wgpu submits.
+/// animations can override via
+/// [`AnimationSpec::frame_interval`](crate::AnimationSpec::frame_interval),
+/// or `Signal::animate_to_with_frame_interval` on the raw signal API:
+/// slow or wide loops where the eye can't resolve sub-30-Hz detail
+/// (e.g. `ProgressBar::indeterminate` at 15 Hz) deliberately throttle
+/// to halve wgpu submits.
 const DEFAULT_FRAME_INTERVAL: Duration = Duration::from_micros(16_667);
 
 /// Manages active animations and advances them each frame.

@@ -18,7 +18,7 @@
 //!
 //! Default endpoint is `http://127.0.0.1:8000/api/event` (a
 //! self-hosted Plausible at localhost). Override at runtime by
-//! editing `~/.config/teksilo-demos/telemetry-plausible/general.toml`
+//! editing `~/.config/telemetry-plausible-demo/general.toml`
 //! and setting:
 //!
 //! ```toml
@@ -28,11 +28,10 @@
 //!
 //! ## Consent UX
 //!
-//! The `PrivacySettings` widget is not yet built, so this
-//! example **auto-grants consent at startup** to keep the demo
-//! self-contained. Real apps must obtain explicit consent before
-//! emission — the dispatch tap is consent-gated and would drop every
-//! event without the auto-grant below.
+//! Nothing reaches the adapter until the user grants consent: the
+//! dispatch tap is consent-gated, and this example ships the
+//! `PrivacySettings` widget as its consent UI. Click the intent buttons
+//! before and after "Accept all" to see the difference.
 
 use std::rc::Rc;
 use teksilo::core::Action;

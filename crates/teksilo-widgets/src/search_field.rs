@@ -48,9 +48,11 @@
 //! `AutoComplete::List`. When the popup is open it advertises
 //! `set_expanded(true)` and `set_controls(listbox_id)` (mapped to
 //! `accesskit::NodeId` via `widget_id_to_node_id`). Each row is
-//! `Role::ListBoxOption` with `set_selected(is_highlighted)`,
-//! `set_position_in_set(idx + 1)`, and `set_size_of_set(total)` so
-//! screen readers can announce "Apple, 1 of 5".
+//! `Role::ListBoxOption` with `set_selected(is_highlighted)` and
+//! `set_position_in_set(idx + 1)`; the `Role::ListBox` container
+//! carries the matching `set_size_of_set(total)`, since AccessKit
+//! resolves a set size by walking up from the item. Together they
+//! let screen readers announce "Apple, 1 of 5".
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -886,7 +888,6 @@ impl Widget for SuggestionPanel {
                 SuggestionRow {
                     label: value.clone(),
                     index: idx,
-                    total,
                     row_height: sf::ROW_HEIGHT,
                     selected_signal: highlighted.clone(),
                     inner_id: row_z,
@@ -1052,7 +1053,6 @@ impl Widget for SuggestionListBox {
 struct SuggestionRow {
     label: String,
     index: usize,
-    total: usize,
     /// Minimum row height — pulled from
     /// `SearchFieldStyle::row_height` at build time.
     row_height: f32,

@@ -67,7 +67,7 @@ optional refinements:
 ```rust
 ToolbarAction::new(tr!(bold()))
     .icon(|| IconWidget::bold(16.0))   // icon FACTORY — reused inline AND in the menu
-    .tooltip(tr!(bold_tooltip()))      // also the accessible name in IconOnly mode
+    .tooltip(tr!(bold_tooltip()))      // hover text; the LABEL is the accessible name
     .enabled(true)
     .toggle(is_bold)                   // checkable: pressed inline, checkmark in the menu
     .priority(10)                      // higher priority collapses LAST (NSToolbar semantics)
@@ -203,16 +203,21 @@ app can use for a menu whose rows come and go.
 
 ---
 
-## Display mode & orientation
+## Orientation
 
 ```rust
 Toolbar::new()
-    .display_mode(ToolbarDisplayMode::IconOnly)   // IconAndText (default) / IconOnly / TextOnly
     .orientation(ToolbarOrientation::Vertical)    // Horizontal (default) / Vertical
     .spacing(6.0)
+    .button_size(IconButtonSize::Compact)         // applied to every action button
 ```
 
-In `IconOnly` mode the label becomes the control's accessible name + tooltip.
+There is no display mode to pick: an action always renders inline as an
+**icon-only** `IconButton`, and only the overflow menu shows the labelled form.
+The action's label becomes that button's accessible name (an icon-only button has
+no visible text to name it), and its `.tooltip(...)` becomes the hover text,
+falling back to the label when no tooltip was set.
+
 Vertical toolbars collapse along the **vertical** axis and the roving arrow keys
 become Up/Down.
 
@@ -254,15 +259,14 @@ python3 tools/extract_widget_api.py Toolbar
 Key types ([crates/teksilo-widgets/src/toolbar.rs](../crates/teksilo-widgets/src/toolbar.rs)):
 
 - [`Toolbar`] — `new`, `item`, `action`, `child`, `add_child`, `orientation`,
-  `display_mode`, `spacing`, `label`, `is_overflowing`.
+  `button_size`, `button_style`, `spacing`, `label`, `compact`, `is_overflowing`.
 - [`ToolbarAction`] — `new`, `icon`, `tooltip`, `enabled`, `on_activate`,
   `toggle`, `priority`, `always_overflow`.
 - [`ToolbarItem`] — `action`, `custom`, `custom_id`, `collapsible`,
   `overflow_as`, `overflow_widget`, `separator`, `flexible_space`.
 - [`ToolbarOverflow`] — `toolbar_menu_form` (implement on a widget for
   `ToolbarItem::collapsible`).
-- `ToolbarDisplayMode` { `IconAndText`, `IconOnly`, `TextOnly` },
-  `ToolbarOrientation` { `Horizontal`, `Vertical` }.
+- `ToolbarOrientation` { `Horizontal`, `Vertical` }.
 
 [`Toolbar`]: ../crates/teksilo-widgets/src/toolbar.rs
 [`ToolbarAction`]: ../crates/teksilo-widgets/src/toolbar.rs

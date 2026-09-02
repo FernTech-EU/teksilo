@@ -28,7 +28,7 @@ Reports `Role::RadioButton` with `set_toggled` mirroring selection, the
 title as the accessible name, and the description as the accessible
 description. When grouped, each tile emits
 `push_to_radio_group([sibling_ids])` plus `set_position_in_set` /
-`set_size_of_set` for "N of M". Inside a `RadioTileGroup` the tile is not
+the group's `set_size_of_set` for "N of M". Inside a `RadioTileGroup` the tile is not
 individually focusable — focus roves on the group (WAI-ARIA radiogroup),
 and the group publishes `active_descendant`. A standalone tile is
 focusable and responds to `Space` / `Action::Click`.

@@ -4,12 +4,17 @@
 //! Thin accessibility wrapper for list/tree item widgets.
 //!
 //! Wraps a delegate-created widget with the correct AccessKit role
-//! and positional properties (position_in_set, size_of_set, level, expanded),
+//! and positional properties (position_in_set, level, expanded),
 //! and advertises the actions an assistive-tech client (or the automation
 //! bridge) drives a row with — `Click`, `ScrollIntoView`, and
 //! `Expand`/`Collapse` on a tree branch. The handlers behind those actions are
 //! installed by the owning pane (`ListBodyPane` / `TreeViewBodyPane`), which is
 //! the only place that can reach the selection model and the row source.
+//!
+//! The matching `size_of_set` is a container property in AccessKit, not a
+//! per-item one: `ListView` publishes it on the `Role::ListBox` node its rows
+//! hang from, and a flattened tree publishes none at all (`TreeItemWrapper`'s
+//! `accessibility` says why).
 //!
 //! The wrapper carries no *name*: the delegate's row widget owns the label, one
 //! node further down. `WidgetTree`'s accessibility walk copies it up
@@ -105,9 +110,8 @@ impl Widget for ListItemWrapper {
 #[derive(Debug)]
 pub(crate) struct TreeItemWrapper {
     child: WidgetId,
-    level: usize,    // 1-based
-    position: usize, // 1-based within sibling group
-    total_siblings: usize,
+    level: usize,           // 1-based
+    position: usize,        // 1-based within sibling group
     expanded: Option<bool>, // None if leaf
     selected: bool,
 }
@@ -117,7 +121,6 @@ impl TreeItemWrapper {
         child: WidgetId,
         level_1based: usize,
         position_1based: usize,
-        total_siblings: usize,
         expanded: Option<bool>,
         selected: bool,
     ) -> Self {
@@ -125,7 +128,6 @@ impl TreeItemWrapper {
             child,
             level: level_1based,
             position: position_1based,
-            total_siblings,
             expanded,
             selected,
         }

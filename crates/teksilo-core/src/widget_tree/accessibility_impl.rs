@@ -9,7 +9,13 @@ impl WidgetTree {
     /// Build an AccessKit `TreeUpdate` from the current state of all active
     /// widgets. Call this once per frame, between layout and paint, and push
     /// the result to the `accesskit_winit::Adapter`.
-    /// Caches the result and only rebuilds when layout has changed.
+    /// Caches the result and rebuilds only when something that actually
+    /// changes the AT tree has happened: a focus move, an overlay change, a
+    /// widget rebuild, an active↔dormant transition, an `AccessibilityOnly`
+    /// binding flip, a shortcut rebind, a locale switch, a queued
+    /// announcement, or an explicit
+    /// [`request_accessibility_update`](Self::request_accessibility_update).
+    /// A plain relayout does not invalidate the cache.
     pub fn sync_accessibility(&mut self) -> accesskit::TreeUpdate {
         // Explicit re-walk request (e.g. `SceneView` materialised / destroyed a
         // scene widget, or an a11y-only scene mutation). A relayout no longer

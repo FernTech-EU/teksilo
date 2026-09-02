@@ -660,7 +660,7 @@ Source:
 .root(|tree| {
     tree.add(
         Button::new(lit!("Click Me"))
-            .style(ButtonVariant::Default)
+            .variant(ButtonVariant::Plain)
             .on_activate_fn(|ctx| ctx.send_intent(AppIntent::ButtonClicked))
             .tooltip(lit!("This is a simple button. Click it to see a message in the console.")),
     )
@@ -672,7 +672,7 @@ With `teksu!`:
 ```rust
 .root(|tree| teksu!(tree =>
     Button::new(lit!("Click Me")) {
-        style: ButtonVariant::Default
+        variant: ButtonVariant::Plain
         on_activate_fn: |ctx| ctx.send_intent(AppIntent::ButtonClicked)
         tooltip_literal: "This is a simple button. Click it to see a message in the console."
     }
@@ -700,7 +700,7 @@ let root = ctx.add(
                     .child(Spacer::new())
                     .child(
                         Button::new(lit!("Toggle Dark Mode"))
-                            .style(ButtonVariant::Regular)
+                            .variant(ButtonVariant::Plain)
                             .on_activate_fn(|ctx| ctx.send_intent(AppIntent::ToggleDarkMode)),
                     ),
             ),
@@ -722,7 +722,7 @@ let root = teksu!(ctx =>
                 }
                 Spacer
                 Button::new(lit!("Toggle Dark Mode")) {
-                    style: ButtonVariant::Regular
+                    variant: ButtonVariant::Plain
                     on_activate_fn: |ctx| ctx.send_intent(AppIntent::ToggleDarkMode)
                 }
             }
@@ -849,7 +849,7 @@ let trailing = HStack::new()
     )
     .child(
         Button::new(lit!("Toggle Theme"))
-            .style(ButtonVariant::Flat)
+            .variant(ButtonVariant::Ghost)
             .on_activate_fn(|ctx| ctx.send_intent(AppIntent::ToggleTheme)),
     );
 
@@ -885,7 +885,7 @@ let trailing = teksu!(
             style: theme.typography.small.clone()
         }
         Button::new(lit!("Toggle Theme")) {
-            style: ButtonVariant::Flat
+            variant: ButtonVariant::Ghost
             on_activate_fn: |ctx| ctx.send_intent(AppIntent::ToggleTheme)
         }
     }
@@ -946,7 +946,7 @@ let modal_trigger_id = ctx.add(
                 .body(TextWidget::new(lit!("The app code does not branch...")))
                 .footer(Button::new(lit!("Close")).on_tap(|_, ctx| ctx.dismiss_modal()))
         })
-        .style(ButtonVariant::Regular),
+        .variant(ButtonVariant::Plain),
 );
 
 let popover = Popover::new(lit!("Show popover"))
@@ -1016,12 +1016,12 @@ let root = teksu!(ctx =>
                                     color: c.text_secondary
                                 }
                                 footer: Button::new(lit!("Close")) {
-                                    style: ButtonVariant::Default
+                                    variant: ButtonVariant::Plain
                                     on_tap: |_, ctx| ctx.dismiss_modal()
                                 }
                             }
                         )
-                        style: ButtonVariant::Regular
+                        variant: ButtonVariant::Plain
                     }
                     Snackbar::new(lit!("Show snackbar")) {
                         content: HStack {
@@ -1031,7 +1031,7 @@ let root = teksu!(ctx =>
                                 color: c.tooltip_text
                             }
                             Button::new(lit!("Dismiss")) {
-                                style: ButtonVariant::Regular
+                                variant: ButtonVariant::Plain
                                 on_tap: |_, ctx| ctx.dismiss_top_overlay()
                             }
                         }
@@ -1115,22 +1115,22 @@ let root = teksu!(ctx =>
                     color: theme.colors.text_primary
                 }
                 Button(tr!(lang_english())) {
-                    style: ButtonVariant::Regular
+                    variant: ButtonVariant::Plain
                     on_activate_fn: |ctx| ctx.send_intent(AppIntent::SetEnglish)
                 }
                 Button(tr!(lang_french())) {
-                    style: ButtonVariant::Regular
+                    variant: ButtonVariant::Plain
                     on_activate_fn: |ctx| ctx.send_intent(AppIntent::SetFrench)
                 }
                 Button(tr!(lang_arabic())) {
-                    style: ButtonVariant::Regular
+                    variant: ButtonVariant::Plain
                     on_activate_fn: |ctx| ctx.send_intent(AppIntent::SetArabic)
                 }
             }
             HStack {
                 spacing: 12.0
-                Button(tr!(leading_button())) { style: ButtonVariant::Regular }
-                Button(tr!(trailing_button())) { style: ButtonVariant::Regular }
+                Button(tr!(leading_button())) { variant: ButtonVariant::Plain }
+                Button(tr!(trailing_button())) { variant: ButtonVariant::Plain }
             }
         }
     }
@@ -1186,7 +1186,7 @@ impl Widget for App {
                         .on_activate_fn(move |_| {
                             write_signal.set("Hello from the button!".to_string());
                         })
-                        .style(ButtonVariant::Default),
+                        .variant(ButtonVariant::Plain),
                 )
                 // ... more children ...
                 .child(Expand::new().fills_stack())
@@ -1245,7 +1245,7 @@ impl Widget for App {
                     color: c.text_primary
                 }
                 Button(tr!(write_something_button())) {
-                    style: ButtonVariant::Default
+                    variant: ButtonVariant::Plain
                     on_activate_fn: move |_| {
                         write_signal.set("Hello from the button!".to_string());
                     }
@@ -1268,7 +1268,7 @@ impl Widget for App {
                     }
                 }
                 Button(tr!(add_item_appcommand_button())) {
-                    style: ButtonVariant::Default
+                    variant: ButtonVariant::Plain
                     on_activate_fn: |ctx| ctx.send_intent(AppIntent::AddItem)
                 }
                 TextWidget(tr!(add_item_label())) {
@@ -1277,7 +1277,7 @@ impl Widget for App {
                     color: c.text_primary
                 }
                 Button(tr!(toggle_dark_mode_button())) {
-                    style: ButtonVariant::Regular
+                    variant: ButtonVariant::Plain
                     on_activate_fn: |ctx| ctx.send_intent(AppIntent::ToggleDarkMode)
                 }
                 Expand { fills_stack }

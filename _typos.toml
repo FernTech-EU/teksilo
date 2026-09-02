@@ -1,9 +1,78 @@
 # SPDX-License-Identifier: MPL-2.0
 # SPDX-FileCopyrightText: 2026 FernTech
 
+# The one typos configuration.
+#
+# At the repository root and named `_typos.toml` so that a bare `typos` finds
+# it. `typos` searches the working directory and its parents for `typos.toml`,
+# `_typos.toml` and `.typos.toml`, and nowhere else, so a config under
+# `.github/` is reachable only by passing `--config` explicitly. This repository
+# used to have both: the real config under `.github/` that CI named, and a thin
+# root file allowlisting two words. A developer running `typos` locally got the
+# thin one, and with it a page of failures for `Canva`, `Big Sur`, `clonable`
+# and the deliberate `Buton` in the language spec, none of which CI ever
+# reported. A gate that says different things to CI and to the person about to
+# push is worse than no gate.
+[files]
+extend-exclude = [
+  "CHANGELOG.md",
+  "Cargo.lock",
+  "tests",
+  # Localized message bundles — translations, not English.
+  "*.ftl",
+  # Binary font files (the filenames encode OpenType axis tags like `wdth`).
+  "crates/teksilo-text/fonts/",
+  # Rich-text editor demo: deliberate misspellings power the spell-check showcase.
+  "examples/rich_text_editor/src/highlighters.rs",
+  "examples/rich_text_editor/src/highlight_controls.rs",
+  "examples/rich_text_editor/src/main.rs",
+  # Language spec documents an intentional `Buton` typo to illustrate an error.
+  "docs/teksu-language-spec-v3.md",
+]
+
 [default.extend-words]
-# `writeable` is ICU4X's crate name (the `Writeable` / `PartsWrite` traits
-# `icu_decimal` formats through), not a misspelling of "writable". It
-# appears in `teksilo-i18n`'s number-symbol probe.
+# Project / domain vocabulary
+teksu = "teksu"
+Teksu = "Teksu"
+teksilo = "teksilo"
+Teksilo = "Teksilo"
+
+# Valid English variants typos doesn't recognize as alternates
+clonable = "clonable"
+invokable = "invokable"
+togglable = "togglable"
+unparented = "unparented"
+unparseable = "unparseable"
+Contextful = "Contextful"
+
+# Hyphenated English prefix ("mis-fire", "mis-click", "mis-recover").
+mis = "mis"
+Mis = "Mis"
+
+# Domain / spec terms
+ALPH = "ALPH"      # WebP container chunk name
+Canva = "Canva"    # design tool referenced in styling docs
+Sur = "Sur"        # "Big Sur" — macOS 11, cited throughout the macOS preset
+Wil = "Wil"        # rich-text engine test fixture string
+PN = "PN"          # substring of PNGs — Portable Network Graphics
+Iin = "Iin"        # git-grep flags `-Iin` (ignore binary + case-insensitive + line numbers)
+
+# Short identifiers used as local variable / field names
+anc = "anc"        # `anchor` shorthand in rich-text cursor code
+ptd = "ptd"        # Win32 `FORMATETC.ptd` field
+iy = "iy"          # "intersection y" in rect-clip math
+nd = "nd"          # tool script variable
+ba = "ba"          # appears inside commit hash substrings in docs
+caf = "caf"        # appears inside `percent_decode("caf%C3%A9")` test input
+optin = "optin"    # `opt-in` written as one word in a test fn name
+
+# Win32 API constants
+TME = "TME"
+tme = "tme"
+TRACKMOUSEEVENT = "TRACKMOUSEEVENT"
+
+# ICU4X's crate name, not a misspelling of "writable": the `Writeable` /
+# `PartsWrite` traits `icu_decimal` formats through. Appears in
+# `teksilo-i18n`'s number-symbol probe.
 writeable = "writeable"
 Writeable = "Writeable"

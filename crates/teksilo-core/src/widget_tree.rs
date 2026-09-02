@@ -251,9 +251,13 @@ pub struct WidgetTree {
     /// off-screen. Starts at `0`, which serves as the "never painted"
     /// sentinel; tests that only call `layout()` see the gate bypass.
     paint_epoch: u64,
-    /// Cached accessibility tree update — only rebuilt when layout changes.
+    /// Cached accessibility tree update, rebuilt only when something that
+    /// changes the AT tree has happened, not on every layout.
     cached_a11y: Option<accesskit::TreeUpdate>,
-    /// Whether the accessibility tree needs rebuilding (set when layout runs).
+    /// Whether the accessibility tree needs rebuilding. Set by focus moves,
+    /// overlay changes, widget rebuilds, active↔dormant transitions,
+    /// `AccessibilityOnly` binding flips and `request_accessibility_update()`;
+    /// a plain relayout does not set it.
     a11y_dirty: bool,
     /// Snapshot of `shortcut_registry.version()` at the last
     /// `sync_accessibility` call. When the live version differs the

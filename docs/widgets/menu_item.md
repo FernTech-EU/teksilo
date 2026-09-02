@@ -242,7 +242,8 @@ dormant until the hover delay elapses.
 
 #### `pub fn submenu_delay(mut self, delay: Duration) -> Self`
 
-Set a custom submenu open delay (default: 200ms).
+Set a custom submenu open delay (default: 400 ms, IntelliJ's value;
+see `DEFAULT_SUBMENU_OPEN_DELAY` for what that delay also buys).
 
 #### `pub fn is_submenu(&self) -> bool`
 

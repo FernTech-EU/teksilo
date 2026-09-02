@@ -74,9 +74,11 @@ pub struct EventContext<'ops> {
     pub(crate) overlay_content_dismissals: Vec<crate::widget_id::WidgetId>,
     /// Overlay ids whose `auto_dismiss_after` timer should be paused
     /// or resumed after the handler returns (`true` = pause, `false`
-    /// = resume). Drained by `WidgetTree::process_overlay_requests`
-    /// against `OverlayManager::pause_auto_dismiss` /
-    /// `resume_auto_dismiss`. Used by `ToastHost` for hover-pause.
+    /// = resume). Drained by `WidgetTree::collect_from_ctx` against
+    /// `OverlayManager::pause_auto_dismiss` / `resume_auto_dismiss`,
+    /// after the dismissals in the same drain: a pause aimed at an
+    /// overlay the same handler dismissed is silently dropped. Used
+    /// by `ToastHost` for hover-pause.
     pub(crate) overlay_pause_requests: Vec<(crate::overlay::OverlayId, bool)>,
     /// The dismissal scope chosen by the handler, if any. Set by
     /// `dismiss_all_overlays()` / `dismiss_all_except_hosts()` /

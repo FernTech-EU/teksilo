@@ -889,6 +889,7 @@ class Registry:
     module_to_file: dict[str, Path]  # lowercased file stem -> file
     type_display: dict[Path, list[str]]  # file -> all exported type names
     widget_display: dict[Path, list[str]]  # file -> just the widget type(s)
+    exported: set[str] = field(default_factory=set)  # names re-exported from lib.rs
 
 
 def _stem_to_camel(stem: str) -> str:
@@ -1068,6 +1069,7 @@ def build_registry() -> Registry:
         module_to_file=module_to_file,
         type_display=type_display,
         widget_display=widget_display,
+        exported=exported,
     )
 
 
@@ -1461,6 +1463,9 @@ def _catalog_keep_target(target: str) -> bool:
     return (
         t.startswith("#")
         or t.startswith("../api/")
+        # The page's own preview image, written next to it by
+        # `teksilo-widgets-previewer --export-docs`.
+        or t.startswith("img/")
         or t.startswith("mailto:")
         or "://" in t
     )
@@ -1633,6 +1638,50 @@ def patch_summary(summary_path: Path, block: str, begin: str, end: str) -> bool:
     return True
 
 
+def merge_submodule_items(reg: "Registry", pf: ParsedFile) -> ParsedFile:
+    """Fold a widget's submodule types into its own page.
+
+    A widget laid out as `foo.rs` + `foo/` keeps helpers in the directory, and
+    those files get no page of their own (they carry no `impl Widget`). But some
+    of what lives there is genuinely public API re-exported from `lib.rs` —
+    `segmented_control/id.rs`'s `SegmentId`, `tab_widget/id.rs`'s `TabId`. Those
+    belong on the parent widget's page rather than nowhere at all.
+
+    Only re-exported names are merged, so internal helpers stay out, and a type
+    the parent file already documents is never duplicated.
+    """
+    sub_dir = pf.file_path.parent / pf.file_path.stem
+    if not sub_dir.is_dir():
+        return pf
+
+    have = {item.name for item in pf.items}
+    extra: list[Item] = []
+    for sub in sorted(sub_dir.glob("*.rs")):
+        if sub.name in SKIP_FILES or _is_test_file(sub):
+            continue
+        # A submodule that earns its own page (it declares a re-exported
+        # `impl Widget` type, like `tab_widget/bar.rs`'s `TabBar`) is
+        # documented there — merging it here too would duplicate it.
+        if reg.widget_display.get(sub):
+            continue
+        sub_pf = parse_file(sub, sub.stem, reg.cfg_by_file.get(sub.resolve(), []))
+        for item in sub_pf.items:
+            if item.name in have or item.name not in reg.exported:
+                continue
+            have.add(item.name)
+            extra.append(item)
+
+    if not extra:
+        return pf
+    return ParsedFile(
+        module_name=pf.module_name,
+        file_path=pf.file_path,
+        header_doc=pf.header_doc,
+        cfg=pf.cfg,
+        items=pf.items + extra,
+    )
+
+
 def cmd_md_dir(
     reg: "Registry", md_dir: str, api_base: str, api_dir: "Path | None" = None
 ) -> int:
@@ -1645,7 +1694,9 @@ def cmd_md_dir(
     # and impl-split modules carry none, so they get no catalog page.
     target = [fp for fp in reg.files if reg.widget_display.get(fp)]
     parsed = [
-        parse_file(fp, fp.stem, reg.cfg_by_file.get(fp.resolve(), []))
+        merge_submodule_items(
+            reg, parse_file(fp, fp.stem, reg.cfg_by_file.get(fp.resolve(), []))
+        )
         for fp in target
     ]
     slugs = _build_slugs(parsed)

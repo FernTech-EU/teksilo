@@ -187,16 +187,25 @@ The unified `Widget` trait has a single `build(&mut self, ctx)` for composition,
 
 ### 5.1 The Slot System
 
-Standard widgets ship with named extension points — slots — at structural boundaries where extension is anticipated. A slot is an optional placeholder that takes zero space when empty and accommodates arbitrary widget content when filled. Slots are part of a widget's public API contract; standard composites in teksilo-widgets ship with `leading_slot`, `trailing_slot`, `header_slot`, `footer_slot` at positions where extension is commonly needed.
+Standard widgets ship with named extension points — slots — at structural boundaries where extension is anticipated. A slot is an optional placeholder that takes zero space when empty and accommodates arbitrary widget content when filled. Slots are part of a widget's public API contract; standard composites in teksilo-widgets ship them where extension is commonly needed: `leading_slot` / `trailing_slot` on `StandardListItem` and `Breadcrumb`, `bar_leading_slot` / `bar_trailing_slot` on `TabWidget`, `header` / `content` / `footer` on `Card`. A slot takes a built widget (or, in the `_id` twins, a `WidgetId`), not a factory closure.
 
 ```rust
-TabWidget::new()
-    .tab("Chapter 1", || chapter_editor(1))
-    .trailing_slot(|ctx| {
+// `selected` is a Signal<Option<TabId>>; it stays None until the first tab is added.
+TabWidget::new(selected)
+    .tab(tr!(chapter_one()), chapter_editor(1))
+    .bar_trailing_slot(
         HStack::new()
-            .child(Button::icon_only(Icon::Plus).on_activate_fn(|ctx| ctx.send_intent(AppIntent::AddChapter)))
-            .child(Button::icon_only(Icon::ChevronDown).on_activate_fn(|ctx| ctx.send_intent(AppIntent::OpenChapterMenu)))
-    })
+            .child(
+                IconButton::new(IconWidget::from_svg_icon(plus))
+                    .tooltip(tr!(add_chapter()))
+                    .on_activate_fn(|ctx| ctx.send_intent(AppIntent::AddChapter)),
+            )
+            .child(
+                IconButton::new(IconWidget::from_svg_icon(chevron_down))
+                    .tooltip(tr!(chapter_menu()))
+                    .on_activate_fn(|ctx| ctx.send_intent(AppIntent::OpenChapterMenu)),
+            ),
+    )
 ```
 
 ---

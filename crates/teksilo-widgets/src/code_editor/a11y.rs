@@ -25,8 +25,10 @@
 //!   stored as `u8`, so a run longer than 255 characters silently loses every
 //!   word boundary past 255 — real for long log lines. Such a run is split into
 //!   linked ≤255-character runs, each with its own valid word starts.
-//! - **Numbers the lines.** Each paragraph carries `position_in_set` /
-//!   `size_of_set` ("line 42 of 200").
+//! - **Numbers the lines.** Each paragraph carries `position_in_set`, and the
+//!   body's own node carries the matching `size_of_set`. That is the split
+//!   `set_child_position_in_set` writes, because AccessKit resolves a set size
+//!   by walking up from the item; together they read "line 42 of 200".
 
 use std::collections::HashMap;
 

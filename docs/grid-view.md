@@ -193,9 +193,12 @@ The container emits `Role::Grid` with the **logical** `row_count` /
 `column_count` (not the realized window), `multiselectable` in Multi mode,
 `active_descendant` pointing at the focused tile (roving focus), and a
 `Live::Polite` selection-count value. Each tile is wrapped in `Role::GridCell`
-with 1-based `row_index` / `column_index` + `pos_in_set` / `size_of_set`.
-Section headers are `Role::RowHeader`. Screen readers announce "row R, column
-C — N of M" and the selection count.
+with 1-based `row_index` / `column_index` and its own 1-based
+`position_in_set`; the total (`size_of_set`) sits on the `Role::Grid`
+container beside the row and column counts, because AccessKit resolves an
+item's set size by walking *up* from it. Section headers are
+`Role::RowHeader`. Screen readers announce "row R, column C — N of M" and the
+selection count.
 
 `.tile_a11y_label(|index| String)` sets each `GridCell`'s accessible **name**
 (e.g. `"Title, Type"`) so a screen reader announces a concise item name in

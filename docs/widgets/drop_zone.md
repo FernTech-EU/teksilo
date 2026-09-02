@@ -25,8 +25,10 @@ DropZone::new(tr!("drop_images_here"))
 External drops are delivered through the framework's normal drag pipeline
 (`on_drag_hover` / `on_drag_leave` / `on_drop`) once
 [`install_external_dnd`](https://docs.rs/teksilo-app) is wired and a backend
-is available; on platforms with no backend (e.g. X11) the Browse button
-keeps the zone fully usable.
+is available. All four desktop backends are real (OLE on Windows,
+`NSDraggingDestination` on macOS, `wl_data_device` on Wayland, XDND on X11
+— see `teksilo-platform/src/external_dnd.rs`), so the Browse button is the
+keyboard route rather than a fallback for a platform that cannot drop.
 
 # Styling
 

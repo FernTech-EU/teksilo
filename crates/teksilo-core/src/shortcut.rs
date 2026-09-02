@@ -14,10 +14,13 @@
 //!   defaults (refreshed every build) plus persisted user overrides.
 //!   The effective view merges them.
 //!
-//! Dispatch (wired in a later step): a keystroke is looked up in the
-//! registry, the matching shortcut's `on_activate` produces an intent,
-//! and the framework walks **source-widget → root** invoking
-//! [`Action`](crate::action::Action) handlers along the way.
+//! Dispatch: a keystroke is looked up in the registry, the matching
+//! shortcut's `on_activate` produces an intent, and the framework walks
+//! **source-widget → root** invoking [`Action`](crate::action::Action)
+//! handlers along the way. When several bindings share a chord, the one
+//! whose scope covers the current focus is selected first, so a `Scoped`
+//! binding outside the focused subtree never shadows an applicable
+//! `Global` one.
 
 use crate::event::{Key, Modifiers};
 use crate::intent::Intent;

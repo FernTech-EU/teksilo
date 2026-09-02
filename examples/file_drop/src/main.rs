@@ -23,8 +23,10 @@
 //! `String` on drop — even after the payload was dragged out to the OS and back
 //! (the framework's typed re-entry, which is what enables cross-window DnD).
 //!
-//! Run with: `cargo run -p file-drop`. (External OS drops are live on macOS /
-//! Windows / Wayland; on X11 the Browse button is the path.)
+//! Run with: `cargo run -p file-drop`. (External OS drops are live on every
+//! desktop target: OLE on Windows, `NSDraggingDestination` on macOS,
+//! `wl_data_device` on Wayland, XDND on X11. The Browse button stays as the
+//! keyboard route.)
 
 use teksilo::core::drag_payload::{DragPayload, DropOutcome};
 use teksilo::core::gesture::DragPhase;

@@ -248,25 +248,26 @@ For state-dependent colors (hover, pressed, focus, disabled), emit a `Signal<Rol
 ### Template — `Button` (canonical example)
 
 ```rust
-fn resolve_bg_role(style: ButtonVariant, state: InteractionState) -> SurfaceRole {
-    match (style, state) {
-        (ButtonVariant::Default, InteractionState::Hovered) => SurfaceRole::AccentHover,
-        (ButtonVariant::Default, InteractionState::Pressed) => SurfaceRole::AccentPressed,
-        (ButtonVariant::Default, _)                          => SurfaceRole::Accent,
-        (ButtonVariant::Flat,    InteractionState::Hovered) => SurfaceRole::Hover,
-        (ButtonVariant::Flat,    _)                          => SurfaceRole::Transparent,
-        // ... Regular variant ...
+fn resolve_bg_role(variant: ButtonVariant, state: InteractionState) -> SurfaceRole {
+    match (variant, state) {
+        (ButtonVariant::Filled, InteractionState::Hovered) => SurfaceRole::AccentHover,
+        (ButtonVariant::Filled, InteractionState::Pressed) => SurfaceRole::AccentPressed,
+        (ButtonVariant::Filled, _)                         => SurfaceRole::Accent,
+        (ButtonVariant::Ghost,  InteractionState::Hovered) => SurfaceRole::Hover,
+        (ButtonVariant::Ghost,  _)                         => SurfaceRole::Transparent,
+        // ... Tinted / Outlined / Link / Destructive ...
+        _ => SurfaceRole::Transparent,   // Plain, the default variant
     }
 }
 
 impl Widget for Button {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let interaction = ctx.signal(InteractionState::Idle);
-        let style       = self.style;
+        let variant     = self.variant;
 
-        let bg_role     = interaction.map(move |s| resolve_bg_role(style, *s));
-        let text_role   = interaction.map(move |s| resolve_text_role(style, *s));
-        let border_role = interaction.map(move |s| resolve_border_role(style, *s));
+        let bg_role     = interaction.map(move |s| resolve_bg_role(variant, *s));
+        let text_role   = interaction.map(move |s| resolve_text_role(variant, *s));
+        let border_role = interaction.map(move |s| resolve_border_role(variant, *s));
 
         ctx.add(
             RectWidget::new()

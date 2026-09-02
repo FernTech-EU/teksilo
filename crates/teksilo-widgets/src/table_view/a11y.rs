@@ -115,11 +115,16 @@ impl Widget for CellA11y {
 }
 
 /// `TreeTableView`-flavoured row wrapper. Announces `Role::Row` and, in
-/// addition to the row index, declares `set_level` (1-based depth) and
-/// `set_expanded` when the row has children, plus `set_position_in_set` /
-/// `set_size_of_set` among the row's siblings — mirroring what
-/// `TreeView`'s `TreeItemWrapper` (`list_item_a11y.rs`) already announces,
-/// so a screen reader reads "item 2 of 5" the same way in both widgets.
+/// addition to the row index, declares `set_level` (1-based depth),
+/// `set_expanded` when the row has children, and `set_position_in_set`
+/// among the row's siblings, mirroring what `TreeView`'s `TreeItemWrapper`
+/// (`list_item_a11y.rs`) announces, so both widgets say which sibling a
+/// row is.
+///
+/// No `size_of_set` goes with it, here or on the container: AccessKit
+/// resolves a set size by walking up from the item, and a flattened tree has
+/// no per-branch node to hold one, so neither widget can say "of 5". The
+/// comment in `accessibility` below spells out what expressing it would cost.
 #[derive(Debug)]
 pub(crate) struct TreeRowA11y {
     child: WidgetId,
@@ -131,12 +136,9 @@ pub(crate) struct TreeRowA11y {
     selected: bool,
     /// 1-based position among this row's siblings (`TreeSource::sibling_pos`).
     position_in_set: usize,
-    /// Total sibling count at this row's level.
-    size_of_set: usize,
 }
 
 impl TreeRowA11y {
-    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         child: WidgetId,
         row_index_1based: usize,
@@ -144,7 +146,6 @@ impl TreeRowA11y {
         expanded: Option<bool>,
         selected: bool,
         position_in_set: usize,
-        size_of_set: usize,
     ) -> Self {
         Self {
             child,
@@ -153,7 +154,6 @@ impl TreeRowA11y {
             expanded,
             selected,
             position_in_set,
-            size_of_set,
         }
     }
 }

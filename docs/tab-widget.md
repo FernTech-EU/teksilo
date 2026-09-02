@@ -831,8 +831,13 @@ for horizontal and vertical bars without re-mapping.
   resolved title.
 - **Pinned tabs**: include `access_description("Pinned tab")` so screen
   readers distinguish them.
-- **Closable tabs**: advertise `accesskit::Action::Default` plus a
-  custom action with i18n name "Close" wired to `on_close`.
+- **Closable tabs**: the header advertises `accesskit::Action::Click`
+  (suppressed while the tab is disabled) and `accesskit::Action::Focus`.
+  Closing is reachable from the keyboard with <kbd>Delete</kbd> on the
+  focused header, and by pointer through the trailing close
+  `IconButton`, whose i18n tooltip doubles as its accessible name. That
+  button is deliberately non-focusable and hidden until the header is
+  hovered, so <kbd>Tab</kbd> walks between headers instead of into them.
 - **Reorderable tabs**: advertise custom actions "Move Left" and
   "Move Right" (or "Move Up" / "Move Down" on vertical bars), invoking
   the same reorder path drag-drop uses. AT users can't drag, so this is
@@ -851,7 +856,8 @@ publish for their own browser tabs.
 
 | Surface                     | Role                                    |
 |-----------------------------|-----------------------------------------|
-| bar backdrop + tab fills    | `tab_surface_role` (settable)           |
+| bar-strip backdrop          | `bar_background` (settable)             |
+| per-tab fill                | `tab_background` (settable)             |
 | label text — selected       | `selected_text_role` (settable)         |
 | label text — idle           | `idle_text_role` (settable)             |
 | label text — disabled       | `TextRole::Disabled` (always)           |
@@ -862,12 +868,15 @@ publish for their own browser tabs.
 | overflow popover surface    | `SurfaceRole::Raised`                   |
 | overflow popover border     | `BorderRole::Default`                   |
 
-`tab_surface_role` defaults to transparent and accepts any `Color`,
-`SurfaceRole`, or `Signal<Color>` (via [`ColorProp`]). When set, the
-bar paints it as a uniform backdrop covering the whole strip — leading
-slot, pinned strip, scroll arrows, headers row, overflow dropdown, and
-trailing slot all share the surface, so the bar reads as a single
-plane regardless of how the chrome is composed.
+Both default to transparent and accept any `Color`, `SurfaceRole`, or
+`Signal<Color>` (via [`ColorProp`]). `bar_background` paints the strip's
+backdrop: leading slot, pinned strip, scroll arrows, headers row,
+overflow dropdown, and trailing slot all share the surface, so the bar
+reads as a single plane regardless of how the chrome is composed.
+`tab_background` is the all-states shorthand for the tabs themselves;
+`selected_tab_background`, `hover_tab_background` and
+`idle_tab_background` override it for one state each and fall back to it
+when unset.
 
 `selected_text_role` defaults to `TextRole::Primary` (the Int UI
 editor-strip convention); `idle_text_role` defaults to
@@ -882,18 +891,20 @@ Static numbers are `pub const`s in
 - `TAB_EDITOR_HEIGHT` (default 50 dp) — height of horizontal bar tabs.
 - `TAB_TOOL_WINDOW_HEIGHT` (default 28 dp) — reserved for future
   tool-window tab variant; not currently consumed by vertical bars.
-- `TAB_UNDERLINE_ACTIVE` (default 3 dp) — thickness of the selection
+- `TAB_UNDERLINE_ACTIVE` (default 2 dp) — thickness of the selection
   indicator. The indicator's color comes from `theme.colors.accent`.
 
 The accent indicator paints at the **top edge** in horizontal bars and
-the **leading edge** in vertical bars. Tabs use a uniform surface
-across all states (`tab_surface_role`); selection is conveyed by the
-accent indicator and the label-color shift only — Int UI editor-strip
-convention.
+the **leading edge** in vertical bars. Out of the box tabs use a uniform
+surface across all states (`tab_background`, transparent unless you set
+it); selection is conveyed by the accent indicator and the label-color
+shift only, the Int UI editor-strip convention. Reach for the per-state
+backgrounds only when a design needs a filled selected tab.
 
 ```rust
 TabWidget::new(selected)
-    .tab_surface_role(SurfaceRole::Content)        // role-driven, theme-aware
+    .bar_background(SurfaceRole::Content)          // role-driven, theme-aware
+    .selected_tab_background(SurfaceRole::Raised)  // per-state tab fill (optional)
     .selected_text_role(TextRole::Primary)         // override the selected label color
     .idle_text_role(TextRole::Secondary);          // override the idle label color
 ```

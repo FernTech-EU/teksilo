@@ -27,7 +27,7 @@ directly.
 
 ```toml
 [dependencies]
-teksilo = "0.7"
+teksilo = "0.9"
 ```
 
 Then in code:
@@ -43,6 +43,9 @@ the widget set explicitly. (The prelude *does* bring the app-builder install-hoo
 `install_toast_default()`, `install_inspector_in_debug()`, … — and, with the default `toast`
 feature, the `Toast` notification types; `tr!` / `lit!` arrive only with the default `i18n`
 feature.)
+
+One widget escapes the flat re-export: `RichTextEditor`. The glob does not reach it, so
+import it by module path, `use teksilo::widgets::rich_text::RichTextEditor;`.
 
 ### Feature flags
 
@@ -63,7 +66,7 @@ and opt-outs:
 | `telemetry` | Privacy-respecting analytics wiring + `PrivacySettings` widget |
 | `fonts-cjk-sc` / `fonts-thai` / `fonts-all` / `system-emoji` | Extra bundled script fonts / runtime color-emoji fallback |
 
-For a Latin-only minimal build: `teksilo = { version = "0.7", default-features = false, features = ["widgets", "text", "clipboard"] }`. Note this drops the default `i18n` feature, so `tr!` / `lit!` and the `teksilo::i18n` module are **unavailable** — add `"i18n"` to the list if you use them.
+For a Latin-only minimal build: `teksilo = { version = "0.9", default-features = false, features = ["widgets", "text", "i18n", "clipboard"] }`. Keep `i18n` in the list whenever `widgets` is on: every labelled widget constructor takes `impl Into<LocalizedString>`, and `LocalizedString` has no `From<&str>`, so `tr!` / `lit!` / `localized` are the only way to build a label. Drop it and no widget label can be constructed at all. What `default-features = false` still buys you is the rest of the default set: the bundled Arabic and Hebrew fallback fonts, the inspector, the toast host, and the native file dialogs all go away.
 
 ## App entry point
 
@@ -92,9 +95,12 @@ See app-wide behavior (shortcuts, actions) below — it lives **inside the root 
 not on the builder.
 
 If you use persistence, add `.app_paths(...)` (or `.application(qualifier, org, app)`) and
-`.settings(SettingsBundle::new()...)`. **Builder-call order is irrelevant** — these methods
-just store config; the only rule is that `.app_paths`/`.application` must be set before
-`.run()` (it panics there if settings need a config dir and none was given).
+`.settings(SettingsBundle::new()...)`. **Call order is irrelevant for the plain config
+setters** (`.theme`, `.settings`, `.initial_window`, `.app_paths`/`.application`): they only
+store config, and `.run()` is where it panics if settings need a config dir and none was
+given. It is **not** irrelevant for install hooks that open files eagerly. `.install_toast_default()`
+resolves the configured `AppPaths` inside the call and panics on the spot, so
+`.app_paths`/`.application` has to come before it.
 
 ## The unified Widget trait
 
@@ -198,11 +204,11 @@ weight (default `0.0` = rigid). `Spacer` and `Expand` carry flex `1.0`.
 
 ```rust,ignore
 HStack::new()
-    .child(Expand::new().flex(1).child(panel_a))   // 1/3 of slack
-    .child(Expand::new().flex(2).child(panel_b))   // 2/3 of slack
+    .child(Expand::new().flex(1.0).child(panel_a))   // 1/3 of slack
+    .child(Expand::new().flex(2.0).child(panel_b))   // 2/3 of slack
 ```
 
-`Expand::new()` defaults to `flex(1)` and stretches its child; default basis is zero
+`Expand::new()` defaults to `flex(1.0)` and stretches its child; default basis is zero
 (CSS flex-basis: 0). Call `.respect_intrinsic()` to use the child's natural size as a
 floor. `.align_child(Alignment::X)` opts out of fill. `Center::new()` is **not** a
 synonym for `Expand::new().align_child(CENTER)`: a bare `Center` sizes to its child on an
@@ -406,6 +412,34 @@ With the `i18n` feature, `tr!(...)` strings stay locale-reactive in the AT tree.
 intentionally-untranslated AT strings use `lit!("…")` — a bare `&str` won't compile for
 these methods.
 
+### Announcing something that is not a widget's name
+
+`ctx.announce(msg)` speaks a message directly to the screen reader — a completed
+action, a new count, the result of an undo, a row that moved. Sighted users read
+those off the screen; a screen-reader user is told only what you say out loud.
+
+```rust,ignore
+ctx.announce(tr!(event_added(title = title.clone())));
+ctx.announce_with(tr!(save_failed()), Politeness::Assertive);   // interrupts
+```
+
+Available on `EventContext`, `BuildContext` and `WidgetTree`. Takes
+`impl Into<String>`, so `tr!(...)` works directly — deliberately not a
+`LocalizedString`, because an announcement is an *event*, not a label, and
+re-resolving it on a later language switch would re-speak it.
+
+**Do not build your own live region for this.** The framework owns two reserved
+AT nodes and cycles them in and out of the filtered tree, which is the only
+mechanism all three platforms agree announces: the AT-SPI adapter emits
+`ObjectEvent::Announcement` from `add_node` and nowhere else, so on Linux
+*editing a live region's label announces nothing at all*, while on Windows and
+macOS a repeated message needs the label to have changed. Two hand-rolled live
+regions inside this framework shipped mute for exactly this reason.
+
+**Do not pair it with a toast on the same path.** `Toast` is already a correct
+live region — a node that appears — so calling both says everything twice, and
+neither side can detect the other.
+
 ## Internationalization & formatting
 
 ```rust,ignore
@@ -431,7 +465,9 @@ atomic projection. Three shapes:
 - `SettingsStore` — dotted-key K/V for scalars. `store.signal::<T>(key, default)` or
   `store.signal_for(&KEY)` returns a cached `Signal<T>` (same key → same signal).
 - `SettingsFile<T>` — typed single-struct persistence with versioned migrations.
-- `PersistedListModel<T>` / `PersistedTreeModel<T>` — collections (fine for <1k items).
+- `PersistedListModel<T>` — flat keyed collections (fine for <1k items). There is no
+  persisted tree model: the `tree` sibling was deleted, see
+  `teksilo-settings/src/collection.rs:19`.
 
 Plus `MruList<T: MruEntry>` (recents) and `WindowStateService` (per-window geometry,
 auto save/restore when a `WindowConfig` has `.id(...)` and the bundle has
@@ -507,8 +543,10 @@ Import from `teksilo::widgets`. The main families:
   `TileLayout::{Row, Grid, Column, Vertical}` — the last is a compact fixed-height settings list),
   Toggle, Slider, ComboBox, SegmentedControl, ProgressBar, Spinner, Link, Badge, SpinBox, Avatar.
 - **Containers:** Panel, Card, Accordion, ToolBox, ScrollArea, ScrollBar, Splitter,
-  DockingLayout, TabWidget / TabBar, Dialog, Popover, Snackbar, GroupBox, Wizard,
-  Breadcrumb, MessageBox, DropZone, DropTarget, Toast.
+  DockingLayout, TabWidget / TabBar, Dialog, PopoverWidget (in practice one of the
+  `PopoverButton` / `PopoverIconButton` / `PopoverCustom` aliases; there is no bare
+  `Popover` type), Snackbar, GroupBox, Wizard, Breadcrumb, MessageBox, DropZone,
+  DropTarget, Toast.
 - **Menus:** MenuBar, MenuList, MenuItem (Plain/Check/Radio modes, `&`-mnemonics). Context
   menus are wired via `.context_menu(...)` builder methods / `ContextMenuFactory`, plus the
   declarative `MenuModel` (shared by the in-window bar and the native OS menu bar).
@@ -516,7 +554,9 @@ Import from `teksilo::widgets`. The main families:
 - **Data-driven:** ListView, TreeView, Repeater, GridView, TableView (multi-column,
   virtualized, sort/filter, drag-resize/reorder columns, pinned columns, keyboard nav, cell
   edit hooks), TreeTableView, StandardListItem, StandardTreeItem.
-- **Text:** TextInput, PasswordField (secure entry), RichTextEditor — call
+- **Text:** TextInput, PasswordField (secure entry), RichTextEditor. The last one is not
+  re-exported flat, so `teksilo::widgets::RichTextEditor` does not resolve; import it by its
+  module path, `use teksilo::widgets::rich_text::RichTextEditor;`. Call
   `RichTextEditor::read_only(doc)` for a read-only viewer (there is no separate
   `RichTextViewer` type; `RichTextEditor::editor(doc)` is the editable constructor).
 - **Rendering primitives:** RectWidget, TextWidget.
@@ -535,15 +575,29 @@ Teksilo repo, or use the framework's `tools/extract_widget_api.py` if you have t
 
 ## Toasts & notifications
 
-With the `toast` feature (default), one line wires the host + archive + bell glyph:
+With the `toast` feature (default), one line wires the host + archive + bell glyph. The
+default archive is **persistent**, so `.application(...)` (or `.app_paths(...)`) must come
+*first*: `install_toast_default()` resolves the configured `AppPaths` while it runs and
+panics on the spot if none is set, long before `.run()`.
 
 ```rust,ignore
 TeksiloAppBuilder::new()
+    .application("eu", "FernTech", "MyApp")   // MUST precede install_toast_default()
     .install_toast_default()
     /* ... */;
 
 // From any handler:
 ctx.show_toast(Toast::success(lit!("Saved")).action(ToastAction::new(lit!("Undo"), |c| c.send_intent(AppIntent::Undo))));
+```
+
+For tests and sandboxed builds with no config dir, install explicitly with an in-memory
+archive instead, and no `AppPaths` is needed:
+
+```rust,ignore
+.install_toast(ToastInstallOptions {
+    archive: Some(NotificationArchive::in_memory()),
+    ..Default::default()
+})
 ```
 
 Severities: `info`/`success`/`warning`/`error`/`loading`. Action constructors are
@@ -617,7 +671,7 @@ teksu!(ctx =>
 > — a **closure that fires the intent**, not `on_activate: AppIntent::Save`. Handlers are
 > always closures.
 
-**Named-slot widgets.** Card, Dialog, TabWidget, Popover, Snackbar, Accordion, Breadcrumb,
+**Named-slot widgets.** Card, Dialog, TabWidget, PopoverButton, Snackbar, Accordion, Breadcrumb,
 TitleBar (and friends) take content by **named slot**, not by bare child — a bare child there
 is a compile error that names the slot you meant:
 
@@ -792,5 +846,5 @@ assert loop. Full reference: `docs/automation-mcp.md` in the framework repo.
 ---
 
 *This guide is abridged from Teksilo's internal `CLAUDE.md` and targets app developers
-consuming `teksilo` 0.7. For framework internals, source layout, and implementation
+consuming `teksilo` 0.9. For framework internals, source layout, and implementation
 status, see the Teksilo repository's own docs (`docs/SUMMARY.md`) and `CLAUDE.md`.*

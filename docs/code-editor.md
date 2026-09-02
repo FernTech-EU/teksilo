@@ -170,8 +170,11 @@ to speak and navigate character by character, plus:
 - **Chunking of runs over 255 characters** into linked ≤255-char runs —
   `word_starts` are character indices stored as `u8`, so a long line would
   otherwise lose word navigation past character 255.
-- **Per-line `position_in_set` / `size_of_set`** ("line 42 of 200"), carried on
-  the line rather than announced from the gutter (which is hidden from AT).
+- **Per-line numbering** ("line 42 of 200"): each line carries its own
+  `position_in_set`, while the total (`size_of_set`) lands on the editor's own
+  node. AccessKit resolves a set size by walking *up* from the item, so a total
+  written on the line is read by no adapter on any platform. Neither number is
+  announced from the gutter, which is hidden from AT.
 
 Editable surfaces report `Role::MultilineTextInput` and advertise `SetValue` /
 `ReplaceSelectedText` / `SetTextSelection`; read-only ones report `Role::Document`

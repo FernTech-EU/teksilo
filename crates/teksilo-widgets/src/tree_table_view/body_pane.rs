@@ -489,13 +489,15 @@ impl<T: 'static> Widget for TreeBodyPane<T> {
             )
             .a11y_hidden();
             let row_inner_id = ctx.add(row_widget);
-            // `(pos_in_set_1based, set_size)` among this row's siblings — a
-            // loading row (no metadata resolved yet) reports (1, 1), the same
-            // "unknowable yet" fallback already used for depth/has_children.
-            let (position_in_set, size_of_set) = if loading {
-                (1, 1)
+            // 1-based position among this row's siblings. A loading row (no
+            // metadata resolved yet) reports 1, the same "unknowable yet"
+            // fallback already used for depth/has_children. `sibling_pos` also
+            // returns the sibling count, which nothing publishes: see
+            // `TreeRowA11y` for why a flattened tree writes no `size_of_set`.
+            let position_in_set = if loading {
+                1
             } else {
-                self.source.sibling_pos(flat_idx)
+                self.source.sibling_pos(flat_idx).0
             };
             let tree_row_id = ctx.add(TreeRowA11y::new(
                 row_inner_id,
@@ -508,7 +510,6 @@ impl<T: 'static> Widget for TreeBodyPane<T> {
                 },
                 row_selected,
                 position_in_set,
-                size_of_set,
             ));
             self.row_entries.push((flat_idx, tree_row_id));
 

@@ -506,7 +506,8 @@ impl MenuItem {
         }
     }
 
-    /// Set a custom submenu open delay (default: 200ms).
+    /// Set a custom submenu open delay (default: 400 ms, IntelliJ's value;
+    /// see `DEFAULT_SUBMENU_OPEN_DELAY` for what that delay also buys).
     pub fn submenu_delay(mut self, delay: Duration) -> Self {
         self.submenu_open_delay = delay;
         self

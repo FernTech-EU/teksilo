@@ -173,7 +173,7 @@ struct PaletteState {
     /// The result list's selection, mirroring [`Self::selected`].
     ///
     /// The highlight is `selected`; this exists so each realized row's
-    /// `Role::ListItem` reports `selected` truthfully. Without it every row
+    /// `Role::ListBoxOption` reports `selected` truthfully. Without it every row
     /// answered "not selected" and the arrow keys moved a highlight no
     /// assistive technology could observe. Owned by the state, not rebuilt per
     /// build, so a pointer click on a row can be routed back into `selected`.
@@ -490,7 +490,7 @@ impl Widget for CommandPalette {
                 },
             )
             .item_height(ROW_HEIGHT)
-            // Makes each row's `Role::ListItem` report `selected` truthfully.
+            // Makes each row's `Role::ListBoxOption` report `selected` truthfully.
             .selection(self.state.selection.clone());
             // Take the realized-row map before the view moves into the tree.
             let row_ids = list.realized_row_ids();

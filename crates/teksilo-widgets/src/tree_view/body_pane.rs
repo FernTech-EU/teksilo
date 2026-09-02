@@ -251,23 +251,24 @@ impl<T: 'static> Widget for TreeViewBodyPane<T> {
                 if let Some(tip) = pending_tip.into_inner() {
                     self.row_tooltips.attach_resolved(ctx, inner_id, tip);
                 }
-                let (level, position_1based, total_siblings, expanded_opt) =
-                    if let Some(ref m) = meta {
-                        let exp = if m.has_children {
-                            Some(m.is_expanded)
-                        } else {
-                            None
-                        };
-                        let (pos, total) = self.source.sibling_pos(i);
-                        (m.depth + 1, pos, total, exp)
+                // `sibling_pos` also returns the sibling count, which nothing
+                // publishes: a flattened tree has no per-branch container node
+                // for AccessKit to read a `size_of_set` from, so the wrapper
+                // takes only the position (see `TreeItemWrapper`).
+                let (level, position_1based, expanded_opt) = if let Some(ref m) = meta {
+                    let exp = if m.has_children {
+                        Some(m.is_expanded)
                     } else {
-                        (1, 1, 1, None)
+                        None
                     };
+                    (m.depth + 1, self.source.sibling_pos(i).0, exp)
+                } else {
+                    (1, 1, None)
+                };
                 let child_id = ctx.add(crate::list_item_a11y::TreeItemWrapper::new(
                     inner_id,
                     level,
                     position_1based,
-                    total_siblings,
                     expanded_opt,
                     selected,
                 ));

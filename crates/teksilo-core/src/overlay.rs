@@ -236,10 +236,14 @@ pub(crate) struct ActiveOverlay {
     /// exactly once when the overlay is removed from the stack,
     /// regardless of dismiss path.
     pub on_dismiss: Option<OverlayDismissCallback>,
-    /// Optional fade-in / fade-out state. Configured post-show via
-    /// `OverlayManager::set_fade`. When `Some`, all dismiss paths
-    /// (auto, escape, click-outside, pointer-leave, manual) defer
-    /// the actual removal until the fade-out tween completes.
+    /// Optional fade-in / fade-out state. Installed post-show by the
+    /// crate-internal `OverlayManager::attach_fade`, which
+    /// `WidgetTree::attach_overlay_fade` calls whenever the show
+    /// request carried a `fade_duration`; read back from outside
+    /// through [`OverlayManager::fade_duration`]. When `Some`, all
+    /// dismiss paths (auto, escape, click-outside, pointer-leave,
+    /// manual) defer the actual removal until the fade-out tween
+    /// completes.
     pub fade: Option<OverlayFadeState>,
 }
 

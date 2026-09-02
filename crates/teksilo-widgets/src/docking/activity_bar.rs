@@ -982,7 +982,9 @@ enum RailNav {
 
 /// Count of rail tabs currently in the AT tree = items whose visible position
 /// is below the live `visible_count` (overflowed items are dormant). Drives
-/// `size_of_set` on each `Role::Tab`.
+/// `size_of_set` on the rail's `Role::TabList` container, never on a
+/// `Role::Tab`: AccessKit resolves an item's set size by walking up from its
+/// parent, so a count written on the item is read by no adapter.
 fn shown_rail_count(item_ids: &RailItemIds, visible_count: &Signal<usize>) -> usize {
     let count = visible_count.get();
     item_ids.borrow().iter().filter(|(p, _)| *p < count).count()
@@ -1023,7 +1025,8 @@ fn rail_focus_target(
 
 /// Count of overflow rows currently shown in the popover = items whose visible
 /// position is at or above the live `visible_count` (the parked ones). Drives
-/// `size_of_set` on each overflow `Role::MenuItem`.
+/// `size_of_set` on the popover's own `Role::Menu` node, not on each
+/// `Role::MenuItem`: AccessKit reads a set size from the container.
 fn overflow_shown_count(row_ids: &RailItemIds, visible_count: &Signal<usize>) -> usize {
     let count = visible_count.get();
     row_ids.borrow().iter().filter(|(p, _)| *p >= count).count()

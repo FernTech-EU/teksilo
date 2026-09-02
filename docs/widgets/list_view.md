@@ -30,10 +30,23 @@ viewport stays put while estimates converge).
 
 ## Accessibility
 
-The widget is `Role::List`; each row is wrapped in `Role::ListItem` with
-`set_selected` state. Full keyboard navigation: arrows, Home, End, PageUp,
-PageDown, Space (select/toggle), Enter (activate), Ctrl+A (select all),
-Shift+Arrow (range), type-ahead (opt-in via `type_ahead_label`).
+The widget is `Role::ListBox`; each row is wrapped in
+`Role::ListBoxOption` with `set_selected` state. Those are the interactive
+ARIA roles — `listbox` / `option` — not the static `list` / `listitem` pair,
+because this widget has keyboard navigation and selection.
+
+Each row publishes its 1-based `position_in_set` **in the model**, and the
+container publishes the model's length as `size_of_set`, so a screen reader
+says "row 147 of 200" rather than counting the realized window. The count
+sits on the container because AccessKit resolves an item's set size by
+walking up from it, unlike ARIA's per-item `aria-setsize`.
+
+The container is the focusable node and rows deliberately are not, so
+`set_selected` is the only signal telling assistive technology which row is
+current. Full keyboard navigation: arrows, Home, End, PageUp, PageDown,
+Space (select/toggle), Enter (activate), Ctrl+A (select all), Shift+Arrow
+(range), type-ahead (opt-in via `type_ahead_label`), and Shift+F10 or the
+Menu key for the selected row's context menu.
 
 ```rust
 # use teksilo_widgets::ListView;
@@ -157,7 +170,7 @@ with `from_source_keyed` instead.
 A shared handle to the live `(model index → row node id)` map of the
 **realized** rows, rewritten at the end of every build.
 
-The id is the row's `Role::ListItem` wrapper — the node an
+The id is the row's `Role::ListBoxOption` wrapper — the node an
 `active_descendant` has to point at. Take the handle before moving the
 view into the tree; it is populated on the first build.
 

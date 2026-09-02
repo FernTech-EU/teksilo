@@ -4,7 +4,8 @@
 //! Drag & Drop tab — DropZone (standalone target) + DropTarget
 //! (wrapping container). Cannibalized from the `file-drop` example.
 //! OS file drops are live once `install_external_dnd()` is wired (it
-//! is, in main.rs). On X11 the keyboard Browse fallback is the path.
+//! is, in main.rs), on X11 as well as on Wayland, Windows and macOS.
+//! The Browse button is the keyboard route.
 
 use teksilo::prelude::*;
 use teksilo::widgets::{

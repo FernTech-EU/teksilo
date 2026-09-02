@@ -291,7 +291,7 @@ view.set_pan(target);     view.pan_to(target, duration);
 view.set_zoom(target);    view.zoom_to(target, duration);
 view.set_rotation(rad);   view.rotate_to(rad, duration);
 view.ensure_visible(scene_rect, margin);   // pan-only fit
-view.fit_to_content();    view.center_on(scene_pt);
+view.fit_to_content();    view.fit_to_items(&ids);    view.fit_to_selection();
 ```
 
 State persistence:

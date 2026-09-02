@@ -253,8 +253,8 @@ through a transform of your own, guard your own edge the same way.
 ### `SortFilterListModel<T>` vs raw signals
 
 The minimum the widget needs is the four signals above; you can apply
-sort and filter manually inside `on_sort_changed` / `on_filters_changed`
-observers. **Don't.** Use the proxy:
+sort and filter manually in your own `observe` on `sort_signal` /
+`filters_signal`. **Don't.** Use the proxy:
 
 ```rust
 let proxy = SortFilterListModel::new(model)
@@ -377,7 +377,7 @@ swap. Wire it in three lines:
 ```rust
 let table = TableView::from_source(proxy)
     // ...
-    .edit_trigger(EditTrigger::F2OrTypeOrDoubleClick)   // default
+    .edit_triggers(EditTriggers::default())            // F2 | ANY_KEY | DOUBLE_CLICK
     .on_cell_edit_request(|row, col_id, ctx| {
         // open your editor: a TextInputField bound to the row's value,
         // a date picker, a colour picker, …
@@ -393,19 +393,32 @@ let column = Column::new("amount", "Amount", move |row, ctx| {
 });
 ```
 
-`EditTrigger` selects which gestures begin an edit:
+`EditTriggers` selects which gestures begin an edit. It is a **bitflag
+set**, not a closed enum: compose the flags you want with `|`.
 
-| Variant                  | F2 | Type | Double-click |
-|--------------------------|:--:|:----:|:------------:|
-| `F2`                     | ✔  |      |              |
-| `F2OrType`               | ✔  | ✔    |              |
-| `DoubleClick`            |    |      | ✔            |
-| `F2OrTypeOrDoubleClick`  | ✔  | ✔    | ✔            |
-| `None`                   |    |      |              |
+| Flag                          | Gesture                                                     |
+|-------------------------------|-------------------------------------------------------------|
+| `EditTriggers::NONE`          | nothing the view does opens an editor                       |
+| `EditTriggers::F2`            | F2 on the focused cell                                      |
+| `EditTriggers::ANY_KEY`       | any printable character typed on the focused cell           |
+| `EditTriggers::SINGLE_CLICK`  | one click on the cell; claims the press, so it no longer selects the row |
+| `EditTriggers::DOUBLE_CLICK`  | double-click on the cell; takes the gesture from row activation on that column only |
+| `EditTriggers::ALL`           | every flag at once                                          |
 
-`F2OrTypeOrDoubleClick` is the default (Excel-like). `editing_cell_signal`
-is the source of truth for "which cell is in edit mode"; `begin_edit`
-and `end_edit` give you imperative control.
+```rust
+.edit_triggers(EditTriggers::F2 | EditTriggers::SINGLE_CLICK)
+```
+
+`EditTriggers::default()` is `F2 | ANY_KEY | DOUBLE_CLICK` (Excel-like).
+Set it per view with `TableView::edit_triggers` / `TreeTableView::edit_triggers`,
+or per column with `Column::edit_triggers`, which wins where a column sets one.
+Only cells of a `Column::editable` column ever open an editor, whatever the
+triggers say. Note that `ANY_KEY` does **not** deliver the opening keystroke
+into the editor (the editor does not exist until the next build), so it reads
+as "F2 with an extra key" and it shadows type-ahead on every editable column.
+
+`editing_cell_signal` is the source of truth for "which cell is in edit mode";
+`begin_edit` and `end_edit` give you imperative control.
 
 Escape ends the edit (the framework's keyboard handler reads
 `editing_cell_signal` and clears it before falling back to the focus
@@ -426,7 +439,7 @@ clear behaviour).
 | Space                       | toggle selection at focus                                                             |
 | Enter                       | invoke `on_row_activate` (or fall back to toggle-select)                              |
 | Ctrl-A                      | select all rows / cells in multi modes                                                |
-| F2 / typing                 | begin edit (gated by `EditTrigger`)                                                   |
+| F2 / typing                 | begin edit (gated by `EditTriggers`)                                                  |
 | Escape                      | end edit if any, else clear focus                                                     |
 | ArrowLeft on tree column    | collapse the row when expanded (TreeTableView)                                            |
 | ArrowRight on tree column   | expand the row when collapsed and has children (TreeTableView)                            |
@@ -601,9 +614,9 @@ header drag-reorder (with cross-pane re-pinning), pinned columns
 popover with reset, `MultiRow` / `MultiCell` selection with shift +
 ctrl semantics, full keyboard nav with focus ring, edit hooks via
 `editing_cell_signal` + `on_cell_edit_request`, row drag-drop reorder
-on `TableView`, tree expand/collapse via twist + `ArrowLeft/Right`,
-tree filter modes, `Role::Table` / `TreeGrid` accessibility with row
-indices and sort direction.
+on `TableView` and `TreeTableView`, tree expand/collapse via twist +
+`ArrowLeft/Right`, tree filter modes, `Role::Table` / `TreeGrid`
+accessibility with row indices and sort direction.
 
 **Intentionally not shipped:**
 
@@ -613,9 +626,7 @@ indices and sort direction.
 - formula evaluation / computed cells,
 - multi-row column-group headers,
 - footer / summary rows (compose a `StatusBar` below the table),
-- in-table filter chip bar,
-- TreeTableView row drag-drop (insertion-vs-reparent UX needs its own
-  design).
+- in-table filter chip bar.
 
 **Deltas you may notice:** `Column::header_override` is stored on
 the column but the default header rendering ignores it for now;

@@ -304,7 +304,6 @@ impl<T: 'static> Widget for GridBodyPane<T> {
                 row + 1,
                 col + 1,
                 i + 1,
-                total,
                 selected,
                 a11y_name,
             ));

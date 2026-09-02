@@ -105,7 +105,7 @@ horizontal slack from siblings — width stays at child intrinsic.
 
 #### `pub fn flex(mut self, flex: f32) -> Self`
 
-Override the flex weight reported to a parent stack. `flex(0)` opts
+Override the flex weight reported to a parent stack. `flex(0.0)` opts
 out of slack distribution (the wrapper still claims any offered
 proposal, useful inside non-stack containers). Default: `1.0`.
 

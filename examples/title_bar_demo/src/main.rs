@@ -15,10 +15,11 @@
 //!   - Hover the very edge (6 px) of the window — the cursor should
 //!     change to a row / column resize cursor — and drag to resize.
 //!
-//! On platforms whose host backend is still a stub (Windows, macOS) or
-//! that don't support custom chrome at all (X11), `tree.title_bar_host()`
-//! returns `None` and the demo falls back to a plain content view with no
-//! title bar.
+//! Windows, macOS and Wayland all have real host backends, and X11 is
+//! supported whenever the window manager implements `_NET_WM_MOVERESIZE`.
+//! When no backend can serve the window, `tree.title_bar_host()` returns
+//! `None` and the demo falls back to a plain content view with no title
+//! bar.
 
 use teksilo::prelude::*;
 use teksilo::widgets::{
@@ -117,9 +118,10 @@ fn main() {
                     // `needs_custom_resize_handles()` returns false and we skip
                     // the overlay — otherwise our strips would fight the OS.
                     //
-                    // On platforms where the host is None (X11, unsupported
-                    // Unix) the frame can't be created either; we just return
-                    // the inner content uncovered.
+                    // When no host could be created (an X11 window manager
+                    // without `_NET_WM_MOVERESIZE`, or a display handle that is
+                    // neither X11 nor Wayland) the frame can't be created
+                    // either; we just return the inner content uncovered.
                     let frame_or_inner = match tree.title_bar_host() {
                         Some(host) if host.needs_custom_resize_handles() => {
                             tree.add(WindowFrame::new(host).thickness(6.0).content_id(inner))

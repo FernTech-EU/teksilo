@@ -180,10 +180,16 @@ pub enum OwnedPropValue {
 
 // --- IntentSource ---------------------------------------------------
 
-/// Where an intent came from. Reserved for future use; all dispatch
-/// sites currently emit `IntentSource::Unknown` because the dispatch
-/// path doesn't yet propagate origin information. Plumbing through the
-/// real source is not yet implemented.
+/// Where an intent came from. [`Intent::new`](crate::Intent::new) starts
+/// every intent at `Programmatic`, and the framework's activation paths
+/// override it before dispatch: `Shortcut` when a chord match produces the
+/// intent, `Handler` for anything raised from inside a gesture handler
+/// (button taps included), `Accessibility` for an AccessKit action, and
+/// `Menu` for a handler that wrapped itself in
+/// [`EventContext::with_intent_source`](crate::EventContext::with_intent_source).
+/// Read by the dispatch tap to fill the `source` prop on
+/// `intent.dispatched`. `Unknown` is left for callers that have no origin
+/// to report; no framework dispatch site emits it.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum IntentSource {
     Shortcut,

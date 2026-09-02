@@ -40,9 +40,13 @@
 //!
 //! # Accessibility
 //!
-//! - Container — `Role::Grid` with `set_label("Calendar, May 2026")`
-//!   (localized). Single-mode also sets `set_value` to the current ISO
-//!   selection or empty; range mode sets `"start – end"`.
+//! - Container — `Role::Grid` with `set_name("Calendar, May 2026")`
+//!   (localized) and `set_live(Live::Polite)`, so every `set_value`
+//!   change is announced. That value always carries the
+//!   keyboard-focused day as `YYYY-MM-DD`, with `(selected: …)`
+//!   appended when a selection exists; a range renders as
+//!   `YYYY-MM-DD to YYYY-MM-DD`, ASCII " to " rather than an
+//!   en-dash because some screen readers skip U+2013.
 //! - Header arrow buttons — `Role::Button` with localized labels
 //!   ("Previous month", "Next month") and `Action::Click` advertised.
 //! - Header month/year label — `Role::Button` (clickable to open the

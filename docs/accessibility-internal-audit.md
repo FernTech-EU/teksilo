@@ -65,9 +65,9 @@ later — produces three findings that matter more than any individual criterion
    live Level-A defects (findings 1–4 below); all four have since been fixed, and
    §§5.1, 5.2, 5.4 and 5.10 record what was done and what was left.
 
-**Newly identified, ranked by severity.** Findings 1–4 were remediated after this
-revision was written; each is struck through here and its section below records
-what was done, what was verified, and what was *not*. Findings 5–9 stand.
+**Newly identified, ranked by severity.** Findings 1–4 and 6 were remediated after
+this revision was written; each is struck through here and its section below records
+what was done, what was verified, and what was *not*. Findings 5 and 7–9 stand.
 
 | # | Finding | Criterion | Severity |
 |---|---|---|---|
@@ -76,7 +76,7 @@ what was done, what was verified, and what was *not*. Findings 5–9 stand.
 | 3 | ~~`CommandPalette` exposes an unnamed `Role::Dialog` with an AT-invisible highlight~~ | 4.1.2 (A), 1.4.1 (A) | **Fixed** — see §5.4 |
 | 4 | ~~`WebView` is never `.focusable()`~~ | 2.1.1 (A) | **Fixed** — see §5.10 |
 | 5 | `Toast` auto-dismisses actionable controls after 10 s, pausable by pointer hover only — never by keyboard focus | 2.2.1 (A), 2.2.2 (A) | Partial |
-| 6 | No keyboard route to any context menu exists (no `Key::ContextMenu`, no Shift+F10) | 2.1.1 (A) | Partial |
+| 6 | ~~No keyboard route to any context menu exists~~ | 2.1.1 (A) | **Fixed** (see §5.8) |
 | 7 | `teksilo-theme-material3` ships with zero contrast assertions | 1.4.3, 1.4.11 (AA) | Untested |
 | 8 | `for_high_contrast()` substitutes IntUI teal into whichever preset is active | EN 11.7(a) | Partial |
 | 9 | No per-run language: `set_language` is emitted once, on the root node | 3.1.2 (AA) | **Fail** |
@@ -134,7 +134,7 @@ The rightmost column records what the previous revision got wrong about each.
 | G7 | EN 11.5.2.9 — text run attributes reach AT | `TextRunAttributes` at [accessibility.rs:178-187](../crates/teksilo-core/src/accessibility.rs); rich-text walk in [rich_text.rs](../crates/teksilo-widgets/src/rich_text.rs) | Line drift (~+1900 lines in `rich_text.rs`). The struct gained `font_weight` since; still **no colour and no language** — see §5.9 |
 | G8 | 3.3.2 Labels — `FormLayout` wires `access_labelled_by` | [form_layout.rs:210-219](../crates/teksilo-widgets/src/primitives/form_layout.rs); test `line_wires_field_labelled_by_label` | **Accurate as written** |
 | G9 | 1.3.1 / 3.3.2 — DateEdit collapses its redundant middle node | [date_edit.rs](../crates/teksilo-widgets/src/date_edit.rs); test `date_edit_collapses_middle_container_node` | Line drift only |
-| G10 | 1.3.5 Input purpose → specialised AT roles | `InputPurpose` at [text_input_field.rs:120-149](../crates/teksilo-widgets/src/primitives/text_input_field.rs) | Line drift, **and the stated blocker is wrong** — see §5.8 |
+| G10 | 1.3.5 Input purpose → specialised AT roles | `InputPurpose` at [text_input_field.rs:120-149](../crates/teksilo-widgets/src/primitives/text_input_field.rs) | Line drift, **and the stated blocker is wrong** — see §5.14 |
 | G12 | 1.4.13 Content on hover or focus | No-dismiss-on-anchor-leave at [overlay_impl.rs:1615-1645](../crates/teksilo-core/src/widget_tree/overlay_impl.rs); 100 ms grace at `:486-494`; bounds check at [widget_tree.rs:1029-1055](../crates/teksilo-core/src/widget_tree.rs) | **The verdict was wrong when written.** G12 closed *hoverable*; *dismissible* and *persistent* were both still broken and were fixed a month later by `55eb6de4` — see §7 |
 | G13 | 1.4.1 / 1.4.11 + high contrast | `for_high_contrast()` at [theme.rs:230-259](../crates/teksilo-tokens/src/theme.rs); OS re-query in [window_manager.rs](../crates/teksilo-app/src/window_manager.rs); list/tree selection boundary at [recipe_standard_item_style.rs:133-166](../crates/teksilo-widgets/src/styles/recipe_standard_item_style.rs) | Line drift. **New problem:** `for_high_contrast()` hardcodes IntUI hexes and is applied to whatever preset is active — see §5.6 |
 | G14 | 3.2.1 On focus — debug warning for context change | [focus_impl.rs](../crates/teksilo-core/src/widget_tree/focus_impl.rs), [event_context.rs](../crates/teksilo-core/src/widget/event_context.rs) | Line drift only |
@@ -164,7 +164,7 @@ Legend: ✅ supported · 🟡 partial · ❌ not supported · ➖ not applicable
 | 1.3.2 Meaningful Sequence | A | framework | ✅ | G17. Second independent proof point: `ColumnFlow` re-partitions across a width-dependent column count but keeps children as contiguous source-order runs, so visual order == AT order == focus order at every count ([column_flow.rs:47-53](../crates/teksilo-widgets/src/primitives/column_flow.rs)) |
 | 1.3.3 Sensory Characteristics | A | framework-enabled | ✅ | No shipped instructional copy relies on shape or position alone |
 | 1.3.4 Orientation | AA | — | ➖ | Desktop, freely resizable windows; no orientation lock |
-| 1.3.5 Identify Input Purpose | AA | framework | 🟡 | Role half done ([text_input_field.rs:120-149](../crates/teksilo-widgets/src/primitives/text_input_field.rs)). The autofill-token half is unreachable — but **not for the reason previously given**: AccessKit 0.24.1 *does* have an `AutoComplete` field; it carries the ARIA `aria-autocomplete` behaviour vocabulary (`Inline`/`List`/`Both`), not the HTML autofill tokens. Only the previous revision of *this* file garbled that — [`docs/a11y/a11y_issues.md`](a11y/a11y_issues.md) and the source comment at `text_input_field.rs:113-118` both draw the distinction correctly |
+| 1.3.5 Identify Input Purpose | AA | framework | 🟡 | Role half done ([text_input_field.rs:120-149](../crates/teksilo-widgets/src/primitives/text_input_field.rs)). The autofill-token half is unreachable — but **not for the reason previously given**: AccessKit *does* have an `AutoComplete` field (still true at 0.25.0, `lib.rs:563`); it carries the ARIA `aria-autocomplete` behaviour vocabulary (`Inline`/`List`/`Both`), not the HTML autofill tokens. Only the previous revision of *this* file garbled that — [`docs/a11y/a11y_issues.md`](a11y/a11y_issues.md) and the source comment at `text_input_field.rs:113-118` both draw the distinction correctly |
 | 1.4.1 Use of Color | A | framework | 🟡 | **Was three colour-only sites; one remains.** (a) *Fixed* — chart series carry a non-colour channel (`SeriesPattern`: dash / marker / hatch, rendered in the plot **and** the legend swatch), which also breaks the palette's modulo wrap (§5.2). (b) *Fixed* — `CommandPalette`'s highlight gained a leading marker bar beside the tint (§5.4). (c) **Still open:** TableView/TreeTableView selection band remains a flat fill (§5.3). List/tree rows *were* fixed (G13) |
 | 1.4.2 Audio Control | A | — | ➖ | No auto-playing audio. The terminal bell is visual-only (`BellStyle::{Visual,None}`) — but see 2.3.1 |
 | 1.4.3 Contrast (Minimum) | AA | framework | 🟡 | Formula at [color.rs:261-283](../crates/teksilo-tokens/src/color.rs). CI-gated for IntUI ([theme.rs:844-887](../crates/teksilo-tokens/src/theme.rs)); Fluent self-gates with 14 assertions using an alpha-compositing-aware helper ([color.rs:259-264, :334-402](../crates/teksilo-theme-fluent/src/color.rs)); macOS self-gates with ~43. **Material 3 has zero contrast assertions** — its tokens measure fine today but nothing holds them there |
@@ -179,7 +179,7 @@ Legend: ✅ supported · 🟡 partial · ❌ not supported · ➖ not applicable
 
 | Criterion | Lvl | Resp. | Status | Evidence / note |
 |---|---|---|---|---|
-| 2.1.1 Keyboard | A | framework | 🟡 | Real DFS Tab order + roving tabindex. Strong coverage: Splitter (arrows/Home/End/Enter, [handle.rs:489, :519-528](../crates/teksilo-widgets/src/splitter/handle.rs)), GridView (full 2D nav + Alt+Arrow reorder), SegmentedControl, CommandPalette, table cell navigation (added `15837b69`/`79b916f3`), scene magnetism connect flow. `WebView` **was** never `.focusable()`; it is now in the Tab cycle, with Enter entering the page (§5.10 — leaving an entered page stays outside the toolkit's control). **Two gaps remain:** no `Key::ContextMenu`/Shift+F10 exists anywhere, so every `.context_menu(..)` is pointer- or AT-only; docking's `split_into_tab`/`stack_into_tab` drop zones have no menu equivalent. Charts are also unreachable — no `focusable`/`on_key` outside the legend |
+| 2.1.1 Keyboard | A | framework | 🟡 | Real DFS Tab order + roving tabindex. Strong coverage: Splitter (arrows/Home/End/Enter, [handle.rs:489, :519-528](../crates/teksilo-widgets/src/splitter/handle.rs)), GridView (full 2D nav + Alt+Arrow reorder), SegmentedControl, CommandPalette, table cell navigation (added `15837b69`/`79b916f3`), scene magnetism connect flow. `WebView` **was** never `.focusable()`; it is now in the Tab cycle, with Enter entering the page (§5.10 — leaving an entered page stays outside the toolkit's control). The context-menu gap **is closed**: `Key::ContextMenu`, Shift+F10, and Ctrl+Shift+M on macOS all open the nearest `.context_menu(..)` from the keyboard (§5.8). **One gap remains:** docking's `split_into_tab`/`stack_into_tab` drop zones have no menu equivalent. Charts are also unreachable — no `focusable`/`on_key` outside the legend |
 | 2.1.2 No Keyboard Trap | A | framework | 🟡 | Modal and overlay scopes default to `EscapeOrClickOutside`. `Terminal`'s trap is **fixed at the primitive**: the dispatcher now reserves `Ctrl+Tab` / `Ctrl+Shift+Tab` for *every* `keyboard_capture` node before the widget is consulted, so no capture surface can swallow the one chord that gets focus out ([event_dispatch_impl.rs](../crates/teksilo-core/src/widget_tree/event_dispatch_impl.rs)); Terminal also declines it itself, no longer consumes keys on the read-only path, and announces the chord to AT (§5.1). **One milder case remains:** the editable `CodeEditor`'s Tab-indent arm lacks the `tab_escape = ctrl` guard `RichTextEditor` has, and is not a capture surface so the dispatcher reservation does not cover it |
 | 2.1.4 Character Key Shortcuts | A | framework | ✅ | Type-ahead and mnemonics are active only while the owning component holds focus. Scene magnetism's single-character `m` trigger meets the criterion by both available exceptions — remappable via `connect_key(..)` and active-on-focus-only. `4402128c` fixed hidden menu rows claiming a mnemonic and being activatable through it |
 | 2.2.1 Timing Adjustable | A | framework | 🟡 | **Previously scored ➖ n/a on the grounds that "no time-limited interactions exist" — that is false.** `Toast` auto-dismisses after a default 10 s ([toast.rs:65, :443](../crates/teksilo-widgets/src/toast.rs)) and can carry Link/Button actions. Adjustable only by the app author (`auto_dismiss_after`/`persistent`), never by the end user. Partially mitigated: dismissed toasts persist in the notification archive |
@@ -226,7 +226,7 @@ mislabelled 2.4.13 as Level AA when it is AAA. They are separated here.
 | 2.4.11 Focus Not Obscured (Min) | AA | 🟡 | A framework-level focus-*reveal* engine does exist — `scroll_focused_into_view` runs on every focus change ([focus_impl.rs:110-133](../crates/teksilo-core/src/widget_tree/focus_impl.rs)), backed by `scroll_rect_into_view` and the public `EventContext::ensure_visible*` family. The previous revision's claim that "`ensure_visible` exists only per-widget" was wrong. But that engine walks `clips_children` scroll ancestors only — it solves *scrolled out of view*, never *covered by content*. Overlays now self-dismiss when focus leaves them (`4152a4c2`), which narrows the exposure. **Zero rect-intersection tests exist** between a focused node and any sticky, pinned, docked or floating rect. Exposure surfaces: corner-anchored toasts, GridView sticky headers, TableView pinned columns, docking side panels |
 | 2.4.12 Focus Not Obscured (Enhanced) | AAA | ❌ | Follows from the above |
 | 2.4.13 Focus Appearance | AAA | ✅ | 2.0 dp stroke at ≥3:1 (G3). **Level corrected from AA** |
-| 2.5.7 Dragging Movements | AA | 🟡 | G6 (scene Alt+Arrow nudge), plus two further alternatives since: Splitter keyboard resize, and the scene magnetism keyboard connect flow ([magnetism.rs:172-240](../crates/teksilo-scene/src/view/magnetism.rs)). GridView's Alt+Arrow reorder is a validated same-view drop. **Docking drag-to-dock is the gap:** its only non-drag route is a context menu, which no keyboard chord can open |
+| 2.5.7 Dragging Movements | AA | 🟡 | G6 (scene Alt+Arrow nudge), plus two further alternatives since: Splitter keyboard resize, and the scene magnetism keyboard connect flow ([magnetism.rs:172-240](../crates/teksilo-scene/src/view/magnetism.rs)). GridView's Alt+Arrow reorder is a validated same-view drop. **Docking drag-to-dock is the gap:** its only non-drag route is a context menu. That menu is now keyboard-reachable on a focused rail item (§5.8), but the `split_into_tab`/`stack_into_tab` drop zones still have no menu equivalent |
 | 2.5.8 Target Size (Minimum) | AA | 🟡 | 24 dp in the default recipe and under Fluent/Material 3; **18 dp under the macOS preset** ([metrics.rs:170-172](../crates/teksilo-theme-macos/src/styles/metrics.rs)). No test asserts a ≥24 floor — the only guard is `size_compact < size_default`. One stale "Compact 22 dp" doc comment remains at [icon_button.rs:98](../crates/teksilo-widgets/src/icon_button.rs) |
 | 3.2.6 Consistent Help | A | ➖ | Author-scope |
 | 3.3.7 Redundant Entry | A | author | ➖ | Framework hooks exist (`Wizard`/`Stepper` for multi-step processes; `MruList`/`SettingsStore` for re-entry avoidance) but the criterion is satisfied at application level |
@@ -260,7 +260,7 @@ Chapter 5 applies to all ICT including software and is not subsumed by either.
 | — | Execution of available actions | ✅ | *As of the July–August fixes, not before.* See §7 — this is the subclause the previous revision had no row for, and the one that was framework-wide broken while it scored 4.1.2 ✅ |
 | 11.5.2.14 / .16 / .17 | Change notification | ✅ | Delegated to `accesskit_winit::Adapter::update_if_active` ([window.rs:415](../crates/teksilo-platform/src/window.rs)); G1 and G15 ensure the tree it diffs is current |
 | 11.5.2.15 | State exposed to AT | 🟡 | Core reactive state is correct. Two residuals: `WidgetBuilder::access_disabled` takes a plain `bool`, not `impl Into<Prop<bool>>`, unlike every sibling override ([widget_builder.rs:1170, :1771](../crates/teksilo-core/src/widget_builder.rs)); and until `ee3d406f`/`4769528f` the *visual* half was broken framework-wide — nine form fields and every ancestor-disabled widget rendered pixel-identical to enabled while correctly reporting `disabled` to AT |
-| 11.5.2.x | AT platform-API binding | ✅ | Real `accesskit_winit` bridges on AT-SPI, NSAccessibility and UIA. `accesskit_winit` 0.33.2, `accesskit` 0.24.1 |
+| 11.5.2.x | AT platform-API binding | ✅ | Real `accesskit_winit` bridges on AT-SPI, NSAccessibility and UIA. `accesskit_winit` 0.34.0, `accesskit` 0.25.0 |
 | 11.6.2 | Accessible end-user documentation | ➖ | Applies to shipped products, not the toolkit |
 | 11.7(a) | Contrast preference | 🟡 | Applied at both main and overlay paint passes — but `for_high_contrast()` substitutes literal IntUI hexes into whatever preset is active (§5.6) |
 | 11.7(b) | Reduced motion preference | 🟡 | G16, and the unified `AccessibilityPreferences` pipeline. **The terminal visual bell is a motion path this pipeline does not reach** (2.3.1) |
@@ -513,15 +513,50 @@ contrast coverage and CI will not notice.
 **Recommendation:** port Fluent's `contrast_on` suite to Material 3, and consider a
 shared contrast-conformance test helper the preset crates each invoke.
 
-### 5.8 No keyboard route to any context menu — 2.1.1 (A) · framework
+### 5.8 There was no keyboard route to any context menu · 2.1.1 (A) · framework · **FIXED**
 
-The `Key` enum has no `ContextMenu`/Menu-key variant, and `Action::ShowContextMenu` is
-serviced only from an AT request or a secondary-button press. Every `.context_menu(..)`
-factory in the framework is therefore pointer- or AT-only. This matters most where a
-context menu is the *only* non-drag route to a command — docking's "Move to ▸", and any
-data-view row whose actions live on hover-only buttons.
+**As found.** The `Key` enum had no `ContextMenu`/Menu-key variant, and
+`Action::ShowContextMenu` was serviced only from an AT request or a secondary-button
+press. Every `.context_menu(..)` factory in the framework was therefore pointer- or
+AT-only. That mattered most where a context menu is the *only* non-drag route to a
+command: docking's "Move to ▸", and any data-view row whose actions live on
+hover-only buttons.
 
-**Recommendation:** add `Key::ContextMenu` and a Shift+F10 binding in dispatch.
+**How it was fixed.** The route is reserved in the dispatcher, so every widget that
+already owns a `.context_menu(..)` gained one without opting in:
+
+- **`Key::ContextMenu` is a first-class key**
+  ([event.rs](../crates/teksilo-core/src/event.rs)), carrying `VK_APPS` on Windows and
+  `keysyms::Menu` on X11 and Wayland. macOS never produces it: its keyboards have no
+  such key, and `winit-0.30.13`'s AppKit backend references the variant zero times.
+- **Three chords, because no single one exists everywhere.** `is_context_menu_chord`
+  ([event_dispatch_impl.rs](../crates/teksilo-core/src/widget_tree/event_dispatch_impl.rs))
+  accepts the dedicated key with no modifiers, Shift+F10 (the convention Windows, GTK
+  and Qt all honour, and the one a PC keyboard without a Menu key can still reach), and
+  Ctrl+Shift+M on macOS only, where F10 is a media key under the default function-key
+  setting and may never arrive as F10 at all. Modifiers are matched exactly, so
+  Ctrl+Shift+F10 stays a different gesture and reaches the application unchanged.
+- **It sits below shortcut resolution, not in it.** A global `Shortcut` would fire while
+  the user was typing in a modal, and an application that deliberately binds Shift+F10
+  to something else still wins.
+- **The menu opens where the thing it is about is.** A keyboard user has no pointer
+  position, and the stale one would put the menu over an unrelated part of the window,
+  so `open_context_menu_from_keyboard` anchors at the centre of the target's bounds and
+  then walks the parent chain for a factory exactly as a secondary click does.
+- **Data views retarget it.** `Widget::context_menu_key_target` lets a focused container
+  name the row the menu is about; ListView, TreeView, TableView, TreeTableView and
+  GridView all implement it, so the chord opens the *selected item's* menu rather than
+  the frame's.
+
+**Tests.** `the_context_menu_key_opens_the_focused_widget_menu` and
+`a_near_miss_chord_is_not_a_context_menu_request` (teksilo-core) pin both halves: the
+accepted chord set, and the near-miss modifier combinations that must pass through
+untouched.
+
+**Not fixed.** The chord is not advertised anywhere a screen-reader user would find it:
+no node carries it as a `keyboard_shortcut`, unlike Terminal's Ctrl+Tab escape (§5.1).
+Docking's `split_into_tab`/`stack_into_tab` drop zones still have no menu equivalent to
+reach, keyboard route or not (§3.2).
 
 ### 5.9 Text-run colour and per-run language never reach AT — EN 11.5.2.9, WCAG 3.1.2 · framework
 
@@ -630,10 +665,11 @@ before claiming it is under threshold.
 
 ### 5.14 Upstream and platform
 
-- **WCAG 1.3.5 autofill tokens** remain unreachable. AccessKit is still 0.24.1 (only
-  `accesskit_winit` and `accesskit_consumer` were bumped). Its `AutoComplete` enum is the
-  ARIA popup-behaviour vocabulary, not the HTML autofill tokens; [`docs/a11y/a11y_issues.md`](a11y/a11y_issues.md)
-  and the source comment already state this correctly, and need no change.
+- **WCAG 1.3.5 autofill tokens** remain unreachable. AccessKit is at 0.25.0
+  (`accesskit_winit` 0.34.0, `accesskit_consumer` 0.39.0), and its `AutoComplete`
+  enum is still the ARIA popup-behaviour vocabulary rather than the HTML autofill
+  tokens; [`docs/a11y/a11y_issues.md`](a11y/a11y_issues.md) and the source comment
+  already state this correctly, and need no change.
 - **AT-bridge coverage** varies only by OS backend maturity, not by Teksilo's code.
   `accesskit_unix`, `accesskit_macos` and `accesskit_windows` are all real, non-stubbed
   bindings. X11 gained a custom title bar with its own window menu since, removing a

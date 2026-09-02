@@ -11,7 +11,7 @@ Please be respectful and constructive in all interactions. We aim to maintain a 
 
 ## Authorship and review
 
-Teksilo is built under the following eight rules. They apply to your contributions too.
+Teksilo is built under the following seven rules. They apply to your contributions too.
 
 1. Direct human communication is written by humans. PR messages, issues, posts, replies: no AI drafting, no AI polish. Common decency.
 
