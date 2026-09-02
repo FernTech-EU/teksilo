@@ -9,7 +9,11 @@ license.workspace = true
 publish.workspace = true
 authors.workspace = true
 repository.workspace = true
+homepage.workspace = true
 description = "Schema-drift linter for teksilo-telemetry event manifests"
+documentation = "https://docs.rs/cargo-teksilo-telemetry-lint"
+keywords = ["linter", "telemetry", "cargo-subcommand", "cli", "schema"]
+categories = ["development-tools::cargo-plugins", "command-line-utilities"]
 
 [[bin]]
 name = "cargo-teksilo-telemetry-lint"

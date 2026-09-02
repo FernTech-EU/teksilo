@@ -9,7 +9,11 @@ license.workspace = true
 publish.workspace = true
 authors.workspace = true
 repository.workspace = true
+homepage.workspace = true
 description = "Model Context Protocol server exposing a Teksilo app's semantic tree + AT-action driving + screenshots (headless or live)."
+documentation = "https://docs.rs/teksilo-automation-mcp"
+keywords = ["mcp", "automation", "testing", "ai-agent", "accessibility"]
+categories = ["development-tools::testing", "accessibility"]
 
 [features]
 # Pixel-level golden screenshot tests. Off by default (need a real GPU):

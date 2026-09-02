@@ -9,7 +9,11 @@ license.workspace = true
 publish.workspace = true
 authors.workspace = true
 repository.workspace = true
+homepage.workspace = true
 description = "Formatter engine for teksu! DSL blocks in Rust source files — the library behind cargo-teksilo-fmt."
+documentation = "https://docs.rs/teksilo-fmt"
+keywords = ["formatter", "dsl", "teksu", "source-code", "rustfmt"]
+categories = ["development-tools", "text-processing"]
 
 [dependencies]
 teksilo-parse = { workspace = true }

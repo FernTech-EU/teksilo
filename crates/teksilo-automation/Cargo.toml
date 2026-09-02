@@ -9,7 +9,11 @@ license.workspace = true
 publish.workspace = true
 authors.workspace = true
 repository.workspace = true
+homepage.workspace = true
 description = "GUI-free runtime-introspection & automation toolkit for Teksilo apps (semantic tree + AT-action driving over serde DTOs)."
+documentation = "https://docs.rs/teksilo-automation"
+keywords = ["automation", "testing", "accessibility", "introspection", "dto"]
+categories = ["development-tools::testing", "accessibility"]
 
 [dependencies]
 # Core-only peer (mirrors `teksilo-data`): depends on `teksilo-core` for the

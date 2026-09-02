@@ -9,7 +9,11 @@ license.workspace = true
 publish.workspace = true
 authors.workspace = true
 repository.workspace = true
+homepage.workspace = true
 description = "Storybook-style previewer for the stock Teksilo widget catalog."
+documentation = "https://docs.rs/teksilo-widgets-previewer"
+keywords = ["storybook", "previewer", "widgets", "catalog", "gui"]
+categories = ["gui", "development-tools"]
 
 # teksilo-widgets-previewer is the Teksilo-side previewer binary. It links
 # teksilo-widgets with the `preview` feature so all `WidgetCatalog` impls

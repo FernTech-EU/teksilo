@@ -9,7 +9,11 @@ license.workspace = true
 publish.workspace = true
 authors.workspace = true
 repository.workspace = true
+homepage.workspace = true
 description = "Resource handling and embedding for Teksilo applications."
+documentation = "https://docs.rs/teksilo-resources"
+keywords = ["resources", "embedding", "assets", "desktop", "gui"]
+categories = ["gui"]
 
 [lib]
 proc-macro = true

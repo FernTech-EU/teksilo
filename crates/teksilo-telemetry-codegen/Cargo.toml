@@ -9,7 +9,11 @@ license.workspace = true
 publish.workspace = true
 authors.workspace = true
 repository.workspace = true
+homepage.workspace = true
 description = "Proc macro that expands a YAML event manifest into typed emitters for teksilo-telemetry."
+documentation = "https://docs.rs/teksilo-telemetry-codegen"
+keywords = ["proc-macro", "codegen", "telemetry", "yaml", "schema"]
+categories = ["development-tools::procedural-macro-helpers"]
 
 [lib]
 proc-macro = true

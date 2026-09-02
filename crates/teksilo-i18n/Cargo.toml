@@ -9,7 +9,11 @@ license.workspace = true
 publish.workspace = true
 authors.workspace = true
 repository.workspace = true
+homepage.workspace = true
 description = "Fluent-based internationalization for Teksilo — locale resolution, hot reload, and ICU-backed number and date formatting."
+documentation = "https://docs.rs/teksilo-i18n"
+keywords = ["i18n", "fluent", "icu", "locale", "internationalization"]
+categories = ["internationalization", "localization"]
 
 [dependencies]
 teksilo-core = { workspace = true }

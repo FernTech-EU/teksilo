@@ -9,7 +9,11 @@ license.workspace = true
 publish.workspace = true
 authors.workspace = true
 repository.workspace = true
+homepage.workspace = true
 description = "Teksilo analytics adapter for OpenTelemetry-compatible backends. Speaks OTLP/HTTP logs over JSON, no protobuf — works with any OTel collector (otelcol-contrib, Honeycomb, Tempo+Loki, …)."
+documentation = "https://docs.rs/teksilo-analytics-otlp"
+keywords = ["opentelemetry", "otlp", "analytics", "telemetry", "observability"]
+categories = ["network-programming"]
 
 [dependencies]
 teksilo-core = { workspace = true }

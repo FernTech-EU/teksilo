@@ -9,7 +9,11 @@ license.workspace = true
 publish.workspace = true
 authors.workspace = true
 repository.workspace = true
+homepage.workspace = true
 description = "wgpu renderer for Teksilo — rect, SDF and path pipelines with a glyph atlas."
+documentation = "https://docs.rs/teksilo-render"
+keywords = ["wgpu", "renderer", "graphics", "gpu", "glyph-atlas"]
+categories = ["rendering::graphics-api", "graphics", "gui"]
 
 [dependencies]
 teksilo-canvas = { workspace = true }

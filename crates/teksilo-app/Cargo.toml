@@ -9,7 +9,11 @@ license.workspace = true
 publish.workspace = true
 authors.workspace = true
 repository.workspace = true
+homepage.workspace = true
 description = "Application shell for Teksilo — app builder, window manager and event loop."
+documentation = "https://docs.rs/teksilo-app"
+keywords = ["gui", "desktop", "window", "event-loop", "app"]
+categories = ["gui"]
 
 [features]
 default = ["text"]

@@ -9,7 +9,11 @@ license.workspace = true
 publish.workspace = true
 authors.workspace = true
 repository.workspace = true
+homepage.workspace = true
 description = "Canvas and geometry layer for Teksilo — RenderFrame, Path, Paint and the TextBackend trait."
+documentation = "https://docs.rs/teksilo-canvas"
+keywords = ["canvas", "graphics", "geometry", "gui", "paths"]
+categories = ["graphics", "rendering", "gui"]
 
 [dependencies]
 teksilo-tokens = { workspace = true }

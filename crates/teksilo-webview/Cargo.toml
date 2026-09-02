@@ -4,12 +4,16 @@
 [package]
 name = "teksilo-webview"
 description = "Embeddable WebView widget for Teksilo — pluggable native engine backend (wry / Servo) behind a Teksilo-native widget."
+documentation = "https://docs.rs/teksilo-webview"
+keywords = ["webview", "wry", "servo", "browser", "gui"]
+categories = ["gui", "web-programming"]
 edition = "2024"
 version.workspace = true
 license.workspace = true
 publish.workspace = true
 authors.workspace = true
 repository.workspace = true
+homepage.workspace = true
 
 [dependencies]
 teksilo-core = { workspace = true }

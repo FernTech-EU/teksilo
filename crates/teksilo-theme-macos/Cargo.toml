@@ -9,7 +9,11 @@ license.workspace = true
 publish.workspace = true
 authors.workspace = true
 repository.workspace = true
+homepage.workspace = true
 description = "macOS Aqua and Dark Aqua theme preset for Teksilo — tokens plus widget chrome."
+documentation = "https://docs.rs/teksilo-theme-macos"
+keywords = ["macos", "aqua", "theme", "gui", "design-system"]
+categories = ["gui", "os::macos-apis"]
 
 [features]
 # Off by default. Switches the theme's typography families to the macOS

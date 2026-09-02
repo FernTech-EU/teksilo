@@ -9,7 +9,11 @@ license.workspace = true
 publish.workspace = true
 authors.workspace = true
 repository.workspace = true
+homepage.workspace = true
 description = "Optional main-thread async executor for Teksilo — spawn_local / spawn_blocking driven by the app event loop."
+documentation = "https://docs.rs/teksilo-async"
+keywords = ["async", "executor", "spawn-local", "gui", "futures"]
+categories = ["asynchronous", "gui"]
 
 [dependencies]
 teksilo-core = { workspace = true }

@@ -9,7 +9,11 @@ license.workspace = true
 publish.workspace = true
 authors.workspace = true
 repository.workspace = true
+homepage.workspace = true
 description = "Text backend for Teksilo — shaping, line breaking and glyph rasterization via text-typeset."
+documentation = "https://docs.rs/teksilo-text"
+keywords = ["text-shaping", "typography", "glyph", "font", "rasterization"]
+categories = ["text-processing", "graphics", "gui"]
 
 [features]
 # Default set: Latin/Cyrillic/Greek via Inter (always embedded), plus

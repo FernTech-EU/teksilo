@@ -9,7 +9,11 @@ license.workspace = true
 publish.workspace = true
 authors.workspace = true
 repository.workspace = true
+homepage.workspace = true
 description = "Formatter for teksu! DSL blocks in Rust source files"
+documentation = "https://docs.rs/cargo-teksilo-fmt"
+keywords = ["formatter", "cargo-subcommand", "dsl", "teksu", "rustfmt"]
+categories = ["development-tools::cargo-plugins", "development-tools"]
 
 [[bin]]
 name = "cargo-teksilo-fmt"

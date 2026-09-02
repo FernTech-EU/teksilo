@@ -9,7 +9,11 @@ license.workspace = true
 publish.workspace = true
 authors.workspace = true
 repository.workspace = true
+homepage.workspace = true
 description = "LSP server for the teksu! DSL formatter."
+documentation = "https://docs.rs/teksilo-fmt-lsp"
+keywords = ["lsp", "language-server", "dsl", "formatter", "teksu"]
+categories = ["development-tools", "text-editors"]
 
 [[bin]]
 name = "teksilo-fmt-lsp"

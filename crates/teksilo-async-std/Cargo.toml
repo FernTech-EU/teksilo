@@ -9,7 +9,11 @@ license.workspace = true
 publish.workspace = true
 authors.workspace = true
 repository.workspace = true
+homepage.workspace = true
 description = "async-std reactor integration for Teksilo's main-thread async executor (teksilo-async)."
+documentation = "https://docs.rs/teksilo-async-std"
+keywords = ["async-std", "async", "reactor", "executor", "gui"]
+categories = ["asynchronous"]
 
 [dependencies]
 teksilo-core = { workspace = true }

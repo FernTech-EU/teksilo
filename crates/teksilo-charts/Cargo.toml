@@ -9,7 +9,11 @@ license.workspace = true
 publish.workspace = true
 authors.workspace = true
 repository.workspace = true
+homepage.workspace = true
 description = "Bar, line and pie charts for Teksilo, driven by a reactive chart model."
+documentation = "https://docs.rs/teksilo-charts"
+keywords = ["charts", "visualization", "graphs", "plotting", "gui"]
+categories = ["visualization", "gui"]
 
 [features]
 preview = ["dep:teksilo-preview"]

@@ -9,7 +9,11 @@ license.workspace = true
 publish.workspace = true
 authors.workspace = true
 repository.workspace = true
+homepage.workspace = true
 description = "Proc macros for Teksilo — the teksu! widget-tree DSL and #[derive(IntentKind)]."
+documentation = "https://docs.rs/teksilo-macros"
+keywords = ["proc-macro", "dsl", "derive", "macros", "gui"]
+categories = ["development-tools::procedural-macro-helpers", "gui"]
 
 [lib]
 proc-macro = true

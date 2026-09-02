@@ -10,8 +10,9 @@ publish.workspace = true
 authors.workspace = true
 repository.workspace = true
 description = "A pure-Rust GUI framework for serious desktop applications — retained widget tree, SwiftUI-style layout, AccessKit accessibility, wgpu rendering."
+documentation = "https://docs.rs/teksilo"
 readme = "README.md"
-homepage = "https://github.com/ferntech-eu/teksilo"
+homepage.workspace = true
 keywords = ["gui", "desktop", "widgets", "accessibility", "wgpu"]
 categories = ["gui", "accessibility"]
 

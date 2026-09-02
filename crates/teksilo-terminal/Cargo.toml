@@ -4,12 +4,16 @@
 [package]
 name = "teksilo-terminal"
 description = "Embeddable, fully-accessible terminal-emulator (Console) widget for Teksilo — the VT view; PTY + parsing delegated to portable-pty + alacritty_terminal behind a swappable engine trait."
+documentation = "https://docs.rs/teksilo-terminal"
+keywords = ["terminal", "pty", "ansi", "console", "gui"]
+categories = ["gui", "command-line-interface"]
 edition = "2024"
 version.workspace = true
 license.workspace = true
 publish.workspace = true
 authors.workspace = true
 repository.workspace = true
+homepage.workspace = true
 
 [dependencies]
 teksilo-core = { workspace = true }

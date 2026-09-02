@@ -9,7 +9,11 @@ license.workspace = true
 publish.workspace = true
 authors.workspace = true
 repository.workspace = true
+homepage.workspace = true
 description = "Core of the Teksilo GUI framework — widget trait, arena, layout engine, event dispatch, focus, signals and theming."
+documentation = "https://docs.rs/teksilo-core"
+keywords = ["gui", "widgets", "layout", "reactive", "theming"]
+categories = ["gui", "data-structures"]
 
 [dependencies]
 teksilo-tokens = { workspace = true }

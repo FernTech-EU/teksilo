@@ -9,7 +9,11 @@ license.workspace = true
 publish.workspace = true
 authors.workspace = true
 repository.workspace = true
+homepage.workspace = true
 description = "Platform integration for Teksilo — winit and AccessKit adapters, clipboard, OS theme, native file dialogs, drag-and-drop and menus."
+documentation = "https://docs.rs/teksilo-platform"
+keywords = ["winit", "accesskit", "clipboard", "drag-and-drop", "gui"]
+categories = ["gui", "os", "accessibility"]
 
 [dependencies]
 teksilo-tokens = { workspace = true }

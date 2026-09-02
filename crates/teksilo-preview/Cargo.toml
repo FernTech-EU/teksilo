@@ -9,7 +9,11 @@ license.workspace = true
 publish.workspace = true
 authors.workspace = true
 repository.workspace = true
+homepage.workspace = true
 description = "Storybook-style preview registry for Teksilo widgets — catalog trait, typed knobs and variants, with no GUI dependency."
+documentation = "https://docs.rs/teksilo-preview"
+keywords = ["storybook", "widgets", "catalog", "preview", "testing"]
+categories = ["development-tools::testing", "gui"]
 
 [dependencies]
 teksilo-core = { workspace = true }

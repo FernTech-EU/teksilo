@@ -9,7 +9,11 @@ license.workspace = true
 publish.workspace = true
 authors.workspace = true
 repository.workspace = true
+homepage.workspace = true
 description = "Parser and IR for Teksilo's teksu! widget-tree DSL, shared by the proc macro and the formatter."
+documentation = "https://docs.rs/teksilo-parse"
+keywords = ["parser", "dsl", "ast", "ir", "teksu"]
+categories = ["parser-implementations", "development-tools"]
 
 [dependencies]
 proc-macro2 = "1"

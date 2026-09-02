@@ -9,7 +9,11 @@ license.workspace = true
 publish.workspace = true
 authors.workspace = true
 repository.workspace = true
+homepage.workspace = true
 description = "Reusable three-pane previewer GUI for Teksilo widget catalogs — navigator, canvas and knob form."
+documentation = "https://docs.rs/teksilo-preview-ui"
+keywords = ["storybook", "previewer", "widgets", "gui", "navigator"]
+categories = ["gui", "development-tools"]
 
 [dependencies]
 teksilo-core = { workspace = true }

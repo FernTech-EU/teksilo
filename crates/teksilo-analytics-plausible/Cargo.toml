@@ -9,7 +9,11 @@ license.workspace = true
 publish.workspace = true
 authors.workspace = true
 repository.workspace = true
+homepage.workspace = true
 description = "Teksilo analytics adapter for Plausible in anonymous mode, with retry, backoff and an on-disk queue."
+documentation = "https://docs.rs/teksilo-analytics-plausible"
+keywords = ["plausible", "analytics", "telemetry", "http", "retry"]
+categories = ["network-programming"]
 
 [dependencies]
 teksilo-core = { workspace = true }

@@ -9,7 +9,11 @@ license.workspace = true
 publish.workspace = true
 authors.workspace = true
 repository.workspace = true
+homepage.workspace = true
 description = "Fluent (Windows 11) theme preset for Teksilo — tokens plus widget chrome."
+documentation = "https://docs.rs/teksilo-theme-fluent"
+keywords = ["fluent", "windows11", "theme", "gui", "design-system"]
+categories = ["gui", "os::windows-apis"]
 
 [features]
 # Off by default. Switches the theme's typography families to the Windows

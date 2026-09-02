@@ -9,7 +9,11 @@ license.workspace = true
 publish.workspace = true
 authors.workspace = true
 repository.workspace = true
+homepage.workspace = true
 description = "Widget library for Teksilo — over a hundred widgets and layout primitives, from Button to TreeTableView."
+documentation = "https://docs.rs/teksilo-widgets"
+keywords = ["gui", "widgets", "layout", "desktop", "components"]
+categories = ["gui"]
 
 [features]
 # Diagnostic traces, compiled out unless asked for. Each is additionally gated on

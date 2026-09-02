@@ -9,7 +9,11 @@ license.workspace = true
 publish.workspace = true
 authors.workspace = true
 repository.workspace = true
+homepage.workspace = true
 description = "Reactive data models for Teksilo — list, tree, selection and sort-filter projections, with no GUI dependency."
+documentation = "https://docs.rs/teksilo-data"
+keywords = ["data-structures", "reactive", "list-model", "tree-model", "selection"]
+categories = ["data-structures"]
 
 [dependencies]
 teksilo-core = { workspace = true }

@@ -30,7 +30,8 @@ edition = "2024"
 license = "MPL-2.0"
 publish = true
 authors = ["Cyril Jacquet <cyril.jacquet@ferntech.eu>"]
-repository = "https://github.com/ferntech-eu/teksilo"
+homepage = "https://teksilo.rs"
+repository = "https://github.com/FernTech-EU/teksilo.git"
 
 [workspace.dependencies]
 # Shared dependency versions

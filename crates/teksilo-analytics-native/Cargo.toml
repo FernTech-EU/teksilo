@@ -20,8 +20,12 @@ version = "0.7.0"
 license = "MPL-2.0"
 publish = true
 authors = ["Cyril Jacquet <cyril.jacquet@ferntech.eu>"]
-repository = "https://github.com/ferntech-eu/teksilo"
+repository = "https://github.com/FernTech-EU/teksilo.git"
+homepage = "https://teksilo.rs"
 description = "Teksilo analytics adapter for the home-grown gRPC `teksilo-collector` backend. Sub-phase A: localhost ingest, no auth, no TLS."
+documentation = "https://docs.rs/teksilo-analytics-native"
+keywords = ["grpc", "analytics", "telemetry", "collector", "teksilo"]
+categories = ["network-programming"]
 
 [dependencies]
 teksilo-core = { path = "../teksilo-core", version = "0.6.2" }

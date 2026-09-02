@@ -9,7 +9,11 @@ license.workspace = true
 publish.workspace = true
 authors.workspace = true
 repository.workspace = true
+homepage.workspace = true
 description = "Pannable, zoomable scene viewport for Teksilo — full widgets and lightweight items under one view transform."
+documentation = "https://docs.rs/teksilo-scene"
+keywords = ["scene-graph", "gui", "pan-zoom", "canvas", "graphics"]
+categories = ["gui", "graphics"]
 
 [dependencies]
 teksilo-tokens = { workspace = true }

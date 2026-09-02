@@ -9,7 +9,11 @@ license.workspace = true
 publish.workspace = true
 authors.workspace = true
 repository.workspace = true
+homepage.workspace = true
 description = "Compile-time tr! / tr_signal! localization macros for Teksilo, with .ftl validation at build time."
+documentation = "https://docs.rs/teksilo-i18n-macros"
+keywords = ["i18n", "fluent", "macros", "proc-macro", "localization"]
+categories = ["internationalization", "development-tools::procedural-macro-helpers"]
 
 [lib]
 proc-macro = true

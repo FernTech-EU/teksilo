@@ -9,7 +9,11 @@ license.workspace = true
 publish.workspace = true
 authors.workspace = true
 repository.workspace = true
+homepage.workspace = true
 description = "In-app debug inspector for Teksilo — widget tree, properties, theme, focus and accessibility panels."
+documentation = "https://docs.rs/teksilo-inspector"
+keywords = ["gui", "inspector", "debugging", "devtools", "accessibility"]
+categories = ["gui", "development-tools::debugging"]
 
 # In-app debug inspector for Teksilo. Active only in debug builds
 # (`cfg(debug_assertions)`); release builds compile to no-ops.
