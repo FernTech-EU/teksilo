@@ -284,7 +284,10 @@ pub fn encode_key(
             }
         }
 
-        Key::CapsLock => None,
+        // Neither key produces bytes. CapsLock is a state change, and the
+        // Menu key has no xterm encoding; it opens the context menu, which the
+        // dispatcher resolves before the widget sees the key.
+        Key::CapsLock | Key::ContextMenu => None,
 
         // --- Any other printable character ---
         Key::Character(ch) => {
