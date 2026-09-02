@@ -39,7 +39,7 @@ let _badge = Badge::new(lit!("NEW"))
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/teksilo_widgets/badge/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/badge/index.html)
 
 ## `pub struct Badge`
 

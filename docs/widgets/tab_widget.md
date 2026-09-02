@@ -77,7 +77,7 @@ opted in via `TabInfo::focusable_panel(true)`.
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/teksilo_widgets/tab_widget/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/tab_widget/index.html)
 
 ## `pub type StaticContentFactory`
 

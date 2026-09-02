@@ -52,7 +52,7 @@ scope.
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/teksilo_widgets/font_picker/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/font_picker/index.html)
 
 ## `pub enum FontSpacingFilter`
 

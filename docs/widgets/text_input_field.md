@@ -59,7 +59,7 @@ ctx.add(
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/teksilo_widgets/primitives/text_input_field/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/primitives/text_input_field/index.html)
 
 ## `pub enum InputPurpose`
 

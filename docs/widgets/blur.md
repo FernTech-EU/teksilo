@@ -57,7 +57,7 @@ it there. See `docs/animation.md` §5.8.
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/teksilo_widgets/animations/blur/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/animations/blur/index.html)
 
 ## `pub struct Blur`
 

@@ -35,7 +35,7 @@ let _w = RectWidget::new()
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/teksilo_widgets/primitives/rect_widget/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/primitives/rect_widget/index.html)
 
 ## `pub struct RectWidget`
 

@@ -108,7 +108,7 @@ announce the dialog and its body on open.
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/teksilo_widgets/message_box/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/message_box/index.html)
 
 ## `pub enum MessageBoxSeverity`
 

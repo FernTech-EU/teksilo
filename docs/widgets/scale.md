@@ -51,7 +51,7 @@ Honours `prefers-reduced-motion`: snaps progress to its end value
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/teksilo_widgets/animations/scale/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/animations/scale/index.html)
 
 ## `pub enum ScaleOrigin`
 

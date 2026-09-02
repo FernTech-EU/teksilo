@@ -88,7 +88,7 @@ Repeater::new(tags, factory)
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/teksilo_widgets/repeater/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/repeater/index.html)
 
 ## `pub enum RepeaterLayout`
 

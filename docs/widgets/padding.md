@@ -41,7 +41,7 @@ let _w = Padding::uniform(12.0)
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/teksilo_widgets/primitives/padding/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/primitives/padding/index.html)
 
 ## `pub struct Padding`
 

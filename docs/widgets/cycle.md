@@ -33,7 +33,7 @@ built (so widget construction is identical) but are never shown.
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/teksilo_widgets/animations/cycle/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/animations/cycle/index.html)
 
 ## `pub struct Cycle`
 

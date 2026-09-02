@@ -48,7 +48,7 @@ assert_eq!(window.point_count(s), 10); // last 10 points only
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/teksilo_data/chart_window/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-data/latest/teksilo_data/chart_window/index.html)
 
 ## `pub struct ChartWindow`
 

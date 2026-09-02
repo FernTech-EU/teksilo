@@ -13,7 +13,7 @@ were never related beyond sharing a file.
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/teksilo_widgets/popover_surface/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/popover_surface/index.html)
 
 ## `pub struct PopoverSurface`
 

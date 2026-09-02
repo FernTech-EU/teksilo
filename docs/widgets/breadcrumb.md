@@ -41,7 +41,7 @@ chevrons are hidden from the AT tree. The `…` overflow button declares
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/teksilo_widgets/breadcrumb/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/breadcrumb/index.html)
 
 ## `pub const BREADCRUMB_ITEM_HEIGHT`
 

@@ -21,12 +21,6 @@ the IntUI preset — but the trait protocol at Tier 3 is the escape
 hatch that lets apps replace the entire chrome of any widget without
 touching the widget source.
 
-> **Reference for designers** — image-backed themes (Figma / Penpot /
-> Canva exports → 9-slice assets → reskinned app) get their own deep
-> reference at [docs/image-themes.md](image-themes.md). The image-theme
-> system is a parallel set of `impl FooStyle` blocks on top of the
-> same Tier-3 surface — same widgets, different chrome.
-
 ## Mental model — which tier do I use for X?
 
 | Task | Tier | API |
@@ -759,9 +753,6 @@ widgets get reskinned across an app.
 
 - [docs/reactive-theme.md](reactive-theme.md) — Signal-backed Theme,
   color signals, theme swaps without rebuild.
-- [docs/image-themes.md](image-themes.md) — designer-workflow deep
-  reference (Figma / Penpot / Canva → 9-slice manifest → theme).
-  (Not yet shipped; design pending.)
 - [docs/widgets-overview.md](widgets-overview.md) — per-widget
   variant + style trait references.
 - [docs/accessibility-overrides.md](accessibility-overrides.md) —

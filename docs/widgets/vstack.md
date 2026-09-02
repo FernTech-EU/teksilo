@@ -35,7 +35,7 @@ let _col = VStack::new()
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/teksilo_widgets/primitives/vstack/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/primitives/vstack/index.html)
 
 ## `pub struct VStack`
 

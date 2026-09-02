@@ -27,7 +27,7 @@ Banner::warning(tr!(unsaved_changes()))
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/teksilo_widgets/banner/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/banner/index.html)
 
 ## `pub struct Banner`
 

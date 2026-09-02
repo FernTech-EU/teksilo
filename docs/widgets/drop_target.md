@@ -113,7 +113,7 @@ drag-and-drop is a no-op). `DropZone` is the better choice when the drop
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/teksilo_widgets/drop_target/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/drop_target/index.html)
 
 ## `pub struct DropRegionSpec`
 

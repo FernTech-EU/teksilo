@@ -41,7 +41,7 @@ gate the animation behind `prefers_reduced_motion`).
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/teksilo_widgets/animations/rotate/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/animations/rotate/index.html)
 
 ## `pub struct Rotate`
 

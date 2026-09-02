@@ -113,7 +113,7 @@ ctx.add(
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/teksilo_widgets/spin_box/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/spin_box/index.html)
 
 ## `pub enum WrapMode`
 

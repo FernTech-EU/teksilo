@@ -38,7 +38,7 @@ rotate.
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/teksilo_widgets/spinner/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/spinner/index.html)
 
 ## `pub struct Spinner`
 

@@ -39,7 +39,7 @@ let _w = Panel::new()
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/teksilo_widgets/panel/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/panel/index.html)
 
 ## `pub struct Panel`
 

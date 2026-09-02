@@ -59,7 +59,7 @@ withheld until the field has been edited for the same reason, so a caller can re
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/teksilo_widgets/input_dialog/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/input_dialog/index.html)
 
 ## `pub type ValidateResult`
 

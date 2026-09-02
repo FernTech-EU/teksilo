@@ -53,7 +53,7 @@ let _table = TableView::new(model)
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/teksilo_widgets/table_view/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/table_view/index.html)
 
 ## `pub struct TableView`
 

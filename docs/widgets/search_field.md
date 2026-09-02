@@ -64,7 +64,7 @@ let screen readers announce "Apple, 1 of 5".
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/teksilo_widgets/search_field/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/search_field/index.html)
 
 ## `pub struct SearchField`
 

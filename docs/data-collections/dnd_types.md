@@ -37,7 +37,7 @@ fn can_accept(&self, query: &teksilo_data::DropQuery<'_, usize>) -> teksilo_data
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/teksilo_data/dnd_types/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-data/latest/teksilo_data/dnd_types/index.html)
 
 ## `pub enum RowState`
 

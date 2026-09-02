@@ -39,7 +39,7 @@ key and seeds every window, so the chosen size is restored automatically.
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/teksilo_widgets/text_scale_control/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/text_scale_control/index.html)
 
 ## `pub struct TextScaleControl`
 

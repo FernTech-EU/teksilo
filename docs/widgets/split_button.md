@@ -39,7 +39,7 @@ let _w = SplitButton::new()
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/teksilo_widgets/split_button/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/split_button/index.html)
 
 ## `pub const SPLIT_BUTTON_HEIGHT`
 

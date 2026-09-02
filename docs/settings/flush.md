@@ -89,7 +89,7 @@ worker is leaner and has identical semantics from the caller's point of view.
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/teksilo_settings/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-settings/latest/teksilo_settings/index.html)
 
 ## `pub enum FlushError`
 

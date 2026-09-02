@@ -49,7 +49,7 @@ let _edit = ColorEdit::new(color)
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/teksilo_widgets/color_edit/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/color_edit/index.html)
 
 ## `pub struct ColorEdit`
 

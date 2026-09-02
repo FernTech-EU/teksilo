@@ -52,7 +52,7 @@ assert_eq!(checked.check_state(&1), CheckState::Indeterminate); // Binder: 2 of 
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/teksilo_data/keyed_tree_checked_model/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-data/latest/teksilo_data/keyed_tree_checked_model/index.html)
 
 ## `pub struct KeyedTreeCheckedModel`
 

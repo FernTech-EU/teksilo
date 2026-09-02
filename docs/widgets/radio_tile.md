@@ -46,7 +46,7 @@ RadioTileGroup::new(selected)
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/teksilo_widgets/radio_tile/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/radio_tile/index.html)
 
 ## `pub enum RadioTileIndicatorSide`
 

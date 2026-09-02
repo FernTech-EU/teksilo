@@ -46,7 +46,7 @@ let _spinner_bar = ProgressBar::indeterminate();
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/teksilo_widgets/progress_bar/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/progress_bar/index.html)
 
 ## `pub struct ProgressBar`
 

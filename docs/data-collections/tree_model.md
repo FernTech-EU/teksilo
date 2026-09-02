@@ -44,7 +44,7 @@ assert_eq!(tree.root_count(), 2); // both handles share the same data
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/teksilo_data/tree_model/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-data/latest/teksilo_data/tree_model/index.html)
 
 ## `pub struct TreeModel`
 

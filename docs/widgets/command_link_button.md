@@ -27,7 +27,7 @@ CommandLinkButton::new(tr!(create_new_project()))
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/teksilo_widgets/command_link_button/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/command_link_button/index.html)
 
 ## `pub const COMMAND_LINK_BUTTON_ICON_SIZE`
 

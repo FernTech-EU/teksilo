@@ -36,13 +36,11 @@
 
 - [Shortcuts, intents & actions](shortcut-intent-action.md)
 - [Tooltips](tooltips.md)
-- [Toasts & notifications](toast.md)
 - [Native menus](native-menu.md)
 - [WebView](web-view.md)
 - [Drag & drop](drag-and-drop.md)
 - [Multi-window](multi-window.md)
 - [Title bar](title-bar.md)
-- [Toolbar](toolbar.md)
 
 # Data, persistence, telemetry
 
@@ -57,8 +55,6 @@
 
 # Specialized widgets
 
-- [Splitter](splitter.md)
-- [Docking layout](docking.md)
   - [Rail actions & bar slots — design notes](docking-rail-actions-design.md)
 - [Table & tree-table views](table-view.md)
 - [Code & plain-text editors](code-editor.md)

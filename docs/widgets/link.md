@@ -37,7 +37,7 @@ let _w = Link::new(lit!("Open documentation"))
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/teksilo_widgets/link/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/link/index.html)
 
 ## `pub struct Link`
 

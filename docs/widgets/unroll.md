@@ -48,7 +48,7 @@ let _w = Unroll::new(expanded)
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/teksilo_widgets/animations/unroll/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/animations/unroll/index.html)
 
 ## `pub enum UnrollFrom`
 

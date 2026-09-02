@@ -15,7 +15,7 @@ a wrapped Finish both dismiss it.
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/teksilo_widgets/stepper/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/stepper/index.html)
 
 ## `pub struct Wizard`
 

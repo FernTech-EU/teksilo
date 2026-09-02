@@ -40,4 +40,4 @@ assert_eq!(_first, Some("alpha"));
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/teksilo_data/list_data_source/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-data/latest/teksilo_data/list_data_source/index.html)

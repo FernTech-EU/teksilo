@@ -39,7 +39,7 @@ let _r2 = RadioButton::new(2, selected.clone()).label(lit!("System"));
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/teksilo_widgets/radio_button/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/radio_button/index.html)
 
 ## `pub struct RadioButton`
 

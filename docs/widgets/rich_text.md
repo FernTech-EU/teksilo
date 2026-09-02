@@ -38,7 +38,7 @@ let editor = RichTextEditor::editor(doc)
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/teksilo_widgets/rich_text/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/rich_text/index.html)
 
 ## `pub enum ScrollPolicy`
 
@@ -1308,6 +1308,13 @@ pub struct EditorHandle { /* fields */ }
 
 ### Methods
 
+#### `pub fn downgrade(&self) -> WeakEditorHandle`
+
+A handle that does not keep this editor alive.
+
+Capture this, not `self`, in any handler the editor stores — see
+`WeakEditorHandle` for which those are and what a strong capture costs.
+
 #### `pub fn to_djot(&self) -> String`
 
 This editor's content as Djot.
@@ -2057,6 +2064,48 @@ Reactive undo-availability signal (toolbar enable-state source).
 #### `pub fn can_redo(&self) -> Signal<bool>`
 
 Reactive redo-availability signal.
+
+## `pub struct WeakEditorHandle`
+
+An `EditorHandle` that does not keep its editor alive.
+
+**For a callback the editor itself stores.** `on_image_activated`,
+`on_image_resized`, `on_link_activated`, `on_files_dropped`, `on_change`,
+`on_text_inserted` and the image resolver are all kept on the editor's own
+state, so a handler that captures an `EditorHandle` by value makes the state
+own itself. Nothing can break that ring afterwards: the widget can be
+destroyed, its tree dropped and its window closed, and the editor — with its
+document, its cursor and its shaped layout — stays resident for the life of
+the process. It is a leak with no owner left to blame, and it is easy to write,
+because reaching for `editor.handle()` is the obvious way for such a handler to
+act on the editor it belongs to.
+
+Capture this instead and `upgrade` inside the handler. The
+handler runs only while the editor is alive, which is the only time it could
+have done anything anyway.
+
+```ignore
+let editor = RichTextEditor::editor(doc);
+let weak = editor.handle().downgrade();
+let editor = editor.on_image_activated(move |activation, _ctx| {
+    let Some(handle) = weak.upgrade() else { return };
+    handle.select_range(activation.offset, activation.offset + 1);
+});
+```
+
+A factory the *builder* stores rather than the state —
+`context_menu` is the one today — may hold a
+strong handle safely, because it dies with the widget.
+
+```rust
+pub struct WeakEditorHandle { /* fields */ }
+```
+
+### Methods
+
+#### `pub fn upgrade(&self) -> Option<EditorHandle>`
+
+The handle, if its editor is still alive.
 
 ## `pub struct ImageActivation`
 

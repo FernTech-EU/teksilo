@@ -46,7 +46,7 @@ ctx.add(
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/teksilo_widgets/shortcut_settings/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/shortcut_settings/index.html)
 
 ## `pub struct ShortcutConflict`
 

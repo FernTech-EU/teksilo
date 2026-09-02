@@ -47,7 +47,7 @@ let _tip = TooltipWidget::new(lit!("Save the current file"));
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/teksilo_widgets/tooltip/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/tooltip/index.html)
 
 ## `pub struct TooltipWidget`
 

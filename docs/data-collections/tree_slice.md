@@ -46,7 +46,7 @@ assert_eq!(slice1.visible_count(), 3); // child2 also visible in the expanded sl
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/teksilo_data/tree_slice/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-data/latest/teksilo_data/tree_slice/index.html)
 
 ## `pub struct TreeSlice`
 

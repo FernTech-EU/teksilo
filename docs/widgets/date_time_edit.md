@@ -69,7 +69,7 @@ let _w = DateTimeEdit::new(datetime.clone())
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/teksilo_widgets/date_time_edit/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/date_time_edit/index.html)
 
 ## `pub struct DateTimeEdit`
 

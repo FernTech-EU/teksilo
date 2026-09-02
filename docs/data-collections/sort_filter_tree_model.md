@@ -78,7 +78,7 @@ assert_eq!(proxy.visible_count(), 3); // src + main.rs + docs
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/teksilo_data/sort_filter_tree_model/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-data/latest/teksilo_data/sort_filter_tree_model/index.html)
 
 ## `pub enum TreeFilterMode`
 

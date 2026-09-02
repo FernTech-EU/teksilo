@@ -69,7 +69,7 @@ let _w = ListView::new(model, |_i, item, _selected| {
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/teksilo_widgets/list_view/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/list_view/index.html)
 
 ## `pub struct ListView`
 

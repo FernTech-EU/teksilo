@@ -35,7 +35,7 @@ let _thumbnail = AspectRatio::new(16.0 / 9.0)
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/teksilo_widgets/primitives/aspect_ratio/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/primitives/aspect_ratio/index.html)
 
 ## `pub struct AspectRatio`
 

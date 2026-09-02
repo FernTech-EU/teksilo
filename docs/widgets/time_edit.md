@@ -48,7 +48,7 @@ let _field = TimeEdit::new(value)
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/teksilo_widgets/time_edit/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/time_edit/index.html)
 
 ## `pub enum TimeFormat`
 

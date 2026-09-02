@@ -87,7 +87,7 @@ let _w = TextInput::new(value)
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/teksilo_widgets/icon_button/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/icon_button/index.html)
 
 ## `pub struct IconButton`
 

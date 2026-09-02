@@ -28,7 +28,7 @@ assert_eq!(pixels[(16 * 32 + 16) * 4 + 3], 255); // center alpha
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/teksilo_widgets/primitives/image_mask/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/primitives/image_mask/index.html)
 
 ## `pub enum ImageMaskShape`
 

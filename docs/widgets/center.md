@@ -46,7 +46,7 @@ let _centered = Center::new().child(RectWidget::new());
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/teksilo_widgets/primitives/center/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/primitives/center/index.html)
 
 ## `pub struct Center`
 

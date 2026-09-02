@@ -37,7 +37,7 @@ let _form = FormLayout::new()
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/teksilo_widgets/primitives/form_layout/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/primitives/form_layout/index.html)
 
 ## `pub struct FormLayout`
 

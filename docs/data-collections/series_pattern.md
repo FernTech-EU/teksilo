@@ -43,7 +43,7 @@ has nothing to disambiguate).
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/teksilo_data/series_pattern/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-data/latest/teksilo_data/series_pattern/index.html)
 
 ## `pub enum SeriesPattern`
 

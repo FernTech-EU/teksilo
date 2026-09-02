@@ -47,7 +47,7 @@ ctx.add(
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/teksilo_widgets/snackbar/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/snackbar/index.html)
 
 ## `pub struct Snackbar`
 

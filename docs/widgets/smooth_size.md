@@ -45,7 +45,7 @@ layout pass instead of tweening.
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/teksilo_widgets/animations/smooth_size/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/animations/smooth_size/index.html)
 
 ## `pub enum SmoothSizeAxes`
 

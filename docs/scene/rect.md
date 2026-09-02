@@ -56,7 +56,7 @@ model.add_item(item, Point::new(40.0, 40.0));
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/teksilo_scene/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-scene/latest/teksilo_scene/index.html)
 
 ## `pub struct RectItem`
 

@@ -43,7 +43,7 @@ paint_layered_shadow(
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/teksilo_widgets/shadow/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/shadow/index.html)
 
 ## `pub const DENSITY_TOOLTIP`
 

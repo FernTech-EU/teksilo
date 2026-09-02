@@ -27,7 +27,7 @@ assert_eq!(CheckState::from(true), CheckState::Checked);
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/teksilo_data/check_state/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-data/latest/teksilo_data/check_state/index.html)
 
 ## `pub enum CheckState`
 

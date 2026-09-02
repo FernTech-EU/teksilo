@@ -28,7 +28,7 @@ let arrow = TwistArrow::new(16.0, true, false)
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/teksilo_widgets/primitives/twist_arrow/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/primitives/twist_arrow/index.html)
 
 ## `pub struct TwistArrow`
 

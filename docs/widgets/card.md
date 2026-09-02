@@ -45,7 +45,7 @@ let _card = Card::new()
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/teksilo_widgets/card/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/card/index.html)
 
 ## `pub struct Card`
 

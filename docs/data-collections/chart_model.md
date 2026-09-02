@@ -49,7 +49,7 @@ assert_eq!(model.point_count(s), 3);
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/teksilo_data/chart_model/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-data/latest/teksilo_data/chart_model/index.html)
 
 ## `pub struct ChartDatum`
 

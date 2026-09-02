@@ -60,7 +60,7 @@ assert_eq!(sel.count(), 0);
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/teksilo_data/chart_selection/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-data/latest/teksilo_data/chart_selection/index.html)
 
 ## `pub struct ChartSelection`
 

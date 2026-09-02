@@ -51,7 +51,7 @@ assert_eq!(model.len(), 2);
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/teksilo_data/list_model/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-data/latest/teksilo_data/list_model/index.html)
 
 ## `pub struct ListModel`
 

@@ -64,7 +64,7 @@ assert_eq!(slice.visible_count(), 3);         // all expanded
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/teksilo_data/tree_data_slice/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-data/latest/teksilo_data/tree_data_slice/index.html)
 
 ## `pub struct TreeRow`
 

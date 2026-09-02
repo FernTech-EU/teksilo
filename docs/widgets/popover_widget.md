@@ -51,7 +51,7 @@ everything else is shared by the generic.
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/teksilo_widgets/popover_widget/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/popover_widget/index.html)
 
 ## `pub type PopoverCustom`
 

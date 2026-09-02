@@ -28,7 +28,7 @@ Trivially composed from existing primitives:
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/teksilo_widgets/group_header/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/group_header/index.html)
 
 ## `pub struct GroupHeader`
 

@@ -46,7 +46,7 @@ assert_eq!(sel.count(), 0);
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/teksilo_data/selection_model/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-data/latest/teksilo_data/selection_model/index.html)
 
 ## `pub enum SelectionMode`
 

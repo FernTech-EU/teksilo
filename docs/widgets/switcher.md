@@ -41,7 +41,7 @@ let _w = Switcher::new(page.clone())
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/teksilo_widgets/primitives/switcher/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/primitives/switcher/index.html)
 
 ## `pub struct Switcher`
 

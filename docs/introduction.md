@@ -25,9 +25,6 @@ any widget's API to the terminal (`python3 tools/extract_widget_api.py Button`).
   reference: scrolling, arena, Canvas API, rendering pipeline, HiDPI,
   threading, testability, crate dependency graph, design comparisons,
   open questions. Per-subsystem APIs live in the focused docs below.
-- [teksilo-milestones.md](teksilo-milestones.md) — the demo-driven milestone
-  roadmap; each milestone produces a runnable example exercising one slice
-  of the architecture.
 
 ## Widget catalog
 
@@ -89,7 +86,7 @@ any widget's API to the terminal (`python3 tools/extract_widget_api.py Button`).
 - [tooltips.md](tooltips.md) — plain `TooltipWidget`, registry-driven
   `RichTooltipWidget`, sticky-on-dwell promotion, focus-driven a11y
   promotion, attach helpers.
-- [toast.md](toast.md) — `Toast` floating notifications (`info` /
+- [widgets/toast.md](widgets/toast.md) — `Toast` floating notifications (`info` /
   `success` / `warning` / `error` / `loading` severities, link +
   button actions, `Toast::id` update-in-place) + `ToastHost` queue +
   persistent `NotificationArchiveModel` + `NotificationLog` / bell
@@ -110,7 +107,7 @@ any widget's API to the terminal (`python3 tools/extract_widget_api.py Button`).
   multi-window orchestration, modal dialogs, restore-from-state.
 - [title-bar.md](title-bar.md) — custom widget-level title bar plus the
   per-OS `PlatformTitleBarHost` for drag / zoom / close / inset.
-- [toolbar.md](toolbar.md) — `Toolbar` command bar with automatic overflow:
+- [widgets/toolbar.md](widgets/toolbar.md) — `Toolbar` command bar with automatic overflow:
   actions (priority / `always_overflow` / toggle), pinned + collapsible
   custom widgets (`overflow_as` menu row, `overflow_widget` live embedded
   control, the `ToolbarOverflow` trait), the `MenuList`-backed chevron menu,
@@ -147,11 +144,11 @@ any widget's API to the terminal (`python3 tools/extract_widget_api.py Button`).
 
 ## Specialized widgets
 
-- [splitter.md](splitter.md) — N-pane `Splitter` with draggable, collapsible
+- [widgets/splitter.md](widgets/splitter.md) — N-pane `Splitter` with draggable, collapsible
   dividers, per-pane stretch, animated collapse (four triggers), a shared
   serializable `SplitterModel`, and a Tier-3 `SplitterStyle`. The building
   block for `DockingLayout`.
-- [docking.md](docking.md) — VS Code-style `DockingLayout`: a centre slot +
+- [widgets/docking.md](widgets/docking.md) — VS Code-style `DockingLayout`: a centre slot +
   four collapsible/splittable/draggable side regions, per-corner ownership, an
   activity rail, drag-to-dock five-zone overlay, and a cloneable serializable
   `DockingModel` with `export_state`/`import_state`.

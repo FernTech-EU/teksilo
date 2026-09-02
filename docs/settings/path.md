@@ -41,7 +41,7 @@ assert_eq!(paths.config_file("settings"), tmp.path().join("settings.toml"));
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/teksilo_settings/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-settings/latest/teksilo_settings/index.html)
 
 ## `pub struct AppPaths`
 

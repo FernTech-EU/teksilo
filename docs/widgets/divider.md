@@ -34,7 +34,7 @@ let _vbar = Divider::vertical();
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/teksilo_widgets/primitives/divider/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/primitives/divider/index.html)
 
 ## `pub struct Divider`
 

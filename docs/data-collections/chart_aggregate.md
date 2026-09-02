@@ -53,7 +53,7 @@ assert_eq!(weekly.point_count(s), 10); // 70 / 7
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/teksilo_data/chart_aggregate/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-data/latest/teksilo_data/chart_aggregate/index.html)
 
 ## `pub enum ChartAggregateFn`
 

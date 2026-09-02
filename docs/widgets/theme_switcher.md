@@ -43,7 +43,7 @@ app-supplied set (e.g. the `teksilo-theme-{fluent,macos,material3}` presets);
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/teksilo_widgets/theme_switcher/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/theme_switcher/index.html)
 
 ## `pub struct ThemeSwitcher`
 

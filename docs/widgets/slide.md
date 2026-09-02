@@ -52,7 +52,7 @@ or out of position instead of tweening.
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/teksilo_widgets/animations/slide/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/animations/slide/index.html)
 
 ## `pub enum SlideEdge`
 

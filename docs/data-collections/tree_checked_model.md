@@ -68,7 +68,7 @@ and clear the relevant entries. Tracked as out-of-scope for V1.
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/teksilo_data/tree_checked_model/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-data/latest/teksilo_data/tree_checked_model/index.html)
 
 ## `pub enum AggregateMode`
 

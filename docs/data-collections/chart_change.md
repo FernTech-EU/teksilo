@@ -31,7 +31,7 @@ model.add_series("Revenue");
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/teksilo_data/chart_change/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-data/latest/teksilo_data/chart_change/index.html)
 
 ## `pub struct SeriesId`
 

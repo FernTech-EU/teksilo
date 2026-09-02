@@ -38,7 +38,7 @@ let _w = Toggle::new(dark_mode)
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/teksilo_widgets/toggle/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/toggle/index.html)
 
 ## `pub struct Toggle`
 

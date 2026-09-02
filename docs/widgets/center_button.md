@@ -39,7 +39,7 @@ let bell = NotificationCenterButton::new(archive)
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/teksilo_widgets/notification/center_button/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/notification/center_button/index.html)
 
 ## `pub struct NotificationCenterButton`
 

@@ -40,7 +40,7 @@
 > - Tooltips and overlays: [`tooltips.md`](tooltips.md)
 > - `teksu!` DSL: [`teksu-macro-reference.md`](teksu-macro-reference.md), [`teksu-language-spec-v3.md`](teksu-language-spec-v3.md)
 > - Inspector: [`inspector.md`](inspector.md)
-> - Widget catalog snapshot: [`teksilo-milestones.md`](teksilo-milestones.md), `tools/extract_widget_api.py --all`
+> - Widget catalog snapshot: `tools/extract_widget_api.py --all`
 > - Per-widget reference docs: [`table-view.md`](table-view.md), [`tab-widget.md`](tab-widget.md), [`charts.md`](charts.md), [`teksilo-scene.md`](teksilo-scene.md)
 
 ---
@@ -594,7 +594,6 @@ The primary reference point for Teksilo's feature scope is Qt Widgets — the fr
 The current widget inventory is no longer maintained as prose in this document — it drifted faster than it could be edited. The authoritative sources are:
 
 - **`tools/extract_widget_api.py --all`** — emits the public surface (struct, builder methods, enums, module doc) of every widget in `teksilo-widgets`. Run `python3 tools/extract_widget_api.py --list` to see the full file list, or pass widget names to extract just those.
-- **[`teksilo-milestones.md`](teksilo-milestones.md)** — the "Current State: What Exists" section enumerates every widget currently shipped, grouped by category, and tracks remaining milestone work.
 - **CLAUDE.md** — the "Implementation Status" block and the per-widget reference docs ([`table-view.md`](table-view.md), [`tab-widget.md`](tab-widget.md), [`charts.md`](charts.md), [`tooltips.md`](tooltips.md), [`teksilo-scene.md`](teksilo-scene.md)) cover the widgets with the deepest API surface.
 
 For a one-shot dump suitable for downstream tooling: `python3 tools/extract_widget_api.py --all -f json -o widgets.json`.
@@ -611,7 +610,7 @@ The `teksu!` DSL desugars to V2 builder calls one-to-one at macro-expansion time
 
 ## 30. Open Questions (Current, May 2026)
 
-The bulk of the original post-milestone question list has landed. The short list below is what remains actively open; see [`teksilo-milestones.md`](teksilo-milestones.md) for detailed status and the Next-candidates roadmap.
+The bulk of the original post-milestone question list has landed. The short list below is what remains actively open.
 
 **External (OS) drag-and-drop.** Intra-app DnD works everywhere (Milestone 6). **Inbound** OS drops — files / text / URLs dragged from a file manager or another app into a Teksilo window — are implemented through the `ExternalDndBackend` trait in `teksilo-platform` (`install_external_dnd()`): macOS via a `NSDraggingDestination` overlay view (verified), Windows via OLE `RegisterDragDrop`/`IDropTarget`, Wayland via `wl_data_device`, X11 via XDND v5 (an `XdndProxy` helper window on its own connection — winit owns the toplevel's X connection and consumes XDND messages itself; see [drag-and-drop.md §11.3.1](drag-and-drop.md)). They reuse the in-app pipeline — an OS drop is a `DragPayload` with `origin() == External`. winit's own `DroppedFile`/`HoveredFile` are not used (no position, files-only, no Wayland). **Outbound** drags (Teksilo window → another app) are now implemented on every desktop target (macOS `NSDraggingSource` + Wayland `wl_data_source`, both verified; Windows OLE `DoDragDrop`; X11 an XDND source that polls the pointer rather than grabbing it): a normal `start_drag` whose payload carries MIME data auto-escalates to a native OS drag when the pointer leaves the window, completion is reported via `on_drag_ended(DropOutcome)`, and the typed payload is recovered on re-entry (enabling drag-and-drop between two windows of the same app). See [drag-and-drop.md §11.5](drag-and-drop.md).
 
@@ -623,4 +622,4 @@ The bulk of the original post-milestone question list has landed. The short list
 
 ## 31. First Milestone: Button in a Window
 
-Status of every milestone (M1 through current) lives in [`teksilo-milestones.md`](teksilo-milestones.md). M1 — a window displaying a single themed button with click handling, hover/press states, text rendering, AccessKit accessibility, and keyboard activation — landed as the `simple_button` example. It exercised the full vertical slice (teksilo-tokens for theme, teksilo-canvas for the SDF rounded rect, teksilo-core for arena/layout/events/focus/a11y, teksilo-text for the label, teksilo-render for the wgpu pipeline, teksilo-platform for the winit window + AccessKit adapter, teksilo-app for the event loop) and proved the end-to-end stack before any further widget work.
+M1 — a window displaying a single themed button with click handling, hover/press states, text rendering, AccessKit accessibility, and keyboard activation — landed as the `simple_button` example. It exercised the full vertical slice (teksilo-tokens for theme, teksilo-canvas for the SDF rounded rect, teksilo-core for arena/layout/events/focus/a11y, teksilo-text for the label, teksilo-render for the wgpu pipeline, teksilo-platform for the winit window + AccessKit adapter, teksilo-app for the event loop) and proved the end-to-end stack before any further widget work.

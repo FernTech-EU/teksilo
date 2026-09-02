@@ -45,7 +45,7 @@ let _w = GroupBox::new(lit!("Indentation"))
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/teksilo_widgets/group_box/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/group_box/index.html)
 
 ## `pub const GROUP_BOX_CONTENT_INDENT`
 

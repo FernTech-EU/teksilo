@@ -44,7 +44,7 @@ let _cb = Checkbox::new(checked)
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/teksilo_widgets/checkbox/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/checkbox/index.html)
 
 ## `pub struct Checkbox`
 

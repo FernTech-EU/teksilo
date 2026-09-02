@@ -40,7 +40,7 @@ PasswordField::new(password.clone())
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/teksilo_widgets/password_field/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/password_field/index.html)
 
 ## `pub enum RevealMode`
 

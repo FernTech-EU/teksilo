@@ -43,7 +43,7 @@ renders an empty, placeholder ComboBox.
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/teksilo_widgets/language_switcher/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/language_switcher/index.html)
 
 ## `pub struct LanguageSwitcher`
 

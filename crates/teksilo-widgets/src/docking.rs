@@ -6,8 +6,7 @@
 //! draggable side regions (leading / trailing / top / bottom), backed by a
 //! cloneable, serializable [`DockingModel`].
 //!
-//! See `docs/docking.md` for the full reference. The structure is four
-//! levels deep:
+//! The structure is four levels deep:
 //!
 //! ```text
 //! DockingLayout
@@ -67,7 +66,7 @@ const COLLAPSED_EPS: f32 = 0.01;
 /// Default resize-gutter thickness between a side and the centre.
 const DOCK_GUTTER: f32 = 6.0;
 
-/// The docking layout widget. See the module docs and `docs/docking.md`.
+/// The docking layout widget. See the module docs.
 ///
 /// ```ignore
 /// let model = DockingModel::new();

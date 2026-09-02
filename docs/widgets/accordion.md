@@ -39,7 +39,7 @@ let _accordion = Accordion::new(lit!("Advanced settings"), expanded);
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/teksilo_widgets/accordion/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/accordion/index.html)
 
 ## `pub const ACCORDION_HEADER_HEIGHT`
 

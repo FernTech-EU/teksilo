@@ -11,7 +11,7 @@
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/teksilo_widgets/primitives/dead_zone/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/primitives/dead_zone/index.html)
 
 ## `pub struct DeadZone`
 

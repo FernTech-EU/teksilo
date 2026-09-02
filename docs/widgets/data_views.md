@@ -29,7 +29,7 @@ the lazy placeholder are wired one way everywhere:
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/teksilo_widgets/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/index.html)
 
 ## `pub enum ActivateOn`
 

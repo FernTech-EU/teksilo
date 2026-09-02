@@ -83,7 +83,7 @@ since here arrows move *selection* rather than a roving focus.
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/teksilo_widgets/segmented_control/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/segmented_control/index.html)
 
 ## `pub enum SegmentDisplay`
 

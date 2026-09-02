@@ -30,7 +30,7 @@ assert_eq!(new_idx, 2);
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/teksilo_data/data_change/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-data/latest/teksilo_data/data_change/index.html)
 
 ## `pub enum DataChange`
 

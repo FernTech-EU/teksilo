@@ -50,7 +50,7 @@ let _d = Dialog::new(lit!("Open settings"))
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/teksilo_widgets/dialog/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/dialog/index.html)
 
 ## `pub struct ModalContainer`
 

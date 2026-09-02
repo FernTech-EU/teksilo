@@ -66,7 +66,7 @@ let _view = TreeTableView::new(model).row_height(28.0);
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/teksilo_widgets/tree_table_view/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/tree_table_view/index.html)
 
 ## `pub struct TreeTableView`
 

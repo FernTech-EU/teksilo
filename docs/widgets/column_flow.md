@@ -70,7 +70,7 @@ this as a CSS multicol port.
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/teksilo_widgets/primitives/column_flow/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/primitives/column_flow/index.html)
 
 ## `pub struct ColumnFlow`
 

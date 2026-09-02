@@ -42,7 +42,7 @@ assert!(!model.is_checked(1));
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/teksilo_data/checked_model/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-data/latest/teksilo_data/checked_model/index.html)
 
 ## `pub struct CheckedModel`
 

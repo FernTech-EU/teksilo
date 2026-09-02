@@ -44,6 +44,21 @@ REPO_ROOT = SCRIPT_DIR.parent
 DEFAULT_REPO_URL = "https://github.com/ferntech-eu/teksilo"
 DEFAULT_BRANCH = "main"
 
+# The book's own rustdoc tree, assembled by .github/workflows/docs.yml as
+# `cp -r target/doc book/api`, holds exactly these crates. A generated catalog
+# page is COMMITTED carrying the crate's docs.rs URL, so it resolves for a
+# reader on GitHub where no rustdoc tree exists; inside the book the local tree
+# is the better target (built from this branch, and no trip off the site), so
+# the link is pointed back at /api/ here. Keep this list in step with
+# `CRATE_SPECS` in extract_widget_api.py and with the `cargo doc` line in the
+# workflow: a crate listed here but not built would gain a dead link, which is
+# why this is an explicit list rather than a `teksilo-*` pattern.
+BOOK_SRC = REPO_ROOT / "docs"
+_API_CRATES = ("teksilo-widgets", "teksilo-data", "teksilo-settings", "teksilo-scene")
+_DOCS_RS_RE = re.compile(
+    r"^https://docs\.rs/(?:" + "|".join(re.escape(c) for c in _API_CRATES) + r")/latest/(.+)$"
+)
+
 _INLINE_RE = re.compile(r'\[([^\]]+)\]\(([^)\s]+)(\s+"[^"]*")?\)')
 _REFDEF_RE = re.compile(r'^(\s*)\[([^\]]+)\]:\s*(\S+)(.*)$')
 _EXT_RE = re.compile(r"\.[A-Za-z0-9]{1,6}$")
@@ -56,9 +71,32 @@ def _as_code(label: str) -> str:
     return f"`{label}`"
 
 
+def _api_prefix(src_dir: Path) -> "str | None":
+    """Book-relative prefix reaching `api/` from a page in `src_dir`.
+
+    `docs/foo.md` -> `api/`, `docs/widgets/button.md` -> `../api/`. Returns
+    None for a directory outside the book source, where there is no such path.
+    """
+    try:
+        depth = len(src_dir.resolve().relative_to(BOOK_SRC).parts)
+    except ValueError:
+        return None
+    return "../" * depth + "api/"
+
+
 def _classify(target: str, src_dir: Path, base: str) -> tuple[str, str | None]:
     """Return (action, new_target). action ∈ {keep, replace, github, strip}."""
     t = target.strip()
+
+    # docs.rs (the committed, GitHub-correct form) -> the book's own /api/ tree.
+    # Checked before the web-URL keep below, which would otherwise pass it through.
+    m = _DOCS_RS_RE.match(t)
+    if m:
+        prefix = _api_prefix(src_dir)
+        if prefix is not None:
+            return ("replace", prefix + m.group(1))
+        return ("keep", t)
+
     if (
         t.startswith("#")
         or "://" in t
@@ -165,6 +203,28 @@ def _self_test() -> int:
 
     def fx(s):
         return fix_text(s, r, b, src)
+
+    # docs.rs (the committed catalog form) -> the book's own /api/ tree, at the
+    # depth of the page it appears in.
+    page = REPO_ROOT / "docs" / "widgets" / "center_button.md"
+    out = fix_text(
+        "[API](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/"
+        "notification/center_button/index.html)",
+        r, b, page,
+    )
+    assert out == "[API](../api/teksilo_widgets/notification/center_button/index.html)", out
+    # A guide sits one level higher, so it reaches api/ without the ../.
+    out = fx("[API](https://docs.rs/teksilo-data/latest/teksilo_data/index.html)")
+    assert out == "[API](api/teksilo_data/index.html)", out
+    # Already rewritten: idempotent, and still kept by the ../api/ rule.
+    assert fx("[API](api/teksilo_data/index.html)") == "[API](api/teksilo_data/index.html)"
+    # A crate the book does NOT ship rustdoc for keeps its docs.rs URL rather
+    # than gaining a link into a tree that has no page for it.
+    keep = "[c](https://docs.rs/teksilo-core/latest/teksilo_core/index.html)"
+    assert fx(keep) == keep, fx(keep)
+    # A third-party docs.rs link is untouched (docs/terminal.md has two).
+    keep = "[pty](https://docs.rs/portable-pty)"
+    assert fx(keep) == keep, fx(keep)
 
     # source link (one ../) -> GitHub blob URL, anchor preserved
     out = fx("see [button.rs](../crates/teksilo-widgets/src/button.rs#L42)")

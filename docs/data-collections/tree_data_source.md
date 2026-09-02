@@ -49,7 +49,7 @@ impl TreeDataSource for MySource {
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/teksilo_data/tree_data_source/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-data/latest/teksilo_data/tree_data_source/index.html)
 
 ## `pub struct FlatEntry`
 

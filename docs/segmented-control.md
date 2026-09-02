@@ -125,7 +125,7 @@ segments that will never realistically overflow.
 
 `is_overflowing() -> Signal<bool>` reports whether anything is currently
 in the menu — republished from `place_children` behind an equality guard,
-like [`Toolbar::is_overflowing`](toolbar.md). Safe for `RepaintOnly` /
+like [`Toolbar::is_overflowing`](widgets/toolbar.md). Safe for `RepaintOnly` /
 `AccessibilityOnly` consumers, and for `Relayout` consumers that do not
 feed back into this control's own width (a caption beside it is fine; a
 container that resizes the control from it is not).
@@ -196,7 +196,7 @@ itself is the semantic node.
 One while everything fits. Two while overflowing: the group, then the
 chevron. An overflow menu no keyboard can reach is not an overflow menu,
 and the chevron cannot join the arrow sequence because here arrows move
-*selection*, not a roving focus (unlike [`Toolbar`](toolbar.md)).
+*selection*, not a roving focus (unlike [`Toolbar`](widgets/toolbar.md)).
 
 Segments in the menu are dormant, so they are pruned from the
 accessibility tree; their **menu rows** are their representation there,

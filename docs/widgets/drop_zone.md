@@ -51,7 +51,7 @@ announcements plus the Browse fallback are the supported pattern.
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/teksilo_widgets/drop_zone/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/drop_zone/index.html)
 
 ## `pub struct DropZone`
 

@@ -61,7 +61,7 @@ let _avatar = ImageWidget::new(&icon)
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/teksilo_widgets/primitives/image_widget/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/primitives/image_widget/index.html)
 
 ## `pub enum ImageFit`
 

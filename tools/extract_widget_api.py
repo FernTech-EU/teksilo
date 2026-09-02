@@ -3,11 +3,23 @@
 # SPDX-FileCopyrightText: 2026 FernTech
 
 """
-Extract public API and inline documentation from teksilo-widgets source files.
+Extract public API and inline documentation from a Teksilo crate's source files.
 
-Walks `crates/teksilo-widgets/src/` recursively (top-level files plus submodule
+Four crates are documentable, selected with `--crate` (default `widgets`) and
+listed in `CRATE_SPECS`:
+
+    widgets   teksilo-widgets   -> docs/widgets/           "Widget Catalog"
+    data      teksilo-data      -> docs/data-collections/  "Data Collections"
+    settings  teksilo-settings  -> docs/settings/          "Settings"
+    scene     teksilo-scene     -> docs/scene/             "Scene"
+
+Only `widgets` gets the widget-specific behaviour (the impl-Widget entry filter
+and the `widgets-overview.md` categories); the others surface their re-exported
+public types and group by directory.
+
+Walks the selected crate's `src/` recursively (top-level files plus submodule
 directories like `notification/`, `tab_widget/`, `primitives/`, `animations/`),
-looks up the widget file for each requested name, and emits:
+looks up the file for each requested name, and emits:
 
   - The file's `//!` module header doc
   - Every `pub struct` / `pub enum` / `pub type` / `pub const` with its `///` doc
@@ -31,13 +43,42 @@ Usage:
     python tools/extract_widget_api.py --list
     python tools/extract_widget_api.py Button --format json
     python tools/extract_widget_api.py Button -o out.md
-    python tools/extract_widget_api.py --md-dir docs/widgets   # mdBook catalog
+    python tools/extract_widget_api.py --crate scene --list
+    python tools/extract_widget_api.py --md-dir docs/widgets   # one crate
+    python tools/extract_widget_api.py --catalog-all --api-dir target/doc
 
-`--md-dir DIR` regenerates the mdBook "Widget Catalog": one Markdown page per
-widget (deep-linking to its rustdoc module page), a grouped `index.md`, and an
-in-place patch of the `<!-- BEGIN/END GENERATED WIDGETS -->` region of
-`docs/SUMMARY.md`. The pages are build artifacts (gitignored) — regenerate them
-before `mdbook build`.
+`--md-dir DIR` regenerates the active crate's mdBook catalog: one Markdown page
+per type (deep-linking to its rustdoc module page), a grouped `index.md`, and an
+in-place patch of that crate's `<!-- BEGIN/END GENERATED <DIR> -->` region of
+`docs/SUMMARY.md`. `--catalog-all` does the same for all four crates, each into
+its own default directory. This is what the docs workflow runs.
+
+The generated pages ARE committed, unlike `book/` — see the note in
+`.gitignore` — so the book builds with its sidebar and pictures on any
+checkout. Regenerate and commit them when a documented item changes.
+
+Two things depend on artifacts this script does not produce:
+
+  * `--api-dir DIR` (the built rustdoc tree, e.g. `target/doc`) makes each
+    page's API link fall back to the nearest module that actually has a page,
+    so a private or cfg-gated module does not 404. Run `cargo doc` first, or
+    the deep links are emitted unverified.
+  * A page opens with `![... preview](img/<slug>.png)` only if that file
+    exists. The images come from
+    `cargo run -p teksilo-widgets-previewer -- --export-docs`, which needs a
+    GPU adapter and so is not part of CI; a missing image degrades to a page
+    without a picture.
+
+Each page's API deep link is emitted as the crate's **docs.rs** URL, because
+the pages are committed and have to resolve for someone reading the Markdown on
+GitHub, where no rustdoc tree exists. `tools/fix_book_links.py` rewrites those
+back to the book-relative `../api/...` at build time, so the rendered site links
+into its own rustdoc tree instead of leaving for docs.rs. `--api-base ../api`
+skips the round trip and emits the book form directly.
+
+The site's `/api/` tree is assembled by the workflow with
+`cp -r target/doc book/api`. A bare local `mdbook build` does not do that, so
+copy it yourself if you want those links live in a local preview.
 """
 
 from __future__ import annotations
@@ -73,6 +114,17 @@ class CrateSpec:
     @property
     def src(self) -> Path:
         return REPO_ROOT / "crates" / self.crate / "src"
+
+    @property
+    def docs_rs(self) -> str:
+        """Base for this crate's published rustdoc.
+
+        The catalog pages are committed, so their API deep link has to resolve
+        for someone reading the Markdown on GitHub, where no rustdoc tree
+        exists. `fix_book_links.py` points it back at the book's own `/api/`
+        tree at build time, so the rendered site links locally.
+        """
+        return f"https://docs.rs/{self.crate}/latest"
 
     @property
     def marker_begin(self) -> str:
@@ -1392,9 +1444,15 @@ def _build_slugs(parsed: list[ParsedFile]) -> dict[Path, str]:
     return slugs
 
 
-def _rustdoc_module_url(api_base: str, fp: Path, api_dir: "Path | None" = None) -> str:
+def _rustdoc_module_url(
+    api_base: "str | None", fp: Path, api_dir: "Path | None" = None
+) -> str:
     """rustdoc module-index URL for a catalog file, e.g.
     `button.rs` -> `<base>/teksilo_widgets/button/index.html`.
+
+    `api_base` of `None` means the active crate's docs.rs base, which is the
+    committed form; pass `--api-base ../api` to emit book-relative links
+    directly instead.
 
     With a built rustdoc tree (`api_dir`) the URL falls back to the nearest
     ancestor module that actually has a page — covering private `mod`s and
@@ -1405,9 +1463,11 @@ def _rustdoc_module_url(api_base: str, fp: Path, api_dir: "Path | None" = None) 
     rel = fp.relative_to(SPEC.src).with_suffix("")
     parts = list(rel.parts)
 
+    base = SPEC.docs_rs if api_base is None else api_base
+
     def url(ps: list[str]) -> str:
         tail = "/".join([SPEC.rustdoc, *ps, "index.html"])
-        return f"{api_base.rstrip('/')}/{tail}"
+        return f"{base.rstrip('/')}/{tail}"
 
     if api_dir is not None:
         cand = list(parts)
@@ -1532,7 +1592,7 @@ def format_catalog_markdown(
     *,
     title: str,
     slug: str,
-    api_base: str,
+    api_base: "str | None",
     img_dir: Path,
     api_dir: "Path | None" = None,
 ) -> str:
@@ -1682,8 +1742,46 @@ def merge_submodule_items(reg: "Registry", pf: ParsedFile) -> ParsedFile:
     )
 
 
+# Every generated page carries this line; `index.md` does not, and neither does
+# a hand-written guide. `_prune_stale_pages` requires it before deleting, so
+# pointing `--md-dir` at a directory of notes cannot destroy them.
+_PAGE_SIGNATURE = "Full rustdoc API for this module"
+
+
+def _prune_stale_pages(out_dir: Path, written: "set[str]") -> "list[str]":
+    """Delete catalog pages whose source module no longer exists.
+
+    The generator rewrites every page on every run, so a `*.md` it did not just
+    write documents something that has gone away. `popover.md` outlived the
+    split of `popover.rs` into three modules by a month, unreferenced by
+    `SUMMARY.md` and by `index.md`, still carrying a deep link to a rustdoc
+    module that no longer exists.
+
+    Deliberately narrow. It globs `*.md` at the top level of `out_dir` only:
+    NOT recursive, and no other suffix, so the preview images under
+    `out_dir/img/` are never traversed and never removed. Those are produced by
+    `teksilo-widgets-previewer --export-docs`, cost a GPU to rebuild, and are
+    not this tool's to delete; stale ones are reported instead.
+    """
+    removed = []
+    for md in sorted(out_dir.glob("*.md")):
+        if md.name in written:
+            continue
+        try:
+            if _PAGE_SIGNATURE not in md.read_text(encoding="utf-8"):
+                continue
+        except (OSError, UnicodeDecodeError):
+            continue
+        md.unlink()
+        removed.append(md.name)
+    return removed
+
+
 def cmd_md_dir(
-    reg: "Registry", md_dir: str, api_base: str, api_dir: "Path | None" = None
+    reg: "Registry",
+    md_dir: str,
+    api_base: "str | None",
+    api_dir: "Path | None" = None,
 ) -> int:
     out_dir = Path(md_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -1716,6 +1814,20 @@ def cmd_md_dir(
         format_catalog_index(reg, parsed, slugs), encoding="utf-8"
     )
 
+    removed = _prune_stale_pages(
+        out_dir, {f"{s}.md" for s in slugs.values()} | {"index.md"}
+    )
+    # Reported, never deleted: `img/` belongs to the previewer's --export-docs.
+    stale_img = (
+        sorted(
+            q.name
+            for q in img_dir.glob("*.png")
+            if q.stem not in set(slugs.values())
+        )
+        if img_dir.is_dir()
+        else []
+    )
+
     book_src = REPO_ROOT / "docs"
     try:
         md_subdir = out_dir.resolve().relative_to(book_src.resolve()).as_posix()
@@ -1734,7 +1846,52 @@ def cmd_md_dir(
         f"Wrote {len(parsed)} catalog pages + index.md to {out_dir} ({note})",
         file=sys.stderr,
     )
+    if removed:
+        print(
+            f"  pruned {len(removed)} stale page(s): {', '.join(removed)}",
+            file=sys.stderr,
+        )
+    if stale_img:
+        print(
+            f"  {len(stale_img)} image(s) with no page, left in place for "
+            f"--export-docs to reconcile: {', '.join(stale_img)}",
+            file=sys.stderr,
+        )
     return 0
+
+
+def _test_prune() -> None:
+    """`_prune_stale_pages` removes dead pages and nothing else."""
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as td:
+        d = Path(td)
+        img = d / "img"
+        img.mkdir()
+        page = f"# X\n\n{_PAGE_SIGNATURE} link\n"
+        (d / "button.md").write_text(page)      # written this run -> keep
+        (d / "popover.md").write_text(page)     # generated, orphaned -> remove
+        (d / "index.md").write_text("# Index")  # always rewritten -> keep
+        (d / "notes.md").write_text("hand-written, no signature")
+        (img / "button.png").write_bytes(b"\x89PNG")
+        (img / "popover.png").write_bytes(b"\x89PNG")
+        (d / "stray.txt").write_text("not markdown")
+        # A signature-bearing .md one level down. Only a recursive walk would
+        # reach it, so this is what pins the glob as top-level-only.
+        (img / "nested.md").write_text(page)
+
+        removed = _prune_stale_pages(d, {"button.md", "index.md"})
+
+        assert removed == ["popover.md"], removed
+        assert not (d / "popover.md").exists()
+        # Everything else survives: a written page, the index, a file with no
+        # generated signature, a non-.md file, and BOTH images. img/ is not
+        # traversed at all, so even the image of the pruned page is untouched.
+        for name in ("button.md", "index.md", "notes.md", "stray.txt"):
+            assert (d / name).exists(), name
+        assert (img / "button.png").exists()
+        assert (img / "popover.png").exists(), "prune must never reach into img/"
+        assert (img / "nested.md").exists(), "prune must not recurse below out_dir"
 
 
 def run_self_tests() -> int:
@@ -1742,6 +1899,7 @@ def run_self_tests() -> int:
     against the live source tree."""
     import tempfile
 
+    _test_prune()
     reg = build_registry()
     fp = reg.module_to_file["button"]
     pf = parse_file(fp, fp.stem, reg.cfg_by_file.get(fp.resolve(), []))
@@ -1776,6 +1934,11 @@ def run_self_tests() -> int:
         assert "# Index" in result and "# Tail" in result, "surrounding text clobbered"
 
     # Slug collision fallback.
+    # Default base is docs.rs, the form that resolves on GitHub; fix_book_links
+    # rewrites it to ../api/ for the book.
+    assert _rustdoc_module_url(None, WIDGETS_SRC / "button.rs") == (
+        "https://docs.rs/teksilo-widgets/latest/teksilo_widgets/button/index.html"
+    ), _rustdoc_module_url(None, WIDGETS_SRC / "button.rs")
     assert _rustdoc_module_url("../api", PRIMITIVES_DIR / "hstack.rs").endswith(
         "teksilo_widgets/primitives/hstack/index.html"
     ), "rustdoc url for nested module wrong"
@@ -1889,9 +2052,11 @@ def main(argv: list[str]) -> int:
     )
     parser.add_argument(
         "--api-base",
-        default="../api",
-        help="Base URL/path for the rustdoc API links in catalog pages "
-        "(default: ../api, i.e. rustdoc published next to the book).",
+        default=None,
+        help="Base URL/path for the rustdoc API links in catalog pages. "
+        "Default: the crate's docs.rs base, so a committed page resolves when "
+        "read on GitHub; fix_book_links.py repoints it at the book's own "
+        "/api/ tree at build time. Pass ../api to emit that directly.",
     )
     parser.add_argument(
         "--api-dir",

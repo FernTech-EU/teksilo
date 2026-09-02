@@ -80,7 +80,7 @@ assert_eq!(proxy.len(), 2); // Alice, Carol
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/teksilo_data/sort_filter_list_model/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-data/latest/teksilo_data/sort_filter_list_model/index.html)
 
 ## `pub enum SortDirection`
 

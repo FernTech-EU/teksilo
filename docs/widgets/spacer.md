@@ -31,7 +31,7 @@ let _row = HStack::new()
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/teksilo_widgets/primitives/spacer/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/primitives/spacer/index.html)
 
 ## `pub struct Spacer`
 

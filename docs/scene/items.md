@@ -30,7 +30,7 @@ in the scene with `Scene::add_item(item, local_pos)`.
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/teksilo_scene/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-scene/latest/teksilo_scene/index.html)
 
 ## `pub enum AccessSubtreeMode`
 

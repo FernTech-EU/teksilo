@@ -31,7 +31,7 @@ tree.insert_root(0, "root".to_string());
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/teksilo_data/tree_change/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-data/latest/teksilo_data/tree_change/index.html)
 
 ## `pub struct NodeId`
 

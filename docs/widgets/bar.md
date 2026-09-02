@@ -52,7 +52,7 @@ let _bar = TabBar::horizontal(model, delegate, selected, |_i, t| t.id)
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/teksilo_widgets/tab_widget/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/tab_widget/index.html)
 
 ## `pub const DEFAULT_MIN_TAB_WIDTH`
 

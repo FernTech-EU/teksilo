@@ -76,7 +76,7 @@ assert_eq!(out.iter().map(|r| r.item).collect::<Vec<_>>(), vec!["Book One", "The
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/teksilo_data/tree_row_filter/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-data/latest/teksilo_data/tree_row_filter/index.html)
 
 ## `pub struct TreeRowFilter`
 

@@ -37,7 +37,7 @@ let _w = ScrollArea::new()
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/teksilo_widgets/scroll_area/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/scroll_area/index.html)
 
 ## `pub enum ScrollBarMode`
 

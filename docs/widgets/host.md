@@ -39,7 +39,7 @@ per-window registry.
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/teksilo_widgets/toast/host/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/toast/host/index.html)
 
 ## `pub struct ToastInstallOptions`
 

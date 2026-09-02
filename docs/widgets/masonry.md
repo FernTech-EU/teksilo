@@ -33,7 +33,7 @@ let _grid = MasonryLayout::new(3)
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/teksilo_widgets/primitives/masonry/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/primitives/masonry/index.html)
 
 ## `pub struct MasonryLayout`
 

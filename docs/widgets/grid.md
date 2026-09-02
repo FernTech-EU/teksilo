@@ -38,7 +38,7 @@ let _grid = Grid::new()
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/teksilo_widgets/primitives/grid/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/primitives/grid/index.html)
 
 ## `pub enum TrackSize`
 

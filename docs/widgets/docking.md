@@ -10,8 +10,7 @@
 draggable side regions (leading / trailing / top / bottom), backed by a
 cloneable, serializable `DockingModel`.
 
-See `docs/docking.md` for the full reference. The structure is four
-levels deep:
+The structure is four levels deep:
 
 ```text
 DockingLayout
@@ -30,11 +29,11 @@ DockingLayout
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/teksilo_widgets/docking/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/docking/index.html)
 
 ## `pub struct DockingLayout`
 
-The docking layout widget. See the module docs and `docs/docking.md`.
+The docking layout widget. See the module docs.
 
 ```ignore
 let model = DockingModel::new();

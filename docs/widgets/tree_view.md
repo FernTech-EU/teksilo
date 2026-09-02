@@ -44,7 +44,7 @@ let _w = TreeView::new(tree_model, |item, entry, _selected| {
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/teksilo_widgets/tree_view/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/tree_view/index.html)
 
 ## `pub struct TreeRowContext`
 

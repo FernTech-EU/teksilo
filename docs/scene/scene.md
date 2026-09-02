@@ -64,7 +64,7 @@ assert_eq!(scene.scene_pos(id), Some(Point::new(100.0, 100.0)));
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/teksilo_scene/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-scene/latest/teksilo_scene/index.html)
 
 ## `pub enum ItemChange`
 

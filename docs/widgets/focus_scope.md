@@ -45,7 +45,7 @@ accessibility semantics. The scope node is never itself a Tab stop
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/teksilo_widgets/focus_scope/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/focus_scope/index.html)
 
 ## `pub struct FocusScope`
 

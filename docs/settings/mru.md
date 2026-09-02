@@ -74,7 +74,7 @@ assert_eq!(recents.model().len(), 1);
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/teksilo_settings/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-settings/latest/teksilo_settings/index.html)
 
 ## `pub struct MruList`
 

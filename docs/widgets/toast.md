@@ -42,7 +42,7 @@ ctx.show_toast(
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/teksilo_widgets/toast/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/toast/index.html)
 
 ## `pub const DEFAULT_TOAST_AUTO_DISMISS`
 

@@ -35,7 +35,7 @@ let _w = Slider::new(volume, 0.0, 1.0).step(0.05);
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/teksilo_widgets/slider/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/slider/index.html)
 
 ## `pub struct Slider`
 

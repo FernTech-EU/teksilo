@@ -46,7 +46,7 @@ let _bar = ScrollBar::new(
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/teksilo_widgets/scroll_bar/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/scroll_bar/index.html)
 
 ## `pub struct ScrollBar`
 

@@ -49,7 +49,7 @@ let _w = MenuList::new()
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/teksilo_widgets/menu_list/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/menu_list/index.html)
 
 ## `pub struct MenuSeparator`
 

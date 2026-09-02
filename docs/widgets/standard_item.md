@@ -76,7 +76,7 @@ the wrapper.
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/teksilo_widgets/standard_item/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/standard_item/index.html)
 
 ## `pub struct StandardListItem`
 
