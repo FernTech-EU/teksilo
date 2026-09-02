@@ -1048,14 +1048,16 @@ impl Widget for TabHeader {
         builder.add_action(teksilo_core::accesskit::Action::Focus);
         builder.set_selected(self.selected.get() == self.index);
 
-        // ARIA aria-posinset / aria-setsize — let screen readers
-        // announce "tab 3 of 5". Pinned and regular tabs share one
-        // TabList (the bar emits one Role::TabList parent), so we
-        // include both in the same set. `self.index` is the unified
-        // index across pinned + regular.
+        // ARIA aria-posinset — "tab 3 of 5". `self.index` is the unified
+        // index across pinned + regular tabs, which share one TabList (the bar
+        // emits one Role::TabList parent).
+        //
+        // The "of 5" half lives on that TabList, not here: unlike
+        // `aria-setsize`, AccessKit's `size_of_set` belongs on the container,
+        // and `size_of_set_from_container` walks up from an item — so a count
+        // written on this node would be read by no adapter on any platform.
         let set_size = self.shared.header_ids.borrow().len();
         if set_size > 0 {
-            builder.set_size_of_set(set_size);
             builder.set_position_in_set(self.index + 1);
         }
 

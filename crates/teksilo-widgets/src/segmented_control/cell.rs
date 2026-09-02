@@ -289,7 +289,8 @@ impl Widget for SegmentCell {
         // chevron menu — so the count deliberately exceeds the number of
         // rendered radios while the control is narrow.
         builder.set_position_in_set(self.index + 1);
-        builder.set_size_of_set(self.live_count);
+        // The "of N" half lives on the control's own `Role::RadioGroup` node,
+        // which also owns the decision that an overflowed segment still counts.
         // Sibling relations, for AT that announces group membership.
         // Only currently-active cells are in the buffer.
         for id in self.group_ids.borrow().iter() {

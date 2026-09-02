@@ -742,6 +742,7 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
             search_query,
             filter: self.filter.clone(),
             search_input_slot: search_input_slot.clone(),
+            visible_count_slot: Rc::new(Cell::new(0)),
             root_child_id: None,
         };
         // Built the first time the combo is opened, not here. A closed combo

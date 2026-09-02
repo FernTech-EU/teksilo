@@ -663,6 +663,13 @@ impl Widget for ColumnFlow {
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         if self.semantic_list {
             builder.set_role(teksilo_core::accesskit::Role::List);
+            // The set size belongs on the container, not on each item:
+            // AccessKit's `size_of_set` differs from ARIA's per-item
+            // `aria-setsize`, and `size_of_set_from_container` resolves an
+            // item's set size by walking *up* from it.
+            if !self.child_ids.is_empty() {
+                builder.set_size_of_set(self.child_ids.len());
+            }
         } else {
             // Deliberately bare: the walker prunes a property-free
             // GenericContainer and promotes the children in source order,
@@ -737,7 +744,7 @@ impl Widget for ColumnFlowItem {
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         builder.set_role(teksilo_core::accesskit::Role::ListItem);
         builder.set_position_in_set(self.position);
-        builder.set_size_of_set(self.total);
+        // The "of N" half lives on the flow's own `Role::List` node.
     }
 
     fn children(&self) -> Vec<WidgetId> {
@@ -1280,6 +1287,18 @@ mod tests {
             .map(|(_, node)| node)
     }
 
+    fn nodes_with_role_ids(
+        update: &teksilo_core::accesskit::TreeUpdate,
+        role: teksilo_core::accesskit::Role,
+    ) -> Vec<teksilo_core::accesskit::NodeId> {
+        update
+            .nodes
+            .iter()
+            .filter(|(_, n)| n.role() == role)
+            .map(|(id, _)| *id)
+            .collect()
+    }
+
     fn nodes_with_role(
         update: &teksilo_core::accesskit::TreeUpdate,
         role: teksilo_core::accesskit::Role,
@@ -1362,17 +1381,20 @@ mod tests {
         let list = find_node(&update, flow_id).expect("List node survives pruning");
         assert_eq!(list.role(), teksilo_core::accesskit::Role::List);
 
-        let items = nodes_with_role(&update, teksilo_core::accesskit::Role::ListItem);
-        assert_eq!(items.len(), 3, "one ListItem per child");
-        // Announced as "item N of 3", in source order. The widget passes
-        // ARIA's 1-based position; AccessKit stores it zero-based, and the
-        // Windows and AT-SPI adapters add the 1 back before speaking it.
-        let mut seen: Vec<(usize, usize)> = items
+        let item_ids = nodes_with_role_ids(&update, teksilo_core::accesskit::Role::ListItem);
+        assert_eq!(item_ids.len(), 3, "one ListItem per child");
+        // Announced as "item N of 3", in source order — asked the way an
+        // adapter asks it, so the size has to be resolvable by walking up to
+        // the flow's own `Role::List` node.
+        let mut seen: Vec<(Option<usize>, Option<usize>)> = item_ids
             .iter()
-            .map(|n| (n.position_in_set().unwrap(), n.size_of_set().unwrap()))
+            .map(|id| crate::a11y_set_semantics::announced_set_position(&update, *id))
             .collect();
         seen.sort();
-        assert_eq!(seen, vec![(0, 3), (1, 3), (2, 3)]);
+        assert_eq!(
+            seen,
+            vec![(Some(1), Some(3)), (Some(2), Some(3)), (Some(3), Some(3))]
+        );
     }
 
     // ── paint ────────────────────────────────────────────────────────

@@ -4800,25 +4800,29 @@ mod tests {
                 .map(|(_, n)| n)
                 .expect("row must be in the a11y tree")
         };
-        let sets: Vec<(usize, usize)> = body_rows
+        let positions: Vec<usize> = body_rows
             .iter()
-            .map(|&r| {
-                let node = find(r);
-                (
-                    node.position_in_set().expect("position_in_set"),
-                    node.size_of_set().expect("size_of_set"),
-                )
-            })
+            .map(|&r| find(r).position_in_set().expect("position_in_set"))
             .collect();
         // The row passes ARIA's 1-based sibling position; AccessKit stores it
         // zero-based, and the Windows and AT-SPI adapters add the 1 back — so
-        // "the first of two siblings" is (0, 2) on the node and "1 of 2" to the
-        // user.
+        // "the first of two siblings" is 0 on the node and "1" to the user.
         assert_eq!(
-            sets,
-            vec![(0, 2), (0, 2), (1, 2), (1, 2), (0, 1)],
-            "docs(1/2) readme(1/2) guide(2/2) src(2/2) main.rs(1/1)"
+            positions,
+            vec![0, 0, 1, 1, 0],
+            "docs(1st) readme(1st) guide(2nd) src(2nd) main.rs(1st)"
         );
+        // No sibling *count*, deliberately. AccessKit resolves a set size by
+        // walking up from an item, so the only value a flattened tree could
+        // publish is one shared by every row at every depth — which is not what
+        // "of 2 siblings" means. See `TreeRowA11y::accessibility`.
+        for &r in body_rows {
+            assert_eq!(
+                find(r).size_of_set(),
+                None,
+                "a per-sibling count is unrepresentable and must not be faked"
+            );
+        }
     }
 
     #[test]

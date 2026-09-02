@@ -1640,6 +1640,12 @@ impl<T: 'static> Widget for ListView<T> {
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         builder.set_role(teksilo_core::accesskit::Role::ListBox);
+        // The logical row count, not the realized virtualization window: a
+        // 200-row list announces "of 200" even while twenty rows exist as
+        // widgets. It belongs here rather than on each row, because
+        // `size_of_set_from_container` resolves an item's set size by walking
+        // *up* from it — a size written on a row is read by no adapter.
+        builder.set_size_of_set(self.source.len());
     }
 
     fn as_any(&self) -> Option<&dyn std::any::Any> {
@@ -1732,6 +1738,70 @@ mod tests {
         ) -> teksilo_core::widget::LayoutResponse {
             Size::new(self.0, self.1).into()
         }
+    }
+
+    /// A `ListView` announced neither its position nor its total until now: no
+    /// row set `position_in_set`, and no container anywhere in the framework
+    /// set `size_of_set`. A screen-reader user arrowing through a 200-row list
+    /// heard each row's label and nothing about where they were in it.
+    ///
+    /// Asked the way a platform adapter asks it — the position off the row, the
+    /// total by walking up to the `Role::ListBox` — because that walk is
+    /// exactly what a node-level assertion would have missed.
+    #[test]
+    fn a_row_announces_its_position_out_of_the_whole_model() {
+        let (mut tree, lv_id, _model) = make_list_view(200, 20.0);
+        tree.layout(SizeProposal::exact(400.0, 200.0));
+        let rows = row_ids(&tree, lv_id);
+        assert!(!rows.is_empty(), "some rows must be realized");
+
+        let update = tree.sync_accessibility();
+        for (i, &row) in rows.iter().enumerate().take(3) {
+            crate::a11y_set_semantics::assert_announces(
+                &update,
+                teksilo_core::accessibility::widget_id_to_node_id(row),
+                i + 1,
+                200,
+                &format!("row {i}"),
+            );
+        }
+    }
+
+    /// The number a row announces is its place in the **model**, not in the
+    /// realized window: scroll to row 150 and it must say 151, not 1.
+    #[test]
+    fn a_scrolled_row_announces_its_model_position_not_its_window_position() {
+        let (mut tree, lv_id, _model) = make_list_view(200, 20.0);
+        tree.layout(SizeProposal::exact(400.0, 200.0));
+        {
+            let any = tree.widget_as_any(lv_id).unwrap();
+            any.downcast_ref::<ListView<usize>>()
+                .unwrap()
+                .scroll_y_signal()
+                .set(150.0 * 20.0);
+        }
+        tree.layout(SizeProposal::exact(400.0, 200.0));
+
+        let rows = row_ids(&tree, lv_id);
+        assert!(
+            !rows.is_empty(),
+            "some rows must be realized after scrolling"
+        );
+        let update = tree.sync_accessibility();
+        let (position, size) = crate::a11y_set_semantics::announced_set_position(
+            &update,
+            teksilo_core::accessibility::widget_id_to_node_id(rows[0]),
+        );
+        assert_eq!(
+            size,
+            Some(200),
+            "the total is the model's, not the window's"
+        );
+        assert!(
+            position.is_some_and(|p| p > 100),
+            "the first realized row after scrolling to the 150th must announce a \
+             model position, not a window position; got {position:?}"
+        );
     }
 
     fn make_list_view(count: usize, item_height: f32) -> (WidgetTree, WidgetId, ListModel<usize>) {

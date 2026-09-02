@@ -688,7 +688,8 @@ impl Widget for DockActivityBar {
             items_stack = items_stack.add_child(*id);
         }
         let items_stack = ctx.add(items_stack);
-        let tab_list = ctx.add(DockRailTabList::new(self.side, items_stack));
+        let shown_tabs = shown_rail_count(&self.item_ids, &self.visible_count);
+        let tab_list = ctx.add(DockRailTabList::new(self.side, items_stack, shown_tabs));
 
         // Item column (pushed to the top by a trailing Spacer).
         let mut column = VStack::new().spacing(RAIL_ITEM_SPACING);
@@ -1115,11 +1116,14 @@ fn rail_insertion(
 pub(crate) struct DockRailTabList {
     side: DockSide,
     stack: WidgetId,
+    /// How many rail tabs are shown, for this node's `size_of_set`. Same value
+    /// each `DockRailItem` used to write on itself, where no adapter read it.
+    shown: usize,
 }
 
 impl DockRailTabList {
-    fn new(side: DockSide, stack: WidgetId) -> Self {
-        Self { side, stack }
+    fn new(side: DockSide, stack: WidgetId, shown: usize) -> Self {
+        Self { side, stack, shown }
     }
 }
 
@@ -1148,6 +1152,13 @@ impl Widget for DockRailTabList {
         builder.set_role(Role::TabList);
         builder.set_name(super::a11y::rail_label(self.side).resolve_now());
         builder.set_orientation(A11yOrientation::Vertical);
+        // The set size belongs on this container, not on each item:
+        // AccessKit's `size_of_set` differs from ARIA's per-item
+        // `aria-setsize`, and `size_of_set_from_container` resolves an
+        // item's set size by walking *up* from it.
+        if self.shown > 0 {
+            builder.set_size_of_set(self.shown);
+        }
     }
 
     fn children(&self) -> Vec<WidgetId> {
@@ -1275,6 +1286,15 @@ impl Widget for DockRailActionGroup {
         builder.set_role(Role::Toolbar);
         builder.set_name(super::a11y::rail_actions_label(self.side, self.placement).resolve_now());
         builder.set_orientation(A11yOrientation::Vertical);
+        // The set size belongs on this container, not on each action:
+        // AccessKit's `size_of_set` differs from ARIA's per-item
+        // `aria-setsize`, and `size_of_set_from_container` resolves an item's
+        // set size by walking *up* from it. `item_ids` is the same list each
+        // `DockRailActionItem` receives as its `siblings`.
+        let count = self.item_ids.borrow().len();
+        if count > 0 {
+            builder.set_size_of_set(count);
+        }
     }
 
     fn children(&self) -> Vec<WidgetId> {
@@ -1572,7 +1592,7 @@ impl Widget for DockRailActionItem {
             builder.set_disabled();
         }
         builder.set_position_in_set(self.index + 1);
-        builder.set_size_of_set(self.siblings.borrow().len());
+        // The "of N" half lives on the `Role::Toolbar` action group.
         // A reflect-only bistate reads as a toggle button to AT.
         if let Some(t) = &self.action.toggled {
             builder.set_toggled(t.get());
@@ -1796,6 +1816,14 @@ impl Widget for DockOverflowMenu {
         use teksilo_core::accesskit::{Orientation, Role};
         builder.set_role(Role::Menu);
         builder.set_orientation(Orientation::Vertical);
+        // The set size belongs on this container, not on each item:
+        // AccessKit's `size_of_set` differs from ARIA's per-item
+        // `aria-setsize`, and `size_of_set_from_container` resolves an
+        // item's set size by walking *up* from it.
+        let shown = overflow_shown_count(&self.row_ids, &self.visible_count);
+        if shown > 0 {
+            builder.set_size_of_set(shown);
+        }
     }
 
     fn children(&self) -> Vec<WidgetId> {
@@ -2161,7 +2189,7 @@ impl Widget for DockRailItem {
         // `pos` is this item's 0-based visible position; only shown items run
         // `accessibility()`, so `pos < visible_count` holds here.
         builder.set_position_in_set(self.pos + 1);
-        builder.set_size_of_set(shown_rail_count(&self.item_ids, &self.visible_count));
+        // The "of N" half lives on the `Role::TabList` wrapper.
         // Communicate the collapse toggle on the active tab: expanded when its
         // panel is shown, collapsed when hidden. Omitted on the other tabs
         // (the "expanded" concept doesn't apply to an inactive tab).
@@ -2382,7 +2410,7 @@ impl Widget for DockOverflowRow {
         // position within the overflowed run is `pos - visible_count + 1`.
         let count = self.visible_count.get();
         builder.set_position_in_set(self.pos.saturating_sub(count) + 1);
-        builder.set_size_of_set(overflow_shown_count(&self.row_ids, &self.visible_count));
+        // The "of N" half lives on the `Role::Menu` container.
     }
 
     fn children(&self) -> Vec<WidgetId> {

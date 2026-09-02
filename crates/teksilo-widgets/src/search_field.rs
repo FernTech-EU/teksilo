@@ -944,7 +944,10 @@ impl Widget for SuggestionPanel {
             ctx,
         );
 
-        let listbox = ctx.add(SuggestionListBox { inner: surface });
+        let listbox = ctx.add(SuggestionListBox {
+            inner: surface,
+            total,
+        });
         // Publish the listbox WidgetId so SearchField's a11y can wire
         // `aria-controls`.
         self.listbox_id_slot.set(Some(listbox));
@@ -990,6 +993,14 @@ impl Widget for SuggestionPanel {
 
 struct SuggestionListBox {
     inner: WidgetId,
+    /// How many suggestions the query returned — the one number a screen-reader
+    /// user needs before deciding whether to arrow through them.
+    ///
+    /// On the container, not on each row: AccessKit's `size_of_set` belongs on
+    /// the container (unlike ARIA's per-item `aria-setsize`), and
+    /// `size_of_set_from_container` walks *up* from an item to find it, so a
+    /// count written on a `Role::ListBoxOption` is read by no adapter.
+    total: usize,
 }
 
 impl std::fmt::Debug for SuggestionListBox {
@@ -1024,6 +1035,9 @@ impl Widget for SuggestionListBox {
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         builder.set_role(teksilo_core::accesskit::Role::ListBox);
+        if self.total > 0 {
+            builder.set_size_of_set(self.total);
+        }
     }
 
     fn children(&self) -> Vec<WidgetId> {
@@ -1088,7 +1102,8 @@ impl Widget for SuggestionRow {
         let is_selected = self.selected_signal.get() == Some(self.index);
         builder.set_selected(is_selected);
         builder.set_position_in_set(self.index + 1);
-        builder.inner_mut().set_size_of_set(self.total);
+        // The "of N" half lives on the `SuggestionListBox` container; a count
+        // written here would be read by no adapter.
     }
 
     fn children(&self) -> Vec<WidgetId> {

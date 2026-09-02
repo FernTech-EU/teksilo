@@ -31,11 +31,18 @@ use teksilo_core::widget_id::WidgetId;
 pub(crate) struct ListItemWrapper {
     child: WidgetId,
     selected: bool,
+    /// 1-based position in the whole model, not in the realized window: the
+    /// screen reader says "row 147", so the number has to be the model's.
+    position: usize,
 }
 
 impl ListItemWrapper {
-    pub fn new(child: WidgetId, selected: bool) -> Self {
-        Self { child, selected }
+    pub fn new(child: WidgetId, selected: bool, position_1based: usize) -> Self {
+        Self {
+            child,
+            selected,
+            position: position_1based,
+        }
     }
 }
 
@@ -82,6 +89,11 @@ impl Widget for ListItemWrapper {
         // here would move focus off the view's root and kill arrow navigation.
         builder.add_action(teksilo_core::accesskit::Action::Click);
         builder.add_action(teksilo_core::accesskit::Action::ScrollIntoView);
+        // "row 147". The matching "of 200" lives on the `Role::ListBox`
+        // container: AccessKit's `size_of_set` belongs there, unlike ARIA's
+        // per-item `aria-setsize`, and `size_of_set_from_container` walks up
+        // from an item to find it. A `ListView` announced neither until now.
+        builder.set_position_in_set(self.position);
     }
 
     fn children(&self) -> Vec<WidgetId> {
@@ -148,7 +160,21 @@ impl Widget for TreeItemWrapper {
         builder.set_role(teksilo_core::accesskit::Role::TreeItem);
         builder.set_level(self.level);
         builder.set_position_in_set(self.position);
-        builder.inner_mut().set_size_of_set(self.total_siblings);
+        // No `size_of_set` here, and none on the container either.
+        //
+        // AccessKit resolves an item's set size by walking *up* from it
+        // (`size_of_set_from_container`), so the only value a flattened tree
+        // could publish is one shared by every row at every depth — which is
+        // not what "the 2nd of 5 siblings" means. Expressing it correctly needs
+        // a real `Role::Group` node per expanded branch, between the container
+        // and its rows, and that changes the AT tree shape for every tree
+        // widget. Writing the number on this node instead is dead: no adapter
+        // on any platform reads it, and leaving it there makes a missing
+        // feature look like a working one.
+        //
+        // The level and the expanded state still carry the hierarchy, and
+        // `position_in_set` still says which sibling this is.
+
         if let Some(expanded) = self.expanded {
             builder.set_expanded(expanded);
         }

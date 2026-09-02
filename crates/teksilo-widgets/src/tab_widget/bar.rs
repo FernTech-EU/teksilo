@@ -2186,6 +2186,19 @@ impl<T: 'static> Widget for TabBar<T> {
             TabBarOrientation::Horizontal => teksilo_core::accesskit::Orientation::Horizontal,
             TabBarOrientation::Vertical => teksilo_core::accesskit::Orientation::Vertical,
         });
+        // The tab count, on the container rather than on each tab:
+        // `size_of_set_from_container` walks up from an item, so a count
+        // written on a `Role::Tab` is read by no adapter. This is the same
+        // number `TabHeader` used to write on itself — pinned and regular tabs
+        // share one TabList, and the buffer holds both.
+        let count = self
+            .header_ids_buffer
+            .as_ref()
+            .map(|b| b.borrow().len())
+            .unwrap_or(0);
+        if count > 0 {
+            builder.set_size_of_set(count);
+        }
     }
 
     fn children(&self) -> Vec<WidgetId> {

@@ -194,7 +194,20 @@ impl Widget for TreeRowA11y {
         // number and converts to AccessKit's zero-based property itself.
         builder.set_level(self.level_1based.max(1));
         builder.set_position_in_set(self.position_in_set);
-        builder.set_size_of_set(self.size_of_set);
+        // No `size_of_set` here, and none on the container either.
+        //
+        // AccessKit resolves an item's set size by walking *up* from it
+        // (`size_of_set_from_container`), so the only value a flattened tree
+        // could publish is one shared by every row at every depth — which is
+        // not what "the 2nd of 5 siblings" means. Expressing it correctly needs
+        // a real `Role::Group` node per expanded branch, between the container
+        // and its rows, and that changes the AT tree shape for every tree
+        // widget. Writing the number on this node instead is dead: no adapter
+        // on any platform reads it, and leaving it there makes a missing
+        // feature look like a working one.
+        //
+        // The level and the expanded state still carry the hierarchy, and
+        // `position_in_set` still says which sibling this is.
     }
 
     fn children(&self) -> Vec<WidgetId> {

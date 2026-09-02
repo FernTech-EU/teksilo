@@ -673,11 +673,18 @@ fn segments_announce_their_position_over_the_whole_list() {
 
     let cells = active_cells(&t, id);
     assert!(cells.len() < 7, "this test needs an overflowing control");
-    let nodes = a11y_nodes(&mut t);
-    let first = node_of(&nodes, cells[0]);
-    assert_eq!(first.size_of_set(), Some(7));
-    // The cell passes ARIA's 1-based position; AccessKit stores it zero-based.
-    assert_eq!(first.position_in_set(), Some(0));
+    // Asked the way an adapter asks it: the position off the cell, the size by
+    // walking up to the `Role::RadioGroup` container. An overflowed segment is
+    // still one of the choices, so the total is 7 even though fewer cells are
+    // rendered.
+    let update = t.sync_accessibility();
+    crate::a11y_set_semantics::assert_announces(
+        &update,
+        teksilo_core::accessibility::widget_id_to_node_id(cells[0]),
+        1,
+        7,
+        "the first segment of an overflowing control",
+    );
 }
 
 #[test]

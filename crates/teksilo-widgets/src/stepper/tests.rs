@@ -74,6 +74,14 @@ fn node_by_label<'a>(
         .map(|(_, n)| n)
 }
 
+fn node_id_by_label(update: &accesskit::TreeUpdate, label: &str) -> Option<accesskit::NodeId> {
+    update
+        .nodes
+        .iter()
+        .find(|(_, n)| n.label() == Some(label))
+        .map(|(id, _)| *id)
+}
+
 // ── build / embedding ──────────────────────────────────────────────────────
 
 #[test]
@@ -743,12 +751,12 @@ fn a11y_indicators_have_posinset_and_setsize() {
     t.add(Stepper::new().non_linear(true).steps(three_steps()));
     layout(&mut t);
     let update = t.sync_accessibility();
-    // The indicator passes ARIA's 1-based step number; AccessKit stores it
-    // zero-based, and the Windows and AT-SPI adapters add the 1 back.
-    for (label, pos) in [("One", 0), ("Two", 1), ("Three", 2)] {
-        let n = node_by_label(&update, label).unwrap();
-        assert_eq!(n.size_of_set(), Some(3));
-        assert_eq!(n.position_in_set(), Some(pos));
+    // Asked the way an adapter asks it: the position off the indicator, the
+    // size by walking up to the indicator strip. In a wizard the total is the
+    // whole point — it is what tells the user how much is left.
+    for (label, pos) in [("One", 1), ("Two", 2), ("Three", 3)] {
+        let id = node_id_by_label(&update, label).unwrap();
+        crate::a11y_set_semantics::assert_announces(&update, id, pos, 3, &format!("step {label}"));
     }
 }
 

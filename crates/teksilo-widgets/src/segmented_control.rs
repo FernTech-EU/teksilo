@@ -1344,6 +1344,15 @@ impl Widget for SegmentedControl {
         if let Some(name) = &self.label {
             builder.set_name(name.resolve_now());
         }
+        // The set size belongs on the container, not on each item:
+        // AccessKit's `size_of_set` differs from ARIA's per-item
+        // `aria-setsize`, and `size_of_set_from_container` resolves an
+        // item's set size by walking *up* from it.
+        // `live`, not the rendered cells: a segment pushed into the
+        // overflow menu is still one of the choices, so it still counts.
+        if !self.live.is_empty() {
+            builder.set_size_of_set(self.live.len());
+        }
         let selected = self.index.get();
         if let Some(segment_index) = self.live.get(selected) {
             builder.set_value(self.segments[*segment_index].label.resolve_now());

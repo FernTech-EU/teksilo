@@ -421,7 +421,7 @@ impl Widget for RadioTileGroup {
         // pattern).
         for (i, mut tile) in pending.into_iter().enumerate() {
             tile.set_selection(i, self.selected.clone());
-            tile.set_grouped(self.group_focused.clone(), self.group_ids.clone(), i + 1, n);
+            tile.set_grouped(self.group_focused.clone(), self.group_ids.clone(), i + 1);
             if self.layout == TileLayout::Vertical {
                 tile.set_vertical_arrangement();
             }
@@ -597,6 +597,14 @@ impl Widget for RadioTileGroup {
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         builder.set_role(teksilo_core::accesskit::Role::RadioGroup);
+        // The set size belongs on this container, not on each tile:
+        // AccessKit's `size_of_set` differs from ARIA's per-item
+        // `aria-setsize`, and `size_of_set_from_container` resolves an item's
+        // set size by walking *up* from it, so a count written on a
+        // `Role::RadioButton` is read by no adapter on any platform.
+        if !self.tile_ids.is_empty() {
+            builder.set_size_of_set(self.tile_ids.len());
+        }
         if let Some(ref name) = self.label {
             builder.set_name(name.resolve_now());
         }

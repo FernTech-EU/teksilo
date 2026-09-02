@@ -185,19 +185,16 @@ fn tabs_have_position_and_size_of_set() {
     let update = tree.sync_accessibility();
     let tab_ids = nodes_with_role(&update, accesskit::Role::Tab);
     assert_eq!(tab_ids.len(), n);
+    // Asked the way an adapter asks it: the position off the tab, the size by
+    // walking up to the `Role::TabList` bar. Pinned and regular tabs share one
+    // TabList, so they share one set.
     for (i, &tab_id) in tab_ids.iter().enumerate() {
-        let node = find_node(&update, tab_id).unwrap();
-        assert_eq!(
-            node.size_of_set(),
-            Some(n),
-            "tab at index {i} should report size_of_set == {n}"
-        );
-        // The header passes ARIA's 1-based position; AccessKit stores it
-        // zero-based, and the Windows and AT-SPI adapters add the 1 back.
-        assert_eq!(
-            node.position_in_set(),
-            Some(i),
-            "tab at index {i} should report AccessKit index {i}"
+        crate::a11y_set_semantics::assert_announces(
+            &update,
+            tab_id,
+            i + 1,
+            n,
+            &format!("tab at index {i}"),
         );
     }
     assert_a11y_tree_valid(&update);

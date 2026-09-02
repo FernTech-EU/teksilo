@@ -13,6 +13,49 @@ by crate for clarity, not because crates version independently.
 
 ## [Unreleased]
 
+### Fixed — no Teksilo collection ever announced "of N", and ListView announced nothing at all
+
+AccessKit puts `size_of_set` on the **container**, unlike ARIA's per-item
+`aria-setsize`: `size_of_set_from_container`
+(`accesskit_consumer-0.39.0/src/node.rs:629-641`) resolves an item's set size by
+walking *up* from its parent. Every one of Teksilo's fifteen writes was on an
+item, and no container anywhere set it. So the property was inert, on every
+platform, for every widget — a tab said "tab 3", never "tab 3 of 5"; a dropdown
+said "Apple, selected", never "1 of 12"; a wizard said "Account details", never
+"step 2 of 4".
+
+The count now lives on the container in every family: `ListView`'s
+`Role::ListBox`, the tab bar's `Role::TabList`, the combo panel's `Role::ListBox`
+(fed by whichever build path ran), `SearchField`'s suggestion list, the code
+editor's completion popup, `GridView`'s `Role::Grid` beside its row and column
+counts, `ColumnFlow`'s `Role::List`, `SegmentedControl`'s and
+`RadioTileGroup`'s `Role::RadioGroup`, the stepper's indicator strip, and the
+docking rail's `Role::TabList`, `Role::Toolbar` and `Role::Menu`. The item-side
+writes are gone; each carries a comment saying where its half went.
+
+**`ListView` set neither half.** No row published a position and no container a
+total, so a screen-reader user arrowing through a 200-row list heard each row's
+label and nothing at all about where they were. Rows now publish their position
+in the **model**, not in the realized virtualization window — scroll to the
+150th row and it says 151, not 1 — and the container publishes the logical
+length.
+
+**The two tree families lose a write that never worked, and gain nothing.** A
+flattened tree publishes every visible row as a sibling of one container, so the
+only set size it could express is one shared by every row at every depth, which
+is not what "the 2nd of 5 siblings" means. Doing it properly needs a real
+`Role::Group` node per expanded branch, which changes the AT tree shape for
+every tree widget and every consumer of it. Until then, `TreeView` and
+`TreeTableView` no longer write a number no adapter reads: the level, the
+expanded state and the sibling position still carry the hierarchy, and a
+missing feature no longer looks like a working one.
+
+The tests moved with the code. They used to read `size_of_set` straight off the
+item's node, which is precisely how fifteen inert writes stayed green for as
+long as they did. A new `a11y_set_semantics` helper asks the question the way a
+platform adapter asks it — position off the item, size resolved by the
+consumer's own upward walk — and every rewritten test goes through it.
+
 ### Added — a context menu can be opened from the keyboard
 
 There was no keyboard route to a context menu at all. `Key` had no

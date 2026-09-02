@@ -202,7 +202,9 @@ impl<T: Clone + PartialEq + 'static> Widget for DropdownItem<T> {
         let is_selected = self.selected_signal.get().as_ref() == Some(&self.value);
         builder.set_selected(is_selected);
         builder.set_position_in_set(self.position);
-        builder.inner_mut().set_size_of_set(self.total);
+        // The "of N" half lives on the `DropdownPanel`'s `Role::ListBox`.
+        // AccessKit resolves an item's set size by walking up from it, so a
+        // count written here is read by no adapter on any platform.
     }
 
     fn children(&self) -> Vec<WidgetId> {

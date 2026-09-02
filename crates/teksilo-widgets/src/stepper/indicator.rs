@@ -308,7 +308,8 @@ impl Widget for StepIndicator {
             builder.set_aria_current(teksilo_core::accesskit::AriaCurrent::Step);
         }
         builder.set_position_in_set(self.index + 1);
-        builder.inner_mut().set_size_of_set(self.total);
+        // The "of N" half lives on the indicator strip, which owns the
+        // `Role::TabList` / `Role::List` container node.
         let _ = self.orientation; // orientation drives strip layout, not the node
     }
 

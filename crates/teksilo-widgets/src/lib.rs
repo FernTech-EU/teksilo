@@ -13,6 +13,8 @@
     dead_code
 )]
 
+#[cfg(test)]
+pub(crate) mod a11y_set_semantics;
 pub mod accordion;
 pub mod animations;
 pub mod avatar;

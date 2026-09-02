@@ -175,6 +175,15 @@ impl Widget for IndicatorStrip {
         }
         builder
             .set_name(teksilo_i18n::tr_widget!(a11y_stepper_indicator_strip_name()).resolve_now());
+        // The set size belongs on the container, not on each item:
+        // AccessKit's `size_of_set` differs from ARIA's per-item
+        // `aria-setsize`, and `size_of_set_from_container` resolves an
+        // item's set size by walking *up* from it.
+        // In a wizard the total is the whole point: "step 2 of 4" is what
+        // tells the user how much is left.
+        if !self.steps.is_empty() {
+            builder.set_size_of_set(self.steps.len());
+        }
     }
 
     fn children(&self) -> Vec<WidgetId> {

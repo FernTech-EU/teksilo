@@ -1599,6 +1599,13 @@ impl<T: 'static> Widget for GridView<T> {
         let rows = total.div_ceil(cols);
         builder.set_row_count(rows);
         builder.set_column_count(cols);
+        // The set size belongs on the container, not on each tile: AccessKit's
+        // `size_of_set` differs from ARIA's per-item `aria-setsize`, and
+        // `size_of_set_from_container` resolves an item's set size by walking
+        // *up* from it. The logical item count, not the realized window.
+        if total > 0 {
+            builder.set_size_of_set(total);
+        }
 
         if let Some(ref sel) = self.selection {
             if sel.mode() == SelectionMode::Multi {

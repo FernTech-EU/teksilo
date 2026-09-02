@@ -1690,16 +1690,15 @@ fn rail_tabs_report_position_and_size_of_set() {
     let (mut t, _model, root) = rail_two_tabs();
     let tabs = rail_tabs(&t, root);
     let update = t.sync_accessibility();
+    // Asked the way an adapter asks it: the position off the tab, the size by
+    // walking up to the `Role::TabList` wrapper that holds the rail's items.
     for (i, &tab) in tabs.iter().enumerate() {
-        let node =
-            find_a11y_node(&update, widget_id_to_node_id(tab)).expect("rail tab in a11y tree");
-        assert_eq!(node.size_of_set(), Some(2), "rail tab {i} size_of_set");
-        // The widget passes the 1-based position; AccessKit stores it
-        // zero-based, and Windows and AT-SPI add the 1 back before speaking it.
-        assert_eq!(
-            node.position_in_set(),
-            Some(i),
-            "rail tab {i} is AccessKit index {i}"
+        crate::a11y_set_semantics::assert_announces(
+            &update,
+            widget_id_to_node_id(tab),
+            i + 1,
+            2,
+            &format!("rail tab {i}"),
         );
     }
 }

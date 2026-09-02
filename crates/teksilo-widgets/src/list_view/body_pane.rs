@@ -261,8 +261,13 @@ impl<T: 'static> Widget for ListBodyPane<T> {
                 if let Some(tip) = pending_tip.into_inner() {
                     self.row_tooltips.attach_resolved(ctx, inner_id, tip);
                 }
+                // `i` is the model index, so `i + 1` is the row number the
+                // user hears — not a position within the realized window,
+                // which would restart at 1 on every scroll.
                 let child_id = ctx.add(crate::list_item_a11y::ListItemWrapper::new(
-                    inner_id, selected,
+                    inner_id,
+                    selected,
+                    i + 1,
                 ));
 
                 // Selection click handling: plain click selects,

@@ -24,7 +24,7 @@
 //! title as the accessible name, and the description as the accessible
 //! description. When grouped, each tile emits
 //! `push_to_radio_group([sibling_ids])` plus `set_position_in_set` /
-//! `set_size_of_set` for "N of M". Inside a `RadioTileGroup` the tile is not
+//! the group's `set_size_of_set` for "N of M". Inside a `RadioTileGroup` the tile is not
 //! individually focusable — focus roves on the group (WAI-ARIA radiogroup),
 //! and the group publishes `active_descendant`. A standalone tile is
 //! focusable and responds to `Space` / `Action::Click`.
@@ -118,7 +118,6 @@ pub struct RadioTile {
     group_focused: Option<Signal<bool>>,
     group_ids: Option<Rc<RefCell<Vec<WidgetId>>>>,
     pos_in_set: Option<usize>,
-    size_of_set: Option<usize>,
     root_child_id: Option<WidgetId>,
 }
 
@@ -155,7 +154,6 @@ impl RadioTile {
             group_focused: None,
             group_ids: None,
             pos_in_set: None,
-            size_of_set: None,
             root_child_id: None,
         }
     }
@@ -331,18 +329,19 @@ impl RadioTile {
         self.selected = selected;
     }
 
+    /// `pos` is the tile's 1-based position. There is deliberately no `size`
+    /// parameter: AccessKit's `size_of_set` is a container property, so the
+    /// group publishes it on its own `Role::RadioGroup` node.
     pub(crate) fn set_grouped(
         &mut self,
         group_focused: Signal<bool>,
         group_ids: Rc<RefCell<Vec<WidgetId>>>,
         pos: usize,
-        size: usize,
     ) {
         self.grouped = true;
         self.group_focused = Some(group_focused);
         self.group_ids = Some(group_ids);
         self.pos_in_set = Some(pos);
-        self.size_of_set = Some(size);
     }
 
     pub(crate) fn is_enabled(&self) -> bool {
@@ -713,9 +712,9 @@ impl Widget for RadioTile {
         if let Some(pos) = self.pos_in_set {
             builder.set_position_in_set(pos);
         }
-        if let Some(size) = self.size_of_set {
-            builder.set_size_of_set(size);
-        }
+        // The "of N" half lives on the `RadioTileGroup`'s own
+        // `Role::RadioGroup` node; `size_of_set` is a container property in
+        // AccessKit, unlike ARIA's per-item `aria-setsize`.
         // Radio-group membership — each tile declares every sibling (incl.
         // itself) so AT can announce positional info.
         if let Some(group_ids) = &self.group_ids {

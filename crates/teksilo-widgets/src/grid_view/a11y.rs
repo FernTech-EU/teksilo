@@ -87,7 +87,8 @@ impl Widget for TileA11y {
         }
         builder.set_selected(self.selected);
         builder.set_position_in_set(self.position);
-        builder.set_size_of_set(self.total);
+        // The "of N" half lives on the grid's own `Role::Grid` node, beside
+        // the row and column counts.
         builder.set_row_index(self.row_index);
         builder.set_column_index(self.col_index);
         builder.add_action(teksilo_core::accesskit::Action::Click);

@@ -320,6 +320,17 @@ pub(super) struct DropdownPanel<T: Clone + PartialEq + 'static> {
     /// widget id so the owning `ComboBox` can `ctx.request_focus(..)`
     /// the field when the overlay opens.
     pub(super) search_input_slot: Rc<Cell<Option<WidgetId>>>,
+    /// How many options are currently visible, written by whichever build path
+    /// ran (filtered, virtualized or plain) and read by this panel's
+    /// accessibility node.
+    ///
+    /// The count has to reach the `Role::ListBox` container rather than each
+    /// `Role::ListBoxOption`: AccessKit's `size_of_set` belongs on the
+    /// container, unlike ARIA's per-item `aria-setsize`, and
+    /// `size_of_set_from_container` walks *up* from an item to find it. Written
+    /// on the option it is read by no adapter, which is why a dropdown
+    /// announced "Apple, selected" and never "1 of 12".
+    pub(super) visible_count_slot: Rc<Cell<usize>>,
     pub(super) root_child_id: Option<WidgetId>,
 }
 
@@ -338,6 +349,10 @@ struct FilteredItemList<T: Clone + PartialEq + 'static> {
     version: Signal<u64>,
     search_query: Signal<String>,
     filter: Option<Rc<dyn Fn(&str, &T) -> bool>>,
+    /// The owning panel's count slot. Filled here because this is where the
+    /// filter runs, and read by `DropdownPanel::accessibility`, which owns the
+    /// `Role::ListBox` node the count has to sit on.
+    visible_count_slot: Rc<Cell<usize>>,
     root_child_id: Option<WidgetId>,
 }
 
@@ -385,6 +400,8 @@ impl<T: Clone + PartialEq + 'static> Widget for FilteredItemList<T> {
             keep
         };
         let visible_count = visible_indices.len();
+        // Publish for the panel's `Role::ListBox` node — see the slot's doc.
+        self.visible_count_slot.set(visible_count);
 
         // Large filtered result — hand off to the shared virtualized
         // path so only the visible rows are materialized even when the
@@ -497,9 +514,12 @@ impl<T: Clone + PartialEq + 'static> Widget for DropdownPanel<T> {
                 version: self.version.clone(),
                 search_query: query.clone(),
                 filter: self.filter.clone(),
+                visible_count_slot: self.visible_count_slot.clone(),
                 root_child_id: None,
             })
         } else {
+            // Unfiltered: every item is visible, so the count is the source's.
+            self.visible_count_slot.set(self.source.len());
             build_static_item_list(
                 ctx,
                 &self.source,
@@ -717,6 +737,10 @@ impl<T: Clone + PartialEq + 'static> Widget for DropdownPanel<T> {
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         builder.set_role(teksilo_core::accesskit::Role::ListBox);
+        let count = self.visible_count_slot.get();
+        if count > 0 {
+            builder.set_size_of_set(count);
+        }
     }
 
     fn children(&self) -> Vec<WidgetId> {

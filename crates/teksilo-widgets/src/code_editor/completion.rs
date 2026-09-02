@@ -816,7 +816,7 @@ impl Widget for CompletionPanel {
                 .access_customize(move |b| {
                     b.inner_mut().set_selected(highlighted);
                     b.set_position_in_set(posinset);
-                    b.inner_mut().set_size_of_set(total);
+                    // The "of N" half lives on the panel's `Role::ListBox`.
                 });
             let id = ctx.add(row);
             if highlighted {
@@ -872,6 +872,18 @@ impl Widget for CompletionPanel {
 
     fn accessibility(&self, builder: &mut teksilo_core::accessibility::AccessNodeBuilder) {
         builder.set_role(Role::ListBox);
+        // The candidate count, on the container. AccessKit's `size_of_set`
+        // differs from ARIA's per-item `aria-setsize`, and
+        // `size_of_set_from_container` resolves an item's set size by walking
+        // *up* from it, so a count written on a row is read by no adapter.
+        //
+        // The logical count, not the realized window: `build` shows at most
+        // `MAX_VISIBLE_ROWS`, and a user arrowing through twenty candidates
+        // needs to hear twenty.
+        let total = self.state.borrow().completion.filtered_len();
+        if total > 0 {
+            builder.set_size_of_set(total);
+        }
     }
 
     fn clips_children(&self) -> bool {
