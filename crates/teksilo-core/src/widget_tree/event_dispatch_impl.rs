@@ -1745,6 +1745,11 @@ impl WidgetTree {
         if ctx.request_a11y_update {
             self.a11y_dirty = true;
         }
+        // Handed to the tree's own live regions, which schedule the two
+        // accessibility syncs each message needs. See `crate::announcer`.
+        for (message, politeness) in std::mem::take(&mut ctx.announcements) {
+            self.announce_with(message, politeness);
+        }
         for mut req in ctx.overlay_requests {
             if req.parent_overlay.is_none() {
                 req.parent_overlay = self.overlay_ancestor_for_widget(source_widget);

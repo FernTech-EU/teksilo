@@ -450,6 +450,12 @@ pub struct WidgetTree {
     /// automation / test harness can poll it to know whether the AT tree
     /// changed without diffing the whole `TreeUpdate`.
     at_version: crate::signal::Signal<u64>,
+    /// The framework's own live regions, one per politeness level. See
+    /// [`crate::announcer`]: each owns a reserved AccessKit node and cycles it
+    /// in and out of the filtered tree, which is the only mechanism all three
+    /// platform adapters agree announces.
+    announcer_polite: crate::announcer::Announcer,
+    announcer_assertive: crate::announcer::Announcer,
     /// Ring buffer of captured live-region announcements (see
     /// [`crate::accessibility::Announcement`]). Filled by a `&mut self`
     /// post-pass in `sync_accessibility` that diffs `Live::{Polite,
@@ -702,6 +708,12 @@ impl WidgetTree {
             pending_follow_system_request: false,
             pending_text_scale_request: None,
             at_version: crate::signal::Signal::new(0),
+            announcer_polite: crate::announcer::Announcer::new(
+                crate::announcer::Politeness::Polite,
+            ),
+            announcer_assertive: crate::announcer::Announcer::new(
+                crate::announcer::Politeness::Assertive,
+            ),
             automation_announcements: std::collections::VecDeque::new(),
             automation_announce_seq: 0,
             automation_last_text: std::collections::HashMap::new(),
@@ -880,6 +892,48 @@ impl WidgetTree {
     /// The drain at the top of `sync_accessibility` flips `a11y_dirty`.
     pub fn request_accessibility_update(&self) {
         self.a11y_update_requested.set(true);
+    }
+
+    /// Speak `message` to the screen reader, politely.
+    ///
+    /// For anything the user needs told that is not the name of a widget: a
+    /// completed action, a changed count, the result of an undo. The message is
+    /// delivered on the next two accessibility syncs, which this schedules.
+    ///
+    /// Prefer `EventContext::announce` inside a handler and
+    /// `BuildContext::announce` inside a build; this is the tree-level entry
+    /// point both of those reach.
+    ///
+    /// Takes `impl Into<String>`, so `tr!(…)` works directly. See
+    /// [`crate::announcer`] for why it is a `String` and not a
+    /// `LocalizedString`, and for why an announcement beside a `Toast` says
+    /// everything twice.
+    pub fn announce(&mut self, message: impl Into<String>) {
+        self.announce_with(message, crate::announcer::Politeness::Polite);
+    }
+
+    /// Speak `message` to the screen reader at the given urgency.
+    ///
+    /// [`Politeness::Assertive`](crate::announcer::Politeness::Assertive)
+    /// interrupts whatever is being spoken; reserve it for something the user
+    /// must not miss and cannot recover by re-reading the screen.
+    pub fn announce_with(
+        &mut self,
+        message: impl Into<String>,
+        politeness: crate::announcer::Politeness,
+    ) {
+        match politeness {
+            crate::announcer::Politeness::Polite => self.announcer_polite.push(message.into()),
+            crate::announcer::Politeness::Assertive => {
+                self.announcer_assertive.push(message.into())
+            }
+        }
+        // Two syncs are needed per message (expose, then retract), and a sync
+        // only happens on a frame. Without both of these a message queued from
+        // a handler that changed nothing visible would sit unspoken until
+        // something else happened to redraw.
+        self.request_accessibility_update();
+        self.request_frame();
     }
 
     /// Clone the shared "accessibility re-walk requested" flag, for the same

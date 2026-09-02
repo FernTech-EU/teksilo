@@ -261,6 +261,10 @@ pub struct EventContext<'ops> {
     /// composing widget that restructured its subtree in a way that changes the AT tree
     /// (relayout alone no longer re-walks AT).
     pub(crate) request_a11y_update: bool,
+    /// Messages queued by [`announce`](EventContext::announce) /
+    /// [`announce_with`](EventContext::announce_with), drained into the tree's
+    /// own live regions by `collect_from_ctx`. See [`crate::announcer`].
+    pub(crate) announcements: Vec<(String, crate::announcer::Politeness)>,
     /// Layout direction (LTR/RTL) of the hosting tree, snapshotted at
     /// handler-invocation time by `make_event_context`. Read via
     /// [`is_rtl`](EventContext::is_rtl) so pointer / keyboard / drag
@@ -373,6 +377,7 @@ impl<'ops> EventContext<'ops> {
             close_window_requested: false,
             force_close_requested: false,
             request_a11y_update: false,
+            announcements: Vec::new(),
             window_ops: None,
             current_window: None,
             tree_window_active: true,
@@ -942,6 +947,45 @@ impl<'ops> EventContext<'ops> {
     /// the build-time path.
     pub fn request_accessibility_update(&mut self) {
         self.request_a11y_update = true;
+    }
+
+    /// Speak `message` to the screen reader, politely.
+    ///
+    /// For anything the user needs told that is not the name of a widget: a
+    /// completed action, a new count, the result of an undo, a row that moved.
+    /// Sighted users read those off the screen; a screen-reader user is told
+    /// only what the framework says out loud.
+    ///
+    /// ```ignore
+    /// ctx.announce(tr!(event_added(title = title.clone())));
+    /// ```
+    ///
+    /// Takes `impl Into<String>`, so `tr!(…)` works directly.
+    /// `LocalizedString` is deliberately not the parameter type: an
+    /// announcement is an event, not a label, and
+    /// re-resolving it on a later language switch would re-speak it. See
+    /// [`crate::announcer`].
+    ///
+    /// **Do not pair this with a toast on the same path.** `Toast` is already a
+    /// correct live region, so doing both says everything twice.
+    pub fn announce(&mut self, message: impl Into<String>) {
+        self.announce_with(message, crate::announcer::Politeness::Polite);
+    }
+
+    /// Speak `message` to the screen reader at the given urgency.
+    ///
+    /// [`Politeness::Assertive`](crate::announcer::Politeness::Assertive)
+    /// interrupts whatever is being spoken. Reserve it for something the user
+    /// must not miss and cannot recover by re-reading the screen — a failure, a
+    /// refusal, a destructive result. Everything else is
+    /// [`Polite`](crate::announcer::Politeness::Polite), which is what
+    /// [`announce`](Self::announce) uses.
+    pub fn announce_with(
+        &mut self,
+        message: impl Into<String>,
+        politeness: crate::announcer::Politeness,
+    ) {
+        self.announcements.push((message.into(), politeness));
     }
 
     /// Show an overlay (tooltip, menu, popover).

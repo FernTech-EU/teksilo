@@ -1085,7 +1085,11 @@ impl TeksiloAppHandler {
 
         // WebView blind-spot warning.
         let warnings = {
-            let update = current.tree.sync_accessibility();
+            // `accessibility_tree_snapshot`, not `sync_accessibility`: this
+            // update is inspected and dropped. Delivering it would consume one
+            // step of the framework's live regions, so taking a screenshot
+            // while something was being announced would eat the announcement.
+            let update = current.tree.accessibility_tree_snapshot();
             if update
                 .nodes
                 .iter()

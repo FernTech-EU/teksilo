@@ -67,6 +67,56 @@ fails the build if any widget reaches past the typed setter with
 `inner_mut().set_position_in_set(..)` and friends. That bypass is what let the
 off-by-one spread to fourteen sites while each one looked locally correct.
 
+### Added — `teksilo-core`: `ctx.announce(...)`, a live region that actually speaks
+
+An application often needs to tell the user something that is not the name of any
+widget: "Event added", "Undone: delete event", "Row moved to position 3 of 12".
+There was no way to do that, and every attempt to build one out of
+`access_live(Live::Polite)` was silent on at least one platform.
+
+```rust,ignore
+ctx.announce(tr!(event_added(title = title.clone())));
+ctx.announce_with(tr!(save_failed()), Politeness::Assertive);
+```
+
+Available on `EventContext`, `BuildContext` and `WidgetTree`. Takes
+`impl Into<String>`, so `tr!(...)` works directly; deliberately not a
+`LocalizedString`, since an announcement is an event rather than a label and
+re-resolving it on a later language switch would re-speak it.
+
+Why it has to be in the framework, read out of the three adapters:
+
+| | node enters the filtered tree | its label changes in place |
+|---|---|---|
+| Windows `accesskit_windows-0.35.0` | announces | announces |
+| macOS `accesskit_macos-0.27.0` | announces | announces |
+| Linux `accesskit_atspi_common-0.20.0` | announces | **never** |
+
+The AT-SPI adapter emits `ObjectEvent::Announcement` from `add_node` and from
+nowhere else; its `node_updated` says nothing about `live` at all. So on Linux,
+editing a live region's text announces nothing. Meanwhile Windows and macOS both
+require the label to have *changed*, so repeating a message is silent there.
+
+The one mechanism that satisfies all three, for a new message and for a repeat,
+is to retract the node and put it back. The framework owns two reserved AccessKit
+nodes — one polite, one assertive — and hides and re-exposes them, which
+`common_filter` turns into a real exit from and re-entry into the filtered tree.
+Each message costs two accessibility syncs, both scheduled automatically.
+
+Messages queue rather than replace one another: two things happening in quick
+succession are two things the user needs to hear.
+
+**Do not add `announce()` beside an existing `show_toast()` on the same path.**
+`Toast` is already a correct live region — a node that appears — so an
+application that does both says everything twice, and no automatic detection is
+possible from either side.
+
+Also added: `WidgetTree::accessibility_tree_snapshot`, which builds a
+`TreeUpdate` for inspection without caching it, bumping the AT version, recording
+announcements or advancing the live regions. The automation screenshot path now
+uses it, because going through `sync_accessibility` there would consume an
+announcement the user was meant to hear.
+
 ### Changed — `teksilo-widgets`: a Yes/No message box no longer defaults to Yes
 
 `MessageBoxButtons::YesNo` and `YesNoCancel` now take **No** as their preset

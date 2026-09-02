@@ -7,6 +7,7 @@ pub mod action;
 pub mod animated_quad;
 pub mod animation;
 pub mod animation_builder;
+pub mod announcer;
 pub mod app_event;
 pub mod arena;
 pub mod async_completion;
@@ -57,6 +58,7 @@ pub use animated_quad::{AnimatedQuadHandle, AnimatedQuadKind, AnimatedQuadRegist
 pub use animation::AnimationRequest;
 pub use animation::AnimationScheduler;
 pub use animation_builder::AnimationSpec;
+pub use announcer::Politeness;
 pub use app_event::{AppEvent, RepaintWindowRequest};
 pub use arena::WidgetArena;
 pub use async_completion::{AsyncCompletionHandle, AsyncCompletionPayload};

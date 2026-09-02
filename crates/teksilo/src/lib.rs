@@ -148,8 +148,8 @@ pub mod prelude {
         BuildContext, ButtonMask, CursorIcon, EventContext, EventResponse, ImeContext, ImePurpose,
         Intent, IntentKind, IntentResponse, IntoTeksiChild, IntoTeksiCondition, Key, KeyStroke,
         LayoutContext, LayoutResponse, ModalCloseBehavior, ModalPresentation, Modifiers,
-        OverscrollBehavior, PaintContext, PointerButton, Prop, Shortcut, ShortcutRegistry,
-        ShortcutScope, Signal, TapEvent, TeksiBranch, TeksiBranch3, TeksiBranch4,
+        OverscrollBehavior, PaintContext, PointerButton, Politeness, Prop, Shortcut,
+        ShortcutRegistry, ShortcutScope, Signal, TapEvent, TeksiBranch, TeksiBranch3, TeksiBranch4,
         TraversalScopePolicy, Widget, WidgetBuilder, WidgetEvent, WidgetId,
     };
 

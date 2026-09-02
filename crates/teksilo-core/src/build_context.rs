@@ -300,6 +300,28 @@ impl<'a> BuildContext<'a> {
         self.tree.request_accessibility_update();
     }
 
+    /// Speak `message` to the screen reader, politely.
+    ///
+    /// The build-time companion to
+    /// [`EventContext::announce`](crate::widget::EventContext::announce), for a
+    /// widget that discovers during `build()` that something needs saying — an
+    /// error surface appearing, a result count changing. Announcing from
+    /// `build()` announces once per *rebuild*, so guard it on a real change
+    /// rather than on the build itself.
+    pub fn announce(&mut self, message: impl Into<String>) {
+        self.tree.announce(message);
+    }
+
+    /// Speak `message` to the screen reader at the given urgency. See
+    /// [`EventContext::announce_with`](crate::widget::EventContext::announce_with).
+    pub fn announce_with(
+        &mut self,
+        message: impl Into<String>,
+        politeness: crate::announcer::Politeness,
+    ) {
+        self.tree.announce_with(message, politeness);
+    }
+
     /// Clone the shared "frame requested" flag. Stash it on widget
     /// state and call `.set(true)` from inside a frame-tick effect
     /// closure to chain-request another frame without needing

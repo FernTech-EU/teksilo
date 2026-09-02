@@ -45,6 +45,15 @@ impl WidgetTree {
             self.last_synced_locale = current_locale;
         }
 
+        // The framework's own live regions. Advancing them here, before the
+        // cache check, is what makes a queued announcement able to wake a tree
+        // that is otherwise clean: `announce` sets `a11y_update_requested`,
+        // which the drain above turned into `a11y_dirty`, and the step below
+        // decides what this update will say. Each message costs two updates —
+        // one that exposes its node, one that retracts it — so an announcer
+        // that is still busy asks for another sync and another frame.
+        let announcers_busy = self.step_announcers();
+
         if !self.a11y_dirty
             && let Some(cached) = &self.cached_a11y
         {
@@ -73,7 +82,42 @@ impl WidgetTree {
             // documented "monotonic" contract holds even past `u64::MAX`.
             self.at_version.set(self.at_version.get().saturating_add(1));
         }
+        if announcers_busy {
+            self.request_accessibility_update();
+            self.request_frame();
+        }
         update
+    }
+
+    /// Build a `TreeUpdate` describing the tree right now, without touching any
+    /// state.
+    ///
+    /// For a caller that wants to *look* at the accessibility tree rather than
+    /// deliver it: an automation query, a screenshot's blind-spot check, a test
+    /// assertion. Unlike [`sync_accessibility`](Self::sync_accessibility) this
+    /// neither caches, nor bumps the AT version, nor records announcements, nor
+    /// advances the framework's live regions — which matters, because a caller
+    /// that consumed an announcer step and then dropped the update would have
+    /// silently eaten a message the user was meant to hear.
+    ///
+    /// It is a full walk every time; `sync_accessibility` is the one with the
+    /// cache.
+    pub fn accessibility_tree_snapshot(&self) -> accesskit::TreeUpdate {
+        self.build_accessibility_tree().0
+    }
+
+    /// Advance both announcers one step and report whether either still has
+    /// work. See [`crate::announcer`].
+    fn step_announcers(&mut self) -> bool {
+        // Both are stepped, not just the busy one: an announcer that is Idle
+        // and empty returns false and emits the same hidden node it emitted
+        // last time, so this costs nothing when nobody is announcing.
+        let polite = self.announcer_polite.step();
+        let assertive = self.announcer_assertive.step();
+        if polite || assertive {
+            self.a11y_dirty = true;
+        }
+        polite || assertive
     }
 
     /// Diff the live-region nodes of a freshly-built `TreeUpdate` against
@@ -219,7 +263,21 @@ impl WidgetTree {
                 }
             }
         }
+        // The framework's own live regions, last in the root's child list so
+        // they sit after the application's content in reading order. Both are
+        // always present and almost always hidden; see [`crate::announcer`] for
+        // why an announcement is delivered by putting a node back into the
+        // filtered tree rather than by editing a label in place.
+        let announcer_nodes = [
+            self.announcer_polite.node(),
+            self.announcer_assertive.node(),
+        ];
+        for (id, _) in &announcer_nodes {
+            root.push_child(*id);
+        }
+
         nodes.push((root_node_id(), root));
+        nodes.extend(announcer_nodes);
 
         // One pass, one set: a tooltip is placed once, on the first node that
         // may have it, and the walk order makes that the owner rather than the
@@ -1178,6 +1236,264 @@ mod tests {
     use super::*;
     use crate::test_widgets::{FillWidget, StackWidget};
 
+    /// The two framework-owned live-region nodes every `TreeUpdate` carries.
+    /// Named rather than inlined so a node-count assertion says what it is
+    /// counting. See [`crate::announcer`].
+    const ANNOUNCER_NODES: usize = 2;
+
+    // The framework's announcer.
+    //
+    // These assert through `accesskit_consumer`, not only through the tree's
+    // own announcement ring. The ring reads `value().or(label())` while every
+    // platform adapter reads `label()` alone, so a live region can pass the
+    // in-process check and be silent on all three platforms — which is exactly
+    // how two of this framework's own live regions shipped mute. Whether the
+    // node is *in the filtered tree* is what the adapters key on, so that is
+    // what these check.
+
+    /// Is the announcer node one an adapter would see, and what does it say?
+    ///
+    /// `accesskit_consumer::Tree` runs the same filter each platform adapter
+    /// runs. A hidden node is `FilterResult::ExcludeSubtree`, so it is absent
+    /// from the filtered walk and no adapter will announce it.
+    fn announced_by_consumer(update: &accesskit::TreeUpdate) -> Vec<(String, accesskit::Live)> {
+        let consumer = accesskit_consumer::Tree::new(update.clone(), false);
+        let state = consumer.state();
+        let mut found = Vec::new();
+        let mut stack = vec![state.root()];
+        while let Some(node) = stack.pop() {
+            if node.live() != accesskit::Live::Off
+                && let Some(label) = node.label()
+            {
+                found.push((label, node.live()));
+            }
+            for child in node.filtered_children(&accesskit_consumer::common_filter) {
+                stack.push(child);
+            }
+        }
+        found
+    }
+
+    /// Every live node an adapter can reach in the filtered walk, by id.
+    ///
+    /// Distinct from [`announced_by_consumer`] on purpose: a node that stays in
+    /// the tree with its label cleared looks "silent" to a label-based check
+    /// while remaining present. Present-but-unlabelled is exactly what does NOT
+    /// work — on Linux the announcement is emitted from `add_node` alone, so
+    /// only a node that genuinely leaves and re-enters the filtered tree
+    /// announces twice.
+    fn live_nodes_in_filtered_tree(update: &accesskit::TreeUpdate) -> Vec<String> {
+        let consumer = accesskit_consumer::Tree::new(update.clone(), false);
+        let state = consumer.state();
+        let mut found = Vec::new();
+        let mut stack = vec![state.root()];
+        while let Some(node) = stack.pop() {
+            if node.live() != accesskit::Live::Off {
+                found.push(format!("{:?}", node.id()));
+            }
+            for child in node.filtered_children(&accesskit_consumer::common_filter) {
+                stack.push(child);
+            }
+        }
+        found.sort();
+        found
+    }
+
+    fn tree_with_one_widget() -> WidgetTree {
+        let mut tree = WidgetTree::new();
+        tree.add(FillWidget::new().label("content"));
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+        tree
+    }
+
+    /// The headline behaviour: `announce` reaches the filtered tree exactly
+    /// once, then leaves it again.
+    #[test]
+    fn an_announcement_enters_the_filtered_tree_then_leaves_it() {
+        let mut tree = tree_with_one_widget();
+        // Nothing announced yet: both live regions are hidden, so a platform
+        // adapter sees neither.
+        let update = tree.sync_accessibility();
+        assert_eq!(announced_by_consumer(&update), Vec::new());
+        assert_eq!(
+            live_nodes_in_filtered_tree(&update),
+            Vec::<String>::new(),
+            "an idle announcer must be outside the filtered tree"
+        );
+        assert_a11y_tree_valid(&update);
+
+        tree.announce("Event added");
+
+        let exposed = tree.sync_accessibility();
+        assert_eq!(
+            announced_by_consumer(&exposed),
+            vec![("Event added".to_string(), accesskit::Live::Polite)],
+            "the message must be a label on a live node inside the filtered tree"
+        );
+        assert_eq!(
+            live_nodes_in_filtered_tree(&exposed).len(),
+            1,
+            "exactly the polite announcer must have entered the filtered tree"
+        );
+        assert_a11y_tree_valid(&exposed);
+
+        let retracted = tree.sync_accessibility();
+        assert_eq!(
+            announced_by_consumer(&retracted),
+            Vec::new(),
+            "the node must stop carrying the message"
+        );
+        // The load-bearing half. Clearing the label would satisfy the check
+        // above while leaving the node in the tree, and a node that never
+        // leaves the tree never announces again on Linux: the AT-SPI adapter
+        // emits `ObjectEvent::Announcement` from `add_node` and from nowhere
+        // else. So assert the node is genuinely gone from the filtered walk.
+        assert_eq!(
+            live_nodes_in_filtered_tree(&retracted),
+            Vec::<String>::new(),
+            "the live node must leave the filtered tree entirely, not merely \
+             lose its label"
+        );
+        assert_a11y_tree_valid(&retracted);
+    }
+
+    /// The case the retract exists for. Both the Windows and the macOS adapter
+    /// only announce an update whose label *changed*, so the same string twice
+    /// in a row would be spoken once. Leaving and re-entering the tree is what
+    /// makes the second one a fresh arrival.
+    #[test]
+    fn the_same_message_announced_twice_is_exposed_twice() {
+        let mut tree = tree_with_one_widget();
+        tree.announce("Saved");
+        tree.announce("Saved");
+
+        let mut exposures = 0;
+        for _ in 0..6 {
+            let update = tree.sync_accessibility();
+            if announced_by_consumer(&update)
+                .iter()
+                .any(|(text, _)| text == "Saved")
+            {
+                exposures += 1;
+            }
+        }
+        assert_eq!(exposures, 2, "each announcement needs its own exposure");
+    }
+
+    #[test]
+    fn an_assertive_announcement_uses_the_assertive_live_setting() {
+        let mut tree = tree_with_one_widget();
+        tree.announce_with("Could not save", crate::announcer::Politeness::Assertive);
+        let update = tree.sync_accessibility();
+        assert_eq!(
+            announced_by_consumer(&update),
+            vec![("Could not save".to_string(), accesskit::Live::Assertive)]
+        );
+    }
+
+    /// The two levels are independent nodes, so an urgent message does not have
+    /// to wait behind a polite one.
+    #[test]
+    fn the_two_politeness_levels_announce_independently() {
+        let mut tree = tree_with_one_widget();
+        tree.announce("Event added");
+        tree.announce_with("Could not save", crate::announcer::Politeness::Assertive);
+
+        let mut spoken = announced_by_consumer(&tree.sync_accessibility());
+        spoken.sort_by(|a, b| a.0.cmp(&b.0));
+        assert_eq!(
+            spoken,
+            vec![
+                ("Could not save".to_string(), accesskit::Live::Assertive),
+                ("Event added".to_string(), accesskit::Live::Polite),
+            ],
+            "both levels must be exposed on the same update"
+        );
+    }
+
+    /// Announcing must wake a tree that has nothing else to redraw, or a
+    /// message raised by a handler that changed nothing visible would sit
+    /// unspoken until something unrelated happened.
+    #[test]
+    fn announcing_requests_the_syncs_it_needs() {
+        let mut tree = tree_with_one_widget();
+        let _ = tree.sync_accessibility();
+        tree.a11y_update_requested.set(false);
+        tree.frame_tick_requested.set(false);
+
+        tree.announce("Event added");
+        assert!(
+            tree.a11y_update_requested.get(),
+            "an announcement must dirty the accessibility tree"
+        );
+        assert!(
+            tree.frame_requested(),
+            "an announcement must ask for the frame that carries it"
+        );
+
+        // Exposing leaves a retract still to do, so it asks again.
+        tree.a11y_update_requested.set(false);
+        tree.frame_tick_requested.set(false);
+        let _ = tree.sync_accessibility();
+        assert!(tree.a11y_update_requested.get());
+        assert!(tree.frame_requested());
+
+        // After the retract there is nothing more to schedule.
+        tree.a11y_update_requested.set(false);
+        tree.frame_tick_requested.set(false);
+        let _ = tree.sync_accessibility();
+        assert!(!tree.a11y_update_requested.get());
+        assert!(!tree.frame_requested());
+    }
+
+    /// The in-process ring is what the automation bridge reports, so it has to
+    /// see the same thing the adapters do.
+    #[test]
+    fn an_announcement_reaches_the_automation_ring() {
+        let mut tree = tree_with_one_widget();
+        let before = tree.announcements_since(0).len() as u64;
+        tree.announce("Event added");
+        let _ = tree.sync_accessibility();
+        let got = tree.announcements_since(before);
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].text, "Event added");
+        assert!(!got[0].assertive);
+    }
+
+    /// A screenshot inspects the tree and throws the update away. If it went
+    /// through `sync_accessibility` it would consume the exposure step and the
+    /// user would never hear the message.
+    #[test]
+    fn a_tree_snapshot_does_not_consume_a_pending_announcement() {
+        let mut tree = tree_with_one_widget();
+        tree.announce("Event added");
+
+        let snapshot = tree.accessibility_tree_snapshot();
+        assert_eq!(
+            announced_by_consumer(&snapshot),
+            Vec::new(),
+            "a snapshot must not advance the announcer"
+        );
+
+        let delivered = tree.sync_accessibility();
+        assert_eq!(
+            announced_by_consumer(&delivered),
+            vec![("Event added".to_string(), accesskit::Live::Polite)],
+            "the message must still be there to deliver"
+        );
+    }
+
+    /// An empty message is dropped rather than costing an exposure that says
+    /// nothing.
+    #[test]
+    fn an_empty_announcement_is_not_exposed() {
+        let mut tree = tree_with_one_widget();
+        let _ = tree.sync_accessibility();
+        tree.announce("   ");
+        let update = tree.sync_accessibility();
+        assert_eq!(announced_by_consumer(&update), Vec::new());
+    }
+
     #[derive(Debug)]
     struct ActionWidget;
 
@@ -1401,7 +1717,9 @@ mod tests {
         tree.layout(SizeProposal::exact(200.0, 100.0));
 
         let update = tree.sync_accessibility();
-        assert_eq!(update.nodes.len(), 3);
+        // Root, the two widgets, and the two framework live regions, which are
+        // always present (and, here, hidden). See `crate::announcer`.
+        assert_eq!(update.nodes.len(), 3 + ANNOUNCER_NODES);
         assert_eq!(update.nodes[0].0, accesskit::NodeId(0));
         assert!(update.tree.is_some());
         assert_a11y_tree_valid(&update);
@@ -1443,7 +1761,7 @@ mod tests {
         tree.set_dormant(dormant);
 
         let update = tree.sync_accessibility();
-        assert_eq!(update.nodes.len(), 2);
+        assert_eq!(update.nodes.len(), 2 + ANNOUNCER_NODES);
         assert_a11y_tree_valid(&update);
     }
 
@@ -1524,7 +1842,7 @@ mod tests {
         tree.layout(SizeProposal::exact(100.0, 50.0));
 
         let update = tree.sync_accessibility();
-        assert_eq!(update.nodes.len(), 3);
+        assert_eq!(update.nodes.len(), 3 + ANNOUNCER_NODES);
 
         let parent_node_id = crate::accessibility::widget_id_to_node_id(parent);
         let parent_node = update
