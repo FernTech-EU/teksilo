@@ -1087,7 +1087,7 @@ impl Widget for SuggestionRow {
         builder.set_name(&self.label);
         let is_selected = self.selected_signal.get() == Some(self.index);
         builder.set_selected(is_selected);
-        builder.inner_mut().set_position_in_set(self.index + 1);
+        builder.set_position_in_set(self.index + 1);
         builder.inner_mut().set_size_of_set(self.total);
     }
 

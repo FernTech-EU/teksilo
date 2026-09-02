@@ -676,7 +676,8 @@ fn segments_announce_their_position_over_the_whole_list() {
     let nodes = a11y_nodes(&mut t);
     let first = node_of(&nodes, cells[0]);
     assert_eq!(first.size_of_set(), Some(7));
-    assert_eq!(first.position_in_set(), Some(1));
+    // The cell passes ARIA's 1-based position; AccessKit stores it zero-based.
+    assert_eq!(first.position_in_set(), Some(0));
 }
 
 #[test]

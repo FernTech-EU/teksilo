@@ -4781,9 +4781,13 @@ mod tests {
                 )
             })
             .collect();
+        // The row passes ARIA's 1-based sibling position; AccessKit stores it
+        // zero-based, and the Windows and AT-SPI adapters add the 1 back — so
+        // "the first of two siblings" is (0, 2) on the node and "1 of 2" to the
+        // user.
         assert_eq!(
             sets,
-            vec![(1, 2), (1, 2), (2, 2), (2, 2), (1, 1)],
+            vec![(0, 2), (0, 2), (1, 2), (1, 2), (0, 1)],
             "docs(1/2) readme(1/2) guide(2/2) src(2/2) main.rs(1/1)"
         );
     }

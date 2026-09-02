@@ -914,8 +914,10 @@ impl Widget for HeaderCell {
             builder.add_action(teksilo_core::accesskit::Action::Increment);
             builder.add_action(teksilo_core::accesskit::Action::Decrement);
         }
+        // Through the typed wrapper, which converts the ARIA 1-based index to
+        // AccessKit's zero-based `column_index`. `inner_mut()` would not.
+        builder.set_column_index(self.col_index_1based);
         let n = builder.inner_mut();
-        n.set_column_index(self.col_index_1based);
         if let Some(dir) = self.current_sort {
             let ak_dir = match dir {
                 SortDirection::Ascending => teksilo_core::accesskit::SortDirection::Ascending,
@@ -1213,7 +1215,7 @@ impl Widget for HeaderRow {
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         builder.set_role(teksilo_core::accesskit::Role::Row);
-        builder.inner_mut().set_row_index(1);
+        builder.set_row_index(1);
     }
 
     fn children(&self) -> Vec<WidgetId> {

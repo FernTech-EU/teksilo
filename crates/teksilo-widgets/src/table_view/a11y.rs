@@ -189,13 +189,12 @@ impl Widget for TreeRowA11y {
             builder.set_expanded(exp);
         }
         builder.set_row_index(self.row_index_1based);
-        // Clamp to 1.. — AccessKit's `set_level` is `usize` but ARIA
-        // levels start at 1.
-        builder.inner_mut().set_level(self.level_1based.max(1));
-        builder
-            .inner_mut()
-            .set_position_in_set(self.position_in_set);
-        builder.inner_mut().set_size_of_set(self.size_of_set);
+        // The floor keeps a caller that computed a depth of 0 on the root
+        // level rather than one above it. `set_level` takes the ARIA 1-based
+        // number and converts to AccessKit's zero-based property itself.
+        builder.set_level(self.level_1based.max(1));
+        builder.set_position_in_set(self.position_in_set);
+        builder.set_size_of_set(self.size_of_set);
     }
 
     fn children(&self) -> Vec<WidgetId> {

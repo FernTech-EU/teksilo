@@ -192,10 +192,12 @@ fn tabs_have_position_and_size_of_set() {
             Some(n),
             "tab at index {i} should report size_of_set == {n}"
         );
+        // The header passes ARIA's 1-based position; AccessKit stores it
+        // zero-based, and the Windows and AT-SPI adapters add the 1 back.
         assert_eq!(
             node.position_in_set(),
-            Some(i + 1),
-            "tab at index {i} should report 1-based position_in_set"
+            Some(i),
+            "tab at index {i} should report AccessKit index {i}"
         );
     }
     assert_a11y_tree_valid(&update);

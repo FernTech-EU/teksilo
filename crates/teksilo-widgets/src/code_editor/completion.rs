@@ -815,7 +815,7 @@ impl Widget for CompletionPanel {
                 .access_role(Role::ListBoxOption)
                 .access_customize(move |b| {
                     b.inner_mut().set_selected(highlighted);
-                    b.inner_mut().set_position_in_set(posinset);
+                    b.set_position_in_set(posinset);
                     b.inner_mut().set_size_of_set(total);
                 });
             let id = ctx.add(row);

@@ -146,8 +146,8 @@ impl Widget for TreeItemWrapper {
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         builder.set_role(teksilo_core::accesskit::Role::TreeItem);
-        builder.inner_mut().set_level(self.level);
-        builder.inner_mut().set_position_in_set(self.position);
+        builder.set_level(self.level);
+        builder.set_position_in_set(self.position);
         builder.inner_mut().set_size_of_set(self.total_siblings);
         if let Some(expanded) = self.expanded {
             builder.set_expanded(expanded);

@@ -201,7 +201,7 @@ impl<T: Clone + PartialEq + 'static> Widget for DropdownItem<T> {
         // say "selected, Apple" instead of just "Apple".
         let is_selected = self.selected_signal.get().as_ref() == Some(&self.value);
         builder.set_selected(is_selected);
-        builder.inner_mut().set_position_in_set(self.position);
+        builder.set_position_in_set(self.position);
         builder.inner_mut().set_size_of_set(self.total);
     }
 

@@ -537,8 +537,19 @@ fn each_line_is_numbered_in_the_set() {
     let paras = roles(&children, Role::Paragraph);
     assert_eq!(paras.len(), 3);
     for (i, p) in paras.iter().enumerate() {
-        assert_eq!(p.position_in_set(), Some(i + 1), "1-based line number");
-        assert_eq!(p.size_of_set(), Some(3), "of the total line count");
+        // The widget passes the 1-based line number; AccessKit stores it
+        // zero-based, and the Windows and AT-SPI adapters add the 1 back.
+        assert_eq!(
+            p.position_in_set(),
+            Some(i),
+            "line {i} is AccessKit index {i}"
+        );
+    }
+    // The total belongs on the container, not on each line: the consumer
+    // resolves a set size by walking up from the item's parent, so a size on
+    // the paragraph itself is read by no adapter.
+    for p in &paras {
+        assert_eq!(p.size_of_set(), None, "the total must not sit on the line");
     }
 }
 
@@ -2637,7 +2648,7 @@ mod log {
 
         let mut b = teksilo_core::accessibility::AccessNodeBuilder::for_widget(WidgetId::default());
         crate::code_editor::a11y::build_log_a11y(&st.borrow(), &mut b);
-        let (_id, _n, children) = b.build(WidgetId::default());
+        let (_id, own, children) = b.build(WidgetId::default());
 
         let paras: Vec<_> = children
             .iter()
@@ -2650,10 +2661,15 @@ mod log {
             "the tree is windowed, not all 1000 lines: got {}",
             paras.len()
         );
+        // The total sits on the container — the log's own node — because the
+        // consumer resolves an item's set size by walking up from its parent.
+        // It is the logical line count, not the size of the realized window,
+        // so a line is "N of 1000" rather than "N of 40".
+        assert_eq!(own.size_of_set(), Some(1000));
         assert_eq!(
             paras[0].size_of_set(),
-            Some(1000),
-            "a line is 'N of 1000', not 'N of window'"
+            None,
+            "the total must not sit on the line, where no adapter reads it"
         );
     }
 

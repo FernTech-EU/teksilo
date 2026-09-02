@@ -1364,13 +1364,15 @@ mod tests {
 
         let items = nodes_with_role(&update, teksilo_core::accesskit::Role::ListItem);
         assert_eq!(items.len(), 3, "one ListItem per child");
-        // Announced as "item N of 3", in source order.
+        // Announced as "item N of 3", in source order. The widget passes
+        // ARIA's 1-based position; AccessKit stores it zero-based, and the
+        // Windows and AT-SPI adapters add the 1 back before speaking it.
         let mut seen: Vec<(usize, usize)> = items
             .iter()
             .map(|n| (n.position_in_set().unwrap(), n.size_of_set().unwrap()))
             .collect();
         seen.sort();
-        assert_eq!(seen, vec![(1, 3), (2, 3), (3, 3)]);
+        assert_eq!(seen, vec![(0, 3), (1, 3), (2, 3)]);
     }
 
     // ── paint ────────────────────────────────────────────────────────

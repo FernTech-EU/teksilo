@@ -307,7 +307,7 @@ impl Widget for StepIndicator {
         if active {
             builder.set_aria_current(teksilo_core::accesskit::AriaCurrent::Step);
         }
-        builder.inner_mut().set_position_in_set(self.index + 1);
+        builder.set_position_in_set(self.index + 1);
         builder.inner_mut().set_size_of_set(self.total);
         let _ = self.orientation; // orientation drives strip layout, not the node
     }

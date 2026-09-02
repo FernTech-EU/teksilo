@@ -846,9 +846,12 @@ fn sections_offset_tiles_below_headers() {
 fn sections_report_section_local_aria_row_col() {
     // Item 3 is the FIRST item of section 1 (items 0, 1, 2 belong to
     // section 0 — see `sections_offset_tiles_below_headers` above), so it
-    // must announce ARIA row 1 / col 1 (1-based) — its position within ITS
-    // OWN section band — not row 2 / col 2, the answer global
-    // `index / cols, index % cols` math would give.
+    // must report its position within ITS OWN section band, not the answer
+    // global `index / cols, index % cols` math would give.
+    //
+    // The widget passes ARIA's 1-based row 1 / column 1; AccessKit stores both
+    // zero-based, so the node carries 0 / 0 and the Windows and AT-SPI adapters
+    // add the 1 back before speaking it.
     let model = ListModel::from_vec((0..6).collect());
     let mut tree = WidgetTree::new();
     let id = tree.add(
@@ -873,12 +876,12 @@ fn sections_report_section_local_aria_row_col() {
         .expect("item 3's a11y node must be present in the sync");
     assert_eq!(
         node.row_index(),
-        Some(1),
+        Some(0),
         "item 3 is the first row of its OWN section"
     );
     assert_eq!(
         node.column_index(),
-        Some(1),
+        Some(0),
         "item 3 is the first column of its row"
     );
 }

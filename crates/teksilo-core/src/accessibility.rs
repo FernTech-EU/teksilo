@@ -139,6 +139,44 @@ pub fn synthetic_node_id(parent: WidgetId, element_id: u64, kind: SyntheticKind)
     NodeId((h & !SYNTHETIC_BIT) | SYNTHETIC_BIT)
 }
 
+/// Convert an ARIA-style **1-based** ordinal to the **zero-based** integer
+/// AccessKit stores.
+///
+/// AccessKit deliberately departs from ARIA on four properties, and says so in
+/// its own documentation (`accesskit-0.25.0/src/lib.rs`, each carrying a
+/// "**Difference with ARIA**" paragraph):
+///
+/// | property | ARIA | AccessKit |
+/// |---|---|---|
+/// | `position_in_set` / `aria-posinset` | 1-based | **0-based** |
+/// | `row_index` / `aria-rowindex` | 1-based | **0-based** |
+/// | `column_index` / `aria-colindex` | 1-based | **0-based** |
+/// | `level` / `aria-level` | 1-based | **0-based** |
+///
+/// Two of the three platform adapters add the 1 back before handing the value
+/// to the platform — `accesskit_windows-0.35.0/src/node.rs:682-687` and
+/// `:698-701`, `accesskit_atspi_common-0.20.0/src/node.rs:394` — so writing an
+/// ARIA-shaped number straight through lands one too high in what the screen
+/// reader actually says. `accesskit_macos-0.27.0` reads none of the four, so
+/// the error is invisible there, which is part of why it went unnoticed.
+///
+/// Teksilo's public surface stays 1-based, because that is the convention every
+/// call site, every doc comment and ARIA itself already use, and because "the
+/// first tab is tab 1" is what the value means to a person. The conversion
+/// happens once, here, at the boundary.
+///
+/// Saturating rather than panicking on 0: an off-by-one in a caller should
+/// produce a slightly wrong announcement, not take down the application. A
+/// caller that passes 0 gets the same node it would have got for 1.
+fn to_accesskit_ordinal(one_based: usize) -> usize {
+    debug_assert!(
+        one_based >= 1,
+        "AccessKit ordinals are 1-based at this boundary; 0 is not a position, \
+         row, column or level"
+    );
+    one_based.saturating_sub(1)
+}
+
 /// Whether a given `NodeId` is a synthetic child node (emitted by a
 /// widget via `push_paragraph_child` / `push_text_run_child`) rather
 /// than a widget-derived NodeId.
@@ -408,22 +446,54 @@ impl AccessNodeBuilder {
         self.inner.set_orientation(orientation);
     }
 
-    /// 1-based index of this item in its parent set — maps to ARIA
-    /// `aria-posinset`. Pair with `set_size_of_set` on every item in
-    /// the set so AT can announce "tab 3 of 5", "row 12 of 200", etc.
+    /// **1-based** index of this item in its parent set — the ARIA
+    /// `aria-posinset` convention, so the first item is 1.
+    ///
     /// Use on `Role::Tab`, `Role::ListBoxOption`, `Role::Row`,
-    /// `Role::MenuItem`, and similar collection items.
+    /// `Role::MenuItem` and similar collection items, and set
+    /// [`set_size_of_set`](Self::set_size_of_set) on their **container** so
+    /// assistive technology can announce "tab 3 of 5".
+    ///
+    /// ⚠ AccessKit's own `position_in_set` is **zero-based**, unlike
+    /// `aria-posinset` — see `accesskit-0.25.0/src/lib.rs`, "Difference with
+    /// ARIA". This wrapper converts, so callers keep the ARIA convention that
+    /// every caller and every doc in this repository already assumed. Do not
+    /// reach past it with `inner_mut().set_position_in_set(..)`: that skips the
+    /// conversion, and the value then arrives one too high on Windows and
+    /// Linux, both of which add the 1 back
+    /// (`accesskit_windows-0.35.0/src/node.rs:682-687`,
+    /// `accesskit_atspi_common-0.20.0/src/node.rs:394`).
     pub fn set_position_in_set(&mut self, position: usize) {
-        self.inner.set_position_in_set(position);
+        self.inner
+            .set_position_in_set(to_accesskit_ordinal(position));
     }
 
-    /// Total number of items in this item's parent set — maps to ARIA
-    /// `aria-setsize`. Set on every collection item alongside
-    /// `set_position_in_set`; the value should reflect the *logical*
-    /// set size, not the visible window (e.g. report 200 for a
-    /// virtualized 200-row list even when only 20 rows are realized).
+    /// Total number of items in a collection — maps to ARIA `aria-setsize`.
+    ///
+    /// ⚠ Set this on the **container** (`Role::ListBox`, `Role::TabList`,
+    /// `Role::Tree`, `Role::Menu`, …), not on each item. Unlike
+    /// `aria-setsize`, which is per item, AccessKit resolves an item's set size
+    /// by walking *up* from its parent: `size_of_set_from_container`
+    /// (`accesskit_consumer-0.39.0/src/node.rs:629-641`) starts at
+    /// `filtered_parent`, so a value written on the item itself is read by no
+    /// adapter on any platform.
+    ///
+    /// Report the **logical** set size, not the realized virtualization window:
+    /// 200 for a 200-row list even when 20 rows exist as widgets.
     pub fn set_size_of_set(&mut self, size: usize) {
         self.inner.set_size_of_set(size);
+    }
+
+    /// **1-based** hierarchical depth — the ARIA `aria-level` convention, so a
+    /// root tree item is level 1 and an `<h1>` is level 1.
+    ///
+    /// ⚠ AccessKit's `level` is **zero-based**, unlike `aria-level`. This
+    /// wrapper converts. Reaching past it with `inner_mut().set_level(..)`
+    /// makes every heading and every tree row announce one level too deep on
+    /// Windows, which adds the 1 back
+    /// (`accesskit_windows-0.35.0/src/node.rs:698-701`).
+    pub fn set_level(&mut self, level: usize) {
+        self.inner.set_level(to_accesskit_ordinal(level));
     }
 
     // ── Grid / table semantics (`aria-rowcount` / `aria-colindex` / …) ──
@@ -444,14 +514,22 @@ impl AccessNodeBuilder {
         self.inner.set_column_count(count);
     }
 
-    /// 1-based row index of a cell / row (`aria-rowindex`).
+    /// **1-based** row index of a cell or row — the ARIA `aria-rowindex`
+    /// convention, so the header row is 1 and the first body row is 2.
+    ///
+    /// ⚠ AccessKit's `row_index` is **zero-based**, unlike `aria-rowindex`.
+    /// This wrapper converts; `inner_mut().set_row_index(..)` does not.
     pub fn set_row_index(&mut self, index: usize) {
-        self.inner.set_row_index(index);
+        self.inner.set_row_index(to_accesskit_ordinal(index));
     }
 
-    /// 1-based column index of a cell (`aria-colindex`).
+    /// **1-based** column index of a cell — the ARIA `aria-colindex`
+    /// convention, so the leftmost column is 1.
+    ///
+    /// ⚠ AccessKit's `column_index` is **zero-based**, unlike `aria-colindex`.
+    /// This wrapper converts; `inner_mut().set_column_index(..)` does not.
     pub fn set_column_index(&mut self, index: usize) {
-        self.inner.set_column_index(index);
+        self.inner.set_column_index(to_accesskit_ordinal(index));
     }
 
     /// Number of rows a cell spans (`aria-rowspan`).
@@ -1003,7 +1081,12 @@ impl AccessNodeBuilder {
                 // AccessKit's `set_level` takes a usize (via the
                 // usize_property_methods macro). Clamp to 1..=6 for
                 // conventional heading semantics.
-                let level: usize = (level as usize).clamp(1, 6);
+                // Clamped to the conventional 1..=6 heading range, then
+                // converted: AccessKit's `level` is zero-based, so an H1 is 0.
+                // Writing the 1-based number straight through made every
+                // heading announce one level too deep on Windows, and made
+                // "heading level 1" unreachable.
+                let level: usize = to_accesskit_ordinal((level as usize).clamp(1, 6));
                 node.set_level(level);
                 return true;
             }
@@ -1011,14 +1094,21 @@ impl AccessNodeBuilder {
         false
     }
 
-    /// Set 1-based position-in-set / size-of-set on a previously-pushed
-    /// synthetic child (a paragraph, "line 42 of 200").
+    /// Set the **1-based** position-in-set on a previously-pushed synthetic
+    /// child (a paragraph, "line 42 of 200"), and the set size on this widget's
+    /// own node, which is the container the child hangs from.
     ///
-    /// AccessKit exposes `position_in_set` / `size_of_set` on every node, but
-    /// [`set_position_in_set`](Self::set_position_in_set) /
-    /// [`set_size_of_set`](Self::set_size_of_set) only touch the widget's own
-    /// node. This reaches a collected child by NodeId, the same way
-    /// [`set_paragraph_as_heading`](Self::set_paragraph_as_heading) does.
+    /// AccessKit exposes `position_in_set` on every node, but
+    /// [`set_position_in_set`](Self::set_position_in_set) only touches the
+    /// widget's own node. This reaches a collected child by NodeId, the same
+    /// way [`set_paragraph_as_heading`](Self::set_paragraph_as_heading) does,
+    /// and applies the same 1-based-to-zero-based conversion.
+    ///
+    /// `size` deliberately lands on the parent rather than the child: AccessKit
+    /// resolves a set size by walking up from the item, so a size written on
+    /// the child is read by nobody. See
+    /// [`set_size_of_set`](Self::set_size_of_set).
+    ///
     /// Returns whether the child was found.
     pub fn set_child_position_in_set(
         &mut self,
@@ -1026,10 +1116,13 @@ impl AccessNodeBuilder {
         position: usize,
         size: usize,
     ) -> bool {
-        self.with_collected_node(node_id, |node| {
-            node.set_position_in_set(position);
-            node.set_size_of_set(size);
-        })
+        let found = self.with_collected_node(node_id, |node| {
+            node.set_position_in_set(to_accesskit_ordinal(position));
+        });
+        if found {
+            self.inner.set_size_of_set(size);
+        }
+        found
     }
 
     /// Link a run of `Role::TextRun` children as one visual line, so assistive
@@ -1454,14 +1547,74 @@ mod tests {
             "an unknown child is not found"
         );
 
-        let (_id, _n, children) = b.build(fake_widget(1));
+        let (_id, own, children) = b.build(fake_widget(1));
         let p = children
             .iter()
             .find(|(i, _)| *i == para)
             .map(|(_, n)| n)
             .unwrap();
-        assert_eq!(p.position_in_set(), Some(42));
-        assert_eq!(p.size_of_set(), Some(200));
+        // The caller says "line 42", the ARIA convention. AccessKit stores the
+        // zero-based 41, and the Windows and AT-SPI adapters add the 1 back.
+        assert_eq!(p.position_in_set(), Some(41));
+        // The set size belongs on the container, which here is the widget's own
+        // node: `size_of_set_from_container` walks up from the item's parent,
+        // so a size written on the paragraph itself is read by no adapter.
+        assert_eq!(p.size_of_set(), None);
+        assert_eq!(own.size_of_set(), Some(200));
+    }
+
+    /// The whole point of the 1-based public surface: a caller writes the
+    /// number a person would say, and AccessKit gets the number it expects.
+    #[test]
+    fn every_aria_ordinal_is_converted_at_the_boundary() {
+        let mut b = AccessNodeBuilder::for_widget(fake_widget(1));
+        b.set_position_in_set(1);
+        b.set_row_index(1);
+        b.set_column_index(1);
+        b.set_level(1);
+        let (_id, n, _children) = b.build(fake_widget(1));
+        assert_eq!(n.position_in_set(), Some(0), "the first item is index 0");
+        assert_eq!(n.row_index(), Some(0), "the header row is row 0");
+        assert_eq!(n.column_index(), Some(0), "the leftmost column is column 0");
+        assert_eq!(n.level(), Some(0), "a root item is level 0");
+    }
+
+    /// A count has no base, so it must pass through untouched. Getting this
+    /// wrong would turn "3 of 12" into "3 of 11".
+    #[test]
+    fn a_count_is_not_an_ordinal_and_is_not_converted() {
+        let mut b = AccessNodeBuilder::for_widget(fake_widget(1));
+        b.set_size_of_set(12);
+        b.set_row_count(100);
+        b.set_column_count(4);
+        b.set_row_span(2);
+        b.set_column_span(3);
+        let (_id, n, _children) = b.build(fake_widget(1));
+        assert_eq!(n.size_of_set(), Some(12));
+        assert_eq!(n.row_count(), Some(100));
+        assert_eq!(n.column_count(), Some(4));
+        assert_eq!(n.row_span(), Some(2));
+        assert_eq!(n.column_span(), Some(3));
+    }
+
+    /// A heading level is the same ARIA convention, and an H1 must be able to
+    /// announce as level 1. Before the conversion the clamp floor of 1 made
+    /// AccessKit level 0 unreachable, so no heading anywhere could.
+    #[test]
+    fn an_h1_is_accesskit_level_zero() {
+        for (heading, expected) in [(1u8, 0usize), (2, 1), (6, 5)] {
+            let mut b = AccessNodeBuilder::for_widget(fake_widget(1));
+            let para = b.push_paragraph_child(7);
+            assert!(b.set_paragraph_as_heading(para, heading));
+            let (_id, _n, children) = b.build(fake_widget(1));
+            let p = children
+                .iter()
+                .find(|(i, _)| *i == para)
+                .map(|(_, n)| n)
+                .unwrap();
+            assert_eq!(p.role(), Role::Heading);
+            assert_eq!(p.level(), Some(expected), "h{heading}");
+        }
     }
 
     #[test]

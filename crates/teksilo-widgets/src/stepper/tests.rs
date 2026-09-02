@@ -743,7 +743,9 @@ fn a11y_indicators_have_posinset_and_setsize() {
     t.add(Stepper::new().non_linear(true).steps(three_steps()));
     layout(&mut t);
     let update = t.sync_accessibility();
-    for (label, pos) in [("One", 1), ("Two", 2), ("Three", 3)] {
+    // The indicator passes ARIA's 1-based step number; AccessKit stores it
+    // zero-based, and the Windows and AT-SPI adapters add the 1 back.
+    for (label, pos) in [("One", 0), ("Two", 1), ("Three", 2)] {
         let n = node_by_label(&update, label).unwrap();
         assert_eq!(n.size_of_set(), Some(3));
         assert_eq!(n.position_in_set(), Some(pos));

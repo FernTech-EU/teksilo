@@ -13,6 +13,60 @@ by crate for clarity, not because crates version independently.
 
 ## [Unreleased]
 
+### Fixed — every position, index and level Teksilo published was one too high
+
+`AccessNodeBuilder` forwarded ARIA-shaped ordinals straight into AccessKit
+properties that are zero-based. AccessKit says so itself, in four separate
+"**Difference with ARIA**" paragraphs (`accesskit-0.25.0/src/lib.rs`):
+
+| property | ARIA | AccessKit |
+|---|---|---|
+| `position_in_set` / `aria-posinset` | 1-based | **0-based** |
+| `row_index` / `aria-rowindex` | 1-based | **0-based** |
+| `column_index` / `aria-colindex` | 1-based | **0-based** |
+| `level` / `aria-level` | 1-based | **0-based** |
+
+Both consuming adapters add the 1 back before speaking
+(`accesskit_windows-0.35.0/src/node.rs:682-687` and `:698-701`,
+`accesskit_atspi_common-0.20.0/src/node.rs:394`). So on Windows and Linux the
+first tab of five announced as "tab 2", the first row of a table as row 2, an
+`<h1>` as "heading level 2", and a root tree item as "level 2" — with no way for
+any Teksilo application to say "level 1" at all. `accesskit_macos-0.27.0` reads
+none of the four, which is part of why it went unseen: testing on a Mac shows
+nothing wrong.
+
+Fourteen call sites across `ListView`, `TreeView`, `TableView`,
+`TreeTableView`, `GridView`, `TabWidget`, `SegmentedControl`, `ComboBox`,
+`RadioTileGroup`, `Stepper`, `ColumnFlow`, `SearchField`, the docking activity
+bar and the code editor were affected — every collection widget the framework
+has.
+
+**The public API is unchanged and stays 1-based.** `set_position_in_set(3)`
+still means "the third item", which is what ARIA means, what every call site
+already passed, and what a person would say. The conversion now happens once, at
+the `AccessNodeBuilder` boundary, so no widget carries it. A new
+`AccessNodeBuilder::set_level` joins the other three, because heading and tree
+levels were reaching the raw node directly.
+
+**This changes what a screen reader says for every existing Teksilo
+application.** Positions, table coordinates, heading levels and tree depths all
+move down by one, to the values they should always have had. No source change is
+needed to pick that up. If an application hand-compensated for the old behaviour
+by passing a 0-based value, that compensation now reads one too low and should be
+removed.
+
+Two things went with it. `set_child_position_in_set` now writes the set size on
+the widget's **own** node rather than on the child: AccessKit resolves a set size
+by walking *up* from an item (`accesskit_consumer-0.39.0/src/node.rs:629-641`),
+so a size written on the item is read by no adapter on any platform. And the
+heading clamp, which pinned levels to 1..=6 before writing them through, made
+AccessKit level 0 — an `<h1>` — unreachable; it now clamps then converts.
+
+A new integration test, `teksilo-widgets/tests/aria_ordinal_conventions.rs`,
+fails the build if any widget reaches past the typed setter with
+`inner_mut().set_position_in_set(..)` and friends. That bypass is what let the
+off-by-one spread to fourteen sites while each one looked locally correct.
+
 ### Changed — `teksilo-widgets`: a Yes/No message box no longer defaults to Yes
 
 `MessageBoxButtons::YesNo` and `YesNoCancel` now take **No** as their preset
