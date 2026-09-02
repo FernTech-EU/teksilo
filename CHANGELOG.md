@@ -13,6 +13,128 @@ by crate for clarity, not because crates version independently.
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-09-02
+
+**Added**
+
+- [crates.io metadata on every crate](#added-packaging-cratesio-metadata-on-every-crate): `homepage`, `documentation`,
+  `keywords` and `categories`, so each crate links to its own docs.rs page.
+- [A context menu can be opened from the keyboard](#added--a-context-menu-can-be-opened-from-the-keyboard): the Menu key,
+  Shift+F10, and Ctrl+Shift+M on macOS, on every widget that already has a
+  `.context_menu(..)`. **Breaking:** new `Key::ContextMenu` variant, and a
+  settings file containing it does not load on an older build.
+- [`ctx.announce(...)`](#added--teksilo-core-ctxannounce-a-live-region-that-actually-speaks), an announcement that reaches a screen
+  reader on all three platforms, including repeats of the same message.
+- [`WeakEditorHandle`](#added-teksilo-widgets-weakeditorhandle-a-handle-that-does-not-keep-its-editor-alive), for a rich-text handler that must not keep
+  its own editor alive.
+
+**Changed**
+
+- [`text-document` 1.12 and `text-typeset` 1.10](#changed-text-document-112-and-text-typeset-110).
+- [A failed `assert_node` is a failure on every automation transport](#changed--a-failed-assert_node-is-a-failure-on-every-transport).
+  **Breaking:** callers that read `.passed` off an `Ok` reply.
+- [`MessageBoxButtons::YesNo` and `YesNoCancel` default to No](#changed--teksilo-widgets-a-yesno-message-box-no-longer-defaults-to-yes).
+  **Behaviour change:** Enter on a confirmation dialog now declines.
+- [A font face is registered without copying its bytes](#changed-teksilo-text-a-font-face-is-registered-without-copying-its-bytes).
+  **Breaking:** `FontFaceSpec::data` is now `SharedFontData`, which
+  `Arc<Vec<u8>>` still coerces to.
+
+**Fixed**
+
+- [53 places where the documentation contradicted the code](#fixed-docs-53-places-where-the-documentation-contradicted-the-code),
+  including three `teksilo = "0.7"` version references in the app guide and a
+  minimal-build recipe that did not compile.
+- [No collection ever announced "of N"](#fixed--no-teksilo-collection-ever-announced-of-n-and-listview-announced-nothing-at-all), and `ListView` published
+  no position at all. **Behaviour change** in what a screen reader says.
+- [Every published position, row, column and level was one too high](#fixed--every-position-index-and-level-teksilo-published-was-one-too-high).
+  **Behaviour change:** all four move down by one, to the values they should
+  always have had.
+- [A keystroke no longer recolours the whole rich-text document](#fixed-teksilo-widgets-a-keystroke-no-longer-recolours-the-whole-document).
+- [A closed window releases its event subscriptions](#fixed-teksilo-core-a-closed-window-releases-its-event-subscriptions) instead of
+  holding their captures for the life of the process.
+- [A long category label no longer starves a chart's plot to nothing](#fixed-teksilo-charts-a-long-category-label-no-longer-starves-the-plot).
+- [Observing a derived signal no longer panics](#fixed-teksilo-core-observing-a-derived-signal-no-longer-panics), which aborted a
+  macOS application before its first window was drawn.
+- [The X11 drag-and-drop teardown is confirmed by the server](#fixed-teksilo-platform-the-x11-drag-and-drop-teardown-is-confirmed-by-the-server), so
+  `XdndProxy` cannot outlive the window it points at.
+- [Publish order counts dev-dependencies and the umbrella crate](#fixed-release-publish-order-accounts-for-dev-dependencies-and-the-umbrella-crate),
+  the ordering bug that failed three crates mid-release for 0.9.0.
+
+### Changed: `text-document` 1.12 and `text-typeset` 1.10
+
+The two sibling text crates move to their latest minor versions. Both are
+version-pinned path dependencies, so a published build resolves them from
+crates.io at those minors.
+
+### Added (packaging): crates.io metadata on every crate
+
+The workspace root gained a `homepage` (`https://teksilo.rs`), and its
+`repository` URL is now the canonical
+`https://github.com/FernTech-EU/teksilo.git`. Every crate declares `homepage`,
+`documentation`, `keywords` and `categories`, so each one links to its own
+docs.rs page and can be found by search rather than by name alone.
+
+### Fixed (docs): 53 places where the documentation contradicted the code
+
+A sweep read every module doc, every public rustdoc comment, every Markdown page
+under `docs/`, the app guide, `CONTRIBUTING` and the examples, and checked each
+factual claim against the code beside it. Each finding was then handed to an
+independent reader told to refute it. 53 survived. These are not gaps or
+vagueness: each is a statement a reader would act on and be wrong.
+
+The ones that would have cost the most:
+
+- The app guide said `teksilo = "0.7"` in three places, against a 0.9 workspace.
+- The guide said builder-call order is irrelevant. It is not.
+  `install_toast_default()` resolves `AppPaths` inside the call and panics
+  there, so `.application(...)` has to come first. The guide's own snippet did
+  not.
+- The guide's minimal-build recipe dropped the `i18n` feature, which removes
+  `tr!` and `lit!`. `LocalizedString` has no `From<&str>`, so every labelled
+  widget in the recipe stops compiling.
+- `Calendar`'s doc told readers to call `set_label`. The method is `set_name`.
+- `Expand::flex`'s own doc wrote `flex(0)`, which does not compile against an
+  `f32` parameter. So did the guide, twice.
+- `BuildContext`'s "# Panics" block sat on a private helper that cannot panic,
+  while `subscribe_event`, which can, carried none.
+- Three examples and `DropZone` said X11 has no drag-and-drop backend. XDND is
+  in `teksilo-platform/src/external_dnd.rs`, and the Browse button they
+  described as a fallback is the keyboard route.
+- `sync_accessibility` claimed it "only rebuilds when layout has changed". A
+  plain relayout has not invalidated that cache for some time; the real trigger
+  list is nine other things.
+- The teksu language spec used `ButtonVariant::Default`, `Regular` and `Flat` in
+  19 places. The variants are `Plain` and `Ghost`, and the builder is
+  `.variant(...)`, not `.style(...)`.
+
+Roughly a third of the findings follow from the five accessibility fixes below,
+which is why this landed last: documentation describing `size_of_set` on each
+item, or a tree row announcing "2 of 5", now describes something the code
+deliberately no longer does.
+
+Four dead fields went with them, under the same rule that produced the findings.
+`TileA11y::total`, `TreeRowA11y::size_of_set`, `SuggestionRow::total` and
+`TreeItemWrapper::total_siblings` were each constructed on every build and read
+by nothing, left behind when their property moved to the container.
+
+The repository also had two `typos` configurations. `.github/typos.toml` was the
+one CI named, and a thin `_typos.toml` at the root allowlisted two words.
+`typos` searches the working directory and its parents and nowhere else, so a
+config under `.github/` is reachable only by passing `--config` explicitly, and
+a developer running `typos` locally got the thin one plus a page of failures CI
+never reported. There is now one config, at the root, used by both.
+
+The widget catalog under `docs/widgets/` is regenerated from the corrected
+module docs.
+
+Two smaller documentation fixes landed alongside. `cargo doc` is clean again:
+the `pub` method `purge_subscriptions_for_window` linked the `pub(crate)`
+`WidgetTree::destroy_subtree`, which trips rustdoc's `private_intra_doc_links`
+lint, and it now points at `BuildContext::destroy_subtree`. And
+`docs/styling-system.md` no longer describes Material 3 as unshipped, two
+sentences left over from before the Material 3, Fluent and macOS presets
+existed.
+
 ### Changed — a failed `assert_node` is a failure, on every transport
 
 `AutomationOp::AssertNode` returned a false assertion as
@@ -258,7 +380,196 @@ Where the question is safe, put Yes back with `.default_button(StandardButton::Y
 `Ok`, `OkCancel`, `SaveDiscardCancel` and `RetryIgnoreAbort` are unchanged: those
 confirm something the user just asked for.
 
+### Fixed (`teksilo-widgets`): a keystroke no longer recolours the whole document
+
+Capturing a block's paint base on write left `apply_block_paint_spans` answering
+`false` for a block that carries no overlay, correctly, since nothing changed.
+But `apply_paint_highlights_for_range` read that answer as "this block could not
+be recoloured" and reported a miss, and the rich-text frame loop treats a miss as
+grounds to fall back to `flow_snapshot()` and recolour the whole document.
+
+So an optimisation that removed a per-document copy put an O(document) pass back
+on every keystroke that touched a block with no highlight on it, which is most of
+them. A block that had nothing to clear now reports the no-op it performed.
+
+### Added (`teksilo-widgets`): `WeakEditorHandle`, a handle that does not keep its editor alive
+
+`on_image_activated`, `on_image_resized`, `on_link_activated`,
+`on_files_dropped`, `on_change`, `on_text_inserted` and the image resolver are
+all stored on the editor's own state. A handler that captured an `EditorHandle`
+by value therefore made the state own itself, and nothing afterwards could break
+the ring: the widget could be destroyed, its tree dropped and its window closed,
+and the editor stayed resident with its document, its cursor and its shaped
+layout.
+
+Nothing about that is visible from the call site. Reaching for `editor.handle()`
+is the obvious way for such a handler to act on the editor it belongs to. In a
+downstream application that mounts one editor per scene, opening and closing a
+single project leaked the whole manuscript, thirty-three documents at a time, on
+a path where every widget, view-model and window had already been freed.
+
+`EditorHandle::downgrade` gives those handlers a `WeakEditorHandle` to capture
+instead, upgraded inside the handler. The handler then runs only while the editor
+is alive, which is the only time it could have done anything anyway. A factory
+the builder stores rather than the state, `context_menu` being the one today, may
+still hold a strong handle.
+
+### Fixed (`teksilo-core`): a closed window releases its event subscriptions
+
+`TreeAppContext::subscription_callbacks` is one map shared by every window.
+Entries were removed in exactly two places, both per-widget, in
+`rebuild_single_widget` and `destroy_subtree_inner`. Closing a window runs
+neither: `WindowManager::close_window` purged the context-bearing map and then
+dropped the tree wholesale, with no per-widget destroy pass, and a plain entry
+carried no window id, so it could not be purged even in principle. Every
+`ctx.subscribe_event` a window's widgets ever made stayed in the map for the life
+of the process, holding strong references to whatever the closure captured.
+
+The plain map now stores `(Option<TeksiloWindowId>, callback)`, exactly as the
+context-bearing map already did, recorded in `BuildContext::subscribe_event` from
+the building widget's window, and `purge_subscriptions_for_window` is called
+beside its context-bearing twin. A registration from a windowless tree records
+`None` and is untouched by any window purge, so the headless and test paths keep
+their existing per-widget teardown.
+
+The shared map now holds `Rc` handles and dispatch clones the matching one out
+before calling it, so a callback that drops the last handle to a window cannot
+re-enter the map the dispatch is holding.
+
+### Changed (`teksilo-text`): a font face is registered without copying its bytes
+
+`FontFaceSpec::data` was `Arc<Vec<u8>>`, so a face compiled into the binary had
+to be copied out of rodata onto the heap to be described, and
+`FontRegistry::register_font` then copied it a second time. Both copies stayed
+resident for the life of the process.
+
+It now carries `text_typeset::SharedFontData`, which is
+`Arc<dyn AsRef<[u8]> + Sync + Send>`, re-exported from `teksilo-text` because it
+is the type of a public field. A `&'static [u8]` shares the rodata, an owned
+buffer still coerces from `Arc<Vec<u8>>`, and `VecFontRegistrar` passes it to
+`register_font_shared` rather than to the copying `register_font`.
+`EmbeddedInterRegistrar` and `TypesetterBridge::register_default_font` took the
+same two copies of Inter, JetBrains Mono and every optional script face, and now
+take none.
+
+This is a breaking change for code that constructs a `FontFaceSpec` directly.
+`Arc<Vec<u8>>` still coerces, so most call sites compile unchanged; a site that
+names the field's type has to be updated. In a downstream application that
+registers eight bundled serifs, this returns 12.8 MB to the launcher's baseline.
+
+### Fixed (`teksilo-charts`): a long category label no longer starves the plot
+
+A tilted x-axis label's band grows with the widest label, about 0.707 times its
+width at the auto 45 degrees, and `carve_plot_area` subtracted that band from the
+chart's height with no floor under the result. A wide enough label therefore left
+`plot.height == 0`, and both `BarChart::paint` and `LineChart::paint` return
+early on a zero-height plot. The chart drew nothing at all: no bars, no grid, no
+axis, no reference line, and no diagnostic anywhere. The widget still occupied
+its box and still published a full set of per-datum accessibility marks, every
+one of them zero pixels tall, so nothing downstream reported a problem either.
+
+The labels now give way before the plot does. `MAX_X_LABEL_BAND_FRACTION` caps
+the band at half the chart's height, and the cap is never applied below the
+upright line height, so an axis whose labels already fit horizontally resolves
+exactly as before. Capping the band alone would push the labels outside the
+widget, over whatever sits beneath the chart, so `PlotGeometry` now carries the
+band it actually granted and both charts size each label's text rect to it via
+the new `axis::label_width_budget`. A label that no longer fits ends in an
+ellipsis, which says there is more of the name where running off the edge says
+nothing.
+
+### Fixed (`teksilo-core`): observing a derived signal no longer panics
+
+`Signal::observe` panicked on anything built with `map`, `zip`, `and` or `not`.
+Every `Prop` in the framework accepts a derived signal, so the one consumer that
+pushes instead of polling, the macOS native menu bridge, rejected exactly the
+bindings the rest of the API invites. `enabled(unsaved.and(&backup_mode.not()))`
+aborted the process before the first window was drawn: the panic unwinds through
+`applicationDidFinishLaunching`, an Objective-C frame it cannot unwind through,
+so it arrives as "panic in a function that cannot unwind".
+
+`SignalKind::Derived` already kept its upstream mutable roots, but only for
+generation polling, which serves the frame loop. An observer has no frame loop
+behind it and has to be told, so `DerivedSource` now also carries a subscribe
+hook and `try_observe` registers on every root, recomputing on any change. The
+set is all-or-nothing on purpose: a partial subscription would report some
+changes and silently miss the rest. `flat_map` re-selects its inner signal as it
+is read and has no fixed root to attach to, so it still reports `ReadOnly`;
+`map_coalesced` folds a fixed set and stays observable. `menu/native.rs` takes
+the fallible path for that remaining case, leaving a row at the state it was
+installed with instead of aborting the process.
+
+### Fixed (`teksilo-platform`): the X11 drag-and-drop teardown is confirmed by the server
+
+`DndThread::teardown` fired `DeleteProperty` and `DestroyWindow` and relied on
+`flush()`. It is the last thing the DnD thread does, so the connection closes the
+moment it returns, and a server that observes the disconnect before dispatching
+the tail of that client's input queue drops the pending requests.
+
+The proxy window disappears either way, since the disconnect frees the client's
+own resources, but `XdndProxy` lives on the toplevel, which belongs to another
+client. Losing that one request left the property pointing at a destroyed window,
+and every later source that skips the specification's self-pointing validation
+sent the whole handshake into it.
+
+Both requests now go through `ignore_errors`, which checks rather than firing and
+forgetting, so the server has processed the delete before the socket closes. The
+cost is one exchange per window close. Reproduced in a container replicating the
+CI job: 6 failures in 300 runs before, 0 in 600 after.
+
+### Fixed (release): publish order accounts for dev-dependencies and the umbrella crate
+
+`tools/check_release_order.py`'s topological sort read only `[dependencies]` and
+`[build-dependencies]`, so a dev-only dependency on a later crate never affected
+ordering, even though a default, verified `cargo publish` compiles dev-deps too.
+Its internal-dependency filter also matched on a `teksilo-` prefix, silently
+dropping any edge to the bare `teksilo` umbrella crate.
+
+Together these put `teksilo-webview` and `teksilo-charts` before their
+dev-dependency `teksilo-widgets`, and `teksilo-automation-mcp` before its real
+dependency on `teksilo`, which is why three crates failed to publish mid-release
+for 0.9.0.
+
 ## [0.9.0] - 2026-08-31
+
+**Added**
+
+- [The framework's own strings speak twenty-one more languages](#added--teksilo-widgets-the-frameworks-own-strings-speak-twenty-one-more-languages): nineteen
+  European locales plus Japanese and Korean, each with its real CLDR plural
+  categories rather than a copy of English's.
+- [A runtime i18n override can watch a locale's whole directory](#added--teksilo-i18n-a-runtime-override-can-watch-a-locales-whole-directory), not
+  just one `.ftl` file, so saving one resource no longer drops the keys its
+  siblings define.
+- [A number can be read back in the locale it was written in](#added--teksilo-i18n-a-number-can-be-read-back-in-the-locale-it-was-written-in).
+  **Behaviour change:** `SpinBox` is `.localized(true)` by default, so a French
+  user sees and types `12,5`.
+- [The widget catalog renders its own pictures](#added--docs-the-widget-catalog-renders-its-own-pictures): 95 of 136 pages now
+  open with a preview, rendered headless through the production wgpu renderer.
+- [The framework answers "is the focused widget a text surface?"](#added--teksilo-core-the-framework-answers-is-the-focused-widget-a-text-surface), so an application owning a global `Ctrl+Z` can route it to whatever is
+  being edited. New `WidgetTree::text_surfaces` and friends.
+- [Cell editing with click triggers and persistent focus](#added--teksilo-widgets-cell-editing-with-click-triggers-and-persistent-focus): a per-column
+  `EditTriggers` bitmask, dismissal on click-away, and `BuildContext::focus_into`.
+- [A button icon may keep its own colour](#added--teksilo-widgets-a-button-icon-may-keep-its-own-colour) through `icon_keeps_color`,
+  for a glyph whose colour is the information.
+
+**Changed**
+
+- [Overlay and tooltip bodies are built on first use](#changed--teksilo-core-overlay-and-tooltip-bodies-are-built-on-first-use) rather than on
+  every rebuild of their owner. New `BuildContext::add_deferred`.
+
+**Fixed**
+
+- [A language switch reaches the date and time fields](#fixed--teksilo-widgets-a-language-switch-reaches-the-date-and-time-fields), which each read
+  their locale convention once in `build()` and never again.
+- [Escape reaches past a tooltip, and out of a text field](#fixed--teksilo-widgets-escape-reaches-past-a-tooltip-and-out-of-a-text-field): two
+  independent swallows, both reachable from any dialog whose cancel sits outside
+  a field.
+- [A menu row activated by keyboard keeps the window sink](#fixed--teksilo-widgets-a-menu-row-activated-by-keyboard-keeps-the-window-sink) instead of
+  panicking on `open_window`.
+- [A drop into a folder no longer looks like a drop after it](#fixed--teksilo-widgets-a-drop-into-a-folder-no-longer-looks-like-a-drop-after-it): three
+  verdicts had one visual.
+- [The four Level-A findings of the internal accessibility assessment](#fixed--accessibility-the-four-level-a-findings-of-the-internal-assessment),
+  including a keyboard trap in `Terminal` (WCAG 2.1.2).
 
 ### Added — `teksilo-widgets`: the framework's own strings speak twenty-one more languages
 
@@ -413,6 +724,41 @@ claim, not third-party verified — with a scope-and-method section stating what
 was *not* done: no live AT testing, no colorimetry, some widgets unassessed.
 
 ## [0.8.0] - 2026-08-27
+
+**Added**
+
+- [The macOS (Aqua / Dark Aqua) preset](#added--teksilo-theme-macos-the-macos-aqua--dark-aqua-preset), a complete design language
+  behind the `theme-macos` feature, replacing a stub.
+- [The Fluent (Windows 11 / WinUI 3) preset](#added--teksilo-theme-fluent-the-fluent-windows-11--winui-3-preset), likewise, behind
+  `theme-fluent`, transcribed from WinUI's own theme dictionaries.
+- [`Settings…` in the macOS App menu](#added--teksilo-widgets-settings-in-the-macos-app-menu) via
+  `StandardMenu::settings_intent`, a placement an ordinary `MenuEntry` cannot
+  reach.
+- [The automation `scroll` op carries modifiers](#added--teksilo-automation-scroll-carries-modifiers), so a probe can perform
+  Ctrl+wheel and not only describe it.
+- [Two defaulted label-role style hooks](#added--teksilo-core-two-defaulted-label-role-style-hooks) so a design language with a
+  solid selection fill can recolour the text on top of it.
+
+**Changed**
+
+- **A declared `Ctrl` shortcut now fires on ⌘ on macOS.**
+  **Behaviour change on macOS:** it no longer fires on physical ⌃. Opt out per
+  chord with the new `ShortcutBuilder::literal_modifiers()`.
+- [macOS in the widget catalog's theme switcher](#changed--widget-catalog-macos-in-the-theme-switcher-and---theme) and `--theme`.
+- [Fluent in the widget catalog's theme switcher](#changed--widget-catalog-fluent-in-the-theme-switcher-and---theme) and `--theme`.
+
+**Fixed**
+
+- [Caret motion follows the platform's own layout](#fixed--teksilo-widgets-caret-motion-follows-the-platforms-own-layout): macOS spreads word,
+  line edge and document across three modifiers, and every text surface read a
+  single accelerator flag.
+- [Accelerator chords across the widget catalog](#fixed--teksilo-widgets-accelerator-chords-across-the-widget-catalog): select-all, the
+  discontiguous-selection click, the marquee modifier and Ctrl+Home / End all
+  tested physical Control.
+- [A tree row's chevron ignored its row's colour](#fixed--teksilo-widgets-a-tree-rows-chevron-ignored-its-rows-colour), leaving it at roughly
+  2.5:1 under a style that flips a selected row's label.
+- [The `SpinBox` mouse wheel was inverted](#fixed--teksilo-widgets-spinbox-the-mouse-wheel-was-inverted) against every other spin box
+  and against its own ArrowDown key.
 
 ### Fixed — `teksilo-widgets`: caret motion follows the platform's own layout
 
@@ -764,6 +1110,30 @@ and then silently reverts on the next launch.
 
 ## [0.7.0] - 2026-08-08
 
+**Added**
+
+- [Docking rail actions and Strip bar slots](#added--teksilo-widgets-docking-rail-actions--strip-bar-slots): `DockAction` puts a plain
+  command in the activity rail, and `DockRail::leading_slot` / `trailing_slot`
+  reach a side showing its tab strip.
+- [`ListModel::reconcile_by_key`](#added--teksilo-data), which diffs against a new
+  authoritative `Vec<T>` and emits minimal granular changes rather than a blanket
+  `Reset` that would clear the user's selection.
+
+**Changed**
+
+- [`teksilo-settings` is cross-process safe by default](#changed--teksilo-settings-breaking), not by opt-in.
+  **Breaking:** `SettingsFile::load_shared`, `MruList::toggle_pin` and
+  `PersistedTreeModel<T>` are removed, `load` / `load_strict` dropped their
+  `delay` parameter, and `MruEntry` now requires a separate `Keyed` trait.
+- [`NotificationArchiveModel::remove(index)` is now `remove_by_id(id)`](#changed--teksilo-widgets-breaking).
+  **Breaking:** an index names a position a peer's insert can invalidate.
+
+**Fixed**
+
+- [The docking activity rail was an invalid ARIA `tablist`](#fixed--teksilo-widgets-docking-rail-accessibility): the slots,
+  overflow trigger and action clusters were non-`Role::Tab` children of it. No
+  app-facing API changed.
+
 ### Added — `teksilo-widgets` docking: rail actions + Strip bar slots
 
 **`DockAction` — dockless command buttons in the activity rail.** A rail item
@@ -904,3 +1274,9 @@ performance trade-offs).
 
 Entries before this file was introduced are not backfilled; see `git log`
 for the full history.
+
+[Unreleased]: https://github.com/FernTech-EU/teksilo/compare/v0.9.1...HEAD
+[0.9.1]: https://github.com/FernTech-EU/teksilo/compare/v0.9.0...v0.9.1
+[0.9.0]: https://github.com/FernTech-EU/teksilo/compare/v0.8.0...v0.9.0
+[0.8.0]: https://github.com/FernTech-EU/teksilo/compare/v0.7.0...v0.8.0
+[0.7.0]: https://github.com/FernTech-EU/teksilo/compare/v0.6.2...v0.7.0
