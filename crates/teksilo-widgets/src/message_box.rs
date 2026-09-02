@@ -64,6 +64,25 @@
 //!   `escape_button` → first `Reject`-role button → `Cancel` → last
 //!   button.
 //!
+//! Each preset supplies a default: Ok for `Ok` and `OkCancel`, Save for
+//! `SaveDiscardCancel`, Retry for `RetryIgnoreAbort`, and **No** for
+//! `YesNo` and `YesNoCancel`.
+//!
+//! The Yes/No default is the negative answer on purpose. An Ok/Cancel box
+//! confirms something the user just asked for, so Ok is the answer they
+//! meant. A Yes/No box asks a question they did not initiate, and it is
+//! overwhelmingly asked before something irreversible — "Delete this?",
+//! "Discard your changes?". Defaulting to Yes means Enter destroys, and
+//! Enter is what a keyboard user presses on a dialog they have not
+//! finished reading. Where the question is safe, `default_button` puts Yes
+//! back in one reviewable line; the reverse default cannot be reviewed,
+//! because there is nothing on the screen to review.
+//!
+//! It matters more than it looks, because **no platform announces which
+//! button is the default**: `Node::keyboard_shortcut` appears in none of
+//! the three AccessKit adapters, so a screen-reader user discovers the
+//! default only by pressing Enter. Where focus lands is the whole contract.
+//!
 //! ## Result reporting
 //!
 //! [`MessageBox::on_result`] takes `impl Fn(MessageBoxResult,
@@ -314,9 +333,11 @@ pub enum MessageBoxButtons {
     Ok,
     /// Ok + Cancel, Ok default, Cancel escape.
     OkCancel,
-    /// Yes + No, Yes default, No escape.
+    /// Yes + No. **No** is the default, and No is the escape. See the module
+    /// docs for why the default is the negative answer.
     YesNo,
-    /// Yes + No + Cancel, Yes default, Cancel escape.
+    /// Yes + No + Cancel. **No** is the default, Cancel is the escape — Enter
+    /// takes the safe answer to the question asked, Escape leaves the dialog.
     YesNoCancel,
     /// The unsaved-changes triad: Save + Discard + Cancel.
     SaveDiscardCancel,
@@ -355,12 +376,18 @@ impl MessageBoxButtons {
 
     /// Default button hint derived from the preset. Callers that want
     /// a different default override via `MessageBox::default_button`.
+    ///
+    /// `Ok` and `OkCancel` default to Ok because an Ok/Cancel box asks the user
+    /// to confirm something they just asked for. `YesNo` and `YesNoCancel`
+    /// default to **No**, because a Yes/No box asks a question the user did not
+    /// initiate, and the answer that cannot be undone is Yes. See the variant
+    /// docs.
     fn preset_default(&self) -> Option<StandardButton> {
         match self {
             Self::Ok => Some(StandardButton::Ok),
             Self::OkCancel => Some(StandardButton::Ok),
-            Self::YesNo => Some(StandardButton::Yes),
-            Self::YesNoCancel => Some(StandardButton::Yes),
+            Self::YesNo => Some(StandardButton::No),
+            Self::YesNoCancel => Some(StandardButton::No),
             Self::SaveDiscardCancel => Some(StandardButton::Save),
             Self::RetryIgnoreAbort => Some(StandardButton::Retry),
             Self::Custom(_) => None,
@@ -1089,6 +1116,83 @@ mod tests {
             .find_by_label(&StandardButton::No.default_label().resolve_now())
             .unwrap();
         assert_eq!(tree.focused(), Some(no_id));
+    }
+
+    /// The reason this preset default exists. A Yes/No box is a confirmation,
+    /// a confirmation usually precedes something destructive, and Enter is what
+    /// a keyboard user presses on a dialog they have not finished reading.
+    ///
+    /// Focus placement is the whole contract: `Node::keyboard_shortcut` appears
+    /// in none of the three AccessKit adapters, so no platform announces which
+    /// button is the default. A screen-reader user finds out by triggering it.
+    #[test]
+    fn a_yes_no_box_defaults_to_no_so_enter_cannot_destroy() {
+        for buttons in [MessageBoxButtons::YesNo, MessageBoxButtons::YesNoCancel] {
+            let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+            let captured: Rc<RefCell<Option<MessageBoxResult>>> = Rc::new(RefCell::new(None));
+            let captured_for_handler = captured.clone();
+            let mb = MessageBox::question(lit!("t"))
+                .text(lit!("x"))
+                .buttons(buttons.clone())
+                .on_result(move |r, _ctx| {
+                    *captured_for_handler.borrow_mut() = Some(r);
+                });
+            let _content = present_and_lay_out(&mut tree, mb);
+
+            let no_id = tree
+                .find_by_label(&StandardButton::No.default_label().resolve_now())
+                .unwrap();
+            assert_eq!(
+                tree.focused(),
+                Some(no_id),
+                "{buttons:?} must open with No focused"
+            );
+
+            tree.press_key(Key::Enter, Modifiers::NONE);
+            let result = captured.borrow().expect("result must be captured");
+            assert_eq!(
+                result.button,
+                StandardButton::No,
+                "{buttons:?}: Enter on an unread confirmation must not answer Yes"
+            );
+        }
+    }
+
+    /// Escape and Enter are different buttons for `YesNoCancel`, and both
+    /// matter: Escape means "I did not mean to be in this dialog", which is
+    /// Cancel, while Enter answers the question that was asked.
+    #[test]
+    fn yes_no_cancel_keeps_cancel_as_the_escape_button() {
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let captured: Rc<RefCell<Option<MessageBoxResult>>> = Rc::new(RefCell::new(None));
+        let captured_for_handler = captured.clone();
+        let mb = MessageBox::question(lit!("t"))
+            .text(lit!("x"))
+            .buttons(MessageBoxButtons::YesNoCancel)
+            .on_result(move |r, _ctx| {
+                *captured_for_handler.borrow_mut() = Some(r);
+            });
+        let _content = present_and_lay_out(&mut tree, mb);
+        tree.press_key(Key::Escape, Modifiers::NONE);
+        let result = captured.borrow().expect("result must be captured");
+        assert_eq!(result.button, StandardButton::Cancel);
+        assert!(result.dismissed_by_escape);
+    }
+
+    /// The override still works, and is how a box that asks something safe
+    /// gets Yes back.
+    #[test]
+    fn default_button_overrides_the_preset() {
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let mb = MessageBox::question(lit!("t"))
+            .text(lit!("x"))
+            .buttons(MessageBoxButtons::YesNo)
+            .default_button(StandardButton::Yes);
+        let _content = present_and_lay_out(&mut tree, mb);
+        let yes_id = tree
+            .find_by_label(&StandardButton::Yes.default_label().resolve_now())
+            .unwrap();
+        assert_eq!(tree.focused(), Some(yes_id));
     }
 
     #[test]

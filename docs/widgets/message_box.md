@@ -68,6 +68,25 @@ in the button. See `crate::button` for details.
   `escape_button` → first `Reject`-role button → `Cancel` → last
   button.
 
+Each preset supplies a default: Ok for `Ok` and `OkCancel`, Save for
+`SaveDiscardCancel`, Retry for `RetryIgnoreAbort`, and **No** for
+`YesNo` and `YesNoCancel`.
+
+The Yes/No default is the negative answer on purpose. An Ok/Cancel box
+confirms something the user just asked for, so Ok is the answer they
+meant. A Yes/No box asks a question they did not initiate, and it is
+overwhelmingly asked before something irreversible — "Delete this?",
+"Discard your changes?". Defaulting to Yes means Enter destroys, and
+Enter is what a keyboard user presses on a dialog they have not
+finished reading. Where the question is safe, `default_button` puts Yes
+back in one reviewable line; the reverse default cannot be reviewed,
+because there is nothing on the screen to review.
+
+It matters more than it looks, because **no platform announces which
+button is the default**: `Node::keyboard_shortcut` appears in none of
+the three AccessKit adapters, so a screen-reader user discovers the
+default only by pressing Enter. Where focus lands is the whole contract.
+
 ## Result reporting
 
 `MessageBox::on_result` takes `impl Fn(MessageBoxResult,
@@ -213,8 +232,8 @@ pub enum MessageBoxButtons { /* variants */ }
 
 - **`Ok`** — Just Ok.
 - **`OkCancel`** — Ok + Cancel, Ok default, Cancel escape.
-- **`YesNo`** — Yes + No, Yes default, No escape.
-- **`YesNoCancel`** — Yes + No + Cancel, Yes default, Cancel escape.
+- **`YesNo`** — Yes + No. **No** is the default, and No is the escape. See the module docs for why the default is the negative answer.
+- **`YesNoCancel`** — Yes + No + Cancel. **No** is the default, Cancel is the escape — Enter takes the safe answer to the question asked, Escape leaves the dialog.
 - **`SaveDiscardCancel`** — The unsaved-changes triad: Save + Discard + Cancel.
 - **`RetryIgnoreAbort`** — The error-recovery triad: Retry + Ignore + Abort.
 - **`Custom`** — Explicit list. MessageBox preserves the order as the visual button order (leading Spacer pushes all buttons to the trailing edge; default button may appear anywhere).

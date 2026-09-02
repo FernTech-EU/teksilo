@@ -13,6 +13,31 @@ by crate for clarity, not because crates version independently.
 
 ## [Unreleased]
 
+### Changed — `teksilo-widgets`: a Yes/No message box no longer defaults to Yes
+
+`MessageBoxButtons::YesNo` and `YesNoCancel` now take **No** as their preset
+default button. Enter on a confirmation dialog therefore declines instead of
+accepting, and `No` receives initial focus on open.
+
+This is a behaviour change for any application that used either preset without
+calling `default_button`. It is deliberate. A Yes/No box asks a question the
+user did not initiate, and it is overwhelmingly asked before something
+irreversible; the previous default meant Enter deleted, discarded or overwrote
+on a dialog the user had not finished reading. Every one of Teksilo's own
+examples that uses the preset — `close_confirmation`, `dialogs_and_popovers`,
+`tab_widget` — already overrode it to `No` by hand, which is the clearest
+evidence available that the default was wrong.
+
+It matters most for screen-reader users, because no platform tells them which
+button is the default: `Node::keyboard_shortcut` appears in none of
+`accesskit_windows`, `accesskit_macos` or `accesskit_atspi_common`, so the
+default is discoverable only by triggering it. Where focus lands is the whole
+contract.
+
+Where the question is safe, put Yes back with `.default_button(StandardButton::Yes)`.
+`Ok`, `OkCancel`, `SaveDiscardCancel` and `RetryIgnoreAbort` are unchanged: those
+confirm something the user just asked for.
+
 ## [0.9.0] - 2026-08-31
 
 ### Added — `teksilo-widgets`: the framework's own strings speak twenty-one more languages
