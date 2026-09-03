@@ -1745,6 +1745,26 @@ impl<T: 'static> Widget for ListView<T> {
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         builder.set_role(teksilo_core::accesskit::Role::ListBox);
+        // Whether the selection takes more than one row. A real property on
+        // both platforms that have one: UIA's `SelectionCanSelectMultiple`
+        // and AT-SPI's multiselectable state. Left unset it reads false, so a
+        // multi-select view was telling every screen reader that one row was
+        // the most it would ever hold.
+        //
+        // Gated on the mode, and the gate matters beyond tidiness:
+        // `accesskit_windows` picks the event it raises on a selection change
+        // from this property (`adapter.rs:189-199`), firing
+        // `ElementAddedToSelection` when it is true and `ElementSelected` when
+        // it is false. A single-select view publishing `true` would trade the
+        // right event for the wrong one.
+        if self
+            .row_selection
+            .as_ref()
+            .is_some_and(|selection| selection.mode() == teksilo_data::SelectionMode::Multi)
+        {
+            builder.set_multiselectable(true);
+        }
+
         // The logical row count, not the realized virtualization window: a
         // 200-row list announces "of 200" even while twenty rows exist as
         // widgets. It belongs here rather than on each row, because
@@ -2682,6 +2702,60 @@ mod tests {
         tree.click(children[1]);
         assert!(selection.is_selected(1), "item 1 should be selected");
         assert!(!selection.is_selected(0), "item 0 should not be selected");
+    }
+
+    #[test]
+    fn a_multi_select_list_says_so_and_a_single_select_one_does_not() {
+        // Left unset the property reads false, so a multi-select list was
+        // telling every screen reader that one row was the most it would hold.
+        //
+        // The negative half is not symmetry for its own sake.
+        // `accesskit_windows` chooses the event it raises on a selection change
+        // from this property (`adapter.rs:189-199`): `ElementAddedToSelection`
+        // when it is true, `ElementSelected` when it is false. A single-select
+        // list publishing `true` would trade the right event for the wrong one.
+        use teksilo_data::{SelectionMode, SelectionModel};
+
+        let published = |mode: SelectionMode| {
+            let model = ListModel::from_vec(vec![1, 2, 3]);
+            let mut tree = WidgetTree::new();
+            // The view's own id is not needed: the node is found by role,
+            // which is how an adapter finds it too.
+            tree.add(
+                ListView::new(model, move |_i, _item, _selected| {
+                    Box::new(FixedLeaf(100.0, 30.0))
+                })
+                .item_height(30.0)
+                .selection(SelectionModel::new(mode)),
+            );
+            tree.layout(SizeProposal::exact(400.0, 300.0));
+            // Read off the real node rather than the `AccessibilityInfo`
+            // summary, which carries no such field: the property only exists
+            // where an adapter would look for it.
+            let snapshot = tree.accessibility_tree_snapshot();
+            let consumer = accesskit_consumer::Tree::new(snapshot, true);
+            let root = consumer.state().root();
+            fn listbox<'a>(
+                node: accesskit_consumer::NodeRef<'a>,
+            ) -> Option<accesskit_consumer::NodeRef<'a>> {
+                if node.role() == teksilo_core::accesskit::Role::ListBox {
+                    return Some(node);
+                }
+                node.children().find_map(listbox)
+            }
+            listbox(root)
+                .expect("the view publishes a ListBox")
+                .is_multiselectable()
+        };
+
+        assert!(
+            published(SelectionMode::Multi),
+            "a list that takes more than one row has to say so"
+        );
+        assert!(
+            !published(SelectionMode::Single),
+            "and one that does not must not, or Windows raises the wrong event"
+        );
     }
 
     #[test]

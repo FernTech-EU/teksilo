@@ -2857,6 +2857,26 @@ impl<T: 'static> Widget for TreeTableView<T> {
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         builder.set_role(teksilo_core::accesskit::Role::TreeGrid);
+        // Whether the selection takes more than one row. A real property on
+        // both platforms that have one: UIA's `SelectionCanSelectMultiple`
+        // and AT-SPI's multiselectable state. Left unset it reads false, so a
+        // multi-select view was telling every screen reader that one row was
+        // the most it would ever hold.
+        //
+        // Gated on the mode, and the gate matters beyond tidiness:
+        // `accesskit_windows` picks the event it raises on a selection change
+        // from this property (`adapter.rs:189-199`), firing
+        // `ElementAddedToSelection` when it is true and `ElementSelected` when
+        // it is false. A single-select view publishing `true` would trade the
+        // right event for the wrong one.
+        if self
+            .row_selection
+            .as_ref()
+            .is_some_and(|selection| selection.mode() == teksilo_data::SelectionMode::Multi)
+        {
+            builder.set_multiselectable(true);
+        }
+
         if let Some(ref label) = self.a11y_label {
             builder.set_name(label.resolve_now());
         }
