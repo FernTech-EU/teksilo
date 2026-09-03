@@ -21,43 +21,141 @@
 //! (name-from-content, as ARIA specifies for `option` / `treeitem`), so the
 //! emitted row node carries role, state and name together.
 
+use std::cell::Cell;
+use std::rc::Rc;
+
 use teksilo_canvas::{Rect, SizeProposal};
 
 use teksilo_core::accessibility::AccessNodeBuilder;
+use teksilo_core::binding::BindingLevel;
+use teksilo_core::build_context::BuildContext;
+use teksilo_core::signal::Signal;
 use teksilo_core::widget::{LayoutContext, Widget, WidgetPlacement};
 use teksilo_core::widget_id::WidgetId;
+
+use crate::data_views::RowSelection;
+
+/// Builds a row's own widget, and returns its id.
+///
+/// Called with the row's selectedness at the moment of the build, because
+/// that is an argument the delegate takes. Erases the source's item type, so
+/// the wrapper does not have to be generic over it: the owning pane closes
+/// over the delegate, the data source and the tooltip resolvers, and this is
+/// what is left of them.
+///
+/// `None` means the row had nothing to show after all.
+pub(crate) type RowBody = Rc<dyn Fn(&mut BuildContext, bool) -> Option<WidgetId>>;
 
 /// Wrapper that sets Role::ListBoxOption with selection state.
 ///
 /// ListView is interactive (keyboard navigation, selection) so the correct
 /// ARIA container role is `listbox` and items are `option`, not the
 /// non-interactive `list`/`listitem` pair.
-#[derive(Debug)]
+///
+/// # The rebuild boundary for a selection move
+///
+/// The wrapper builds the delegate's row widget itself rather than being
+/// handed one, and watches the selection for its own row only. A selection
+/// move flips exactly two rows: the one that lost it and the one that gained
+/// it. Those two rebuild; every other row keeps the widget, the arena node
+/// and the AccessKit node id it already had.
+///
+/// The owning pane used to do this instead, by rebuilding itself whenever the
+/// selection changed anywhere. That replaced every realized row on every
+/// arrow press. It cost the scroll offset, the keyboard anchor, and the
+/// identity of the node the container nominates as its `active_descendant` —
+/// a screen reader was being pointed at a node it had never seen, one
+/// keystroke after the node it had been told about ceased to exist.
+///
+/// Note what stays with the pane: every per-row *handler* is applied to this
+/// wrapper's id, not to the row widget inside it. Those handlers survive a
+/// rebuild of the wrapper's children, which is the only thing that happens
+/// here. They must not be applied a second time — `HandlerSet::merge` chains
+/// handlers rather than replacing them, so a row whose handlers were
+/// reapplied would act on one press twice.
 pub(crate) struct ListItemWrapper {
-    child: WidgetId,
+    body: RowBody,
+    /// The selection to watch, and this row's index in it.
+    selection: Option<RowSelection>,
+    /// Model index. The screen reader says "row 147", so the position it
+    /// publishes is `index + 1` in the whole model, never a position within
+    /// the realized window, which would restart at 1 on every scroll.
+    index: usize,
+    /// Rebuild trigger, bumped only when *this* row's selectedness flips.
+    version: Signal<u64>,
+
+    // Build state.
     selected: bool,
-    /// 1-based position in the whole model, not in the realized window: the
-    /// screen reader says "row 147", so the number has to be the model's.
-    position: usize,
+    child: Option<WidgetId>,
 }
 
 impl ListItemWrapper {
-    pub fn new(child: WidgetId, selected: bool, position_1based: usize) -> Self {
+    pub fn new(body: RowBody, selection: Option<RowSelection>, index: usize) -> Self {
         Self {
-            child,
-            selected,
-            position: position_1based,
+            body,
+            selection,
+            index,
+            version: Signal::new(0),
+            selected: false,
+            child: None,
         }
     }
 }
 
+impl std::fmt::Debug for ListItemWrapper {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ListItemWrapper")
+            .field("index", &self.index)
+            .field("selected", &self.selected)
+            .finish_non_exhaustive()
+    }
+}
+
 impl Widget for ListItemWrapper {
+    fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+        // A persistent field rather than `ctx.signal`, so the observer
+        // installed below survives into the build it triggers.
+        self.version
+            .bind_to(ctx.self_id(), ctx.binding_registry(), BindingLevel::Rebuild);
+
+        let selected = self
+            .selection
+            .as_ref()
+            .map(|s| s.is_selected(self.index))
+            .unwrap_or(false);
+        self.selected = selected;
+
+        if let Some(ref selection) = self.selection {
+            let watched = selection.clone();
+            let index = self.index;
+            let version = self.version.clone();
+            // Seeded with what this build is about to draw, so the first
+            // notification after it compares against the truth on screen.
+            let last = Cell::new(selected);
+            let handle = selection.observe_for_rebuild(move || {
+                let now = watched.is_selected(index);
+                // Every row hears every selection change. Only the two whose
+                // own state moved may rebuild; the rest return here, which is
+                // the whole point of watching per row.
+                if now != last.get() {
+                    last.set(now);
+                    version.set(version.get() + 1);
+                }
+            });
+            ctx.own_handle(handle);
+        }
+
+        self.child = (self.body)(ctx, selected);
+        self.child.into_iter().collect()
+    }
+
     fn layout_response(
         &self,
         proposal: SizeProposal,
         ctx: &LayoutContext,
     ) -> teksilo_core::widget::LayoutResponse {
-        ctx.child_size(self.child, proposal)
+        self.child
+            .and_then(|child| ctx.child_size(child, proposal))
             .unwrap_or_else(|| proposal.resolve(0.0, 0.0))
             .into()
     }
@@ -98,11 +196,11 @@ impl Widget for ListItemWrapper {
         // container: AccessKit's `size_of_set` belongs there, unlike ARIA's
         // per-item `aria-setsize`, and `size_of_set_from_container` walks up
         // from an item to find it. A `ListView` announced neither until now.
-        builder.set_position_in_set(self.position);
+        builder.set_position_in_set(self.index + 1);
     }
 
     fn children(&self) -> Vec<WidgetId> {
-        vec![self.child]
+        self.child.into_iter().collect()
     }
 }
 

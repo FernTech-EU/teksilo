@@ -2685,6 +2685,36 @@ mod tests {
     }
 
     #[test]
+    fn moving_the_selection_keeps_every_row_node() {
+        // Arrowing down replaced every realized row widget, and with them
+        // every AccessKit node id in the list. The `active_descendant` the
+        // container publishes then names a node the screen reader has never
+        // seen, and the scroll anchor is reset under the user.
+        //
+        // Only two rows change when the selection moves: the one that lost it
+        // and the one that gained it. Every other row is identical, and the
+        // wrapper nodes must survive even for those two.
+        let (mut tree, lv_id, _model, selection) = make_selectable_list(5);
+        selection.select(0);
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        let before = row_ids(&tree, lv_id);
+        assert_eq!(
+            before.len(),
+            5,
+            "all five rows realize in a 300 px viewport"
+        );
+
+        selection.select(1);
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        let after = row_ids(&tree, lv_id);
+
+        assert_eq!(
+            before, after,
+            "a selection move must not replace the row nodes"
+        );
+    }
+
+    #[test]
     fn click_replaces_selection() {
         let (mut tree, lv_id, _, selection) = make_selectable_list(5);
         let children = row_ids(&tree, lv_id);

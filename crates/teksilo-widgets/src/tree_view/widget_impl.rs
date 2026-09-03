@@ -1075,7 +1075,7 @@ impl<T: 'static> Widget for TreeView<T> {
         //
         // No `size_of_set` here, deliberately. A flattened tree cannot express
         // "the 2nd of 5 siblings" from a single container value, and the reason
-        // is argued in full at `list_item_a11y.rs:164-177`: AccessKit resolves
+        // is argued in full at `list_item_a11y.rs:263-276`: AccessKit resolves
         // an item's set size by walking *up* from it, so the only number this
         // node could carry is one shared by every row at every depth. Doing it
         // correctly needs a real `Role::Group` per expanded branch. Writing the

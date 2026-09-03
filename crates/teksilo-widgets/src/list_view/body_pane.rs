@@ -200,18 +200,13 @@ impl<T: 'static> Widget for ListBodyPane<T> {
         });
         ctx.own_handle(scroll_handle);
 
-        // Selection changes refresh the `selected` argument handed to the row
-        // delegate, so they rebuild the pane. (The root separately repaints
-        // its container focus ring — see `ListView::build`.)
-        if let Some(ref sel) = self.row_selection {
-            let v = version.clone();
-            let counter = Rc::new(Cell::new(0_u64));
-            let handle = sel.observe_for_rebuild(move || {
-                counter.set(counter.get() + 1);
-                v.set(counter.get());
-            });
-            ctx.own_handle(handle);
-        }
+        // A selection change is deliberately NOT observed here. Each row
+        // watches its own selectedness from inside its `ListItemWrapper` and
+        // rebuilds only itself, so an arrow press replaces the two rows that
+        // actually changed instead of every realized row in the pane. See
+        // `ListItemWrapper`'s docs for what that identity is load-bearing
+        // for. (The root separately repaints its container focus ring — see
+        // `ListView::build`.)
 
         // --- Create visible item widgets ---
         let (start, end) = self.visible_range();
@@ -234,40 +229,56 @@ impl<T: 'static> Widget for ListBodyPane<T> {
         // focusable node), not this pane — see `root_id`'s docs.
         ctx.begin_view_focus_for(root_id);
         for i in start..end {
-            let selected = selection
-                .as_ref()
-                .map(|s| s.is_selected(i))
-                .unwrap_or(false);
-            // A `Loading` row (data not yet resident) renders a placeholder
-            // skeleton instead of being skipped, so the scrollbar and layout
-            // stay stable while the window loads.
-            // Resolve the row's tooltip inside the same borrow that builds the
-            // row: it is the only place the item is reachable, and attaching
-            // needs a `WidgetId` that does not exist until afterwards.
-            let pending_tip: std::cell::RefCell<Option<crate::data_views::ResolvedRowTooltip>> =
-                std::cell::RefCell::new(None);
-            let tips = &self.row_tooltips;
-            let row_widget = (self.source.with_item_fn)(i, &|item| {
-                if tips.is_set() {
-                    *pending_tip.borrow_mut() = tips.resolve(i, item);
-                }
-                (self.delegate)(i, item, selected)
-            })
-            .or_else(|| ((row_state_fn)(i) == RowState::Loading).then(default_placeholder));
-            if let Some(widget) = row_widget {
-                let inner_id = ctx.add_boxed(widget);
-                // The app cannot reach this widget to hang a tooltip on it —
-                // the view built it — so the view attaches the resolved tip.
-                if let Some(tip) = pending_tip.into_inner() {
-                    self.row_tooltips.attach_resolved(ctx, inner_id, tip);
-                }
-                // `i` is the model index, so `i + 1` is the row number the
-                // user hears — not a position within the realized window,
-                // which would restart at 1 on every scroll.
+            // Has this row anything to show? The wrapper builds the row widget
+            // itself, so the answer is needed before the wrapper exists.
+            // `read_item_fn` is the cheap probe: it reports presence without
+            // building anything. A `Loading` row (data not yet resident)
+            // renders a placeholder skeleton rather than being skipped, so the
+            // scrollbar and the layout stay stable while the window loads.
+            let has_item = (self.source.read_item_fn)(i, &mut |_| {});
+            if !has_item && (row_state_fn)(i) != RowState::Loading {
+                continue;
+            }
+
+            // Everything the row needs to draw itself, closed over once. The
+            // wrapper calls this on its first build and again whenever this
+            // row's own selectedness flips, which is the only thing that can
+            // change the delegate's output without the data changing.
+            let body: crate::list_item_a11y::RowBody = {
+                let with_item = self.source.with_item_fn.clone();
+                let delegate = self.delegate.clone();
+                let tips = self.row_tooltips.clone();
+                let row_state = row_state_fn.clone();
+                Rc::new(move |ctx: &mut BuildContext, selected: bool| {
+                    // Resolve the row's tooltip inside the same borrow that
+                    // builds the row: it is the only place the item is
+                    // reachable, and attaching needs a `WidgetId` that does
+                    // not exist until afterwards.
+                    let pending_tip: RefCell<Option<crate::data_views::ResolvedRowTooltip>> =
+                        RefCell::new(None);
+                    let widget = (with_item)(i, &|item| {
+                        if tips.is_set() {
+                            *pending_tip.borrow_mut() = tips.resolve(i, item);
+                        }
+                        (delegate)(i, item, selected)
+                    })
+                    .or_else(|| ((row_state)(i) == RowState::Loading).then(default_placeholder))?;
+                    let inner_id = ctx.add_boxed(widget);
+                    // The app cannot reach this widget to hang a tooltip on
+                    // it — the view built it — so the view attaches the
+                    // resolved tip.
+                    if let Some(tip) = pending_tip.into_inner() {
+                        tips.attach_resolved(ctx, inner_id, tip);
+                    }
+                    Some(inner_id)
+                })
+            };
+
+            {
                 let child_id = ctx.add(crate::list_item_a11y::ListItemWrapper::new(
-                    inner_id,
-                    selected,
-                    i + 1,
+                    body,
+                    selection.clone(),
+                    i,
                 ));
 
                 // Selection click handling: plain click selects,
