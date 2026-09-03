@@ -6,6 +6,75 @@
 
 use super::*;
 
+impl<T: 'static> TreeView<T> {
+    /// The realized row the keyboard is on: the navigation cursor when there
+    /// is one, else the first selected row.
+    ///
+    /// `None` when that row is outside the virtualization window, which is the
+    /// honest answer: there is no widget for it, so there is no node to point
+    /// at and nothing on screen for a menu or an announcement to be about.
+    ///
+    /// The index is the **flat** (visible) row index, the same coordinate
+    /// `focused_index` and `row_map` are keyed on, so a collapsed branch's
+    /// descendants simply are not in it.
+    fn current_row_widget(&self) -> Option<WidgetId> {
+        let index = self.focused_index.get().or_else(|| {
+            self.row_selection
+                .as_ref()
+                .and_then(|s| s.selected_indices().first().copied())
+        })?;
+        let map = self.row_map.borrow();
+        map.iter().find(|(i, _)| *i == index).map(|(_, id)| *id)
+    }
+
+    /// Scroll the row the keyboard is on into view when this tree takes focus.
+    ///
+    /// Only the rows near the viewport are realized, so on a tree taller than
+    /// the window the current row frequently has no widget. Everything that
+    /// speaks for it then has nothing to speak about: no node carries
+    /// `selected`, [`Self::current_row_widget`] resolves to `None` so no active
+    /// descendant is nominated, and a screen reader taking focus here is told
+    /// nothing at all. Worse, the first arrow press steps *past* that row,
+    /// because the cursor was somewhere the user was never shown.
+    ///
+    /// `ensure_index_visible` rather than `scroll_to_index`: a row already on
+    /// screen must not jump under somebody who can see it.
+    ///
+    /// The handles are cloned into the effect rather than reaching through
+    /// `self`, which the closure cannot borrow.
+    fn reveal_current_row_on_focus(&self, ctx: &mut teksilo_core::build_context::BuildContext) {
+        let metrics = self.metrics.clone();
+        let scroll_y = self.scroll_y.clone();
+        let viewport_height = self.viewport_height.clone();
+        let max_scroll_y = self.max_scroll_y.clone();
+        let focused_index = self.focused_index.clone();
+        let selection = self.row_selection.clone();
+
+        ctx.effect(&self.view_focused, move |focused| {
+            if !*focused {
+                return;
+            }
+            let Some(index) = focused_index.get().or_else(|| {
+                selection
+                    .as_ref()
+                    .and_then(|s| s.selected_indices().first().copied())
+            }) else {
+                return;
+            };
+            let current = scroll_y.get();
+            let target = metrics.borrow_mut().scroll_for_ensure_visible(
+                index,
+                current,
+                viewport_height.get(),
+                max_scroll_y.get(),
+            );
+            if (target - current).abs() > f32::EPSILON {
+                scroll_y.set(target);
+            }
+        });
+    }
+}
+
 impl<T: 'static> Widget for TreeView<T> {
     fn build(&mut self, ctx: &mut teksilo_core::build_context::BuildContext) -> Vec<WidgetId> {
         let self_id = ctx.self_id();
@@ -73,6 +142,7 @@ impl<T: 'static> Widget for TreeView<T> {
         self.view_focused = ctx.begin_view_focus();
         ctx.end_view_focus();
         self.focus_visible = ctx.focus_visible();
+        self.reveal_current_row_on_focus(ctx);
         self.view_focused.bind_to(
             ctx.self_id(),
             ctx.binding_registry(),
@@ -991,17 +1061,57 @@ impl<T: 'static> Widget for TreeView<T> {
     /// and the menu falls back to the tree — right, because there is no row on
     /// screen for it to be about.
     fn context_menu_key_target(&self) -> Option<WidgetId> {
-        let index = self.focused_index.get().or_else(|| {
-            self.row_selection
-                .as_ref()
-                .and_then(|s| s.selected_indices().first().copied())
-        })?;
-        let map = self.row_map.borrow();
-        map.iter().find(|(i, _)| *i == index).map(|(_, id)| *id)
+        self.current_row_widget()
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         builder.set_role(teksilo_core::accesskit::Role::Tree);
+        // The role above is left exactly as it was found. It is not what makes
+        // the nomination below work: `focus_id` is the raw stored value
+        // (`accesskit_consumer-0.39.0/src/tree.rs:534-536`) and neither it nor
+        // the `active_descendant` resolution beneath it consults `common_filter`
+        // at all, so a container the filter drops can still be the node whose
+        // active descendant an adapter reads.
+        //
+        // No `size_of_set` here, deliberately. A flattened tree cannot express
+        // "the 2nd of 5 siblings" from a single container value, and the reason
+        // is argued in full at `list_item_a11y.rs:164-177`: AccessKit resolves
+        // an item's set size by walking *up* from it, so the only number this
+        // node could carry is one shared by every row at every depth. Doing it
+        // correctly needs a real `Role::Group` per expanded branch. Writing the
+        // number anyway would make a missing feature look like a working one.
+
+        // The current row, as the container's active descendant.
+        //
+        // Keyboard focus stays here, on the tree, and the row is marked
+        // `selected`. On AT-SPI that is the whole story: Orca announces the
+        // selection change. On Windows it is not, because UIA has no
+        // active-descendant property at all. What it has is a focused element,
+        // and for a tree that element is the item.
+        //
+        // AccessKit bridges the two in the consumer rather than in each
+        // adapter: `accesskit_consumer` resolves the focused node as
+        // `focused.active_descendant().unwrap_or(focused)` (`tree.rs:541`) and
+        // `accesskit_windows::focus_moved` (`adapter.rs:341-345`) raises
+        // `UIA_AutomationFocusChangedEventId` on whatever comes out. So this
+        // one property turns every arrow press into the focus change a screen
+        // reader announces, and `is_focused` (`consumer node.rs:89-105`) moves
+        // from this container to the row, which is what the ARIA tree pattern
+        // says should happen.
+        //
+        // Without it, arrowing through any Teksilo tree is silent to NVDA:
+        // there is no focus change to announce. The mouse still reads rows
+        // correctly, because hit-testing does not go through events at all,
+        // which is exactly how this hid for so long.
+        //
+        // Only while this view actually holds focus. A container that does not
+        // have focus has no active descendant to speak of, and publishing one
+        // anyway puts a second relation in the tree for a client to follow.
+        if self.view_focused.get()
+            && let Some(row) = self.current_row_widget()
+        {
+            builder.set_active_descendant(teksilo_core::accessibility::widget_id_to_node_id(row));
+        }
     }
 
     fn as_any(&self) -> Option<&dyn std::any::Any> {

@@ -1529,6 +1529,170 @@ fn active_descendant_clears_after_the_focused_cell_scrolls_out_of_realization() 
     );
 }
 
+// ── Taking focus reveals the row the cursor is on ───────────────────────────
+
+/// Taking focus scrolls the keyboard cursor's row into the realized window.
+///
+/// Only the rows near the viewport are realized, so a cursor placed before the
+/// table is looked at (a restored session, a "jump to what is happening now")
+/// usually sits outside that window. Nothing then speaks for it: no row node
+/// carries `selected`, the `cell_map` lookup in `accessibility()` finds nothing
+/// so no `active_descendant` is nominated, and a screen reader taking focus
+/// here is told nothing at all. The first arrow press steps past the row as
+/// well, because the cursor was somewhere nobody was shown.
+///
+/// Asserted on the accessibility tree, since that is what the failure was
+/// about: the cell has to be a node a platform can name.
+#[test]
+fn taking_focus_reveals_the_focused_cells_row() {
+    use teksilo_core::accessibility::widget_id_to_node_id;
+
+    let (mut tree, table, _model) = build_table(1000);
+    let table_node_id = widget_id_to_node_id(table);
+    let viewport = SizeProposal {
+        width: Some(400.0),
+        height: Some(200.0),
+    };
+
+    // Place the cursor far below the viewport WITHOUT giving the table focus.
+    // `set_focused_cell` on its own never scrolls: only the key handler does
+    // (`table_view/keyboard.rs:445`), and no key was pressed.
+    {
+        let any = tree.widget_as_any(table).unwrap();
+        any.downcast_ref::<TableView<Row>>()
+            .unwrap()
+            .set_focused_cell(500, 1);
+    }
+    tree.request_frame();
+    tree.layout(viewport);
+
+    let update = tree.sync_accessibility();
+    assert_eq!(
+        update
+            .nodes
+            .iter()
+            .find(|(id, _)| *id == table_node_id)
+            .and_then(|(_, n)| n.active_descendant()),
+        None,
+        "row 500 starts far outside the realized window, which is the case \
+         this is about"
+    );
+
+    tree.focus(table);
+    tree.layout(viewport);
+
+    let update = tree.sync_accessibility();
+    let active = update
+        .nodes
+        .iter()
+        .find(|(id, _)| *id == table_node_id)
+        .and_then(|(_, n)| n.active_descendant())
+        .expect(
+            "taking focus has to bring the cursor's row into the realized \
+             window, or nothing in the tree can be told about it",
+        );
+    let cell = update
+        .nodes
+        .iter()
+        .find(|(id, _)| *id == active)
+        .map(|(_, n)| n)
+        .expect("active_descendant must reference a node present in the TreeUpdate");
+    assert_eq!(cell.role(), Role::Cell);
+    assert_eq!(
+        cell.row_index(),
+        Some(501),
+        "1-based, and it must be the cursor's own row rather than whichever \
+         row the viewport happened to be showing"
+    );
+}
+
+/// With no cell navigated to yet, the selected row is the one revealed.
+///
+/// A table restored into a selection has no `focused_cell`, so resolving the
+/// current row only from the cursor would leave that selection off-screen and
+/// unrealized: no row node carrying `selected` for AT-SPI to announce either.
+/// Same fallback order the context-menu key already uses.
+#[test]
+fn taking_focus_reveals_the_selected_row_when_no_cell_has_been_navigated_to() {
+    let model = rows(1000);
+    let sel = SelectionModel::new(SelectionMode::Single);
+    let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+    let table = tree.add(
+        TableView::new(model)
+            .add_column(id_col())
+            .add_column(name_col())
+            .row_height(20.0)
+            .selection_mode(TableSelectionMode::SingleRow)
+            .selection(sel.clone()),
+    );
+    let viewport = SizeProposal {
+        width: Some(400.0),
+        height: Some(200.0),
+    };
+    tree.layout(viewport);
+
+    sel.select(500);
+    tree.request_frame();
+    tree.layout(viewport);
+
+    let realized_selected_rows = |tree: &mut WidgetTree| -> Vec<usize> {
+        tree.sync_accessibility()
+            .nodes
+            .iter()
+            .filter(|(_, n)| n.role() == Role::Row && n.is_selected() == Some(true))
+            .filter_map(|(_, n)| n.row_index())
+            .collect()
+    };
+
+    assert!(
+        realized_selected_rows(&mut tree).is_empty(),
+        "row 500 starts far outside the realized window, which is the case \
+         this is about"
+    );
+
+    tree.focus(table);
+    tree.layout(viewport);
+
+    assert_eq!(
+        realized_selected_rows(&mut tree),
+        vec![501],
+        "taking focus has to bring the selected row into the realized window \
+         (1-based row index), or nothing in the tree can be told about it"
+    );
+}
+
+/// And a row already on screen does not jump.
+///
+/// Ensure-visible, not scroll-to: somebody who can see the table must not have
+/// it lurch when they click or Tab into it.
+#[test]
+fn taking_focus_does_not_move_a_row_already_in_view() {
+    let (mut tree, table, _model) = build_table(1000);
+    let viewport = SizeProposal {
+        width: Some(400.0),
+        height: Some(200.0),
+    };
+
+    let scroll = {
+        let any = tree.widget_as_any(table).unwrap();
+        let tv = any.downcast_ref::<TableView<Row>>().unwrap();
+        tv.set_focused_cell(2, 1);
+        tv.scroll_y_signal().clone()
+    };
+    tree.request_frame();
+    tree.layout(viewport);
+    let before = scroll.get();
+
+    tree.focus(table);
+    tree.layout(viewport);
+
+    assert_eq!(
+        scroll.get(),
+        before,
+        "row 2 is already visible, so the table must not scroll at all"
+    );
+}
+
 // ── Cell state survives a column reorder/pin ───────────────────────────────
 //
 // `focused_cell`, `editing_cell`, and `CellSelectionModel` all store

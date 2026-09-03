@@ -1263,6 +1263,68 @@ impl<T: 'static> TableView<T> {
 
     // ── Internals ──────────────────────────────────────────────────────
 
+    /// Scroll the row the keyboard cursor is on into view when this table
+    /// takes focus.
+    ///
+    /// Only the rows near the viewport are realized, so on a table taller than
+    /// the window the cursor's row frequently has no widget. Everything that
+    /// speaks for it then has nothing to speak about: no row node carries
+    /// `selected`, the `cell_map` lookup in `accessibility()` finds nothing so
+    /// no `active_descendant` is nominated, and a screen reader taking focus
+    /// here is told nothing at all. Worse, the first arrow press steps *past*
+    /// that row, because the cursor was somewhere the user was never shown.
+    ///
+    /// The row resolves the way `context_menu_key_target` below resolves it:
+    /// the focused cell's row if the user has navigated, else the first
+    /// selected row. Both are "the row this table is currently about", and a
+    /// session restored into a selection has no focused cell yet.
+    ///
+    /// **Vertical only, and that is the whole of it here.** The body pane
+    /// realizes every display column of a realized row, iterating the full
+    /// `display_indices` with no `scroll_x` culling
+    /// (`table_view/body_pane.rs:313-443`), so the cell is in `cell_map`
+    /// whatever the horizontal offset is. The row is the only axis that can
+    /// hide it from the AT tree. A sighted keyboard user can still land with
+    /// the cursor's column scrolled off to the side, which would want
+    /// `ensure_col_visible` (`table_view/keyboard.rs:483`); that is a private
+    /// helper of the key-handler module and out of this change's reach.
+    ///
+    /// Ensure-visible rather than scroll-to: a row already on screen must not
+    /// jump under somebody who can see it.
+    ///
+    /// The handles are cloned into the effect rather than reaching through
+    /// `self`, which the closure cannot borrow.
+    fn reveal_current_row_on_focus(&self, ctx: &mut teksilo_core::build_context::BuildContext) {
+        let row_metrics = self.row_metrics.clone();
+        let scroll_y = self.scroll_y.clone();
+        let max_scroll_y = self.max_scroll_y.clone();
+        let viewport_height = self.viewport_height.clone();
+        let laid_out = self.laid_out.clone();
+        let focused_cell = self.focused_cell.clone();
+        let selection = self.row_selection.clone();
+
+        ctx.effect(&self.view_focused, move |focused| {
+            if !*focused {
+                return;
+            }
+            let Some(row) = focused_cell.get().map(|(row, _col)| row).or_else(|| {
+                selection
+                    .as_ref()
+                    .and_then(|s| s.selected_indices().first().copied())
+            }) else {
+                return;
+            };
+            imperative::ensure_row_visible(
+                row,
+                &row_metrics,
+                &scroll_y,
+                &max_scroll_y,
+                viewport_height.get(),
+                laid_out.get(),
+            );
+        });
+    }
+
     /// The configured row height (override) or the table style's 28 px
     /// fallback. In the non-uniform modes this is the seed estimate;
     /// real geometry lives in `row_metrics`.
@@ -1632,6 +1694,7 @@ impl<T: 'static> Widget for TableView<T> {
         self.view_focused = ctx.begin_view_focus();
         ctx.end_view_focus();
         self.focus_visible = ctx.focus_visible();
+        self.reveal_current_row_on_focus(ctx);
         self.view_focused.bind_to(
             ctx.self_id(),
             ctx.binding_registry(),

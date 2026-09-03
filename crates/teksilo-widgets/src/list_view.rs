@@ -462,6 +462,81 @@ impl<T: 'static> ListView<T> {
         self
     }
 
+    /// Keep the row the keyboard is on inside the realized window.
+    ///
+    /// Only the rows near the viewport are realized, so a current row far from
+    /// the scroll offset frequently has **no widget**. Everything that speaks
+    /// for it then has nothing to speak about: no node carries `selected`,
+    /// [`Self::current_row_widget`] resolves to `None` so no active descendant
+    /// is nominated, and a screen reader is told nothing. The first arrow press
+    /// steps *past* that row as well, because the cursor was somewhere nobody
+    /// was shown.
+    ///
+    /// Two triggers, and the second is not redundant. Revealing only on focus
+    /// misses the common case where the selection is made *from inside* a focus
+    /// handler — a list that lands on "whatever is happening now" the first
+    /// time it is reached does exactly that, so the reveal would run first,
+    /// find nothing selected, and do nothing. Reacting to the selection as well
+    /// covers that, and covers any later programmatic selection too.
+    ///
+    /// `ensure_index_visible` arithmetic rather than `scroll_to_index`: a row
+    /// already on screen must not jump under somebody who can see it.
+    ///
+    /// The handles are cloned into the closures rather than reached through
+    /// `self`, which they cannot borrow. A caller could not do this from
+    /// outside in any case: the handles are private, and
+    /// `with_widget_mut::<ListView<_>>` cannot reach the widget either, since
+    /// this type overrides `as_any` and not `as_any_mut`.
+    fn reveal_current_row_on_focus(&self, ctx: &mut teksilo_core::build_context::BuildContext) {
+        let metrics = self.metrics.clone();
+        let scroll_y = self.scroll_y.clone();
+        let viewport_height = self.viewport_height.clone();
+        let max_scroll_y = self.max_scroll_y.clone();
+        let focused_index = self.focused_index.clone();
+        let selection = self.row_selection.clone();
+
+        let reveal: Rc<dyn Fn()> = Rc::new(move || {
+            let Some(index) = focused_index.get().or_else(|| {
+                selection
+                    .as_ref()
+                    .and_then(|s| s.selected_indices().first().copied())
+            }) else {
+                return;
+            };
+            let current = scroll_y.get();
+            let target = metrics.borrow_mut().scroll_for_ensure_visible(
+                index,
+                current,
+                viewport_height.get(),
+                max_scroll_y.get(),
+            );
+            if (target - current).abs() > f32::EPSILON {
+                scroll_y.set(target);
+            }
+        });
+
+        let on_focus = reveal.clone();
+        ctx.effect(&self.view_focused, move |focused| {
+            if *focused {
+                on_focus();
+            }
+        });
+
+        if let Some(sel) = self.row_selection.as_ref() {
+            let on_select = reveal;
+            let focused = self.view_focused.clone();
+            let handle = sel.observe_for_rebuild(move || {
+                // Only while this view has focus. A selection driven from
+                // elsewhere — a combobox highlighting rows in a list the user
+                // is not in — must not scroll the view under them.
+                if focused.get() {
+                    on_select();
+                }
+            });
+            ctx.own_handle(handle);
+        }
+    }
+
     /// A shared handle to the live `(model index → row node id)` map of the
     /// **realized** rows, rewritten at the end of every build.
     ///
@@ -474,13 +549,37 @@ impl<T: 'static> ListView<T> {
     /// through this list (a command palette, a type-ahead picker). The field's
     /// AT node publishes `active_descendant` pointing here, so a screen reader
     /// announces each row as the highlight moves without focus ever leaving
-    /// the input. A `ListView` that holds focus itself does not need this.
+    /// the input.
+    ///
+    /// A `ListView` that holds focus itself does **not** need this handle: it
+    /// publishes its own `active_descendant` from `accessibility()`, pointing
+    /// at whichever row the keyboard is on. It used to publish none, on the
+    /// assumption that holding focus was enough, and that assumption is what
+    /// made every Teksilo list silent to NVDA.
     ///
     /// Only realized rows are present — a row scrolled outside the
     /// virtualization window has no widget, so look-ups for it return `None`.
     /// Callers should `scroll_to_index` the row they intend to announce.
     pub fn realized_row_ids(&self) -> Rc<RefCell<Vec<(usize, WidgetId)>>> {
         self.row_map.clone()
+    }
+
+    /// The realized row the keyboard is on: the navigation cursor when there
+    /// is one, else the first selected row.
+    ///
+    /// `None` when that row is outside the virtualization window, which is the
+    /// honest answer — there is no widget for it, so there is no node to point
+    /// at and nothing on screen for a menu or an announcement to be about.
+    fn current_row_widget(&self) -> Option<WidgetId> {
+        let index = self.focused_index.get().or_else(|| {
+            self.row_selection
+                .as_ref()
+                .and_then(|s| s.selected_indices().first().copied())
+        })?;
+        let map = self.row_map.borrow();
+        map.iter()
+            .find(|(i, _)| *i == index)
+            .map(|(_, widget)| *widget)
     }
 
     /// Enable intra-widget drag reordering.
@@ -860,6 +959,7 @@ impl<T: 'static> Widget for ListView<T> {
         self.view_focused = ctx.begin_view_focus();
         ctx.end_view_focus();
         self.focus_visible = ctx.focus_visible();
+        self.reveal_current_row_on_focus(ctx);
         self.view_focused.bind_to(
             ctx.self_id(),
             ctx.binding_registry(),
@@ -1640,15 +1740,7 @@ impl<T: 'static> Widget for ListView<T> {
     /// back to the list — which is the right answer, since there is no row on
     /// screen for it to be about.
     fn context_menu_key_target(&self) -> Option<WidgetId> {
-        let index = self.focused_index.get().or_else(|| {
-            self.row_selection
-                .as_ref()
-                .and_then(|s| s.selected_indices().first().copied())
-        })?;
-        let map = self.row_map.borrow();
-        map.iter()
-            .find(|(i, _)| *i == index)
-            .map(|(_, widget)| *widget)
+        self.current_row_widget()
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
@@ -1659,6 +1751,41 @@ impl<T: 'static> Widget for ListView<T> {
         // `size_of_set_from_container` resolves an item's set size by walking
         // *up* from it — a size written on a row is read by no adapter.
         builder.set_size_of_set(self.source.len());
+
+        // The current row, as the container's active descendant.
+        //
+        // Keyboard focus stays here, on the list, and the row is marked
+        // `selected`. On AT-SPI that is the whole story: Orca announces the
+        // selection change. On Windows it is not, because UIA has no
+        // active-descendant property at all — what it has is a focused
+        // element, and for a list box that element is the item.
+        //
+        // AccessKit bridges the two in the consumer rather than in each
+        // adapter: `accesskit_consumer` resolves the focused node as
+        // `focused.active_descendant().unwrap_or(focused)`
+        // (`tree.rs:541`) and `accesskit_windows::focus_moved`
+        // (`adapter.rs:341-345`) raises `UIA_AutomationFocusChangedEventId` on
+        // whatever comes out. So this one property turns every arrow press
+        // into the focus change a screen reader announces, and `is_focused`
+        // (`consumer node.rs:89-105`) moves from this container to the row,
+        // which is what the ARIA listbox pattern says should happen.
+        //
+        // Without it, arrowing through any Teksilo list is silent to NVDA:
+        // there is no focus change to announce, and the selection event that
+        // is raised names a row node the pane rebuilt a moment earlier. The
+        // mouse still reads rows correctly, because hit-testing does not go
+        // through events at all, which is exactly how this hid for so long.
+        // Only while this view actually holds focus. A container that does not
+        // have focus has no active descendant to speak of, and publishing one
+        // anyway puts a second relation in the tree for a client to follow: the
+        // combobox pattern (`CommandPalette`) keeps focus on a text field that
+        // points at a row in *this* list, and two publishers of the same row is
+        // an ambiguity nobody needs to resolve.
+        if self.view_focused.get()
+            && let Some(row) = self.current_row_widget()
+        {
+            builder.set_active_descendant(teksilo_core::accessibility::widget_id_to_node_id(row));
+        }
     }
 
     fn as_any(&self) -> Option<&dyn std::any::Any> {
@@ -1827,6 +1954,244 @@ mod tests {
             .item_height(item_height),
         );
         (tree, lv_id, model)
+    }
+
+    /// Taking focus reveals the row the keyboard is on, however far down it is.
+    ///
+    /// Only the rows near the viewport are realized, so a selection made
+    /// before the list is looked at — restoring a session, landing on
+    /// "whatever is happening now" — usually sits outside that window. Nothing
+    /// then speaks for it: no node carries `selected`, no active descendant is
+    /// nominated, and a screen reader taking focus here is told nothing. The
+    /// first arrow press steps past the row as well, because the cursor was
+    /// somewhere nobody was shown.
+    ///
+    /// Asserted on the accessibility tree, since that is what the failure was
+    /// about: the row has to be a node a platform can name.
+    #[test]
+    fn taking_focus_reveals_the_current_row() {
+        use teksilo_data::{SelectionMode, SelectionModel};
+
+        let model = ListModel::from_vec((0..200).collect::<Vec<usize>>());
+        let selection = SelectionModel::new(SelectionMode::Single);
+        selection.select(150);
+
+        let mut tree = WidgetTree::new();
+        let lv_id = tree.add(
+            ListView::new(model.clone(), move |_i, _item, _selected| {
+                Box::new(FixedLeaf(100.0, 20.0))
+            })
+            .item_height(20.0)
+            .selection(selection.clone()),
+        );
+        tree.layout(SizeProposal::exact(400.0, 200.0));
+
+        let realized_selected = |tree: &mut WidgetTree| -> Vec<usize> {
+            tree.accessibility_tree_snapshot()
+                .nodes
+                .iter()
+                .filter(|(_, node)| node.is_selected() == Some(true))
+                .filter_map(|(_, node)| node.position_in_set())
+                .collect()
+        };
+
+        assert!(
+            realized_selected(&mut tree).is_empty(),
+            "row 150 starts far outside the realized window, which is the case \
+             this is about"
+        );
+
+        tree.focus(lv_id);
+        tree.layout(SizeProposal::exact(400.0, 200.0));
+
+        assert_eq!(
+            realized_selected(&mut tree),
+            vec![150],
+            "taking focus has to bring the current row into the realized window, \
+             or nothing in the tree can be told about it"
+        );
+    }
+
+    /// And a row already on screen does not jump.
+    ///
+    /// `ensure_index_visible`, not `scroll_to_index`: somebody who can see the
+    /// list must not have it lurch when they click into it.
+    #[test]
+    fn taking_focus_does_not_move_a_row_already_in_view() {
+        use teksilo_data::{SelectionMode, SelectionModel};
+
+        let model = ListModel::from_vec((0..200).collect::<Vec<usize>>());
+        let selection = SelectionModel::new(SelectionMode::Single);
+        selection.select(2);
+
+        let mut tree = WidgetTree::new();
+        let lv_id = tree.add(
+            ListView::new(model.clone(), move |_i, _item, _selected| {
+                Box::new(FixedLeaf(100.0, 20.0))
+            })
+            .item_height(20.0)
+            .selection(selection.clone()),
+        );
+        tree.layout(SizeProposal::exact(400.0, 200.0));
+
+        let scroll = {
+            let any = tree.widget_as_any(lv_id).unwrap();
+            any.downcast_ref::<ListView<usize>>()
+                .unwrap()
+                .scroll_y_signal()
+                .clone()
+        };
+        let before = scroll.get();
+
+        tree.focus(lv_id);
+        tree.layout(SizeProposal::exact(400.0, 200.0));
+
+        assert_eq!(
+            scroll.get(),
+            before,
+            "row 2 is already visible, so the list must not scroll at all"
+        );
+    }
+
+    /// The focused node, as a platform adapter resolves it, is the current row.
+    ///
+    /// This is the property that decides whether a screen reader says anything
+    /// when the user presses an arrow. Keyboard focus stays on the list, so
+    /// there is no focus change for the platform to report unless the list
+    /// nominates a row as its active descendant; `accesskit_consumer` then
+    /// resolves the focused node through it (`tree.rs:541`) and
+    /// `accesskit_windows::focus_moved` raises
+    /// `UIA_AutomationFocusChangedEventId` on the row (`adapter.rs:341-345`).
+    ///
+    /// Asserted through `is_focused`, which is the consumer's own answer and
+    /// what both adapters go on, rather than through the raw property: the
+    /// property is the mechanism and this is the meaning.
+    #[test]
+    fn the_current_row_is_what_the_platform_calls_focused() {
+        use teksilo_data::{SelectionMode, SelectionModel};
+
+        let model = ListModel::from_vec((0..10).collect::<Vec<usize>>());
+        let selection = SelectionModel::new(SelectionMode::Single);
+        selection.select(3);
+
+        let mut tree = WidgetTree::new();
+        let lv_id = tree.add(
+            ListView::new(model.clone(), move |_i, _item, _selected| {
+                Box::new(FixedLeaf(100.0, 20.0))
+            })
+            .item_height(20.0)
+            .selection(selection.clone()),
+        );
+        tree.layout(SizeProposal::exact(400.0, 200.0));
+        tree.focus(lv_id);
+        tree.layout(SizeProposal::exact(400.0, 200.0));
+
+        // The row a screen reader would be told about, by model index.
+        let focused_row = |tree: &mut WidgetTree| -> Option<usize> {
+            let snapshot = tree.accessibility_tree_snapshot();
+            let consumer = accesskit_consumer::Tree::new(snapshot, true);
+            let state = consumer.state();
+            let focus = state.focus_id()?;
+            let focused = state.node_by_id(focus)?;
+            // Exactly what `accesskit_consumer` does before telling an adapter
+            // the focus moved (`tree.rs:541`), and what `is_focused` concludes
+            // (`node.rs:89-105`). `focus_id` alone is the raw value and still
+            // names the container.
+            let resolved = focused.active_descendant().unwrap_or(focused);
+            // Zero-based in the tree, one-based in the ear.
+            resolved.position_in_set()
+        };
+
+        assert_eq!(
+            focused_row(&mut tree),
+            Some(3),
+            "with the list focused, the platform's focused node must be the \
+             current row and not the list itself"
+        );
+
+        selection.select(6);
+        tree.layout(SizeProposal::exact(400.0, 200.0));
+
+        assert_eq!(
+            focused_row(&mut tree),
+            Some(6),
+            "and moving the selection must move it, which is the focus change \
+             NVDA announces; without it an arrow press is silent"
+        );
+    }
+
+    /// A list with nothing selected nominates nothing.
+    ///
+    /// The container stays the focused node, which is correct: there is no row
+    /// to be on, and pointing at one would make a screen reader announce a row
+    /// the user has not reached.
+    #[test]
+    fn an_unselected_list_nominates_no_row() {
+        let (mut tree, lv_id, _model) = make_list_view(10, 20.0);
+        tree.layout(SizeProposal::exact(400.0, 200.0));
+        tree.focus(lv_id);
+        tree.layout(SizeProposal::exact(400.0, 200.0));
+
+        let snapshot = tree.accessibility_tree_snapshot();
+        let consumer = accesskit_consumer::Tree::new(snapshot, true);
+        let state = consumer.state();
+        let focus = state.focus_id().expect("something has focus");
+        let focused = state.node_by_id(focus).expect("the focused node exists");
+        let resolved = focused.active_descendant().unwrap_or(focused);
+        assert_eq!(
+            resolved.role(),
+            teksilo_core::accesskit::Role::ListBox,
+            "with no selection the list itself is the focused node"
+        );
+    }
+
+    /// And the row that is now selected says so.
+    ///
+    /// The pair matters: keeping the widgets would be easy if the selected flag
+    /// stopped following the selection, and that would trade a silent screen
+    /// reader for a lying one.
+    #[test]
+    fn the_selected_row_reports_itself_after_a_move() {
+        use teksilo_data::{SelectionMode, SelectionModel};
+
+        let model = ListModel::from_vec((0..10).collect::<Vec<usize>>());
+        let selection = SelectionModel::new(SelectionMode::Single);
+        selection.select(3);
+
+        let mut tree = WidgetTree::new();
+        // The id is not needed: this asserts the `selected` flag, which does
+        // not depend on the view holding focus.
+        let _ = tree.add(
+            ListView::new(model.clone(), move |_i, _item, _selected| {
+                Box::new(FixedLeaf(100.0, 20.0))
+            })
+            .item_height(20.0)
+            .selection(selection.clone()),
+        );
+        tree.layout(SizeProposal::exact(400.0, 200.0));
+
+        let selected_rows = |tree: &mut WidgetTree| -> Vec<usize> {
+            let nodes = tree.accessibility_tree_snapshot().nodes;
+            nodes
+                .iter()
+                .filter(|(_, node)| node.is_selected() == Some(true))
+                .filter_map(|(_, node)| node.position_in_set())
+                .collect()
+        };
+
+        // Raw `position_in_set` is zero-based (AccessKit's convention, one
+        // below the ARIA number the adapters speak), so row 4 reads as 3.
+        assert_eq!(selected_rows(&mut tree), vec![3]);
+
+        selection.select(4);
+        tree.layout(SizeProposal::exact(400.0, 200.0));
+
+        assert_eq!(
+            selected_rows(&mut tree),
+            vec![4],
+            "the flag has to follow the selection, whether or not the widget was \
+             rebuilt to carry it"
+        );
     }
 
     #[test]

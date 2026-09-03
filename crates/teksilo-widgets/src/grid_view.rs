@@ -601,17 +601,16 @@ impl<T: 'static> GridView<T> {
         let Some(ref strategy) = self.strategy else {
             return;
         };
-        let delta = strategy.scroll_delta_to_reveal(
+        if let Some(target) = scroll_for_ensure_visible(
+            strategy.as_ref(),
             index,
             self.scroll_y.get(),
             self.viewport_height.get(),
             self.viewport_width.get(),
+            self.max_scroll_y.get(),
             anchor,
-        );
-        if delta.abs() > 0.01 {
-            let max = self.max_scroll_y.get();
-            self.scroll_y
-                .set((self.scroll_y.get() + delta).clamp(0.0, max));
+        ) {
+            self.scroll_y.set(target);
         }
     }
 
@@ -619,6 +618,93 @@ impl<T: 'static> GridView<T> {
     /// (`Auto` behaves like [`ensure_index_visible`](Self::ensure_index_visible)).
     pub fn scroll_to_index(&self, index: usize, anchor: ScrollAnchor) {
         self.ensure_index_visible(index, anchor);
+    }
+
+    /// Scroll the tile the keyboard is on into view when this grid takes
+    /// focus.
+    ///
+    /// Only the tiles near the viewport are realized, so on a grid taller than
+    /// the window the current tile frequently has no widget. Everything that
+    /// speaks for it then has nothing to speak about: no node carries
+    /// `selected`, no tile id is in `tile_map` for `accessibility` to nominate
+    /// as the `active_descendant`, and a screen reader taking focus here is
+    /// told nothing at all. The first arrow press steps *past* that tile as
+    /// well, because the cursor was somewhere the user was never shown.
+    ///
+    /// `ScrollAnchor::Auto` (`scroll_delta_to_reveal` returns 0 for a tile
+    /// already fully visible, `grid_view/layout/strategy.rs:194-202`) rather
+    /// than a forced anchor: a tile already on screen must not jump under
+    /// somebody who can see it. `Center` would, and by a lot: a fully visible
+    /// tile on the fifth row of a 300px viewport gets dragged 107px to reach
+    /// the middle. It is also the anchor arrow navigation already scrolls with
+    /// (`grid_view/keyboard.rs:348-355`), so taking focus and then stepping
+    /// move the viewport by the same rule.
+    ///
+    /// The cursor is `focused_index` else the first selected tile, the same
+    /// one the keyboard steps from (`grid_view/keyboard.rs:113-121`) and the
+    /// same one the context-menu key targets, so focus reveals the tile the
+    /// next keystroke will act on.
+    ///
+    /// Index to offset is asked of the layout strategy rather than computed
+    /// here, because a grid wraps and the wrap point is not this widget's to
+    /// know: `UniformGrid::tile_rect` (`grid_view/layout/uniform.rs:87-99`)
+    /// puts item `i` on row `i / column_count(viewport_width)` at
+    /// `inset.top + row * row_step()`, so the offset depends on the width the
+    /// last layout settled on, and a waterfall strategy has no row formula at
+    /// all, its items dropping into whichever column is shortest.
+    /// `viewport_width` is the body width `place_children` published
+    /// (`grid_view.rs:1622`) and asked the strategy for its column count
+    /// (`:1624`), the scrollbar column already subtracted, so the reveal and
+    /// the layout wrap at the same place.
+    ///
+    /// The handles are cloned into the effect rather than reaching through
+    /// `self`, which the closure cannot borrow. `strategy` comes from the
+    /// caller because `ensure_strategy` has just built it there and takes
+    /// `&mut self`.
+    fn reveal_focused_tile_on_focus(
+        &self,
+        ctx: &mut BuildContext,
+        strategy: Rc<dyn GridLayoutStrategy>,
+    ) {
+        // Keyed on this grid's own id, not on the enclosing scope: a grid
+        // nested inside another data view's rows would otherwise read that
+        // view's focus, since `view_focus_active` prefers whatever scope is
+        // open on the build stack (`build_context.rs:543-552`). Begin/end
+        // around nothing leaves the stack as it was
+        // (`widget_tree/focus_impl.rs:663-672`).
+        let view_focused = ctx.begin_view_focus();
+        ctx.end_view_focus();
+
+        let scroll_y = self.scroll_y.clone();
+        let max_scroll_y = self.max_scroll_y.clone();
+        let viewport_height = self.viewport_height.clone();
+        let viewport_width = self.viewport_width.clone();
+        let focused_index = self.focused_index.clone();
+        let selection = self.selection.clone();
+
+        ctx.effect(&view_focused, move |focused| {
+            if !*focused {
+                return;
+            }
+            let Some(index) = focused_index.get().or_else(|| {
+                selection
+                    .as_ref()
+                    .and_then(|s| s.selected_indices().first().copied())
+            }) else {
+                return;
+            };
+            if let Some(target) = scroll_for_ensure_visible(
+                strategy.as_ref(),
+                index,
+                scroll_y.get(),
+                viewport_height.get(),
+                viewport_width.get(),
+                max_scroll_y.get(),
+                ScrollAnchor::Auto,
+            ) {
+                scroll_y.set(target);
+            }
+        });
     }
 
     // ── Accessibility / empty state ─────────────────────────────────────
@@ -921,6 +1007,33 @@ impl<T: 'static> std::fmt::Debug for GridView<T> {
     }
 }
 
+/// The scroll offset that brings tile `index` into view per `anchor`, or
+/// `None` when the offset already satisfies it.
+///
+/// Split out of [`GridView::ensure_index_visible`] so the reveal-on-focus
+/// effect runs the same arithmetic as the public scroll-into-view API rather
+/// than a second copy of it: the effect outlives any borrow of `self` and
+/// holds cloned handles instead of the widget, so it cannot call the method.
+/// Takes the geometry by value for the same reason. The keyboard has its own
+/// call into `scroll_delta_to_reveal` (`grid_view/keyboard.rs:349-355`),
+/// because it applies the delta to an enclosing scroll area as well.
+fn scroll_for_ensure_visible(
+    strategy: &dyn GridLayoutStrategy,
+    index: usize,
+    scroll_y: f32,
+    viewport_height: f32,
+    viewport_width: f32,
+    max_scroll_y: f32,
+    anchor: ScrollAnchor,
+) -> Option<f32> {
+    let delta =
+        strategy.scroll_delta_to_reveal(index, scroll_y, viewport_height, viewport_width, anchor);
+    if delta.abs() <= 0.01 {
+        return None;
+    }
+    Some((scroll_y + delta).clamp(0.0, max_scroll_y))
+}
+
 impl<T: 'static> Widget for GridView<T> {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let self_id = ctx.self_id();
@@ -966,6 +1079,10 @@ impl<T: 'static> Widget for GridView<T> {
             ctx.binding_registry(),
             BindingLevel::AccessibilityOnly,
         );
+
+        // Taking focus scrolls the current tile into the realized window,
+        // which is what gives `accessibility` a tile id to nominate.
+        self.reveal_focused_tile_on_focus(ctx, strategy.clone());
 
         // Observe model changes.
         {
@@ -1979,5 +2096,149 @@ impl Widget for PinnedHeader {
 
     fn clips_children(&self) -> bool {
         true
+    }
+}
+
+#[cfg(test)]
+mod focus_reveal_tests {
+    //! Taking focus brings the current tile into the realized window.
+    //!
+    //! The other half of `active_descendant`: `GridView::accessibility` can
+    //! only nominate a tile that has a widget, and virtualization means the
+    //! current one usually has none until the grid is scrolled to it.
+
+    use super::*;
+    use teksilo_core::widget::LayoutContext;
+    use teksilo_core::widget_tree::WidgetTree;
+
+    #[derive(Debug)]
+    struct FixedLeaf(f32, f32);
+    impl Widget for FixedLeaf {
+        fn layout_response(
+            &self,
+            _proposal: SizeProposal,
+            _ctx: &LayoutContext,
+        ) -> teksilo_core::widget::LayoutResponse {
+            Size::new(self.0, self.1).into()
+        }
+    }
+
+    /// A 300-item grid of 100x50 tiles carrying `selection`, laid out once at
+    /// 400x300. That width holds three columns, so the items wrap into 100
+    /// rows of 58px and the viewport shows about five of them.
+    fn grid_with_selection(selection: &SelectionModel) -> (WidgetTree, WidgetId) {
+        let model = ListModel::from_vec((0..300).collect::<Vec<usize>>());
+        let mut tree = WidgetTree::new();
+        let id = tree.add(
+            GridView::new(model, |_tc| Box::new(FixedLeaf(100.0, 50.0)))
+                .tile_size(100.0, 50.0)
+                .selection(selection.clone()),
+        );
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        (tree, id)
+    }
+
+    /// The flat index of every realized tile marked selected, read back off
+    /// the accessibility tree, since that is what the failure was about: the
+    /// tile has to be a node a platform can name.
+    ///
+    /// `position_in_set` reads 0-based here even though `TileA11y` writes the
+    /// 1-based ARIA number (`grid_view/a11y.rs:88`):
+    /// `AccessNodeBuilder::set_position_in_set`
+    /// (`teksilo-core/src/accessibility.rs:466-469`) subtracts the 1 through
+    /// `to_accesskit_ordinal` (`:171-178`), so the value in a snapshot is the
+    /// flat index itself.
+    fn selected_positions(tree: &WidgetTree) -> Vec<usize> {
+        tree.accessibility_tree_snapshot()
+            .nodes
+            .iter()
+            .filter(|(_, node)| node.is_selected() == Some(true))
+            .filter_map(|(_, node)| node.position_in_set())
+            .collect()
+    }
+
+    /// A selection made before the grid is ever looked at is off-window, so
+    /// nothing carries it into the tree until focus scrolls to it.
+    #[test]
+    fn taking_focus_reveals_the_current_tile() {
+        let selection = SelectionModel::new(SelectionMode::Single);
+        selection.select(150);
+        let (mut tree, id) = grid_with_selection(&selection);
+
+        assert!(
+            selected_positions(&tree).is_empty(),
+            "tile 150 sits fifty rows below the realized window, which is the \
+             case this is about"
+        );
+
+        tree.focus(id);
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+
+        assert_eq!(
+            selected_positions(&tree),
+            vec![150],
+            "taking focus has to bring the current tile into the realized \
+             window, or nothing in the tree can be told about it"
+        );
+    }
+
+    /// The window-space rect of a realized tile, read out of the same
+    /// `tile_map` the body pane writes and `accessibility` nominates from
+    /// (`grid_view.rs:1737-1743`). `None` for a tile outside the
+    /// virtualization window, which has no widget and so no rect.
+    fn tile_bounds(tree: &WidgetTree, grid: WidgetId, index: usize) -> Option<Rect> {
+        let tile = tree
+            .widget_as_any(grid)
+            .and_then(|any| any.downcast_ref::<GridView<usize>>())
+            .and_then(|g| {
+                g.tile_map
+                    .borrow()
+                    .iter()
+                    .find(|(i, _)| *i == index)
+                    .map(|(_, id)| *id)
+            })?;
+        Some(tree.bounds(tile))
+    }
+
+    /// And a tile already on screen does not lurch when the grid is clicked
+    /// into: `ScrollAnchor::Auto`, not a forced anchor.
+    ///
+    /// Tile 12 is the one that catches a forced anchor. Three columns of 58px
+    /// row step put it on the fifth row, spanning y 232..282 of a 300px
+    /// viewport: fully visible, and far enough down that `Center` would scroll
+    /// by about 107px to drag it to the middle. A tile on the first row proves
+    /// nothing here, because centering row 0 asks for a negative offset that
+    /// the clamp to `0.0..=max_scroll_y` turns back into no movement at all.
+    #[test]
+    fn taking_focus_does_not_move_a_tile_already_in_view() {
+        let selection = SelectionModel::new(SelectionMode::Single);
+        selection.select(12);
+        let (mut tree, id) = grid_with_selection(&selection);
+
+        let scroll = tree
+            .widget_as_any(id)
+            .and_then(|any| any.downcast_ref::<GridView<usize>>())
+            .map(|g| g.scroll_y_signal().clone())
+            .expect("the grid is the widget at `id`");
+        let before = scroll.get();
+
+        let rect = tile_bounds(&tree, id, 12).expect("tile 12 is realized");
+        assert!(
+            rect.y >= 0.0 && rect.y + rect.height <= 300.0,
+            "this case only means anything while tile 12 is fully on screen, \
+             and it spans y {}..{} of a 300px viewport",
+            rect.y,
+            rect.y + rect.height
+        );
+
+        tree.focus(id);
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+
+        assert_eq!(
+            scroll.get(),
+            before,
+            "tile 12 is already fully visible, so taking focus must not scroll \
+             the grid under somebody who can see it"
+        );
     }
 }

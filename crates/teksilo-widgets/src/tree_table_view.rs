@@ -1159,6 +1159,80 @@ impl<T: 'static> TreeTableView<T> {
         );
     }
 
+    /// Scroll the row the keyboard cursor sits on into view when this view
+    /// takes focus.
+    ///
+    /// Only the rows near the viewport are realized, so on a tree taller than
+    /// the window the cursor row frequently has no widget. Everything that
+    /// speaks for it then has nothing to speak about: no cell node exists, so
+    /// `accessibility()` below finds nothing in `cell_map` and nominates no
+    /// `active_descendant`, and a screen reader taking focus here is told
+    /// nothing at all. The first arrow press steps *past* that row as well,
+    /// because the cursor was somewhere the user was never shown.
+    ///
+    /// The cursor is read exactly as the shared keyboard handler reads it
+    /// (`table_view::keyboard::build_key_handler`, `keyboard.rs:134-139`): the
+    /// focused cell's row, else the first selected row. Anything else would
+    /// reveal a row the next arrow press does not step from.
+    ///
+    /// That row index is a **flat visible** index, not a position in the
+    /// unflattened tree: a collapsed node's descendants have no index at all
+    /// here. Checked on both sides of the read. `focused_cell` is clamped to
+    /// `TreeNavigator::row_count()`, which returns `TreeSource::visible_count()`
+    /// (`tree_table_view.rs:129-131`), and the keyed selection facade builds
+    /// its indices by scanning `0..visible_count()` through
+    /// `SortFilterTreeModel::visible_node_id` (`data_views.rs:545-552`). On the
+    /// spending side, `RowMetrics` is sized by `place_children` from that same
+    /// `visible_count()`, so `row_top(i)` is the top of the *i*-th visible row.
+    ///
+    /// `ensure_row_visible`, the view's own imperative path, rather than
+    /// `scroll_to_row`: a row already on screen must not jump under somebody
+    /// who can see it. It carries the `laid_out` guard too, so a focus that
+    /// arrives before the first real height is a no-op instead of scrolling
+    /// against a viewport that was never measured. It is the same
+    /// `RowMetrics::scroll_for_ensure_visible` arithmetic the keyboard runs on
+    /// every arrow press; what the keyboard's own wrapper
+    /// (`table_view/keyboard.rs:445`) adds on top is chasing the row into an
+    /// *enclosing* scroll area, and that needs an `EventContext`, which an
+    /// effect does not have. Nothing is lost: the same keyboard or programmatic
+    /// focus change makes the framework reveal the newly focused widget in
+    /// every ancestor scroll area itself (`focus_impl.rs:95-96`,
+    /// `WidgetTree::scroll_focused_into_view`), so the enclosing viewport is
+    /// somebody else's job here.
+    ///
+    /// The handles are cloned into the effect rather than reaching through
+    /// `self`, which the closure cannot borrow.
+    fn reveal_current_row_on_focus(&self, ctx: &mut BuildContext) {
+        let focused_cell = self.focused_cell.clone();
+        let selection = self.row_selection.clone();
+        let row_metrics = self.row_metrics.clone();
+        let scroll_y = self.scroll_y.clone();
+        let max_scroll_y = self.max_scroll_y.clone();
+        let viewport_height = self.viewport_height.clone();
+        let laid_out = self.laid_out.clone();
+
+        ctx.effect(&self.view_focused, move |focused| {
+            if !*focused {
+                return;
+            }
+            let Some(row) = focused_cell.get().map(|(row, _col)| row).or_else(|| {
+                selection
+                    .as_ref()
+                    .and_then(|s| s.selected_indices().first().copied())
+            }) else {
+                return;
+            };
+            imperative::ensure_row_visible(
+                row,
+                &row_metrics,
+                &scroll_y,
+                &max_scroll_y,
+                viewport_height.get(),
+                laid_out.get(),
+            );
+        });
+    }
+
     /// Set or remove a single column's user-resized width override.
     /// A non-positive `width` removes the entry (the column reverts to
     /// its declared width policy).
@@ -1435,6 +1509,7 @@ impl<T: 'static> Widget for TreeTableView<T> {
         self.view_focused = ctx.begin_view_focus();
         ctx.end_view_focus();
         self.focus_visible = ctx.focus_visible();
+        self.reveal_current_row_on_focus(ctx);
         self.view_focused.bind_to(
             ctx.self_id(),
             ctx.binding_registry(),
@@ -4360,6 +4435,277 @@ mod tests {
             active_after, None,
             "a focused cell that scrolled out of realization must not leave \
              a stale active_descendant pointing at a destroyed node"
+        );
+    }
+
+    /// Taking focus reveals the row the keyboard cursor sits on.
+    ///
+    /// Only the rows near the viewport are realized, so a cursor placed before
+    /// the view is ever looked at (a restored position, a preselected row)
+    /// usually has no cell widget at all. Nothing then speaks for it:
+    /// `accessibility()` finds no entry in `cell_map`, so it nominates no
+    /// `active_descendant`, and a screen reader arriving here is told nothing.
+    /// The first arrow press steps *past* that row as well, because the cursor
+    /// was somewhere nobody was shown.
+    ///
+    /// Asserted on the accessibility tree, since that is what the failure was
+    /// about: the cell has to be a node a platform can name.
+    #[test]
+    fn taking_focus_reveals_the_cursor_row() {
+        let proxy = SortFilterTreeModel::new(wide_tree(1000));
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let id = tree.add(
+            TreeTableView::from_projection(proxy)
+                .add_column(name_col())
+                .row_height(20.0),
+        );
+        let viewport = SizeProposal {
+            width: Some(400.0),
+            height: Some(200.0),
+        };
+        tree.layout(viewport);
+
+        // Place the cursor far below the viewport WITHOUT giving the view
+        // focus. `set_focused_cell` never scrolls on its own: only the key
+        // handler does (`table_view/keyboard.rs:445`), and no key was pressed.
+        {
+            let any = tree.widget_as_any(id).unwrap();
+            any.downcast_ref::<TreeTableView<&'static str>>()
+                .unwrap()
+                .set_focused_cell(500, 0);
+        }
+        tree.request_frame();
+        tree.layout(viewport);
+
+        let root_node_id = widget_id_to_node_id(id);
+        // What a platform adapter is handed: the container's
+        // `active_descendant`, resolved inside the same `TreeUpdate` that
+        // published it.
+        let nominated = |tree: &mut WidgetTree| -> Option<(Role, Option<usize>)> {
+            let update = tree.sync_accessibility();
+            let active = update
+                .nodes
+                .iter()
+                .find(|(nid, _)| *nid == root_node_id)
+                .and_then(|(_, n)| n.active_descendant())?;
+            update
+                .nodes
+                .iter()
+                .find(|(nid, _)| *nid == active)
+                .map(|(_, n)| (n.role(), n.row_index()))
+        };
+
+        assert_eq!(
+            nominated(&mut tree),
+            None,
+            "row 500 starts far outside the realized window, which is the case \
+             this is about"
+        );
+
+        tree.focus(id);
+        tree.layout(viewport);
+
+        assert_eq!(
+            nominated(&mut tree),
+            // `row_index` is stored zero-based and the adapters add the 1 back,
+            // so the cursor's row 500 reads as 501 with the header counted.
+            Some((Role::Cell, Some(501))),
+            "taking focus has to bring the cursor's row into the realized \
+             window, or nothing in the tree can be told about it"
+        );
+    }
+
+    /// With no cell navigated to yet, the selected row is the one revealed.
+    ///
+    /// A view restored into a selection has no `focused_cell`, so reading the
+    /// cursor only from that signal would leave the selection off-screen and
+    /// unrealized: no row node carrying `selected` for AT-SPI to announce
+    /// either, and the next arrow press stepping from a row nobody saw. The
+    /// fallback order is the keyboard handler's own
+    /// (`table_view/keyboard.rs:134-139`).
+    #[test]
+    fn taking_focus_reveals_the_selected_row_when_no_cell_has_been_navigated_to() {
+        use teksilo_data::{SelectionMode, SelectionModel};
+
+        let proxy = SortFilterTreeModel::new(wide_tree(1000));
+        let sel = SelectionModel::new(SelectionMode::Single);
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let id = tree.add(
+            TreeTableView::from_projection(proxy)
+                .add_column(name_col())
+                .row_height(20.0)
+                .selection_mode(TableSelectionMode::SingleRow)
+                .selection(sel.clone()),
+        );
+        let viewport = SizeProposal {
+            width: Some(400.0),
+            height: Some(200.0),
+        };
+        tree.layout(viewport);
+
+        sel.select(500);
+        tree.request_frame();
+        tree.layout(viewport);
+
+        let selected_rows = |tree: &mut WidgetTree| -> Vec<usize> {
+            tree.sync_accessibility()
+                .nodes
+                .iter()
+                .filter(|(_, n)| n.role() == Role::Row && n.is_selected() == Some(true))
+                .filter_map(|(_, n)| n.row_index())
+                .collect()
+        };
+
+        assert!(
+            selected_rows(&mut tree).is_empty(),
+            "row 500 starts far outside the realized window, which is the case \
+             this is about"
+        );
+
+        tree.focus(id);
+        tree.layout(viewport);
+
+        assert_eq!(
+            selected_rows(&mut tree),
+            vec![501],
+            "taking focus has to realize the selected row, or there is no node \
+             carrying `selected` for a screen reader to find"
+        );
+    }
+
+    /// The index revealed is a **visible** row, not a position in the
+    /// unflattened tree.
+    ///
+    /// The two differ by every descendant hidden above the cursor, so a tree
+    /// with collapsed branches is where a confusion between them shows. Here
+    /// the first twenty roots keep their nine children each and show none of
+    /// them, which slides every row below 180 places up the flat order while
+    /// nothing about the tree itself moves. The gap is deliberately far wider
+    /// than the realized window: a reveal aimed at the unflattened position
+    /// would leave the cursor's row with no widget at all, which is the state
+    /// this whole change is about.
+    ///
+    /// The reveal is fed `focused_cell`, whose row the keyboard handler clamps
+    /// against `TreeNavigator::row_count()` = `TreeSource::visible_count()`
+    /// (`tree_table_view.rs:129-131`), and it spends that index on
+    /// `RowMetrics`, which `place_children` sizes from the same
+    /// `visible_count()`. Both ends are therefore the flat order this test
+    /// reads through `SortFilterTreeModel::visible_node_id`.
+    ///
+    /// Checked by identity rather than by arithmetic: the nominated cell has
+    /// to be the one holding the node the cursor was put on.
+    #[test]
+    fn the_revealed_row_is_a_visible_index_not_a_position_in_the_unflattened_tree() {
+        use teksilo_core::accessibility::node_id_to_widget_id;
+
+        let model = TreeModel::new();
+        let mut to_collapse = Vec::new();
+        let mut needle = None;
+        for r in 0..40usize {
+            let root = model.insert_root(r, "root");
+            if r < 20 {
+                to_collapse.push(root);
+            }
+            for c in 0..9usize {
+                let label = if r == 30 && c == 4 { "needle" } else { "leaf" };
+                let child = model.insert_child(root, c, label);
+                if r == 30 && c == 4 {
+                    needle = Some(child);
+                }
+            }
+        }
+        let needle = needle.expect("the needle inserted");
+
+        let proxy = SortFilterTreeModel::new(model);
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let id = tree.add(
+            TreeTableView::from_projection(proxy.clone())
+                .add_column(name_col())
+                .row_height(20.0),
+        );
+        let viewport = SizeProposal {
+            width: Some(400.0),
+            height: Some(200.0),
+        };
+        tree.layout(viewport);
+        {
+            let any = tree.widget_as_any(id).unwrap();
+            any.downcast_ref::<TreeTableView<&'static str>>()
+                .unwrap()
+                .expand_all();
+        }
+        tree.layout(viewport);
+
+        let flat_of = |node| {
+            (0..proxy.visible_count())
+                .find(|&i| proxy.visible_node_id(i) == Some(node))
+                .expect("the node is visible")
+        };
+        let flat_expanded = flat_of(needle);
+
+        {
+            let any = tree.widget_as_any(id).unwrap();
+            let tt = any.downcast_ref::<TreeTableView<&'static str>>().unwrap();
+            for root in to_collapse {
+                tt.collapse(root);
+            }
+        }
+        tree.layout(viewport);
+
+        let flat = flat_of(needle);
+        assert_eq!(
+            flat,
+            flat_expanded - 180,
+            "collapsing the first twenty roots has to move the needle up the \
+             flat order without moving it in the tree, or this test proves \
+             nothing"
+        );
+
+        {
+            let any = tree.widget_as_any(id).unwrap();
+            any.downcast_ref::<TreeTableView<&'static str>>()
+                .unwrap()
+                .set_focused_cell(flat, 0);
+        }
+        tree.request_frame();
+        tree.layout(viewport);
+        tree.focus(id);
+        tree.layout(viewport);
+
+        let root_node_id = widget_id_to_node_id(id);
+        let update = tree.sync_accessibility();
+        let active = update
+            .nodes
+            .iter()
+            .find(|(nid, _)| *nid == root_node_id)
+            .and_then(|(_, n)| n.active_descendant())
+            .expect(
+                "taking focus has to bring the cursor's row into the realized \
+                 window, or nothing in the tree can be told about it",
+            );
+        let cell = update
+            .nodes
+            .iter()
+            .find(|(nid, _)| *nid == active)
+            .map(|(_, n)| n)
+            .expect("active_descendant must reference a node in the TreeUpdate");
+        assert_eq!(cell.row_index(), Some(flat + 1));
+
+        // And it is the needle's own cell: walk the nominated cell's widget
+        // subtree for the label the delegate rendered.
+        let mut q = vec![node_id_to_widget_id(active)];
+        let mut names = Vec::new();
+        while let Some(w) = q.pop() {
+            if let Some(name) = tree.accessibility_node(w).name() {
+                names.push(name.to_string());
+            }
+            for c in tree.children(w) {
+                q.push(c);
+            }
+        }
+        assert!(
+            names.iter().any(|n| n == "needle"),
+            "the revealed row must be the node the cursor was put on, got {names:?}"
         );
     }
 

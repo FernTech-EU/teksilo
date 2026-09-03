@@ -3146,3 +3146,169 @@ fn into_box_is_inset_so_it_cannot_be_read_as_an_insertion_line() {
         "the Into box needs both a wash and an outline"
     );
 }
+
+// --- Accessibility: the current row as the container's active descendant ---
+//
+// A flat tree of roots, so `position_in_set` read back off the node is exactly
+// the flat row index, which makes it a readable stand-in for "which row is
+// this" below. Two conversions cancel: `sibling_pos` numbers visible roots from
+// 1 (`tree_source.rs:369-387`) and `TreeItemWrapper` passes that 1-based value
+// on (`list_item_a11y.rs:164`), while `set_position_in_set` stores AccessKit's
+// 0-based ordinal (`teksilo-core/src/accessibility.rs:466-468`, via
+// `to_accesskit_ordinal`). Zero-based in the tree, one-based in the ear.
+
+/// The rows that are both realized and marked selected, by sibling position.
+fn realized_selected(wtree: &mut WidgetTree) -> Vec<usize> {
+    wtree
+        .accessibility_tree_snapshot()
+        .nodes
+        .iter()
+        .filter(|(_, node)| node.is_selected() == Some(true))
+        .filter_map(|(_, node)| node.position_in_set())
+        .collect()
+}
+
+/// Taking focus reveals the row the keyboard is on, however far down it is.
+///
+/// Only the rows near the viewport are realized, so a selection made before the
+/// tree is looked at (restoring a session, landing on "whatever is happening
+/// now") usually sits outside that window. Nothing then speaks for it: no node
+/// carries `selected`, no active descendant is nominated, and a screen reader
+/// taking focus here is told nothing. The first arrow press steps past the row
+/// as well, because the cursor was somewhere nobody was shown.
+///
+/// Asserted on the accessibility tree, since that is what the failure was
+/// about: the row has to be a node a platform can name.
+#[test]
+fn taking_focus_reveals_the_current_row() {
+    let (mut wtree, tv_id, selection) = flat_tree_view(200, teksilo_data::SelectionMode::Single);
+    // Selected before the first layout, which is the case this is about: the
+    // row was chosen by something other than the user scrolling to it.
+    selection.select(150);
+    wtree.layout(SizeProposal::exact(400.0, 200.0));
+
+    assert!(
+        realized_selected(&mut wtree).is_empty(),
+        "row 150 starts far outside the realized window, which is the case this \
+         is about"
+    );
+
+    wtree.focus(tv_id);
+    wtree.layout(SizeProposal::exact(400.0, 200.0));
+
+    assert_eq!(
+        realized_selected(&mut wtree),
+        vec![150],
+        "taking focus has to bring the current row into the realized window, or \
+         nothing in the tree can be told about it"
+    );
+}
+
+/// And a row already on screen does not jump.
+///
+/// `ensure_index_visible`, not `scroll_to_index`: somebody who can see the tree
+/// must not have it lurch when they click into it.
+#[test]
+fn taking_focus_does_not_move_a_row_already_in_view() {
+    let (mut wtree, tv_id, selection) = flat_tree_view(200, teksilo_data::SelectionMode::Single);
+    selection.select(2);
+    wtree.layout(SizeProposal::exact(400.0, 200.0));
+
+    let scroll = {
+        let any = wtree.widget_as_any(tv_id).unwrap();
+        // `tests` is a child module of `tree_view`, so it reads the private
+        // field directly; TreeView exposes no public scroll signal.
+        any.downcast_ref::<TreeView<String>>()
+            .unwrap()
+            .scroll_y
+            .clone()
+    };
+    let before = scroll.get();
+
+    wtree.focus(tv_id);
+    wtree.layout(SizeProposal::exact(400.0, 200.0));
+
+    assert_eq!(
+        scroll.get(),
+        before,
+        "row 2 is already visible, so the tree must not scroll at all"
+    );
+}
+
+/// The focused node, as a platform adapter resolves it, is the current row.
+///
+/// This is the property that decides whether a screen reader says anything when
+/// the user presses an arrow. Keyboard focus stays on the tree, so there is no
+/// focus change for the platform to report unless the tree nominates a row as
+/// its active descendant; `accesskit_consumer` then resolves the focused node
+/// through it (`tree.rs:541`) and `accesskit_windows::focus_moved` raises
+/// `UIA_AutomationFocusChangedEventId` on the row (`adapter.rs:341-345`).
+///
+/// Asserted through the consumer's own resolution, which is what both adapters
+/// go on, rather than through the raw property: the property is the mechanism
+/// and this is the meaning.
+#[test]
+fn the_current_row_is_what_the_platform_calls_focused() {
+    let (mut wtree, tv_id, selection) = flat_tree_view(20, teksilo_data::SelectionMode::Single);
+    selection.select(3);
+    wtree.layout(SizeProposal::exact(400.0, 200.0));
+    wtree.focus(tv_id);
+    wtree.layout(SizeProposal::exact(400.0, 200.0));
+
+    // The row a screen reader would be told about, by sibling position.
+    let focused_row = |wtree: &mut WidgetTree| -> Option<usize> {
+        let snapshot = wtree.accessibility_tree_snapshot();
+        let consumer = accesskit_consumer::Tree::new(snapshot, true);
+        let state = consumer.state();
+        let focus = state.focus_id()?;
+        let focused = state.node_by_id(focus)?;
+        // Exactly what `accesskit_consumer` does before telling an adapter the
+        // focus moved (`tree.rs:541`), and what `is_focused` concludes
+        // (`node.rs:89-105`). `focus_id` alone is the raw value and still names
+        // the container.
+        let resolved = focused.active_descendant().unwrap_or(focused);
+        resolved.position_in_set()
+    };
+
+    assert_eq!(
+        focused_row(&mut wtree),
+        Some(3),
+        "with the tree focused, the platform's focused node must be the current \
+         row and not the tree itself"
+    );
+
+    selection.select(6);
+    wtree.layout(SizeProposal::exact(400.0, 200.0));
+
+    assert_eq!(
+        focused_row(&mut wtree),
+        Some(6),
+        "and moving the selection must move it, which is the focus change NVDA \
+         announces; without it an arrow press is silent"
+    );
+}
+
+/// A tree with nothing selected nominates nothing.
+///
+/// The container stays the focused node, which is correct: there is no row to
+/// be on, and pointing at one would make a screen reader announce a row the
+/// user has not reached.
+#[test]
+fn an_unselected_tree_nominates_no_row() {
+    let (mut wtree, tv_id) = make_tree_view(sample_tree());
+    wtree.layout(SizeProposal::exact(400.0, 300.0));
+    wtree.focus(tv_id);
+    wtree.layout(SizeProposal::exact(400.0, 300.0));
+
+    let snapshot = wtree.accessibility_tree_snapshot();
+    let consumer = accesskit_consumer::Tree::new(snapshot, true);
+    let state = consumer.state();
+    let focus = state.focus_id().expect("something has focus");
+    let focused = state.node_by_id(focus).expect("the focused node exists");
+    let resolved = focused.active_descendant().unwrap_or(focused);
+    assert_eq!(
+        resolved.role(),
+        teksilo_core::accesskit::Role::Tree,
+        "with no selection the tree itself is the focused node"
+    );
+}
