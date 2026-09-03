@@ -530,6 +530,7 @@ impl WidgetTree {
         // paths are parallel by construction and a derivation added to one of them
         // only is a node that reads differently to a test than to a screen reader.
         self.announce_context_menu(id, &mut builder);
+        self.announce_focusable(id, &mut builder);
 
         // Apply builder-level overrides AFTER the inner widget has
         // emitted its defaults, so the overrides win for scalar fields
@@ -833,6 +834,40 @@ impl WidgetTree {
     /// nested boxes. Applied BEFORE the overrides so `access_remove_action` still
     /// takes it away, and so a widget wiring its own `on_access_action` handler is
     /// not given a second one.
+    /// Announce that a focusable node can be focused, before any override runs.
+    ///
+    /// The sibling of [`Self::announce_context_menu`], for the same reason. The
+    /// dispatcher has always *serviced* `Action::Focus` for any node -- the
+    /// `AccessAction` arm calls `focus_with_origin_ops` itself rather than
+    /// handing the action to the widget -- so an assistive technology that tried
+    /// it got focus. Nothing told it the action was there, and an AT offers what
+    /// a node advertises: focus was reachable and undiscoverable at the same
+    /// time.
+    ///
+    /// Leaving it to each widget made it a rule that had to be remembered ~40
+    /// times and was not: every stock button remembered, while `ListView`,
+    /// `TreeView`, `TableView`, `TreeTableView`, `GridView`, `MenuList` and
+    /// `OverlayTrigger` did not -- so a screen reader could not put focus in a
+    /// list, a tree, a table, a grid or an open menu. Deriving it from the
+    /// arena's own focusable flag makes the advertisement true by construction
+    /// and keeps it true for widgets not yet written.
+    ///
+    /// Gated on the *arena* flag rather than on the widget's opinion, because
+    /// that flag is what `focus_with_origin_ops` will actually honour -- a node
+    /// that is not focusable would advertise an action that then declines to
+    /// land. Applied BEFORE the overrides, so `access_remove_action` can still
+    /// take it away.
+    fn announce_focusable(&self, id: WidgetId, builder: &mut AccessNodeBuilder) {
+        if self
+            .arena
+            .get(id)
+            .is_some_and(|node| self.is_node_focusable(node))
+            && !builder.actions().contains(&accesskit::Action::Focus)
+        {
+            builder.add_action(accesskit::Action::Focus);
+        }
+    }
+
     fn announce_context_menu(&self, id: WidgetId, builder: &mut AccessNodeBuilder) {
         if self
             .arena
@@ -852,6 +887,7 @@ impl WidgetTree {
         let mut builder = AccessNodeBuilder::for_widget(id);
         node.widget.accessibility(&mut builder);
         self.announce_context_menu(id, &mut builder);
+        self.announce_focusable(id, &mut builder);
         if let Some(ov) = node.access_overrides.as_deref() {
             ov.apply(&mut builder);
             // Resolve `access_shortcut_id` against the live registry —
@@ -1537,6 +1573,68 @@ mod tests {
             builder.set_name("Click Me");
             builder.add_action(accesskit::Action::Click);
         }
+    }
+
+    /// A focusable node advertises `Action::Focus` whether or not its widget
+    /// remembered to. The dispatcher services the action for any focusable
+    /// node, so deriving the advertisement from the arena flag is what keeps
+    /// the two in step — see `announce_focusable`.
+    #[test]
+    fn a_focusable_node_advertises_focus_without_the_widget_saying_so() {
+        let mut tree = WidgetTree::new();
+        // `ClickableWidget` names Click and nothing else.
+        let id = tree.add(ClickableWidget.focusable(true));
+        tree.layout(SizeProposal::exact(100.0, 100.0));
+
+        let info = tree.accessibility_node(id);
+        assert!(
+            info.actions().contains(&accesskit::Action::Focus),
+            "the arena knows the node is focusable; the AT node must say so"
+        );
+
+        // Advertised means serviceable, not merely announced.
+        let mut ops = crate::window::NoopWindowOps;
+        assert!(tree.dispatch_access_action(
+            crate::accessibility::widget_id_to_node_id(id),
+            accesskit::Action::Focus,
+            None,
+            &mut ops,
+        ));
+        assert_eq!(tree.focused(), Some(id));
+    }
+
+    /// The derivation is a default, not a decree: `access_remove_action` still
+    /// takes it away, because it is applied before the overrides.
+    #[test]
+    fn a_derived_focus_action_is_still_removable_by_an_override() {
+        let mut tree = WidgetTree::new();
+        let id = tree.add(
+            ClickableWidget
+                .focusable(true)
+                .access_remove_action(accesskit::Action::Focus),
+        );
+        tree.layout(SizeProposal::exact(100.0, 100.0));
+        assert!(
+            !tree
+                .accessibility_node(id)
+                .actions()
+                .contains(&accesskit::Action::Focus)
+        );
+    }
+
+    /// A node nobody can focus must not advertise focus — it would be an
+    /// action that declines to land.
+    #[test]
+    fn a_non_focusable_node_does_not_advertise_focus() {
+        let mut tree = WidgetTree::new();
+        let id = tree.add(ClickableWidget);
+        tree.layout(SizeProposal::exact(100.0, 100.0));
+        assert!(
+            !tree
+                .accessibility_node(id)
+                .actions()
+                .contains(&accesskit::Action::Focus)
+        );
     }
 
     #[test]

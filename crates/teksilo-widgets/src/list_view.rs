@@ -4141,4 +4141,33 @@ mod tests {
         assert_eq!(model.with_item(0, |v| *v), Some(10));
         assert_eq!(model.with_item(3, |v| *v), Some(40));
     }
+
+    /// A focusable container that never advertises `Action::Focus` cannot be
+    /// focused by assistive technology: the tree services the action itself,
+    /// but the AT only ever asks for what a node advertises.
+    #[test]
+    fn advertises_focus_so_assistive_tech_can_focus_the_list() {
+        let (mut tree, lv_id, _model) = make_list_view(20, 20.0);
+        tree.layout(SizeProposal::exact(400.0, 200.0));
+
+        let info = tree.accessibility_node(lv_id);
+        assert_eq!(info.role(), teksilo_core::accesskit::Role::ListBox);
+        assert!(
+            info.actions()
+                .contains(&teksilo_core::accesskit::Action::Focus),
+            "ListView must advertise Action::Focus; without it no screen reader \
+             can move focus into the list"
+        );
+
+        // And the advertised action really lands.
+        let mut ops = teksilo_core::window::NoopWindowOps;
+        let handled = tree.dispatch_access_action(
+            teksilo_core::accessibility::widget_id_to_node_id(lv_id),
+            teksilo_core::accesskit::Action::Focus,
+            None,
+            &mut ops,
+        );
+        assert!(handled, "the Focus action must be serviced");
+        assert_eq!(tree.focused(), Some(lv_id));
+    }
 }

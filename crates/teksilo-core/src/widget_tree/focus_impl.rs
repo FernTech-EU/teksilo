@@ -459,7 +459,7 @@ impl WidgetTree {
     }
 
     /// Check if a node is focusable (set via HandlerSet `.focusable(true)` in build).
-    fn is_node_focusable(&self, node: &crate::arena::WidgetNode) -> bool {
+    pub(super) fn is_node_focusable(&self, node: &crate::arena::WidgetNode) -> bool {
         node.node_focusable.unwrap_or(false)
     }
 
