@@ -534,6 +534,29 @@ impl WindowManager {
             .with_resizable(config.resizable)
             .with_visible(false); // Must be invisible for AccessKit adapter creation
 
+        // The id the desktop matches this window against. On Wayland it is the
+        // toplevel's `app_id`, and without it the shell cannot tie the window
+        // to its desktop entry: it appears as an unnamed entry with the generic
+        // icon, and `StartupWMClass` is not consulted, there being no
+        // `WM_CLASS` on Wayland to put there. On X11 it is `WM_CLASS` itself.
+        //
+        // One call covers both: winit's Wayland and X11 extension traits write
+        // the same `platform_specific.name` field (`platform/wayland.rs:113`
+        // and `platform/x11.rs:212`), so this is the whole of it on every
+        // display server the same build supports. Windows and macOS have no
+        // equivalent and the field is simply unused there.
+        #[cfg(any(
+            target_os = "linux",
+            target_os = "dragonfly",
+            target_os = "freebsd",
+            target_os = "netbsd",
+            target_os = "openbsd"
+        ))]
+        if let Some(app_id) = config.app_id.as_deref() {
+            use winit::platform::wayland::WindowAttributesExtWayland;
+            window_attrs = window_attrs.with_name(app_id, "");
+        }
+
         if let Some((min_w, min_h)) = config.min_size {
             window_attrs =
                 window_attrs.with_min_inner_size(winit::dpi::LogicalSize::new(min_w, min_h));

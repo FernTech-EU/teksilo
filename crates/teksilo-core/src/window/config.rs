@@ -133,6 +133,29 @@ pub type WindowRemovedCallback = Rc<dyn Fn(&WindowRemovedEvent)>;
 pub struct WindowConfig {
     pub title: String,
     pub string_id: Option<String>,
+    /// The application id the desktop matches this window against, on the
+    /// platforms that have one.
+    ///
+    /// Set it to the basename of the installed desktop entry, without the
+    /// `.desktop` suffix, and matching the reverse-DNS convention that entry
+    /// already follows: `"eu.example.MyApp"`.
+    ///
+    /// **Wayland**: this becomes the toplevel's `xdg_toplevel.set_app_id`. A
+    /// toplevel that sends none cannot be tied to its desktop entry at all, so
+    /// the shell shows the window as a separate unnamed entry carrying the
+    /// generic fallback icon, however many icons the application installed.
+    /// `StartupWMClass` in the desktop entry does not rescue it: a Wayland
+    /// compositor has no `WM_CLASS` to put there, and GNOME reads that key for
+    /// X11 windows only. Portals attribute notifications by the same id.
+    ///
+    /// **X11**: it becomes `WM_CLASS`. Without it winit falls back to the
+    /// executable's own name, which is right often enough that the Wayland
+    /// half of this gap goes unnoticed on an X11 session.
+    ///
+    /// **Windows and macOS**: ignored. Neither identifies a window this way.
+    ///
+    /// `None` by default, which leaves winit's own behaviour untouched.
+    pub app_id: Option<String>,
     pub size: (u32, u32),
     pub position: Option<(i32, i32)>,
     pub min_size: Option<(u32, u32)>,
@@ -277,6 +300,7 @@ impl WindowConfig {
         Self {
             title: "Teksilo".to_string(),
             string_id: None,
+            app_id: None,
             size: (800, 600),
             position: None,
             min_size: None,
@@ -304,6 +328,14 @@ impl WindowConfig {
     /// [`WindowState::title`].
     pub fn title(mut self, title: impl Into<String>) -> Self {
         self.title = title.into();
+        self
+    }
+
+    /// The application id the desktop matches this window against. See
+    /// [`app_id`](Self::app_id) for what each platform does with it, and why a
+    /// Wayland session shows the wrong icon without it.
+    pub fn app_id(mut self, app_id: impl Into<String>) -> Self {
+        self.app_id = Some(app_id.into());
         self
     }
 
@@ -650,6 +682,7 @@ mod tests {
         assert!(!config.skip_taskbar);
         assert!(config.modal.is_none());
         assert!(config.string_id.is_none());
+        assert!(config.app_id.is_none());
         assert!(config.position.is_none());
         assert!(config.min_size.is_none());
         assert!(config.max_size.is_none());
