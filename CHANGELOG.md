@@ -13,6 +13,263 @@ by crate for clarity, not because crates version independently.
 
 ## [Unreleased]
 
+## [0.9.2] - 2026-09-03
+
+Accessibility. Every entry below changes what a screen reader says, and four
+of them fix something that reached no assistive client at all. Two were found
+by driving a real screen reader after the widget tests had already passed, and
+both fixes are shaped by what the AccessKit adapters actually do rather than by
+what the documentation says they do.
+
+**Added**
+
+- [`TextInput::field_id`](#added-teksilo-widgets-a-host-can-name-the-node-a-textinput-actually-focuses),
+  so a form can send focus to the field a validator refused, and a modal can
+  pick one field out of several. `TextInput` also answers `initial_focus_hint`
+  now.
+- [`WindowConfig::app_id`](#added-teksilo-core-a-window-can-say-which-application-it-is),
+  the identity a desktop matches a window against. Without it a Wayland
+  toplevel sends no `app_id` at all and the shell shows an unnamed window with
+  the fallback icon.
+
+**Fixed**
+
+- [A labelled `TextInput` was nameless to every screen reader](#fixed-teksilo-widgets-a-labelled-textinput-was-nameless-to-every-screen-reader).
+  **Behaviour change** in what a screen reader says: fields labelled through
+  `.label(..)` now have a name where they had none.
+- [Nothing focusable advertised that it could be focused](#fixed-teksilo-core-nothing-focusable-advertised-that-it-could-be-focused),
+  so assistive technology could not put focus in a list, tree, table, grid or
+  open menu. **Behaviour change:** every focusable node now carries
+  `Action::Focus`.
+- [No data view told a screen reader which row was current](#fixed-teksilo-widgets-no-data-view-told-a-screen-reader-which-row-was-current).
+  Arrowing through a `ListView` was silent to NVDA. **Behaviour change:** all
+  five views nominate the current row as their active descendant and reveal it
+  when they take focus.
+- [A selection move replaced every row node in the list](#fixed-teksilo-widgets-a-selection-move-replaced-every-row-node-in-the-list),
+  resetting the scroll offset and the keyboard anchor, and handing the
+  accessibility tree a fresh set of node ids on every keystroke.
+- [A multi-select view reported that it could hold only one row](#fixed-teksilo-widgets-a-multi-select-view-reported-that-it-could-hold-only-one-row).
+
+### Added (`teksilo-widgets`): a host can name the node a `TextInput` actually focuses
+
+`TextInput` is a composite. The id `ctx.add` returns is the outer node's, and
+that node is a `Role::GenericContainer`: not focusable, and dropped from the
+filtered accessibility tree. So an application that had to *name* the focus
+target had nothing to name it with.
+
+Two ordinary cases need one: a form sending focus back to the field a validator
+refused, and a modal with several fields choosing one for `initial_focus_hint`.
+An application meeting this had to give up on `TextInput` and assemble
+`TextInputField` plus the theme's own chrome by hand, only to arrive at an id
+the framework already had.
+
+`field_id()` returns a shared slot filled in by `build`, in the same shape as
+`caret_setter` and `handle`: take it before `ctx.add`, read it after.
+`TextInput` also answers `initial_focus_hint` with that field now, because the
+modal presentation pipeline asks the content tree for a hint before falling
+back to the first focusable descendant, and a composite that answered nothing
+was skipped over. Deferred content whose one control was a text field opened
+with focus nowhere in particular.
+
+A host that only means "focus this input, whichever node that is" still wants
+`request_focus_into` on the outer id and no handle at all.
+
+### Added (`teksilo-core`): a window can say which application it is
+
+A Teksilo window on Wayland sent no `xdg_toplevel.set_app_id`, ever. winit sends
+one only when `WindowAttributesExtWayland::with_name` has been called, and
+nothing here called it, so a compositor had nothing to tie the window to its
+desktop entry with.
+
+What that costs is the application's whole desktop identity. The shell shows the
+window as a separate, unnamed entry in the dash and in Alt+Tab, carrying the
+generic fallback icon however many icons were installed. `StartupWMClass` in the
+desktop entry does not rescue it: there is no `WM_CLASS` on Wayland to put
+there, and GNOME reads that key for X11 windows only. Portals attribute
+notifications by the same id, so those were unattributed too.
+
+It goes unnoticed easily. On X11 winit falls back to the executable's own name,
+which is usually right, and KWin falls back the same way, so a KDE session looks
+correct while GNOME does not.
+
+`WindowConfig::app_id` defaults to `None`, which leaves winit's behaviour
+exactly as it was. Set it to the basename of the installed desktop entry. One
+call covers both display servers, since winit's Wayland and X11 extension traits
+write the same field. Windows and macOS identify a window no such way and ignore
+it.
+
+### Fixed (`teksilo-widgets`): a labelled `TextInput` was nameless to every screen reader
+
+`TextInput::label` wrote the accessible name onto the composite's own node,
+which carries `Role::GenericContainer`. `accesskit_consumer`'s `common_filter`
+(`accesskit_consumer-0.39.0/src/filters.rs:31-33`) returns `ExcludeNode` for
+that role **unconditionally**, before it looks at anything else on the node, and
+the only escape above it, `is_focused()`, never applied here, because the outer
+node is not focusable; the inner `TextInputField` is. So the name was discarded
+on every platform, always. A field labelled through the documented API announced
+as an unnamed edit box.
+
+The name now goes on the inner field, which carries `Role::TextInput`, holds
+focus, and survives the filter, which is what `PasswordField` was already doing.
+Routing it through `access_label` also makes the name locale-reactive, which the
+previous `resolve_now()` snapshot was not: a `tr!(..)` label now follows a locale
+change without a rebuild.
+
+`TimeEdit`, `HexColorInput`, `FilePickerField`, `SearchField` and `FontPicker`
+all forward into `TextInput::label`, so all five are fixed by the same change.
+An app working around this by naming the field itself can drop the workaround;
+the explicit `access_label` still wins, so nothing breaks if it does not.
+
+A sweep for the same shape found two more, both in the previewer UI:
+`PreviewCanvas` and the inspector body each named a `GenericContainer`. Both now
+use `Role::Group`, the rule `FormLayout` already followed when it upgrades to
+`Role::Form` for a labelled form. **A name belongs on a role that survives the
+filter**; `GenericContainer` is for nodes that carry no semantics at all.
+
+### Fixed (`teksilo-core`): nothing focusable advertised that it could be focused
+
+`WidgetTree` services `Action::Focus` itself, the `AccessAction` arm calling
+`focus_with_origin_ops` rather than handing the action to the widget, so an
+assistive technology that *tried* the action got focus. Nothing ever told it the
+action was there, and an AT offers what a node advertises. Focus was reachable
+and undiscoverable at the same time.
+
+Advertising it was left to each widget, which made it a rule to be remembered
+about forty times, and it was not. Every stock button remembered. `ListView`,
+`TreeView`, `TableView`, `TreeTableView`, `GridView`, `MenuList` and
+`OverlayTrigger` did not, so a screen reader could not programmatically put
+focus in a list, a tree, a table, a grid, or an open menu. Each of those is a
+focusable container whose rows, cells and items are deliberately *not* focusable,
+which makes the container the only node that can hold focus and therefore the
+only one that could have advertised it.
+
+The advertisement is now derived from the arena's own focusable flag, in
+`announce_focusable`, the sibling of `announce_context_menu`, in the same place,
+for the same reason. Gated on the arena flag rather than the widget's opinion,
+because that flag is what `focus_with_origin_ops` will actually honour: a node
+that is not focusable would otherwise advertise an action that then declines to
+land. It runs before the overrides, so `access_remove_action(Action::Focus)`
+still takes it away. Both parallel builder paths derive it, so a node reads the
+same to a test as to a screen reader.
+
+Fixing it per widget was the wrong shape: it would have closed the seven known
+holes and left the rule waiting to be forgotten by the next focusable widget
+written. Derived from the flag, the advertisement is true by construction, and
+the per-widget line is gone from all five data views.
+
+### Fixed (`teksilo-widgets`): no data view told a screen reader which row was current
+
+Arrowing through a `ListView` was completely silent to NVDA. Confirmed against a
+real one: it spoke the list on arrival, and an arrow press produced no speech
+line at all, while hovering the mouse over the same row read the whole sentence.
+That last part is what identifies the fault. Hit testing reads the tree
+directly, so names, roles and structure were all correct; what was missing was
+an event.
+
+A view keeps keyboard focus on itself and marks the current row `selected`. On
+AT-SPI that is the whole story, since Orca announces a selection change. UIA has
+no selection-driven announcement to match it, and no active-descendant property
+either. What it has is a focused element, and for a list box that element is the
+item.
+
+AccessKit bridges the two in the consumer rather than in each adapter:
+`accesskit_consumer` resolves the focused node as
+`focused.active_descendant().unwrap_or(focused)`
+(`accesskit_consumer-0.39.0/src/tree.rs:541`) before telling an adapter the
+focus moved, and `accesskit_windows::focus_moved` raises
+`UIA_AutomationFocusChangedEventId` on whatever comes out
+(`accesskit_windows-0.35.0/src/adapter.rs:341-345`). So a container nominating a
+row turns every arrow press into the focus change a screen reader announces,
+without keyboard focus moving anywhere, and `is_focused` moves from the
+container to the row exactly as the ARIA listbox pattern says it should.
+
+The nomination is gated on the view actually holding focus. The combobox pattern
+keeps focus on a text field pointing into the same list, and two publishers of
+one row would otherwise appear in the tree.
+
+Nominating a row cannot help while that row has no widget to nominate, which is
+the other half. Only the rows near the viewport are realized, so a selection
+made before the view is looked at, a restored session or a landing on the
+current item, usually sits outside that window. Nothing then carries `selected`,
+there is no node to point at, and the first arrow press steps past the row
+because the cursor was somewhere nobody was shown. Every view now reveals its
+current row when it takes focus, by ensure-visible rather than scroll-to, so a
+row already on screen does not lurch under somebody who can see it.
+
+`ListView` reveals on a selection change as well, and the second trigger is not
+redundant. A list that lands on whatever is happening now makes that selection
+from *inside* its own focus handler, so a focus-only reveal runs first, finds
+nothing selected, and does nothing. The selection trigger is gated on focus, so
+a selection driven from elsewhere never scrolls a view the user is not in. This
+half was found by driving a real application: the widget test passed while the
+application stayed silent, because the test selected before focusing and the
+application selects after.
+
+`TreeView` nominated no active descendant at all and now does. `TableView`,
+`TreeTableView` and `GridView` nominated one but revealed nothing; all three now
+reveal, by row and by tile. `TableView`'s reveal is vertical only, and the doc
+says why: its body pane realizes every display column of a realized row, so the
+cell is in `cell_map` whatever the horizontal offset is, and the row is the only
+axis that can hide it from the AT tree.
+
+`TreeView` still publishes no `size_of_set`, and the comment there argues it
+now instead of being silent about it. A flattened tree cannot express "the 2nd
+of 5 siblings" from one container value, because AccessKit resolves an item's
+set size by walking up from it, so the only number the container could carry is
+one shared by every row at every depth. Doing it properly needs a `Role::Group`
+per expanded branch, which changes the tree shape for every tree widget and is
+its own decision.
+
+### Fixed (`teksilo-widgets`): a selection move replaced every row node in the list
+
+Every arrow press replaced every realized row. `ListBodyPane` watched the
+selection and rebuilt itself, and a rebuild destroys the row widgets and their
+arena nodes, so each keystroke handed the accessibility tree a fresh set of node
+ids for content that had not changed.
+
+That is expensive in three ways, and the third is the one that matters. It reset
+the scroll offset. It reset the keyboard anchor. And it meant the
+`active_descendant` the container nominates named a node the screen reader had
+never been told about, one keystroke after the node it had been told about
+ceased to exist. The nomination above made that visible; it was there before,
+unnoticed, because nothing was reading the ids.
+
+Only two rows change when the selection moves: the one that lost it and the one
+that gained it. So `ListItemWrapper` is now the rebuild boundary. It builds the
+delegate's row widget itself instead of being handed one, and watches the
+selection for its own row alone, rebuilding only when its own state flips. Every
+other row keeps its widget, its arena node and its node id.
+
+The pane keeps its per-row handlers, which were already applied to the wrapper's
+id rather than to the row widget inside it. That is what makes this safe: they
+survive a rebuild of the wrapper's children, and they are never applied twice.
+`HandlerSet::merge` chains handlers rather than replacing them, so a row whose
+handlers were reapplied would act on one press twice.
+
+### Fixed (`teksilo-widgets`): a multi-select view reported that it could hold only one row
+
+`GridView` published `multiselectable`; `ListView`, `TreeView` and
+`TreeTableView` never did. Left unset it reads false, so a view configured for
+multi-select told every screen reader that one row was the most it would ever
+hold. The property is real on both platforms that have one: UIA's
+`SelectionCanSelectMultiple` and AT-SPI's multiselectable state.
+
+It is gated on the selection mode, exactly as `GridView` gates it, and the gate
+is load-bearing rather than tidy. `accesskit_windows` picks the event it raises
+on a selection change from this very property
+(`accesskit_windows-0.35.0/src/adapter.rs:189-199`):
+`ElementAddedToSelection` when it is true, `ElementSelected` when it is false. A
+single-select view publishing it unconditionally would trade the right event for
+the wrong one.
+
+`TableView` is deliberately left out. It publishes `Role::Table`, which is not
+among the roles `accesskit_consumer::is_container_with_selectable_children`
+recognises (`accesskit_consumer-0.39.0/src/node.rs:938-955`), so it exposes no
+selection for the property to describe and the line would be dead. Whether it
+should publish `Role::Grid` instead is a real question, of the same shape as
+List versus ListBox, and it changes what every existing application announces,
+so it is not settled here.
+
 ## [0.9.1] - 2026-09-02
 
 **Added**
@@ -1275,7 +1532,8 @@ performance trade-offs).
 Entries before this file was introduced are not backfilled; see `git log`
 for the full history.
 
-[Unreleased]: https://github.com/FernTech-EU/teksilo/compare/v0.9.1...HEAD
+[Unreleased]: https://github.com/FernTech-EU/teksilo/compare/v0.9.2...HEAD
+[0.9.2]: https://github.com/FernTech-EU/teksilo/compare/v0.9.1...v0.9.2
 [0.9.1]: https://github.com/FernTech-EU/teksilo/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/FernTech-EU/teksilo/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/FernTech-EU/teksilo/compare/v0.7.0...v0.8.0
