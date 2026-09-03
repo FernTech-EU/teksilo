@@ -239,9 +239,18 @@ impl TextInput {
         self
     }
 
-    /// Accessible name for the composite. Propagated to the outer
-    /// container's a11y node; the inner `TextInputField` still
-    /// carries `Role::TextInput` with the document's value.
+    /// Accessible name for the field.
+    ///
+    /// Applied to the inner `TextInputField` — the node that carries
+    /// `Role::TextInput`, holds focus, and reports the document's value.
+    /// It deliberately does *not* go on the composite's outer node: that
+    /// node is a `Role::GenericContainer`, which
+    /// `accesskit_consumer::common_filter` drops from the filtered tree
+    /// unconditionally, so a name placed there would be invisible to every
+    /// screen reader on every platform.
+    ///
+    /// Stays locale-reactive: a `tr!(...)` name is re-resolved when the
+    /// locale changes, without a rebuild.
     pub fn label(mut self, label: impl Into<LocalizedString>) -> Self {
         let ls: LocalizedString = label.into();
         self.label = Some(ls);
@@ -598,7 +607,19 @@ impl Widget for TextInput {
         // Add the field directly so we can capture its own WidgetId (needed to
         // wire the validation strip as its `described_by`, below); wrap it by
         // id instead of moving it into `Padding`.
-        let field_id = ctx.add(field);
+        //
+        // The accessible name goes on the *field*, not on the composite's
+        // outer node. The outer node is a `Role::GenericContainer`, and
+        // `accesskit_consumer::common_filter` excludes that role from the
+        // filtered tree unconditionally — a name written there reaches no
+        // screen reader on any platform. The field is the node that carries
+        // `Role::TextInput` and holds focus, so it is the one that must be
+        // named. (`PasswordField` names its inner field the same way.)
+        // `LocalizedString -> Prop<String>` keeps the name locale-reactive.
+        let field_id = match self.label.clone() {
+            Some(label) => ctx.add(field.access_label(label)),
+            None => ctx.add(field),
+        };
 
         // Text editing area, wrapped in vertical padding so slots
         // (IconButton etc.) sit flush against top/bottom of the
@@ -903,13 +924,14 @@ impl Widget for TextInput {
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
-        // The inner TextInputField handles Role::TextInput.
-        // The outer composite is transparent to a11y except for a
-        // pass-through label.
+        // The inner TextInputField handles Role::TextInput. The outer
+        // composite is transparent to a11y: `Role::GenericContainer` is
+        // excluded from the filtered tree by
+        // `accesskit_consumer::common_filter`, so nothing written here
+        // reaches a screen reader. In particular the `label` is NOT set
+        // here — it is applied to the inner field in `build`, which is the
+        // node that survives the filter and holds focus.
         builder.set_role(teksilo_core::accesskit::Role::GenericContainer);
-        if let Some(ref label) = self.label {
-            builder.set_name(label.resolve_now());
-        }
         // Framework a11y walker sets `set_disabled` from arena state.
     }
 }

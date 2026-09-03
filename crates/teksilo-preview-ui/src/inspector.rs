@@ -144,7 +144,10 @@ impl Widget for InspectorBody {
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
-        builder.set_role(teksilo_core::accesskit::Role::GenericContainer);
+        // See `PreviewCanvas::accessibility`: a name on a `GenericContainer`
+        // is dropped by `common_filter`, so a named region needs a role that
+        // survives it.
+        builder.set_role(teksilo_core::accesskit::Role::Group);
         builder.set_name("Inspector");
     }
 }

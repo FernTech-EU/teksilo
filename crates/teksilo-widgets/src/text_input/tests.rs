@@ -647,3 +647,35 @@ fn placeholder_is_leading_aligned() {
         "placeholder stays on the column's vertical midline"
     );
 }
+
+/// `TextInput::label` must name the node a screen reader can actually see.
+///
+/// The composite's outer node is a `Role::GenericContainer`, and
+/// `accesskit_consumer::common_filter` drops that role from the filtered tree
+/// unconditionally — so a name written there is announced by nothing on any
+/// platform. The name belongs on the inner `TextInputField`, which carries
+/// `Role::TextInput` and holds focus.
+#[test]
+fn label_names_the_text_input_node_not_the_filtered_container() {
+    let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+    let id = tree.add(TextInput::new(Signal::new(String::new())).label(lit!("Search")));
+    tree.layout(SizeProposal::exact(300.0, 40.0));
+
+    let field = tree
+        .find_by_role(teksilo_core::accesskit::Role::TextInput)
+        .expect("the composite builds a Role::TextInput field");
+    assert_eq!(
+        tree.accessibility_node(field).name().map(str::to_owned),
+        Some("Search".to_string()),
+        "the labelled name must sit on the field, which survives the AT filter"
+    );
+
+    // And the outer container stays anonymous — naming a filtered role is
+    // what made the label invisible in the first place.
+    let outer = tree.accessibility_node(id);
+    assert_eq!(
+        outer.role(),
+        teksilo_core::accesskit::Role::GenericContainer
+    );
+    assert_eq!(outer.name(), None);
+}

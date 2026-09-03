@@ -196,7 +196,12 @@ impl Widget for PreviewCanvas {
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
-        builder.set_role(teksilo_core::accesskit::Role::GenericContainer);
+        // `Role::Group`, not `GenericContainer`: `common_filter` excludes the
+        // latter from the filtered tree unconditionally, so the name would
+        // reach no screen reader. A named region has to carry a role that
+        // survives the filter — the same rule `FormLayout` follows when it
+        // upgrades to `Role::Form` for a labelled form.
+        builder.set_role(teksilo_core::accesskit::Role::Group);
         builder.set_name("Preview canvas");
     }
 }
