@@ -679,3 +679,59 @@ fn label_names_the_text_input_node_not_the_filtered_container() {
     );
     assert_eq!(outer.name(), None);
 }
+
+/// The handle names the node that actually takes focus.
+///
+/// A host with several fields has to say *which* one focus starts on, and the
+/// id `ctx.add` hands back is the composite's — a `Role::GenericContainer`
+/// that is not focusable and is dropped from the filtered accessibility tree.
+/// Focusing it would put focus nowhere.
+#[test]
+fn the_field_handle_names_the_node_that_takes_focus() {
+    let input = TextInput::new(Signal::new(String::new())).label(lit!("Title"));
+    let handle = input.field_id();
+    assert_eq!(handle.get(), None, "empty until build runs");
+
+    let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+    let outer = tree.add(input);
+    tree.layout(SizeProposal::exact(300.0, 40.0));
+
+    let field = handle.get().expect("build fills the handle");
+    assert_ne!(field, outer, "the field is not the composite");
+    assert_eq!(
+        tree.accessibility_node(field).role(),
+        teksilo_core::accesskit::Role::TextInput,
+        "the handle names the field, which is the node that survives the filter"
+    );
+
+    tree.focus(field);
+    tree.request_frame();
+    assert_eq!(
+        tree.focused(),
+        Some(field),
+        "and focus lands on it, which the composite's own id could not do"
+    );
+}
+
+/// Deferred modal content directs focus into the field without the handle.
+///
+/// The modal pipeline asks the content tree for an `initial_focus_hint`
+/// before falling back to the first focusable descendant. A composite that
+/// answered nothing was skipped, so a dialog whose content is one text field
+/// opened with focus nowhere in particular.
+#[test]
+fn the_composite_hints_at_its_own_field() {
+    let input = TextInput::new(Signal::new(String::new())).label(lit!("Title"));
+    let handle = input.field_id();
+
+    let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+    let outer = tree.add(input);
+    tree.layout(SizeProposal::exact(300.0, 40.0));
+
+    let field = handle.get().expect("build fills the handle");
+    assert_eq!(
+        tree.widget_initial_focus_hint(outer),
+        Some(field),
+        "the hint has to be the field, not the container that cannot hold focus"
+    );
+}

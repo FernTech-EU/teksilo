@@ -119,6 +119,9 @@ pub struct TextInput {
     /// Handed out by [`Self::handle`] before build, adopted by the inner field
     /// at build time — so the two are one handle, not two that agree by luck.
     field_handle: crate::primitives::TextFieldHandle,
+    /// Arena id of the inner `TextInputField`, filled in by `build`.
+    /// Shared, so a handle taken before `ctx.add` sees it afterwards.
+    field_id_slot: std::rc::Rc<std::cell::Cell<Option<WidgetId>>>,
     /// Mirrored from the inner field's `validation_feedback_signal`
     /// during `build`. Composing widgets that install a `validator`
     /// read this to compose feedback across multiple fields (range
@@ -188,6 +191,7 @@ impl TextInput {
             caret_position_slot: std::rc::Rc::new(std::cell::RefCell::new(None)),
             caret_setter_slot: std::rc::Rc::new(std::cell::RefCell::new(None)),
             field_handle: crate::primitives::TextFieldHandle::detached(),
+            field_id_slot: std::rc::Rc::new(std::cell::Cell::new(None)),
             feedback_signal: Signal::new(ValidationFeedback::Pristine),
             label: None,
             min_width: None,
@@ -409,6 +413,28 @@ impl TextInput {
         self.field_handle.clone()
     }
 
+    /// The arena id of the inner field: the node that holds focus, carries
+    /// `Role::TextInput` and reports the document's value.
+    ///
+    /// A `TextInput` is a composite whose outer node is a
+    /// `Role::GenericContainer`. That node is neither focusable nor present in
+    /// the filtered accessibility tree, so a host that has to *name* the focus
+    /// target cannot use the id `ctx.add` returned it. Two cases need the
+    /// name: a form sending focus back to the field a validator refused, and a
+    /// modal whose own `initial_focus_hint` picks one field out of several.
+    ///
+    /// Empty until `build` runs, like [`caret_setter`](Self::caret_setter);
+    /// take the handle before `ctx.add(text_input)` and read it after.
+    ///
+    /// A host that only needs "focus this input, whichever node that is" wants
+    /// [`EventContext::request_focus_into`] on the outer id instead, and no
+    /// handle at all.
+    ///
+    /// [`EventContext::request_focus_into`]: teksilo_core::widget::EventContext::request_focus_into
+    pub fn field_id(&self) -> std::rc::Rc<std::cell::Cell<Option<WidgetId>>> {
+        self.field_id_slot.clone()
+    }
+
     /// Programmatic caret setter. Mirrors the inner field's
     /// [`TextInputField::caret_setter`]. Returns a closure that
     /// is a no-op until `build` runs; afterwards it walks the
@@ -620,6 +646,7 @@ impl Widget for TextInput {
             Some(label) => ctx.add(field.access_label(label)),
             None => ctx.add(field),
         };
+        self.field_id_slot.set(Some(field_id));
 
         // Text editing area, wrapped in vertical padding so slots
         // (IconButton etc.) sit flush against top/bottom of the
@@ -921,6 +948,17 @@ impl Widget for TextInput {
 
     fn children(&self) -> Vec<WidgetId> {
         self.root_child_id.into_iter().collect()
+    }
+
+    /// Focus belongs on the inner field, never on this composite: the outer
+    /// node is a `Role::GenericContainer` and is not focusable at all.
+    ///
+    /// Without this, a `TextInput` inside deferred modal content could not be
+    /// focused on open. The modal pipeline asks the content tree for a hint
+    /// before falling back to the first focusable descendant, and a composite
+    /// that answered nothing was skipped over.
+    fn initial_focus_hint(&self) -> Option<WidgetId> {
+        self.field_id_slot.get()
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
