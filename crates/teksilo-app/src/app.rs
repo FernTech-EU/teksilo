@@ -1120,13 +1120,13 @@ impl TeksiloAppHandler {
 
         let reply = match captured {
             Ok((rgba, w, h)) if w != 0 && h != 0 => {
-                crate::automation_bridge::screenshot_reply(&rgba, w, h, warnings)
+                crate::automation_bridge::screenshot_reply(&rgba, w, h, scale, warnings)
             }
             Ok(_) => {
                 AutomationReply::err(codes::BAD_ARGUMENT, "crop region empty / outside window")
             }
             Err(_) => AutomationReply::err(
-                "GPU_READBACK_FAILED",
+                codes::GPU_READBACK_FAILED,
                 "offscreen capture failed (GPU device lost?)",
             ),
         };

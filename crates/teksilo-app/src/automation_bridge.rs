@@ -5,20 +5,24 @@
 //!
 //! When a debug build calls
 //! [`install_automation_bridge_in_debug`](TeksiloAppBuilderAutomationExt::install_automation_bridge_in_debug),
-//! a background thread binds a private Unix-domain socket and lets
-//! `teksilo-automation-mcp --connect <sock> --token <uuid>` drive the *live*
-//! running app: it reads framed [`AutomationRequest`](teksilo_automation::dto::AutomationRequest)s, posts an
-//! [`AutomationPayload`] (carrying a `Send` reply channel) through the
-//! existing `AppEvent::External` path, and the winit main thread runs the
-//! op against the real window via
-//! [`execute`](teksilo_automation::execute) (or, for screenshots,
+//! a background thread binds this platform's private automation endpoint — a
+//! Unix-domain socket, or a named pipe on Windows — and lets
+//! `teksilo-automation-mcp --attach` drive the *live* running app: it reads
+//! framed [`AutomationRequest`](teksilo_automation::dto::AutomationRequest)s,
+//! posts an [`AutomationPayload`] (carrying a `Send` reply channel) through the
+//! existing `AppEvent::External` path, and the winit main thread runs the op
+//! against the real window via [`execute`](teksilo_automation::execute) (or,
+//! for screenshots,
 //! [`PlatformWindow::capture_offscreen`](teksilo_platform::PlatformWindow::capture_offscreen)).
 //!
-//! Everything that touches the socket is additionally gated on
-//! `debug_assertions`: a *release* build with the `automation` feature on
-//! still contains no socket, token, or bridge — the install method is the
-//! identity. The framework itself stays runtime-free: this uses only
-//! `std::os::unix::net` plus the existing event-proxy plumbing.
+//! This module owns *policy* only. The bytes on the wire come from
+//! [`teksilo_automation::wire`] and the OS endpoint from
+//! [`teksilo_platform::automation_transport`], so nothing here is
+//! platform-conditional.
+//!
+//! Everything is additionally gated on `debug_assertions`: a *release* build
+//! with the `automation` feature on still contains no endpoint, token, or
+//! bridge — the install method is the identity.
 
 use crate::TeksiloAppBuilder;
 
@@ -26,11 +30,10 @@ use crate::TeksiloAppBuilder;
 /// to [`TeksiloAppBuilder`]. Mirrors `TeksiloAppBuilderInspectorExt`.
 pub trait TeksiloAppBuilderAutomationExt {
     /// In a **debug** build: generate a per-process token, then on `on_ready`
-    /// bind a private `0600` Unix socket, print its path +
-    /// `TEKSILO_AUTOMATION_TOKEN=<uuid>` to stderr, and spawn the bridge
-    /// thread. The announcement follows the bind, so the printed path is
-    /// connectable the instant it appears. In a **release** build (or on a
-    /// non-Unix target): a no-op returning `self`.
+    /// bind a private endpoint, publish an
+    /// [`EndpointFile`](teksilo_automation::wire::EndpointFile) describing it,
+    /// print how to attach, and spawn the bridge thread. In a **release**
+    /// build: a no-op returning `self`.
     fn install_automation_bridge_in_debug(self) -> Self;
 }
 
@@ -54,9 +57,15 @@ impl TeksiloAppBuilderAutomationExt for TeksiloAppBuilder {
 
 #[cfg(debug_assertions)]
 use std::sync::mpsc::SyncSender;
+#[cfg(debug_assertions)]
+use std::time::Duration;
 
 #[cfg(debug_assertions)]
-use teksilo_automation::dto::{AutomationReply, SettleSpec};
+use teksilo_automation::dto::{AutomationReply, SettleSpec, codes};
+#[cfg(debug_assertions)]
+use teksilo_automation::wire::{self, EndpointFile};
+#[cfg(debug_assertions)]
+use teksilo_platform::automation_transport::{self, TransportStream};
 
 /// The `Send` payload posted from the bridge thread to the winit main
 /// thread. Carries the op to run and a one-shot channel for the reply.
@@ -75,25 +84,27 @@ pub struct AutomationPayload {
     pub reply_tx: SyncSender<AutomationReply>,
 }
 
-/// Cap on a single inbound request frame (requests are small JSON ops — no
-/// images travel inbound). Bounds the `vec![0u8; len]` allocation against a
-/// client that sends a bogus 4-byte length (up to ~4 GiB otherwise).
+/// How long the token handshake may take before the connection is dropped, so
+/// a peer that connects and says nothing cannot hold the single slot.
 #[cfg(debug_assertions)]
-const MAX_REQUEST_FRAME: usize = 16 * 1024 * 1024;
+const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// The per-process directory holding the bridge socket. Created `0700`, so the
-/// socket is unreachable by other local users even during the brief window
-/// before its own `0600` is applied (closes the bind→chmod TOCTOU).
+/// How long the bridge waits for the UI thread to answer one request.
+///
+/// This is the bridge's liveness guarantee, and it is not optional. winit's
+/// macOS backend queues user events onto the run loop in *default mode only*,
+/// so while a native panel is up (`NSOpenPanel`, `NSMenu` tracking) the posted
+/// `AppEvent::External` is not delivered at all. Without a deadline the bridge
+/// thread would block on `recv` forever, the client would block on its read
+/// forever, and — because the bridge serves one connection at a time — the slot
+/// would be held for the rest of the process's life with no way to recover
+/// short of killing the app. The same shape is possible on Windows inside a
+/// modal `WM_ENTERSIZEMOVE` loop.
+///
+/// Generous relative to the ~2 s settle clamp below, so this only fires when
+/// the main thread genuinely is not running our code.
 #[cfg(debug_assertions)]
-fn socket_dir() -> String {
-    let dir = std::env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| "/tmp".to_string());
-    format!("{dir}/teksilo-automation-{}", std::process::id())
-}
-
-#[cfg(debug_assertions)]
-fn socket_path() -> String {
-    format!("{}/sock", socket_dir())
-}
+const REPLY_TIMEOUT: Duration = Duration::from_secs(15);
 
 /// Clamp a settle for the LIVE bridge. The settle runs synchronously on the
 /// winit main thread, so an unbounded `settle_timeout_ms` / `max_anim_frames`
@@ -118,9 +129,6 @@ fn install(builder: TeksiloAppBuilder) -> TeksiloAppBuilder {
     // up-front; otherwise generate a fresh per-process one.
     let token = std::env::var("TEKSILO_AUTOMATION_TOKEN")
         .unwrap_or_else(|_| uuid::Uuid::new_v4().to_string());
-    // The announcement belongs to `spawn_bridge_thread`, after the bind — see
-    // the comment there. Printing it here, at builder time, is what made the
-    // path a promise the process could not yet keep.
     builder.on_ready(move |proxy| {
         if let Err(e) = spawn_bridge_thread(proxy, token) {
             eprintln!("teksilo-automation: bridge failed to start: {e}");
@@ -128,46 +136,39 @@ fn install(builder: TeksiloAppBuilder) -> TeksiloAppBuilder {
     })
 }
 
-/// Bind the socket and spawn the bridge thread. Unix-only; on other targets
-/// this is a no-op (`Ok`) with an informational message — the headless MCP
-/// mode works everywhere, only the live socket is Unix-gated.
-#[cfg(all(debug_assertions, unix))]
+/// Bind the endpoint, publish its descriptor, and spawn the bridge thread.
+#[cfg(debug_assertions)]
 pub fn spawn_bridge_thread(proxy: crate::app::AppEventProxy, token: String) -> std::io::Result<()> {
-    use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
-    use std::os::unix::net::UnixListener;
+    let pid = std::process::id();
+    let bound = automation_transport::bind(pid)?;
+    let endpoint = bound.endpoint.clone();
 
-    let dir = socket_dir();
-    // Stale dir from a crashed prior run (PID reuse). Then create it `0700`
-    // atomically (mkdir mode) so the socket is never world-reachable.
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::DirBuilder::new().mode(0o700).create(&dir)?;
-    let path = socket_path();
-    let _ = std::fs::remove_file(&path);
-    let listener = UnixListener::bind(&path)?;
-    // Belt + suspenders (the 0700 dir already gates access).
-    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
+    // Publish *before* announcing and before accepting: a client acts on the
+    // descriptor the moment it can read it, and `--attach` does not retry.
+    let descriptor = EndpointFile::new(endpoint.clone(), token.clone());
+    let descriptor_path = descriptor.write()?;
 
-    // The thread below takes the token; keep a copy to announce with.
-    let announce = token.clone();
-
+    let announce_token = token.clone();
+    let mut listener = bound.listener;
     std::thread::Builder::new()
         .name("teksilo-automation-bridge".into())
         .spawn(move || {
-            // Remove the whole per-process dir (socket included) on thread exit.
-            struct Cleanup(String);
+            // Remove the descriptor on thread exit; dropping `listener`
+            // releases the OS endpoint (and, on Unix, its directory).
+            struct Cleanup(u32);
             impl Drop for Cleanup {
                 fn drop(&mut self) {
-                    let _ = std::fs::remove_dir_all(&self.0);
+                    EndpointFile::remove(self.0);
                 }
             }
-            let _cleanup = Cleanup(dir);
+            let _cleanup = Cleanup(pid);
 
-            // Single connection at a time.
-            for conn in listener.incoming() {
-                match conn {
+            // One connection at a time.
+            loop {
+                match listener.accept() {
+                    // Connection errors end that connection only; the loop
+                    // waits for the next client.
                     Ok(stream) => {
-                        // Connection errors just end this connection; the
-                        // loop waits for the next client.
                         let _ = handle_connection(stream, &proxy, &token);
                     }
                     Err(_) => break,
@@ -175,86 +176,56 @@ pub fn spawn_bridge_thread(proxy: crate::app::AppEventProxy, token: String) -> s
             }
         })?;
 
-    // Announce only now — after the bind AND after the accept thread exists.
-    // A client acts on this path the moment it reads it, so every failure has to
-    // happen first: printing at builder time (where this used to live) left
-    // every client racing the bind, and `teksilo-automation-mcp --connect` loses
-    // that race with ENOENT and `exit(1)` without speaking a byte of MCP, since
-    // it never retries. Printing merely after the bind would still be wrong for
-    // a rarer case — a failed `spawn` (thread limit) leaves a socket that is
-    // bound, so `connect` succeeds, but that nobody will ever `accept`, and the
-    // client has no read timeout to rescue it: it would hang rather than fail.
-    // `UnixListener::bind` has already called `listen`, so the kernel queues a
-    // connection arriving before the thread is scheduled. Clients therefore need
-    // no wait-for-socket loop; reading this line is enough.
-    eprintln!("teksilo-automation: bridge socket = {path}");
-    eprintln!("TEKSILO_AUTOMATION_TOKEN={announce}");
+    // Announce only now — after the bind, after the descriptor exists, and
+    // after the accept thread exists. A client acts on this the moment it reads
+    // it, so every failure has to happen first: announcing at builder time (as
+    // this once did) left every client racing the bind, and a failed `spawn`
+    // would leave an endpoint that accepts a connection nobody will ever serve.
+    eprintln!("teksilo-automation: bridge endpoint = {endpoint}");
     eprintln!(
-        "teksilo-automation: connect with `teksilo-automation-mcp --connect {path} --token {announce}`"
+        "teksilo-automation: descriptor = {}",
+        descriptor_path.display()
+    );
+    eprintln!("TEKSILO_AUTOMATION_TOKEN={announce_token}");
+    eprintln!(
+        "teksilo-automation: attach with `teksilo-automation-mcp --attach-pid {pid}` \
+         (or --connect {endpoint} --token {announce_token})"
     );
     Ok(())
 }
 
-#[cfg(all(debug_assertions, not(unix)))]
-pub fn spawn_bridge_thread(
-    _proxy: crate::app::AppEventProxy,
-    _token: String,
-) -> std::io::Result<()> {
-    eprintln!(
-        "teksilo-automation: the live bridge needs a Unix-domain socket and is unavailable on \
-         this platform; use `teksilo-automation-mcp --headless` instead."
-    );
-    Ok(())
-}
-
-#[cfg(all(debug_assertions, unix))]
+/// Serve one connected client until it disconnects.
+#[cfg(debug_assertions)]
 fn handle_connection(
-    stream: std::os::unix::net::UnixStream,
+    mut stream: Box<dyn TransportStream>,
     proxy: &crate::app::AppEventProxy,
     token: &str,
 ) -> std::io::Result<()> {
-    use std::io::{BufRead, BufReader, Read};
-    use std::time::Duration;
-
-    // Bound the token handshake: a client that connects but never sends the
-    // token must not occupy the single connection slot forever.
-    stream.set_read_timeout(Some(Duration::from_secs(10)))?;
-    let mut writer = stream.try_clone()?;
-    let mut reader = BufReader::new(stream);
-
-    // Token handshake (one line, length-bounded so a stream of bytes without a
-    // newline can't exhaust memory).
-    let mut token_line = String::new();
-    {
-        let mut limited = (&mut reader).take(512);
-        limited.read_line(&mut token_line)?;
-    }
-    if token_line.trim() != token {
+    // Bound the handshake: a peer that connects but never sends the token must
+    // not occupy the single connection slot forever.
+    stream.set_read_timeout(Some(HANDSHAKE_TIMEOUT))?;
+    let offered = wire::read_token(&mut stream)?;
+    if !wire::token_matches(token, &offered) {
         return Ok(()); // reject — bad/missing token
     }
-    // Requests can arrive sporadically over a long-lived connection, so clear
-    // the read deadline now that the client is authenticated.
-    reader.get_ref().set_read_timeout(None)?;
+    // Requests arrive sporadically over a long-lived connection, so clear the
+    // deadline now that the peer is authenticated.
+    stream.set_read_timeout(None)?;
 
     let mut request_id: u64 = 0;
     loop {
-        // 4-byte little-endian length prefix.
-        let mut len = [0u8; 4];
-        if reader.read_exact(&mut len).is_err() {
-            break; // clean EOF — client disconnected
-        }
-        let frame_len = u32::from_le_bytes(len) as usize;
-        if frame_len > MAX_REQUEST_FRAME {
-            break; // desynced / abusive client — drop the connection
-        }
-        let mut buf = vec![0u8; frame_len];
-        reader.read_exact(&mut buf)?;
+        let buf = match wire::read_frame(&mut stream, wire::MAX_REQUEST_FRAME) {
+            Ok(b) => b,
+            // Clean EOF (client disconnected) or a desynced / abusive peer:
+            // either way this conversation is over.
+            Err(_) => break,
+        };
 
         let req: teksilo_automation::dto::AutomationRequest = match serde_json::from_slice(&buf) {
             Ok(r) => r,
             Err(e) => {
-                let reply = AutomationReply::err("BAD_REQUEST", e.to_string());
-                write_frame(&mut writer, &serde_json::to_vec(&reply).unwrap())?;
+                let reply = AutomationReply::err(codes::BAD_REQUEST, e.to_string());
+                write_reply(&mut stream, &reply)?;
                 continue;
             }
         };
@@ -271,35 +242,76 @@ fn handle_connection(
         };
         proxy.send_external(payload);
 
-        let reply = rx.recv().unwrap_or_else(|_| {
-            AutomationReply::err("BRIDGE_DROPPED", "the app dropped the automation reply")
-        });
-        write_frame(&mut writer, &serde_json::to_vec(&reply).unwrap())?;
+        let reply = match rx.recv_timeout(REPLY_TIMEOUT) {
+            Ok(reply) => reply,
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => AutomationReply::err(
+                codes::BRIDGE_TIMEOUT,
+                format!(
+                    "the app's UI thread did not answer within {}s — it is probably inside a \
+                     native modal loop (file dialog, menu, window drag)",
+                    REPLY_TIMEOUT.as_secs()
+                ),
+            ),
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => AutomationReply::err(
+                codes::BRIDGE_DROPPED,
+                "the app dropped the automation reply",
+            ),
+        };
+        write_reply(&mut stream, &reply)?;
     }
     Ok(())
 }
 
-#[cfg(all(debug_assertions, unix))]
-fn write_frame(w: &mut impl std::io::Write, bytes: &[u8]) -> std::io::Result<()> {
-    w.write_all(&(bytes.len() as u32).to_le_bytes())?;
-    w.write_all(bytes)?;
-    w.flush()
+#[cfg(debug_assertions)]
+fn write_reply(
+    stream: &mut Box<dyn TransportStream>,
+    reply: &AutomationReply,
+) -> std::io::Result<()> {
+    let bytes = serde_json::to_vec(reply)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+    match wire::write_frame(stream, &bytes, wire::MAX_REPLY_FRAME) {
+        Ok(()) => Ok(()),
+        // A reply too large to frame (an enormous screenshot) must not desync
+        // the stream: send a typed error of a size that always fits instead.
+        Err(e) if e.kind() == std::io::ErrorKind::InvalidInput => {
+            let fallback = AutomationReply::err(codes::BRIDGE_IO, e.to_string());
+            let bytes = serde_json::to_vec(&fallback).unwrap_or_default();
+            wire::write_frame(stream, &bytes, wire::MAX_REPLY_FRAME)
+        }
+        Err(e) => Err(e),
+    }
 }
 
 /// Build a screenshot reply: PNG-encode the RGBA pixels, base64 them into a
-/// JSON object the `--connect` client rehydrates to an image block. Used by
-/// the main-thread screenshot arm in `app.rs`.
+/// JSON object the client rehydrates to an image block. Used by the
+/// main-thread screenshot arm in `app.rs`.
+///
+/// `w`/`h` are **physical** pixels and `scale` is the window's device scale
+/// factor, both carried through to the client — see
+/// [`ScreenshotMeta`](teksilo_automation::dto::ScreenshotMeta) for why pixels
+/// without a scale are not enough to act on.
 #[cfg(debug_assertions)]
 pub(crate) fn screenshot_reply(
     rgba: &[u8],
     w: u32,
     h: u32,
+    scale: f32,
     warnings: Vec<String>,
 ) -> AutomationReply {
     use base64::Engine;
     let png = encode_png(rgba, w, h);
     let b64 = base64::engine::general_purpose::STANDARD.encode(&png);
-    AutomationReply::ok(serde_json::json!({ "png_base64": b64, "warnings": warnings }))
+    let meta = teksilo_automation::dto::ScreenshotMeta {
+        width: w,
+        height: h,
+        scale,
+        warnings,
+    };
+    let mut data = serde_json::to_value(&meta).unwrap_or_else(|_| serde_json::json!({}));
+    if let Some(obj) = data.as_object_mut() {
+        obj.insert("png_base64".to_string(), serde_json::Value::String(b64));
+    }
+    AutomationReply::ok(data)
 }
 
 #[cfg(debug_assertions)]
@@ -317,8 +329,7 @@ fn encode_png(rgba: &[u8], w: u32, h: u32) -> Vec<u8> {
 
 #[cfg(all(debug_assertions, test))]
 mod tests {
-    use super::clamp_live_settle;
-    use teksilo_automation::dto::SettleSpec;
+    use super::*;
 
     #[test]
     fn live_settle_is_clamped() {
@@ -338,5 +349,40 @@ mod tests {
         let small = clamp_live_settle(&d);
         assert_eq!(small.settle_timeout_ms, d.settle_timeout_ms);
         assert_eq!(small.max_anim_frames, d.max_anim_frames);
+    }
+
+    #[test]
+    fn the_reply_deadline_outlives_the_settle_clamp() {
+        // If these ever crossed, a legitimate long settle would be reported as
+        // a wedged UI thread. The reply deadline must stay the outer bound.
+        let clamped_ms = clamp_live_settle(&SettleSpec {
+            settle_timeout_ms: u64::MAX,
+            ..SettleSpec::default()
+        })
+        .settle_timeout_ms;
+        assert!(
+            REPLY_TIMEOUT.as_millis() as u64 > clamped_ms * 2,
+            "REPLY_TIMEOUT ({REPLY_TIMEOUT:?}) must comfortably exceed the {clamped_ms}ms settle clamp"
+        );
+    }
+
+    #[test]
+    fn screenshot_reply_carries_pixels_and_their_scale() {
+        // 2×2 opaque red.
+        let rgba = [255u8, 0, 0, 255].repeat(4);
+        let reply = screenshot_reply(&rgba, 2, 2, 2.0, vec!["webview_hole_possible".into()]);
+        let AutomationReply::Ok { data } = reply else {
+            panic!("expected ok");
+        };
+        assert_eq!(data["width"], 2);
+        assert_eq!(data["height"], 2);
+        assert_eq!(data["scale"], 2.0);
+        assert_eq!(data["warnings"][0], "webview_hole_possible");
+        let b64 = data["png_base64"].as_str().expect("png");
+        use base64::Engine;
+        let png = base64::engine::general_purpose::STANDARD
+            .decode(b64)
+            .expect("decodes");
+        assert_eq!(&png[1..4], b"PNG", "a real PNG signature");
     }
 }

@@ -31,7 +31,10 @@ const HEADLESS_H: f32 = 600.0;
 /// [`AutomationReply`] (most ops) or raw PNG bytes (the screenshot op).
 pub enum HostReply {
     Reply(AutomationReply),
-    Image { png: Vec<u8>, warnings: Vec<String> },
+    Image {
+        png: Vec<u8>,
+        meta: teksilo_automation::dto::ScreenshotMeta,
+    },
 }
 
 /// One unit of work sent from an async handler to the tree thread.
@@ -184,7 +187,19 @@ fn screenshot(
     });
     let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
     renderer.render(&frame, &view, 1.0, w, h, [0.0, 0.0, 0.0, 0.0]);
-    let rgba = teksilo_render::test_support::read_texture_rgba(device, queue, &texture, w, h);
+    // Fallible, not panicking: a lost device must cost the caller one
+    // screenshot, not the whole session. This thread owns the `!Send` tree, so
+    // a panic here would take every subsequent tool call down with it.
+    let rgba =
+        match teksilo_render::test_support::try_read_texture_rgba(device, queue, &texture, w, h) {
+            Ok(px) => px,
+            Err(e) => {
+                return HostReply::Reply(AutomationReply::err(
+                    codes::GPU_READBACK_FAILED,
+                    e.to_string(),
+                ));
+            }
+        };
 
     let (bytes, ow, oh) = match crop {
         Some(rect) => crop_rgba(&rgba, w, h, rect),
@@ -198,7 +213,13 @@ fn screenshot(
     }
     HostReply::Image {
         png: encode_png(&bytes, ow, oh),
-        warnings,
+        // Headless lays out at scale 1.0, so physical and logical coincide.
+        meta: teksilo_automation::dto::ScreenshotMeta {
+            width: ow,
+            height: oh,
+            scale: 1.0,
+            warnings,
+        },
     }
 }
 

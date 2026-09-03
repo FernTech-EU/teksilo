@@ -329,9 +329,16 @@ pub struct SettleSpec {
     /// `true`.
     #[serde(default = "default_true")]
     pub layout_after: bool,
-    /// Hard wall-clock budget for the whole settle, in milliseconds.
-    /// Default `500`. Exceeding it ends the settle early (the live bridge
-    /// reports `SETTLE_TIMEOUT`).
+    /// Budget for the whole settle, in milliseconds. Default `500`.
+    ///
+    /// For a settle this is a hard **wall-clock** cap: exceeding it ends the
+    /// settle early (the live bridge reports `SETTLE_TIMEOUT`), which is what
+    /// keeps a long animation from freezing a real app's UI thread.
+    ///
+    /// For `wait_for_condition` it is instead a **simulated-time** budget, spent
+    /// in 16 ms frames, so the same wait resolves identically on every platform
+    /// — a wall-clock bound there would make the result depend on the host's
+    /// timer granularity (see `wait_for_condition`).
     #[serde(default = "default_settle_timeout")]
     pub settle_timeout_ms: u64,
 }
@@ -448,6 +455,20 @@ pub enum AutomationOp {
         alt: bool,
         #[serde(default)]
         meta: bool,
+        /// Hold the platform's **primary accelerator** — Control on Windows and
+        /// Linux, Command (⌘) on macOS.
+        ///
+        /// Use this, not `ctrl`, whenever the chord means "the accelerator":
+        /// save, copy, select-all, accelerator-click to extend a selection. A
+        /// Teksilo shortcut *declared* as `Ctrl+S` resolves to ⌘S on macOS, so
+        /// `ctrl: true` fires nothing there — and reports success, because the
+        /// key really was injected, it just matched no binding. `command: true`
+        /// is the same script on all three platforms.
+        ///
+        /// `ctrl` stays literal Control everywhere, for the chords that really
+        /// are Control on macOS too (Ctrl+Tab, the terminal's Ctrl+C).
+        #[serde(default)]
+        command: bool,
     },
     // ---- Synthetic input ----
     InjectPointer {
@@ -471,6 +492,20 @@ pub enum AutomationOp {
         alt: bool,
         #[serde(default)]
         meta: bool,
+        /// Hold the platform's **primary accelerator** — Control on Windows and
+        /// Linux, Command (⌘) on macOS.
+        ///
+        /// Use this, not `ctrl`, whenever the chord means "the accelerator":
+        /// save, copy, select-all, accelerator-click to extend a selection. A
+        /// Teksilo shortcut *declared* as `Ctrl+S` resolves to ⌘S on macOS, so
+        /// `ctrl: true` fires nothing there — and reports success, because the
+        /// key really was injected, it just matched no binding. `command: true`
+        /// is the same script on all three platforms.
+        ///
+        /// `ctrl` stays literal Control everywhere, for the chords that really
+        /// are Control on macOS too (Ctrl+Tab, the terminal's Ctrl+C).
+        #[serde(default)]
+        command: bool,
     },
     /// Right-click a node: a synthetic Secondary press+release at the node's
     /// point, which drives the framework's context-menu machinery
@@ -489,6 +524,20 @@ pub enum AutomationOp {
         alt: bool,
         #[serde(default)]
         meta: bool,
+        /// Hold the platform's **primary accelerator** — Control on Windows and
+        /// Linux, Command (⌘) on macOS.
+        ///
+        /// Use this, not `ctrl`, whenever the chord means "the accelerator":
+        /// save, copy, select-all, accelerator-click to extend a selection. A
+        /// Teksilo shortcut *declared* as `Ctrl+S` resolves to ⌘S on macOS, so
+        /// `ctrl: true` fires nothing there — and reports success, because the
+        /// key really was injected, it just matched no binding. `command: true`
+        /// is the same script on all three platforms.
+        ///
+        /// `ctrl` stays literal Control everywhere, for the chords that really
+        /// are Control on macOS too (Ctrl+Tab, the terminal's Ctrl+C).
+        #[serde(default)]
+        command: bool,
     },
     TypeText {
         node: NodeRef,
@@ -597,6 +646,28 @@ pub struct AutomationRequest {
     pub settle: SettleSpec,
 }
 
+/// What a screenshot's pixels actually are, sent alongside the image.
+///
+/// Pixel dimensions are **physical**, and a live window on a HiDPI display is
+/// not laid out at that size: a 800×600 logical window captures as 1600×1200
+/// at `scale: 2.0`. Every coordinate elsewhere in this toolkit — node
+/// `bounds`, `inject_pointer` — is *logical*, so without `scale` a caller
+/// cannot relate a pixel it can see to a point it can click, and a script
+/// written against one display silently mis-aims on another. Headless always
+/// reports `scale: 1.0`, where the two coincide.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct ScreenshotMeta {
+    /// Image width in physical pixels.
+    pub width: u32,
+    /// Image height in physical pixels.
+    pub height: u32,
+    /// Physical pixels per logical pixel.
+    pub scale: f32,
+    /// Non-fatal caveats about the capture, e.g. `webview_hole_possible`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<String>,
+}
+
 /// Stable error codes used across the toolkit and both transports.
 pub mod codes {
     /// No node / window matched the request.
@@ -615,8 +686,23 @@ pub mod codes {
     pub const SETTLE_TIMEOUT: &str = "SETTLE_TIMEOUT";
     /// No GPU backend was available for a screenshot.
     pub const GPU_UNAVAILABLE: &str = "GPU_UNAVAILABLE";
+    /// A GPU device existed, but reading the rendered pixels back failed —
+    /// device loss (driver restart, compositor crash) or memory pressure.
+    /// Distinct from [`GPU_UNAVAILABLE`]: retrying this one can succeed.
+    pub const GPU_READBACK_FAILED: &str = "GPU_READBACK_FAILED";
     /// `execute` cannot produce pixels / window lists — the host must.
     pub const HOST_REQUIRED: &str = "HOST_REQUIRED";
+    /// The app accepted the request but its UI thread did not answer in time —
+    /// it is inside a native modal loop (a file dialog, menu tracking, a
+    /// window drag) or otherwise wedged. The request may still be applied
+    /// later; re-read the tree rather than assuming it was dropped.
+    pub const BRIDGE_TIMEOUT: &str = "BRIDGE_TIMEOUT";
+    /// The app dropped the request without answering — it is shutting down.
+    pub const BRIDGE_DROPPED: &str = "BRIDGE_DROPPED";
+    /// A request could not be parsed as an [`AutomationRequest`].
+    pub const BAD_REQUEST: &str = "BAD_REQUEST";
+    /// The client could not talk to the bridge at all.
+    pub const BRIDGE_IO: &str = "BRIDGE_IO";
     /// An `assert_node` assertion evaluated to false against a node that does
     /// exist. Deliberately distinct from [`NOT_FOUND`]: "the button is not
     /// focused" and "there is no such button" are different bugs, and a caller

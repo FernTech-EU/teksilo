@@ -29,6 +29,11 @@ teksilo = { workspace = true }
 teksilo-core = { workspace = true }
 teksilo-canvas = { workspace = true }
 teksilo-render = { workspace = true }
+# The attach client opens the same per-OS endpoint the in-app bridge binds
+# (Unix socket / Windows named pipe). Already in the graph via `teksilo`; named
+# directly so the transport feature is switched on explicitly rather than by
+# someone else's unification.
+teksilo-platform = { workspace = true, features = ["automation-transport"] }
 
 # Crate-local async stack — kept OUT of `[workspace.dependencies]` (the
 # `teksilo-tokio` precedent: runtimes stay confined to the crates that need

@@ -157,6 +157,12 @@ pub struct ScrollParams {
     pub shift: Option<bool>,
     pub alt: Option<bool>,
     pub meta: Option<bool>,
+    /// Hold the platform's primary accelerator: Control on Windows and Linux,
+    /// Command on macOS. Use this — not `ctrl` — for any chord that means "the
+    /// accelerator" (save, copy, select-all, accelerator-click). A shortcut
+    /// declared `Ctrl+S` resolves to the Command chord on macOS, so `ctrl`
+    /// there injects a key that matches nothing and still reports success.
+    pub command: Option<bool>,
     pub settle: Option<SettleArg>,
 }
 
@@ -174,6 +180,12 @@ pub struct InjectPointerParams {
     pub shift: Option<bool>,
     pub alt: Option<bool>,
     pub meta: Option<bool>,
+    /// Hold the platform's primary accelerator: Control on Windows and Linux,
+    /// Command on macOS. Use this — not `ctrl` — for any chord that means "the
+    /// accelerator" (save, copy, select-all, accelerator-click). A shortcut
+    /// declared `Ctrl+S` resolves to the Command chord on macOS, so `ctrl`
+    /// there injects a key that matches nothing and still reports success.
+    pub command: Option<bool>,
     /// primary (default), secondary, middle, back, forward. `secondary` is a
     /// right-click (opens a context menu); prefer the node-based `right_click`
     /// tool for that so you don't have to compute a point.
@@ -191,6 +203,12 @@ pub struct InjectKeyParams {
     pub shift: Option<bool>,
     pub alt: Option<bool>,
     pub meta: Option<bool>,
+    /// Hold the platform's primary accelerator: Control on Windows and Linux,
+    /// Command on macOS. Use this — not `ctrl` — for any chord that means "the
+    /// accelerator" (save, copy, select-all, accelerator-click). A shortcut
+    /// declared `Ctrl+S` resolves to the Command chord on macOS, so `ctrl`
+    /// there injects a key that matches nothing and still reports success.
+    pub command: Option<bool>,
     pub settle: Option<SettleArg>,
 }
 
@@ -490,6 +508,7 @@ impl AutomationServer {
                 shift: p.shift.unwrap_or(false),
                 alt: p.alt.unwrap_or(false),
                 meta: p.meta.unwrap_or(false),
+                command: p.command.unwrap_or(false),
             },
             settle,
         )
@@ -515,6 +534,7 @@ impl AutomationServer {
                 shift: p.shift.unwrap_or(false),
                 alt: p.alt.unwrap_or(false),
                 meta: p.meta.unwrap_or(false),
+                command: p.command.unwrap_or(false),
             },
             settle,
         )
@@ -556,6 +576,7 @@ impl AutomationServer {
                 shift: p.shift.unwrap_or(false),
                 alt: p.alt.unwrap_or(false),
                 meta: p.meta.unwrap_or(false),
+                command: p.command.unwrap_or(false),
             },
             settle,
         )
@@ -835,15 +856,20 @@ pub fn to_result(reply: HostReply) -> CallToolResult {
             result.structured_content = Some(body);
             result
         }
-        HostReply::Image { png, warnings } => {
+        HostReply::Image { png, meta } => {
             let b64 = base64::engine::general_purpose::STANDARD.encode(&png);
-            let mut content = vec![ContentBlock::image(b64, "image/png".to_string())];
-            if !warnings.is_empty() {
-                content.push(ContentBlock::text(
-                    serde_json::json!({ "warnings": warnings }).to_string(),
-                ));
-            }
-            CallToolResult::success(content)
+            // The metadata rides as both a text block and structured content:
+            // pixels alone don't say whether they are logical or physical, and
+            // a caller that wants to click what it can see needs `scale` to
+            // convert. See `ScreenshotMeta`.
+            let body = serde_json::to_value(&meta).unwrap_or(serde_json::Value::Null);
+            let content = vec![
+                ContentBlock::image(b64, "image/png".to_string()),
+                ContentBlock::text(body.to_string()),
+            ];
+            let mut result = CallToolResult::success(content);
+            result.structured_content = Some(body);
+            result
         }
     }
 }

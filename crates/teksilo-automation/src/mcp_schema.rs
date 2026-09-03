@@ -89,15 +89,13 @@ pub const TOOL_CATALOG: &[ToolDescriptor] = &[
     },
     ToolDescriptor {
         name: "scroll",
-        description: "Scroll the widget under a node by a pixel delta, with optional modifiers \
-                      (ctrl/shift/alt/meta) — a modifier-held wheel is its own gesture, e.g. \
-                      Ctrl+wheel to zoom.",
+        description: "Scroll the widget under a node by a pixel delta, with optional modifiers (ctrl/shift/alt/meta/command). A modifier-held wheel is its own gesture, e.g. Ctrl+wheel to zoom. Use `command` for the platform accelerator (Control on Windows/Linux, Command on macOS); `ctrl` is literal Control.",
         mutating: true,
     },
     // ---- Synthetic input ----
     ToolDescriptor {
         name: "inject_pointer",
-        description: "Inject a pointer event at a point: action = click (default), double_click, down, up or move; button = primary (default), secondary, middle, back, forward; with optional ctrl/shift/alt/meta held for the press and release. Unknown names and unknown fields are refused rather than defaulted.",
+        description: "Inject a pointer event at a point: action = click (default), double_click, down, up or move; button = primary (default), secondary, middle, back, forward; with optional ctrl/shift/alt/meta/command held for the press and release. Use `command` for the platform accelerator (Control on Windows/Linux, Command on macOS) — accelerator-click to extend a selection is `command`, not `ctrl`. Unknown names and unknown fields are refused rather than defaulted.",
         mutating: true,
     },
     ToolDescriptor {
@@ -107,7 +105,7 @@ pub const TOOL_CATALOG: &[ToolDescriptor] = &[
     },
     ToolDescriptor {
         name: "inject_key",
-        description: "Inject a key press (with optional modifiers) to the focused widget.",
+        description: "Inject a key press (with optional modifiers) to the focused widget. Use `command` for any accelerator chord (Control on Windows/Linux, Command on macOS) — a shortcut declared Ctrl+S resolves to the Command chord on macOS, so `ctrl` there injects a key that matches no binding and still reports success. `ctrl` stays literal Control, for chords that really are Control everywhere (Ctrl+Tab).",
         mutating: true,
     },
     ToolDescriptor {

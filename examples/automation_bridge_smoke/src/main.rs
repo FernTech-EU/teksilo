@@ -1,50 +1,51 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
-//! Live-bridge smoke test (Phase 2).
+//! Live-bridge smoke test.
 //!
 //! `build_headless` has no event loop / `AppEventProxy`, so a `#[cfg(test)]`
 //! unit test can't exercise the bridge's `send_external` path. This example
-//! builds a real app with `install_automation_bridge_in_debug()`, then a
-//! client thread connects to the printed socket, runs
-//! `snapshot_tree → invoke_action → snapshot_tree`, checks the socket is
-//! `0600`, and `exit(0)`s the whole process on success (or `exit(1)` on
-//! failure).
+//! builds a real app with `install_automation_bridge_in_debug()`, then a client
+//! thread discovers the published endpoint, connects, runs
+//! `snapshot_tree → invoke_action → snapshot_tree → screenshot`, and `exit(0)`s
+//! the whole process on success (or `exit(1)` on failure).
+//!
+//! It is platform-agnostic: discovery goes through
+//! [`EndpointFile`](teksilo::automation::wire::EndpointFile) and the connection
+//! through `teksilo_platform::automation_transport`, so the same code drives a
+//! Unix socket and a Windows named pipe.
 //!
 //! Run (needs a display for the window):
-//! `cargo run -p automation_bridge_smoke` (its own manifest already enables
-//! the `automation` feature; it is a workspace package, not a cargo example)
+//! `cargo run -p automation_bridge_smoke` (its own manifest already enables the
+//! `automation` feature; it is a workspace package, not a cargo example).
+//! With `--serve` it keeps the app alive so an external
+//! `teksilo-automation-mcp --attach` can drive it interactively.
+
+use std::time::{Duration, Instant};
 
 use teksilo::automation::dto::{AutomationOp, AutomationReply, AutomationRequest, SettleSpec};
+use teksilo::automation::wire::{self, EndpointFile};
 use teksilo::prelude::*;
 use teksilo::widgets::{Button, VStack};
+use teksilo_platform::automation_transport::{self, TransportStream};
 
 fn main() {
     // Pin the token so the in-process client knows it without scraping stderr.
-    // Respect a token already set in the environment (so `--serve` can be
-    // driven by an external `--connect` client with a known token).
-    let token = std::env::var("TEKSILO_AUTOMATION_TOKEN").unwrap_or_else(|_| {
-        let t = "teksilo-automation-smoke-token".to_string();
+    // Respect one already in the environment (so `--serve` can be driven by an
+    // external client with a known token).
+    if std::env::var("TEKSILO_AUTOMATION_TOKEN").is_err() {
         // SAFETY: set before any threads read the environment (single-threaded here).
         unsafe {
-            std::env::set_var("TEKSILO_AUTOMATION_TOKEN", &t);
+            std::env::set_var("TEKSILO_AUTOMATION_TOKEN", "teksilo-automation-smoke-token");
         }
-        t
-    });
-    let token = token.as_str();
-    // Matches the bridge's per-process `0700` dir layout (see
-    // `teksilo_app::automation_bridge`): `<XDG_RUNTIME_DIR>/teksilo-automation-<pid>/sock`.
-    let dir = std::env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| "/tmp".to_string());
-    let sock = format!("{dir}/teksilo-automation-{}/sock", std::process::id());
+    }
 
     // `--serve` keeps the app (and its bridge) running so an external
-    // `teksilo-automation-mcp --connect <sock>` can drive it interactively.
-    // Without it, an in-process client runs the smoke sequence and exits.
+    // `teksilo-automation-mcp --attach` can drive it interactively. Without it,
+    // an in-process client runs the smoke sequence and exits.
     let serve = std::env::args().any(|a| a == "--serve");
     if !serve {
-        let sock = sock.clone();
-        let token = token.to_string();
-        std::thread::spawn(move || match run_smoke(&sock, &token) {
+        std::thread::spawn(|| match run_smoke() {
             Ok(()) => {
                 eprintln!("automation_bridge_smoke: OK");
                 std::process::exit(0);
@@ -70,68 +71,30 @@ fn main() {
         .run();
 }
 
-#[cfg(unix)]
-fn run_smoke(sock: &str, token: &str) -> Result<(), String> {
-    use std::io::{Read, Write};
-    use std::os::unix::fs::PermissionsExt;
-    use std::os::unix::net::UnixStream;
-    use std::time::{Duration, Instant};
+/// Wait for this process's own endpoint descriptor, then drive the bridge.
+fn run_smoke() -> Result<(), String> {
+    let pid = std::process::id();
+    let deadline = Instant::now() + Duration::from_secs(20);
 
-    // Wait for the bridge socket to appear (the app is still starting up).
-    let deadline = Instant::now() + Duration::from_secs(15);
+    // The app is still starting: poll for the descriptor it publishes.
+    let descriptor = loop {
+        match EndpointFile::read(&EndpointFile::path_for_pid(pid)) {
+            Ok(f) => break f,
+            Err(_) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(50)),
+            Err(e) => return Err(format!("no endpoint descriptor for pid {pid}: {e}")),
+        }
+    };
+    check_descriptor_is_private(&descriptor)?;
+
     let mut stream = loop {
-        match UnixStream::connect(sock) {
+        match automation_transport::connect(&descriptor.endpoint) {
             Ok(s) => break s,
             Err(_) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(50)),
-            Err(e) => return Err(format!("could not connect to {sock}: {e}")),
+            Err(e) => return Err(format!("could not connect to {}: {e}", descriptor.endpoint)),
         }
     };
 
-    // Socket must be 0600.
-    let mode = std::fs::metadata(sock)
-        .map_err(|e| e.to_string())?
-        .permissions()
-        .mode()
-        & 0o777;
-    if mode != 0o600 {
-        return Err(format!("socket mode is {mode:o}, expected 600"));
-    }
-
-    // Token handshake.
-    stream
-        .write_all(format!("{token}\n").as_bytes())
-        .map_err(|e| e.to_string())?;
-    stream.flush().map_err(|e| e.to_string())?;
-
-    fn exchange(stream: &mut UnixStream, op: AutomationOp) -> Result<AutomationReply, String> {
-        let req = AutomationRequest {
-            window_id: None,
-            op,
-            settle: SettleSpec::default(),
-        };
-        let bytes = serde_json::to_vec(&req).map_err(|e| e.to_string())?;
-        stream
-            .write_all(&(bytes.len() as u32).to_le_bytes())
-            .map_err(|e| e.to_string())?;
-        stream.write_all(&bytes).map_err(|e| e.to_string())?;
-        stream.flush().map_err(|e| e.to_string())?;
-        let mut len = [0u8; 4];
-        stream.read_exact(&mut len).map_err(|e| e.to_string())?;
-        let frame_len = u32::from_le_bytes(len) as usize;
-        if frame_len > 256 * 1024 * 1024 {
-            return Err("reply frame exceeds maximum size".to_string());
-        }
-        let mut buf = vec![0u8; frame_len];
-        stream.read_exact(&mut buf).map_err(|e| e.to_string())?;
-        serde_json::from_slice(&buf).map_err(|e| e.to_string())
-    }
-
-    fn data(reply: AutomationReply) -> Result<serde_json::Value, String> {
-        match reply {
-            AutomationReply::Ok { data } => Ok(data),
-            AutomationReply::Err { code, message } => Err(format!("{code}: {message}")),
-        }
-    }
+    wire::write_token(&mut stream, &descriptor.token).map_err(|e| e.to_string())?;
 
     // 1. snapshot_tree → find the Save button.
     let snap = data(exchange(
@@ -164,10 +127,98 @@ fn run_smoke(sock: &str, token: &str) -> Result<(), String> {
         return Err("re-snapshot returned no nodes".into());
     }
 
+    // 4. screenshot: the live-window capture path, including the BGRA swizzle
+    //    that only ever executes on a Windows or macOS surface format. A host
+    //    with no usable GPU reports that cleanly instead of failing.
+    match exchange(&mut stream, AutomationOp::Screenshot { node: None })? {
+        AutomationReply::Ok { data } => {
+            let b64 = data["png_base64"]
+                .as_str()
+                .ok_or("screenshot reply carries no png_base64")?;
+            if b64.is_empty() {
+                return Err("screenshot returned an empty image".into());
+            }
+            let (w, h) = (data["width"].as_u64(), data["height"].as_u64());
+            if w.unwrap_or(0) == 0 || h.unwrap_or(0) == 0 {
+                return Err(format!("screenshot reports a degenerate size {w:?}×{h:?}"));
+            }
+            if data["scale"].as_f64().unwrap_or(0.0) <= 0.0 {
+                return Err("screenshot reports no device scale factor".into());
+            }
+            eprintln!(
+                "automation_bridge_smoke: captured {}×{} @ {}×",
+                w.unwrap(),
+                h.unwrap(),
+                data["scale"]
+            );
+        }
+        AutomationReply::Err { code, message }
+            if code == teksilo::automation::dto::codes::GPU_UNAVAILABLE =>
+        {
+            eprintln!("automation_bridge_smoke: no GPU for the screenshot ({message}) — skipped");
+        }
+        AutomationReply::Err { code, message } => {
+            return Err(format!("screenshot failed: {code}: {message}"));
+        }
+    }
+
     Ok(())
 }
 
-#[cfg(not(unix))]
-fn run_smoke(_sock: &str, _token: &str) -> Result<(), String> {
-    Err("the live bridge needs a Unix-domain socket; not supported on this platform".into())
+/// The descriptor carries the token, so it must not be world-readable.
+fn check_descriptor_is_private(descriptor: &EndpointFile) -> Result<(), String> {
+    let path = EndpointFile::path_for_pid(descriptor.pid);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(&path)
+            .map_err(|e| e.to_string())?
+            .permissions()
+            .mode()
+            & 0o777;
+        if mode != 0o600 {
+            return Err(format!("descriptor mode is {mode:o}, expected 600"));
+        }
+        // The Unix socket itself must be owner-only too.
+        let sock_mode = std::fs::metadata(&descriptor.endpoint.address)
+            .map_err(|e| e.to_string())?
+            .permissions()
+            .mode()
+            & 0o777;
+        if sock_mode != 0o600 {
+            return Err(format!("socket mode is {sock_mode:o}, expected 600"));
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        // Windows: the descriptor lives under %LOCALAPPDATA% (per-user by ACL)
+        // and the pipe carries its own owner-only DACL, checked where it is
+        // built. Here we only assert the descriptor is actually there.
+        if !path.exists() {
+            return Err(format!("descriptor {} vanished", path.display()));
+        }
+    }
+    Ok(())
+}
+
+fn exchange(
+    stream: &mut Box<dyn TransportStream>,
+    op: AutomationOp,
+) -> Result<AutomationReply, String> {
+    let req = AutomationRequest {
+        window_id: None,
+        op,
+        settle: SettleSpec::default(),
+    };
+    let bytes = serde_json::to_vec(&req).map_err(|e| e.to_string())?;
+    wire::write_frame(stream, &bytes, wire::MAX_REQUEST_FRAME).map_err(|e| e.to_string())?;
+    let buf = wire::read_frame(stream, wire::MAX_REPLY_FRAME).map_err(|e| e.to_string())?;
+    serde_json::from_slice(&buf).map_err(|e| e.to_string())
+}
+
+fn data(reply: AutomationReply) -> Result<serde_json::Value, String> {
+    match reply {
+        AutomationReply::Ok { data } => Ok(data),
+        AutomationReply::Err { code, message } => Err(format!("{code}: {message}")),
+    }
 }

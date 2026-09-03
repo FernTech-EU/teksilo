@@ -35,20 +35,24 @@
 //! - [`recording_ops`] — a non-panicking [`WindowOps`](teksilo_core::WindowOps)
 //!   for the headless server.
 //! - [`mcp_schema`] — the canonical tool catalog.
+//! - [`wire`] — the live-bridge framing, token handshake and endpoint
+//!   discovery, shared verbatim by the in-app bridge and the MCP client.
 
 pub mod dto;
 pub mod executor;
 pub mod mcp_schema;
 pub mod recording_ops;
+pub mod wire;
 
 pub use dto::{
     AnnouncementDto, Assertion, AssertionResult, AutomationOp, AutomationReply, AutomationRequest,
-    LayoutNode, NodeBounds, NodeRef, PointerAction, PointerButtonDto, SemanticNode, SettleSpec,
-    ShortcutInfo, WaitCondition, WindowInfo, codes,
+    LayoutNode, NodeBounds, NodeRef, PointerAction, PointerButtonDto, ScreenshotMeta, SemanticNode,
+    SettleSpec, ShortcutInfo, WaitCondition, WindowInfo, codes,
 };
 pub use executor::{execute, run_settle};
 pub use mcp_schema::{TOOL_CATALOG, TOOL_COUNT, ToolDescriptor};
 pub use recording_ops::{RecordedWindow, RecordingWindowOps};
+pub use wire::{Endpoint, EndpointFile, Transport};
 
 #[cfg(test)]
 mod tests;

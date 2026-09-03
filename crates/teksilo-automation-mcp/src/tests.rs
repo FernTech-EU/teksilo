@@ -47,8 +47,15 @@ fn reply_ok(hr: HostReply) -> serde_json::Value {
 fn debug_reply(hr: &HostReply) -> String {
     match hr {
         HostReply::Reply(r) => format!("{r:?}"),
-        HostReply::Image { png, warnings } => {
-            format!("Image({} bytes, warnings={warnings:?})", png.len())
+        HostReply::Image { png, meta } => {
+            format!(
+                "Image({} bytes, {}x{} @ {}x, warnings={:?})",
+                png.len(),
+                meta.width,
+                meta.height,
+                meta.scale,
+                meta.warnings
+            )
         }
     }
 }

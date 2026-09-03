@@ -818,6 +818,7 @@ fn inject_pointer_double_click_is_seen_as_a_double_tap() {
             shift: false,
             alt: false,
             meta: false,
+            command: false,
         },
         &default_settle(),
     );
@@ -852,6 +853,7 @@ fn inject_pointer_carries_its_modifiers() {
             shift: false,
             alt: false,
             meta: false,
+            command: false,
         },
         &default_settle(),
     );
@@ -886,6 +888,7 @@ fn inject_pointer_click_taps_widget() {
             shift: false,
             alt: false,
             meta: false,
+            command: false,
         },
         &default_settle(),
     );
@@ -909,6 +912,7 @@ fn inject_key_letter_maps_to_named_variant() {
         shift: false,
         alt: false,
         meta: false,
+        command: false,
     };
     execute(&mut tree, &mut ops, &mk("s"), &default_settle());
     execute(&mut tree, &mut ops, &mk("/"), &default_settle());
@@ -973,6 +977,7 @@ fn scroll_carries_the_modifiers_it_was_given() {
         shift,
         alt,
         meta,
+        command: false,
     };
     execute(
         &mut tree,
@@ -1005,6 +1010,68 @@ fn scroll_carries_the_modifiers_it_was_given() {
     );
 }
 
+/// `command` is the platform's *primary accelerator*, `ctrl` is literal Control,
+/// and the two are only the same key off macOS.
+///
+/// This is the difference between a cross-platform agent script and one that
+/// silently does nothing: a Teksilo shortcut declared `Ctrl+S` resolves to the
+/// Command chord on macOS, so a probe sending literal Control there matches no
+/// binding — and reports success, because the key really was injected. Asserting
+/// against `Modifiers::COMMAND` rather than a hardcoded `ctrl` keeps this test
+/// meaningful on all three platforms: it is the same constant the shortcut
+/// registry resolves declarations through.
+#[test]
+fn command_modifier_is_the_platform_accelerator_and_ctrl_stays_literal() {
+    let probe = Probe::new(accesskit::Role::GenericContainer, "S");
+    let scrolls = probe.scrolls.clone();
+    let (mut tree, id) = laid_out(probe);
+    let mut ops = RecordingWindowOps::new();
+    let node = node_ref(id);
+
+    let mk = |ctrl, command| AutomationOp::Scroll {
+        node,
+        dx: 0.0,
+        dy: -1.0,
+        ctrl,
+        shift: false,
+        alt: false,
+        meta: false,
+        command,
+    };
+    execute(&mut tree, &mut ops, &mk(false, true), &default_settle());
+    execute(&mut tree, &mut ops, &mk(true, false), &default_settle());
+
+    let log = scrolls.get();
+    // What the accelerator spells on *this* host, taken from the same constant
+    // the rest of the framework resolves `Ctrl`-declared shortcuts through.
+    let accel = if teksilo_core::event::Modifiers::COMMAND
+        .contains(teksilo_core::event::Modifiers::SUPER)
+    {
+        "meta"
+    } else {
+        "ctrl"
+    };
+    assert_eq!(
+        log,
+        vec![format!("0,-1,{accel}"), "0,-1,ctrl".to_string()],
+        "command must resolve to the platform accelerator and ctrl stay literal, got {log:?}"
+    );
+}
+
+/// Omitting `command` leaves every existing probe unchanged — it is
+/// `#[serde(default)]`, so an op authored before it existed still deserializes.
+#[test]
+fn command_defaults_to_off_and_is_optional_on_the_wire() {
+    // The externally-tagged wire form, with `command` simply absent.
+    let json = r#"{"InjectKey":{"key":"s","ctrl":true}}"#;
+    let op: AutomationOp = serde_json::from_str(json).expect("legacy op still parses");
+    let AutomationOp::InjectKey { ctrl, command, .. } = op else {
+        panic!("expected inject_key");
+    };
+    assert!(ctrl, "ctrl round-trips");
+    assert!(!command, "command defaults to false when absent");
+}
+
 /// The default stays a bare wheel, so every existing probe keeps working
 /// unchanged — the fields are `#[serde(default)]` for exactly this.
 #[test]
@@ -1026,6 +1093,7 @@ fn scroll_without_modifiers_is_still_a_plain_wheel() {
             shift: false,
             alt: false,
             meta: false,
+            command: false,
         },
         &default_settle(),
     );
@@ -1046,6 +1114,7 @@ fn inject_key_unknown_is_unknown_name() {
             shift: false,
             alt: false,
             meta: false,
+            command: false,
         },
         &default_settle(),
     );
@@ -1268,6 +1337,7 @@ fn an_injected_click_reaches_the_callers_window_ops() {
             shift: false,
             alt: false,
             meta: false,
+            command: false,
         },
         &default_settle(),
     );
@@ -1306,6 +1376,7 @@ fn an_injected_key_reaches_the_callers_window_ops() {
             shift: true,
             alt: false,
             meta: false,
+            command: false,
         },
         &default_settle(),
     );

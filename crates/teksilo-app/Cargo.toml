@@ -55,6 +55,7 @@ web-view = ["dep:teksilo-webview"]
 # wire-encoding deps.
 automation = [
     "dep:teksilo-automation",
+    "teksilo-platform/automation-transport",
     "dep:base64",
     "dep:png",
     "dep:serde_json",

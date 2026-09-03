@@ -54,7 +54,7 @@ app. To headlessly automate *your* app there are two paths:
 - **Use the live `--connect` mode** below — the turnkey "drive my real app"
   path today (needs a display and a running debug build).
 
-### Live (connect)
+### Live (attach)
 
 A debug build opts in with one line:
 
@@ -68,27 +68,69 @@ TeksiloAppBuilder::new()
     .run();
 ```
 
-Once the socket is bound and listening it prints its path and the token to
-stderr — the announcement follows the bind, so the path is connectable the
-instant it appears and a client needs no wait-for-socket loop:
+On startup it binds this platform's private endpoint, publishes a small
+**endpoint descriptor** naming it, and prints how to attach:
 
 ```text
-teksilo-automation: bridge socket = /run/user/1000/teksilo-automation-12345/sock
+teksilo-automation: bridge endpoint = /run/user/1000/teksilo-automation/12345.d/s
+teksilo-automation: descriptor = /run/user/1000/teksilo-automation/12345.json
 TEKSILO_AUTOMATION_TOKEN=8f3c…
-teksilo-automation: connect with `teksilo-automation-mcp --connect /run/user/1000/teksilo-automation-12345/sock --token 8f3c…`
+teksilo-automation: attach with `teksilo-automation-mcp --attach-pid 12345`
 ```
 
-Then point the server at it:
+On Windows the endpoint is a named pipe and the descriptor lives under
+`%LOCALAPPDATA%`, but nothing else changes:
 
 ```text
-teksilo-automation-mcp --connect /run/user/1000/teksilo-automation-12345/sock --token 8f3c…
+teksilo-automation: bridge endpoint = \.\pipe\teksilo-automation-12828
+teksilo-automation: descriptor = C:\Users\you\AppData\Local\Teksilo\teksilo-automation\12828.json
 ```
 
-Each rmcp tool handler writes the op to the Unix socket and reads one reply;
-the in-app bridge thread reads the socket and posts an `AutomationPayload`
-(carrying a `Send` reply channel) through the existing `AppEvent::External`
-path, and the winit **main thread** runs the op against the real window — the
-settle runs synchronously on the main thread, never across a frame boundary.
+Attach with any of:
+
+```sh
+teksilo-automation-mcp --attach              # the newest live app
+teksilo-automation-mcp --attach-pid 12345    # one specific process
+teksilo-automation-mcp --list                # what is live right now
+teksilo-automation-mcp --connect <endpoint> --token <uuid>   # explicit escape hatch
+```
+
+`--attach` reads the descriptor, so the same command works on all three
+platforms and there is nothing to copy out of stderr. Descriptors are probed
+before use, and a stale one — left by an app that exited without unwinding
+(`exit()`, a crash, a kill) — is removed as it is found.
+
+Each rmcp tool handler writes the op to the endpoint and reads one reply; the
+in-app bridge thread reads it and posts an `AutomationPayload` (carrying a
+`Send` reply channel) through the existing `AppEvent::External` path, and the
+winit **main thread** runs the op against the real window — the settle runs
+synchronously on the main thread, never across a frame boundary.
+
+If the main thread does not answer within 15 s — it is inside a native modal
+loop (a file dialog, menu tracking, a window drag) — the bridge replies
+`BRIDGE_TIMEOUT` and keeps serving, rather than blocking forever and holding
+the single connection slot for the life of the process.
+
+#### The endpoint descriptor
+
+```jsonc
+// <runtime dir>/teksilo-automation/<pid>.json — 0600, or owner-only by ACL
+{
+  "version": 1,
+  "pid": 12345,
+  "transport": "unix",              // or "named_pipe"
+  "address": "/run/user/1000/teksilo-automation/12345.d/s",
+  "token": "8f3c…",
+  "app": "widget-catalog",
+  "started_unix_ms": 1772000000000
+}
+```
+
+| OS | Runtime directory | Endpoint |
+| --- | --- | --- |
+| Linux | `$XDG_RUNTIME_DIR` | Unix socket, `0700` dir + `0600` socket |
+| macOS | `$TMPDIR` (per-user, per-boot) | Unix socket, `0700` dir + `0600` socket |
+| Windows | `%LOCALAPPDATA%\Teksilo` | Named pipe with an owner-only DACL |
 
 ## Install
 
@@ -242,16 +284,38 @@ reports the live nodes themselves.
 ## Screenshots
 
 `screenshot` renders the window (or, with `node`, that node's bounds) to a PNG
-and returns it as an MCP **image content block**.
+and returns it as an MCP **image content block**, alongside a metadata block:
 
-- **Headless:** an offscreen `RENDER_ATTACHMENT | COPY_SRC` texture, rendered
-  via the test renderer, read back, PNG-encoded. If no GPU backend is present
-  (CI without a GPU), the tool returns `GPU_UNAVAILABLE` (non-fatal).
+```jsonc
+{ "width": 1600, "height": 1200, "scale": 2.0, "warnings": [] }
+```
+
+**`scale` is not decoration.** Pixel dimensions are physical, and a live window
+on a HiDPI display is not laid out at that size: an 800×600 logical window
+captures as 1600×1200 at `scale: 2.0`. Every coordinate elsewhere in the
+toolkit — node `bounds`, `inject_pointer` — is *logical*, so without `scale` a
+caller cannot relate a pixel it can see to a point it can click, and a script
+written against one display silently mis-aims on another. Headless always
+reports `scale: 1.0`, where the two coincide.
+
+- **Headless:** an offscreen `RENDER_ATTACHMENT | COPY_SRC` texture in a fixed
+  `Rgba8UnormSrgb` format, rendered via the test renderer, read back,
+  PNG-encoded — identical bytes on every backend.
 - **Live:** `PlatformWindow::capture_offscreen` renders the live frame into an
   offscreen texture in the window's own surface format (the swapchain texture
-  lacks `COPY_SRC`), swizzling BGRA→RGBA as needed; the bridge base64-encodes
-  the PNG over the socket and the `--connect` client rehydrates it to an image
-  block.
+  lacks `COPY_SRC`), swizzling BGRA→RGBA as needed — that branch is the one
+  DX12 and Metal take. The bridge base64-encodes the PNG and the attach client
+  rehydrates it to an image block.
+
+Adapter selection is a search, not a single request: the preferred adapter
+first, then an explicit software fallback if it yields no device. A host can
+enumerate an adapter it cannot actually open — a VM's OpenGL driver is the
+common case — while a perfectly good software device (DX12 WARP, llvmpipe) sits
+behind `force_fallback_adapter`. Treating the first failure as fatal reported
+"no GPU" on machines that have one, which is what made screenshots unavailable
+on GPU-less Windows hosts and CI runners. When *nothing* yields a device the
+tool returns `GPU_UNAVAILABLE`; when a device is lost mid-readback it returns
+`GPU_READBACK_FAILED`. Both are non-fatal and the session survives.
 
 **WebView blind spot:** a native `WebView` subview composites *on top of* the
 wgpu surface and is invisible to the readback (a transparent hole). When the
@@ -263,50 +327,72 @@ in scope.
 
 The live bridge is defence-in-depth:
 
-- **Feature- and debug-gated.** Every item that binds the socket, generates the
-  token, or spawns the bridge thread is `#[cfg(debug_assertions)]`; a release
-  build's `install_automation_bridge_in_debug()` is the identity. A shipped
-  release binary contains no socket, token, or bridge.
-- **Unix-domain socket only** (never TCP), in a `0700` per-process directory
-  under `$XDG_RUNTIME_DIR` with a `0600` socket (so it isn't world-connectable
-  even during the bind→chmod window), removed on startup and on bridge-thread
-  exit.
+- **Feature- and debug-gated.** Every item that binds the endpoint, generates
+  the token, or spawns the bridge thread is `#[cfg(debug_assertions)]`; a
+  release build's `install_automation_bridge_in_debug()` is the identity. A
+  shipped release binary contains no endpoint, token, or bridge.
+- **A private local endpoint, never TCP.** Each platform uses the mechanism it
+  actually provides, and each refuses to bind rather than fall back to a weaker
+  mode:
+  - **Linux / macOS** — a Unix-domain socket in a per-process directory created
+    `0700` by `mkdir`'s own mode (so it is never briefly world-reachable — that
+    ordering is what closes the bind→chmod TOCTOU), with the socket itself
+    `0600`. Removed on startup and on bridge-thread exit.
+  - **Windows** — a named pipe with an explicit owner-only DACL
+    (`D:P(A;;GA;;;<user SID>)`). This is not the default: a pipe created with a
+    null security descriptor grants read access to *Everyone and the anonymous
+    account*, so the descriptor is always built from the process token's user
+    SID. `PIPE_REJECT_REMOTE_CLIENTS` is set in the same `dwPipeMode` bitmask as
+    a second layer against the SMB path — it does **not** keep out other local
+    users, so it is never a substitute for the DACL.
+- **An owner-only endpoint descriptor.** It carries the token, so it is written
+  `0600` on Unix and under the per-user `%LOCALAPPDATA%` ACL on Windows,
+  write-then-rename so a reader never sees it half-written.
 - **Single connection at a time**, single in-flight request, with a 10 s
-  read-timeout on the token handshake and a 16 MiB cap on a request frame.
-- **Per-process UUID token**: the client must send the token (printed to
-  stderr, or pinned via `TEKSILO_AUTOMATION_TOKEN`) as the first line, or the
-  connection is rejected.
+  deadline on the token handshake and a 16 MiB cap on a request frame (256 MiB
+  on a reply, which can carry a screenshot). A reply too large to frame is
+  replaced by a typed error rather than desyncing the stream.
+- **Per-process UUID token**: the client must send the token as the first line
+  or the connection is dropped. Compared without early-exit, so the comparison
+  leaks neither length nor prefix.
 - **Bounded main-thread settle.** Because the live settle runs on the winit
   main thread, the bridge clamps `max_anim_frames ≤ 120` and
-  `settle_timeout_ms ≤ 2000` so no op (including a long `wait_for_condition`)
-  can freeze the UI for more than ~2 s. Headless keeps the caller's values (no
-  UI to freeze).
+  `settle_timeout_ms ≤ 2000` so no op can freeze the UI for more than ~2 s.
+  Headless keeps the caller's values (no UI to freeze).
+- **A bridge that always answers.** The reply wait is bounded (15 s,
+  `BRIDGE_TIMEOUT`), so a main thread stuck in a native modal loop costs one
+  request rather than the connection slot for the life of the process.
 
-The threat model is a *trusted local user with a non-shared `$XDG_RUNTIME_DIR`*
-— the same-uid socket plus the per-process token. The token is printed to
-stderr, so anyone who can read the app's stderr (or `/proc/<pid>/environ` when
-it's pinned) can drive the UI; this is a dev-tool stance, kept out of
-production by the debug gate above. **Regression guard:** the debug-only banner
-string only exists in the gated `spawn_bridge_thread`, so a release binary with
-the feature on must not contain it — a CI canary:
+The threat model is a *trusted local user*: the OS refuses the connection to
+anyone else, and the token is a second gate. The token is printed to stderr and
+stored in the descriptor, so anyone who can read the app's stderr (or
+`/proc/<pid>/environ` when it's pinned) can drive the UI; this is a dev-tool
+stance, kept out of production by the debug gate above. **Regression guard:**
+the debug-only banner string only exists in the gated `spawn_bridge_thread`, so
+a release binary with the feature on must not contain it — a CI canary:
 
 ```sh
 cargo build --release -p widget-catalog          # has the bridge wired + feature
-! grep -qa "teksilo-automation: bridge socket" target/release/widget-catalog \
+! grep -qa "teksilo-automation: bridge endpoint" target/release/widget-catalog \
   || { echo "BRIDGE LEAKED INTO RELEASE"; exit 1; }
 ```
 
-Headless mode has no socket at all.
+Headless mode has no endpoint at all.
 
 ## Documented limitations
 
 - **WebView pixels** in screenshots (compositor hole — warned, not captured).
-- **Windows live bridge**: the socket is Unix-only;
-  `install_automation_bridge_in_debug()` is a no-op on Windows (headless mode
-  works everywhere — it has no socket).
 - **Release-build automation**: debug-gated by design.
-- **Software-GPU fallback** for CI screenshots: a clean `GPU_UNAVAILABLE`
-  error, not a fallback.
+- **Golden screenshots are Linux-only**: font rasterisation differs per OS, so
+  cross-platform screenshot assertions are structural (size, scale, non-blank),
+  not pixel-exact.
+- **One client at a time.** A second client waits rather than being refused —
+  the kernel backlog on Unix, a second pipe instance on Windows — and gives up
+  after 5 s if the first never leaves. The bridge itself serves strictly one
+  connection and one in-flight request.
+- **macOS App Sandbox**: a sandboxed build cannot bind outside its container.
+  Structurally moot (the bridge is debug-gated and a sandboxed release build
+  can never contain it), but worth knowing.
 - This complements, **not replaces**, a real screen-reader OS round-trip.
 
 ## Architecture
@@ -332,10 +418,17 @@ alone hold.
 
 | Crate | Role |
 | --- | --- |
-| `teksilo-automation` | GUI-free toolkit: DTOs, `execute`, `RecordingWindowOps`, the tool catalog. Mirrors `teksilo-data`'s core-only-peer design. |
-| `teksilo-automation-mcp` | The rmcp server binary (`--headless` / `--connect`) + offscreen screenshots. `tokio` / `rmcp` are confined here. |
-| `teksilo-app` (`automation` feature) | The debug-only in-app bridge — `std::os::unix::net` + the existing `send_external` path; no async runtime in the framework. |
-| `teksilo-platform` | `PlatformWindow::capture_offscreen` — the live-window readback. |
+| `teksilo-automation` | GUI-free toolkit: DTOs, `execute`, `RecordingWindowOps`, the tool catalog, and `wire` — the framing, token handshake and endpoint descriptor, shared verbatim by both ends. Mirrors `teksilo-data`'s core-only-peer design. |
+| `teksilo-automation-mcp` | The rmcp server binary (`--headless` / `--attach`) + offscreen screenshots. `tokio` / `rmcp` are confined here. |
+| `teksilo-app` (`automation` feature) | The debug-only in-app bridge: policy only — token, accept loop, main-thread routing. No `cfg` on the OS, no async runtime in the framework. |
+| `teksilo-platform` (`automation-transport` feature) | `automation_transport` — `bind`/`accept`/`connect` and their per-OS access control (Unix socket, Windows named pipe), plus `PlatformWindow::capture_offscreen` for the live-window readback. |
+
+The split between the last two is the same one the crate already draws for
+`external_dnd` and `native_menu`: the OS primitive lives in `teksilo-platform`
+behind a backend trait, and the subsystem that uses it stays platform-agnostic.
+The protocol lives one level lower still, in `teksilo-automation`, because both
+ends speak it and it needs no OS at all — which is what makes it exhaustively
+testable over an in-memory buffer on every platform.
 
 `RecordingWindowOps` is why an AT action that opens a window (a menu item, a
 "New window" button) never crashes the headless server: instead of panicking
@@ -344,13 +437,15 @@ on `open_window`, it records the request and returns a synthetic id.
 ## Run snippets
 
 ```text
-# Headless MCP server (CI / agent test-authoring):
+# Headless MCP server (CI / agent test-authoring, no display, no GPU needed):
 teksilo-automation-mcp --headless
 
 # Drive a live running app (after `install_automation_bridge_in_debug()`):
-teksilo-automation-mcp --connect <sock> --token <uuid>
+teksilo-automation-mcp --attach              # the newest one
+teksilo-automation-mcp --attach-pid 12345    # a specific process
+teksilo-automation-mcp --list                # what is live right now
 
-# Live-bridge smoke test (needs a display):
+# Live-bridge smoke test (needs a display; works on Linux, macOS and Windows):
 cargo run -p automation_bridge_smoke
 #   — or keep it alive for an external client:
 cargo run -p automation_bridge_smoke -- --serve
@@ -360,15 +455,32 @@ cargo run -p automation_bridge_smoke -- --serve
 
 - **Toolkit** (`teksilo-automation`): unit tests driven through `execute()`,
   each validating the produced `TreeUpdate` with the real `accesskit_consumer`.
-- **MCP conformance** (`teksilo-automation-mcp`): the 24-tool router, the
+- **Wire protocol** (`teksilo-automation::wire`): framing round-trips, empty and
+  truncated frames, oversize refusal on both read and write, the token-line cap,
+  and that the handshake leaves the first frame intact. Pure in-memory, so the
+  whole protocol is covered on every platform with no socket.
+- **Transport** (`teksilo-platform::automation_transport`): bind → connect →
+  round-trip over whatever this platform actually uses, plus the read deadline,
+  the owner-only permissions (`0600` socket in a `0700` directory on Unix; the
+  DACL and its SID on Windows), and cleanup on drop.
+- **MCP conformance** (`teksilo-automation-mcp`): the tool router, the
   async-handler ⇄ tree-thread marshaling, and a screenshot that decodes to PNG
   magic bytes (skipped when no GPU).
+- **Server end-to-end** (`teksilo-automation-mcp/tests/stdio_smoke.rs`): spawns
+  the real binary and speaks JSON-RPC to it — argument parsing, the rmcp stdio
+  transport, the `!Send` tree thread and the serde round-trip. Needs no display
+  and no GPU, so it runs on all three OSes in the ordinary `cargo test`.
 - **Golden screenshots** behind the `golden-tests` feature
   (`cargo test -p teksilo-automation-mcp --features golden-tests`), inline
   per-channel pixel compare with tolerance ≤ 2, `UPDATE_GOLDENS=1` to refresh.
+  Linux-only by policy: font rasterisation differs per OS, so the cross-platform
+  assertions are structural rather than pixel-exact.
 - **Bridge round-trip** (`examples/automation_bridge_smoke`): a real app +
-  `install_automation_bridge_in_debug()`, an in-process client running
-  `snapshot → invoke → re-snapshot` and asserting the `0600` socket.
+  `install_automation_bridge_in_debug()`, a client that discovers the endpoint
+  from the published descriptor and runs
+  `snapshot → invoke → re-snapshot → screenshot`, asserting the descriptor and
+  socket are owner-only. Run per-OS in CI by the `test-automation` job, which
+  also carries the release canary.
 
 See also: [Accessibility overrides](accessibility-overrides.md),
 [Scene accessibility](teksilo-scene-a11y.md).

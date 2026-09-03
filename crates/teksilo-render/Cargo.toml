@@ -20,6 +20,7 @@ teksilo-canvas = { workspace = true }
 wgpu = { workspace = true }
 tiny-skia = { workspace = true }
 bytemuck = { workspace = true }
+thiserror = { workspace = true }
 
 [dev-dependencies]
 teksilo-tokens = { workspace = true }

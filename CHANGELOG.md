@@ -96,6 +96,112 @@ reasoning from the HIGs. See
 - Keyboard access to the column header — sort, resize, reorder — is still
   missing, and remains a WCAG 2.1.1 / 2.5.7 exposure.
 
+Automation on Windows and macOS. The MCP automation surface was only ever run
+on Linux, and the parts that were portable had never been proven so while the
+parts that were not had never been named. Both halves are now settled: the
+semantics turned out to be portable by construction — `teksilo-automation`
+makes no OS call at all, because input is dispatched into the widget tree
+rather than through `SendInput` or `CGEvent` — and everything that genuinely
+differed has been moved behind one seam.
+
+### teksilo-platform
+
+- **`automation_transport`** (new, behind the `automation-transport` feature):
+  the per-OS endpoint the live bridge binds, following the same backend shape
+  as `external_dnd` and `native_menu`. Unix keeps the domain socket in a `0700`
+  per-process directory with a `0600` socket; Windows gets a **named pipe with
+  an owner-only DACL**, built explicitly from the process token's SID because
+  the default descriptor grants read access to Everyone *and* the anonymous
+  account. `PIPE_REJECT_REMOTE_CLIENTS` rides in the same `dwPipeMode` bitmask
+  as a second layer — never a substitute for the DACL, since it only blocks the
+  SMB path. Costs no new dependency: the `windows` crate was already linked, so
+  this is six feature strings.
+- Pipe I/O is overlapped, because a byte-mode pipe in `PIPE_WAIT` blocks
+  forever and there is no `SO_RCVTIMEO` for pipes — the token handshake needs a
+  deadline, or a peer that connects and says nothing holds the only slot for
+  the life of the process.
+- `accept` recycles an instance that a client opened and dropped before it
+  could be connected (`ERROR_NO_DATA`) instead of failing, and `connect` waits
+  for the server to come back around instead of giving up at the first
+  `ERROR_PIPE_BUSY`. Without both, `--list` — which probes by connecting and
+  dropping — poisoned the `--attach` that followed it.
+
+### teksilo-automation
+
+- **`wire`** (new): framing, the token handshake and the endpoint descriptor,
+  in pure `std` + `serde`. Both ends of the bridge and the smoke example now
+  share one implementation instead of three copies of the same four-byte length
+  prefix. Being OS-free, the whole protocol is covered by tests that run over an
+  in-memory buffer on every platform.
+- The token handshake reads a byte at a time rather than through a `BufRead`,
+  which would swallow part of the first frame and force a second handle on the
+  connection — an operation a Windows pipe has no clean equivalent for.
+- **`command` modifier** on `inject_key`, `inject_pointer` and `scroll`.
+  `command` is the platform's primary accelerator (Control on Windows and
+  Linux, ⌘ on macOS) and `ctrl` stays literal. A shortcut *declared* `Ctrl+S`
+  resolves to ⌘S on macOS, so a probe sending literal Control there matched no
+  binding — and reported success, because the key really had been injected.
+  Scripts written on Linux silently did nothing on macOS.
+- `wait_for_condition` spends its budget as **simulated** frames rather than
+  wall clock. The old loop slept 1 ms per poll, which costs up to 15.6 ms on
+  Windows, so the same budget bought roughly a fifteenth of the frames and a
+  wait that passed on Linux timed out there. Nothing else can move the tree
+  while the loop runs, so the sleep was never buying progress in the first
+  place.
+- New codes: `GPU_READBACK_FAILED`, `BRIDGE_TIMEOUT`, `BRIDGE_DROPPED`,
+  `BAD_REQUEST`, `BRIDGE_IO` — several were bare string literals a client could
+  not match on.
+
+### teksilo-app
+
+- The live bridge is now platform-agnostic policy — token, accept loop,
+  main-thread routing — over the transport above. `install_automation_bridge_in_debug()`
+  works on Linux, macOS and Windows; it is still a no-op in release on all of
+  them.
+- **The reply wait is bounded** (15 s, `BRIDGE_TIMEOUT`). winit's macOS backend
+  queues user events in `kCFRunLoopDefaultMode` only, so while a native panel is
+  up the posted event is not delivered at all — the bridge thread blocked
+  forever, the client blocked forever, and because the bridge serves one
+  connection at a time the slot was gone for the life of the process.
+- The app publishes an **endpoint descriptor** (`<runtime dir>/teksilo-automation/<pid>.json`,
+  owner-only) naming its transport, address and token, so a client no longer
+  scrapes stderr. macOS now uses `$TMPDIR` — its actual per-user runtime
+  directory — instead of falling back to the shared `/tmp`.
+
+### teksilo-automation-mcp
+
+- `--attach` (newest live app), `--attach-pid <pid>` and `--list` replace
+  copying a socket path out of stderr; `--connect <endpoint> --token <uuid>`
+  remains as the explicit escape hatch. Stale descriptors — left by an app that
+  exited without unwinding — are probed and pruned rather than offered.
+- Screenshots return a `{width, height, scale}` block beside the image. Pixels
+  are physical and every other coordinate in the toolkit is logical, so without
+  `scale` a caller could not relate a pixel it could see to a point it could
+  click, and a script written against one display mis-aimed on another.
+
+### teksilo-render
+
+- `create_test_renderer` treats adapter selection as a **search** — preferred,
+  then an explicit software fallback — instead of giving up when the first
+  adapter yields no device. A host can enumerate an adapter it cannot open (a
+  VM's OpenGL driver is the common case) while a working software device sits
+  behind `force_fallback_adapter`; the old behaviour reported "no GPU" on
+  machines that have one, which is what made screenshots unavailable on
+  GPU-less Windows hosts and CI runners where DX12 WARP is present and works.
+- Offscreen limits are lifted to the adapter's real resolution, so a path-heavy
+  frame no longer fails offscreen while rendering fine in a live window
+  (`downlevel_defaults` caps textures at 2048; the path atlas grows to 4096).
+- `try_read_texture_rgba` returns a `Result`, so a lost device costs one
+  screenshot rather than the tree thread and every tool call after it.
+
+### CI
+
+- A `test-automation` job on Linux, macOS and Windows drives a real window over
+  the real endpoint and carries the release canary. The headless server is
+  covered by an ordinary integration test that speaks JSON-RPC to the actual
+  binary, so it runs everywhere `cargo test` does.
+
+
 ## [0.9.2] - 2026-09-03
 
 Accessibility. Every entry below changes what a screen reader says, and four

@@ -37,7 +37,7 @@ env:
 jobs:
   ci:
     name: CI
-    needs: [test-linux, test-x11, test-cross, check, rustfmt, clippy, docs, spdx]
+    needs: [test-linux, test-x11, test-cross, test-automation, check, rustfmt, clippy, docs, spdx]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -46,6 +46,7 @@ jobs:
           if [[ "${{ needs.test-linux.result }}" != "success" ]] || \
              [[ "${{ needs.test-x11.result }}" != "success" ]] || \
              [[ "${{ needs.test-cross.result }}" != "success" ]] || \
+             [[ "${{ needs.test-automation.result }}" != "success" ]] || \
              [[ "${{ needs.check.result }}" != "success" ]] || \
              [[ "${{ needs.rustfmt.result }}" != "success" ]] || \
              [[ "${{ needs.clippy.result }}" != "success" ]] || \
@@ -190,6 +191,92 @@ jobs:
 
       - name: Test
         run: cargo test --workspace
+
+  # The automation bridge is the one subsystem whose *transport* differs per OS
+  # — a Unix socket on Linux/macOS, a named pipe on Windows — so it is the one
+  # that most needs to be *run* on each of them rather than merely compiled.
+  # `cargo test --workspace` in test-cross already covers the wire, transport
+  # and stdio-smoke tests. This job adds the two things a test harness cannot
+  # reach: a live app with a real window driven over the bridge end to end, and
+  # the canary proving the bridge stays out of a release build.
+  test-automation:
+    name: Automation (${{ matrix.name }})
+    needs: test-linux
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux
+            os: ubuntu-latest
+          - name: windows
+            os: windows-latest
+          - name: mac
+            os: macos-latest
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Install Linux system dependencies
+        if: matrix.os == 'ubuntu-latest'
+        uses: ./.github/actions/install-linux-deps
+
+      - name: Install X server
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y xvfb x11-utils
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+
+      - name: Strip path dependencies
+        uses: ./.github/actions/strip-path-deps
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ${{ matrix.name }}
+
+      - name: Build the bridge smoke and the MCP server
+        run: cargo build -p automation_bridge_smoke -p teksilo-automation-mcp
+
+      # Drives a real window over the real endpoint: snapshot_tree →
+      # invoke_action → snapshot_tree → screenshot. Exits 0 on success, 1 on
+      # any failure, so the job result is the assertion. A GPU-less runner is
+      # expected — the smoke treats GPU_UNAVAILABLE as a skip, not a failure.
+      - name: Live-bridge smoke (Unix socket)
+        if: matrix.os != 'windows-latest'
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            export DISPLAY=:99
+            Xvfb :99 -screen 0 1280x1024x24 &
+            for _ in $(seq 1 50); do xdpyinfo -display :99 >/dev/null 2>&1 && break; sleep 0.2; done
+          fi
+          cargo run -p automation_bridge_smoke
+
+      - name: Live-bridge smoke (named pipe)
+        if: matrix.os == 'windows-latest'
+        run: cargo run -p automation_bridge_smoke
+
+      # The bridge is debug-gated, so a release binary with the feature on must
+      # contain none of it. The banner string only exists inside the gated
+      # `spawn_bridge_thread`, which makes it a reliable canary: if it survives
+      # into the release binary, the gate has regressed.
+      - name: Release canary — no bridge in a release build
+        shell: bash
+        run: |
+          cargo build --release -p automation_bridge_smoke
+          bin=target/release/automation_bridge_smoke
+          [ "$RUNNER_OS" = "Windows" ] && bin=target/release/automation_bridge_smoke.exe
+          if grep -qa "teksilo-automation: bridge endpoint" "$bin"; then
+            echo "::error::the automation bridge leaked into a release build"
+            exit 1
+          fi
+          echo "clean: no bridge in $bin"
 
   check:
     name: Check (${{ matrix.name }})

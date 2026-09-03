@@ -136,6 +136,7 @@ pub fn execute(
             shift,
             alt,
             meta,
+            command,
         } => {
             let update = tree.sync_accessibility();
             let Some(widget) = resolve_widget(tree, &update, *node) else {
@@ -152,7 +153,7 @@ pub fn execute(
                     // a distinct gesture (Ctrl-wheel-to-zoom is why
                     // `WidgetEvent::Scroll` has this field at all), and a probe
                     // that could only send a bare wheel could not reach it.
-                    modifiers: modifiers(*ctrl, *shift, *alt, *meta),
+                    modifiers: modifiers(*ctrl, *shift, *alt, *meta, *command),
                 },
                 ops,
             );
@@ -169,11 +170,12 @@ pub fn execute(
             shift,
             alt,
             meta,
+            command,
         } => {
             use crate::dto::PointerAction as PA;
             let p = Point::new(*x, *y);
             let btn = button.to_core();
-            let m = modifiers(*ctrl, *shift, *alt, *meta);
+            let m = modifiers(*ctrl, *shift, *alt, *meta, *command);
             match action {
                 PA::Move => pointer_move(tree, ops, p),
                 PA::Down => pointer_down(tree, ops, p, btn, m),
@@ -228,11 +230,17 @@ pub fn execute(
             shift,
             alt,
             meta,
+            command,
         } => {
             let Some(k) = key_from_str(key) else {
                 return AutomationReply::err(codes::UNKNOWN_NAME, format!("unknown key '{key}'"));
             };
-            press_key(tree, ops, k, modifiers(*ctrl, *shift, *alt, *meta));
+            press_key(
+                tree,
+                ops,
+                k,
+                modifiers(*ctrl, *shift, *alt, *meta, *command),
+            );
             finish_settle(tree, ops, settle)
         }
         AutomationOp::TypeText { node, text } => {
@@ -565,37 +573,60 @@ fn dispatch_action_and_settle(
     )
 }
 
+/// One simulated frame at ~60 Hz — how far the wait advances the tree per poll.
+const WAIT_FRAME: Duration = Duration::from_millis(16);
+
+/// Poll `condition`, advancing the simulated clock a frame at a time.
+///
+/// `settle.settle_timeout_ms` is spent as **simulated** time, in whole frames,
+/// so the same wait resolves identically on every platform. Bounding it by wall
+/// clock — what this used to do — made the outcome depend on the host's timer
+/// granularity: each poll slept 1 ms, but a 1 ms sleep costs up to 15.6 ms on
+/// Windows, so the same wall budget bought roughly a fifteenth of the frames
+/// and a fifteenth of the simulated time. A wait that passed on Linux timed out
+/// on Windows, with nothing in the reply to say why.
+///
+/// Nothing else can move the tree while this runs — the tree is `!Send` and this
+/// loop owns the only thread that touches it — so simulated frames are the only
+/// thing that can make the predicate true, and sleeping bought no progress at
+/// all. Dropping the sleep also removes the reason it was there: the loop is now
+/// bounded by a frame count rather than by the timeout, so it finishes in
+/// microseconds instead of occupying the thread for the whole budget.
 fn wait_for_condition(
     tree: &mut WidgetTree,
     ops: &mut dyn WindowOps,
     settle: &SettleSpec,
     condition: &WaitCondition,
 ) -> AutomationReply {
-    let deadline = Instant::now() + Duration::from_millis(settle.settle_timeout_ms.max(1));
-    loop {
+    let budget_ms = settle.settle_timeout_ms.max(1);
+    let frame_ms = WAIT_FRAME.as_millis() as u64;
+    let max_frames = budget_ms.div_ceil(frame_ms);
+    // Wall-clock backstop, deliberately far above the simulated budget: it
+    // exists only so a pathological tree (an unbounded rebuild each frame)
+    // cannot spin forever, and must never be what ends an ordinary wait.
+    let backstop = Instant::now()
+        + Duration::from_millis(budget_ms.saturating_mul(10)).max(Duration::from_secs(5));
+
+    // `..=` so a budget of one frame still gets an initial check *and* a frame.
+    for _ in 0..=max_frames {
         let update = tree.sync_accessibility();
         if condition_met(tree, &update, condition) {
             return AutomationReply::ok_unit();
         }
-        if Instant::now() >= deadline {
-            return AutomationReply::err(
-                codes::WAIT_TIMEOUT,
-                "wait_for_condition timed out before the predicate held",
-            );
+        if Instant::now() >= backstop {
+            break;
         }
         // Drive timed / animated state forward one frame, then re-layout so
         // reactive (AccessibilityOnly) bindings flush before the next sync.
-        tree.advance_time(Duration::from_millis(16));
-        tree.tick_animations(Duration::from_millis(16));
+        tree.advance_time(WAIT_FRAME);
+        tree.tick_animations(WAIT_FRAME);
         let proposal = tree.last_proposal();
         tree.layout_with_ops(proposal, ops);
-        // Yield the CPU between polls. The loop body is pure in-memory work
-        // (no VSync / OS wait), so without this it would pin a core at 100% and
-        // — on the single tree-owning thread — starve other queued tool calls
-        // for the whole timeout. The sim clock still advances above, so this
-        // doesn't change settle semantics.
-        std::thread::sleep(Duration::from_millis(1));
     }
+    AutomationReply::err(
+        codes::WAIT_TIMEOUT,
+        "wait_for_condition timed out before the predicate held",
+    )
 }
 
 fn condition_met(
@@ -1044,10 +1075,22 @@ fn action_from_str(s: &str) -> Option<accesskit::Action> {
     })
 }
 
-fn modifiers(ctrl: bool, shift: bool, alt: bool, meta: bool) -> Modifiers {
+/// Build a [`Modifiers`] set from the DTO's flags.
+///
+/// `ctrl` is **literal** Control on every platform; `command` is the platform's
+/// primary accelerator — Control on Windows and Linux, Command on macOS.
+/// Keeping them apart is what lets one agent script drive all three platforms:
+/// a Teksilo shortcut declared as `Ctrl+S` resolves to the Command chord on
+/// macOS, so a probe sending literal Control there matches no binding and —
+/// worse — reports success, because the key really was injected. See
+/// [`Modifiers::COMMAND`].
+fn modifiers(ctrl: bool, shift: bool, alt: bool, meta: bool, command: bool) -> Modifiers {
     let mut m = Modifiers::NONE;
     if ctrl {
         m = m | Modifiers::CTRL;
+    }
+    if command {
+        m = m | Modifiers::COMMAND;
     }
     if shift {
         m = m | Modifiers::SHIFT;

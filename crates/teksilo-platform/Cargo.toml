@@ -37,6 +37,9 @@ rfd = { version = "0.17.2", default-features = false, features = [
 ], optional = true }
 async-std = { version = "1", optional = true }
 thiserror = { workspace = true }
+# Only the GUI-free wire types (`Endpoint`, `EndpointFile`) for the
+# `automation-transport` feature; no executor, no GUI.
+teksilo-automation = { workspace = true, optional = true }
 
 [features]
 default = []
@@ -65,6 +68,13 @@ rfd-backend = ["file-dialog", "dep:rfd", "dep:async-std"]
 # mirror a `MenuModel` into the platform's global menu bar. No external
 # deps beyond what each target already links.
 native-menu = []
+
+# Local-IPC transport for the debug-only automation bridge: a Unix-domain
+# socket on Unix, a named pipe on Windows, each bound private to the current
+# user. Pulls in the GUI-free `teksilo-automation` for the shared wire types
+# (`Endpoint` / `EndpointFile`) — no async runtime, and on Windows no new
+# crate: it uses the `windows` bindings this crate already links.
+automation-transport = ["dep:teksilo-automation"]
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
@@ -126,6 +136,15 @@ windows = { workspace = true, features = [
     "Win32_System_Memory",                # GlobalLock / GlobalUnlock
     "Win32_System_SystemServices",        # CF_HDROP / CF_UNICODETEXT clipboard format constants
     "Win32_System_DataExchange",          # RegisterClipboardFormatW (CFSTR_INETURL)
+    # Automation-bridge named-pipe transport (`automation_transport/windows.rs`).
+    # These cost nothing when the `automation-transport` feature is off: cargo
+    # features are additive per-crate, and unused bindings are dead code.
+    "Win32_System_Pipes",                 # CreateNamedPipeW / ConnectNamedPipe / WaitNamedPipeW / PIPE_*
+    "Win32_Storage_FileSystem",           # CreateFileW / ReadFile / WriteFile / FILE_FLAG_OVERLAPPED
+    "Win32_System_IO",                    # OVERLAPPED / GetOverlappedResult / CancelIoEx
+    "Win32_System_Threading",             # CreateEventW / WaitForSingleObject / OpenProcessToken
+    "Win32_Security",                     # SECURITY_ATTRIBUTES / TOKEN_USER / GetTokenInformation
+    "Win32_Security_Authorization",       # ConvertStringSecurityDescriptorToSecurityDescriptorW / ConvertSidToStringSidW
 ] }
 # The `#[implement(IDropTarget)]` COM object in external_dnd/windows.rs makes the
 # `implement` macro emit a crate-root `::windows_core` path, which requires
