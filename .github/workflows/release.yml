@@ -25,7 +25,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       # Stdlib-only Python, no toolchain needed, so it runs first and fails a
       # bad graph in seconds. It exits non-zero on a cycle in the normal/build
@@ -84,7 +84,7 @@ jobs:
     if: ${{ !contains(github.ref_name, '-') }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       # `cargo publish` verify-builds every crate, which needs the same X11 /
       # Wayland / keyboard libraries the test jobs install.
@@ -172,7 +172,7 @@ jobs:
     timeout-minutes: 15
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Extract release notes from CHANGELOG
         id: changelog
