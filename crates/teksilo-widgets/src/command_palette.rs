@@ -226,6 +226,17 @@ impl PaletteState {
         self.reveal(next);
     }
 
+    /// Move the selection to an absolute row (Home / End).
+    fn select_edge(&self, last: bool) {
+        let len = self.rows.borrow().len();
+        if len == 0 {
+            return;
+        }
+        let target = if last { len - 1 } else { 0 };
+        self.set_selected(target);
+        self.reveal(target);
+    }
+
     /// Scroll the minimum distance that brings row `index` into view.
     fn reveal(&self, index: usize) {
         let top = self.top_index.get();
@@ -536,6 +547,29 @@ impl Widget for CommandPalette {
                     key: Key::ArrowUp, ..
                 } => {
                     key_state.step_selection(-1);
+                    EventResponse::Handled
+                }
+                // A palette is a list, and a long result set is exactly
+                // where jumping to an end matters — these were the only list
+                // keys it did not answer.
+                WidgetEvent::KeyDown { key: Key::Home, .. } => {
+                    key_state.select_edge(false);
+                    EventResponse::Handled
+                }
+                WidgetEvent::KeyDown { key: Key::End, .. } => {
+                    key_state.select_edge(true);
+                    EventResponse::Handled
+                }
+                WidgetEvent::KeyDown {
+                    key: Key::PageUp, ..
+                } => {
+                    key_state.step_selection(-(VISIBLE_ROWS as isize));
+                    EventResponse::Handled
+                }
+                WidgetEvent::KeyDown {
+                    key: Key::PageDown, ..
+                } => {
+                    key_state.step_selection(VISIBLE_ROWS as isize);
                     EventResponse::Handled
                 }
                 WidgetEvent::KeyDown {

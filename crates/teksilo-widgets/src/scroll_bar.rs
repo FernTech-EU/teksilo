@@ -473,6 +473,7 @@ impl Widget for ScrollBar {
             let scroll_position = scroll_position.clone();
             let max_scroll = max_scroll.clone();
             let set_scroll = set_scroll.clone();
+            let ratio = self.viewport_ratio.clone();
             handlers = handlers.on_key(move |event, _ctx| {
                 let max = max_scroll.get();
                 if max <= 0.0 {
@@ -505,6 +506,21 @@ impl Widget for ScrollBar {
                             }
                             (_, Key::End) => {
                                 set_scroll(max);
+                                EventResponse::Handled
+                            }
+                            // A page is one viewport of content. The bar
+                            // already knows the ratio it draws its thumb from,
+                            // so `max` (which is content minus viewport)
+                            // scaled by `ratio / (1 - ratio)` recovers the
+                            // viewport in the same units — and it degrades to
+                            // the arrow step when the content barely overflows
+                            // rather than jumping nowhere.
+                            (_, Key::PageUp) => {
+                                set_scroll(scroll_position.get() - page_step(&ratio, max, step));
+                                EventResponse::Handled
+                            }
+                            (_, Key::PageDown) => {
+                                set_scroll(scroll_position.get() + page_step(&ratio, max, step));
                                 EventResponse::Handled
                             }
                             _ => EventResponse::Ignored,
@@ -568,6 +584,25 @@ impl Widget for ScrollBar {
         // parent ScrollView node — exposing the bar itself adds noise without
         // benefit and creates spurious Tab stops in screen readers.
         builder.set_hidden();
+    }
+}
+
+/// One viewport of content, in the same units as the scroll position.
+///
+/// `max` is `content - viewport` and `ratio` is `viewport / content`, so
+/// `viewport = max * ratio / (1 - ratio)`. Falls back to the arrow step where
+/// that is degenerate (a full or near-full viewport), so `PageDown` always
+/// moves rather than silently doing nothing.
+fn page_step(ratio: &teksilo_core::signal::Signal<f32>, max: f32, step: f32) -> f32 {
+    let r = ratio.get().clamp(0.0, 1.0);
+    if r <= 0.0 || r >= 1.0 {
+        return step;
+    }
+    let viewport = max * r / (1.0 - r);
+    if viewport.is_finite() && viewport > step {
+        viewport
+    } else {
+        step
     }
 }
 

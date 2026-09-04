@@ -752,6 +752,33 @@ impl Widget for MenuList {
                             reveal(last, &item_ids, ctx);
                             EventResponse::Handled
                         }
+                        // A long menu (a language list, a recent-files list)
+                        // is the only place these earn their keep, and they
+                        // were the one list chord `MenuList` lacked. A page is
+                        // ten visible rows — menus have no viewport of their
+                        // own to measure, and ten is the step every menu
+                        // implementation that has one uses.
+                        Key::PageUp | Key::PageDown => {
+                            const MENU_PAGE: usize = 10;
+                            let n = visible_indices.len();
+                            if n == 0 {
+                                return EventResponse::Ignored;
+                            }
+                            let pos = focused_index
+                                .get()
+                                .and_then(|f| visible_indices.iter().position(|&v| v == f));
+                            let next_pos = match (*key == Key::PageDown, pos) {
+                                (true, Some(p)) => (p + MENU_PAGE).min(n - 1),
+                                (true, None) => 0,
+                                (false, Some(p)) => p.saturating_sub(MENU_PAGE),
+                                (false, None) => n - 1,
+                            };
+                            let next = visible_indices[next_pos];
+                            focused_index.set(Some(next));
+                            ctx.show_highlight_tooltip(item_ids[next]);
+                            reveal(next, &item_ids, ctx);
+                            EventResponse::Handled
+                        }
                         Key::Enter | Key::Space => {
                             // Activate the focused item via synthetic click —
                             // but only if it is currently visible.
@@ -1362,6 +1389,38 @@ mod tests {
         // 'q' wins the most recent search; Enter activates Quit.
         tree.press_key(Key::Enter, Modifiers::NONE);
         assert_eq!(fired.get(), Some(2));
+    }
+
+    #[test]
+    fn page_keys_step_a_long_menu_and_clamp_at_the_ends() {
+        // A language list or a recents list is long enough for the arrows to
+        // be tedious; these were the one list chord `MenuList` did not answer.
+        let labels: Vec<String> = (0..25).map(|i| format!("Item {i}")).collect();
+        let refs: Vec<&str> = labels.iter().map(|s| s.as_str()).collect();
+        let fired = StdRc::new(StdCell::new(None));
+        let mut tree = light_tree();
+        let menu_id = menu_with_activation_probe(&mut tree, &refs, fired.clone());
+        tree.layout(SizeProposal::with_width(300.0));
+        tree.focus(menu_id);
+
+        // With no focus yet, PageDown enters at the top.
+        tree.press_key(Key::PageDown, Modifiers::NONE);
+        tree.press_key(Key::PageDown, Modifiers::NONE);
+        tree.press_key(Key::Enter, Modifiers::NONE);
+        assert_eq!(fired.get(), Some(10), "one page in from the first row");
+
+        fired.set(None);
+        tree.press_key(Key::PageDown, Modifiers::NONE);
+        tree.press_key(Key::PageDown, Modifiers::NONE);
+        tree.press_key(Key::Enter, Modifiers::NONE);
+        assert_eq!(fired.get(), Some(24), "and it clamps at the last row");
+
+        fired.set(None);
+        tree.press_key(Key::PageUp, Modifiers::NONE);
+        tree.press_key(Key::PageUp, Modifiers::NONE);
+        tree.press_key(Key::PageUp, Modifiers::NONE);
+        tree.press_key(Key::Enter, Modifiers::NONE);
+        assert_eq!(fired.get(), Some(0), "and at the first");
     }
 
     #[test]

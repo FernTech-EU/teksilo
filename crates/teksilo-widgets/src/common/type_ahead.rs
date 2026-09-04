@@ -77,10 +77,15 @@ impl TypeAheadState {
                 st.buffer.clear();
             }
             st.last = Some(now);
-            st.buffer.push(c.to_ascii_lowercase());
+            // Unicode fold, not ASCII: a label like "Élise" or "Über" was
+            // unreachable by type-ahead, because `to_ascii_lowercase` leaves
+            // "É" alone on both sides of the comparison and the search term
+            // never matched. `char::to_lowercase` yields a sequence (ß → ss,
+            // İ → i̇), so extend rather than push.
+            st.buffer.extend(c.to_lowercase());
             st.buffer.clone()
         };
-        // `buffer` is non-empty (just pushed to) so `first` always exists.
+        // `buffer` is non-empty (just extended) so `first` always exists.
         let first = buffer.chars().next().unwrap();
         let term: &str = if buffer.chars().all(|ch| ch == first) {
             &buffer[..first.len_utf8()]
@@ -90,7 +95,7 @@ impl TypeAheadState {
         for offset in 1..=count {
             let i = (current + offset) % count;
             if let Some(text) = label(i) {
-                if text.to_ascii_lowercase().starts_with(term) {
+                if text.to_lowercase().starts_with(term) {
                     return Some(i);
                 }
             }
@@ -151,5 +156,35 @@ mod tests {
             .search('r', i1, rows.len(), timeout, labels(rows))
             .unwrap();
         assert_eq!(i2, 2, "'cr' narrows to Cranberry");
+    }
+
+    #[test]
+    fn an_accented_label_is_reachable() {
+        // `to_ascii_lowercase` leaves "É" alone on both sides, so the term
+        // never matched and every accented row was unreachable by type-ahead —
+        // which for a French or German label set is most of them.
+        let rows: &'static [&'static str] = &["Alpha", "Élise", "Über", "Zulu"];
+        let timeout = DEFAULT_TYPE_AHEAD_TIMEOUT;
+
+        let st = TypeAheadState::new();
+        let hit = st.search('é', 0, rows.len(), timeout, labels(rows));
+        assert_eq!(hit, Some(1), "typing é must find Élise");
+
+        let st = TypeAheadState::new();
+        let hit = st.search('Ü', 1, rows.len(), timeout, labels(rows));
+        assert_eq!(hit, Some(2), "and an upper-case Ü must find Über");
+    }
+
+    #[test]
+    fn folding_is_symmetric_across_the_case_of_the_keystroke() {
+        let rows: &'static [&'static str] = &["alpha", "Beta"];
+        for c in ['b', 'B'] {
+            let st = TypeAheadState::new();
+            assert_eq!(
+                st.search(c, 0, rows.len(), DEFAULT_TYPE_AHEAD_TIMEOUT, labels(rows)),
+                Some(1),
+                "{c} must reach Beta"
+            );
+        }
     }
 }
