@@ -1703,6 +1703,7 @@ impl<T: 'static> Widget for TreeTableView<T> {
             // it off the leading position.
             tree_column_display_pos: tree_display_pos,
             focused_cell: self.focused_cell.clone(),
+            cell_map: self.cell_map.clone(),
             selection_mode: self.selection_mode,
             selection: self.row_selection.clone(),
             cell_selection: self.cell_selection.clone(),
@@ -3239,6 +3240,297 @@ mod tests {
             tt.expand(docs);
         }
         assert_eq!(proxy.visible_count(), 4); // docs, readme, guide, src
+    }
+
+    #[test]
+    fn ctrl_home_keeps_the_column_in_a_treegrid() {
+        use teksilo_core::event::{Key, Modifiers};
+        // The ARIA grid and treegrid patterns disagree here on purpose. A flat
+        // cell grid escalates to the corner; a treegrid "moves focus to the
+        // cell in the first row in the same column as the cell that had
+        // focus". The shared keyboard module used to send both to the corner.
+        let proxy = SortFilterTreeModel::new(sample_tree());
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let id = tree.add(
+            TreeTableView::from_projection(proxy.clone())
+                .add_column(name_col())
+                .add_column(size_col())
+                .row_height(20.0)
+                .selection_mode(TableSelectionMode::MultiCell)
+                .cell_selection(CellSelectionModel::new(TableSelectionMode::MultiCell)),
+        );
+        tree.layout(SizeProposal {
+            width: Some(400.0),
+            height: Some(200.0),
+        });
+        tree.focus(id);
+        let read = |tree: &WidgetTree| {
+            let any = tree.widget_as_any(id).unwrap();
+            let tt = any.downcast_ref::<TreeTableView<&'static str>>().unwrap();
+            tt.focused_cell_signal().get()
+        };
+        {
+            let any = tree.widget_as_any(id).unwrap();
+            let tt = any.downcast_ref::<TreeTableView<&'static str>>().unwrap();
+            tt.set_focused_cell(1, 1);
+        }
+
+        tree.press_key(Key::Home, Modifiers::COMMAND);
+        assert_eq!(read(&tree), Some((0, 1)), "column 1 is kept");
+        tree.press_key(Key::End, Modifiers::COMMAND);
+        assert_eq!(read(&tree), Some((1, 1)), "and kept going the other way");
+    }
+
+    #[test]
+    fn a_row_answers_the_expand_action_it_advertises() {
+        use teksilo_core::accesskit::Action;
+        // A row that sets `expanded` already advertises UIA's ExpandCollapse
+        // pattern — `accesskit_consumer` derives support from the property,
+        // not from the action list — so Windows sends Expand and Collapse
+        // whether or not anything answers. Nothing did.
+        let proxy = SortFilterTreeModel::new(sample_tree());
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let id = tree.add(
+            TreeTableView::from_projection(proxy.clone())
+                .add_column(name_col())
+                .row_height(20.0),
+        );
+        tree.layout(SizeProposal {
+            width: Some(400.0),
+            height: Some(200.0),
+        });
+        assert_eq!(proxy.visible_count(), 2, "roots only");
+
+        // Find the first body row (the header shares Role::Row, so pick the
+        // one that declares an expanded state).
+        let row = {
+            let mut found = None;
+            let mut walker = vec![id];
+            while let Some(w) = walker.pop() {
+                // Discriminate on the advertised action itself: the header
+                // shares `Role::Row` but has no Expand to offer, and a body
+                // row that failed to advertise one is exactly the bug.
+                let node = tree.accessibility_node(w);
+                if node.role() == teksilo_core::accesskit::Role::Row
+                    && node.actions().contains(&Action::Expand)
+                {
+                    found = Some(w);
+                    break;
+                }
+                for c in tree.children(w) {
+                    walker.push(c);
+                }
+            }
+            found.expect("a body row advertising Action::Expand")
+        };
+
+        let mut ops = teksilo_core::window::NoopWindowOps;
+        let handled = tree.dispatch_access_action(
+            teksilo_core::accessibility::widget_id_to_node_id(row),
+            Action::Expand,
+            None,
+            &mut ops,
+        );
+        assert!(handled, "the advertised Expand action must be serviced");
+        // Whichever root the walk reached, it opened: the pattern is no longer
+        // advertised-and-inert. (The walk is stack-ordered, so which of the
+        // two roots it finds is not something to pin down here.)
+        assert!(
+            proxy.visible_count() > 2,
+            "the row actually opened, rather than reporting success and doing nothing"
+        );
+    }
+
+    #[test]
+    fn a_leaf_row_advertises_no_expand() {
+        use teksilo_core::accesskit::Action;
+        // `access_action` advertises as well as handles, so attaching the
+        // ExpandCollapse pair to every row put the pattern on leaves — which
+        // declare no `expanded` state and have nothing to open. That is the
+        // advertised-and-inert bug this whole change set out to remove,
+        // reappearing one level down.
+        let proxy = SortFilterTreeModel::new(sample_tree());
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let id = tree.add(
+            TreeTableView::from_projection(proxy.clone())
+                .add_column(name_col())
+                .row_height(20.0),
+        );
+        tree.layout(SizeProposal {
+            width: Some(400.0),
+            height: Some(200.0),
+        });
+        // Open "docs" so its two leaves are realized.
+        tree.focus(id);
+        {
+            let any = tree.widget_as_any(id).unwrap();
+            let tt = any.downcast_ref::<TreeTableView<&'static str>>().unwrap();
+            tt.set_focused_cell(0, 0);
+        }
+        tree.press_key(
+            teksilo_core::event::Key::ArrowRight,
+            teksilo_core::event::Modifiers::NONE,
+        );
+        tree.layout(SizeProposal {
+            width: Some(400.0),
+            height: Some(200.0),
+        });
+        assert_eq!(proxy.visible_count(), 4);
+
+        // Four visible rows — docs, readme, guide, src — of which exactly two
+        // are branches. Only those two may offer the pattern.
+        let mut rows_with_expand = 0;
+        let mut walker = vec![id];
+        while let Some(w) = walker.pop() {
+            let node = tree.accessibility_node(w);
+            if node.role() == teksilo_core::accesskit::Role::Row
+                && node.actions().contains(&Action::Expand)
+            {
+                rows_with_expand += 1;
+            }
+            for c in tree.children(w) {
+                walker.push(c);
+            }
+        }
+        assert_eq!(
+            rows_with_expand, 2,
+            "only docs and src have children; readme and guide must not \
+             advertise an Expand they cannot perform"
+        );
+    }
+
+    #[test]
+    fn a_tree_table_is_one_tab_stop_and_space_checks_the_focused_cell() {
+        use crate::table_view::CellContext;
+        use teksilo_core::event::{Key, Modifiers};
+
+        let checked = teksilo_core::signal::Signal::new(false);
+        let ck = checked.clone();
+        let proxy = SortFilterTreeModel::new(sample_tree());
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let id = tree.add(
+            TreeTableView::from_projection(proxy)
+                .add_column(name_col())
+                .add_column(Column::<&str>::new(
+                    "done",
+                    lit!("Done"),
+                    move |_r, _: &CellContext| Box::new(crate::Checkbox::new(ck.clone())),
+                ))
+                .row_height(20.0),
+        );
+        let p = SizeProposal {
+            width: Some(400.0),
+            height: Some(200.0),
+        };
+        tree.layout(p);
+        let stops = tree.tab_stops_within(id);
+        assert_eq!(stops.len(), 1, "one Tab stop; got {}", stops.len());
+
+        tree.focus(id);
+        {
+            let any = tree.widget_as_any(id).unwrap();
+            let tt = any.downcast_ref::<TreeTableView<&'static str>>().unwrap();
+            tt.set_focused_cell(0, 1); // the checkbox column
+        }
+        tree.press_key(Key::Space, Modifiers::NONE);
+        tree.layout(p);
+        assert!(checked.get(), "Space reaches the focused cell's checkbox");
+    }
+
+    #[test]
+    fn left_on_a_leaf_ascends_to_the_parent() {
+        use teksilo_core::event::{Key, Modifiers};
+        let proxy = SortFilterTreeModel::new(sample_tree());
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let id = tree.add(
+            TreeTableView::from_projection(proxy.clone())
+                .add_column(name_col())
+                .row_height(20.0),
+        );
+        tree.layout(SizeProposal {
+            width: Some(400.0),
+            height: Some(200.0),
+        });
+        tree.focus(id);
+        let focus_at = |tree: &WidgetTree, row: usize| {
+            let any = tree.widget_as_any(id).unwrap();
+            let tt = any.downcast_ref::<TreeTableView<&'static str>>().unwrap();
+            tt.set_focused_cell(row, 0);
+        };
+        let read = |tree: &WidgetTree| {
+            let any = tree.widget_as_any(id).unwrap();
+            let tt = any.downcast_ref::<TreeTableView<&'static str>>().unwrap();
+            tt.focused_cell_signal().get()
+        };
+
+        focus_at(&tree, 0);
+        tree.press_key(Key::ArrowRight, Modifiers::NONE); // open "docs"
+        assert_eq!(proxy.visible_count(), 4);
+
+        // "readme" is a leaf, so Left ascends rather than collapsing. Left was
+        // a dead key here before — `TreeView` has ascended since it shipped.
+        focus_at(&tree, 1);
+        tree.press_key(Key::ArrowLeft, Modifiers::NONE);
+        assert_eq!(read(&tree), Some((0, 0)), "back on docs");
+        assert_eq!(proxy.visible_count(), 4, "and nothing collapsed on the way");
+
+        // A second press does collapse, because docs is open.
+        tree.press_key(Key::ArrowLeft, Modifiers::NONE);
+        assert_eq!(proxy.visible_count(), 2);
+    }
+
+    #[test]
+    fn asterisk_expands_the_subtree_of_a_tree_table_row() {
+        use teksilo_core::event::{Key, Modifiers};
+        let proxy = SortFilterTreeModel::new(sample_tree());
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let id = tree.add(
+            TreeTableView::from_projection(proxy.clone())
+                .add_column(name_col())
+                .row_height(20.0),
+        );
+        tree.layout(SizeProposal {
+            width: Some(400.0),
+            height: Some(200.0),
+        });
+        tree.focus(id);
+        {
+            let any = tree.widget_as_any(id).unwrap();
+            let tt = any.downcast_ref::<TreeTableView<&'static str>>().unwrap();
+            tt.set_focused_cell(0, 0);
+        }
+        assert_eq!(proxy.visible_count(), 2, "roots only");
+
+        tree.press_key(Key::Character('*'), Modifiers::NONE);
+        assert_eq!(proxy.visible_count(), 4, "docs and its two children");
+
+        // `-` folds it back one level.
+        tree.press_key(Key::Character('-'), Modifiers::NONE);
+        assert_eq!(proxy.visible_count(), 2);
+    }
+
+    #[test]
+    fn a_shifted_arrow_does_not_expand_a_tree_table_row() {
+        use teksilo_core::event::{Key, Modifiers};
+        let proxy = SortFilterTreeModel::new(sample_tree());
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let id = tree.add(
+            TreeTableView::from_projection(proxy.clone())
+                .add_column(name_col())
+                .row_height(20.0),
+        );
+        tree.layout(SizeProposal {
+            width: Some(400.0),
+            height: Some(200.0),
+        });
+        tree.focus(id);
+        {
+            let any = tree.widget_as_any(id).unwrap();
+            let tt = any.downcast_ref::<TreeTableView<&'static str>>().unwrap();
+            tt.set_focused_cell(0, 0);
+        }
+        tree.press_key(Key::ArrowRight, Modifiers::SHIFT);
+        assert_eq!(proxy.visible_count(), 2, "Shift belongs to the selection");
     }
 
     #[test]
@@ -5912,7 +6204,12 @@ mod tests {
                 .width(ColumnWidth::Fixed(col_w)),
             );
         }
-        let id = tree.add(tv.row_height(20.0));
+        // Cell selection: this fixture drives the *column* cursor.
+        let id = tree.add(
+            tv.row_height(20.0)
+                .selection_mode(TableSelectionMode::MultiCell)
+                .cell_selection(CellSelectionModel::new(TableSelectionMode::MultiCell)),
+        );
         tree.layout(SizeProposal {
             width: Some(table_w),
             height: Some(200.0),

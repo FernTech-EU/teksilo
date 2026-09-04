@@ -16,6 +16,24 @@
 //! exact per-flat-index callback (`item_height_fn`), and auto-measured
 //! (`auto_item_height` — height-for-width per row, scroll-anchored).
 //!
+//! ## Keyboard
+//!
+//! Arrows move the cursor; `Home` / `End` reach the first and last **visible**
+//! row and `PageUp` / `PageDown` a viewport of them, each moving the selection
+//! unless the accelerator is held, which moves the cursor alone. `Shift`
+//! extends a range from the anchor and `Ctrl+Shift` extends it additively.
+//!
+//! `→` opens a closed node and, on one already open, moves into its first
+//! child; `←` closes an open node and, on a leaf or a closed one, ascends to
+//! the parent. Both mirror under RTL. `*` expands the whole subtree, `+` and
+//! `-` one level. `Space` selects or toggles, `Enter` activates, `Ctrl+A` and
+//! `Ctrl+Shift+A` select and deselect everything, and `Ctrl+Arrow` with
+//! `Ctrl+Space` build a disjoint selection. On macOS `⌘↓` opens a row, `⌘↑`
+//! ascends, and `⌥→`/`⌥←` expand or collapse a subtree.
+//!
+//! The full table, and why some of it is platform-specific, is in
+//! [docs/data-view-keyboard.md](https://github.com/ferntech-eu/teksilo/blob/main/docs/data-view-keyboard.md).
+//!
 //! ## Example
 //!
 //! ```rust

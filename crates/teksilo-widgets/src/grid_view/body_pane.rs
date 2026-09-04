@@ -308,6 +308,13 @@ impl<T: 'static> Widget for GridBodyPane<T> {
                 a11y_name,
             ));
 
+            // A grid is *one* Tab stop — the 2-D cursor is the navigation.
+            // Anything focusable the delegate put in a tile would otherwise be
+            // a stop of its own, and only realized tiles exist, so the Tab
+            // order would follow the scroll position. `Space` reaches such a
+            // control through the focused tile's published keyboard toggle.
+            ctx.set_tab_stop(tile_id, false);
+
             // Selection click. Returns Ignored so the gesture arena still
             // sees the PointerDown (drag-to-reorder / marquee). Deferred
             // collapse: pressing an already-selected tile (no modifiers)
@@ -459,7 +466,32 @@ impl<T: 'static> Widget for GridBodyPane<T> {
                 let activate = self.on_tile_activate.clone();
                 let activate_on = self.activate_on;
                 let idx = i;
+                // ScrollIntoView rides along: it is the one scroll action all
+                // three AccessKit adapters consume (UIA `IScrollItemProvider`,
+                // AppKit `accessibilityScrollToVisible`, AT-SPI `ScrollTo`),
+                // and a tile that has scrolled out of the realized window has
+                // no other way back for assistive tech.
+                let strategy = self.strategy.clone();
+                let scroll_y = self.scroll_y.clone();
+                let viewport_h = self.viewport_height.clone();
+                let viewport_w = self.viewport_width.clone();
                 extra = extra.on_access_action(move |action, ctx| {
+                    if action == teksilo_core::accesskit::Action::ScrollIntoView {
+                        let delta = strategy.scroll_delta_to_reveal(
+                            idx,
+                            scroll_y.get(),
+                            viewport_h.get(),
+                            viewport_w.get(),
+                            super::layout::ScrollAnchor::Auto,
+                        );
+                        if delta.abs() > 0.01 {
+                            // The strategy's delta is already bounded by the
+                            // content, and the pane clamps `scroll_y` on the
+                            // next layout, so a floor at zero is enough here.
+                            scroll_y.set((scroll_y.get() + delta).max(0.0));
+                        }
+                        return EventResponse::Handled;
+                    }
                     if action != teksilo_core::accesskit::Action::Click {
                         return EventResponse::Ignored;
                     }

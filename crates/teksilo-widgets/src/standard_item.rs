@@ -629,10 +629,14 @@ impl StandardListItem {
             // name. With `labels_hidden(true)` the visual label is
             // suppressed; without an `access_label*` override the AT
             // node would be a nameless `Role::CheckBox`. Using
-            // `access_label_literal` on the WidgetBuilder applies an
-            // override AFTER Checkbox::accessibility runs, so the
-            // screen reader announces e.g. "checkbox, checked, Save"
-            // when the user navigates to it.
+            // `access_label` on the WidgetBuilder applies an override
+            // AFTER Checkbox::accessibility runs, so the screen reader
+            // announces e.g. "checkbox, checked, Save" when the user
+            // navigates to it.
+            //
+            // The checkbox publishes its own keyboard toggle (see
+            // `Checkbox::build`), which is what the view's `Space` finds once
+            // the row is out of the Tab order — nothing to wire here.
             use teksilo_core::widget_builder::WidgetBuilder;
             let cb = match kind {
                 CheckboxKind::TwoState(s) => Checkbox::new(s),

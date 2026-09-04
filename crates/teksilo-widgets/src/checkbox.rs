@@ -510,6 +510,24 @@ impl Widget for Checkbox {
 
         ctx.apply_self_handlers(handler_set);
 
+        // Publish the toggle for the data views' `Space`.
+        //
+        // A row, cell or tile in a data view is not a focus target and its
+        // subtree is kept out of the Tab order — a listbox or grid is one Tab
+        // stop, and a per-row stop would make the Tab order follow the scroll
+        // position. That leaves a checkbox inside one with no keyboard route,
+        // so the view asks the focused row/cell/tile what `Space` should do
+        // and finds this. Published by the checkbox itself rather than by each
+        // row type, so it works for a hand-written cell delegate too.
+        //
+        // Costs nothing outside a data view: the marker is only ever read by
+        // one, and a standalone checkbox keeps its own focus and its own
+        // Space/Enter handling above.
+        {
+            let kind_space = self.kind.clone();
+            ctx.set_keyboard_toggle(ctx.self_id(), std::rc::Rc::new(move || kind_space.toggle()));
+        }
+
         vec![root_id]
     }
 

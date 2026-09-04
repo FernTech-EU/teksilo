@@ -435,7 +435,8 @@ impl<T: 'static> Widget for TreeBodyPane<T> {
                 };
 
                 let cell_a11y =
-                    CellA11y::new(leading_id, flat_idx + 2, display_pos + 1, is_selected);
+                    CellA11y::new(leading_id, flat_idx + 2, display_pos + 1, is_selected)
+                        .with_grid_cell_role(selection_mode.is_cell_mode());
                 let cell_id = ctx.add(cell_a11y);
 
                 // Click-to-edit, from this column's `EditTriggers`. Per cell,
@@ -489,6 +490,16 @@ impl<T: 'static> Widget for TreeBodyPane<T> {
             )
             .a11y_hidden();
             let row_inner_id = ctx.add(row_widget);
+
+            // A grid is *one* Tab stop — the cell cursor is the navigation, and
+            // a control the delegate put in a cell (a checkbox column, most
+            // often) must not become a Tab stop of its own. Only realized rows
+            // exist, so a per-cell stop would make the Tab order follow the
+            // scroll position: the count tracking the realized window. Honoured up the ancestor chain by
+            // `tab_stop_effective`, so one call covers every cell in the row.
+            // `Space` reaches the control through the focused cell's published
+            // keyboard toggle instead.
+            ctx.set_tab_stop(row_inner_id, false);
             // 1-based position among this row's siblings. A loading row (no
             // metadata resolved yet) reports 1, the same "unknowable yet"
             // fallback already used for depth/has_children. `sibling_pos` also
@@ -499,7 +510,7 @@ impl<T: 'static> Widget for TreeBodyPane<T> {
             } else {
                 self.source.sibling_pos(flat_idx).0
             };
-            let tree_row_id = ctx.add(TreeRowA11y::new(
+            let row_a11y = TreeRowA11y::new(
                 row_inner_id,
                 flat_idx + 2,
                 depth + 1,
@@ -510,7 +521,63 @@ impl<T: 'static> Widget for TreeBodyPane<T> {
                 },
                 row_selected,
                 position_in_set,
-            ));
+            );
+            // A row that declares `set_expanded` already advertises UIA's
+            // ExpandCollapse pattern — `accesskit_consumer` derives support
+            // from the property, not from the action list — so Windows will
+            // send Expand and Collapse whether or not anything answers them.
+            // Nothing did: the pattern was advertised and inert.
+            //
+            // ScrollIntoView is the one scroll action all three adapters
+            // actually consume (UIA `IScrollItemProvider`, AppKit
+            // `accessibilityScrollToVisible`, AT-SPI `ScrollTo`), and rows are
+            // not focusable nodes, so without it a screen reader has no way to
+            // bring one into view.
+            let tree_row_id = {
+                use teksilo_core::accesskit::Action;
+                use teksilo_core::widget_builder::WidgetBuilder;
+                let src = self.source.clone();
+                let metrics = self.row_metrics.clone();
+                let scroll = self.scroll_y.clone();
+                let viewport = self.viewport_height.clone();
+                let with_scroll = row_a11y.access_action(Action::ScrollIntoView, {
+                    let count = self.source.clone();
+                    move |_ctx| {
+                        let vh = viewport.get();
+                        let cur = scroll.get();
+                        let new = {
+                            let mut m = metrics.borrow_mut();
+                            let total = m.total_height(count.visible_count());
+                            let max = (total - vh).max(0.0);
+                            m.scroll_for_ensure_visible(flat_idx, cur, vh, max)
+                        };
+                        if (new - cur).abs() > f32::EPSILON {
+                            scroll.set(new);
+                        }
+                    }
+                });
+                // Only a branch gets the ExpandCollapse pair. `access_action`
+                // advertises as well as handles, so attaching it to every row
+                // would put the pattern on leaves — which declare no
+                // `expanded` state and have nothing to open — reintroducing
+                // on leaves exactly the advertised-and-inert bug this fixes
+                // for branches.
+                ctx.add_boxed(if has_children {
+                    Box::new(
+                        with_scroll
+                            .access_action(Action::Expand, {
+                                let src = src.clone();
+                                move |_ctx| src.set_expanded_at(flat_idx, true)
+                            })
+                            .access_action(Action::Collapse, {
+                                let src = src.clone();
+                                move |_ctx| src.set_expanded_at(flat_idx, false)
+                            }),
+                    )
+                } else {
+                    Box::new(with_scroll)
+                })
+            };
             self.row_entries.push((flat_idx, tree_row_id));
 
             // Row handlers: selection click + optional drag-to-reorder

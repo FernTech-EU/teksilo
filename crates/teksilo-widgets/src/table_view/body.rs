@@ -260,6 +260,13 @@ impl Widget for BodyRow {
         builder.set_role(teksilo_core::accesskit::Role::Row);
         builder.set_selected(self.selected);
         builder.set_row_index(self.row_index_1based);
+        // Advertised, not just handled: every adapter gates its scroll
+        // pattern on the node *supporting* the action (UIA's
+        // `IScrollItemProvider`, AppKit's `accessibilityScrollToVisible`,
+        // AT-SPI's `ScrollTo`), so a row whose pane installs the handler
+        // through `on_access_action` alone is still unreachable to a real
+        // screen reader. The handler itself lives on the body pane.
+        builder.add_action(teksilo_core::accesskit::Action::ScrollIntoView);
     }
 
     fn children(&self) -> Vec<WidgetId> {

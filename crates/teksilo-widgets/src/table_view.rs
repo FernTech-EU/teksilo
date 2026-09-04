@@ -1763,6 +1763,7 @@ impl<T: 'static> Widget for TableView<T> {
             // to be a position the cursor can actually occupy.
             tree_column_display_pos: 0,
             focused_cell: self.focused_cell.clone(),
+            cell_map: self.cell_map.clone(),
             selection_mode: self.selection_mode,
             selection: self.row_selection.clone(),
             cell_selection: self.cell_selection.clone(),
@@ -2805,7 +2806,27 @@ impl<T: 'static> Widget for TableView<T> {
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
-        builder.set_role(teksilo_core::accesskit::Role::Table);
+        // `Role::Grid` for a table the keyboard can drive, `Role::Table` for
+        // one that is pure structure.
+        //
+        // Not a semantic nicety: `accesskit_consumer`'s
+        // `is_container_with_selectable_children` — the sole gate on UIA's
+        // `ISelectionProvider` — lists `Grid`, `ListBox`, `ListGrid`, `Tree`
+        // and `TreeGrid`, and **not** `Table`. Announced as a table, a
+        // multi-select `TableView` exposed no `CanSelectMultiple` and no
+        // `GetSelection` to Narrator, NVDA or JAWS at all. The two roles map
+        // identically on macOS (`NSAccessibilityTableRole`) and AT-SPI
+        // (`AtspiRole::Table`), so this is a Windows fix that costs nothing
+        // elsewhere.
+        //
+        // `Role::ListGrid` looks like the closer match — its own doc says it
+        // exists for Chromium's `TableView` — but `accesskit_macos` maps it to
+        // `NSAccessibilityUnknownRole`, which is worse than either.
+        builder.set_role(if self.selection_mode == TableSelectionMode::None {
+            teksilo_core::accesskit::Role::Table
+        } else {
+            teksilo_core::accesskit::Role::Grid
+        });
         if let Some(ref label) = self.a11y_label {
             builder.set_name(label.resolve_now());
         }

@@ -6,6 +6,8 @@
 
 use super::*;
 
+use crate::common::{list_nav, tree_expand};
+
 impl<T: 'static> TreeView<T> {
     /// The realized row the keyboard is on: the navigation cursor when there
     /// is one, else the first selected row.
@@ -299,6 +301,9 @@ impl<T: 'static> Widget for TreeView<T> {
             let vh_for_nav = self.viewport_height.clone();
             let vb_for_nav = self.viewport_bounds.clone();
             let ta_state = self.type_ahead.clone();
+            // Visible index → realized row id, so `Space` can ask the row
+            // whether it publishes a keyboard toggle.
+            let row_map_for_key = self.row_map.clone();
             let ta_label = self.type_ahead_label.clone();
             let ta_timeout = self.type_ahead_timeout;
 
@@ -355,15 +360,55 @@ impl<T: 'static> Widget for TreeView<T> {
                         new_scroll
                     };
 
-                    // Select all visible rows — Ctrl+A, ⌘A on macOS (Multi only).
+                    // Select all visible rows — Ctrl+A, ⌘A on macOS (Multi only);
+                    // with Shift, deselect instead (GTK's Ctrl+Shift+A, which
+                    // no other toolkit spends on anything else).
                     if modifiers.command() && matches!(key, Key::A) {
                         if let Some(ref sel) = sel_for_key
                             && sel.mode() == teksilo_data::SelectionMode::Multi
                         {
-                            sel.select_all(visible_count);
+                            if modifiers.shift() {
+                                sel.clear();
+                            } else {
+                                sel.select_all(visible_count);
+                            }
                             return teksilo_core::event::EventResponse::Handled;
                         }
                         return teksilo_core::event::EventResponse::Ignored;
+                    }
+
+                    // The three recursive / one-level expand chords, read
+                    // *before* type-ahead: `Key::to_char` answers for `*`, `+`
+                    // and `-`, so a view that searched first would swallow them
+                    // and hunt for a row named "*".
+                    if let Some(chord) = list_nav::tree_chord(*key, *modifiers) {
+                        let handled = with_subtree_ops(&source, |ops| match chord {
+                            list_nav::TreeChord::ExpandSubtree => {
+                                tree_expand::expand_subtree(ops, current)
+                            }
+                            list_nav::TreeChord::CollapseSubtree => {
+                                tree_expand::collapse_subtree(ops, current)
+                            }
+                            list_nav::TreeChord::ExpandOne => match source.meta(current) {
+                                Some(m) if m.has_children && !m.is_expanded => {
+                                    source.set_expanded_at(current, true);
+                                    true
+                                }
+                                _ => false,
+                            },
+                            list_nav::TreeChord::CollapseOne => match source.meta(current) {
+                                Some(m) if m.is_expanded => {
+                                    source.set_expanded_at(current, false);
+                                    true
+                                }
+                                _ => false,
+                            },
+                        });
+                        return if handled {
+                            teksilo_core::event::EventResponse::Handled
+                        } else {
+                            teksilo_core::event::EventResponse::Ignored
+                        };
                     }
 
                     // Type-ahead: a printable char (no Ctrl/Alt/Super) jumps the
@@ -423,155 +468,278 @@ impl<T: 'static> Widget for TreeView<T> {
                         return teksilo_core::event::EventResponse::Ignored;
                     }
 
-                    // ArrowRight: expand / ArrowLeft: collapse or move to parent
-                    match key {
-                        teksilo_core::event::Key::ArrowRight => {
-                            if let Some(meta) = source.meta(current)
-                                && meta.has_children
-                                && !meta.is_expanded
-                            {
-                                source.set_expanded_at(current, true);
-                                return teksilo_core::event::EventResponse::Handled;
-                            }
+                    // Move the cursor to `to`, selecting and revealing it the
+                    // way every other focus-moving key does.
+                    let move_to = |to: usize, ctx: &mut teksilo_core::widget::EventContext| {
+                        set_focus(to);
+                        if let Some(ref sel) = sel_for_key {
+                            sel.select(to);
                         }
-                        teksilo_core::event::Key::ArrowLeft => {
-                            if let Some(meta) = source.meta(current) {
-                                if meta.is_expanded {
-                                    source.set_expanded_at(current, false);
-                                    return teksilo_core::event::EventResponse::Handled;
-                                }
-                                // If leaf or collapsed, move to parent.
-                                if let Some(parent_idx) = source.parent_index(current) {
-                                    set_focus(parent_idx);
-                                    if let Some(ref sel) = sel_for_key {
-                                        sel.select(parent_idx);
-                                    }
-                                    // Reveal the parent row (own viewport, then
-                                    // any enclosing scroll area) like every
-                                    // other focus-moving key.
-                                    let new_scroll = ensure_visible(parent_idx);
-                                    crate::common::row_metrics::chase_row_into_outer_view(
-                                        ctx,
-                                        &metrics_for_nav,
-                                        vb_for_nav.get(),
-                                        parent_idx,
-                                        new_scroll,
-                                    );
-                                    return teksilo_core::event::EventResponse::Handled;
-                                }
-                            }
+                        let new_scroll = ensure_visible(to);
+                        crate::common::row_metrics::chase_row_into_outer_view(
+                            ctx,
+                            &metrics_for_nav,
+                            vb_for_nav.get(),
+                            to,
+                            new_scroll,
+                        );
+                    };
+
+                    // Expand a closed node; on one already open, move into its
+                    // first child. Both halves are required by the ARIA tree
+                    // pattern, and Windows documents the same two-stage rule
+                    // ("display the current selection, or select the first
+                    // subfolder") — so descending takes two presses, which is
+                    // what makes the first press safe on a large subtree.
+                    let expand_or_descend = |ctx: &mut teksilo_core::widget::EventContext| {
+                        let Some(meta) = source.meta(current) else {
+                            return false;
+                        };
+                        if meta.has_children && !meta.is_expanded {
+                            source.set_expanded_at(current, true);
+                            return true;
                         }
-                        _ => {}
+                        match with_subtree_ops(&source, |ops| {
+                            crate::common::tree_expand::first_child(ops, current)
+                        }) {
+                            Some(child) => {
+                                move_to(child, ctx);
+                                true
+                            }
+                            None => false,
+                        }
+                    };
+
+                    // Collapse an open node; on a leaf or a closed one, ascend
+                    // to the parent. Shared with the macOS ⌘↑ alias below,
+                    // which means exactly this.
+                    let collapse_or_ascend = |ctx: &mut teksilo_core::widget::EventContext| {
+                        let Some(meta) = source.meta(current) else {
+                            return false;
+                        };
+                        if meta.is_expanded {
+                            source.set_expanded_at(current, false);
+                            return true;
+                        }
+                        match source.parent_index(current) {
+                            Some(parent) => {
+                                move_to(parent, ctx);
+                                true
+                            }
+                            None => false,
+                        }
+                    };
+
+                    // The chevron points along the reading direction, so the
+                    // two arrows swap under RTL — `TreeTableView` has read
+                    // `is_rtl()` here since it shipped; this one did not, so a
+                    // right-to-left tree collapsed on the wrong key.
+                    //
+                    // Only the unmodified arrows expand: with Shift held the
+                    // key belongs to the range extension below, and with the
+                    // accelerator to the cursor-only move. ⌘ is excluded too,
+                    // or a macOS ⌘←/⌘→ — which the platform spends on history,
+                    // never on an outline — would silently open and close rows.
+                    if !modifiers.shift()
+                        && !modifiers.ctrl()
+                        && !modifiers.alt()
+                        && !modifiers.super_key()
+                    {
+                        let rtl = ctx.is_rtl();
+                        let expand_key = if rtl { Key::ArrowLeft } else { Key::ArrowRight };
+                        let collapse_key = if rtl { Key::ArrowRight } else { Key::ArrowLeft };
+                        if *key == expand_key && expand_or_descend(ctx) {
+                            return teksilo_core::event::EventResponse::Handled;
+                        }
+                        if *key == collapse_key && collapse_or_ascend(ctx) {
+                            return teksilo_core::event::EventResponse::Handled;
+                        }
+                    }
+
+                    // macOS spends a few chords on a tree that the other
+                    // desktops spend elsewhere, and all of them are dead here
+                    // otherwise: ⌘↓ opens the row, ⌘↑ ascends to the parent
+                    // (Finder's "enclosing folder", VS Code's `list.collapse`),
+                    // and ⌥→/⌥← expand or collapse a whole subtree — AppKit's
+                    // own `expandItem:expandChildren:`, documented as the
+                    // Option-click twin. Off macOS this is `None` and free.
+                    if let Some(alias) = list_nav::mac_alias(*key, *modifiers, ctx.is_rtl()) {
+                        let handled = match alias {
+                            list_nav::MacAlias::Activate => {
+                                if let Some(ref sel) = sel_for_key {
+                                    sel.select(current);
+                                }
+                                if let Some(ref cb) = activate_key {
+                                    cb(current, ctx);
+                                }
+                                true
+                            }
+                            list_nav::MacAlias::CollapseOrParent => collapse_or_ascend(ctx),
+                            list_nav::MacAlias::ExpandSubtree => with_subtree_ops(&source, |ops| {
+                                tree_expand::expand_subtree(ops, current)
+                            }),
+                            list_nav::MacAlias::CollapseSubtree => {
+                                with_subtree_ops(&source, |ops| {
+                                    tree_expand::collapse_subtree(ops, current)
+                                })
+                            }
+                        };
+                        return if handled {
+                            teksilo_core::event::EventResponse::Handled
+                        } else {
+                            teksilo_core::event::EventResponse::Ignored
+                        };
                     }
 
                     // Navigation keys. With no cursor yet, the first Down lands ON
                     // the first row and the first Up on the last one — stepping
                     // to row 1 would silently skip the row the user is looking at
                     // (see `ListView`, same rule).
-                    let new_idx = match key {
-                        Key::ArrowDown => Some(match cursor {
-                            None => 0,
-                            Some(c) => (c + 1).min(visible_count - 1),
-                        }),
-                        Key::ArrowUp => Some(match cursor {
-                            None => visible_count - 1,
-                            Some(c) => c.saturating_sub(1),
-                        }),
-                        Key::Home => Some(0),
-                        Key::End => Some(visible_count - 1),
-                        // Page keys: jump one viewport of rows by visual distance
-                        // (variable heights honored), then ensure-visible scrolls.
-                        Key::PageDown => {
-                            let vh = vh_for_nav.get();
-                            let r = {
-                                let mut m = metrics_for_nav.borrow_mut();
-                                m.resize(visible_count);
-                                let target = m.row_top(current) + vh;
-                                m.row_at(target)
-                            };
-                            Some(if r == current {
-                                (current + 1).min(visible_count - 1)
-                            } else {
-                                r.min(visible_count - 1)
-                            })
-                        }
-                        Key::PageUp => {
-                            let vh = vh_for_nav.get();
-                            let r = {
-                                let mut m = metrics_for_nav.borrow_mut();
-                                m.resize(visible_count);
-                                let target = (m.row_top(current) - vh).max(0.0);
-                                m.row_at(target)
-                            };
-                            Some(if r == current {
-                                current.saturating_sub(1)
-                            } else {
-                                r
-                            })
-                        }
-                        Key::Enter => {
-                            // Enter activates the focused row (open / commit).
-                            if let Some(ref sel) = sel_for_key {
-                                sel.select(current);
+                    // The edge-and-page family, resolved once in
+                    // `common::list_nav`. `End` is the last **visible** row,
+                    // not the model's last leaf — the ARIA tree pattern states
+                    // it outright ("the last node that is focusable without
+                    // opening a node"), and Qt and GTK both scan the current
+                    // flattening rather than the model.
+                    let nav = list_nav::nav_chord(*key, *modifiers, list_nav::ViewKind::Linear);
+                    let new_idx = if let Some(chord) = nav {
+                        Some(match chord.movement {
+                            list_nav::NavMove::First | list_nav::NavMove::RowFirst => 0,
+                            list_nav::NavMove::Last | list_nav::NavMove::RowLast => {
+                                visible_count - 1
                             }
-                            if let Some(ref cb) = activate_key {
-                                cb(current, ctx);
-                            }
-                            return teksilo_core::event::EventResponse::Handled;
-                        }
-                        Key::Space if modifiers.ctrl() => {
-                            // Ctrl+Space toggles the focused row's selection —
-                            // the keyboard equivalent of Ctrl+click. Pairs
-                            // with Ctrl+Arrow's cursor-only move so a user can
-                            // walk the cursor without disturbing the existing
-                            // selection, then Ctrl+Space to add rows one at a
-                            // time.
-                            //
-                            // Both halves stay on literal `ctrl()`, macOS
-                            // included: ⌘Space is Spotlight and never reaches
-                            // an app, and ⌘↑/⌘↓ already mean something else in
-                            // a Finder list. This Explorer-style cursor pair
-                            // has no ⌘ counterpart, so Control keeps it
-                            // reachable and out of the platform's way.
-                            if let Some(ref sel) = sel_for_key {
-                                sel.toggle(current);
-                            }
-                            set_focus(current);
-                            return teksilo_core::event::EventResponse::Handled;
-                        }
-                        Key::Space => {
-                            // Space moves/toggles the selection but does NOT
-                            // activate (Enter is the activator). Multi: toggle;
-                            // Single: select.
-                            if let Some(ref sel) = sel_for_key {
-                                if sel.mode() == teksilo_data::SelectionMode::Multi {
-                                    sel.toggle(current);
+                            list_nav::NavMove::Page { down } => {
+                                let vh = vh_for_nav.get();
+                                let r = {
+                                    let mut m = metrics_for_nav.borrow_mut();
+                                    m.resize(visible_count);
+                                    let target = if down {
+                                        m.row_top(current) + vh
+                                    } else {
+                                        (m.row_top(current) - vh).max(0.0)
+                                    };
+                                    m.row_at(target)
+                                };
+                                if r == current && down {
+                                    (current + 1).min(visible_count - 1)
+                                } else if r == current {
+                                    current.saturating_sub(1)
                                 } else {
-                                    sel.select(current);
+                                    r.min(visible_count - 1)
                                 }
                             }
-                            set_focus(current);
-                            return teksilo_core::event::EventResponse::Handled;
+                        })
+                    } else {
+                        match key {
+                            Key::ArrowDown => Some(match cursor {
+                                None => 0,
+                                Some(c) => (c + 1).min(visible_count - 1),
+                            }),
+                            Key::ArrowUp => Some(match cursor {
+                                None => visible_count - 1,
+                                Some(c) => c.saturating_sub(1),
+                            }),
+                            Key::Enter => {
+                                // Enter activates the focused row (open / commit).
+                                if let Some(ref sel) = sel_for_key {
+                                    sel.select(current);
+                                }
+                                if let Some(ref cb) = activate_key {
+                                    cb(current, ctx);
+                                }
+                                return teksilo_core::event::EventResponse::Handled;
+                            }
+                            Key::Space if modifiers.ctrl() => {
+                                // Ctrl+Space toggles the focused row's selection —
+                                // the keyboard equivalent of Ctrl+click. Pairs
+                                // with Ctrl+Arrow's cursor-only move so a user can
+                                // walk the cursor without disturbing the existing
+                                // selection, then Ctrl+Space to add rows one at a
+                                // time.
+                                //
+                                // Both halves stay on literal `ctrl()`, macOS
+                                // included: ⌘Space is Spotlight and never reaches
+                                // an app, and ⌘↑/⌘↓ already mean something else in
+                                // a Finder list. This Explorer-style cursor pair
+                                // has no ⌘ counterpart, so Control keeps it
+                                // reachable and out of the platform's way.
+                                if let Some(ref sel) = sel_for_key {
+                                    sel.toggle(current);
+                                }
+                                set_focus(current);
+                                return teksilo_core::event::EventResponse::Handled;
+                            }
+                            Key::Space => {
+                                // A row carrying a checkbox reads Space as
+                                // "check this" — see the `ListView` sibling for
+                                // why. Ctrl+Space above keeps toggling the
+                                // selection, and a row without a checkbox
+                                // publishes no toggle, so it falls through to
+                                // the selection exactly as before.
+                                if let Some(row_id) = row_map_for_key
+                                    .borrow()
+                                    .iter()
+                                    .find(|(i, _)| *i == current)
+                                    .map(|(_, id)| *id)
+                                {
+                                    let sel_fallback = sel_for_key.clone();
+                                    ctx.row_space_activate(
+                                        row_id,
+                                        std::rc::Rc::new(move || {
+                                            if let Some(ref sel) = sel_fallback {
+                                                if sel.mode() == teksilo_data::SelectionMode::Multi
+                                                {
+                                                    sel.toggle(current);
+                                                } else {
+                                                    sel.select(current);
+                                                }
+                                            }
+                                        }),
+                                    );
+                                    set_focus(current);
+                                    return teksilo_core::event::EventResponse::Handled;
+                                }
+                                if let Some(ref sel) = sel_for_key {
+                                    if sel.mode() == teksilo_data::SelectionMode::Multi {
+                                        sel.toggle(current);
+                                    } else {
+                                        sel.select(current);
+                                    }
+                                }
+                                set_focus(current);
+                                return teksilo_core::event::EventResponse::Handled;
+                            }
+                            _ => None,
                         }
-                        _ => None,
                     };
 
                     if let Some(idx) = new_idx {
                         set_focus(idx);
-                        // Ctrl+Arrow (no Shift) moves the keyboard cursor
-                        // only, leaving the selection untouched — see the
-                        // `ListView` sibling implementation for the full
-                        // rationale. Only the arrows opt in; Home/End/
-                        // PageUp/PageDown keep selecting under Ctrl. Literal
-                        // `ctrl()` — see the Ctrl+Space arm above.
-                        let cursor_only = modifiers.ctrl()
-                            && !modifiers.shift()
-                            && matches!(key, Key::ArrowUp | Key::ArrowDown);
-                        if !cursor_only && let Some(ref sel) = sel_for_key {
-                            if modifiers.shift() {
-                                sel.extend_to(idx);
-                            } else {
-                                sel.select(idx);
+                        // What the chord does to the selection — see the
+                        // `ListView` sibling for the full rationale. The
+                        // edge-and-page keys carry their own answer from
+                        // `list_nav`; the arrows keep reading literal `ctrl()`,
+                        // which is what leaves ⌘↑/⌘↓ free for the macOS
+                        // aliases above.
+                        let op = match nav {
+                            Some(chord) => chord.selection,
+                            None if modifiers.ctrl()
+                                && !modifiers.shift()
+                                && matches!(key, Key::ArrowUp | Key::ArrowDown) =>
+                            {
+                                list_nav::SelectionOp::Suppress
+                            }
+                            None if modifiers.shift() => list_nav::SelectionOp::Extend,
+                            None => list_nav::SelectionOp::Replace,
+                        };
+                        if let Some(ref sel) = sel_for_key {
+                            match op {
+                                list_nav::SelectionOp::Replace => sel.select(idx),
+                                list_nav::SelectionOp::Suppress => {}
+                                list_nav::SelectionOp::Extend => sel.extend_to(idx),
+                                list_nav::SelectionOp::ExtendAdditive => {
+                                    sel.extend_to_additive(idx)
+                                }
                             }
                         }
                         let new_scroll = ensure_visible(idx);
@@ -1145,4 +1313,27 @@ impl<T: 'static> Widget for TreeView<T> {
     fn clips_children(&self) -> bool {
         true
     }
+}
+
+/// Run `f` against a [`SubtreeOps`] view of `source`.
+///
+/// The recursive expand walks the *live* flattening, so it needs the three
+/// closures rebuilt against this source rather than a snapshot — expanding a
+/// row changes what the next read returns, which is the whole point.
+fn with_subtree_ops<T: 'static, R>(
+    source: &std::rc::Rc<crate::tree_source::TreeSource<T>>,
+    f: impl FnOnce(&crate::common::tree_expand::SubtreeOps) -> R,
+) -> R {
+    let count = || source.visible_count();
+    let row = |i: usize| {
+        source
+            .meta(i)
+            .map(|m| (m.depth, m.has_children, m.is_expanded))
+    };
+    let set = |i: usize, on: bool| source.set_expanded_at(i, on);
+    f(&crate::common::tree_expand::SubtreeOps {
+        visible_count: &count,
+        row: &row,
+        set_expanded: &set,
+    })
 }

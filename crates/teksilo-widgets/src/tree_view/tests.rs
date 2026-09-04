@@ -3312,3 +3312,244 @@ fn an_unselected_tree_nominates_no_row() {
         "with no selection the tree itself is the focused node"
     );
 }
+
+// ── Expand / collapse chords and the edge keys ──────────────────────────────
+
+/// `sample_tree` wired to a Multi selection, focused, with the cursor on the
+/// first root. Returns the tree, the view id and the selection.
+fn keyboard_tree() -> (WidgetTree, WidgetId, teksilo_data::SelectionModel) {
+    use teksilo_data::{SelectionMode, SelectionModel};
+    let model = sample_tree();
+    let selection = SelectionModel::new(SelectionMode::Multi);
+    let sel = selection.clone();
+    let mut wtree = WidgetTree::new();
+    let tv_id = wtree.add(
+        TreeView::new(model, |_item, entry, _s| {
+            Box::new(FixedLeaf(100.0 + entry.depth as f32 * 20.0, 28.0))
+        })
+        .item_height(28.0)
+        .selection(sel),
+    );
+    wtree.layout(SizeProposal::exact(400.0, 300.0));
+    wtree.focus(tv_id);
+    selection.select(0);
+    wtree.layout(SizeProposal::exact(400.0, 300.0));
+    (wtree, tv_id, selection)
+}
+
+fn visible_rows(wtree: &WidgetTree, tv_id: WidgetId) -> usize {
+    row_ids(wtree, tv_id).len()
+}
+
+#[test]
+fn asterisk_expands_the_whole_subtree_in_one_press() {
+    use teksilo_core::event::{Key, Modifiers};
+    let (mut wtree, tv_id, _sel) = keyboard_tree();
+    assert_eq!(visible_rows(&wtree, tv_id), 3, "roots only");
+
+    wtree.press_key(Key::Character('*'), Modifiers::NONE);
+    wtree.layout(SizeProposal::exact(400.0, 300.0));
+    // A opens and so do its children; B and C are outside the subtree.
+    assert_eq!(visible_rows(&wtree, tv_id), 5, "A, A1, A2, B, C");
+}
+
+#[test]
+fn plus_and_minus_expand_and_collapse_one_level() {
+    use teksilo_core::event::{Key, Modifiers};
+    let (mut wtree, tv_id, _sel) = keyboard_tree();
+
+    wtree.press_key(Key::Character('+'), Modifiers::NONE);
+    wtree.layout(SizeProposal::exact(400.0, 300.0));
+    assert_eq!(visible_rows(&wtree, tv_id), 5);
+
+    wtree.press_key(Key::Character('-'), Modifiers::NONE);
+    wtree.layout(SizeProposal::exact(400.0, 300.0));
+    assert_eq!(visible_rows(&wtree, tv_id), 3);
+}
+
+#[test]
+fn a_modified_asterisk_is_left_to_the_application() {
+    use teksilo_core::event::{Key, Modifiers};
+    let (mut wtree, tv_id, _sel) = keyboard_tree();
+    wtree.press_key(Key::Character('*'), Modifiers::COMMAND);
+    wtree.layout(SizeProposal::exact(400.0, 300.0));
+    assert_eq!(visible_rows(&wtree, tv_id), 3, "still folded");
+}
+
+#[test]
+fn right_expands_then_descends_into_the_first_child() {
+    use teksilo_core::event::{Key, Modifiers};
+    let (mut wtree, tv_id, sel) = keyboard_tree();
+
+    // First press opens A and leaves the cursor on it — the two-stage rule the
+    // ARIA tree pattern and Windows both specify.
+    wtree.press_key(Key::ArrowRight, Modifiers::NONE);
+    wtree.layout(SizeProposal::exact(400.0, 300.0));
+    assert_eq!(visible_rows(&wtree, tv_id), 5);
+    assert_eq!(sel.selected_indices(), vec![0], "focus stays on A");
+
+    // Second press moves into A1.
+    wtree.press_key(Key::ArrowRight, Modifiers::NONE);
+    wtree.layout(SizeProposal::exact(400.0, 300.0));
+    assert_eq!(sel.selected_indices(), vec![1], "now on A1");
+}
+
+#[test]
+fn left_collapses_then_ascends_to_the_parent() {
+    use teksilo_core::event::{Key, Modifiers};
+    let (mut wtree, tv_id, sel) = keyboard_tree();
+    wtree.press_key(Key::ArrowRight, Modifiers::NONE); // open A
+    wtree.press_key(Key::ArrowRight, Modifiers::NONE); // onto A1
+    wtree.layout(SizeProposal::exact(400.0, 300.0));
+    assert_eq!(sel.selected_indices(), vec![1]);
+
+    // A1 is a leaf, so Left ascends rather than collapsing.
+    wtree.press_key(Key::ArrowLeft, Modifiers::NONE);
+    wtree.layout(SizeProposal::exact(400.0, 300.0));
+    assert_eq!(sel.selected_indices(), vec![0], "back on A");
+
+    // A is open, so this one collapses instead of ascending again.
+    wtree.press_key(Key::ArrowLeft, Modifiers::NONE);
+    wtree.layout(SizeProposal::exact(400.0, 300.0));
+    assert_eq!(visible_rows(&wtree, tv_id), 3);
+}
+
+#[test]
+fn a_shifted_arrow_extends_the_selection_instead_of_expanding() {
+    use teksilo_core::event::{Key, Modifiers};
+    let (mut wtree, tv_id, _sel) = keyboard_tree();
+    // Shift+Right used to reach the expand arm, which read no modifiers at all.
+    wtree.press_key(Key::ArrowRight, Modifiers::SHIFT);
+    wtree.layout(SizeProposal::exact(400.0, 300.0));
+    assert_eq!(visible_rows(&wtree, tv_id), 3, "the tree must not open");
+}
+
+#[test]
+fn home_and_end_reach_the_first_and_last_visible_row() {
+    use teksilo_core::event::{Key, Modifiers};
+    let (mut wtree, _tv_id, sel) = keyboard_tree();
+
+    wtree.press_key(Key::End, Modifiers::NONE);
+    wtree.layout(SizeProposal::exact(400.0, 300.0));
+    assert_eq!(sel.selected_indices(), vec![2], "C, the last *visible* row");
+
+    // Opening A adds two rows, so End must follow the new flattening rather
+    // than a remembered count.
+    wtree.press_key(Key::Home, Modifiers::NONE);
+    wtree.press_key(Key::Character('*'), Modifiers::NONE);
+    wtree.press_key(Key::End, Modifiers::NONE);
+    wtree.layout(SizeProposal::exact(400.0, 300.0));
+    assert_eq!(sel.selected_indices(), vec![4]);
+}
+
+#[test]
+fn the_accelerator_walks_the_cursor_without_selecting() {
+    use teksilo_core::event::{Key, Modifiers};
+    let (mut wtree, _tv_id, sel) = keyboard_tree();
+    sel.select(0);
+    wtree.press_key(Key::End, Modifiers::COMMAND);
+    wtree.layout(SizeProposal::exact(400.0, 300.0));
+    assert_eq!(sel.selected_indices(), vec![0], "selection untouched");
+}
+
+#[test]
+fn shift_end_then_shift_home_leaves_a_range_not_the_whole_tree() {
+    use teksilo_core::event::{Key, Modifiers};
+    let (mut wtree, _tv_id, sel) = keyboard_tree();
+    wtree.press_key(Key::Character('*'), Modifiers::NONE); // 5 visible rows
+    sel.select(2);
+
+    wtree.press_key(Key::End, Modifiers::SHIFT);
+    wtree.layout(SizeProposal::exact(400.0, 300.0));
+    assert_eq!(sel.selected_indices(), vec![2, 3, 4]);
+
+    wtree.press_key(Key::Home, Modifiers::SHIFT);
+    wtree.layout(SizeProposal::exact(400.0, 300.0));
+    assert_eq!(sel.selected_indices(), vec![0, 1, 2]);
+}
+
+#[test]
+fn rtl_swaps_the_expand_and_collapse_arrows() {
+    use teksilo_core::environment::LayoutDirection;
+    use teksilo_core::event::{Key, Modifiers};
+    let (mut wtree, tv_id, _sel) = keyboard_tree();
+    wtree.set_layout_direction(LayoutDirection::RightToLeft);
+    wtree.layout(SizeProposal::exact(400.0, 300.0));
+
+    // The chevron points along the reading direction, so under RTL it is Left
+    // that opens. `TreeTableView` has read `is_rtl()` here since it shipped;
+    // this view did not, and collapsed on the wrong key.
+    wtree.press_key(Key::ArrowLeft, Modifiers::NONE);
+    wtree.layout(SizeProposal::exact(400.0, 300.0));
+    assert_eq!(
+        visible_rows(&wtree, tv_id),
+        5,
+        "ArrowLeft expands under RTL"
+    );
+
+    wtree.press_key(Key::ArrowRight, Modifiers::NONE);
+    wtree.layout(SizeProposal::exact(400.0, 300.0));
+    assert_eq!(visible_rows(&wtree, tv_id), 3, "ArrowRight collapses");
+}
+
+// ── The row checkbox: out of the Tab order, reachable by Space ─────────────
+
+#[test]
+fn a_tree_is_one_tab_stop_and_space_checks_the_focused_row() {
+    use crate::StandardTreeItem;
+    use teksilo_core::event::{Key, Modifiers};
+    use teksilo_data::{CheckState, SelectionMode, SelectionModel, TreeCheckedModel};
+
+    let model = sample_tree();
+    let checks: TreeCheckedModel<&'static str> = TreeCheckedModel::new(model.clone());
+    let selection = SelectionModel::new(SelectionMode::Multi);
+    let (sel, ck) = (selection.clone(), checks.clone());
+    let mut wtree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+    let tv = wtree.add(
+        TreeView::new(model.clone(), move |_item, entry, selected| {
+            let mut row = StandardTreeItem::new(lit!("row"))
+                .from_entry(entry)
+                .selected(selected);
+            row = if entry.has_children {
+                // Branches are tristate, so this also pins that Space never
+                // *sets* Indeterminate — that state belongs to the model's
+                // descendant aggregation, not to a keystroke.
+                row.tristate_checkbox(ck.signal_for(entry.node_id))
+            } else {
+                row.checkbox(ck.bool_signal_for(entry.node_id))
+            };
+            Box::new(row)
+        })
+        .item_height(28.0)
+        .selection(sel),
+    );
+    let p = SizeProposal::exact(400.0, 300.0);
+    wtree.layout(p);
+    wtree.focus(tv);
+
+    let mut seen = std::collections::BTreeSet::new();
+    for _ in 0..12 {
+        wtree.press_key(Key::Tab, Modifiers::NONE);
+        wtree.layout(p);
+        seen.insert(wtree.focused());
+    }
+    assert_eq!(seen.len(), 1, "the tree is a single Tab stop");
+
+    // Cursor on the first root ("A", a branch) — Space checks it, and the
+    // model aggregates that down to its children.
+    selection.select(0);
+    wtree.layout(p);
+    wtree.press_key(Key::Space, Modifiers::NONE);
+    wtree.layout(p);
+    let first = model.root(0);
+    assert_eq!(checks.signal_for(first).get(), CheckState::Checked);
+    assert_eq!(selection.selected_indices(), vec![0], "selection untouched");
+
+    wtree.press_key(Key::Space, Modifiers::NONE);
+    wtree.layout(p);
+    assert_eq!(
+        checks.signal_for(first).get(),
+        CheckState::Unchecked,
+        "a second press unchecks; Space never sets Indeterminate"
+    );
+}

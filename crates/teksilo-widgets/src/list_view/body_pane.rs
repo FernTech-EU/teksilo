@@ -281,6 +281,18 @@ impl<T: 'static> Widget for ListBodyPane<T> {
                     i,
                 ));
 
+                // A listbox is *one* Tab stop, with a cursor moving inside it.
+                // Any focusable the delegate put in a row — the checkbox
+                // `StandardListItem` embeds, most often — would otherwise be a
+                // Tab stop of its own, which makes the Tab order track the
+                // virtualization window: how many stops there are, and which,
+                // then depends on the scroll position. Suppressing the row
+                // subtree is honoured up the ancestor chain by
+                // `tab_stop_effective`, so one call covers whatever the
+                // delegate built. The control stays clickable, and `Space`
+                // reaches it through the row's keyboard-toggle target.
+                ctx.set_tab_stop(child_id, false);
+
                 // Selection click handling: plain click selects,
                 // Ctrl+click toggles, Shift+click extends range.
                 if let Some(ref sel) = self.row_selection {

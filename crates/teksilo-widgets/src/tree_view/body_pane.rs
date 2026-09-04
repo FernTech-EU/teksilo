@@ -273,6 +273,11 @@ impl<T: 'static> Widget for TreeViewBodyPane<T> {
                     selected,
                 ));
 
+                // One Tab stop for the whole tree — see the sibling call in
+                // `list_view/body_pane.rs` for why a per-row stop makes the
+                // Tab order a function of the scroll position.
+                ctx.set_tab_stop(child_id, false);
+
                 // Click handling: selection + expand/collapse for branch rows.
                 {
                     let sel_click = self.row_selection.clone();

@@ -125,7 +125,7 @@ fn fixed_plus_flex_split_pane_minus_scrollbar() {
     // name Flex(1) gets 388 - 60 = 328.
     let (tree, table, _) = build_table(50);
     let info = tree.accessibility_node(table);
-    assert_eq!(info.role(), Role::Table);
+    assert_eq!(info.role(), Role::Grid);
 
     // Walk to the first row, then to its first cell, and check x/widths.
     let row_ids = first_visible_row_cells(&tree, table);
@@ -321,10 +321,14 @@ fn selection_auto_adjusts_on_remove() {
 // ── Accessibility ──────────────────────────────────────────────────────────
 
 #[test]
-fn root_role_is_table_with_row_and_col_count() {
+fn root_role_is_grid_with_row_and_col_count() {
+    // `Role::Grid`, not `Role::Table`: a table the keyboard can drive is the
+    // interactive ARIA pattern, and `Role::Table` is the one role
+    // `accesskit_consumer` will not treat as a selection container — so a
+    // multi-select table announced that way exposed no selection to UIA.
     let (tree, table, _) = build_table(50);
     let info = tree.accessibility_node(table);
-    assert_eq!(info.role(), Role::Table);
+    assert_eq!(info.role(), Role::Grid);
     let row_count = count_role(&tree, table, Role::Row);
     let header_count = count_role(&tree, table, Role::ColumnHeader);
     let cell_count = count_role(&tree, table, Role::Cell);
@@ -1038,8 +1042,24 @@ fn row_click_moves_focus_so_arrow_nav_resumes_there() {
 }
 
 #[test]
-fn home_end_jump_within_row() {
+fn home_end_reach_the_first_and_last_row_when_rows_are_the_unit() {
+    // A row-selection table has no cell cursor for "start of the row" to mean
+    // anything against, so Home is the first *row* — which is what Explorer's
+    // details view and every list control do. The column is carried along
+    // rather than reset, since nothing here selects a column.
     let (mut tree, table, _) = build_table(5);
+    focus_at(&mut tree, table, 1, 1);
+    tree.press_key(Key::End, Modifiers::NONE);
+    assert_eq!(read_focused_cell(&tree, table), Some((4, 1)));
+    tree.press_key(Key::Home, Modifiers::NONE);
+    assert_eq!(read_focused_cell(&tree, table), Some((0, 1)));
+}
+
+#[test]
+fn home_end_jump_within_row_when_cells_are_the_unit() {
+    // With a cell cursor the row *is* a navigable unit, so Home is its start —
+    // the ARIA grid rule, and Qt's `QTableView`.
+    let (mut tree, table, _) = build_cell_table(5);
     focus_at(&mut tree, table, 1, 0);
     tree.press_key(Key::End, Modifiers::NONE);
     assert_eq!(read_focused_cell(&tree, table), Some((1, 1)));
@@ -1048,13 +1068,74 @@ fn home_end_jump_within_row() {
 }
 
 #[test]
-fn ctrl_home_end_jump_to_corners() {
-    let (mut tree, table, _) = build_table(5);
+fn ctrl_home_end_jump_to_corners_in_a_cell_grid() {
+    let (mut tree, table, _) = build_cell_table(5);
     focus_at(&mut tree, table, 2, 1);
     tree.press_key(Key::End, Modifiers::COMMAND);
     assert_eq!(read_focused_cell(&tree, table), Some((4, 1)));
     tree.press_key(Key::Home, Modifiers::COMMAND);
     assert_eq!(read_focused_cell(&tree, table), Some((0, 0)));
+}
+
+#[test]
+fn the_accelerator_moves_the_row_cursor_without_selecting() {
+    use teksilo_data::{SelectionMode, SelectionModel};
+    let model = rows(10);
+    let sel = SelectionModel::new(SelectionMode::Multi);
+    let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+    let table = tree.add(
+        TableView::new(model)
+            .add_column(id_col())
+            .add_column(name_col())
+            .row_height(20.0)
+            .selection_mode(TableSelectionMode::MultiRow)
+            .selection(sel.clone()),
+    );
+    tree.layout(SizeProposal {
+        width: Some(400.0),
+        height: Some(200.0),
+    });
+    focus_at(&mut tree, table, 3, 0);
+    sel.select(3);
+
+    tree.press_key(Key::End, Modifiers::COMMAND);
+    assert_eq!(
+        read_focused_cell(&tree, table),
+        Some((9, 0)),
+        "cursor moved"
+    );
+    assert_eq!(sel.selected_indices(), vec![3], "selection did not");
+
+    // And Shift+End extends from the anchor instead.
+    tree.press_key(Key::End, Modifiers::SHIFT);
+    assert_eq!(sel.selected_indices(), (3..=9).collect::<Vec<_>>());
+    tree.press_key(Key::Home, Modifiers::SHIFT);
+    assert_eq!(
+        sel.selected_indices(),
+        (0..=3).collect::<Vec<_>>(),
+        "reversing shrinks the range"
+    );
+}
+
+/// The same fixture as `build_table`, in Excel-style cell selection.
+fn build_cell_table(n: u32) -> (WidgetTree, WidgetId, ListModel<Row>) {
+    let model = rows(n);
+    let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+    let table = tree.add(
+        TableView::new(model.clone())
+            .add_column(id_col())
+            .add_column(name_col())
+            .row_height(20.0)
+            .selection_mode(TableSelectionMode::MultiCell)
+            .cell_selection(super::CellSelectionModel::new(
+                TableSelectionMode::MultiCell,
+            )),
+    );
+    tree.layout(SizeProposal {
+        width: Some(400.0),
+        height: Some(200.0),
+    });
+    (tree, table, model)
 }
 
 fn read_scroll(tree: &WidgetTree, table: WidgetId) -> f32 {
@@ -1108,10 +1189,12 @@ fn arrow_nav_scroll_follows_focused_row() {
         "Ctrl+Home must scroll back to the top"
     );
 
-    // Ctrl+End jumps focus AND scroll to reveal the last row.
+    // Ctrl+End jumps focus AND scroll to reveal the last row. The column is
+    // carried rather than reset: this table selects rows, so there is no cell
+    // cursor for "the last column" to be the corner of.
     tree.press_key(Key::End, Modifiers::COMMAND);
     tree.layout(proposal);
-    assert_eq!(read_focused_cell(&tree, table), Some((99, 1)));
+    assert_eq!(read_focused_cell(&tree, table), Some((99, 0)));
     assert!(
         read_scroll(&tree, table) > 0.0,
         "Ctrl+End must scroll to reveal the last row"
@@ -2054,7 +2137,7 @@ fn reorderable_on_list_model_lays_out_cleanly() {
         height: Some(200.0),
     });
     let info = tree.accessibility_node(table);
-    assert_eq!(info.role(), Role::Table);
+    assert_eq!(info.role(), Role::Grid);
 }
 
 // ── Empty state ────────────────────────────────────────────────────────────
@@ -2637,7 +2720,12 @@ fn build_pinned_scroll_table(middle_w: f32, table_w: f32) -> (WidgetTree, Widget
                 .width(ColumnWidth::Fixed(60.0))
                 .pinned(super::PinnedSide::Trailing),
             )
-            .row_height(20.0),
+            .row_height(20.0)
+            // Cell selection: this fixture drives the *column* cursor.
+            .selection_mode(TableSelectionMode::MultiCell)
+            .cell_selection(super::CellSelectionModel::new(
+                TableSelectionMode::MultiCell,
+            )),
     );
     tree.layout(SizeProposal {
         width: Some(table_w),
@@ -2661,7 +2749,15 @@ fn build_wide_unpinned_table(col_w: f32, n: usize, table_w: f32) -> (WidgetTree,
             .width(ColumnWidth::Fixed(col_w)),
         );
     }
-    let table = tree.add(tv.row_height(20.0));
+    // Cell selection: this fixture exists to drive the *column* cursor, and
+    // a row-selection table has no column cursor for Home/End to move.
+    let table = tree.add(
+        tv.row_height(20.0)
+            .selection_mode(TableSelectionMode::MultiCell)
+            .cell_selection(super::CellSelectionModel::new(
+                TableSelectionMode::MultiCell,
+            )),
+    );
     tree.layout(SizeProposal {
         width: Some(table_w),
         height: Some(200.0),
@@ -2920,16 +3016,20 @@ fn resize_handle_hit_tests_correctly_under_scroll() {
 
 /// The first (lowest row_index) BODY `Role::Row` — distinguished from the
 /// header (same `Role::Row`, but `Role::ColumnHeader` children once
-/// band-flattened) by having at least one `Role::Cell` child.
+/// band-flattened) by having at least one cell child. Either cell role
+/// counts: a cell-selection table announces `Role::GridCell` so its selected
+/// state reaches UIA, and a row-selection one stays on `Role::Cell`.
 fn first_body_row_id(tree: &WidgetTree, root: WidgetId) -> WidgetId {
     let mut walker = vec![root];
     while let Some(id) = walker.pop() {
         if tree.accessibility_node(id).role() == Role::Row {
             let flat = flatten_through_bands(tree, tree.children(id));
-            if flat
-                .iter()
-                .any(|&c| tree.accessibility_node(c).role() == Role::Cell)
-            {
+            if flat.iter().any(|&c| {
+                matches!(
+                    tree.accessibility_node(c).role(),
+                    Role::Cell | Role::GridCell
+                )
+            }) {
                 return id;
             }
         }
@@ -3375,7 +3475,22 @@ fn rtl_swaps_arrow_key_column_navigation() {
         Some((0, 0)),
         "RTL ArrowRight should step back toward column 0"
     );
-    // Home/End stay logical (leading = column 0) regardless of direction.
+    // Home/End move rows here (this table selects rows), so they leave the
+    // column alone in either direction — there is nothing for RTL to mirror.
+    tree.press_key(Key::End, Modifiers::NONE);
+    assert_eq!(read_focused_cell(&tree, table), Some((9, 0)));
+    tree.press_key(Key::Home, Modifiers::NONE);
+    assert_eq!(read_focused_cell(&tree, table), Some((0, 0)));
+}
+
+#[test]
+fn rtl_leaves_home_and_end_logical_in_a_cell_grid() {
+    use teksilo_core::environment::LayoutDirection;
+    let (mut tree, table, _) = build_cell_table(5);
+    tree.set_layout_direction(LayoutDirection::RightToLeft);
+    focus_at(&mut tree, table, 0, 0);
+    // Leading is column 0 whichever way the columns run, so Home/End are the
+    // one pair the mirroring must *not* touch.
     tree.press_key(Key::End, Modifiers::NONE);
     assert_eq!(read_focused_cell(&tree, table), Some((0, 1)));
     tree.press_key(Key::Home, Modifiers::NONE);
@@ -4605,4 +4720,354 @@ mod resize_grip {
             frame.decorations.iter().map(|d| d.rect).collect::<Vec<_>>()
         );
     }
+}
+
+// ── Editor release, and the spreadsheet selection chords ───────────────────
+
+#[test]
+fn an_open_editor_keeps_the_keys_it_needs() {
+    // Rows are not focusable nodes, so a key the editor ignores bubbles
+    // straight to the table. A single-line editor does nothing with PageDown,
+    // and the table used to page the cursor out from under the edit.
+    let (mut tree, table, _) = build_table(50);
+    focus_at(&mut tree, table, 5, 0);
+    {
+        let any = tree.widget_as_any(table).unwrap();
+        let tv = any.downcast_ref::<TableView<Row>>().unwrap();
+        tv.editing_cell_signal().set(Some((5, 0)));
+    }
+
+    for key in [Key::PageDown, Key::Home, Key::End, Key::PageUp] {
+        tree.press_key(key, Modifiers::NONE);
+        assert_eq!(
+            read_focused_cell(&tree, table),
+            Some((5, 0)),
+            "{key:?} belongs to the editor while one is open"
+        );
+    }
+
+    // Escape still reaches the table — it is about the edit, not the text.
+    tree.press_key(Key::Escape, Modifiers::NONE);
+    let any = tree.widget_as_any(table).unwrap();
+    let tv = any.downcast_ref::<TableView<Row>>().unwrap();
+    assert_eq!(tv.editing_cell_signal().get(), None);
+}
+
+#[test]
+fn ctrl_space_selects_the_column_and_shift_space_the_row() {
+    // The ARIA grid pattern and Excel both read these two this way. Reading
+    // them as the file manager's "toggle the focused item" would take a
+    // spreadsheet user's two most-used selection chords.
+    let model = rows(4);
+    let cs = super::CellSelectionModel::new(TableSelectionMode::MultiCell);
+    let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+    let table = tree.add(
+        TableView::new(model)
+            .add_column(id_col())
+            .add_column(name_col())
+            .row_height(20.0)
+            .selection_mode(TableSelectionMode::MultiCell)
+            .cell_selection(cs.clone()),
+    );
+    tree.layout(SizeProposal {
+        width: Some(400.0),
+        height: Some(200.0),
+    });
+    focus_at(&mut tree, table, 1, 1);
+
+    tree.press_key(Key::Space, Modifiers::CTRL);
+    let got: Vec<_> = cs.selection_signal().get().into_iter().collect();
+    assert_eq!(got, vec![(0, 1), (1, 1), (2, 1), (3, 1)], "the column");
+
+    tree.press_key(Key::Space, Modifiers::SHIFT);
+    let got: Vec<_> = cs.selection_signal().get().into_iter().collect();
+    assert_eq!(got, vec![(1, 0), (1, 1)], "the row");
+}
+
+#[test]
+fn ctrl_shift_a_deselects_a_multi_row_table() {
+    use teksilo_data::{SelectionMode, SelectionModel};
+    let model = rows(6);
+    let sel = SelectionModel::new(SelectionMode::Multi);
+    let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+    let table = tree.add(
+        TableView::new(model)
+            .add_column(id_col())
+            .row_height(20.0)
+            .selection_mode(TableSelectionMode::MultiRow)
+            .selection(sel.clone()),
+    );
+    tree.layout(SizeProposal {
+        width: Some(400.0),
+        height: Some(200.0),
+    });
+    tree.focus(table);
+
+    tree.press_key(Key::A, Modifiers::COMMAND);
+    assert_eq!(sel.count(), 6);
+    tree.press_key(Key::A, Modifiers::COMMAND | Modifiers::SHIFT);
+    assert_eq!(sel.count(), 0);
+}
+
+#[test]
+fn a_non_selectable_table_stays_pure_structure() {
+    // Nothing to select means nothing to drive, so `Role::Table` is right
+    // there — the static-structure ARIA role, and what a screen reader should
+    // read in browse mode rather than as a navigable grid.
+    let model = rows(3);
+    let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+    let table = tree.add(
+        TableView::new(model)
+            .add_column(id_col())
+            .row_height(20.0)
+            .selection_mode(TableSelectionMode::None),
+    );
+    tree.layout(SizeProposal {
+        width: Some(400.0),
+        height: Some(200.0),
+    });
+    assert_eq!(tree.accessibility_node(table).role(), Role::Table);
+}
+
+#[test]
+fn a_cell_selection_table_announces_grid_cells() {
+    // `Role::Cell` gets no UIA `SelectionItem` pattern from AccessKit, so a
+    // selected cell announced that way never reports `IsSelected` on Windows.
+    // `Role::GridCell` does, and maps identically on macOS and AT-SPI.
+    let (tree, table, _) = build_cell_table(3);
+    assert!(
+        count_role(&tree, table, Role::GridCell) > 0,
+        "cell-selection tables announce GridCell"
+    );
+
+    let (tree, table, _) = build_table(3);
+    assert_eq!(
+        count_role(&tree, table, Role::GridCell),
+        0,
+        "a row-selection table's cells are not the selectable unit"
+    );
+    assert!(count_role(&tree, table, Role::Cell) > 0);
+}
+
+#[test]
+fn a_row_answers_the_scroll_into_view_an_assistive_client_sends() {
+    // The one scroll action all three AccessKit adapters actually consume —
+    // UIA's `IScrollItemProvider`, AppKit's `accessibilityScrollToVisible`,
+    // AT-SPI's `ScrollTo`. Rows are not focusable nodes, so without it a
+    // screen reader has no way to bring one into view. `ListView` and
+    // `TreeView` have answered it since they shipped; the tables did not.
+    let (mut tree, table, _) = build_table(100);
+    tree.layout(SizeProposal {
+        width: Some(400.0),
+        height: Some(200.0),
+    });
+    assert_eq!(read_scroll(&tree, table), 0.0);
+
+    // Scroll away, then ask a realized row to reveal itself. The id is
+    // resolved *after* the relayout: the pane rebuilds its rows on scroll, so
+    // one captured earlier would name a destroyed widget.
+    {
+        let any = tree.widget_as_any(table).unwrap();
+        let tv = any.downcast_ref::<TableView<Row>>().unwrap();
+        tv.scroll_y_signal().set(600.0);
+    }
+    tree.layout(SizeProposal {
+        width: Some(400.0),
+        height: Some(200.0),
+    });
+    let row = first_body_row_id(&tree, table);
+    let mut ops = teksilo_core::window::NoopWindowOps;
+    let handled = tree.dispatch_access_action(
+        teksilo_core::accessibility::widget_id_to_node_id(row),
+        teksilo_core::accesskit::Action::ScrollIntoView,
+        None,
+        &mut ops,
+    );
+    assert!(handled, "ScrollIntoView must be serviced");
+    tree.layout(SizeProposal {
+        width: Some(400.0),
+        height: Some(200.0),
+    });
+    // And it actually moved the viewport, rather than reporting success and
+    // doing nothing: the row the walker named sits below the visible band, so
+    // revealing it scrolls down to its bottom edge.
+    assert!(
+        read_scroll(&tree, table) > 600.0,
+        "ScrollIntoView must move the viewport toward the row"
+    );
+}
+
+// ── Regressions from the data-view keyboard review ─────────────────────────
+
+#[test]
+fn a_minus_still_opens_the_editor_in_a_flat_table() {
+    // `-` is unshifted on a US board, so the tree chords claimed it before
+    // the type-to-edit arm ever ran — and a flat table has no subtree to
+    // expand, so the key simply vanished. Starting a negative number in an
+    // `ANY_KEY` column is exactly the case that broke.
+    use std::cell::Cell;
+    use std::rc::Rc;
+    let fired = Rc::new(Cell::new(0));
+    let f = fired.clone();
+    let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+    let table = tree.add(
+        TableView::new(rows(5))
+            .add_column(id_col().editable(true))
+            .add_column(name_col())
+            .row_height(20.0)
+            .edit_triggers(super::EditTriggers::F2 | super::EditTriggers::ANY_KEY)
+            .on_cell_edit_request(move |_, _, _| f.set(f.get() + 1)),
+    );
+    tree.layout(SizeProposal {
+        width: Some(400.0),
+        height: Some(200.0),
+    });
+    focus_at(&mut tree, table, 0, 0);
+    tree.press_key(Key::Character('-'), Modifiers::NONE);
+    assert_eq!(fired.get(), 1, "the flat table's editor must still open");
+}
+
+#[test]
+fn ctrl_space_stays_a_toggle_in_a_single_cell_table() {
+    // "Select the column" has no reading for a mode that holds one cell, and
+    // performing it broke the mode's own invariant.
+    let model = rows(4);
+    let cs = super::CellSelectionModel::new(TableSelectionMode::SingleCell);
+    let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+    let table = tree.add(
+        TableView::new(model)
+            .add_column(id_col())
+            .add_column(name_col())
+            .row_height(20.0)
+            .selection_mode(TableSelectionMode::SingleCell)
+            .cell_selection(cs.clone()),
+    );
+    tree.layout(SizeProposal {
+        width: Some(400.0),
+        height: Some(200.0),
+    });
+    focus_at(&mut tree, table, 1, 1);
+
+    tree.press_key(Key::Space, Modifiers::CTRL);
+    let got: Vec<_> = cs.selection_signal().get().into_iter().collect();
+    assert_eq!(got, vec![(1, 1)], "one cell, not the whole column");
+}
+
+#[test]
+fn a_row_advertises_the_scroll_into_view_it_answers() {
+    // Every adapter gates its scroll pattern on the node *supporting* the
+    // action, so handling it without advertising it left the row unreachable
+    // to a real screen reader even though a synthetic dispatch worked.
+    use teksilo_core::accesskit::Action;
+    let (tree, table, _) = build_table(50);
+    let row = first_body_row_id(&tree, table);
+    assert!(
+        tree.accessibility_node(row)
+            .actions()
+            .contains(&Action::ScrollIntoView),
+        "the row must advertise the action, not only handle it"
+    );
+}
+
+// ── A cell's own controls ──────────────────────────────────────────────────
+
+/// A 200-row table whose second column is a checkbox, 35 rows realized.
+fn checkbox_table() -> (
+    WidgetTree,
+    WidgetId,
+    teksilo_core::signal::Signal<bool>,
+    SizeProposal,
+) {
+    // One shared signal across every row: the test only needs to observe that
+    // Space reached *a* checkbox, and a per-row signal would mean threading a
+    // map through the delegate for nothing.
+    let checked = teksilo_core::signal::Signal::new(false);
+    let ck = checked.clone();
+    let model = rows(200);
+    let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+    let table = tree.add(
+        TableView::new(model)
+            .add_column(id_col())
+            .add_column(
+                Column::<Row>::new("done", lit!("Done"), move |_row, _: &CellContext| {
+                    Box::new(crate::Checkbox::new(ck.clone()))
+                })
+                .width(ColumnWidth::Fixed(60.0)),
+            )
+            .row_height(20.0),
+    );
+    let p = SizeProposal {
+        width: Some(400.0),
+        height: Some(200.0),
+    };
+    tree.layout(p);
+    tree.focus(table);
+    (tree, table, checked, p)
+}
+
+#[test]
+fn a_table_is_one_tab_stop_however_many_cells_are_realized() {
+    // A checkbox column used to put every realized cell in the Tab order — 36
+    // stops here, and a different 36 after scrolling. Pressing Tab cannot
+    // detect that (the table claims Tab for its cell cursor), which is why
+    // this reads the traversal graph directly.
+    let (tree, table, _ck, _p) = checkbox_table();
+    let stops = tree.tab_stops_within(table);
+    assert_eq!(
+        stops.len(),
+        1,
+        "a grid is one Tab stop; got {} — a cell control has leaked into the \
+         Tab order, where its presence tracks the scroll position",
+        stops.len()
+    );
+}
+
+#[test]
+fn space_checks_the_focused_cell_and_leaves_the_selection_alone() {
+    use teksilo_data::{SelectionMode, SelectionModel};
+    let checked = teksilo_core::signal::Signal::new(false);
+    let ck = checked.clone();
+    let sel = SelectionModel::new(SelectionMode::Multi);
+    let model = rows(20);
+    let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+    let table = tree.add(
+        TableView::new(model)
+            .add_column(id_col())
+            .add_column(
+                Column::<Row>::new("done", lit!("Done"), move |_row, _: &CellContext| {
+                    Box::new(crate::Checkbox::new(ck.clone()))
+                })
+                .width(ColumnWidth::Fixed(60.0)),
+            )
+            .row_height(20.0)
+            .selection_mode(TableSelectionMode::MultiRow)
+            .selection(sel.clone()),
+    );
+    let p = SizeProposal {
+        width: Some(400.0),
+        height: Some(200.0),
+    };
+    tree.layout(p);
+    // Cursor on the checkbox column of row 2.
+    focus_at(&mut tree, table, 2, 1);
+    sel.select(2);
+
+    tree.press_key(Key::Space, Modifiers::NONE);
+    tree.layout(p);
+    assert!(checked.get(), "Space reaches the focused cell's checkbox");
+    assert_eq!(sel.selected_indices(), vec![2], "selection untouched");
+
+    // The id column publishes no toggle, so Space is the selection there.
+    focus_at(&mut tree, table, 2, 0);
+    tree.press_key(Key::Space, Modifiers::NONE);
+    tree.layout(p);
+    assert!(
+        checked.get(),
+        "the checkbox is not touched from another column"
+    );
+    assert_eq!(
+        sel.selected_indices(),
+        Vec::<usize>::new(),
+        "row toggled off"
+    );
 }

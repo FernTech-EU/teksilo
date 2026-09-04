@@ -389,6 +389,10 @@ pub(crate) struct RowSelection {
     select_fn: Rc<dyn Fn(usize)>,
     toggle_fn: Rc<dyn Fn(usize)>,
     extend_fn: Rc<dyn Fn(usize)>,
+    /// Ctrl+Shift range extension: keeps whatever the previous gesture
+    /// selected instead of replacing it, so a second disjoint range can be
+    /// built without losing the first.
+    extend_additive_fn: Rc<dyn Fn(usize)>,
     select_all_fn: Rc<dyn Fn(usize)>,
     selected_indices_fn: Rc<dyn Fn() -> Vec<usize>>,
     /// Cheap (O(selected count), never O(visible)) emptiness check for the
@@ -434,6 +438,10 @@ impl RowSelection {
             select_fn: Rc::new(move |i| s_sel.select(i)),
             toggle_fn: Rc::new(move |i| s_tog.toggle(i)),
             extend_fn: Rc::new(move |i| s_ext.extend_to(i)),
+            extend_additive_fn: {
+                let s = sel.clone();
+                Rc::new(move |i| s.extend_to_additive(i))
+            },
             select_all_fn: Rc::new(move |count| s_all.select_all(count)),
             selected_indices_fn: Rc::new(move || s_idx.selected_indices()),
             has_selection_fn: Rc::new(move || s_has.count() > 0),
@@ -535,6 +543,17 @@ impl RowSelection {
                     }
                 })
             },
+            extend_additive_fn: {
+                // Same visible-order rebuild as `extend_fn` above, and the same
+                // reasoning for why it is not narrowed to the anchor's span.
+                let (k, ka, l) = (keyed.clone(), key_at.clone(), len.clone());
+                Rc::new(move |i| {
+                    if let Some(target) = ka(i) {
+                        let ordered: Vec<K> = (0..l()).filter_map(|j| ka(j)).collect();
+                        k.extend_to_additive(target, &ordered);
+                    }
+                })
+            },
             select_all_fn: {
                 let (k, ka) = (keyed.clone(), key_at.clone());
                 Rc::new(move |count| {
@@ -597,6 +616,9 @@ impl RowSelection {
     }
     pub(crate) fn extend_to(&self, index: usize) {
         (self.extend_fn)(index)
+    }
+    pub(crate) fn extend_to_additive(&self, index: usize) {
+        (self.extend_additive_fn)(index)
     }
     pub(crate) fn select_all(&self, count: usize) {
         (self.select_all_fn)(count)

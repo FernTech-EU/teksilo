@@ -92,6 +92,13 @@ impl Widget for TileA11y {
         builder.set_column_index(self.col_index);
         builder.add_action(teksilo_core::accesskit::Action::Click);
         builder.add_action(teksilo_core::accesskit::Action::Focus);
+        // Advertised, not just handled: every adapter gates its scroll
+        // pattern on the node *supporting* the action (UIA's
+        // `IScrollItemProvider`, AppKit's `accessibilityScrollToVisible`,
+        // AT-SPI's `ScrollTo`), so a tile whose pane installs the handler
+        // through `on_access_action` alone is still unreachable to a real
+        // screen reader. The handler itself lives on the body pane.
+        builder.add_action(teksilo_core::accesskit::Action::ScrollIntoView);
     }
 
     fn children(&self) -> Vec<WidgetId> {

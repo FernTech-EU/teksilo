@@ -1522,3 +1522,209 @@ fn reactive_sizing_signal_reflows_and_preserves_scroll() {
         scroll.get()
     );
 }
+
+// ── Edge keys, paging and the selection verbs ──────────────────────────────
+
+/// A 30-tile grid, 3 columns to a 400 dp row, 50 dp tiles in a 300 dp
+/// viewport (six rows visible). Focused and ready for keys.
+fn grid_keyboard_fixture(mode: SelectionMode) -> (WidgetTree, WidgetId, SelectionModel) {
+    let model = ListModel::from_vec((0..30).collect::<Vec<usize>>());
+    let selection = SelectionModel::new(mode);
+    let sel = selection.clone();
+    let mut tree = WidgetTree::new();
+    let id = tree.add(
+        GridView::new(model, |_tc| Box::new(FixedLeaf(100.0, 50.0)))
+            .tile_size(100.0, 50.0)
+            .selection(sel),
+    );
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    tree.focus(id);
+    (tree, id, selection)
+}
+
+fn grid_focus(tree: &WidgetTree, id: WidgetId) -> Option<usize> {
+    tree.widget_as_any(id)
+        .and_then(|any| any.downcast_ref::<GridView<usize>>())
+        .and_then(|g| g.focused_index.get())
+}
+
+#[test]
+fn home_and_end_reach_the_ends_of_the_collection_not_the_reflow_row() {
+    use teksilo_core::event::{Key, Modifiers};
+    let (mut tree, id, sel) = grid_keyboard_fixture(SelectionMode::Single);
+    sel.select(13); // middle of row 4, so a row-scoped Home would land on 12
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+
+    tree.press_key(Key::Home, Modifiers::NONE);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    assert_eq!(
+        grid_focus(&tree, id),
+        Some(0),
+        "a wrapped grid's rows are a reflow artifact, so Home is absolute"
+    );
+
+    tree.press_key(Key::End, Modifiers::NONE);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    assert_eq!(grid_focus(&tree, id), Some(29));
+}
+
+#[test]
+fn the_accelerator_moves_the_grid_cursor_without_selecting() {
+    use teksilo_core::event::{Key, Modifiers};
+    let (mut tree, id, sel) = grid_keyboard_fixture(SelectionMode::Multi);
+    sel.select(13);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+
+    tree.press_key(Key::End, Modifiers::COMMAND);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    assert_eq!(grid_focus(&tree, id), Some(29), "the cursor moved");
+    assert_eq!(sel.selected_indices(), vec![13], "the selection did not");
+}
+
+#[test]
+fn paging_moves_about_a_viewport_of_rows_and_always_makes_progress() {
+    use teksilo_core::event::{Key, Modifiers};
+    let (mut tree, id, sel) = grid_keyboard_fixture(SelectionMode::Single);
+    sel.select(0);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+
+    tree.press_key(Key::PageDown, Modifiers::NONE);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    let after = grid_focus(&tree, id).expect("a cursor");
+    assert!(
+        (12..=18).contains(&after),
+        "300 dp of 50 dp rows is ~6 rows of 3 columns; got {after}"
+    );
+
+    tree.press_key(Key::PageUp, Modifiers::NONE);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    assert_eq!(grid_focus(&tree, id), Some(0), "and back again");
+}
+
+#[test]
+fn shift_end_then_shift_home_leaves_a_range_not_the_whole_grid() {
+    use teksilo_core::event::{Key, Modifiers};
+    let (mut tree, _id, sel) = grid_keyboard_fixture(SelectionMode::Multi);
+    sel.select(10);
+
+    tree.press_key(Key::End, Modifiers::SHIFT);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    assert_eq!(sel.count(), 20, "10..=29");
+
+    tree.press_key(Key::Home, Modifiers::SHIFT);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    assert_eq!(sel.selected_indices(), (0..=10).collect::<Vec<_>>());
+}
+
+#[test]
+fn ctrl_a_does_nothing_to_a_single_selection_grid() {
+    use teksilo_core::event::{Key, Modifiers};
+    let (mut tree, _id, sel) = grid_keyboard_fixture(SelectionMode::Single);
+    sel.select(4);
+    tree.press_key(Key::A, Modifiers::COMMAND);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    assert_eq!(
+        sel.selected_indices(),
+        vec![4],
+        "select-all has no reading for a control holding at most one tile"
+    );
+}
+
+#[test]
+fn ctrl_shift_a_deselects_a_multi_selection_grid() {
+    use teksilo_core::event::{Key, Modifiers};
+    let (mut tree, _id, sel) = grid_keyboard_fixture(SelectionMode::Multi);
+    tree.press_key(Key::A, Modifiers::COMMAND);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    assert_eq!(sel.count(), 30);
+
+    tree.press_key(Key::A, Modifiers::COMMAND | Modifiers::SHIFT);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    assert_eq!(sel.count(), 0);
+}
+
+#[test]
+fn space_toggles_a_tile_in_multi_mode() {
+    use teksilo_core::event::{Key, Modifiers};
+    let (mut tree, _id, sel) = grid_keyboard_fixture(SelectionMode::Multi);
+    sel.select(7);
+
+    tree.press_key(Key::Space, Modifiers::NONE);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    assert_eq!(sel.count(), 0, "Space unpicks a picked tile");
+
+    tree.press_key(Key::Space, Modifiers::NONE);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    assert_eq!(sel.selected_indices(), vec![7]);
+}
+
+#[test]
+fn space_selects_without_deselecting_in_single_mode() {
+    use teksilo_core::event::{Key, Modifiers};
+    let (mut tree, _id, sel) = grid_keyboard_fixture(SelectionMode::Single);
+    sel.select(7);
+    tree.press_key(Key::Space, Modifiers::NONE);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    assert_eq!(sel.selected_indices(), vec![7]);
+}
+
+// ── A tile's own controls ─────────────────────────────────────────────────
+
+#[test]
+fn a_grid_is_one_tab_stop_however_many_tiles_are_realized() {
+    // A checkbox in the tile delegate used to put every realized tile in the
+    // Tab order — 40 stops in this fixture, and a different 40 after
+    // scrolling.
+    let checked = teksilo_core::signal::Signal::new(false);
+    let ck = checked.clone();
+    let model = ListModel::from_vec((0..200).collect::<Vec<usize>>());
+    let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+    let id = tree.add(
+        GridView::new(model, move |_tc| Box::new(crate::Checkbox::new(ck.clone())))
+            .tile_size(100.0, 50.0),
+    );
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    let stops = tree.tab_stops_within(id);
+    assert_eq!(
+        stops.len(),
+        1,
+        "a grid is one Tab stop; got {}",
+        stops.len()
+    );
+}
+
+#[test]
+fn space_checks_the_focused_tile_and_leaves_the_selection_alone() {
+    use teksilo_core::event::{Key, Modifiers};
+    let checked = teksilo_core::signal::Signal::new(false);
+    let ck = checked.clone();
+    let model = ListModel::from_vec((0..30).collect::<Vec<usize>>());
+    let selection = SelectionModel::new(SelectionMode::Multi);
+    let sel = selection.clone();
+    let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+    let id = tree.add(
+        GridView::new(model, move |_tc| Box::new(crate::Checkbox::new(ck.clone())))
+            .tile_size(100.0, 50.0)
+            .selection(sel),
+    );
+    let p = SizeProposal::exact(400.0, 300.0);
+    tree.layout(p);
+    tree.focus(id);
+    selection.select(4);
+    tree.layout(p);
+
+    tree.press_key(Key::Space, Modifiers::NONE);
+    tree.layout(p);
+    assert!(checked.get(), "Space reaches the focused tile's checkbox");
+    assert_eq!(
+        selection.selected_indices(),
+        vec![4],
+        "and leaves the selection alone"
+    );
+
+    // Ctrl+Space keeps meaning selection.
+    tree.press_key(Key::Space, Modifiers::CTRL);
+    tree.layout(p);
+    assert_eq!(selection.selected_indices(), Vec::<usize>::new());
+    assert!(checked.get(), "the check is untouched");
+}

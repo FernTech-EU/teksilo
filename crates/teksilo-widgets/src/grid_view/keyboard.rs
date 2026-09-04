@@ -22,6 +22,7 @@ use teksilo_core::widget::EventContext;
 use teksilo_data::{DropPosition, SelectionModel};
 
 use super::layout::{GridLayoutStrategy, ScrollAnchor};
+use crate::common::list_nav;
 use crate::common::type_ahead::TypeAheadState;
 use crate::data_views::ViewId;
 
@@ -82,6 +83,12 @@ pub(crate) struct GridKeyConfig {
     /// doesn't need a type parameter — mirrors the `DndLazy` erasure pattern.
     pub(crate) make_reorder_payload: Rc<dyn Fn(usize) -> DragPayload>,
     pub(crate) type_ahead_timeout: Duration,
+    /// Persistent across rebuilds — see `GridView::type_ahead`.
+    pub(crate) type_ahead: Rc<TypeAheadState>,
+    /// Index → realized tile id. `Space` asks the focused tile whether it
+    /// publishes a keyboard toggle before falling back to the selection.
+    #[allow(clippy::type_complexity)]
+    pub(crate) tile_map: Rc<std::cell::RefCell<Vec<(usize, teksilo_core::widget_id::WidgetId)>>>,
     /// `None` when a row isn't resident yet (lazy/windowed source) — skipped
     /// during the search rather than matched against whatever the label
     /// closure happens to compute for an absent row.
@@ -93,8 +100,7 @@ pub(crate) struct GridKeyConfig {
 pub(crate) fn build_grid_key_handler(
     cfg: GridKeyConfig,
 ) -> impl FnMut(&WidgetEvent, &mut EventContext) -> EventResponse + 'static {
-    // Shared accumulate-and-search type-ahead state (mirrors `ListView`).
-    let ta_state = TypeAheadState::new();
+    let ta_state = cfg.type_ahead.clone();
     move |event, ctx| {
         let WidgetEvent::KeyDown { key, modifiers, .. } = event else {
             return EventResponse::Ignored;
@@ -124,12 +130,25 @@ pub(crate) fn build_grid_key_handler(
         let current = cursor.unwrap_or(0);
         let col = current % cols;
 
-        // Select-all — Ctrl+A, ⌘A on macOS.
+        // The edge-and-page family, resolved once in `common::list_nav`.
+        let nav = list_nav::nav_chord(*key, *modifiers, list_nav::ViewKind::TileGrid);
+
+        // Select-all — Ctrl+A, ⌘A on macOS, and Ctrl+Shift+A to deselect.
+        // Gated on `Multi` like `ListView` and `TreeView`: "select all" has no
+        // reading for a control that holds at most one tile, and this handler
+        // used to claim the chord even with no selection model at all.
         if modifiers.command() && *key == Key::A {
-            if let Some(ref sel) = cfg.selection {
-                sel.select_all(n);
+            if let Some(ref sel) = cfg.selection
+                && sel.mode() == teksilo_data::SelectionMode::Multi
+            {
+                if modifiers.shift() {
+                    sel.clear();
+                } else {
+                    sel.select_all(n);
+                }
+                return EventResponse::Handled;
             }
-            return EventResponse::Handled;
+            return EventResponse::Ignored;
         }
 
         // Resolve the horizontal arrows, swapping under RTL.
@@ -171,24 +190,53 @@ pub(crate) fn build_grid_key_handler(
             }
         }
 
+        // macOS reads ⌘↓ as "open the focused item" in a list or an icon view
+        // — Finder's meaning, and dead here otherwise. Off macOS this is
+        // `None` and costs nothing.
+        //
+        // Read *after* the Alt+Arrow reorder above, not before: ⌥←/⌥→ resolve
+        // to the subtree aliases, which a flat tile grid has no use for, and
+        // claiming them first made keyboard reorder a dead chord on macOS.
+        if let Some(alias) = list_nav::mac_alias(*key, *modifiers, rtl) {
+            if alias == list_nav::MacAlias::Activate {
+                cfg.focused_index.set(Some(current));
+                if let Some(ref cb) = cfg.on_tile_activate {
+                    cb(current, ctx);
+                } else if let Some(ref sel) = cfg.selection {
+                    sel.select(current);
+                }
+                return EventResponse::Handled;
+            }
+            return EventResponse::Ignored;
+        }
+
         // Type-ahead: a bare printable character jumps to the next match.
         // Use `to_char()` so letters (which arrive as the dedicated
         // `Key::A`..`Key::Z` variants, NOT `Key::Character`) trigger it too —
         // matching only `Key::Character` silently broke letter type-ahead.
+        //
+        // A search that finds nothing returns `Ignored` rather than falling
+        // through to the navigation match below, so a printable key can never
+        // be read as a movement — the same shape `ListView` and `TreeView`
+        // use. Nothing in the current key set is both, but the fall-through
+        // made that a latent hazard rather than a decision.
         if let Some(ref label_fn) = cfg.type_ahead_label
             && !modifiers.ctrl()
             && !modifiers.alt()
             && !modifiers.super_key()
             && let Some(c) = key.to_char()
-            && let Some(idx) =
-                ta_state.search(c, current, n, cfg.type_ahead_timeout, |i| label_fn(i))
         {
-            cfg.focused_index.set(Some(idx));
-            if let Some(ref sel) = cfg.selection {
-                sel.select(idx);
-            }
-            ensure_visible(&cfg, idx, ctx);
-            return EventResponse::Handled;
+            return match ta_state.search(c, current, n, cfg.type_ahead_timeout, |i| label_fn(i)) {
+                Some(idx) => {
+                    cfg.focused_index.set(Some(idx));
+                    if let Some(ref sel) = cfg.selection {
+                        sel.select(idx);
+                    }
+                    ensure_visible(&cfg, idx, ctx);
+                    EventResponse::Handled
+                }
+                None => EventResponse::Ignored,
+            };
         }
 
         // With no cursor yet, a directional key lands ON the near end tile
@@ -230,22 +278,36 @@ pub(crate) fn build_grid_key_handler(
                         None
                     }
                 }
-                // Accelerator + Home / End (⌘ on macOS) jumps to the first /
-                // last tile; plain Home / End stay within the row.
-                Key::Home if modifiers.command() => Some(0),
-                Key::End if modifiers.command() => Some(n - 1),
-                Key::Home => Some(current - col), // first item in this row
-                Key::End => Some((current - col + cols - 1).min(n - 1)),
-                Key::PageDown => {
-                    let rows = rows_per_page(&cfg);
-                    page_scroll(&cfg, rows as f32);
-                    Some((current + rows * cols).min(n - 1))
+                // Home / End reach the first / last tile of the collection,
+                // not the ends of the reflow row. A wrapped grid's rows change
+                // with the window width, so "first tile in this row" is not a
+                // target a user can form a model of — `GtkGridView` and Qt's
+                // `QListView` in icon mode both resolve it absolutely for that
+                // reason. The accelerator therefore adds no new destination
+                // here; it only suppresses the selection, via `list_nav`.
+                Key::Home | Key::End | Key::PageUp | Key::PageDown => {
+                    let Some(chord) = nav else {
+                        return EventResponse::Ignored;
+                    };
+                    Some(match chord.movement {
+                        list_nav::NavMove::First | list_nav::NavMove::RowFirst => 0,
+                        list_nav::NavMove::Last | list_nav::NavMove::RowLast => n - 1,
+                        // Paged by real geometry rather than by
+                        // `estimated_row_height`, so `VariableRowGrid` and
+                        // `VirtualizedMasonry` page to the tile the user
+                        // actually lands on. The shared `ensure_visible` tail
+                        // then does the scrolling — this arm used to scroll
+                        // too, moving the viewport twice for one keypress.
+                        list_nav::NavMove::Page { down } => {
+                            page_target(&cfg, current, cols, n, down)
+                        }
+                    })
                 }
-                Key::PageUp => {
-                    let rows = rows_per_page(&cfg);
-                    page_scroll(&cfg, -(rows as f32));
-                    Some(current.saturating_sub(rows * cols))
-                }
+                // Ctrl+Tab / Ctrl+Shift+Tab escape the grid, so a
+                // `WithinGrid` traversal is never a trap. Literal `ctrl()`,
+                // macOS included: ⌘⇥ belongs to the application switcher and
+                // never reaches an app. Same hatch `TableView` has.
+                Key::Tab if modifiers.ctrl() => return EventResponse::Ignored,
                 Key::Tab if cfg.tab_traversal == GridTabTraversal::WithinGrid => {
                     if modifiers.shift() {
                         if current == 0 {
@@ -287,8 +349,31 @@ pub(crate) fn build_grid_key_handler(
                     return EventResponse::Handled;
                 }
                 Key::Space => {
-                    if let Some(ref sel) = cfg.selection {
-                        sel.select(current);
+                    // A tile carrying a checkbox reads Space as "check this" —
+                    // its control is out of the Tab order, so this is the only
+                    // keyboard route to it. Otherwise: toggle in `Multi`,
+                    // select in `Single`, the rule `ListView` and `TreeView`
+                    // follow. (This used to select unconditionally, so Space
+                    // could never unpick a tile.)
+                    let selection = cfg.selection.clone();
+                    let fallback = std::rc::Rc::new(move || {
+                        if let Some(ref sel) = selection {
+                            if sel.mode() == teksilo_data::SelectionMode::Multi {
+                                sel.toggle(current);
+                            } else {
+                                sel.select(current);
+                            }
+                        }
+                    });
+                    match cfg
+                        .tile_map
+                        .borrow()
+                        .iter()
+                        .find(|(i, _)| *i == current)
+                        .map(|(_, id)| *id)
+                    {
+                        Some(tile_id) => ctx.row_space_activate(tile_id, fallback),
+                        None => fallback(),
                     }
                     cfg.focused_index.set(Some(current));
                     return EventResponse::Handled;
@@ -305,24 +390,36 @@ pub(crate) fn build_grid_key_handler(
             return EventResponse::Ignored;
         };
         cfg.focused_index.set(Some(idx));
-        // Ctrl+Arrow (no Shift, no Alt — Alt+Arrow reorder and Ctrl+Home/End
-        // keep their existing behavior) moves the keyboard cursor only,
-        // leaving the selection untouched. Checked against
-        // `logical_next`/`logical_prev` (already RTL-swapped above) plus
-        // the raw vertical keys, so the chord follows the visual arrow.
-        // Literal `ctrl()` — see the Ctrl+Space arm above.
-        let cursor_only = modifiers.ctrl()
-            && !modifiers.shift()
-            && !modifiers.alt()
-            && (*key == logical_next
-                || *key == logical_prev
-                || *key == Key::ArrowDown
-                || *key == Key::ArrowUp);
-        if !cursor_only && let Some(ref sel) = cfg.selection {
-            if modifiers.shift() {
-                sel.extend_to(idx);
-            } else {
-                sel.select(idx);
+        // What the chord does to the selection. The edge-and-page keys carry
+        // their own answer from `list_nav`, where the accelerator means "move
+        // the cursor, leave the selection alone".
+        //
+        // The arrows keep reading literal `ctrl()`: ⌘Space is Spotlight and
+        // ⌘↑/⌘↓ mean something else in a Finder icon view, so this pair has no
+        // ⌘ counterpart to move to (see the Ctrl+Space arm above). Checked
+        // against `logical_next`/`logical_prev` (already RTL-swapped) plus the
+        // raw vertical keys, so the chord follows the visual arrow.
+        let op = match nav {
+            Some(chord) => chord.selection,
+            None if modifiers.ctrl()
+                && !modifiers.shift()
+                && !modifiers.alt()
+                && (*key == logical_next
+                    || *key == logical_prev
+                    || *key == Key::ArrowDown
+                    || *key == Key::ArrowUp) =>
+            {
+                list_nav::SelectionOp::Suppress
+            }
+            None if modifiers.shift() => list_nav::SelectionOp::Extend,
+            None => list_nav::SelectionOp::Replace,
+        };
+        if let Some(ref sel) = cfg.selection {
+            match op {
+                list_nav::SelectionOp::Replace => sel.select(idx),
+                list_nav::SelectionOp::Suppress => {}
+                list_nav::SelectionOp::Extend => sel.extend_to(idx),
+                list_nav::SelectionOp::ExtendAdditive => sel.extend_to_additive(idx),
             }
         }
         ensure_visible(&cfg, idx, ctx);
@@ -330,19 +427,59 @@ pub(crate) fn build_grid_key_handler(
     }
 }
 
-fn rows_per_page(cfg: &GridKeyConfig) -> usize {
-    let vp = cfg.viewport_height.get();
-    let step = cfg.strategy.estimated_row_height().max(1.0);
-    ((vp / step).floor() as usize).max(1)
-}
-
-/// Scroll by `rows` rows (signed), clamped. Used by PageUp/PageDown so the
-/// viewport tracks the focus jump.
-fn page_scroll(cfg: &GridKeyConfig, rows: f32) {
-    let step = cfg.strategy.estimated_row_height().max(1.0);
-    let max = cfg.max_scroll_y.get();
-    let new_y = (cfg.scroll_y.get() + rows * step).clamp(0.0, max);
-    cfg.scroll_y.set(new_y);
+/// The tile one viewport away from `current`, in the direction pressed.
+///
+/// Measured against the layout strategy's real tile rectangles rather than
+/// `estimated_row_height`, because two of the three shipped strategies do not
+/// have a single row height: `VariableRowGrid` sizes each row to its tallest
+/// tile and `VirtualizedMasonry` has no rows at all. Paging by the estimate
+/// landed short or long on both, and by an amount that changed as the
+/// measurements converged.
+///
+/// The walk is per-row rather than a closed form for the same reason — with
+/// variable rows there is no `rows × height` to divide by. It costs one
+/// `tile_rect` per row of a single viewport, on a keypress.
+fn page_target(cfg: &GridKeyConfig, current: usize, cols: usize, n: usize, down: bool) -> usize {
+    let viewport = cfg.viewport_height.get();
+    let width = cfg.viewport_width.get();
+    let origin = cfg.strategy.tile_rect(current, width).y;
+    let mut candidate = current;
+    let mut probe = current;
+    loop {
+        probe = if down {
+            match probe.checked_add(cols) {
+                Some(next) if next < n => next,
+                _ => break,
+            }
+        } else {
+            match probe.checked_sub(cols) {
+                Some(prev) => prev,
+                None => break,
+            }
+        };
+        let y = cfg.strategy.tile_rect(probe, width).y;
+        if (y - origin).abs() > viewport {
+            // One row past the viewport edge: stop at the last row inside it,
+            // unless that would not move at all.
+            candidate = if candidate == current {
+                probe
+            } else {
+                candidate
+            };
+            break;
+        }
+        candidate = probe;
+    }
+    // Guarantee progress even when a single tile is taller than the viewport.
+    if candidate == current {
+        if down {
+            (current + cols).min(n - 1)
+        } else {
+            current.saturating_sub(cols)
+        }
+    } else {
+        candidate
+    }
 }
 
 fn ensure_visible(cfg: &GridKeyConfig, idx: usize, ctx: &mut EventContext) {

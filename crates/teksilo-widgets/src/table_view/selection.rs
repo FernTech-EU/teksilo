@@ -165,6 +165,26 @@ impl CellSelectionModel {
     }
 
     /// Select every cell in `0..row_count × 0..col_count`.
+    /// Replace the selection with an arbitrary set of cells, committing it as
+    /// the base a following Shift range extends around.
+    ///
+    /// Backs the two spreadsheet chords a rectangle cannot express: Ctrl+Space
+    /// selects a column and Shift+Space a row, neither of which is an
+    /// anchor-to-cursor block.
+    /// Declines outside `MultiCell` for the reason [`select_all`](Self::select_all)
+    /// declines outside a cell mode: a set of cells is not something a
+    /// single-selection or row-selection model can hold, and quietly storing
+    /// one would break the mode's own invariant.
+    pub fn select_cells(&self, cells: impl IntoIterator<Item = (usize, usize)>) {
+        if self.mode != TableSelectionMode::MultiCell {
+            return;
+        }
+        let set: BTreeSet<(usize, usize)> = cells.into_iter().collect();
+        self.selection.set(set.clone());
+        *self.base.borrow_mut() = set;
+        self.anchor.set(None);
+    }
+
     pub fn select_all(&self, row_count: usize, col_count: usize) {
         if self.mode == TableSelectionMode::None {
             return;

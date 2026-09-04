@@ -35,6 +35,15 @@ pub(crate) struct CellA11y {
     /// When true, emit `Role::RowHeader` instead of `Role::Cell` — used
     /// when the table promotes a column to row-header status.
     is_row_header: bool,
+    /// Whether the cell is itself the selectable unit.
+    ///
+    /// Decides `Role::GridCell` over `Role::Cell`, which is not cosmetic on
+    /// Windows: `accesskit_windows` supports UIA's `SelectionItem` pattern for
+    /// `GridCell` unconditionally and for `Role::Cell` not at all, so a
+    /// selected cell announced as `Cell` never reports `IsSelected`. The two
+    /// map identically on macOS (`NSAccessibilityCellRole`) and AT-SPI
+    /// (`TableCell`), so this costs nothing there.
+    is_grid_cell: bool,
     /// Optional name override (when the cell content isn't textual).
     name: Option<String>,
 }
@@ -52,8 +61,17 @@ impl CellA11y {
             col_index_1based,
             selected,
             is_row_header: false,
+            is_grid_cell: false,
             name: None,
         }
+    }
+
+    /// Announce `Role::GridCell` — the cell is the selectable unit. Named for
+    /// the sibling `with_role_row_header`, not `as_*`, which clippy reserves
+    /// for by-reference conversions.
+    pub(crate) fn with_grid_cell_role(mut self, is_grid_cell: bool) -> Self {
+        self.is_grid_cell = is_grid_cell;
+        self
     }
 
     /// Promote to `Role::RowHeader` (`row_header_column` support).
@@ -98,6 +116,8 @@ impl Widget for CellA11y {
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         builder.set_role(if self.is_row_header {
             teksilo_core::accesskit::Role::RowHeader
+        } else if self.is_grid_cell {
+            teksilo_core::accesskit::Role::GridCell
         } else {
             teksilo_core::accesskit::Role::Cell
         });

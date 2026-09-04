@@ -253,6 +253,12 @@ pub struct GridView<T: 'static> {
         >,
     >,
     type_ahead_timeout: std::time::Duration,
+    /// Accumulate-and-search state for type-ahead. A widget field, not a
+    /// handler local: the buffer has to survive the rebuild a selection or
+    /// scroll change triggers, or a two-key search resets between the
+    /// keystrokes. `common::type_ahead`'s module doc says as much, and
+    /// `ListView` has always held it this way.
+    type_ahead: Rc<crate::common::type_ahead::TypeAheadState>,
     #[allow(clippy::type_complexity)]
     type_ahead_label: Option<Rc<dyn Fn(usize) -> String>>,
     /// Per-tile accessible name — sets each `GridCell`'s `Node::label` so a
@@ -376,6 +382,7 @@ impl<T: 'static> GridView<T> {
             activate_on: crate::data_views::ActivateOn::default(),
             tile_context_menu: None,
             type_ahead_timeout: std::time::Duration::from_millis(500),
+            type_ahead: crate::common::type_ahead::TypeAheadState::new(),
             type_ahead_label: None,
             tile_a11y_label: None,
             empty_view: None,
@@ -1234,6 +1241,8 @@ impl<T: 'static> Widget for GridView<T> {
                 })
             },
             type_ahead_timeout: self.type_ahead_timeout,
+            type_ahead: self.type_ahead.clone(),
+            tile_map: self.tile_map.clone(),
             // Route through the source's string accessor so an unloaded
             // (lazy/windowed) row is skipped rather than searched with
             // whatever the app's index-only closure happens to compute for

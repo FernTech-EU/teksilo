@@ -22,6 +22,7 @@ use super::body::SharedColumnWidths;
 use super::column::{EditTriggers, TabTraversal};
 use super::row_navigator::RowNavigator;
 use super::selection::{CellSelectionModel, TableSelectionMode};
+use crate::common::list_nav;
 use crate::common::row_metrics::SharedRowMetrics;
 use crate::common::type_ahead::TypeAheadState;
 use crate::data_views::RowSelection;
@@ -44,6 +45,12 @@ pub(crate) struct KeyHandlerConfig {
     /// so the comparison can never lead anywhere.
     pub tree_column_display_pos: usize,
     pub focused_cell: Signal<Option<(usize, usize)>>,
+    /// `(row, col)` → realized cell id. `Space` asks the focused cell whether
+    /// it publishes a keyboard toggle before falling back to the selection —
+    /// scoped to the *cell*, not the row, because a table can carry more than
+    /// one checkbox column and "the row's checkbox" would be arbitrary.
+    #[allow(clippy::type_complexity)]
+    pub cell_map: Rc<std::cell::RefCell<Vec<((usize, usize), teksilo_core::widget_id::WidgetId)>>>,
     pub selection_mode: TableSelectionMode,
     pub selection: Option<RowSelection>,
     pub cell_selection: Option<CellSelectionModel>,
@@ -170,11 +177,30 @@ pub(crate) fn build_key_handler(
         } else {
             matches!(key, Key::ArrowRight)
         };
-        if is_collapse_key && on_tree_column && cfg.navigator.is_expanded(row) {
-            cfg.navigator.toggle_expanded(row);
-            return EventResponse::Handled;
+        // Only the unmodified arrows expand: with Shift the key belongs to the
+        // range extension, and with the accelerator to the cursor-only move.
+        // ⌘ is excluded too, or a macOS ⌘←/⌘→ — which the platform spends on
+        // history, never on an outline — would silently open and close rows.
+        let plain_arrow =
+            !modifiers.shift() && !modifiers.ctrl() && !modifiers.alt() && !modifiers.super_key();
+        if plain_arrow && is_collapse_key && on_tree_column {
+            if cfg.navigator.is_expanded(row) {
+                cfg.navigator.toggle_expanded(row);
+                return EventResponse::Handled;
+            }
+            // Nothing to collapse: ascend. The ARIA tree pattern, Explorer,
+            // Nautilus and Dolphin all read Left this way, and `TreeView` has
+            // done so since it shipped — this is the half `TreeTableView` was
+            // missing, which left Left a dead key on every leaf.
+            if let Some(parent) = cfg.navigator.parent_row(row) {
+                cfg.focused_cell.set(Some((parent, col)));
+                apply_selection_extension(&cfg, parent, col, false);
+                ensure_row_visible(&cfg, parent, row_count, ctx);
+                return EventResponse::Handled;
+            }
         }
-        if is_expand_key
+        if plain_arrow
+            && is_expand_key
             && on_tree_column
             && cfg.navigator.has_children(row)
             && !cfg.navigator.is_expanded(row)
@@ -183,7 +209,113 @@ pub(crate) fn build_key_handler(
             return EventResponse::Handled;
         }
 
+        // `*` expands the whole subtree, `+` / `-` one level — read before
+        // type-ahead, since `Key::to_char` answers for all three.
+        //
+        // Gated on the navigator actually being hierarchical (the same
+        // discriminator `corner_column` uses). A flat `TableView` can never
+        // act on these, and claiming them there returned `Ignored` *before*
+        // the type-to-edit and type-ahead arms below — so on a US board,
+        // where `-` is unshifted, typing a minus to start a negative number
+        // in an `EditTriggers::ANY_KEY` column stopped opening the editor.
+        if is_hierarchical(&cfg)
+            && let Some(chord) = list_nav::tree_chord(*key, *modifiers)
+        {
+            let handled = with_navigator_subtree(&cfg, |ops| match chord {
+                list_nav::TreeChord::ExpandSubtree => {
+                    crate::common::tree_expand::expand_subtree(ops, row)
+                }
+                list_nav::TreeChord::CollapseSubtree => {
+                    crate::common::tree_expand::collapse_subtree(ops, row)
+                }
+                list_nav::TreeChord::ExpandOne => {
+                    if cfg.navigator.has_children(row) && !cfg.navigator.is_expanded(row) {
+                        cfg.navigator.toggle_expanded(row);
+                        true
+                    } else {
+                        false
+                    }
+                }
+                list_nav::TreeChord::CollapseOne => {
+                    if cfg.navigator.is_expanded(row) {
+                        cfg.navigator.toggle_expanded(row);
+                        true
+                    } else {
+                        false
+                    }
+                }
+            });
+            return if handled {
+                EventResponse::Handled
+            } else {
+                EventResponse::Ignored
+            };
+        }
+
+        // macOS reads ⌘↓ as open, ⌘↑ as collapse-or-ascend and ⌥→/⌥← as a
+        // recursive expand in an outline. All four are dead here otherwise.
+        if let Some(alias) = list_nav::mac_alias(*key, *modifiers, rtl) {
+            let handled = match alias {
+                list_nav::MacAlias::Activate => {
+                    if let Some(ref f) = cfg.on_row_activate {
+                        f(row, ctx);
+                        true
+                    } else {
+                        false
+                    }
+                }
+                list_nav::MacAlias::CollapseOrParent => {
+                    if cfg.navigator.is_expanded(row) {
+                        cfg.navigator.toggle_expanded(row);
+                        true
+                    } else if let Some(parent) = cfg.navigator.parent_row(row) {
+                        cfg.focused_cell.set(Some((parent, col)));
+                        apply_selection_extension(&cfg, parent, col, false);
+                        ensure_row_visible(&cfg, parent, row_count, ctx);
+                        true
+                    } else {
+                        false
+                    }
+                }
+                list_nav::MacAlias::ExpandSubtree => with_navigator_subtree(&cfg, |ops| {
+                    crate::common::tree_expand::expand_subtree(ops, row)
+                }),
+                list_nav::MacAlias::CollapseSubtree => with_navigator_subtree(&cfg, |ops| {
+                    crate::common::tree_expand::collapse_subtree(ops, row)
+                }),
+            };
+            return if handled {
+                EventResponse::Handled
+            } else {
+                EventResponse::Ignored
+            };
+        }
+
+        // While a cell editor is open the container must stop claiming the
+        // keys the editor needs. Rows are not focusable nodes, so a key the
+        // editor ignores bubbles straight to this handler: a single-line
+        // editor does nothing with PageDown, and the table would page the
+        // cursor out from under the edit in progress. Escape and the commit /
+        // advance keys stay here, since they are about the *edit*, not the
+        // text. The ARIA grid pattern states the rule outright — everything
+        // else "passes the key event to the focused widget".
+        if cfg.editing_cell.get().is_some()
+            && !matches!(key, Key::Escape | Key::Enter | Key::Tab | Key::F2)
+        {
+            return EventResponse::Ignored;
+        }
+
         let viewport_h = cfg.viewport_height.get();
+        // A table whose cells are the navigable unit reads Home as the start
+        // of the row; one that selects whole rows has no cell cursor for that
+        // to mean anything against, so its Home is the first row — which is
+        // also what Explorer's details view and every list control do.
+        let view_kind = if cfg.selection_mode.is_cell_mode() {
+            list_nav::ViewKind::CellGrid
+        } else {
+            list_nav::ViewKind::Linear
+        };
+        let nav = list_nav::nav_chord(*key, *modifiers, view_kind);
 
         // Each directional key, with NO cursor yet, lands ON the end cell it
         // would have entered from — it does not step past it (see `cursor`
@@ -234,46 +366,65 @@ pub(crate) fn build_key_handler(
                     }
                 }
             }
-            // Plain Home / End move within the row; with the accelerator
-            // (Ctrl, ⌘ on macOS) they jump to the first / last row of the table.
-            Key::Home if !modifiers.command() => Some((row, 0)),
-            Key::End if !modifiers.command() => Some((row, cfg.col_count - 1)),
-            Key::Home if modifiers.command() => cfg.navigator.first_row().map(|r| (r, 0)),
-            Key::End if modifiers.command() => {
-                cfg.navigator.last_row().map(|r| (r, cfg.col_count - 1))
-            }
-            Key::PageUp => {
-                // Scroll one page; move focus to the row one viewport
-                // above the current row's top (offset-table-driven, so
-                // variable heights page by visual distance, not by a
-                // fixed row count). Guarantee progress even when a
-                // single row is taller than the viewport.
-                let new_y = (cfg.scroll_y.get() - viewport_h).max(0.0);
-                cfg.scroll_y.set(new_y);
-                let r = {
-                    let mut m = cfg.row_metrics.borrow_mut();
-                    m.resize(row_count);
-                    let target_y = (m.row_top(row) - viewport_h).max(0.0);
-                    m.row_at(target_y)
+            // The edge-and-page family, resolved once in `common::list_nav`.
+            // `first_row` / `last_row` rather than raw 0 / count-1 so a
+            // hierarchical navigator lands on a row that is actually visible.
+            Key::Home | Key::End | Key::PageUp | Key::PageDown => {
+                let Some(chord) = nav else {
+                    return EventResponse::Ignored;
                 };
-                let r = if r == row { row.saturating_sub(1) } else { r };
-                Some((r, col))
-            }
-            Key::PageDown => {
-                let new_y = (cfg.scroll_y.get() + viewport_h).min(cfg.max_scroll_y.get());
-                cfg.scroll_y.set(new_y);
-                let r = {
-                    let mut m = cfg.row_metrics.borrow_mut();
-                    m.resize(row_count);
-                    let target_y = m.row_top(row) + viewport_h;
-                    m.row_at(target_y)
-                };
-                let r = if r == row {
-                    (row + 1).min(row_count - 1)
-                } else {
-                    r.min(row_count - 1)
-                };
-                Some((r, col))
+                match chord.movement {
+                    list_nav::NavMove::RowFirst => Some((row, 0)),
+                    list_nav::NavMove::RowLast => Some((row, cfg.col_count - 1)),
+                    // Where the accelerator lands depends on which ARIA
+                    // pattern this table *is*, and the two disagree on
+                    // purpose. A flat cell grid escalates to the corner —
+                    // "moves focus to the first cell in the first row" (the
+                    // grid pattern, and Excel and Qt's `QTableView`). A
+                    // treegrid keeps the column: "moves focus to the cell in
+                    // the first row in the same column as the cell that had
+                    // focus". A row-selection table has no column cursor to
+                    // move at all, so the column simply stays put.
+                    list_nav::NavMove::First => cfg
+                        .navigator
+                        .first_row()
+                        .map(|r| (r, corner_column(&cfg, view_kind, col, false))),
+                    list_nav::NavMove::Last => cfg
+                        .navigator
+                        .last_row()
+                        .map(|r| (r, corner_column(&cfg, view_kind, col, true))),
+                    // Scroll one page, then move focus to the row one viewport
+                    // away from the current row's top — offset-table-driven,
+                    // so variable heights page by visual distance rather than
+                    // by a fixed row count. Guarantees progress even when a
+                    // single row is taller than the viewport.
+                    list_nav::NavMove::Page { down } => {
+                        let new_y = if down {
+                            (cfg.scroll_y.get() + viewport_h).min(cfg.max_scroll_y.get())
+                        } else {
+                            (cfg.scroll_y.get() - viewport_h).max(0.0)
+                        };
+                        cfg.scroll_y.set(new_y);
+                        let r = {
+                            let mut m = cfg.row_metrics.borrow_mut();
+                            m.resize(row_count);
+                            let target_y = if down {
+                                m.row_top(row) + viewport_h
+                            } else {
+                                (m.row_top(row) - viewport_h).max(0.0)
+                            };
+                            m.row_at(target_y)
+                        };
+                        let r = if r == row && down {
+                            (row + 1).min(row_count - 1)
+                        } else if r == row {
+                            row.saturating_sub(1)
+                        } else {
+                            r.min(row_count - 1)
+                        };
+                        Some((r, col))
+                    }
+                }
             }
             // Ctrl+Tab / Ctrl+Shift+Tab escape the cell grid: return Ignored so
             // the framework's focus cycling moves to the next / previous widget.
@@ -308,12 +459,59 @@ pub(crate) fn build_key_handler(
                     }
                 }
             }
-            // Toggles the focused cell/row regardless of Ctrl — this is
-            // already "Ctrl+Space toggles the focused row's selection"
-            // (the Explorer/Finder pairing with Ctrl+Arrow move-only above):
-            // after a Ctrl+Arrow walk away from the selection, Space here
-            // toggles just the cursor's current cell.
+            // Space and its two modified forms. In a **row**-selection table
+            // this is the Explorer trio: Space toggles the focused row, and
+            // Ctrl+Space does the same after a Ctrl+Arrow walk away from the
+            // selection.
+            //
+            // In a **multi**-cell grid the same two chords are already spoken
+            // for, and mean the opposite way round: the ARIA grid pattern and
+            // Excel both read Ctrl+Space as "select this column" and
+            // Shift+Space as "select this row". Reading them as a toggle there
+            // would take a spreadsheet user's two most-used selection chords
+            // and do something else with them.
+            //
+            // `MultiCell` only, not every cell mode: a `SingleCell` table
+            // holds one cell by definition, so "select the column" has no
+            // reading there — it would quietly break the mode's own
+            // invariant. It falls through to the plain toggle below, the same
+            // way `select_all` already declines outside the multi modes.
+            Key::Space
+                if cfg.selection_mode == TableSelectionMode::MultiCell && modifiers.ctrl() =>
+            {
+                select_column(&cfg, col, row_count);
+                cfg.focused_cell.set(Some((row, col)));
+                return EventResponse::Handled;
+            }
+            Key::Space
+                if cfg.selection_mode == TableSelectionMode::MultiCell && modifiers.shift() =>
+            {
+                select_row_cells(&cfg, row);
+                cfg.focused_cell.set(Some((row, col)));
+                return EventResponse::Handled;
+            }
             Key::Space => {
+                // A cell carrying a checkbox reads Space as "check this" — its
+                // control is out of the Tab order, so this is the only
+                // keyboard route to it. A cell that publishes no toggle falls
+                // back to the selection, exactly as before.
+                if let Some(cell_id) = cfg
+                    .cell_map
+                    .borrow()
+                    .iter()
+                    .find(|(pos, _)| *pos == (row, col))
+                    .map(|(_, id)| *id)
+                {
+                    let fallback_cfg = cfg.clone();
+                    ctx.row_space_activate(
+                        cell_id,
+                        std::rc::Rc::new(move || {
+                            toggle_selection(&fallback_cfg, row, col);
+                        }),
+                    );
+                    cfg.focused_cell.set(Some((row, col)));
+                    return EventResponse::Handled;
+                }
                 toggle_selection(&cfg, row, col);
                 cfg.focused_cell.set(Some((row, col)));
                 return EventResponse::Handled;
@@ -386,7 +584,19 @@ pub(crate) fn build_key_handler(
                 }
                 return EventResponse::Ignored;
             }
-            // Select all — Ctrl+A, ⌘A on macOS.
+            // Select all — Ctrl+A, ⌘A on macOS; Ctrl+Shift+A deselects (GTK's
+            // chord, unspent by every other toolkit).
+            // `Ignored` outside the multi modes, so the chord reaches the
+            // application rather than being swallowed by a table that has
+            // nothing to deselect — the shape `ListView`, `TreeView` and
+            // `GridView` already use for the same pair.
+            Key::A if modifiers.command() && modifiers.shift() => {
+                if !cfg.selection_mode.is_multi() {
+                    return EventResponse::Ignored;
+                }
+                clear_selection(&cfg);
+                return EventResponse::Handled;
+            }
             Key::A if modifiers.command() => {
                 select_all(&cfg, row_count);
                 return EventResponse::Handled;
@@ -420,8 +630,25 @@ pub(crate) fn build_key_handler(
             // else in a Finder list, and this Explorer-style cursor pair has no
             // ⌘ counterpart — Control keeps it reachable and out of the way.
             let move_cursor_only = is_arrow && modifiers.ctrl() && !modifiers.shift();
-            if !move_cursor_only {
-                apply_selection_extension(&cfg, nr, nc, modifiers.shift());
+            // The edge-and-page keys carry their own verb from `list_nav`,
+            // where the accelerator means "move the cursor, leave the
+            // selection alone" — the rule GTK4 and Qt apply to every
+            // navigation key, and the one the arrows above already follow.
+            match nav.map(|c| c.selection) {
+                Some(list_nav::SelectionOp::Suppress) => {}
+                Some(list_nav::SelectionOp::Extend) => {
+                    apply_selection_extension(&cfg, nr, nc, true)
+                }
+                Some(list_nav::SelectionOp::ExtendAdditive) => {
+                    apply_additive_extension(&cfg, nr, nc)
+                }
+                Some(list_nav::SelectionOp::Replace) => {
+                    apply_selection_extension(&cfg, nr, nc, false)
+                }
+                None if !move_cursor_only => {
+                    apply_selection_extension(&cfg, nr, nc, modifiers.shift())
+                }
+                None => {}
             }
             ensure_row_visible(&cfg, nr, row_count, ctx);
             ensure_col_visible(&cfg, nc);
@@ -513,6 +740,73 @@ fn ensure_col_visible(cfg: &KeyHandlerConfig, display_col: usize) {
     }
 }
 
+/// Which column `Ctrl+Home` / `Ctrl+End` land on.
+///
+/// The ARIA grid and treegrid patterns differ here deliberately: a flat cell
+/// grid escalates to the table's corner, a treegrid keeps the column the
+/// cursor was already in. A row-selection table has no column cursor to move.
+///
+/// The navigator is the discriminator — only a hierarchical one reports a
+/// depth — so this costs no extra config field and cannot fall out of step
+/// with the widget it describes.
+fn corner_column(
+    cfg: &KeyHandlerConfig,
+    view_kind: list_nav::ViewKind,
+    col: usize,
+    last: bool,
+) -> usize {
+    if view_kind != list_nav::ViewKind::CellGrid {
+        return col;
+    }
+    if is_hierarchical(cfg) {
+        col
+    } else if last {
+        cfg.col_count - 1
+    } else {
+        0
+    }
+}
+
+/// Whether the navigator reports a hierarchy at all.
+///
+/// Only `TreeNavigator` answers `depth`, so this is what separates a
+/// `TreeTableView` from a `TableView` without a second config field that
+/// could fall out of step with the widget it describes.
+fn is_hierarchical(cfg: &KeyHandlerConfig) -> bool {
+    cfg.navigator
+        .first_row()
+        .and_then(|r| cfg.navigator.depth(r))
+        .is_some()
+}
+
+/// Run `f` against a [`SubtreeOps`](crate::common::tree_expand::SubtreeOps)
+/// view of the navigator.
+///
+/// A flat table's navigator reports no depth and no children, so every
+/// recursive expand over one is a no-op — which is why `TableView` can share
+/// this path without a second branch.
+fn with_navigator_subtree<R>(
+    cfg: &KeyHandlerConfig,
+    f: impl FnOnce(&crate::common::tree_expand::SubtreeOps) -> R,
+) -> R {
+    let nav = &cfg.navigator;
+    let count = || nav.row_count();
+    let row = |i: usize| {
+        nav.depth(i)
+            .map(|d| (d, nav.has_children(i), nav.is_expanded(i)))
+    };
+    let set = |i: usize, on: bool| {
+        if nav.is_expanded(i) != on {
+            nav.toggle_expanded(i);
+        }
+    };
+    f(&crate::common::tree_expand::SubtreeOps {
+        visible_count: &count,
+        row: &row,
+        set_expanded: &set,
+    })
+}
+
 fn toggle_selection(cfg: &KeyHandlerConfig, row: usize, col: usize) {
     match cfg.selection_mode {
         TableSelectionMode::SingleRow | TableSelectionMode::MultiRow => {
@@ -574,6 +868,61 @@ fn apply_selection_extension(cfg: &KeyHandlerConfig, row: usize, col: usize, shi
             }
         }
         TableSelectionMode::None => {}
+    }
+}
+
+/// Ctrl+Shift+`nav` — extend the range while keeping whatever the previous
+/// gesture selected. Only the multi modes have a range to extend.
+fn apply_additive_extension(cfg: &KeyHandlerConfig, row: usize, col: usize) {
+    match cfg.selection_mode {
+        TableSelectionMode::MultiRow => {
+            if let Some(ref s) = cfg.selection {
+                s.extend_to_additive(row);
+            }
+        }
+        // `CellSelectionModel::extend_to` already unions with the set
+        // committed at the last non-extending action, so its plain extend is
+        // the additive one — the row model is the side that needed a second
+        // entry point.
+        TableSelectionMode::MultiCell => {
+            if let Some(ref cs) = cfg.cell_selection {
+                cs.extend_to(row, col);
+            }
+        }
+        _ => apply_selection_extension(cfg, row, col, true),
+    }
+}
+
+/// Ctrl+Space in a cell grid — select the whole column holding the cursor.
+/// The ARIA grid pattern and Excel agree on this; it is *not* the file
+/// manager's "toggle the focused item".
+fn select_column(cfg: &KeyHandlerConfig, col: usize, row_count: usize) {
+    if let Some(ref cs) = cfg.cell_selection {
+        cs.select_cells((0..row_count).map(|r| (r, col)));
+    }
+}
+
+/// Shift+Space in a cell grid — select the whole row holding the cursor.
+fn select_row_cells(cfg: &KeyHandlerConfig, row: usize) {
+    if let Some(ref cs) = cfg.cell_selection {
+        cs.select_cells((0..cfg.col_count).map(|c| (row, c)));
+    }
+}
+
+/// Ctrl+Shift+A — drop the selection whichever model is backing it.
+fn clear_selection(cfg: &KeyHandlerConfig) {
+    match cfg.selection_mode {
+        TableSelectionMode::MultiRow => {
+            if let Some(ref s) = cfg.selection {
+                s.clear();
+            }
+        }
+        TableSelectionMode::MultiCell => {
+            if let Some(ref cs) = cfg.cell_selection {
+                cs.clear();
+            }
+        }
+        _ => {}
     }
 }
 

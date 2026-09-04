@@ -42,13 +42,28 @@ pub(crate) trait RowNavigator {
         if n == 0 { None } else { Some(n - 1) }
     }
 
-    /// Tree-only — depth of the row in the hierarchy. `None` for
-    /// flat tables. Currently only exercised by `TreeNavigator`'s own
-    /// test path; reserved for upcoming Shift+ArrowLeft "jump to
-    /// parent" navigation in the shared keyboard module.
-    #[allow(dead_code)]
+    /// Tree-only — depth of the row in the hierarchy. `None` for flat tables,
+    /// which is what makes [`parent_row`](Self::parent_row) inert there.
     fn depth(&self, _row: usize) -> Option<usize> {
         None
+    }
+
+    /// The row's parent in the current flattening, or `None` at the root (and
+    /// always, for a flat table).
+    ///
+    /// Derived by scanning back for the nearest shallower row rather than
+    /// asked of the source, because the flattening is the only shape both
+    /// navigators expose — a parent is by construction the closest preceding
+    /// row at a smaller depth. Bounded by the distance to the parent, on a
+    /// keypress.
+    fn parent_row(&self, row: usize) -> Option<usize> {
+        let depth = self.depth(row)?;
+        if depth == 0 {
+            return None;
+        }
+        (0..row)
+            .rev()
+            .find(|&i| self.depth(i).is_some_and(|d| d < depth))
     }
 
     fn has_children(&self, _row: usize) -> bool {

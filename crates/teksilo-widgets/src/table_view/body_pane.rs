@@ -367,7 +367,10 @@ impl<T: 'static> Widget for BodyPane<T> {
                         row_idx + 2, // header is row 1
                         display_pos + 1,
                         is_selected,
-                    );
+                    )
+                    // `Role::GridCell` only where the cell really is the
+                    // selectable unit; see `CellA11y::is_grid_cell`.
+                    .with_grid_cell_role(selection_mode.is_cell_mode());
                     let cell_id = ctx.add(cell_a11y);
 
                     // Per-cell pointer handler: a click on the cell
@@ -468,12 +471,52 @@ impl<T: 'static> Widget for BodyPane<T> {
             );
             let row_id = ctx.add(row_widget);
 
+            // A grid is *one* Tab stop — the cell cursor is the navigation, and
+            // a control the delegate put in a cell (a checkbox column, most
+            // often) must not become a Tab stop of its own. Only realized rows
+            // exist, so a per-cell stop would make the Tab order follow the
+            // scroll position: 36 stops in a 200-row table showing 35, and a
+            // different 36 after scrolling. Honoured up the ancestor chain by
+            // `tab_stop_effective`, so one call covers every cell in the row.
+            // `Space` reaches the control through the focused cell's published
+            // keyboard toggle instead.
+            ctx.set_tab_stop(row_id, false);
+
             // Selection click on the row. Skipped while a cell is in
             // edit mode so clicks landing inside the editor (e.g. on
             // the cell's `TextInput`) don't change the selection — a
             // selection change would re-emit the row, destroying the
             // editor and dropping focus mid-click.
             let mut row_handlers = HandlerSet::new();
+            // ScrollIntoView is the one scroll action all three AccessKit
+            // adapters actually consume (UIA `IScrollItemProvider`, AppKit
+            // `accessibilityScrollToVisible`, AT-SPI `ScrollTo`). Rows are not
+            // focusable nodes, so without it a screen reader has no way to
+            // bring one into view. `ListView` and `TreeView` have answered it
+            // since they shipped; the tables did not.
+            {
+                let metrics = self.row_metrics.clone();
+                let scroll = self.scroll_y.clone();
+                let viewport = self.viewport_height.clone();
+                let len = self.len_fn.clone();
+                row_handlers = row_handlers.on_access_action(move |action, _ctx| {
+                    if action != teksilo_core::accesskit::Action::ScrollIntoView {
+                        return teksilo_core::event::EventResponse::Ignored;
+                    }
+                    let vh = viewport.get();
+                    let cur = scroll.get();
+                    let new = {
+                        let mut m = metrics.borrow_mut();
+                        let total = m.total_height(len());
+                        let max = (total - vh).max(0.0);
+                        m.scroll_for_ensure_visible(row_idx, cur, vh, max)
+                    };
+                    if (new - cur).abs() > f32::EPSILON {
+                        scroll.set(new);
+                    }
+                    teksilo_core::event::EventResponse::Handled
+                });
+            }
             if let Some(ref sel) = self.selection {
                 let click_anchor = row_anchor.clone();
                 let sel_for_click = sel.clone();

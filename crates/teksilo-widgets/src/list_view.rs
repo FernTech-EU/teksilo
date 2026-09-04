@@ -39,10 +39,19 @@
 //!
 //! The container is the focusable node and rows deliberately are not, so
 //! `set_selected` is the only signal telling assistive technology which row is
-//! current. Full keyboard navigation: arrows, Home, End, PageUp, PageDown,
-//! Space (select/toggle), Enter (activate), Ctrl+A (select all), Shift+Arrow
-//! (range), type-ahead (opt-in via `type_ahead_label`), and Shift+F10 or the
-//! Menu key for the selected row's context menu.
+//! current — and the row subtree is kept out of the Tab order, so a control the
+//! delegate puts in a row (the checkbox `StandardListItem` embeds, most often)
+//! never becomes a Tab stop of its own. Such a control publishes a keyboard
+//! toggle instead, which `Space` runs. Full keyboard navigation: arrows, Home,
+//! End, PageUp, PageDown (each moving the selection, or only the cursor when
+//! the accelerator is held), Shift for a range and Ctrl+Shift for an additive
+//! one, Space (checks the row when it carries a checkbox, else select/toggle),
+//! Enter (activate), Ctrl+A / Ctrl+Shift+A (select all /
+//! deselect), Ctrl+Arrow and Ctrl+Space (the disjoint-selection pair),
+//! type-ahead (opt-in via `type_ahead_label`), and Shift+F10 or the Menu key
+//! for the selected row's context menu. On macOS, Cmd+Down opens the focused
+//! row. The chord table and its rationale are in
+//! [docs/data-view-keyboard.md](https://github.com/ferntech-eu/teksilo/blob/main/docs/data-view-keyboard.md).
 //!
 //! ```rust
 //! # use teksilo_widgets::ListView;
@@ -81,6 +90,9 @@ use teksilo_data::{ItemKey, KeyedSelectionModel};
 use crate::data_views::RowSelection;
 use teksilo_data::{DataChange, DropPosition, DropResponse, ListModel};
 
+// Qualified rather than glob-imported: `data_views::ViewKind` is already in
+// scope here and means something else (which data view a drag came from).
+use crate::common::list_nav;
 use crate::common::row_metrics::{HeightSource, RowMetrics, SharedRowMetrics};
 use crate::common::scroll::OverscrollBehavior;
 use crate::data_views::{DragTransferMode, RowDragData, ViewId, ViewKind, flat_insertion_target};
@@ -1104,6 +1116,10 @@ impl<T: 'static> Widget for ListView<T> {
             // Type-ahead state + label resolver (reads row text via the
             // source's string accessor, so lazy/unloaded rows are skipped).
             let ta_state = self.type_ahead.clone();
+            // Index → realized row id, so `Space` can ask the row whether it
+            // publishes a keyboard toggle (a checkbox) before falling back to
+            // the selection.
+            let row_map_for_key = self.row_map.clone();
             let ta_label = self.type_ahead_label.clone();
             let ta_timeout = self.type_ahead_timeout;
             let with_item_str = self.source.with_item_str_fn.clone();
@@ -1118,11 +1134,48 @@ impl<T: 'static> Widget for ListView<T> {
 
                     // Select all — Ctrl+A, ⌘A on macOS (Multi selection only;
                     // a no-op for Single / None, matching every list control).
+                    // With Shift it deselects instead: GTK is the only toolkit
+                    // that *mandates* Ctrl+Shift+A, but the ARIA listbox and
+                    // tree patterns both sanction an unselect-all, Windows and
+                    // Qt simply have none, and adding it takes nothing away.
                     if modifiers.command() && matches!(key, Key::A) {
                         if let Some(ref sel) = sel_for_key
                             && sel.mode() == teksilo_data::SelectionMode::Multi
                         {
-                            sel.select_all(count);
+                            if modifiers.shift() {
+                                sel.clear();
+                            } else {
+                                sel.select_all(count);
+                            }
+                            return teksilo_core::event::EventResponse::Handled;
+                        }
+                        return teksilo_core::event::EventResponse::Ignored;
+                    }
+
+                    // macOS reads a couple of chords in a list that the other
+                    // desktops spend elsewhere, and both are dead here
+                    // otherwise. ⌘↓ opens the row — Finder's "Command–Down
+                    // Arrow: Open the selected item", and what VS Code binds as
+                    // `list.select`'s macOS secondary. (⌘↑ ascends to the
+                    // parent, which a flat list has none of; `TreeView` claims
+                    // it.) Off macOS this resolves to `None` and costs nothing.
+                    if let Some(alias) = list_nav::mac_alias(*key, *modifiers, ctx.is_rtl()) {
+                        if alias == list_nav::MacAlias::Activate {
+                            let row = fi
+                                .get()
+                                .or_else(|| {
+                                    sel_for_key
+                                        .as_ref()
+                                        .and_then(|s| s.selected_indices().first().copied())
+                                })
+                                .unwrap_or(0)
+                                .min(count - 1);
+                            if let Some(ref sel) = sel_for_key {
+                                sel.select(row);
+                            }
+                            if let Some(ref cb) = activate_key {
+                                cb(row, ctx);
+                            }
                             return teksilo_core::event::EventResponse::Handled;
                         }
                         return teksilo_core::event::EventResponse::Ignored;
@@ -1260,118 +1313,172 @@ impl<T: 'static> Widget for ListView<T> {
                     // Anchor for the keys that need a row to compute *from*
                     // (paging, activation) rather than a direction to step in.
                     let current = cursor.unwrap_or(0);
-                    let new_idx = match key {
-                        Key::ArrowDown => Some(match cursor {
-                            None => 0,
-                            Some(c) => (c + 1).min(count - 1),
-                        }),
-                        Key::ArrowUp => Some(match cursor {
-                            None => count - 1,
-                            Some(c) => c.saturating_sub(1),
-                        }),
-                        Key::Home => Some(0),
-                        Key::End => Some(count - 1),
-                        // Page keys: jump one viewport of rows (geometry-driven,
-                        // so variable heights page by visual distance), then the
-                        // common ensure-visible below scrolls to follow.
-                        Key::PageDown => {
-                            let vh = vh_for_nav.get();
-                            let r = {
-                                let mut m = metrics_for_nav.borrow_mut();
-                                m.resize(count);
-                                let target = m.row_top(current) + vh;
-                                m.row_at(target)
-                            };
-                            Some(if r == current {
-                                (current + 1).min(count - 1)
-                            } else {
-                                r.min(count - 1)
-                            })
-                        }
-                        Key::PageUp => {
-                            let vh = vh_for_nav.get();
-                            let r = {
-                                let mut m = metrics_for_nav.borrow_mut();
-                                m.resize(count);
-                                let target = (m.row_top(current) - vh).max(0.0);
-                                m.row_at(target)
-                            };
-                            Some(if r == current {
-                                current.saturating_sub(1)
-                            } else {
-                                r
-                            })
-                        }
-                        Key::Enter => {
-                            // Enter activates the focused row (open / commit).
-                            if let Some(ref sel) = sel_for_key {
-                                sel.select(current);
-                            }
-                            if let Some(ref cb) = activate_key {
-                                cb(current, ctx);
-                            }
-                            return teksilo_core::event::EventResponse::Handled;
-                        }
-                        Key::Space if modifiers.ctrl() => {
-                            // Ctrl+Space toggles the focused row's selection —
-                            // the keyboard equivalent of Ctrl+click. Distinct
-                            // from plain Space below: it always toggles (even
-                            // in Single mode, via `SelectionModel::toggle`'s
-                            // own Single-mode fallback to `select`), pairing
-                            // with Ctrl+Arrow's cursor-only move so a user can
-                            // walk the cursor without disturbing the existing
-                            // selection, then Ctrl+Space to add rows one at a
-                            // time.
-                            //
-                            // Both halves stay on literal `ctrl()`, macOS
-                            // included: ⌘Space is Spotlight and never reaches
-                            // an app, and ⌘↑/⌘↓ already mean something else in
-                            // a Finder list. This Explorer-style cursor pair
-                            // has no ⌘ counterpart, so Control keeps it
-                            // reachable and out of the platform's way.
-                            if let Some(ref sel) = sel_for_key {
-                                sel.toggle(current);
-                            }
-                            fi.set(Some(current));
-                            return teksilo_core::event::EventResponse::Handled;
-                        }
-                        Key::Space => {
-                            // Space moves/toggles the selection but does NOT
-                            // activate — the platform convention (Enter is the
-                            // activator). Multi: toggle the focused row; Single:
-                            // select it.
-                            if let Some(ref sel) = sel_for_key {
-                                if sel.mode() == teksilo_data::SelectionMode::Multi {
-                                    sel.toggle(current);
+                    // The edge-and-page family is resolved once, in
+                    // `common::list_nav`, so the five data views cannot drift
+                    // apart on it again. A flat list has no row to be scoped
+                    // to, so `RowFirst` / `RowLast` never arrive here — but a
+                    // list's row *is* the collection, so they read the same way
+                    // if the view kind is ever widened.
+                    let nav = list_nav::nav_chord(*key, *modifiers, list_nav::ViewKind::Linear);
+                    let new_idx = if let Some(chord) = nav {
+                        Some(match chord.movement {
+                            list_nav::NavMove::First | list_nav::NavMove::RowFirst => 0,
+                            list_nav::NavMove::Last | list_nav::NavMove::RowLast => count - 1,
+                            // Geometry-driven, so variable and auto-measured
+                            // heights page by visual distance rather than by a
+                            // fixed row count; the ensure-visible below then
+                            // scrolls to follow.
+                            list_nav::NavMove::Page { down } => {
+                                let vh = vh_for_nav.get();
+                                let r = {
+                                    let mut m = metrics_for_nav.borrow_mut();
+                                    m.resize(count);
+                                    let target = if down {
+                                        m.row_top(current) + vh
+                                    } else {
+                                        (m.row_top(current) - vh).max(0.0)
+                                    };
+                                    m.row_at(target)
+                                };
+                                // Guarantee progress even when one row is
+                                // taller than the whole viewport.
+                                if r == current && down {
+                                    (current + 1).min(count - 1)
+                                } else if r == current {
+                                    current.saturating_sub(1)
                                 } else {
-                                    sel.select(current);
+                                    r.min(count - 1)
                                 }
                             }
-                            fi.set(Some(current));
-                            return teksilo_core::event::EventResponse::Handled;
+                        })
+                    } else {
+                        match key {
+                            Key::ArrowDown => Some(match cursor {
+                                None => 0,
+                                Some(c) => (c + 1).min(count - 1),
+                            }),
+                            Key::ArrowUp => Some(match cursor {
+                                None => count - 1,
+                                Some(c) => c.saturating_sub(1),
+                            }),
+                            Key::Enter => {
+                                // Enter activates the focused row (open / commit).
+                                if let Some(ref sel) = sel_for_key {
+                                    sel.select(current);
+                                }
+                                if let Some(ref cb) = activate_key {
+                                    cb(current, ctx);
+                                }
+                                return teksilo_core::event::EventResponse::Handled;
+                            }
+                            Key::Space if modifiers.ctrl() => {
+                                // Ctrl+Space toggles the focused row's selection —
+                                // the keyboard equivalent of Ctrl+click. Distinct
+                                // from plain Space below: it always toggles (even
+                                // in Single mode, via `SelectionModel::toggle`'s
+                                // own Single-mode fallback to `select`), pairing
+                                // with Ctrl+Arrow's cursor-only move so a user can
+                                // walk the cursor without disturbing the existing
+                                // selection, then Ctrl+Space to add rows one at a
+                                // time.
+                                //
+                                // Both halves stay on literal `ctrl()`, macOS
+                                // included: ⌘Space is Spotlight and never reaches
+                                // an app, and ⌘↑/⌘↓ already mean something else in
+                                // a Finder list. This Explorer-style cursor pair
+                                // has no ⌘ counterpart, so Control keeps it
+                                // reachable and out of the platform's way.
+                                if let Some(ref sel) = sel_for_key {
+                                    sel.toggle(current);
+                                }
+                                fi.set(Some(current));
+                                return teksilo_core::event::EventResponse::Handled;
+                            }
+                            Key::Space => {
+                                // A row carrying a checkbox reads Space as
+                                // "check this" — what Windows does for a
+                                // checkbox list view, and what a visible
+                                // checkbox looks like it should answer to. The
+                                // row's control is out of the Tab order, so
+                                // this is its only keyboard route; Ctrl+Space
+                                // above keeps toggling the *selection*.
+                                //
+                                // Rows without a checkbox are unaffected:
+                                // there is no published toggle, so Space falls
+                                // through to the selection as before.
+                                if let Some(row_id) = row_map_for_key
+                                    .borrow()
+                                    .iter()
+                                    .find(|(i, _)| *i == current)
+                                    .map(|(_, id)| *id)
+                                {
+                                    let sel_fallback = sel_for_key.clone();
+                                    ctx.row_space_activate(
+                                        row_id,
+                                        std::rc::Rc::new(move || {
+                                            if let Some(ref sel) = sel_fallback {
+                                                if sel.mode() == teksilo_data::SelectionMode::Multi
+                                                {
+                                                    sel.toggle(current);
+                                                } else {
+                                                    sel.select(current);
+                                                }
+                                            }
+                                        }),
+                                    );
+                                    fi.set(Some(current));
+                                    return teksilo_core::event::EventResponse::Handled;
+                                }
+                                // Otherwise Space moves/toggles the selection but
+                                // does NOT activate — the platform convention
+                                // (Enter is the activator). Multi: toggle the
+                                // focused row; Single: select it.
+                                if let Some(ref sel) = sel_for_key {
+                                    if sel.mode() == teksilo_data::SelectionMode::Multi {
+                                        sel.toggle(current);
+                                    } else {
+                                        sel.select(current);
+                                    }
+                                }
+                                fi.set(Some(current));
+                                return teksilo_core::event::EventResponse::Handled;
+                            }
+                            _ => None,
                         }
-                        _ => None,
                     };
 
                     if let Some(idx) = new_idx {
                         fi.set(Some(idx));
-                        // Ctrl+Arrow (no Shift) moves the keyboard cursor only,
-                        // leaving the selection untouched — pairs with
-                        // Ctrl+Space to build a selection without every step
-                        // replacing it. Every other nav key keeps the
-                        // existing select-follow behavior (Home/End/PageUp/
-                        // PageDown are unaffected by Ctrl; only the arrows
-                        // opt into cursor-only movement). Literal `ctrl()` —
-                        // see the Ctrl+Space arm above for why this pair does
-                        // not follow the platform accelerator.
-                        let cursor_only = modifiers.ctrl()
-                            && !modifiers.shift()
-                            && matches!(key, Key::ArrowUp | Key::ArrowDown);
-                        if !cursor_only && let Some(ref sel) = sel_for_key {
-                            if modifiers.shift() {
-                                sel.extend_to(idx);
-                            } else {
-                                sel.select(idx);
+                        // What the chord does to the selection. The edge-and-page
+                        // keys carry their own answer from `list_nav`, where the
+                        // accelerator means "move the cursor, leave the selection
+                        // alone" — the rule GTK4 and Qt both apply to *every*
+                        // navigation key.
+                        //
+                        // The arrows keep reading literal `ctrl()` instead: ⌘↑/⌘↓
+                        // already mean something else in a Finder list (see the
+                        // Ctrl+Space arm above), so this pair has no ⌘ counterpart
+                        // to move to. That asymmetry is deliberate — it is also
+                        // what leaves ⌘↑/⌘↓ free for the macOS aliases.
+                        let op = match nav {
+                            Some(chord) => chord.selection,
+                            None if modifiers.ctrl()
+                                && !modifiers.shift()
+                                && matches!(key, Key::ArrowUp | Key::ArrowDown) =>
+                            {
+                                list_nav::SelectionOp::Suppress
+                            }
+                            None if modifiers.shift() => list_nav::SelectionOp::Extend,
+                            None => list_nav::SelectionOp::Replace,
+                        };
+                        if let Some(ref sel) = sel_for_key {
+                            match op {
+                                list_nav::SelectionOp::Replace => sel.select(idx),
+                                list_nav::SelectionOp::Suppress => {}
+                                list_nav::SelectionOp::Extend => sel.extend_to(idx),
+                                list_nav::SelectionOp::ExtendAdditive => {
+                                    sel.extend_to_additive(idx)
+                                }
                             }
                         }
                         // Scroll into view — the ListView's own viewport first,
@@ -1889,7 +1996,7 @@ mod tests {
     }
 
     #[derive(Debug)]
-    struct FixedLeaf(f32, f32);
+    pub(super) struct FixedLeaf(pub f32, pub f32);
     impl Widget for FixedLeaf {
         fn layout_response(
             &self,
@@ -3051,6 +3158,146 @@ mod tests {
         assert_eq!(model.with_item(0, |v| *v), Some(20));
         assert_eq!(model.with_item(1, |v| *v), Some(10));
         assert_eq!(model.with_item(2, |v| *v), Some(30));
+    }
+
+    /// A 100-row list, ~10 rows to a viewport, focused and ready for keys.
+    /// Returns the scroll signal too, so a test can assert that a key moved
+    /// the viewport and not just the selection.
+    fn keyboard_fixture(
+        mode: teksilo_data::SelectionMode,
+    ) -> (
+        WidgetTree,
+        teksilo_data::SelectionModel,
+        Signal<f32>,
+        SizeProposal,
+    ) {
+        use teksilo_data::SelectionModel;
+        let model = ListModel::from_vec((0..100usize).collect());
+        let selection = SelectionModel::new(mode);
+        let sel = selection.clone();
+        let mut tree = WidgetTree::new();
+        let view = ListView::new(model, move |_i, _it, _s| Box::new(FixedLeaf(100.0, 20.0)))
+            .item_height(20.0)
+            .selection(sel);
+        let scroll = view.scroll_y_signal().clone();
+        let lv = tree.add(view);
+        let p = SizeProposal::exact(400.0, 200.0);
+        tree.layout(p);
+        tree.focus(lv);
+        (tree, selection, scroll, p)
+    }
+
+    #[test]
+    fn home_and_end_reach_the_ends_of_the_collection() {
+        use teksilo_core::event::{Key, Modifiers};
+        let (mut tree, selection, _scroll, p) =
+            keyboard_fixture(teksilo_data::SelectionMode::Single);
+        selection.select(40);
+
+        tree.press_key(Key::End, Modifiers::NONE);
+        tree.layout(p);
+        assert_eq!(selection.selected_indices(), vec![99]);
+
+        tree.press_key(Key::Home, Modifiers::NONE);
+        tree.layout(p);
+        assert_eq!(selection.selected_indices(), vec![0]);
+    }
+
+    #[test]
+    fn home_and_end_scroll_the_row_they_land_on_into_view() {
+        use teksilo_core::event::{Key, Modifiers};
+        let (mut tree, selection, scroll, p) =
+            keyboard_fixture(teksilo_data::SelectionMode::Single);
+        selection.select(0);
+        tree.layout(p);
+
+        tree.press_key(Key::End, Modifiers::NONE);
+        tree.layout(p);
+        // 100 rows of 20 dp in a 200 dp viewport: the last row is only visible
+        // once the offset reaches the bottom of the content.
+        let at_end = scroll.get();
+        assert!(
+            at_end > 1500.0,
+            "End should scroll to the bottom of the content, got {at_end}"
+        );
+
+        tree.press_key(Key::Home, Modifiers::NONE);
+        tree.layout(p);
+        assert!(scroll.get() < 1.0, "Home should scroll back to the top");
+    }
+
+    #[test]
+    fn the_accelerator_moves_the_cursor_without_disturbing_the_selection() {
+        use teksilo_core::event::{Key, Modifiers};
+        let (mut tree, selection, _scroll, p) =
+            keyboard_fixture(teksilo_data::SelectionMode::Multi);
+        selection.select(40);
+
+        // Ctrl/⌘+End walks the cursor to the last row and leaves row 40 picked
+        // — the rule GTK4 and Qt apply to every navigation key, and the one
+        // Ctrl+Arrow already followed here.
+        tree.press_key(Key::End, Modifiers::COMMAND);
+        tree.layout(p);
+        assert_eq!(selection.selected_indices(), vec![40]);
+
+        tree.press_key(Key::Home, Modifiers::COMMAND);
+        tree.layout(p);
+        assert_eq!(selection.selected_indices(), vec![40]);
+
+        // The cursor really did move, so a plain Home now selects where it is.
+        tree.press_key(Key::PageDown, Modifiers::COMMAND);
+        tree.layout(p);
+        assert_eq!(selection.selected_indices(), vec![40]);
+    }
+
+    #[test]
+    fn shift_end_then_shift_home_selects_one_range_not_the_whole_list() {
+        use teksilo_core::event::{Key, Modifiers};
+        let (mut tree, selection, _scroll, p) =
+            keyboard_fixture(teksilo_data::SelectionMode::Multi);
+        selection.select(10);
+
+        tree.press_key(Key::End, Modifiers::SHIFT);
+        tree.layout(p);
+        assert_eq!(selection.count(), 90, "10..=99");
+
+        tree.press_key(Key::Home, Modifiers::SHIFT);
+        tree.layout(p);
+        assert_eq!(
+            selection.selected_indices(),
+            (0..=10).collect::<Vec<_>>(),
+            "reversing the gesture must shrink the range, not union with it"
+        );
+    }
+
+    #[test]
+    fn ctrl_shift_end_extends_without_losing_an_earlier_pick() {
+        use teksilo_core::event::{Key, Modifiers};
+        let (mut tree, selection, _scroll, p) =
+            keyboard_fixture(teksilo_data::SelectionMode::Multi);
+        selection.select(0);
+        selection.toggle(95); // a disjoint pick; anchor moves to 95
+
+        tree.press_key(Key::End, Modifiers::COMMAND | Modifiers::SHIFT);
+        tree.layout(p);
+        let got = selection.selected_indices();
+        assert_eq!(got.first().copied(), Some(0), "the earlier pick survives");
+        assert_eq!(got.last().copied(), Some(99));
+        assert_eq!(got.len(), 6, "0 plus 95..=99");
+    }
+
+    #[test]
+    fn ctrl_shift_a_deselects_everything() {
+        use teksilo_core::event::{Key, Modifiers};
+        let (mut tree, selection, _scroll, p) =
+            keyboard_fixture(teksilo_data::SelectionMode::Multi);
+        tree.press_key(Key::A, Modifiers::COMMAND);
+        tree.layout(p);
+        assert_eq!(selection.count(), 100);
+
+        tree.press_key(Key::A, Modifiers::COMMAND | Modifiers::SHIFT);
+        tree.layout(p);
+        assert_eq!(selection.count(), 0);
     }
 
     #[test]
@@ -4638,5 +4885,109 @@ mod tests {
         );
         assert!(handled, "the Focus action must be serviced");
         assert_eq!(tree.focused(), Some(lv_id));
+    }
+}
+
+#[cfg(test)]
+mod checkbox_keyboard_tests {
+    use super::tests::FixedLeaf;
+    use super::*;
+    use teksilo_core::WidgetTree;
+    use teksilo_core::event::{Key, Modifiers};
+    use teksilo_data::{CheckedModel, SelectionMode, SelectionModel};
+    use teksilo_i18n::lit;
+
+    /// A 200-row list showing ~10, every row carrying a checkbox.
+    fn checked_list() -> (WidgetTree, SelectionModel, CheckedModel, SizeProposal) {
+        let model = ListModel::from_vec((0..200usize).collect());
+        let checks = CheckedModel::new();
+        let selection = SelectionModel::new(SelectionMode::Multi);
+        let (sel, ck) = (selection.clone(), checks.clone());
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let lv = tree.add(
+            ListView::new(model, move |i, item, selected| {
+                Box::new(
+                    crate::StandardListItem::new(lit!(format!("Row {item}")))
+                        .selected(selected)
+                        .checkbox(ck.signal_for(i)),
+                )
+            })
+            .item_height(24.0)
+            .selection(sel),
+        );
+        let p = SizeProposal::exact(400.0, 240.0);
+        tree.layout(p);
+        tree.focus(lv);
+        (tree, selection, checks, p)
+    }
+
+    #[test]
+    fn a_list_is_one_tab_stop_however_many_rows_are_realized() {
+        // The row checkboxes used to be Tab stops of their own, which made the
+        // Tab order a function of the virtualization window: 31 stops in this
+        // fixture, and a *different* 31 after scrolling. A listbox is one Tab
+        // stop with a cursor moving inside it.
+        let (mut tree, _sel, _ck, p) = checked_list();
+        let mut seen = std::collections::BTreeSet::new();
+        for _ in 0..40 {
+            tree.press_key(Key::Tab, Modifiers::NONE);
+            tree.layout(p);
+            seen.insert(tree.focused());
+        }
+        assert_eq!(
+            seen.len(),
+            1,
+            "Tab must not walk into the rows; got {} distinct stops",
+            seen.len()
+        );
+    }
+
+    #[test]
+    fn space_checks_the_focused_row_and_ctrl_space_still_selects() {
+        let (mut tree, sel, checks, p) = checked_list();
+        sel.select(3);
+        tree.layout(p);
+
+        // Space reaches the checkbox — the row's only keyboard route to it,
+        // now that it is out of the Tab order.
+        tree.press_key(Key::Space, Modifiers::NONE);
+        tree.layout(p);
+        assert!(checks.signal_for(3).get(), "Space checks the focused row");
+        assert_eq!(sel.selected_indices(), vec![3], "and leaves the selection");
+
+        tree.press_key(Key::Space, Modifiers::NONE);
+        tree.layout(p);
+        assert!(!checks.signal_for(3).get(), "and unchecks it again");
+
+        // Ctrl+Space keeps meaning "toggle the selection".
+        tree.press_key(Key::Space, Modifiers::CTRL);
+        tree.layout(p);
+        assert_eq!(sel.selected_indices(), Vec::<usize>::new());
+        assert!(!checks.signal_for(3).get(), "the check is untouched");
+    }
+
+    #[test]
+    fn a_row_without_a_checkbox_keeps_space_on_the_selection() {
+        let model = ListModel::from_vec((0..20usize).collect());
+        let selection = SelectionModel::new(SelectionMode::Multi);
+        let sel = selection.clone();
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let lv = tree.add(
+            ListView::new(model, move |_i, _item, _s| Box::new(FixedLeaf(100.0, 24.0)))
+                .item_height(24.0)
+                .selection(sel),
+        );
+        let p = SizeProposal::exact(400.0, 240.0);
+        tree.layout(p);
+        tree.focus(lv);
+        selection.select(2);
+
+        tree.press_key(Key::Space, Modifiers::NONE);
+        tree.layout(p);
+        assert_eq!(
+            selection.selected_indices(),
+            Vec::<usize>::new(),
+            "no checkbox to publish a toggle, so Space is still the selection"
+        );
     }
 }
