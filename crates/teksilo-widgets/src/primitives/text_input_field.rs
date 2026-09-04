@@ -1324,12 +1324,14 @@ impl Widget for TextInputField {
                     // context menu path (the framework focuses the
                     // newly-mounted menu, which dispatches `FocusLost`
                     // here, and `Cut` / `Copy` invoked from the menu
-                    // afterwards find an empty selection). Native
-                    // macOS / Windows text fields keep the selection
-                    // on blur too — typically the visual is dimmed
-                    // but the selection state is preserved so the
-                    // next focus-gain or context-menu invocation
-                    // still operates on it.
+                    // afterwards find an empty selection). A Win32
+                    // edit control does the same: the default (no
+                    // `ES_NOHIDESEL`) hides the highlight on blur but
+                    // `EM_GETSEL` still returns the range, so the
+                    // menu invoked afterwards still has something to
+                    // act on. The *painting* is the part that stops —
+                    // see `field_selection_color`, which returns a
+                    // transparent band for an unfocused field.
                     st.scroll_x = 0.0;
                     st.caret_visible.set(false);
                     st.drag_state = state::DragState::Idle;
@@ -1794,34 +1796,51 @@ fn paint_suffix_glyphs(canvas: &mut Canvas, frame: &teksilo_text::RenderFrame, o
     }
 }
 
-/// Selection-highlight colour for a text field: the vivid `selection_bg_active`
-/// while the host window is active, the muted `selection_bg_inactive` while it
-/// is inactive — so a field's selection desaturates in a background window
-/// (the universal desktop convention; the same `selection_bg_inactive` the OS
-/// uses for unfocused selection).
-/// The band a selection is painted in — the **active** tint only while this
-/// field is the one the keystrokes would go to.
+/// The band a selection is painted in. Two axes decide it, and they do *not*
+/// decide it the same way:
 ///
-/// Two axes, and both are needed. The window losing focus was already handled;
-/// what was missing is the field losing it *within* an active window, which is
-/// the common case: click into a cell editor, then click a button, and the
-/// field went on showing a fully-lit selection as though it were still taking
-/// input. Two fields on screen could both look focused at once.
+/// | field focus | window | band |
+/// | --- | --- | --- |
+/// | focused | active | vivid `selection_bg_active` |
+/// | focused | inactive | muted `selection_bg_inactive` |
+/// | not focused | either | nothing — fully transparent |
 ///
-/// The selection *state* is deliberately kept across blur — see the
-/// `on_focus(false)` arm, which spells out why (the right-click Copy path needs
-/// it, and native fields keep it too). This is the other half of that same
-/// sentence: the state is preserved, the **visual is dimmed**. Only the second
-/// half was implemented.
+/// **An entry that does not hold focus paints no selection**, which is what
+/// every native single-line field does. A Win32 edit control hides the
+/// selection on focus-out unless it was created with `ES_NOHIDESEL`, and
+/// WinForms spells the same default `TextBoxBase.HideSelection = true`.
+/// `QLineEdit::focusOutEvent` goes further and calls `deselect()` outright for
+/// every focus reason except `ActiveWindowFocusReason` and `PopupFocusReason`.
+/// On macOS an `NSTextField` that stops being first responder has its shared
+/// field editor detached, so there is no selection left to draw. GTK's entry is
+/// the one toolkit that keeps a defocused selection lit, and that has been
+/// filed against it as a papercut rather than defended as a design.
+///
+/// The *window* axis is the one where dimming, not hiding, is correct — and
+/// the same three toolkits say so: Qt's carve-out for `ActiveWindowFocusReason`
+/// exists precisely so a focused field keeps its selection when the window goes
+/// to the background, and AppKit renders it there in
+/// `unemphasizedSelectedTextBackgroundColor`. Losing the window is not the same
+/// event as losing the caret.
+///
+/// Multi-line editors (`RichTextEditor`, `CodeEditor`, `LogView`) are
+/// deliberately **not** on this rule: `QTextEdit` / `NSTextView` / every code
+/// editor keep a visible selection in a blurred view, because there the
+/// selection is a region of a document the user is working with rather than a
+/// transient edit state.
+///
+/// The selection *state* survives blur either way — the `on_focus(false)` arm
+/// spells out why (the right-click Copy path needs it) — this decides only what
+/// is drawn.
 fn field_selection_color(
     colors: &teksilo_tokens::ColorTokens,
     window_active: bool,
     has_focus: bool,
 ) -> [f32; 4] {
-    if window_active && has_focus {
-        colors.selection_bg_active.to_array()
-    } else {
-        colors.selection_bg_inactive.to_array()
+    match (has_focus, window_active) {
+        (false, _) => [0.0; 4],
+        (true, true) => colors.selection_bg_active.to_array(),
+        (true, false) => colors.selection_bg_inactive.to_array(),
     }
 }
 
@@ -2157,27 +2176,25 @@ mod window_active_tests {
         );
     }
 
-    /// **A field that is not focused dims its selection, even in an active
-    /// window.**
+    /// **A field that is not focused paints no selection at all**, in an
+    /// active window or a background one.
     ///
-    /// Only the window axis was ever consulted, so clicking from one field to
-    /// another left both showing a fully-lit selection: two controls claiming
-    /// the keystrokes at once. The selection *state* is kept on blur on
-    /// purpose — the `on_focus(false)` arm explains why, and native fields do
-    /// the same — and this is the other half of that sentence, which had never
-    /// been written.
+    /// Dimming it was not enough: tab across a form of `SpinBox`es — each of
+    /// which selects all on keyboard focus — and every field left behind kept
+    /// a grey band, so the form read as a column of half-lit selections with
+    /// no way to tell which one the keystrokes went to. Native single-line
+    /// fields hide it outright (Win32 without `ES_NOHIDESEL`,
+    /// `TextBoxBase.HideSelection = true`, `QLineEdit`'s `deselect()` on
+    /// focus-out, AppKit detaching the field editor).
     #[test]
-    fn field_selection_color_dims_when_the_field_is_not_focused() {
+    fn field_selection_color_vanishes_when_the_field_is_not_focused() {
         let colors = teksilo_core::presets::intui::light().colors;
         assert_eq!(
             field_selection_color(&colors, true, false),
-            colors.selection_bg_inactive.to_array(),
-            "an unfocused field must dim its selection even in an active window"
+            [0.0; 4],
+            "an unfocused field must paint no selection, even in an active window"
         );
-        assert_eq!(
-            field_selection_color(&colors, false, false),
-            colors.selection_bg_inactive.to_array()
-        );
+        assert_eq!(field_selection_color(&colors, false, false), [0.0; 4]);
     }
 
     /// ...and the live field re-tints as focus comes and goes, rather than
@@ -2208,8 +2225,8 @@ mod window_active_tests {
         tree.focus(b);
         assert_eq!(
             tint(&tree, a),
-            colors.selection_bg_inactive.to_array(),
-            "focus moved to another field and the first kept a lit selection"
+            [0.0; 4],
+            "focus moved to another field and the first kept a visible selection"
         );
         assert_eq!(tint(&tree, b), colors.selection_bg_active.to_array());
     }

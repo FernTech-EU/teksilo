@@ -84,6 +84,33 @@ Keyboard focus rings grey out (not hide) in an inactive window, uniformly, via
 the theme-side accent projection above — no per-widget check. `MenuList` is
 excluded by design — an open menu is always active.
 
+### Single-line fields hide their selection when *they* lose focus
+
+The table above is the **window** axis. On the **view-focus** axis the
+`TextInput` family (`TextInput`, `PasswordField`, `SpinBox`, `SearchField`,
+`DateEdit` / `TimeEdit` / `DateTimeEdit`, `HexColorInput`, and anything else
+built on `TextInputField`) does not desaturate — it paints **no selection at
+all** while the field itself is unfocused, even in an active window. So a form
+of fields tabbed through in turn shows exactly one selection: the one that the
+keystrokes reach.
+
+That follows the native single-line entry everywhere except GTK. A Win32 edit
+control hides the selection on focus-out unless created with `ES_NOHIDESEL`
+(WinForms: `TextBoxBase.HideSelection`, default `true`); `QLineEdit`'s
+`focusOutEvent` calls `deselect()` for every focus reason except
+`ActiveWindowFocusReason` and `PopupFocusReason`; and an `NSTextField` that
+stops being first responder has the shared field editor detached from it, so
+there is no selection left to draw. Qt's carve-out is the same distinction made
+here: losing the *window* dims, losing the *caret* hides.
+
+Multi-line editors (`RichTextEditor`, `CodeEditor`, `LogView`) stay on the
+desaturating rule for both axes — `QTextEdit`, `NSTextView` and every code
+editor keep a blurred view's selection visible, because there it marks a region
+of a document being worked on rather than a transient edit state.
+
+The selection *state* is kept across blur in both families (the right-click
+Copy path needs it, and native fields keep it too); only the painting changes.
+
 ### Custom selection colours stay fixed
 
 If an app sets an explicit selection colour — e.g.
