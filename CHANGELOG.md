@@ -13,290 +13,175 @@ by crate for clarity, not because crates version independently.
 
 ## [Unreleased]
 
-Keyboard navigation across the five data views. The five had grown their key
-handling separately and had three different answers for `Home`; they now share
-one chord table, and the platform question behind it was settled by reading
-what GTK4, Qt, wxWidgets, Slint and VS Code actually bind rather than by
-reasoning from the HIGs. See
-[docs/data-view-keyboard.md](docs/data-view-keyboard.md).
+## [0.9.3] - 2026-09-04
 
-**Added**
+Three unrelated strands: one keyboard contract for the five data views, MCP
+automation on Windows and macOS, and a text field that stops painting a
+selection it does not own.
 
-- `common::list_nav` — the edge-and-page chord table as pure functions over
+### Added
+
+#### Data views
+
+See [docs/data-view-keyboard.md](docs/data-view-keyboard.md) for the full chord
+table.
+
+- `common::list_nav`: the edge-and-page chords as pure functions over
   `(key, modifiers, view kind)`, with `_for` twins so both platform branches
-  are reachable from one host's test run. Deliberately takes no convention for
-  navigation itself: every surveyed toolkit binds `Home`/`End`/`PageUp`/
-  `PageDown` identically on all three platforms.
-- `Ctrl+Shift`+navigation extends a range **additively**, so a second disjoint
-  range can be built without losing the first
-  (`SelectionModel::extend_to_additive`).
-- `Ctrl+Shift+A` deselects everything in all five views.
-- Tree expand chords in `TreeView` and `TreeTableView`: `*` expands a whole
-  subtree, `+` and `-` one level. `→` on an already-open node now moves into
-  its first child, which the ARIA tree pattern and Windows both specify.
-- macOS-only aliases, all previously dead: `⌘↓` opens the focused row, `⌘↑`
-  collapses or ascends, `⌥→`/`⌥←` expand or collapse a subtree.
-- `PageUp`/`PageDown` in `ScrollBar` and `MenuList`; `Home`/`End`/`PageUp`/
-  `PageDown` in `CommandPalette`.
+  are reachable from one host's test run.
+- `SelectionModel::extend_to_additive`, and `Ctrl+Shift`+navigation on top of
+  it: a second disjoint range can be built without losing the first.
+- `Ctrl+Shift+A` deselects everything, in all five views.
+- Tree expand chords in `TreeView` and `TreeTableView`: `*` expands a subtree,
+  `+` and `-` one level, `→` on an open node moves to its first child.
+- macOS aliases, all previously dead: `⌘↓` opens the focused row, `⌘↑`
+  collapses or ascends, `⌥→` / `⌥←` expand or collapse a subtree.
+- `PageUp` / `PageDown` in `ScrollBar` and `MenuList`; `Home` / `End` /
+  `PageUp` / `PageDown` in `CommandPalette`.
 
-**Fixed**
+#### Automation
 
-- **A `Shift` range could only grow.** `SelectionModel::extend_to` unioned into
-  the live selection, so `Shift+End` then `Shift+Home` selected the whole
-  collection instead of reversing, and `Shift+Down`×4 then `Shift+Up`×2 kept
-  every row. Ranges are now recomputed from a committed base, so reversing
-  shrinks. **Behaviour change** for anything driving `extend_to` directly.
-- **`Ctrl`+`Home`/`End`/`Page` moved the selection.** They now move the cursor
-  and leave the selection alone, which is the rule GTK4 and Qt apply to every
-  navigation key and which Teksilo's own `Ctrl`+arrow already followed.
-  **Behaviour change.**
+- `teksilo-platform::automation_transport`, behind the `automation` feature:
+  the per-OS endpoint the live bridge binds. Unix domain socket, Windows named
+  pipe.
+- `teksilo-automation::wire`: framing, token handshake and endpoint descriptor
+  in pure `std` + `serde`, shared by both ends of the bridge.
+- `install_automation_bridge_in_debug()` works on Linux, macOS and Windows, and
+  is still a no-op in release on all three.
+- The app publishes an endpoint descriptor at
+  `<runtime dir>/teksilo-automation/<pid>.json`, so attaching needs nothing
+  scraped from stderr.
+- `--attach` (newest live app), `--attach-pid <pid>` and `--list` in
+  `teksilo-automation-mcp`; `--connect <endpoint> --token <uuid>` remains as
+  the explicit escape hatch.
+- `command` modifier on `inject_key`, `inject_pointer` and `scroll`: the
+  platform's primary accelerator, Control on Windows and Linux and ⌘ on macOS,
+  where `ctrl` stays literal.
+- Screenshots return a `{width, height, scale}` block beside the image. Pixels
+  are physical; every other coordinate in the toolkit is logical.
+- Error codes `GPU_READBACK_FAILED`, `BRIDGE_TIMEOUT`, `BRIDGE_DROPPED`,
+  `BAD_REQUEST` and `BRIDGE_IO`, as constants rather than message strings.
+- A `test-automation` CI job on Linux, macOS and Windows, driving a real window
+  over the real endpoint and carrying the release canary.
+
+### Changed
+
+- **One GPU device per process**, shared by every window (`teksilo-platform`)
+  and every offscreen renderer (`teksilo-render`), instead of one per window
+  and one per caller. Each still gets its own surface and its own `Renderer`,
+  so no caller sees another's cached glyphs; a window the shared adapter cannot
+  present to gets its own device.
+- `wait_for_condition` spends its budget as simulated frames rather than wall
+  clock, so the same budget buys the same number of frames on every platform.
+  The wall-clock backstop is 1× the budget, floor 250 ms. **Behaviour change.**
+- The live bridge's reply wait is bounded at 15 s, reported as
+  `BRIDGE_TIMEOUT`. **Behaviour change.**
+- The transport's `probe` answers `Live` / `Busy` / `Dead` rather than a bool.
+  **Behaviour change**: only an unambiguous absence unregisters an app.
+- `try_read_texture_rgba` returns a `Result`, so a lost device costs one
+  screenshot rather than the thread. **Behaviour change.**
+- Offscreen renderers take the adapter's real limits rather than
+  `downlevel_defaults`, which capped textures at 2048 where the path atlas
+  grows to 4096.
+- The Unix runtime directory on macOS is `$TMPDIR`, not the shared `/tmp`.
+- `PlatformWindow::new` and `new_with_a11y` share their GPU and swapchain
+  setup, and differ only in whether an AccessKit adapter is attached.
+
+### Fixed
+
+#### Data views
+
+- **A `Shift` range could only grow.** `Shift+End` then `Shift+Home` selected
+  the whole collection instead of reversing. Ranges are recomputed from a
+  committed base. **Behaviour change** for anything driving
+  `SelectionModel::extend_to` directly.
+- **`Ctrl`+`Home` / `End` / `Page` moved the selection.** They move the cursor
+  and leave the selection alone. **Behaviour change.**
 - **`TableView`'s `Home` moved the column in every mode**, including the
-  default `MultiRow`, where there is no column cursor for it to mean anything
-  against — which also made `Shift+Home` an effective no-op there. Scope now
-  follows the cursor topology. **Behaviour change.**
-- **`GridView` paged by an estimated row height**, so `VariableRowGrid` and
-  `VirtualizedMasonry` landed short or long, and it scrolled twice per
-  keypress. Its `Home`/`End` also now reach the first and last tile rather than
-  the ends of a reflow row. **Behaviour change.**
-- **`GridView`'s `Ctrl+A` ignored the selection mode** (a single-selection grid
-  selected every tile — the one thing the docs said it did not do) and its
-  `Space` never toggled.
-- **An open cell editor lost keys to the table.** `PageDown` inside an editor
+  default `MultiRow`, which also made `Shift+Home` a no-op there. Scope follows
+  the cursor topology. **Behaviour change.**
+- **`GridView` paged by an estimated row height** and scrolled twice per
+  keypress, and its `Home` / `End` stopped at the ends of a reflow row rather
+  than the first and last tile. **Behaviour change.**
+- **`GridView`'s `Ctrl+A` ignored the selection mode**, and its `Space` never
+  toggled.
+- **An open cell editor lost keys to the table**: `PageDown` inside an editor
   paged the cursor out from under the edit.
-- **`TreeTableView`'s `←` was a dead key on every leaf** — it now ascends to
-  the parent, as `TreeView` has since it shipped — and its expand/collapse
-  arrows ignored the modifiers, so `Shift+→` opened a row instead of extending
-  the selection.
-- **`TreeView`'s expand/collapse arrows ignored the layout direction**, so a
-  right-to-left tree collapsed on the wrong key. `TreeTableView` had read
-  `is_rtl()` here since it shipped.
-- **Type-ahead could not reach an accented label.** Case was folded with
-  `to_ascii_lowercase`, which leaves `É` alone on both sides, so most of a
-  French or German list was unreachable.
+- **`TreeTableView`'s `←` was a dead key on every leaf**, and its expand /
+  collapse arrows ignored the modifiers, so `Shift+→` opened a row instead of
+  extending the selection.
+- **`TreeView`'s expand / collapse arrows ignored the layout direction**, so a
+  right-to-left tree collapsed on the wrong key.
+- **Type-ahead could not reach an accented label**: case was folded with
+  `to_ascii_lowercase`, which leaves `É` alone on both sides.
 - **A selectable `TableView` exposed no selection to Windows assistive tech.**
-  `Role::Table` is the one role AccessKit's consumer will not treat as a
-  selection container, so `CanSelectMultiple` and `GetSelection` were absent
-  entirely; it now announces `Role::Grid`, and its cells `Role::GridCell` in a
+  It announces `Role::Grid` now, and its cells `Role::GridCell` in a
   cell-selection mode. No effect on macOS or AT-SPI, where the roles coincide.
-- **`TreeTableView` advertised an expand it never performed.** Setting the
-  `expanded` property is what makes AccessKit offer UIA's ExpandCollapse
-  pattern, so Windows could ask a row to open and watch nothing happen.
+- **`TreeTableView` advertised an expand it never performed**, so Windows could
+  ask a row to open and watch nothing happen.
 - **`TableView`, `TreeTableView` and `GridView` ignored
-  `Action::ScrollIntoView`**, the one scroll action every AccessKit adapter
-  consumes. Rows and tiles are not focusable nodes, so assistive tech had no
-  way to bring one into view.
+  `Action::ScrollIntoView`**, so assistive tech had no way to bring a row or a
+  tile into view.
 
-**Known limitations**
+#### Automation
+
+- **Two concurrent offscreen renders killed the process** roughly a quarter of
+  the time on a WARP host: two D3D12 WARP devices rasterizing at once fault
+  inside `d3d10warp.dll`. Closed by the shared device above. The same fault was
+  latent, never live, for windows.
+- **`create_test_renderer` reported "no GPU" on machines that have one.**
+  Adapter selection is a search: preferred, then an explicit software
+  fallback, so a host that enumerates an adapter it cannot open still gets a
+  device.
+- **A value-taking flag with its value missing** (`--connect`, `--attach-pid`,
+  `--token`) quietly started the demo server. It is an error.
+- **`--list` poisoned the `--attach` that followed it** on Windows. The pipe
+  server recycles an instance a client opened and dropped before it could be
+  connected, and `connect` waits out `ERROR_PIPE_BUSY`.
+- **A stale descriptor, left by an app that exited without unwinding, was
+  offered as live.** Descriptors are probed and pruned; one that probes `Busy`
+  is kept.
+- **A descriptor outlived a failed bridge start**, handing `--attach-pid` an
+  endpoint that answers nobody. It is retracted if the accept thread fails to
+  spawn.
+
+#### Widgets
+
+- **A text field that does not hold focus no longer paints its selection**, in
+  `TextInput`, `PasswordField`, `SpinBox`, `SearchField`, `DateEdit` /
+  `TimeEdit` / `DateTimeEdit`, `HexColorInput` and `FilePickerField`.
+  **Behaviour change**, visual only: the selection state is unchanged, a field
+  that keeps focus while its window goes inactive still dims rather than hides,
+  and `RichTextEditor`, `CodeEditor` and `LogView` are unaffected.
+
+### Security
+
+All of these concern the automation bridge, which is debug-only.
+
+- The Windows named pipe carries an **owner-only DACL** built from the process
+  token's SID. The default descriptor grants read access to Everyone and to the
+  anonymous account. `PIPE_REJECT_REMOTE_CLIENTS` is set as a second layer.
+- The Unix socket is `0600` in a `0700` per-process directory, created before
+  the descriptor is published.
+- The endpoint descriptor, which carries the token, is created with
+  `create_new` and its mode in the same `open` rather than written and then
+  `chmod`ed, so it also refuses a symlink planted at its path.
+- An existing runtime directory must be a real directory rather than a symlink,
+  and a mode reachable by others is tightened to `0700`. The documented
+  fallback for a Unix with neither `$XDG_RUNTIME_DIR` nor `$TMPDIR` is the
+  shared `/tmp`.
+- The token handshake carries an end-to-end deadline, so a peer dripping one
+  byte per timeout cannot hold the single connection slot.
+
+### Known limitations
 
 - A selected *row* still reports no `IsSelected` on Windows: `Role::Row` is
   absent from `accesskit_windows`' selection-item list, which carries its own
   `// TODO: tables (#29)`.
 - `Role::TreeGrid` maps to `NSAccessibilityTableRole`, so a `TreeTableView`
   reads flat under VoiceOver where a `TreeView` does not.
-- Keyboard access to the column header — sort, resize, reorder — is still
-  missing, and remains a WCAG 2.1.1 / 2.5.7 exposure.
-
-Automation on Windows and macOS. The MCP automation surface was only ever run
-on Linux, and the parts that were portable had never been proven so while the
-parts that were not had never been named. Both halves are now settled: the
-semantics turned out to be portable by construction — `teksilo-automation`
-makes no OS call at all, because input is dispatched into the widget tree
-rather than through `SendInput` or `CGEvent` — and everything that genuinely
-differed has been moved behind one seam.
-
-### teksilo-platform
-
-- **One GPU device per process, shared by every window**, instead of one per
-  window. A device is a heavyweight process-level object and a second one bought
-  nothing: each window still needs its own surface and its own `Renderer` — that
-  is where the glyph atlas, path atlas and blur pool live, and `Renderer` is
-  `!Sync` — but the driver objects underneath were identical for every window on
-  the same adapter. Each extra window was paying for a fresh `wgpu::Instance`
-  (a DXGI factory on D3D12), adapter and device, and compiling the whole
-  nine-pipeline set against a cold device with no cache to share.
-- The same change closes a **latent** crash rather than a live one, and the
-  distinction is worth keeping straight: two D3D12 WARP devices rasterizing
-  concurrently fault inside `d3d10warp.dll`, but Teksilo draws its windows
-  sequentially on the winit main thread — `handle_redraw_requested` takes one
-  window at a time — so no two windows could ever rasterize at once. It would
-  have become reachable the first time any window work moved off that thread.
-  (`teksilo-render`'s offscreen device, below, is where the same fault *was*
-  reachable and did crash.)
-- A window whose surface the shared adapter cannot present to — a genuinely
-  multi-GPU machine, where the second window opens on the other GPU — quietly
-  gets its own device instead of failing.
-- `PlatformWindow::new` and `new_with_a11y` no longer carry sixty duplicated
-  lines of GPU and swapchain setup each; they differ only in whether an
-  AccessKit adapter is attached, which is all they ever meant to.
-
-
-- **`automation_transport`** (new, behind the `automation` feature):
-  the per-OS endpoint the live bridge binds, following the same backend shape
-  as `external_dnd` and `native_menu`. Unix keeps the domain socket in a `0700`
-  per-process directory with a `0600` socket; Windows gets a **named pipe with
-  an owner-only DACL**, built explicitly from the process token's SID because
-  the default descriptor grants read access to Everyone *and* the anonymous
-  account. `PIPE_REJECT_REMOTE_CLIENTS` rides in the same `dwPipeMode` bitmask
-  as a second layer — never a substitute for the DACL, since it only blocks the
-  SMB path. The pipe backend costs no new crate — the `windows` bindings were
-  already linked, so it is six feature strings — but the feature itself pulls
-  in the GUI-free `teksilo-automation` for the shared wire types, and with it
-  `serde_json`. No async runtime on either side.
-- Pipe I/O is overlapped, because a byte-mode pipe in `PIPE_WAIT` blocks
-  forever and there is no `SO_RCVTIMEO` for pipes — the token handshake needs a
-  deadline, or a peer that connects and says nothing holds the only slot for
-  the life of the process.
-- `accept` recycles an instance that a client opened and dropped before it
-  could be connected (`ERROR_NO_DATA`) instead of failing, and `connect` waits
-  for the server to come back around instead of giving up at the first
-  `ERROR_PIPE_BUSY`. Without both, `--list` — which probes by connecting and
-  dropping — poisoned the `--attach` that followed it.
-- **`probe` answers `Live` / `Busy` / `Dead`** rather than a bool. A caller acts
-  on that answer by *deleting the descriptor*, and over a connect attempt "the
-  single slot is taken" looks exactly like "nothing is there" — so a healthy app
-  somebody else was already driving got unregistered by a `--list` that only
-  reads. Only an unambiguous absence counts as dead: a missing socket or pipe,
-  or `ECONNREFUSED`, the classic Unix corpse whose listener is gone.
-- The Unix bind creates the shared `teksilo-automation/` parent through `wire`'s
-  private-directory helper instead of a bare `create_dir_all`, which honours the
-  umask (`0755` as a rule). It runs *before* the descriptor is published, so it —
-  not `EndpointFile::write` later finding the directory already there — is what
-  decides the mode the documented `0700` ends up being.
-
-### teksilo-automation
-
-- **`wire`** (new): framing, the token handshake and the endpoint descriptor,
-  in pure `std` + `serde`. Both ends of the bridge and the smoke example now
-  share one implementation instead of three copies of the same four-byte length
-  prefix. Being OS-free, the whole protocol is covered by tests that run over an
-  in-memory buffer on every platform.
-- The token handshake reads a byte at a time rather than through a `BufRead`,
-  which would swallow part of the first frame and force a second handle on the
-  connection — an operation a Windows pipe has no clean equivalent for. It is
-  also what makes a per-`read` timeout the wrong bound, so the handshake carries
-  **its own end-to-end deadline** (`read_token_by`): a peer dripping one byte
-  just under the per-read timeout would otherwise hold the single connection
-  slot for `MAX_TOKEN_LINE` × 10 s — the exact denial the timeout exists to
-  prevent.
-- The endpoint descriptor is created with `create_new` and its mode **in the
-  same `open`**, never written and then `chmod`ed. It carries the token, and the
-  gap between the two leaves it at the umask default — the same bind-then-chmod
-  window the socket ordering already exists to close. `create_new` also refuses
-  to follow a symlink planted at the staging path, so a writable parent cannot
-  redirect the token elsewhere, and the directory's owner is checked before any
-  of it reaches the disk.
-- An **already existing** runtime directory is no longer taken on trust: it must
-  be a real directory rather than a symlink, and a mode reachable by others is
-  tightened to `0700`. `$XDG_RUNTIME_DIR` is per-user by spec and Darwin's
-  `$TMPDIR` is per-user per-boot, but the documented fallback for a Unix with
-  neither is the *shared* `/tmp`, where another local user can create
-  `teksilo-automation/` first — and `AlreadyExists` was being accepted blindly,
-  which would publish a token-bearing descriptor into a directory somebody else
-  controls and let `--list` pick up descriptors they planted.
-- **`command` modifier** on `inject_key`, `inject_pointer` and `scroll`.
-  `command` is the platform's primary accelerator (Control on Windows and
-  Linux, ⌘ on macOS) and `ctrl` stays literal. A shortcut *declared* `Ctrl+S`
-  resolves to ⌘S on macOS, so a probe sending literal Control there matched no
-  binding — and reported success, because the key really had been injected.
-  Scripts written on Linux silently did nothing on macOS.
-- `wait_for_condition` spends its budget as **simulated** frames rather than
-  wall clock. The old loop slept 1 ms per poll, which costs up to 15.6 ms on
-  Windows, so the same budget bought roughly a fifteenth of the frames and a
-  wait that passed on Linux timed out there. Nothing else can move the tree
-  while the loop runs, so the sleep was never buying progress in the first
-  place. The wall-clock backstop that remains is **1×** the budget (floor
-  250 ms), not 10×: it exists only so a pathological tree cannot spin forever,
-  and at 10× it outlived both the live bridge's ~2 s settle clamp — the whole
-  point of which is that no op freezes the winit main thread for longer — and
-  the bridge's own 15 s reply deadline, so the client was told its request had
-  timed out while the UI stayed frozen.
-- **New codes**, each a constant rather than a string spelled at its throw
-  site: `GPU_READBACK_FAILED` — a device existed but reading the pixels back
-  failed, which unlike `GPU_UNAVAILABLE` can succeed on a retry;
-  `BRIDGE_TIMEOUT` — the app took the request but its UI thread did not answer,
-  and because it may still be applied later the caller should re-read the tree
-  rather than assume it was dropped; `BRIDGE_DROPPED` — the app dropped it
-  without answering, because it is shutting down; `BAD_REQUEST` — the frame did
-  not parse as an `AutomationRequest`; `BRIDGE_IO` — the exchange itself failed,
-  either because the client never reached the bridge or because a reply was too
-  large to frame. Three of them were bare string literals a client could not
-  match on, which is the whole point of a code: a caller has to tell "the UI may
-  yet move" from "it never will" without reading a message written for a human.
-
-### teksilo-app
-
-- The live bridge is now platform-agnostic policy — token, accept loop,
-  main-thread routing — over the transport above. `install_automation_bridge_in_debug()`
-  works on Linux, macOS and Windows; it is still a no-op in release on all of
-  them.
-- **The reply wait is bounded** (15 s, `BRIDGE_TIMEOUT`). winit's macOS backend
-  queues user events in `kCFRunLoopDefaultMode` only, so while a native panel is
-  up the posted event is not delivered at all — the bridge thread blocked
-  forever, the client blocked forever, and because the bridge serves one
-  connection at a time the slot was gone for the life of the process.
-- The app publishes an **endpoint descriptor** (`<runtime dir>/teksilo-automation/<pid>.json`,
-  owner-only) naming its transport, address and token, so a client no longer
-  scrapes stderr. macOS now uses `$TMPDIR` — its actual per-user runtime
-  directory — instead of falling back to the shared `/tmp`. It is retracted
-  again if the accept thread then fails to spawn: the cleanup guard lives
-  *inside* that thread, so `--attach-pid` would otherwise hand a caller an
-  endpoint that answers nobody until the process exits.
-
-### teksilo-automation-mcp
-
-- `--attach` (newest live app), `--attach-pid <pid>` and `--list` replace
-  copying a socket path out of stderr; `--connect <endpoint> --token <uuid>`
-  remains as the explicit escape hatch. Stale descriptors — left by an app that
-  exited without unwinding — are probed and pruned rather than offered; one that
-  probes `Busy` is kept, because another client holding the single slot is no
-  reason to unregister a healthy app, and pruning it there would leave
-  `--attach-pid` unable to find that app again for the life of the process.
-- A value-taking flag with its value missing (`--connect`, `--attach-pid`,
-  `--token`) is an error rather than a shrug. The lookup returns `None` either
-  way, so falling through to the default quietly started the *demo* server while
-  the caller believed it was driving their app.
-- Screenshots return a `{width, height, scale}` block beside the image. Pixels
-  are physical and every other coordinate in the toolkit is logical, so without
-  `scale` a caller could not relate a pixel it could see to a point it could
-  click, and a script written against one display mis-aimed on another.
-
-### teksilo-render
-
-- **One GPU device per process**, shared by every offscreen renderer, instead of
-  one per caller. Two D3D12 **WARP** devices rasterizing concurrently fault
-  inside `d3d10warp.dll` — Microsoft's software rasterizer, which is precisely
-  what a GPU-less Windows host and the CI runners use — so the adapter-search
-  fix above, by making a device open where none used to, turned any two
-  concurrent offscreen renders into a ~25 % chance of the test process dying
-  mid-run with `STATUS_ACCESS_VIOLATION`. The faulting-module log pins it on
-  WARP itself, so there is nothing to catch and nothing to fix downstream: the
-  only remedy is not to open the second device. Callers still get their own
-  `Renderer`, which is where the glyph and path atlases live, so no caller can
-  see another's cached glyphs. Sharing is also just right — a GPU device is a
-  process-level resource, and nothing here ever wanted a private one.
-  `exactly_one_device_is_opened_per_process` pins the invariant, counting opens
-  rather than comparing handles: `wgpu::Device` exposes no identity, so two
-  clones and two devices are indistinguishable at the type level — which is
-  exactly the confusion that let the second device appear.
-- `create_test_renderer` treats adapter selection as a **search** — preferred,
-  then an explicit software fallback — instead of giving up when the first
-  adapter yields no device. A host can enumerate an adapter it cannot open (a
-  VM's OpenGL driver is the common case) while a working software device sits
-  behind `force_fallback_adapter`; the old behaviour reported "no GPU" on
-  machines that have one, which is what made screenshots unavailable on
-  GPU-less Windows hosts and CI runners where DX12 WARP is present and works.
-- Offscreen limits are lifted to the adapter's real resolution, so a path-heavy
-  frame no longer fails offscreen while rendering fine in a live window
-  (`downlevel_defaults` caps textures at 2048; the path atlas grows to 4096).
-- `try_read_texture_rgba` returns a `Result`, so a lost device costs one
-  screenshot rather than the tree thread and every tool call after it.
-
-### CI
-
-- A `test-automation` job on Linux, macOS and Windows drives a real window over
-  the real endpoint and carries the release canary. The headless server is
-  covered by an ordinary integration test that speaks JSON-RPC to the actual
-  binary, so it runs everywhere `cargo test` does.
+- Keyboard access to the column header — sort, resize, reorder — is missing,
+  and remains a WCAG 2.1.1 / 2.5.7 exposure.
 
 
 ## [0.9.2] - 2026-09-03
@@ -307,7 +192,7 @@ by driving a real screen reader after the widget tests had already passed, and
 both fixes are shaped by what the AccessKit adapters actually do rather than by
 what the documentation says they do.
 
-**Added**
+### Added
 
 - [`TextInput::field_id`](#added-teksilo-widgets-a-host-can-name-the-node-a-textinput-actually-focuses),
   so a form can send focus to the field a validator refused, and a modal can
@@ -318,7 +203,7 @@ what the documentation says they do.
   toplevel sends no `app_id` at all and the shell shows an unnamed window with
   the fallback icon.
 
-**Fixed**
+### Fixed
 
 - [A labelled `TextInput` was nameless to every screen reader](#fixed-teksilo-widgets-a-labelled-textinput-was-nameless-to-every-screen-reader).
   **Behaviour change** in what a screen reader says: fields labelled through
@@ -558,7 +443,7 @@ so it is not settled here.
 
 ## [0.9.1] - 2026-09-02
 
-**Added**
+### Added
 
 - [crates.io metadata on every crate](#added-packaging-cratesio-metadata-on-every-crate): `homepage`, `documentation`,
   `keywords` and `categories`, so each crate links to its own docs.rs page.
@@ -571,7 +456,7 @@ so it is not settled here.
 - [`WeakEditorHandle`](#added-teksilo-widgets-weakeditorhandle-a-handle-that-does-not-keep-its-editor-alive), for a rich-text handler that must not keep
   its own editor alive.
 
-**Changed**
+### Changed
 
 - [`text-document` 1.12 and `text-typeset` 1.10](#changed-text-document-112-and-text-typeset-110).
 - [A failed `assert_node` is a failure on every automation transport](#changed--a-failed-assert_node-is-a-failure-on-every-transport).
@@ -582,7 +467,7 @@ so it is not settled here.
   **Breaking:** `FontFaceSpec::data` is now `SharedFontData`, which
   `Arc<Vec<u8>>` still coerces to.
 
-**Fixed**
+### Fixed
 
 - [53 places where the documentation contradicted the code](#fixed-docs-53-places-where-the-documentation-contradicted-the-code),
   including three `teksilo = "0.7"` version references in the app guide and a
@@ -1075,7 +960,7 @@ for 0.9.0.
 
 ## [0.9.0] - 2026-08-31
 
-**Added**
+### Added
 
 - [The framework's own strings speak twenty-one more languages](#added--teksilo-widgets-the-frameworks-own-strings-speak-twenty-one-more-languages): nineteen
   European locales plus Japanese and Korean, each with its real CLDR plural
@@ -1095,12 +980,12 @@ for 0.9.0.
 - [A button icon may keep its own colour](#added--teksilo-widgets-a-button-icon-may-keep-its-own-colour) through `icon_keeps_color`,
   for a glyph whose colour is the information.
 
-**Changed**
+### Changed
 
 - [Overlay and tooltip bodies are built on first use](#changed--teksilo-core-overlay-and-tooltip-bodies-are-built-on-first-use) rather than on
   every rebuild of their owner. New `BuildContext::add_deferred`.
 
-**Fixed**
+### Fixed
 
 - [A language switch reaches the date and time fields](#fixed--teksilo-widgets-a-language-switch-reaches-the-date-and-time-fields), which each read
   their locale convention once in `build()` and never again.
@@ -1268,7 +1153,7 @@ was *not* done: no live AT testing, no colorimetry, some widgets unassessed.
 
 ## [0.8.0] - 2026-08-27
 
-**Added**
+### Added
 
 - [The macOS (Aqua / Dark Aqua) preset](#added--teksilo-theme-macos-the-macos-aqua--dark-aqua-preset), a complete design language
   behind the `theme-macos` feature, replacing a stub.
@@ -1282,7 +1167,7 @@ was *not* done: no live AT testing, no colorimetry, some widgets unassessed.
 - [Two defaulted label-role style hooks](#added--teksilo-core-two-defaulted-label-role-style-hooks) so a design language with a
   solid selection fill can recolour the text on top of it.
 
-**Changed**
+### Changed
 
 - **A declared `Ctrl` shortcut now fires on ⌘ on macOS.**
   **Behaviour change on macOS:** it no longer fires on physical ⌃. Opt out per
@@ -1290,7 +1175,7 @@ was *not* done: no live AT testing, no colorimetry, some widgets unassessed.
 - [macOS in the widget catalog's theme switcher](#changed--widget-catalog-macos-in-the-theme-switcher-and---theme) and `--theme`.
 - [Fluent in the widget catalog's theme switcher](#changed--widget-catalog-fluent-in-the-theme-switcher-and---theme) and `--theme`.
 
-**Fixed**
+### Fixed
 
 - [Caret motion follows the platform's own layout](#fixed--teksilo-widgets-caret-motion-follows-the-platforms-own-layout): macOS spreads word,
   line edge and document across three modifiers, and every text surface read a
@@ -1653,7 +1538,7 @@ and then silently reverts on the next launch.
 
 ## [0.7.0] - 2026-08-08
 
-**Added**
+### Added
 
 - [Docking rail actions and Strip bar slots](#added--teksilo-widgets-docking-rail-actions--strip-bar-slots): `DockAction` puts a plain
   command in the activity rail, and `DockRail::leading_slot` / `trailing_slot`
@@ -1662,7 +1547,7 @@ and then silently reverts on the next launch.
   authoritative `Vec<T>` and emits minimal granular changes rather than a blanket
   `Reset` that would clear the user's selection.
 
-**Changed**
+### Changed
 
 - [`teksilo-settings` is cross-process safe by default](#changed--teksilo-settings-breaking), not by opt-in.
   **Breaking:** `SettingsFile::load_shared`, `MruList::toggle_pin` and
@@ -1671,7 +1556,7 @@ and then silently reverts on the next launch.
 - [`NotificationArchiveModel::remove(index)` is now `remove_by_id(id)`](#changed--teksilo-widgets-breaking).
   **Breaking:** an index names a position a peer's insert can invalidate.
 
-**Fixed**
+### Fixed
 
 - [The docking activity rail was an invalid ARIA `tablist`](#fixed--teksilo-widgets-docking-rail-accessibility): the slots,
   overflow trigger and action clusters were non-`Role::Tab` children of it. No
@@ -1818,7 +1703,8 @@ performance trade-offs).
 Entries before this file was introduced are not backfilled; see `git log`
 for the full history.
 
-[Unreleased]: https://github.com/FernTech-EU/teksilo/compare/v0.9.2...HEAD
+[Unreleased]: https://github.com/FernTech-EU/teksilo/compare/v0.9.3...HEAD
+[0.9.3]: https://github.com/FernTech-EU/teksilo/compare/v0.9.2...v0.9.3
 [0.9.2]: https://github.com/FernTech-EU/teksilo/compare/v0.9.1...v0.9.2
 [0.9.1]: https://github.com/FernTech-EU/teksilo/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/FernTech-EU/teksilo/compare/v0.8.0...v0.9.0
