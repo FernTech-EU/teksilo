@@ -17,7 +17,7 @@
 //! preferred one will not fit. The fallback keeps the same `0700` directory
 //! discipline, so it is a shorter path, not a weaker one.
 
-use std::io;
+use std::io::{self, Read, Write};
 use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
@@ -31,9 +31,47 @@ use super::{BoundTransport, TransportListener, TransportStream};
 /// the tightest platform (macOS) with room for the terminating NUL.
 const MAX_SOCKET_PATH: usize = 100;
 
-impl TransportStream for UnixStream {
+/// A `UnixStream` whose reads report a deadline the way the trait promises.
+///
+/// `SO_RCVTIMEO` expires as `EAGAIN` on Unix but as `WSAETIMEDOUT` on Windows,
+/// so `std` surfaces one event as two kinds: [`io::ErrorKind::WouldBlock`]
+/// here, [`io::ErrorKind::TimedOut`] there. The trait documents a single kind
+/// and the Windows backend already synthesises it, so the normalisation
+/// belongs on this side of the seam rather than in every caller — the whole
+/// point of the trait is that the two backends are interchangeable.
+///
+/// The socket is never put in non-blocking mode, so an expired read deadline
+/// is the only thing that can produce `WouldBlock` on it.
+struct SocketStream(UnixStream);
+
+impl Read for SocketStream {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        self.0.read(buf).map_err(timed_out_if_would_block)
+    }
+}
+
+impl Write for SocketStream {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        self.0.write(buf)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.0.flush()
+    }
+}
+
+impl TransportStream for SocketStream {
     fn set_read_timeout(&self, timeout: Option<Duration>) -> io::Result<()> {
-        UnixStream::set_read_timeout(self, timeout)
+        self.0.set_read_timeout(timeout)
+    }
+}
+
+/// Map the Unix spelling of "the read deadline expired" onto the trait's.
+fn timed_out_if_would_block(e: io::Error) -> io::Error {
+    if e.kind() == io::ErrorKind::WouldBlock {
+        io::Error::new(io::ErrorKind::TimedOut, "the socket read deadline expired")
+    } else {
+        e
     }
 }
 
@@ -46,7 +84,7 @@ struct SocketListener {
 impl TransportListener for SocketListener {
     fn accept(&mut self) -> io::Result<Box<dyn TransportStream>> {
         let (stream, _addr) = self.listener.accept()?;
-        Ok(Box::new(stream))
+        Ok(Box::new(SocketStream(stream)))
     }
 }
 
@@ -126,7 +164,7 @@ fn bind_at(dir: &Path, path: &Path) -> io::Result<SocketListener> {
 }
 
 pub(super) fn connect(address: &str) -> io::Result<Box<dyn TransportStream>> {
-    Ok(Box::new(UnixStream::connect(address)?))
+    Ok(Box::new(SocketStream(UnixStream::connect(address)?)))
 }
 
 #[cfg(test)]

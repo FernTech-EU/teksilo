@@ -13,6 +13,14 @@ by crate for clarity, not because crates version independently.
 
 ## [Unreleased]
 
+### Fixed
+
+#### Automation
+
+- A read deadline on the automation bridge's Unix socket now expires as
+  `TimedOut` — the kind the transport trait documents and the Windows named
+  pipe already returns — instead of the platform's `WouldBlock`.
+
 ## [0.9.3] - 2026-09-04
 
 Three unrelated strands: one keyboard contract for the five data views, MCP
