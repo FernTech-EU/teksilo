@@ -21,10 +21,13 @@ wgpu = { workspace = true }
 tiny-skia = { workspace = true }
 bytemuck = { workspace = true }
 thiserror = { workspace = true }
+# Opening the shared offscreen device is blocking work behind an async
+# wgpu API; `pollster` is the minimal executor that bridges the two so the
+# `OnceLock` initialiser can stay synchronous. No transitive deps.
+pollster = { workspace = true }
 
 [dev-dependencies]
 teksilo-tokens = { workspace = true }
-pollster = { workspace = true }
 
 [package.metadata.docs.rs]
 all-features = true

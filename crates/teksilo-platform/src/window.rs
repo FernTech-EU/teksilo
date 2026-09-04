@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
-use std::sync::Arc;
-use std::sync::mpsc;
+use std::sync::{Arc, Mutex, OnceLock, mpsc};
 
 use winit::event::WindowEvent;
 use winit::window::Window;
@@ -50,44 +49,115 @@ pub struct PlatformWindow {
     a11y_action_rx: mpsc::Receiver<ActionRequest>,
 }
 
+/// The wgpu objects every window in the process shares.
+///
+/// All three are `Arc` handles internally, so cloning one is a refcount bump,
+/// not a second GPU object.
+#[derive(Clone)]
+struct SharedGpu {
+    adapter: wgpu::Adapter,
+    device: wgpu::Device,
+    queue: wgpu::Queue,
+}
+
+/// The one wgpu instance for this process.
+///
+/// A surface has to come from the same instance that later enumerates adapters
+/// for it, so this is the root every window hangs off. `Instance::new` is
+/// synchronous, which is why this one can be a plain `OnceLock` while the
+/// adapter and device below cannot.
+fn shared_instance() -> &'static wgpu::Instance {
+    static INSTANCE: OnceLock<wgpu::Instance> = OnceLock::new();
+    INSTANCE
+        .get_or_init(|| wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle()))
+}
+
+/// The adapter, device and queue every window shares.
+///
+/// One device per process, not one per window. A device is a heavyweight,
+/// process-level object and a second one buys nothing: each window still needs
+/// its own surface and its own [`Renderer`] (that is where the glyph and path
+/// atlases live), but the driver objects underneath are the same for every
+/// window on the same adapter. Opening one per window duplicated the entire
+/// pipeline set and both atlas textures for every window a user opened.
+///
+/// It also closes a latent crash. Two D3D12 **WARP** devices rasterizing at the
+/// same time fault inside `d3d10warp.dll` — Microsoft's software rasterizer,
+/// and what a GPU-less Windows host actually draws with. Teksilo renders its
+/// windows sequentially on the winit main thread, so that was not reachable
+/// here; it would have become reachable the moment any window work moved off
+/// that thread. `teksilo_render::test_support` shares its offscreen device for
+/// the same reason, where it *was* reachable and did crash.
+///
+/// `surface` is used only to pick an adapter that can actually present to it.
+/// If a later window's surface turns out to be incompatible with the adapter we
+/// cached — a genuinely multi-GPU machine, where the second window opens on the
+/// other GPU — that window quietly gets its own device rather than failing.
+async fn shared_gpu_for(surface: &wgpu::Surface<'static>) -> SharedGpu {
+    static SHARED: Mutex<Option<SharedGpu>> = Mutex::new(None);
+
+    // Clone out and release the lock: it is never held across the awaits below.
+    let cached = SHARED.lock().unwrap_or_else(|e| e.into_inner()).clone();
+    if let Some(gpu) = cached {
+        // A non-empty format list is wgpu's own answer to "can this adapter
+        // present to this surface".
+        if !surface.get_capabilities(&gpu.adapter).formats.is_empty() {
+            return gpu;
+        }
+    }
+
+    let adapter = shared_instance()
+        .request_adapter(&wgpu::RequestAdapterOptions {
+            power_preference: wgpu::PowerPreference::default(),
+            compatible_surface: Some(surface),
+            force_fallback_adapter: false,
+            ..Default::default()
+        })
+        .await
+        .expect("no compatible wgpu adapter available");
+
+    let (device, queue) = adapter
+        .request_device(&wgpu::DeviceDescriptor {
+            label: Some("teksilo_device"),
+            required_features: wgpu::Features::empty(),
+            required_limits: wgpu::Limits::default(),
+            ..Default::default()
+        })
+        .await
+        .expect("wgpu device request failed");
+
+    let gpu = SharedGpu {
+        adapter,
+        device,
+        queue,
+    };
+    // First one in becomes the shared device. Losing here is the multi-GPU case
+    // above (or a race that cannot happen while windows are created on one
+    // thread): the loser keeps the device it just opened, which is the old
+    // per-window behaviour and still correct.
+    let mut slot = SHARED.lock().unwrap_or_else(|e| e.into_inner());
+    if slot.is_none() {
+        *slot = Some(gpu.clone());
+    }
+    gpu
+}
+
 impl PlatformWindow {
-    /// Create a new platform window from a winit window.
-    /// The `event_loop` parameter is needed for the AccessKit adapter.
-    pub async fn new_with_a11y(
-        window: Window,
-        event_loop: &winit::event_loop::ActiveEventLoop,
-    ) -> Self {
-        let window = Arc::new(window);
+    /// Everything both constructors do: surface, shared device, swapchain
+    /// configuration, renderer. Kept in one place because the two entry points
+    /// differ only in whether they attach an AccessKit adapter, and sixty
+    /// duplicated lines of GPU setup is exactly the sort of thing that drifts.
+    async fn surface_and_renderer(
+        window: &Arc<Window>,
+    ) -> (wgpu::Surface<'static>, wgpu::SurfaceConfiguration, Renderer) {
         let size = window.inner_size();
-        let scale_factor = window.scale_factor();
-
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
-
-        let surface = instance
+        let surface = shared_instance()
             .create_surface(window.clone())
             .expect("wgpu surface creation failed for the platform window");
 
-        let adapter = instance
-            .request_adapter(&wgpu::RequestAdapterOptions {
-                power_preference: wgpu::PowerPreference::default(),
-                compatible_surface: Some(&surface),
-                force_fallback_adapter: false,
-                ..Default::default()
-            })
-            .await
-            .expect("no compatible wgpu adapter available");
+        let gpu = shared_gpu_for(&surface).await;
 
-        let (device, queue) = adapter
-            .request_device(&wgpu::DeviceDescriptor {
-                label: Some("teksilo_device"),
-                required_features: wgpu::Features::empty(),
-                required_limits: wgpu::Limits::default(),
-                ..Default::default()
-            })
-            .await
-            .expect("wgpu device request failed");
-
-        let surface_caps = surface.get_capabilities(&adapter);
+        let surface_caps = surface.get_capabilities(&gpu.adapter);
         // Guard the index accesses: a degenerate adapter/surface (software
         // fallback, headless) can report empty `formats` / `alpha_modes`, and
         // `[0]` would panic with an opaque out-of-bounds instead of degrading.
@@ -116,9 +186,23 @@ impl PlatformWindow {
             // non-`Rgba16Float` formats we select above.
             color_space: wgpu::SurfaceColorSpace::Auto,
         };
-        surface.configure(&device, &surface_config);
+        surface.configure(&gpu.device, &surface_config);
 
-        let renderer = Renderer::new(device, queue, surface_format);
+        // The renderer stays per-window: it owns the glyph atlas, the path
+        // atlas and the blur pool, and it is `!Sync` besides.
+        let renderer = Renderer::new(gpu.device, gpu.queue, surface_format);
+        (surface, surface_config, renderer)
+    }
+
+    /// Create a new platform window from a winit window.
+    /// The `event_loop` parameter is needed for the AccessKit adapter.
+    pub async fn new_with_a11y(
+        window: Window,
+        event_loop: &winit::event_loop::ActiveEventLoop,
+    ) -> Self {
+        let window = Arc::new(window);
+        let scale_factor = window.scale_factor();
+        let (surface, surface_config, renderer) = Self::surface_and_renderer(&window).await;
 
         // Create AccessKit adapter with action channel
         let (action_tx, action_rx) = mpsc::channel();
@@ -148,65 +232,8 @@ impl PlatformWindow {
     /// Create a platform window without AccessKit (for contexts without ActiveEventLoop).
     pub async fn new(window: Window) -> Self {
         let window = Arc::new(window);
-        let size = window.inner_size();
         let scale_factor = window.scale_factor();
-
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
-        let surface = instance
-            .create_surface(window.clone())
-            .expect("wgpu surface creation failed for the platform window");
-
-        let gpu_adapter = instance
-            .request_adapter(&wgpu::RequestAdapterOptions {
-                power_preference: wgpu::PowerPreference::default(),
-                compatible_surface: Some(&surface),
-                force_fallback_adapter: false,
-                ..Default::default()
-            })
-            .await
-            .expect("no compatible wgpu adapter available");
-
-        let (device, queue) = gpu_adapter
-            .request_device(&wgpu::DeviceDescriptor {
-                label: Some("teksilo_device"),
-                required_features: wgpu::Features::empty(),
-                required_limits: wgpu::Limits::default(),
-                ..Default::default()
-            })
-            .await
-            .expect("wgpu device request failed");
-
-        let surface_caps = surface.get_capabilities(&gpu_adapter);
-        // See the sibling path above: guard against an empty `formats` /
-        // `alpha_modes` rather than panicking on `[0]`.
-        let surface_format = surface_caps
-            .formats
-            .iter()
-            .find(|f| f.is_srgb())
-            .copied()
-            .or_else(|| surface_caps.formats.first().copied())
-            .unwrap_or(wgpu::TextureFormat::Rgba8UnormSrgb);
-
-        let surface_config = wgpu::SurfaceConfiguration {
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-            format: surface_format,
-            width: size.width.max(1),
-            height: size.height.max(1),
-            present_mode: wgpu::PresentMode::Fifo,
-            alpha_mode: surface_caps
-                .alpha_modes
-                .first()
-                .copied()
-                .unwrap_or(wgpu::CompositeAlphaMode::Auto),
-            view_formats: vec![],
-            desired_maximum_frame_latency: 2,
-            // `Auto` reproduces wgpu's pre-30 behaviour: sRGB for the
-            // non-`Rgba16Float` formats we select above.
-            color_space: wgpu::SurfaceColorSpace::Auto,
-        };
-        surface.configure(&device, &surface_config);
-
-        let renderer = Renderer::new(device, queue, surface_format);
+        let (surface, surface_config, renderer) = Self::surface_and_renderer(&window).await;
         let (_action_tx, action_rx) = mpsc::channel();
 
         Self {

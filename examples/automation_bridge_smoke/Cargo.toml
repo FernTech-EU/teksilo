@@ -16,5 +16,5 @@ path = "src/main.rs"
 [dependencies]
 teksilo = { workspace = true, features = ["automation"] }
 # The smoke client opens the bridge endpoint the same way the MCP server does.
-teksilo-platform = { workspace = true, features = ["automation-transport"] }
+teksilo-platform = { workspace = true, features = ["automation"] }
 serde_json = { workspace = true }

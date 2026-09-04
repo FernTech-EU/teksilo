@@ -2,7 +2,7 @@
 // SPDX-FileCopyrightText: 2026 FernTech
 
 pub mod accessibility_prefs;
-#[cfg(feature = "automation-transport")]
+#[cfg(feature = "automation")]
 pub mod automation_transport;
 pub mod clipboard;
 pub mod event_translation;
@@ -22,7 +22,7 @@ pub mod window_system;
 pub mod x11;
 
 pub use accessibility_prefs::AccessibilityPreferences;
-#[cfg(feature = "automation-transport")]
+#[cfg(feature = "automation")]
 pub use automation_transport::{BoundTransport, TransportListener, TransportStream};
 #[cfg(feature = "clipboard")]
 pub use clipboard::ArboardClipboard;

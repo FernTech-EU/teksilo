@@ -405,6 +405,15 @@ on GPU-less Windows hosts and CI runners. When *nothing* yields a device the
 tool returns `GPU_UNAVAILABLE`; when a device is lost mid-readback it returns
 `GPU_READBACK_FAILED`. Both are non-fatal and the session survives.
 
+That device is opened **once per process** and shared by every offscreen
+renderer. Two D3D12 WARP devices rasterizing at the same time fault inside
+`d3d10warp.dll` — Microsoft's software rasterizer, which is what a GPU-less
+Windows host and the CI runners actually use — so a device per caller made any
+two concurrent screenshots a coin-flip on the process surviving, with the crash
+landing in WARP rather than anywhere we could catch it. Each caller still gets
+its own `Renderer`, and therefore its own glyph and path atlases, so nothing
+leaks between them.
+
 **WebView blind spot:** a native `WebView` subview composites *on top of* the
 wgpu surface and is invisible to the readback (a transparent hole). When the
 AT tree contains a `WebView` node the `screenshot` reply adds
@@ -578,7 +587,7 @@ alone hold.
 | `teksilo-automation` | GUI-free toolkit: DTOs, `execute`, `RecordingWindowOps`, the tool catalog, and `wire` — the framing, token handshake and endpoint descriptor, shared verbatim by both ends. Mirrors `teksilo-data`'s core-only-peer design. |
 | `teksilo-automation-mcp` | The rmcp server binary (`--headless` / `--attach`) + offscreen screenshots. `tokio` / `rmcp` are confined here. |
 | `teksilo-app` (`automation` feature) | The debug-only in-app bridge: policy only — token, accept loop, main-thread routing. No `cfg` on the OS, no async runtime in the framework. |
-| `teksilo-platform` (`automation-transport` feature) | `automation_transport` — `bind`/`accept`/`connect` and their per-OS access control (Unix socket, Windows named pipe). The live-window readback, `PlatformWindow::capture_offscreen`, is **not** behind the feature: it is an ordinary method on the window, usable by anything that wants an offscreen frame. |
+| `teksilo-platform` (`automation` feature) | `automation_transport` — `bind`/`accept`/`connect` and their per-OS access control (Unix socket, Windows named pipe). The live-window readback, `PlatformWindow::capture_offscreen`, is **not** behind the feature: it is an ordinary method on the window, usable by anything that wants an offscreen frame. |
 
 The split between the last two is the same one the crate already draws for
 `external_dnd` and `native_menu`: the OS primitive lives in `teksilo-platform`

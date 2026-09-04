@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
-use std::sync::mpsc;
+use std::sync::{OnceLock, mpsc};
 
 use crate::Renderer;
 
@@ -24,8 +24,26 @@ pub enum ReadbackError {
     PollFailed(String),
 }
 
-/// Build an offscreen renderer plus its device/queue, or `None` if this host
-/// can open no usable GPU device at all.
+/// The process-wide GPU device every offscreen renderer shares.
+///
+/// One device per process, not one per caller. Two D3D12 **WARP** devices
+/// rasterizing at the same time fault inside `d3d10warp.dll` — Microsoft's
+/// software rasterizer, which is exactly what a GPU-less Windows host and the
+/// CI runners use — so a device per caller turned any two concurrent offscreen
+/// renders into a crash the faulting-module log pins on WARP itself, not on
+/// wgpu or on us. It is not something we can fix downstream; the only remedy is
+/// to stop creating the second device.
+///
+/// Sharing is also simply right: a GPU device is a process-level resource, and
+/// nothing here ever wanted a private one. Callers still get their **own**
+/// [`Renderer`] — that is where the glyph and path atlases live, so no caller
+/// can see another's cached glyphs.
+///
+/// `None` means this host can open no usable device at all; it is cached too,
+/// so a GPU-less machine pays the failed search once rather than per call.
+static SHARED_DEVICE: OnceLock<Option<(wgpu::Device, wgpu::Queue)>> = OnceLock::new();
+
+/// Open the one device, searching for an adapter that actually yields one.
 ///
 /// Adapter selection is a *search*, not a single request. A host can enumerate
 /// an adapter it cannot actually open — a VM's OpenGL driver is the common
@@ -35,9 +53,9 @@ pub enum ReadbackError {
 /// screenshots unavailable on GPU-less Windows hosts and CI runners (where
 /// DX12 WARP is present and works). So: try the preferred adapter, then an
 /// explicit software fallback, and only give up when neither yields a device.
-pub async fn create_test_renderer(
-    label: &'static str,
-) -> Option<(Renderer, wgpu::Device, wgpu::Queue)> {
+async fn open_shared_device(label: &'static str) -> Option<(wgpu::Device, wgpu::Queue)> {
+    #[cfg(test)]
+    DEVICE_OPENS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
 
     for force_fallback_adapter in [false, true] {
@@ -69,16 +87,46 @@ pub async fn create_test_renderer(
             })
             .await
         {
-            let renderer = Renderer::new(
-                device.clone(),
-                queue.clone(),
-                wgpu::TextureFormat::Rgba8UnormSrgb,
-            );
-            return Some((renderer, device, queue));
+            return Some((device, queue));
         }
     }
-
     None
+}
+
+/// Build an offscreen renderer on the shared device, or `None` if this host can
+/// open no usable GPU device at all.
+///
+/// The [`Renderer`] is fresh per call; the device and queue behind it are
+/// shared process-wide — see [`SHARED_DEVICE`] for why that is load-bearing and
+/// not merely an optimisation.
+///
+/// `label` names the device, so it only takes effect on the call that actually
+/// opens it; later callers join a device someone else already named.
+pub async fn create_test_renderer(
+    label: &'static str,
+) -> Option<(Renderer, wgpu::Device, wgpu::Queue)> {
+    let (device, queue) = shared_device(label)?;
+    let renderer = Renderer::new(
+        device.clone(),
+        queue.clone(),
+        wgpu::TextureFormat::Rgba8UnormSrgb,
+    );
+    Some((renderer, device.clone(), queue.clone()))
+}
+
+/// The shared device, opening it on the first call.
+///
+/// Synchronous on purpose. `OnceLock::get_or_init` gives "exactly one caller
+/// runs the initialiser, the rest wait" for free, and opening a GPU device is
+/// blocking work whichever way it is spelled — every caller already reaches
+/// this through `pollster::block_on`. The alternative, holding a lock across
+/// the `await` inside an async fn, is the shape `clippy::await_holding_lock`
+/// warns about, and it would deadlock the first caller that ever drove this
+/// from a single-threaded executor.
+fn shared_device(label: &'static str) -> Option<&'static (wgpu::Device, wgpu::Queue)> {
+    SHARED_DEVICE
+        .get_or_init(|| pollster::block_on(open_shared_device(label)))
+        .as_ref()
 }
 
 /// Read a texture back as tightly-packed RGBA, panicking on GPU failure.
@@ -176,4 +224,62 @@ pub fn try_read_texture_rgba(
     drop(mapped);
     buffer.unmap();
     Ok(pixels)
+}
+
+/// How many times a GPU device has actually been opened in this process.
+///
+/// Exists only so [`exactly_one_device_is_opened_per_process`] can assert the
+/// invariant the WARP crash depends on.
+#[cfg(test)]
+static DEVICE_OPENS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+#[cfg(test)]
+mod shared_device_tests {
+    use super::*;
+
+    /// Every caller must land on the SAME device, even under contention.
+    ///
+    /// This is the invariant that keeps the offscreen renderer alive on a
+    /// GPU-less Windows host. Two D3D12 WARP devices rasterizing concurrently
+    /// fault inside `d3d10warp.dll`, which no amount of care on our side can
+    /// catch — it is a wild access violation in Microsoft's software
+    /// rasterizer, so the process dies mid-test. The only defence is to never
+    /// open the second device, and that is what this pins.
+    ///
+    /// Asserted through a counter rather than by comparing handles because
+    /// `wgpu::Device` exposes no identity: cloning is the supported way to
+    /// share one, so two clones are indistinguishable from two devices at the
+    /// type level — exactly the confusion that let a second device appear.
+    #[test]
+    fn exactly_one_device_is_opened_per_process() {
+        use std::sync::atomic::Ordering;
+
+        // Race several threads at the initialiser; `OnceLock` plus the init
+        // lock must let exactly one of them reach `open_shared_device`.
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(4));
+        let handles: Vec<_> = (0..4)
+            .map(|_| {
+                let b = barrier.clone();
+                std::thread::spawn(move || {
+                    b.wait();
+                    pollster::block_on(create_test_renderer("shared-device-test")).is_some()
+                })
+            })
+            .collect();
+        let got: Vec<bool> = handles.into_iter().map(|h| h.join().unwrap()).collect();
+
+        // Either this host has a device and every caller got one, or it has
+        // none and nobody did — never a mix.
+        assert!(
+            got.iter().all(|g| *g) || got.iter().all(|g| !*g),
+            "callers disagreed about whether a GPU exists: {got:?}"
+        );
+
+        let opens = DEVICE_OPENS.load(Ordering::Relaxed);
+        assert_eq!(
+            opens, 1,
+            "the device must be opened exactly once per process, not {opens} times - a second \
+             concurrent WARP device is an access violation inside d3d10warp.dll, not a slowdown"
+        );
+    }
 }

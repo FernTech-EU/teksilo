@@ -38,7 +38,7 @@ rfd = { version = "0.17.2", default-features = false, features = [
 async-std = { version = "1", optional = true }
 thiserror = { workspace = true }
 # Only the GUI-free wire types (`Endpoint`, `EndpointFile`) for the
-# `automation-transport` feature; no executor, no GUI.
+# `automation` feature; no executor, no GUI.
 teksilo-automation = { workspace = true, optional = true }
 
 [features]
@@ -74,7 +74,7 @@ native-menu = []
 # user. Pulls in the GUI-free `teksilo-automation` for the shared wire types
 # (`Endpoint` / `EndpointFile`) — no async runtime, and on Windows no new
 # crate: it uses the `windows` bindings this crate already links.
-automation-transport = ["dep:teksilo-automation"]
+automation = ["dep:teksilo-automation"]
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
@@ -137,7 +137,7 @@ windows = { workspace = true, features = [
     "Win32_System_SystemServices",        # CF_HDROP / CF_UNICODETEXT clipboard format constants
     "Win32_System_DataExchange",          # RegisterClipboardFormatW (CFSTR_INETURL)
     # Automation-bridge named-pipe transport (`automation_transport/windows.rs`).
-    # These cost nothing when the `automation-transport` feature is off: cargo
+    # These cost nothing when the `automation` feature is off: cargo
     # features are additive per-crate, and unused bindings are dead code.
     "Win32_System_Pipes",                 # CreateNamedPipeW / ConnectNamedPipe / WaitNamedPipeW / PIPE_*
     "Win32_Storage_FileSystem",           # CreateFileW / ReadFile / WriteFile / FILE_FLAG_OVERLAPPED

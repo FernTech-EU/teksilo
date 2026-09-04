@@ -106,7 +106,31 @@ differed has been moved behind one seam.
 
 ### teksilo-platform
 
-- **`automation_transport`** (new, behind the `automation-transport` feature):
+- **One GPU device per process, shared by every window**, instead of one per
+  window. A device is a heavyweight process-level object and a second one bought
+  nothing: each window still needs its own surface and its own `Renderer` — that
+  is where the glyph atlas, path atlas and blur pool live, and `Renderer` is
+  `!Sync` — but the driver objects underneath were identical for every window on
+  the same adapter. Each extra window was paying for a fresh `wgpu::Instance`
+  (a DXGI factory on D3D12), adapter and device, and compiling the whole
+  nine-pipeline set against a cold device with no cache to share.
+- The same change closes a **latent** crash rather than a live one, and the
+  distinction is worth keeping straight: two D3D12 WARP devices rasterizing
+  concurrently fault inside `d3d10warp.dll`, but Teksilo draws its windows
+  sequentially on the winit main thread — `handle_redraw_requested` takes one
+  window at a time — so no two windows could ever rasterize at once. It would
+  have become reachable the first time any window work moved off that thread.
+  (`teksilo-render`'s offscreen device, below, is where the same fault *was*
+  reachable and did crash.)
+- A window whose surface the shared adapter cannot present to — a genuinely
+  multi-GPU machine, where the second window opens on the other GPU — quietly
+  gets its own device instead of failing.
+- `PlatformWindow::new` and `new_with_a11y` no longer carry sixty duplicated
+  lines of GPU and swapchain setup each; they differ only in whether an
+  AccessKit adapter is attached, which is all they ever meant to.
+
+
+- **`automation_transport`** (new, behind the `automation` feature):
   the per-OS endpoint the live bridge binds, following the same backend shape
   as `external_dnd` and `native_menu`. Unix keeps the domain socket in a `0700`
   per-process directory with a `0600` socket; Windows gets a **named pipe with
@@ -238,6 +262,22 @@ differed has been moved behind one seam.
 
 ### teksilo-render
 
+- **One GPU device per process**, shared by every offscreen renderer, instead of
+  one per caller. Two D3D12 **WARP** devices rasterizing concurrently fault
+  inside `d3d10warp.dll` — Microsoft's software rasterizer, which is precisely
+  what a GPU-less Windows host and the CI runners use — so the adapter-search
+  fix above, by making a device open where none used to, turned any two
+  concurrent offscreen renders into a ~25 % chance of the test process dying
+  mid-run with `STATUS_ACCESS_VIOLATION`. The faulting-module log pins it on
+  WARP itself, so there is nothing to catch and nothing to fix downstream: the
+  only remedy is not to open the second device. Callers still get their own
+  `Renderer`, which is where the glyph and path atlases live, so no caller can
+  see another's cached glyphs. Sharing is also just right — a GPU device is a
+  process-level resource, and nothing here ever wanted a private one.
+  `exactly_one_device_is_opened_per_process` pins the invariant, counting opens
+  rather than comparing handles: `wgpu::Device` exposes no identity, so two
+  clones and two devices are indistinguishable at the type level — which is
+  exactly the confusion that let the second device appear.
 - `create_test_renderer` treats adapter selection as a **search** — preferred,
   then an explicit software fallback — instead of giving up when the first
   adapter yields no device. A host can enumerate an adapter it cannot open (a
