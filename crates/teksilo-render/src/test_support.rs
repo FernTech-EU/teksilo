@@ -97,8 +97,12 @@ async fn open_shared_device(label: &'static str) -> Option<(wgpu::Device, wgpu::
 /// open no usable GPU device at all.
 ///
 /// The [`Renderer`] is fresh per call; the device and queue behind it are
-/// shared process-wide — see [`SHARED_DEVICE`] for why that is load-bearing and
-/// not merely an optimisation.
+/// shared process-wide, which is load-bearing rather than an optimisation: two
+/// D3D12 **WARP** devices rasterizing at once fault inside Microsoft's software
+/// rasterizer — exactly what a GPU-less Windows host and the CI runners use —
+/// so a device per caller turns any two concurrent offscreen renders into a
+/// crash. Atlases still live on the per-call `Renderer`, so no caller can see
+/// another's cached glyphs.
 ///
 /// `label` names the device, so it only takes effect on the call that actually
 /// opens it; later callers join a device someone else already named.

@@ -30,8 +30,7 @@ use crate::TeksiloAppBuilder;
 /// to [`TeksiloAppBuilder`]. Mirrors `TeksiloAppBuilderInspectorExt`.
 pub trait TeksiloAppBuilderAutomationExt {
     /// In a **debug** build: generate a per-process token, then on `on_ready`
-    /// bind a private endpoint, publish an
-    /// [`EndpointFile`](teksilo_automation::wire::EndpointFile) describing it,
+    /// bind a private endpoint, publish an [`EndpointFile`] describing it,
     /// print how to attach, and spawn the bridge thread. In a **release**
     /// build: a no-op returning `self`.
     fn install_automation_bridge_in_debug(self) -> Self;
@@ -163,16 +162,12 @@ pub fn spawn_bridge_thread(proxy: crate::app::AppEventProxy, token: String) -> s
             }
             let _cleanup = Cleanup(pid);
 
-            // One connection at a time.
-            loop {
-                match listener.accept() {
-                    // Connection errors end that connection only; the loop
-                    // waits for the next client.
-                    Ok(stream) => {
-                        let _ = handle_connection(stream, &proxy, &token);
-                    }
-                    Err(_) => break,
-                }
+            // One connection at a time. An error *serving* a client ends that
+            // conversation only and the loop waits for the next one; an error
+            // *accepting* means the listener itself is gone, so the thread is
+            // done.
+            while let Ok(stream) = listener.accept() {
+                let _ = handle_connection(stream, &proxy, &token);
             }
         });
     if let Err(e) = spawned {
@@ -228,14 +223,9 @@ fn handle_connection(
     stream.set_read_timeout(None)?;
 
     let mut request_id: u64 = 0;
-    loop {
-        let buf = match wire::read_frame(&mut stream, wire::MAX_REQUEST_FRAME) {
-            Ok(b) => b,
-            // Clean EOF (client disconnected) or a desynced / abusive peer:
-            // either way this conversation is over.
-            Err(_) => break,
-        };
-
+    // A read that fails is a clean EOF (the client disconnected) or a desynced
+    // / abusive peer: either way this conversation is over.
+    while let Ok(buf) = wire::read_frame(&mut stream, wire::MAX_REQUEST_FRAME) {
         let req: teksilo_automation::dto::AutomationRequest = match serde_json::from_slice(&buf) {
             Ok(r) => r,
             Err(e) => {

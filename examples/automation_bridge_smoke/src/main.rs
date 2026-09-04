@@ -10,10 +10,9 @@
 //! `snapshot_tree → invoke_action → snapshot_tree → screenshot`, and `exit(0)`s
 //! the whole process on success (or `exit(1)` on failure).
 //!
-//! It is platform-agnostic: discovery goes through
-//! [`EndpointFile`](teksilo::automation::wire::EndpointFile) and the connection
-//! through `teksilo_platform::automation_transport`, so the same code drives a
-//! Unix socket and a Windows named pipe.
+//! It is platform-agnostic: discovery goes through [`EndpointFile`] and the
+//! connection through `teksilo_platform::automation_transport`, so the same
+//! code drives a Unix socket and a Windows named pipe.
 //!
 //! Run (needs a display for the window):
 //! `cargo run -p automation_bridge_smoke` (its own manifest already enables the
