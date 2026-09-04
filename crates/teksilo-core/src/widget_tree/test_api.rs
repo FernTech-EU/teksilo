@@ -227,6 +227,34 @@ impl WidgetTree {
     /// construction) is invisible to every other count in this file, and to the
     /// accessibility tree, while still paying for itself in the arena's slotmap
     /// forever.
+    /// Every node inside `root` (inclusive) that Tab traversal would stop on:
+    /// focusable, and not suppressed by a `tab_stop` flag on itself or any
+    /// ancestor.
+    ///
+    /// Pressing Tab and watching focus cannot answer this for a view that
+    /// claims the key for its own navigation — `TableView` moves a cell cursor
+    /// on Tab, so focus never moves and the traversal graph underneath stays
+    /// invisible. A data view should expose exactly one stop however many rows
+    /// are realized; more than one means a control inside a row has leaked
+    /// into the Tab order, where its presence would track the scroll position.
+    pub fn tab_stops_within(&self, root: WidgetId) -> Vec<WidgetId> {
+        let mut out = Vec::new();
+        self.collect_tab_stops_within(root, &mut out);
+        out
+    }
+
+    fn collect_tab_stops_within(&self, id: WidgetId, out: &mut Vec<WidgetId>) {
+        let Some(node) = self.arena.get(id) else {
+            return;
+        };
+        if self.is_node_focusable(node) && self.tab_stop_effective(id) {
+            out.push(id);
+        }
+        for &child in self.arena.children(id) {
+            self.collect_tab_stops_within(child, out);
+        }
+    }
+
     pub fn widget_count(&self) -> usize {
         self.arena.len()
     }

@@ -3518,6 +3518,33 @@ impl WidgetTree {
     /// calls `request_focus`. Implements the ARIA roving-tabindex
     /// pattern (HTML `tabindex="-1"` semantics). Accepts
     /// `Signal<bool>`, `Prop<bool>`, or plain `bool`.
+    /// Publish what a data view's `Space` should do when the row containing
+    /// `id` holds the keyboard cursor. See
+    /// [`WidgetNode::keyboard_toggle`](crate::arena::WidgetNode).
+    pub fn set_keyboard_toggle(&mut self, id: WidgetId, f: std::rc::Rc<dyn Fn()>) {
+        if let Some(node) = self.arena.get_mut(id) {
+            node.keyboard_toggle = Some(f);
+        }
+    }
+
+    /// The first keyboard-toggle action published in `root`'s subtree, in
+    /// traversal order.
+    ///
+    /// Searched per keypress rather than cached: a data view rebuilds its rows
+    /// as they realize, so an id recorded at build time would outlive the
+    /// widget it named.
+    pub fn keyboard_toggle_in(&self, root: WidgetId) -> Option<std::rc::Rc<dyn Fn()>> {
+        if let Some(f) = self.arena.get(root).and_then(|n| n.keyboard_toggle.clone()) {
+            return Some(f);
+        }
+        for &child in self.arena.children(root) {
+            if let Some(found) = self.keyboard_toggle_in(child) {
+                return Some(found);
+            }
+        }
+        None
+    }
+
     pub fn set_tab_stop(&mut self, id: WidgetId, state: impl Into<crate::signal::Prop<bool>>) {
         let prop = state.into();
         // Bind at the lightest level — tab-stop changes never affect

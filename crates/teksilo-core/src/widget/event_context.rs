@@ -317,6 +317,18 @@ pub(crate) enum TreeMutation {
     /// rather than marking it for the next layout pass. See
     /// [`EventContext::materialize_now`].
     MaterializeNow(WidgetId),
+    /// `Space` on a data view's focused row: run the keyboard-toggle action
+    /// published inside `row`, or `fallback` when the row publishes none.
+    ///
+    /// Deferred rather than resolved in the handler because finding the action
+    /// means walking the row's subtree, and `EventContext` is a command buffer
+    /// with no view of the arena. Carrying the fallback keeps the decision in
+    /// one place: whether a row has a checkbox is a fact about the tree, not
+    /// something the key handler can know.
+    RowSpaceActivate {
+        row: WidgetId,
+        fallback: std::rc::Rc<dyn Fn()>,
+    },
 }
 
 // Manual `Debug`: the `WithWidgetMut` closure is not `Debug`.
@@ -331,6 +343,10 @@ impl std::fmt::Debug for TreeMutation {
                 .debug_struct("WithWidgetMut")
                 .field("id", id)
                 .field("dirty", dirty)
+                .finish_non_exhaustive(),
+            Self::RowSpaceActivate { row, .. } => f
+                .debug_struct("RowSpaceActivate")
+                .field("row", row)
                 .finish_non_exhaustive(),
         }
     }
@@ -936,6 +952,18 @@ impl<'ops> EventContext<'ops> {
     /// [`with_widget_mut`](Self::with_widget_mut) or a `Rebuild` binding for
     /// ordinary reactive updates, which are correctly served by the next
     /// layout pass.
+    /// `Space` on a data view's focused row: activate the row's published
+    /// keyboard toggle — the checkbox `StandardListItem` embeds, most often —
+    /// or run `fallback` when the row publishes none.
+    ///
+    /// A row's controls are out of the Tab order, so this is the only keyboard
+    /// route to them; `fallback` is what `Space` means on a row without one,
+    /// which for the data views is "toggle the selection".
+    pub fn row_space_activate(&mut self, row: WidgetId, fallback: std::rc::Rc<dyn Fn()>) {
+        self.tree_mutations
+            .push(TreeMutation::RowSpaceActivate { row, fallback });
+    }
+
     pub fn materialize_now(&mut self, id: WidgetId) {
         self.tree_mutations.push(TreeMutation::MaterializeNow(id));
     }

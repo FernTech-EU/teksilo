@@ -2110,6 +2110,16 @@ impl WidgetTree {
                         self.rebuild_single_widget(id);
                     }
                 }
+                TreeMutation::RowSpaceActivate { row, fallback } => {
+                    // Resolve against the *live* tree: a data view rebuilds its
+                    // rows as they realize, so the row that was focused when
+                    // the key arrived may have been rebuilt since.
+                    // Both the toggle and the fallback are signal writes,
+                    // so neither needs a context — which is why the published
+                    // action is a bare `Fn()`. Anything a row wants to do that
+                    // *does* need one belongs on its own handlers.
+                    self.keyboard_toggle_in(row).unwrap_or(fallback)();
+                }
                 TreeMutation::WithWidgetMut { id, dirty, apply } => {
                     // Run the typed mutation while `&mut arena` is live, then
                     // drop the borrow before dirty-marking (the `mark_*` calls

@@ -444,7 +444,7 @@ impl WidgetTree {
     /// constrains it. This makes `set_tab_stop` on a composite control
     /// (whose focusable node is an inner leaf) govern the whole subtree —
     /// the basis of the roving-tabindex pattern in `Toolbar` / `TabBar`.
-    fn tab_stop_effective(&self, id: WidgetId) -> bool {
+    pub(super) fn tab_stop_effective(&self, id: WidgetId) -> bool {
         let mut current = Some(id);
         while let Some(cur) = current {
             let Some(node) = self.arena.get(cur) else {

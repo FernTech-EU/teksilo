@@ -681,6 +681,19 @@ impl<'a> BuildContext<'a> {
         self.tree.set_tab_stop(id, state);
     }
 
+    /// Publish what a data view's `Space` should do when the row containing
+    /// `id` holds the keyboard cursor.
+    ///
+    /// A `ListView` / `TreeView` row is not itself focusable and the view keeps
+    /// the row subtree out of the Tab order — a listbox is one Tab stop — so a
+    /// checkbox inside a row has no keyboard route of its own.
+    /// `StandardListItem` / `StandardTreeItem` publish one for the checkbox
+    /// they embed; a hand-written row delegate calls this to get the same
+    /// behaviour. Without it `Space` keeps meaning "toggle the selection".
+    pub fn set_keyboard_toggle(&mut self, id: WidgetId, f: std::rc::Rc<dyn Fn()>) {
+        self.tree.set_keyboard_toggle(id, f);
+    }
+
     /// Declare the widget being built as a **traversal-scope boundary** for
     /// Tab / Shift+Tab navigation. Descendants' `tab_index` values become
     /// scoped to this node — they never collide with sibling scopes — and the

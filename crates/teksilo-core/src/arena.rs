@@ -93,6 +93,22 @@ pub struct WidgetNode {
     /// when focusable" — the default. The selected `TabHeader` is the
     /// canonical user.
     pub(crate) tab_stop: Option<Prop<bool>>,
+    /// What a data view's `Space` should do when the row containing this node
+    /// holds the keyboard cursor.
+    ///
+    /// A `ListView` / `TreeView` row is deliberately not focusable — the
+    /// container is — and the view takes the row subtree out of the Tab order,
+    /// because a listbox is one Tab stop and a per-row stop would make the Tab
+    /// order track the virtualization window. That leaves a checkbox inside a
+    /// row with no keyboard route, so the row publishes one here and the view
+    /// calls it. Carrying the *action* rather than the target's id keeps the
+    /// views from having to know what kind of control it is.
+    ///
+    /// `StandardListItem` / `StandardTreeItem` set it on the checkbox they
+    /// embed, so the common path needs no wiring; a hand-written delegate
+    /// calls `BuildContext::set_keyboard_toggle`.
+    #[allow(clippy::type_complexity)]
+    pub(crate) keyboard_toggle: Option<std::rc::Rc<dyn Fn()>>,
     /// User-bound signal that the framework sets to `true` whenever
     /// the focused widget is a strict descendant of this node, and
     /// `false` otherwise. Used by `Panel` / `Card` / composite
@@ -378,6 +394,7 @@ impl WidgetNode {
             visible_state: None,
             enabled_state: None,
             tab_stop: None,
+            keyboard_toggle: None,
             focus_within_signal: None,
             view_focus_signal: None,
             hover_within_signal: None,
