@@ -467,6 +467,10 @@ struct State {
     /// consulted when neither `escape_button` nor a `Reject`-role
     /// button is set.
     buttons: RefCell<Vec<StandardButton>>,
+    /// Every button this box built, by widget id. Read by the Enter
+    /// shortcut so it can answer for the button the user is standing on
+    /// rather than for the default. Rebuilt on every `build`.
+    button_ids: RefCell<Vec<(WidgetId, StandardButton)>>,
     /// Guards against multiple result-callback invocations when a
     /// button click races the Escape shortcut.
     fired: Cell<bool>,
@@ -480,8 +484,18 @@ impl State {
             escape_button: Cell::new(None),
             default_button: Cell::new(None),
             buttons: RefCell::new(Vec::new()),
+            button_ids: RefCell::new(Vec::new()),
             fired: Cell::new(false),
         })
+    }
+
+    /// Which of this box's buttons a widget id is, if it is one of them.
+    fn button_for(&self, id: WidgetId) -> Option<StandardButton> {
+        self.button_ids
+            .borrow()
+            .iter()
+            .find(|(btn, _)| *btn == id)
+            .map(|(_, kind)| *kind)
     }
 
     fn fire(&self, button: StandardButton, by_escape: bool, ctx: &mut EventContext) {
@@ -818,6 +832,7 @@ impl Widget for MessageBox {
         });
 
         let mut footer = HStack::new().spacing(8.0).child(Spacer::new());
+        state.button_ids.borrow_mut().clear();
         for button_cfg in &buttons {
             let kind = button_cfg.kind;
             let label = button_cfg.resolved_label();
@@ -837,6 +852,7 @@ impl Widget for MessageBox {
             if Some(kind) == self.default_button {
                 self.default_button_id.set(Some(btn_id));
             }
+            state.button_ids.borrow_mut().push((btn_id, kind));
             footer = footer.add_child(btn_id);
         }
 
@@ -861,7 +877,24 @@ impl Widget for MessageBox {
             let state_enter = state.clone();
             ctx.register_action(
                 Action::new(DEFAULT_INTENT_NAME).on_invoke(move |_intent, ctx| {
-                    if let Some(kind) = state_enter.default_button.get() {
+                    // The focused button wins, and only then the default.
+                    //
+                    // This shortcut is widget-scoped, and a scoped shortcut is
+                    // matched before the focused widget is offered the key, so
+                    // without this the default answered for a button the user
+                    // had deliberately tabbed to: standing on Yes and pressing
+                    // Enter in a `YesNo` box whose default is No said No, shut
+                    // the dialog, and left the caller's `on_result` looking as
+                    // though the user had declined. Every desktop toolkit puts
+                    // the focused push button first here, and a confirmation
+                    // whose safe answer is the default is exactly where the
+                    // difference is destructive.
+                    //
+                    // `Button` already activates on Enter itself, so this is
+                    // only about which of the two answers the key, never about
+                    // making the button work.
+                    let focused = ctx.focused().and_then(|id| state_enter.button_for(id));
+                    if let Some(kind) = focused.or_else(|| state_enter.default_button.get()) {
                         state_enter.fire(kind, false, ctx);
                     }
                 }),
@@ -1195,8 +1228,16 @@ mod tests {
         assert_eq!(tree.focused(), Some(yes_id));
     }
 
+    /// Enter answers for the button the user is standing on.
+    ///
+    /// This asserted the opposite until 0.9.3, and the opposite is what every
+    /// caller of a `YesNo` box was living with: the shortcut that carries
+    /// Enter is widget-scoped, so it is matched before the focused widget is
+    /// offered the key, and the default answered for a button the user had
+    /// deliberately tabbed to. In a confirmation whose safe answer is the
+    /// default, that turns a deliberate Yes into a silent No.
     #[test]
-    fn enter_fires_default_button_from_any_focus() {
+    fn enter_fires_the_focused_button_rather_than_the_default() {
         let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
         let captured: Rc<RefCell<Option<MessageBoxResult>>> = Rc::new(RefCell::new(None));
         let captured_for_handler = captured.clone();
@@ -1211,6 +1252,36 @@ mod tests {
             .find_by_label(&StandardButton::Cancel.default_label().resolve_now())
             .unwrap();
         tree.focus(cancel_id);
+        tree.press_key(Key::Enter, Modifiers::NONE);
+        let result = captured.borrow().expect("result must be captured");
+        assert_eq!(
+            result.button,
+            StandardButton::Cancel,
+            "Enter must answer for the focused button, not for the default"
+        );
+        assert!(!result.dismissed_by_escape);
+    }
+
+    /// And the default still answers when the focus is not on a button.
+    ///
+    /// The "show again" checkbox is the case that exists in a real box: it
+    /// takes focus, and it handles Space rather than Enter, so Enter reaches
+    /// the shortcut with the focus somewhere that is not one of the answers.
+    #[test]
+    fn enter_still_fires_the_default_when_the_focus_is_not_a_button() {
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let captured: Rc<RefCell<Option<MessageBoxResult>>> = Rc::new(RefCell::new(None));
+        let captured_for_handler = captured.clone();
+        let mb = MessageBox::question(lit!("t"))
+            .text(lit!("x"))
+            .buttons(MessageBoxButtons::OkCancel)
+            .show_again_checkbox(lit!("Ne plus demander"))
+            .on_result(move |r, _ctx| {
+                *captured_for_handler.borrow_mut() = Some(r);
+            });
+        let _content = present_and_lay_out(&mut tree, mb);
+        let checkbox_id = tree.find_by_label("Ne plus demander").unwrap();
+        tree.focus(checkbox_id);
         tree.press_key(Key::Enter, Modifiers::NONE);
         let result = captured.borrow().expect("result must be captured");
         assert_eq!(result.button, StandardButton::Ok);

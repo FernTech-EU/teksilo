@@ -64,6 +64,18 @@ table.
 - A `test-automation` CI job on Linux, macOS and Windows, driving a real window
   over the real endpoint and carrying the release canary.
 
+#### Core
+
+- `EventContext::focused()`, the widget that held focus when the event batch
+  began. A widget-scoped shortcut is matched before the focused widget is
+  offered the key, so a container that binds a key its own children also handle
+  had no way to tell whether one of them was standing under it. Part of the
+  same per-dispatch snapshot as the pointer position and the overlay bounds, so
+  it reads `None` in a hand-made `EventContext`, and it is the focus as of
+  dispatch time rather than a live read: a handler that has already called
+  `request_focus` still sees the old value, which is the useful reading for one
+  deciding whether to act at all.
+
 ### Changed
 
 - **One GPU device per process**, shared by every window (`teksilo-platform`)
@@ -153,6 +165,16 @@ table.
   **Behaviour change**, visual only: the selection state is unchanged, a field
   that keeps focus while its window goes inactive still dims rather than hides,
   and `RichTextEditor`, `CodeEditor` and `LogView` are unaffected.
+- **Enter in a `MessageBox` answers for the focused button**, and falls back to
+  `default_button` only when the focus is not on one of the box's own buttons.
+  The shortcut carrying Enter is widget-scoped, so it was matched before the
+  focused button was offered the key, and the default answered for a button the
+  user had deliberately tabbed to. **Behaviour change**, and the case it was
+  destructive in is the ordinary one: a `YesNo` confirmation defaults to No, so
+  standing on Yes and pressing Enter closed the dialog reporting No, and the
+  caller saw a user who had declined. Escape is unchanged, Space was always the
+  focused button, and a box whose focus sits on its checkbox still gets the
+  default.
 
 ### Security
 

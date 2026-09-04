@@ -222,6 +222,10 @@ pub struct EventContext<'ops> {
     /// 0–3 per tree. Read by the safe-triangle submenu hover gate
     /// via [`EventContext::overlay_bounds_for_content`].
     pub(crate) overlay_bounds_snapshot: Vec<(WidgetId, teksilo_canvas::Rect)>,
+    /// The widget holding focus when this batch began. Part of the same
+    /// per-dispatch snapshot as the two above, and read by
+    /// [`focused`](EventContext::focused).
+    pub(crate) focused_widget: Option<WidgetId>,
     /// Intents queued by handlers via `send_intent`. Drained by the
     /// tree after event dispatch and routed source-widget → root.
     pub(crate) pending_intents: Vec<crate::intent::Intent>,
@@ -402,6 +406,7 @@ impl<'ops> EventContext<'ops> {
             tree_pointer_position: None,
             press_claimed_by_interactive_child: false,
             overlay_bounds_snapshot: Vec::new(),
+            focused_widget: None,
             layout_direction: crate::environment::LayoutDirection::LeftToRight,
             in_focus_dispatch: None,
         }
@@ -431,19 +436,43 @@ impl<'ops> EventContext<'ops> {
         self.layout_direction == crate::environment::LayoutDirection::RightToLeft
     }
 
+    /// The widget that held focus when this event batch began.
+    ///
+    /// A snapshot, not a live read: it answers what the tree's focus was at
+    /// dispatch time, so a handler that has already called
+    /// [`request_focus`](EventContext::request_focus) still sees the old
+    /// value. That is the useful reading for a handler deciding *whether* to
+    /// act on the focused widget.
+    ///
+    /// `None` when nothing is focused, and also for an `EventContext` built
+    /// outside `WidgetTree::make_event_context`, which is what a hand-made
+    /// test context is. Treat it as `None`-safe, like the other snapshots.
+    ///
+    /// The reason this exists: a widget-scoped shortcut fires before the
+    /// focused widget sees the key, so a container that binds a key which its
+    /// own children also handle has no other way to yield to them.
+    /// `MessageBox` is the case that asked for it, where Enter is bound to the
+    /// default button and must not answer for the button the user has actually
+    /// tabbed to.
+    pub fn focused(&self) -> Option<WidgetId> {
+        self.focused_widget
+    }
+
     /// Attach a per-dispatch snapshot of read-only tree query state
-    /// (current pointer position, overlay bounds). Called by
+    /// (current pointer position, overlay bounds, focus). Called by
     /// `WidgetTree::make_event_context` once per event batch. Test
     /// `EventContext`s that don't go through that path stay with
-    /// empty snapshots — handlers must treat both reads as `None`-
+    /// empty snapshots — handlers must treat every read as `None`-
     /// safe.
     pub(crate) fn with_query_snapshot(
         mut self,
         pointer: Option<teksilo_canvas::Point>,
         overlays: Vec<(WidgetId, teksilo_canvas::Rect)>,
+        focused: Option<WidgetId>,
     ) -> Self {
         self.tree_pointer_position = pointer;
         self.overlay_bounds_snapshot = overlays;
+        self.focused_widget = focused;
         self
     }
 

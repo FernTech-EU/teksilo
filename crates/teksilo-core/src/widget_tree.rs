@@ -737,9 +737,11 @@ impl WidgetTree {
     ) -> crate::widget::EventContext<'ops> {
         let drag_is_external = self.active_drag.as_ref().is_some_and(|d| d.is_external);
         // Read-only snapshot of tree query state that handlers may
-        // need synchronously. Today this carries the last pointer
-        // position and a (content_id, bounds) slice of open overlays
-        // — both read by the safe-triangle submenu hover gate.
+        // need synchronously: the last pointer position and a
+        // (content_id, bounds) slice of open overlays, both read by the
+        // safe-triangle submenu hover gate, and the focused widget, read
+        // by a container deciding whether a shortcut of its own should
+        // yield to the widget the user is standing on.
         let overlay_snapshot: Vec<(crate::widget_id::WidgetId, teksilo_canvas::Rect)> = self
             .overlay_manager
             .active_content_ids()
@@ -754,7 +756,7 @@ impl WidgetTree {
             .with_app_context(self.app_context.clone())
             .with_window_context(ops, self.window_state.clone())
             .with_drag_external(drag_is_external)
-            .with_query_snapshot(self.last_pointer_position, overlay_snapshot)
+            .with_query_snapshot(self.last_pointer_position, overlay_snapshot, self.focused())
             .with_layout_direction(self.layout_direction)
             .with_window_active(self.is_window_active())
             .with_focus_dispatch_flag(self.in_focus_dispatch.clone())
