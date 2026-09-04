@@ -205,7 +205,7 @@ teksilo-widgets = { workspace = true, optional = true }
 # restores the out-of-the-box behavior, and downstream apps that use
 # `default-features = false` on teksilo get a clean slate with no
 # Noto fonts bundled.
-teksilo-text = { path = "../teksilo-text", version = "0.9.2", optional = true, default-features = false }
+teksilo-text = { path = "../teksilo-text", version = "0.9.3", optional = true, default-features = false }
 teksilo-i18n = { workspace = true, optional = true }
 teksilo-inspector = { workspace = true, optional = true }
 teksilo-webview = { workspace = true, optional = true }

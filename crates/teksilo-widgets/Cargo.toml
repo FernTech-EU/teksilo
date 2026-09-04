@@ -90,7 +90,7 @@ thiserror = { workspace = true }
 # level, so font selection stays an app-level decision driven through
 # the umbrella's `fonts-*` features. The base Inter font is always
 # embedded by teksilo-text regardless.
-teksilo-text = { path = "../teksilo-text", version = "0.9.2", default-features = false }
+teksilo-text = { path = "../teksilo-text", version = "0.9.3", default-features = false }
 
 [dev-dependencies]
 # Test-only: property-based testing (see the `proptest` entry in the
