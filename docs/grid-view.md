@@ -108,13 +108,13 @@ painted focus ring. Matrix (RTL-aware; horizontal arrows swap):
 | --- | --- |
 | Arrow ←/→ | ±1 (within row; `.wrap_navigation(true)` to cross rows) |
 | Arrow ↑/↓ | ±columns |
-| Home / End | first / last of row |
-| Ctrl+Home / Ctrl+End | first / last item |
+| Home / End | first / last item of the collection |
+| Ctrl+Home / Ctrl+End | the same, without moving the selection |
 | PageUp / PageDown | ± a viewport of rows + scroll |
-| Space | toggle selection |
+| Space | check the focused tile if it holds a checkbox, else toggle (`Multi`) / select (`Single`) |
 | Enter | `.on_tile_activate` (else select) |
 | Esc | clear focus |
-| Ctrl+A | select all (`Multi` mode only) |
+| Ctrl+A | select all (`Multi` mode only); Ctrl+Shift+A deselects |
 | Alt+Arrow | reorder the focused tile (when `.reorderable`) |
 | printable | type-ahead (needs `.type_ahead_label(i)`; `.type_ahead_timeout`) |
 | Tab | `.tab_traversal(WithinGrid \| OutOfGrid)` |

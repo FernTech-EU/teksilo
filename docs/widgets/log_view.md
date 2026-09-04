@@ -33,7 +33,7 @@ What it adds over the read-only code viewer:
 
 ## API reference
 
-📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/code_editor/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/code_editor/log_view/index.html)
 
 ## `pub struct LogView`
 

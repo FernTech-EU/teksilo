@@ -852,9 +852,17 @@ Extend the selection to include the rectangular range from the
 anchor to `(row, col)`. In `SingleCell` mode this falls back to
 `select`.
 
-#### `pub fn select_all(&self, row_count: usize, col_count: usize)`
+#### `pub fn select_cells(&self, cells: impl IntoIterator<Item = (usize, usize)>)`
 
 Select every cell in `0..row_count × 0..col_count`.
+Replace the selection with an arbitrary set of cells, committing it as
+the base a following Shift range extends around.
+
+Backs the two spreadsheet chords a rectangle cannot express: Ctrl+Space
+selects a column and Shift+Space a row, neither of which is an
+anchor-to-cursor block.
+
+#### `pub fn select_all(&self, row_count: usize, col_count: usize)`
 
 #### `pub fn clear(&self)`
 

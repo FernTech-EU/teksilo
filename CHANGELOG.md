@@ -13,6 +13,89 @@ by crate for clarity, not because crates version independently.
 
 ## [Unreleased]
 
+Keyboard navigation across the five data views. The five had grown their key
+handling separately and had three different answers for `Home`; they now share
+one chord table, and the platform question behind it was settled by reading
+what GTK4, Qt, wxWidgets, Slint and VS Code actually bind rather than by
+reasoning from the HIGs. See
+[docs/data-view-keyboard.md](docs/data-view-keyboard.md).
+
+**Added**
+
+- `common::list_nav` — the edge-and-page chord table as pure functions over
+  `(key, modifiers, view kind)`, with `_for` twins so both platform branches
+  are reachable from one host's test run. Deliberately takes no convention for
+  navigation itself: every surveyed toolkit binds `Home`/`End`/`PageUp`/
+  `PageDown` identically on all three platforms.
+- `Ctrl+Shift`+navigation extends a range **additively**, so a second disjoint
+  range can be built without losing the first
+  (`SelectionModel::extend_to_additive`).
+- `Ctrl+Shift+A` deselects everything in all five views.
+- Tree expand chords in `TreeView` and `TreeTableView`: `*` expands a whole
+  subtree, `+` and `-` one level. `→` on an already-open node now moves into
+  its first child, which the ARIA tree pattern and Windows both specify.
+- macOS-only aliases, all previously dead: `⌘↓` opens the focused row, `⌘↑`
+  collapses or ascends, `⌥→`/`⌥←` expand or collapse a subtree.
+- `PageUp`/`PageDown` in `ScrollBar` and `MenuList`; `Home`/`End`/`PageUp`/
+  `PageDown` in `CommandPalette`.
+
+**Fixed**
+
+- **A `Shift` range could only grow.** `SelectionModel::extend_to` unioned into
+  the live selection, so `Shift+End` then `Shift+Home` selected the whole
+  collection instead of reversing, and `Shift+Down`×4 then `Shift+Up`×2 kept
+  every row. Ranges are now recomputed from a committed base, so reversing
+  shrinks. **Behaviour change** for anything driving `extend_to` directly.
+- **`Ctrl`+`Home`/`End`/`Page` moved the selection.** They now move the cursor
+  and leave the selection alone, which is the rule GTK4 and Qt apply to every
+  navigation key and which Teksilo's own `Ctrl`+arrow already followed.
+  **Behaviour change.**
+- **`TableView`'s `Home` moved the column in every mode**, including the
+  default `MultiRow`, where there is no column cursor for it to mean anything
+  against — which also made `Shift+Home` an effective no-op there. Scope now
+  follows the cursor topology. **Behaviour change.**
+- **`GridView` paged by an estimated row height**, so `VariableRowGrid` and
+  `VirtualizedMasonry` landed short or long, and it scrolled twice per
+  keypress. Its `Home`/`End` also now reach the first and last tile rather than
+  the ends of a reflow row. **Behaviour change.**
+- **`GridView`'s `Ctrl+A` ignored the selection mode** (a single-selection grid
+  selected every tile — the one thing the docs said it did not do) and its
+  `Space` never toggled.
+- **An open cell editor lost keys to the table.** `PageDown` inside an editor
+  paged the cursor out from under the edit.
+- **`TreeTableView`'s `←` was a dead key on every leaf** — it now ascends to
+  the parent, as `TreeView` has since it shipped — and its expand/collapse
+  arrows ignored the modifiers, so `Shift+→` opened a row instead of extending
+  the selection.
+- **`TreeView`'s expand/collapse arrows ignored the layout direction**, so a
+  right-to-left tree collapsed on the wrong key. `TreeTableView` had read
+  `is_rtl()` here since it shipped.
+- **Type-ahead could not reach an accented label.** Case was folded with
+  `to_ascii_lowercase`, which leaves `É` alone on both sides, so most of a
+  French or German list was unreachable.
+- **A selectable `TableView` exposed no selection to Windows assistive tech.**
+  `Role::Table` is the one role AccessKit's consumer will not treat as a
+  selection container, so `CanSelectMultiple` and `GetSelection` were absent
+  entirely; it now announces `Role::Grid`, and its cells `Role::GridCell` in a
+  cell-selection mode. No effect on macOS or AT-SPI, where the roles coincide.
+- **`TreeTableView` advertised an expand it never performed.** Setting the
+  `expanded` property is what makes AccessKit offer UIA's ExpandCollapse
+  pattern, so Windows could ask a row to open and watch nothing happen.
+- **`TableView`, `TreeTableView` and `GridView` ignored
+  `Action::ScrollIntoView`**, the one scroll action every AccessKit adapter
+  consumes. Rows and tiles are not focusable nodes, so assistive tech had no
+  way to bring one into view.
+
+**Known limitations**
+
+- A selected *row* still reports no `IsSelected` on Windows: `Role::Row` is
+  absent from `accesskit_windows`' selection-item list, which carries its own
+  `// TODO: tables (#29)`.
+- `Role::TreeGrid` maps to `NSAccessibilityTableRole`, so a `TreeTableView`
+  reads flat under VoiceOver where a `TreeView` does not.
+- Keyboard access to the column header — sort, resize, reorder — is still
+  missing, and remains a WCAG 2.1.1 / 2.5.7 exposure.
+
 ## [0.9.2] - 2026-09-03
 
 Accessibility. Every entry below changes what a screen reader says, and four

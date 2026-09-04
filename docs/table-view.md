@@ -431,17 +431,19 @@ clear behaviour).
 | Key                         | Effect                                                                                |
 |-----------------------------|---------------------------------------------------------------------------------------|
 | Arrow keys                  | move focused cell within the visible grid                                             |
-| Home / End                  | jump to first / last column of the current row                                        |
-| Ctrl-Home / Ctrl-End        | jump to first / last cell                                                             |
+| Home / End                  | cell modes: first / last column of the row. Row modes: first / last **row**            |
+| Ctrl-Home / Ctrl-End        | the same, without moving the selection (cell modes also jump to the corner)            |
 | PgUp / PgDn                 | scroll one page; focus moves the same number of rows                                  |
 | Tab / Shift+Tab             | next / previous cell in row order, wrapping rows (configurable via `tab_traversal`)   |
 | Shift + Arrow               | extend selection in `MultiRow` / `MultiCell` modes                                    |
-| Space                       | toggle selection at focus                                                             |
+| Space                       | check the focused cell if it holds a checkbox, else toggle selection at focus          |
+| Ctrl-Space / Shift-Space    | `MultiCell`: select the column / the row (Excel and the ARIA grid pattern)             |
 | Enter                       | invoke `on_row_activate` (or fall back to toggle-select)                              |
-| Ctrl-A                      | select all rows / cells in multi modes                                                |
+| Ctrl-A                      | select all rows / cells in multi modes; Ctrl-Shift-A deselects                         |
 | F2 / typing                 | begin edit (gated by `EditTriggers`)                                                  |
 | Escape                      | end edit if any, else clear focus                                                     |
-| ArrowLeft on tree column    | collapse the row when expanded (TreeTableView)                                            |
+| ArrowLeft on tree column    | collapse the row when expanded, else move to its parent (TreeTableView)                   |
+| `*` / `+` / `-`             | expand the whole subtree / expand one level / collapse (TreeTableView)                    |
 | ArrowRight on tree column   | expand the row when collapsed and has children (TreeTableView)                            |
 
 The same handler powers both widgets via the

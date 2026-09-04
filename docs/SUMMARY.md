@@ -35,6 +35,7 @@
 # Input, navigation, chrome
 
 - [Shortcuts, intents & actions](shortcut-intent-action.md)
+- [Data-view keyboard navigation](data-view-keyboard.md)
 - [Tooltips](tooltips.md)
 - [Native menus](native-menu.md)
 - [WebView](web-view.md)

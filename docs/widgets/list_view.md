@@ -43,10 +43,15 @@ walking up from it, unlike ARIA's per-item `aria-setsize`.
 
 The container is the focusable node and rows deliberately are not, so
 `set_selected` is the only signal telling assistive technology which row is
-current. Full keyboard navigation: arrows, Home, End, PageUp, PageDown,
-Space (select/toggle), Enter (activate), Ctrl+A (select all), Shift+Arrow
-(range), type-ahead (opt-in via `type_ahead_label`), and Shift+F10 or the
-Menu key for the selected row's context menu.
+current. Full keyboard navigation: arrows, Home, End, PageUp, PageDown
+(each moving the selection, or only the cursor when the accelerator is
+held), Shift for a range and Ctrl+Shift for an additive one, Space
+(select/toggle), Enter (activate), Ctrl+A / Ctrl+Shift+A (select all /
+deselect), Ctrl+Arrow and Ctrl+Space (the disjoint-selection pair),
+type-ahead (opt-in via `type_ahead_label`), and Shift+F10 or the Menu key
+for the selected row's context menu. On macOS, Cmd+Down opens the focused
+row. The chord table and its rationale are in
+[docs/data-view-keyboard.md](https://github.com/ferntech-eu/teksilo/blob/main/docs/data-view-keyboard.md).
 
 ```rust
 # use teksilo_widgets::ListView;
@@ -179,7 +184,13 @@ focus stays on a *text field* while the arrow keys move a highlight
 through this list (a command palette, a type-ahead picker). The field's
 AT node publishes `active_descendant` pointing here, so a screen reader
 announces each row as the highlight moves without focus ever leaving
-the input. A `ListView` that holds focus itself does not need this.
+the input.
+
+A `ListView` that holds focus itself does **not** need this handle: it
+publishes its own `active_descendant` from `accessibility()`, pointing
+at whichever row the keyboard is on. It used to publish none, on the
+assumption that holding focus was enough, and that assumption is what
+made every Teksilo list silent to NVDA.
 
 Only realized rows are present — a row scrolled outside the
 virtualization window has no widget, so look-ups for it return `None`.

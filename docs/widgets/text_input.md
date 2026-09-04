@@ -32,7 +32,7 @@ TextInput::new(search.clone())
 
 ## Builder methods at a glance
 
-`variant`, `style`, `placeholder`, `label`, `enabled`, `read_only`, `max_length`, `show_clear_button`, `min_width`, `leading_slot`, `trailing_slot`, `on_submit_fn`, `on_blur_fn`, `char_filter`, `suffix`, `input_mask`, `input_purpose`, `active_descendant`, `controls`, `validator`, `caret_position`, `handle`, `caret_setter`, `validation_feedback_signal`, `validation`, `validation_feedback`, `tooltip`, `rich_tooltip_key`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`, `text`
+`variant`, `style`, `placeholder`, `label`, `enabled`, `read_only`, `max_length`, `show_clear_button`, `min_width`, `leading_slot`, `trailing_slot`, `on_submit_fn`, `on_blur_fn`, `char_filter`, `suffix`, `input_mask`, `input_purpose`, `active_descendant`, `controls`, `validator`, `caret_position`, `handle`, `field_id`, `caret_setter`, `validation_feedback_signal`, `validation`, `validation_feedback`, `tooltip`, `rich_tooltip_key`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`, `text`
 
 ## API reference
 
@@ -93,9 +93,18 @@ Set the placeholder text shown when the field is empty.
 
 #### `pub fn label(mut self, label: impl Into<LocalizedString>) -> Self`
 
-Accessible name for the composite. Propagated to the outer
-container's a11y node; the inner `TextInputField` still
-carries `Role::TextInput` with the document's value.
+Accessible name for the field.
+
+Applied to the inner `TextInputField` — the node that carries
+`Role::TextInput`, holds focus, and reports the document's value.
+It deliberately does *not* go on the composite's outer node: that
+node is a `Role::GenericContainer`, which
+`accesskit_consumer::common_filter` drops from the filtered tree
+unconditionally, so a name placed there would be invisible to every
+screen reader on every platform.
+
+Stays locale-reactive: a `tr!(...)` name is re-resolved when the
+locale changes, without a rebuild.
 
 #### `pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self`
 
@@ -204,6 +213,26 @@ lose its own Ctrl+Z to whatever the host routed the chord at instead.
 
 Like `caret_setter`, safe to take before `build`:
 the handle reaches the field through a slot the widget fills in.
+
+#### `pub fn field_id(&self) -> std::rc::Rc<std::cell::Cell<Option<WidgetId>>>`
+
+The arena id of the inner field: the node that holds focus, carries
+`Role::TextInput` and reports the document's value.
+
+A `TextInput` is a composite whose outer node is a
+`Role::GenericContainer`. That node is neither focusable nor present in
+the filtered accessibility tree, so a host that has to *name* the focus
+target cannot use the id `ctx.add` returned it. Two cases need the
+name: a form sending focus back to the field a validator refused, and a
+modal whose own `initial_focus_hint` picks one field out of several.
+
+Empty until `build` runs, like `caret_setter`;
+take the handle before `ctx.add(text_input)` and read it after.
+
+A host that only needs "focus this input, whichever node that is" wants
+`EventContext::request_focus_into` on the outer id instead, and no
+handle at all.
+
 
 #### `pub fn caret_setter(&self) -> std::rc::Rc<dyn Fn(usize)>`
 
