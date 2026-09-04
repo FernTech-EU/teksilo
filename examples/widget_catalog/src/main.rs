@@ -77,9 +77,10 @@ fn main() {
         .application("eu", "FernTech", "widget-catalog")
         .settings(SettingsBundle::new())
         .install_inspector_in_debug()
-        // Debug-only automation bridge: drive this catalog from
-        // `teksilo-automation-mcp --connect <sock> --token <uuid>` (the socket
-        // path + token are printed to stderr at startup). No-op in release.
+        // Debug-only automation bridge: drive this catalog with
+        // `teksilo-automation-mcp --attach` (or `--attach-pid <pid>`). The app
+        // publishes an endpoint descriptor carrying its token under its runtime
+        // dir, so there is nothing to copy out of stderr. No-op in release.
         .install_automation_bridge_in_debug()
         .install_file_dialog()
         // Toast host + persistent notification archive — drives the

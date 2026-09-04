@@ -150,7 +150,7 @@ pub fn spawn_bridge_thread(proxy: crate::app::AppEventProxy, token: String) -> s
 
     let announce_token = token.clone();
     let mut listener = bound.listener;
-    std::thread::Builder::new()
+    let spawned = std::thread::Builder::new()
         .name("teksilo-automation-bridge".into())
         .spawn(move || {
             // Remove the descriptor on thread exit; dropping `listener`
@@ -174,7 +174,15 @@ pub fn spawn_bridge_thread(proxy: crate::app::AppEventProxy, token: String) -> s
                     Err(_) => break,
                 }
             }
-        })?;
+        });
+    if let Err(e) = spawned {
+        // The descriptor was published a moment ago and nothing will ever serve
+        // it now (the `Cleanup` guard lives inside the thread that failed to
+        // start). Retract it here, or `--attach-pid` would hand a caller an
+        // endpoint that answers nobody until the process exits.
+        EndpointFile::remove(pid);
+        return Err(e);
+    }
 
     // Announce only now — after the bind, after the descriptor exists, and
     // after the accept thread exists. A client acts on this the moment it reads
@@ -204,7 +212,14 @@ fn handle_connection(
     // Bound the handshake: a peer that connects but never sends the token must
     // not occupy the single connection slot forever.
     stream.set_read_timeout(Some(HANDSHAKE_TIMEOUT))?;
-    let offered = wire::read_token(&mut stream)?;
+    // The transport deadline is per-`read` and the token is read a byte at a
+    // time, so the *handshake* also gets its own end-to-end deadline —
+    // otherwise a peer dripping a byte just under the per-read timeout holds
+    // the single slot for `MAX_TOKEN_LINE` × `HANDSHAKE_TIMEOUT`.
+    let offered = wire::read_token_by(
+        &mut stream,
+        Some(std::time::Instant::now() + HANDSHAKE_TIMEOUT),
+    )?;
     if !wire::token_matches(token, &offered) {
         return Ok(()); // reject — bad/missing token
     }

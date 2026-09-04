@@ -114,8 +114,10 @@ differed has been moved behind one seam.
   the default descriptor grants read access to Everyone *and* the anonymous
   account. `PIPE_REJECT_REMOTE_CLIENTS` rides in the same `dwPipeMode` bitmask
   as a second layer — never a substitute for the DACL, since it only blocks the
-  SMB path. Costs no new dependency: the `windows` crate was already linked, so
-  this is six feature strings.
+  SMB path. The pipe backend costs no new crate — the `windows` bindings were
+  already linked, so it is six feature strings — but the feature itself pulls
+  in the GUI-free `teksilo-automation` for the shared wire types, and with it
+  `serde_json`. No async runtime on either side.
 - Pipe I/O is overlapped, because a byte-mode pipe in `PIPE_WAIT` blocks
   forever and there is no `SO_RCVTIMEO` for pipes — the token handshake needs a
   deadline, or a peer that connects and says nothing holds the only slot for
@@ -125,6 +127,17 @@ differed has been moved behind one seam.
   for the server to come back around instead of giving up at the first
   `ERROR_PIPE_BUSY`. Without both, `--list` — which probes by connecting and
   dropping — poisoned the `--attach` that followed it.
+- **`probe` answers `Live` / `Busy` / `Dead`** rather than a bool. A caller acts
+  on that answer by *deleting the descriptor*, and over a connect attempt "the
+  single slot is taken" looks exactly like "nothing is there" — so a healthy app
+  somebody else was already driving got unregistered by a `--list` that only
+  reads. Only an unambiguous absence counts as dead: a missing socket or pipe,
+  or `ECONNREFUSED`, the classic Unix corpse whose listener is gone.
+- The Unix bind creates the shared `teksilo-automation/` parent through `wire`'s
+  private-directory helper instead of a bare `create_dir_all`, which honours the
+  umask (`0755` as a rule). It runs *before* the descriptor is published, so it —
+  not `EndpointFile::write` later finding the directory already there — is what
+  decides the mode the documented `0700` ends up being.
 
 ### teksilo-automation
 
@@ -135,7 +148,27 @@ differed has been moved behind one seam.
   in-memory buffer on every platform.
 - The token handshake reads a byte at a time rather than through a `BufRead`,
   which would swallow part of the first frame and force a second handle on the
-  connection — an operation a Windows pipe has no clean equivalent for.
+  connection — an operation a Windows pipe has no clean equivalent for. It is
+  also what makes a per-`read` timeout the wrong bound, so the handshake carries
+  **its own end-to-end deadline** (`read_token_by`): a peer dripping one byte
+  just under the per-read timeout would otherwise hold the single connection
+  slot for `MAX_TOKEN_LINE` × 10 s — the exact denial the timeout exists to
+  prevent.
+- The endpoint descriptor is created with `create_new` and its mode **in the
+  same `open`**, never written and then `chmod`ed. It carries the token, and the
+  gap between the two leaves it at the umask default — the same bind-then-chmod
+  window the socket ordering already exists to close. `create_new` also refuses
+  to follow a symlink planted at the staging path, so a writable parent cannot
+  redirect the token elsewhere, and the directory's owner is checked before any
+  of it reaches the disk.
+- An **already existing** runtime directory is no longer taken on trust: it must
+  be a real directory rather than a symlink, and a mode reachable by others is
+  tightened to `0700`. `$XDG_RUNTIME_DIR` is per-user by spec and Darwin's
+  `$TMPDIR` is per-user per-boot, but the documented fallback for a Unix with
+  neither is the *shared* `/tmp`, where another local user can create
+  `teksilo-automation/` first — and `AlreadyExists` was being accepted blindly,
+  which would publish a token-bearing descriptor into a directory somebody else
+  controls and let `--list` pick up descriptors they planted.
 - **`command` modifier** on `inject_key`, `inject_pointer` and `scroll`.
   `command` is the platform's primary accelerator (Control on Windows and
   Linux, ⌘ on macOS) and `ctrl` stays literal. A shortcut *declared* `Ctrl+S`
@@ -147,10 +180,24 @@ differed has been moved behind one seam.
   Windows, so the same budget bought roughly a fifteenth of the frames and a
   wait that passed on Linux timed out there. Nothing else can move the tree
   while the loop runs, so the sleep was never buying progress in the first
-  place.
-- New codes: `GPU_READBACK_FAILED`, `BRIDGE_TIMEOUT`, `BRIDGE_DROPPED`,
-  `BAD_REQUEST`, `BRIDGE_IO` — several were bare string literals a client could
-  not match on.
+  place. The wall-clock backstop that remains is **1×** the budget (floor
+  250 ms), not 10×: it exists only so a pathological tree cannot spin forever,
+  and at 10× it outlived both the live bridge's ~2 s settle clamp — the whole
+  point of which is that no op freezes the winit main thread for longer — and
+  the bridge's own 15 s reply deadline, so the client was told its request had
+  timed out while the UI stayed frozen.
+- **New codes**, each a constant rather than a string spelled at its throw
+  site: `GPU_READBACK_FAILED` — a device existed but reading the pixels back
+  failed, which unlike `GPU_UNAVAILABLE` can succeed on a retry;
+  `BRIDGE_TIMEOUT` — the app took the request but its UI thread did not answer,
+  and because it may still be applied later the caller should re-read the tree
+  rather than assume it was dropped; `BRIDGE_DROPPED` — the app dropped it
+  without answering, because it is shutting down; `BAD_REQUEST` — the frame did
+  not parse as an `AutomationRequest`; `BRIDGE_IO` — the exchange itself failed,
+  either because the client never reached the bridge or because a reply was too
+  large to frame. Three of them were bare string literals a client could not
+  match on, which is the whole point of a code: a caller has to tell "the UI may
+  yet move" from "it never will" without reading a message written for a human.
 
 ### teksilo-app
 
@@ -166,14 +213,24 @@ differed has been moved behind one seam.
 - The app publishes an **endpoint descriptor** (`<runtime dir>/teksilo-automation/<pid>.json`,
   owner-only) naming its transport, address and token, so a client no longer
   scrapes stderr. macOS now uses `$TMPDIR` — its actual per-user runtime
-  directory — instead of falling back to the shared `/tmp`.
+  directory — instead of falling back to the shared `/tmp`. It is retracted
+  again if the accept thread then fails to spawn: the cleanup guard lives
+  *inside* that thread, so `--attach-pid` would otherwise hand a caller an
+  endpoint that answers nobody until the process exits.
 
 ### teksilo-automation-mcp
 
 - `--attach` (newest live app), `--attach-pid <pid>` and `--list` replace
   copying a socket path out of stderr; `--connect <endpoint> --token <uuid>`
   remains as the explicit escape hatch. Stale descriptors — left by an app that
-  exited without unwinding — are probed and pruned rather than offered.
+  exited without unwinding — are probed and pruned rather than offered; one that
+  probes `Busy` is kept, because another client holding the single slot is no
+  reason to unregister a healthy app, and pruning it there would leave
+  `--attach-pid` unable to find that app again for the life of the process.
+- A value-taking flag with its value missing (`--connect`, `--attach-pid`,
+  `--token`) is an error rather than a shrug. The lookup returns `None` either
+  way, so falling through to the default quietly started the *demo* server while
+  the caller believed it was driving their app.
 - Screenshots return a `{width, height, scale}` block beside the image. Pixels
   are physical and every other coordinate in the toolkit is logical, so without
   `scale` a caller could not relate a pixel it could see to a point it could

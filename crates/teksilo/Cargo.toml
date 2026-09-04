@@ -110,10 +110,12 @@ terminal = ["dep:teksilo-terminal", "teksilo-terminal/alacritty"]
 
 # Debug-only automation bridge. Adds `install_automation_bridge_in_debug()`
 # (re-exported here as `TeksiloAppBuilderAutomationExt`, mirroring `toast` /
-# `web-view`) so `teksilo-automation-mcp --connect <sock>` can drive a live
-# running app. The active socket is additionally gated on `debug_assertions`,
-# so a release build with this feature still ships no bridge. Also re-exports
-# the GUI-free `teksilo-automation` toolkit as `teksilo::automation`.
+# `web-view`) so `teksilo-automation-mcp --attach` (or `--connect <endpoint>
+# --token <uuid>`) can drive a live running app. The active endpoint — a
+# Unix-domain socket, or a named pipe on Windows — is additionally gated on
+# `debug_assertions`, so a release build with this feature still ships no
+# endpoint, token, or bridge. Also re-exports the GUI-free
+# `teksilo-automation` toolkit as `teksilo::automation`.
 automation = ["dep:teksilo-automation", "teksilo-app/automation"]
 
 # Optional main-thread async executor (`teksilo-async`): adds

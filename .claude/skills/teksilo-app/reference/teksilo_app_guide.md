@@ -809,25 +809,44 @@ live under `teksilo::core`; `MockTextBackend::new()` (fixed 8px char width) live
 
 Beyond unit tests, an app can be **observed and driven by an AI agent or a CI harness**
 through a Model Context Protocol server — in-process, with no OS accessibility layer. It
-exposes the live AccessKit tree (so node ids are stable across rebuilds), AT actions,
-synthetic pointer/key/IME input, and screenshots.
+exposes the live AccessKit tree, AT actions, synthetic pointer/key/IME input, and
+screenshots. A node id is stable for the **lifetime of the widget instance** — across
+relayout, repaint, theme and locale, which mutate the widget in place — but a *structural
+rebuild* that destroys and recreates it (a data-model change, a `Switcher` swap, a
+`Rebuild`-level binding) allocates a new one, so re-`find_node` after the tree's structure
+changes instead of reusing a cached id.
 
 - **Headless (CI / agent-authored tests):** `teksilo-automation-mcp --headless` — a
-  self-contained MCP server, no display or GPU daemon needed (screenshots need a GPU else
-  return `GPU_UNAVAILABLE`). Works on every platform.
+  self-contained MCP server, no display or GPU daemon needed (screenshots render offscreen:
+  a real adapter is preferred, a software one accepted, and only "neither exists" returns
+  `GPU_UNAVAILABLE`). Works on every platform. The stock binary drives a small **built-in
+  demo** (a heading, two buttons, a text field, a checkbox) — the toolkit's own conformance
+  harness, **not** your app. To headlessly drive your own, own its `WidgetTree` on one
+  thread and call `teksilo_automation::execute` per request (the crate is GUI-free); the
+  turnkey "drive my real app" path is the live mode below.
 - **Live app:** enable the `automation` feature on the `teksilo` dependency and add one
   builder call:
 
   ```rust,ignore
   TeksiloAppBuilder::new()
-      .install_automation_bridge_in_debug()   // debug-only; no-op in release / on Windows
+      .install_automation_bridge_in_debug()   // debug-only; a no-op in release
       // … the rest of the chain …
       .run();
   ```
 
-  At startup it prints a socket path + token to stderr; drive it with
-  `teksilo-automation-mcp --connect <sock> --token <uuid>`. The bridge is a debug-only,
-  `0600`, per-process Unix socket (Linux/macOS) — a release build contains no socket.
+  Linux, macOS and Windows alike. On startup the app binds a private endpoint — a `0600`
+  Unix socket in a `0700` per-process directory, or on Windows a named pipe with an
+  owner-only DACL (a pipe's default descriptor grants read to Everyone) — and publishes an
+  **endpoint descriptor** at `<runtime dir>/teksilo-automation/<pid>.json`, owner-only
+  because it carries the token. Attach with `teksilo-automation-mcp --attach` (the newest
+  live app), `--attach-pid <pid>`, or `--list` to see what is live; `--connect <endpoint>
+  --token <uuid>` names one by hand. Nothing is scraped from stderr, and a release build
+  contains no endpoint, token or bridge on any platform.
+
+When injecting a chord, prefer the `command` modifier over `ctrl`: it is the platform's
+primary accelerator (Control on Windows/Linux, ⌘ on macOS), which is what a shortcut
+*declared* `Ctrl+S` resolves to. `ctrl` stays literal Control everywhere — on macOS it
+injects a key that matches no binding **and still reports success**.
 
 On connect the server hands the client a "how to drive this app" briefing plus a JSON
 schema per tool, so a capable agent self-guides through the snapshot → act → settle →

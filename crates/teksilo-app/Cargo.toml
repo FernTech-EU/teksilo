@@ -44,15 +44,17 @@ telemetry = ["dep:teksilo-telemetry", "dep:uuid", "teksilo-widgets/telemetry"]
 # default; the umbrella `teksilo/web-view` feature turns it on.
 web-view = ["dep:teksilo-webview"]
 # Debug-only in-process automation bridge. Lets `teksilo-automation-mcp
-# --connect <sock>` drive a *live* running app over a Unix-domain socket.
-# The active machinery (socket / token / bridge thread) is additionally gated
-# on `debug_assertions`, so a release build with this feature on never opens a
-# socket and `install_automation_bridge_in_debug()` is a no-op. NOTE: the
+# --attach` (or `--attach-pid <pid>`, or the explicit `--connect <endpoint>
+# --token <uuid>`) drive a *live* running app over this platform's private
+# local endpoint — a Unix-domain socket, or a named pipe on Windows. The
+# active machinery (endpoint / token / bridge thread) is additionally gated on
+# `debug_assertions`, so a release build with this feature on binds no endpoint
+# and `install_automation_bridge_in_debug()` is a no-op. NOTE: the
 # guarantee is *behavioral* — the `teksilo-automation` toolkit (executor +
 # serde_json) is still linked, dead-code-eliminated only under fat LTO (the
 # `release` default); a non-LTO profile such as `profiling` retains those
-# symbols even though no bridge runs. Pulls in the GUI-free toolkit plus the
-# wire-encoding deps.
+# symbols even though no bridge runs. Pulls in the GUI-free toolkit, this
+# platform's transport, plus the wire-encoding deps.
 automation = [
     "dep:teksilo-automation",
     "teksilo-platform/automation-transport",

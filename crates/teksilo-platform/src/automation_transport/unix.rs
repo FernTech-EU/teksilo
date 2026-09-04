@@ -20,7 +20,7 @@
 use std::io;
 use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
 use std::os::unix::net::{UnixListener, UnixStream};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use teksilo_automation::wire::Endpoint;
@@ -66,8 +66,14 @@ fn candidate_dirs(pid: u32) -> Vec<PathBuf> {
 }
 
 pub(super) fn bind(pid: u32) -> io::Result<BoundTransport> {
+    bind_over(&candidate_dirs(pid))
+}
+
+/// The candidate-selection loop `bind` runs, over an explicit candidate list so
+/// a test can drive the overflow branch without a 120-character `$TMPDIR`.
+fn bind_over(candidates: &[PathBuf]) -> io::Result<BoundTransport> {
     let mut last_err = None;
-    for dir in candidate_dirs(pid) {
+    for dir in candidates {
         let path = dir.join("s");
         if path.as_os_str().len() > MAX_SOCKET_PATH {
             last_err = Some(io::Error::new(
@@ -80,7 +86,7 @@ pub(super) fn bind(pid: u32) -> io::Result<BoundTransport> {
             ));
             continue;
         }
-        match bind_at(&dir, &path) {
+        match bind_at(dir, &path) {
             Ok(listener) => {
                 let address = path.to_string_lossy().into_owned();
                 return Ok(BoundTransport {
@@ -96,11 +102,17 @@ pub(super) fn bind(pid: u32) -> io::Result<BoundTransport> {
     }))
 }
 
-fn bind_at(dir: &PathBuf, path: &PathBuf) -> io::Result<SocketListener> {
+fn bind_at(dir: &Path, path: &Path) -> io::Result<SocketListener> {
     // A stale directory from a crashed prior run with the same PID.
     let _ = std::fs::remove_dir_all(dir);
     if let Some(parent) = dir.parent() {
-        std::fs::create_dir_all(parent)?;
+        // `wire`'s helper, not a bare `create_dir_all`: that honours the umask
+        // (0755 as a rule) and this runs *before* the descriptor is published,
+        // so it is what decides the mode the descriptor directory ends up with.
+        // Creating it loosely here and letting `EndpointFile::write` find it
+        // "already existing" is how the documented `0700` silently became
+        // world-readable under the shared-`/tmp` fallback.
+        teksilo_automation::wire::create_private_dir(parent)?;
     }
     // `mkdir`'s own mode: the directory is never briefly world-reachable.
     std::fs::DirBuilder::new().mode(0o700).create(dir)?;
@@ -109,7 +121,7 @@ fn bind_at(dir: &PathBuf, path: &PathBuf) -> io::Result<SocketListener> {
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
     Ok(SocketListener {
         listener,
-        dir: dir.clone(),
+        dir: dir.to_path_buf(),
     })
 }
 
@@ -160,15 +172,35 @@ mod tests {
 
     #[test]
     fn an_overlong_preferred_path_falls_back_instead_of_failing() {
-        // Simulate a very deep `$TMPDIR` — the macOS hazard — and confirm the
-        // candidate list still yields something bindable.
-        let deep = "/tmp/".to_string() + &"d".repeat(120);
-        let candidates = candidate_dirs(1234);
-        assert!(candidates.len() >= 2, "there must be a fallback candidate");
+        // Simulate the macOS hazard — a `$TMPDIR` deep enough that the socket
+        // path overruns `sun_path` — and drive the *real* selection loop with
+        // it, rather than asserting that a locally-built string is long (which
+        // proves nothing about `bind`).
+        let deep = PathBuf::from("/tmp/".to_string() + &"d".repeat(120));
         assert!(
-            candidates.last().unwrap().join("s").as_os_str().len() <= MAX_SOCKET_PATH,
+            deep.join("s").as_os_str().len() > MAX_SOCKET_PATH,
+            "the simulated preferred directory must actually overflow"
+        );
+
+        let fallback = candidate_dirs(1234).pop().expect("a fallback candidate");
+        assert!(
+            fallback.join("s").as_os_str().len() <= MAX_SOCKET_PATH,
             "the fallback must always fit"
         );
-        assert!(deep.len() > MAX_SOCKET_PATH, "sanity");
+
+        // The guard `bind` applies, over a candidate list whose preferred entry
+        // cannot fit: it must skip to the fallback and bind there.
+        let pid = std::process::id().wrapping_add(9);
+        let candidates = vec![deep.clone(), PathBuf::from(format!("/tmp/tka-{pid}"))];
+        let bound = match bind_over(&candidates) {
+            Ok(b) => b,
+            Err(e) if e.kind() == io::ErrorKind::PermissionDenied => return,
+            Err(e) => panic!("bind should have fallen back, but failed: {e}"),
+        };
+        assert!(
+            !bound.endpoint.address.starts_with(deep.to_str().unwrap()),
+            "the overlong preferred path must be skipped, got {}",
+            bound.endpoint.address
+        );
     }
 }

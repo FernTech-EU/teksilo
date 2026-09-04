@@ -490,8 +490,9 @@ impl AutomationServer {
 
     #[tool(
         description = "Scroll the widget under a node by a pixel delta, with optional modifiers \
-                       (ctrl/shift/alt/meta) — a modifier-held wheel is its own gesture, e.g. \
-                       Ctrl+wheel to zoom."
+                       (ctrl/shift/alt/meta/command). A modifier-held wheel is its own gesture, \
+                       e.g. Ctrl+wheel to zoom. Use `command` for the platform accelerator \
+                       (Control on Windows/Linux, Command on macOS); `ctrl` is literal Control."
     )]
     pub(crate) async fn scroll(
         &self,
@@ -516,7 +517,7 @@ impl AutomationServer {
     }
 
     #[tool(
-        description = "Inject a pointer event at a point: action = click (default), double_click, down, up or move; button = primary (default), secondary, middle, back, forward; with optional ctrl/shift/alt/meta held for the press and release. Unknown names and unknown fields are refused rather than defaulted."
+        description = "Inject a pointer event at a point: action = click (default), double_click, down, up or move; button = primary (default), secondary, middle, back, forward; with optional ctrl/shift/alt/meta/command held for the press and release. Use `command` for the platform accelerator (Control on Windows/Linux, Command on macOS) — accelerator-click to extend a selection is `command`, not `ctrl`. Unknown names and unknown fields are refused rather than defaulted."
     )]
     pub(crate) async fn inject_pointer(
         &self,
@@ -562,7 +563,9 @@ impl AutomationServer {
         .await
     }
 
-    #[tool(description = "Inject a key press (with optional modifiers) to the focused widget.")]
+    #[tool(
+        description = "Inject a key press (with optional modifiers) to the focused widget. Use `command` for any accelerator chord (Control on Windows/Linux, Command on macOS) — a shortcut declared Ctrl+S resolves to the Command chord on macOS, so `ctrl` there injects a key that matches no binding and still reports success. `ctrl` stays literal Control, for chords that really are Control everywhere (Ctrl+Tab)."
+    )]
     pub(crate) async fn inject_key(
         &self,
         Parameters(p): Parameters<InjectKeyParams>,
@@ -791,11 +794,20 @@ value, toggled/expanded/selected, bounds, and the `actions` it supports. \
 2. Act on it. `invoke_action {node, action}` where action is one of click, \
 focus, expand, collapse, set_value, increment, decrement, show_context_menu; \
 or the shortcuts `set_value` / `type_text` / `focus_node` / `expand` / \
-`collapse` / `scroll`; or raw input `inject_pointer {x,y,action?,button?}` / \
-`inject_key {key, ctrl?,shift?,alt?,meta?}` / `type_ime` / `drag_node`.
+`collapse` / `scroll`; or raw input `inject_pointer \
+{x,y,action?,button?,ctrl?,shift?,alt?,meta?,command?}` / `right_click {node}` \
+(opens the node's context menu — the coordinate-free form of a secondary \
+click) / `inject_key {key, ctrl?,shift?,alt?,meta?,command?}` / `type_ime` / \
+`drag_node`. Reach for `command`, not `ctrl`, whenever a chord means \"the \
+accelerator\" (save, copy, select-all, accelerator-click): it is Control on \
+Windows and Linux and Command on macOS, which is what a shortcut *declared* \
+`Ctrl+S` resolves to there — so `ctrl` on macOS injects a key that matches no \
+binding and still reports success, because the key really was injected. `ctrl` \
+stays literal Control, for the chords that genuinely are Control everywhere \
+(Ctrl+Tab).
 3. Verify. Re-`snapshot_tree`, `read_node {node}`, or `assert_node {node, kind, \
 value?/flag?}` where kind is role_equals, label_equals, label_contains, \
-value_equals, toggled, expanded, selected, disabled, exists, or focused. A \
+value_equals, toggled, expanded, selected, disabled, exists, or focused. \
 A failed assert_node comes back as a tool error (isError=true) with code ASSERTION_FAILED, and a node reference that names nothing comes back as NOT_FOUND — those are different bugs and the code tells you which.
 
 Error results carry a stable `code` (in the text body and in structured_content) \

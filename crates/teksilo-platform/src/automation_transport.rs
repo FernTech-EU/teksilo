@@ -4,12 +4,11 @@
 //! Local IPC for the debug-only automation bridge.
 //!
 //! One trait pair, two OS backends — the same shape as
-//! [`external_dnd`](crate::external_dnd) and
-//! [`native_menu`](crate::native_menu):
+//! `external_dnd` and `native_menu`:
 //!
-//! - **Unix** ([`unix`]) — a Unix-domain socket in a `0700` per-process
+//! - **Unix** (`unix.rs`) — a Unix-domain socket in a `0700` per-process
 //!   directory, the socket itself `0600`.
-//! - **Windows** ([`windows`]) — a named pipe under `\\.\pipe\`, with an
+//! - **Windows** (`windows.rs`) — a named pipe under `\\.\pipe\`, with an
 //!   explicit DACL granting only the creating user.
 //!
 //! Only `bind` / `accept` / `connect` and their access control live here. The
@@ -98,6 +97,23 @@ pub fn bind(pid: u32) -> io::Result<BoundTransport> {
     }
 }
 
+/// What a [`probe`] found.
+///
+/// `Busy` is deliberately distinct from `Dead`: "someone else is already
+/// driving this app" and "nothing is there" look similar over a connect
+/// attempt and must never be conflated, because a caller acts on the answer by
+/// *deleting the descriptor*.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Liveness {
+    /// A bridge answered.
+    Live,
+    /// Something is listening but could not take us right now — the single
+    /// connection slot is occupied, or the server is between accepts.
+    Busy,
+    /// Nothing is listening at that address.
+    Dead,
+}
+
 /// Is a bridge actually listening at `endpoint`?
 ///
 /// A descriptor outlives its process whenever the app exits without unwinding
@@ -106,9 +122,39 @@ pub fn bind(pid: u32) -> io::Result<BoundTransport> {
 /// drops it immediately; the bridge sees a peer that says nothing, fails the
 /// token handshake on EOF, and goes back to accepting. Microseconds of slot
 /// occupancy in exchange for never offering a dead endpoint to a caller.
-pub fn probe(endpoint: &Endpoint) -> bool {
-    connect(endpoint).is_ok()
+///
+/// A probe is impatient by design: [`connect`] retries for seconds because a
+/// named-pipe instance is routinely unavailable for a moment, but a *probe*
+/// paying that for every stale descriptor would make `--list` and `--attach`
+/// take seconds per corpse.
+pub fn probe(endpoint: &Endpoint) -> Liveness {
+    let outcome: io::Result<Box<dyn TransportStream>> = match endpoint.transport {
+        #[cfg(unix)]
+        Transport::Unix => unix::connect(&endpoint.address),
+        #[cfg(windows)]
+        Transport::NamedPipe => windows::connect_within(&endpoint.address, PROBE_PATIENCE),
+        _ => return Liveness::Dead,
+    };
+    match outcome {
+        Ok(_) => Liveness::Live,
+        // Only an unambiguous "there is nothing there" counts as dead: a
+        // missing socket / pipe, or a socket file whose listener is gone
+        // (`ECONNREFUSED` — the classic Unix stale-socket corpse). Anything
+        // else — busy, in-between-accepts, a permission hiccup — is a
+        // live-or-unknown endpoint that must not be pruned.
+        Err(e)
+            if e.kind() == io::ErrorKind::NotFound
+                || e.kind() == io::ErrorKind::ConnectionRefused =>
+        {
+            Liveness::Dead
+        }
+        Err(_) => Liveness::Busy,
+    }
 }
+
+/// How long a [`probe`] waits before calling an endpoint unavailable.
+#[cfg(windows)]
+const PROBE_PATIENCE: Duration = Duration::from_millis(300);
 
 /// Connect to a bridge published at `endpoint`.
 pub fn connect(endpoint: &Endpoint) -> io::Result<Box<dyn TransportStream>> {

@@ -80,10 +80,7 @@ fn wide(s: &str) -> Vec<u16> {
 }
 
 fn last_io_error(context: &str) -> io::Error {
-    io::Error::new(
-        io::ErrorKind::Other,
-        format!("{context}: {}", io::Error::last_os_error()),
-    )
+    io::Error::other(format!("{context}: {}", io::Error::last_os_error()))
 }
 
 // ---------------------------------------------------------------------------
@@ -238,11 +235,22 @@ impl PipeStream {
         // SAFETY: `self.event` is the event this OVERLAPPED was armed with.
         let waited = unsafe { WaitForSingleObject(self.event, millis) };
         if waited == WAIT_TIMEOUT {
-            // SAFETY: cancels only the operation described by `ov` on our handle.
-            unsafe {
+            // Cancellation races completion: a byte-mode pipe read can already
+            // have moved data into the caller's buffer by the time `CancelIoEx`
+            // lands. Those bytes are *gone from the pipe*, so throwing the
+            // count away would silently lose them — and the trait promises a
+            // timeout "leaves the stream usable". Report the partial transfer
+            // as a short read instead; only a genuinely empty cancellation is a
+            // timeout.
+            let mut transferred = 0u32;
+            // SAFETY: cancels only the operation described by `ov` on our handle,
+            // then waits for the kernel to release `ov` before it is dropped.
+            let completed = unsafe {
                 let _ = CancelIoEx(self.handle, Some(ov as *const OVERLAPPED));
-                let mut discarded = 0u32;
-                let _ = GetOverlappedResult(self.handle, ov, &mut discarded, true);
+                GetOverlappedResult(self.handle, ov, &mut transferred, true)
+            };
+            if completed.is_ok() && transferred > 0 {
+                return Ok(transferred);
             }
             return Err(io::Error::new(
                 io::ErrorKind::TimedOut,
@@ -268,9 +276,10 @@ impl PipeStream {
         // SAFETY: our own manual-reset event.
         unsafe { ResetEvent(self.event) }
             .map_err(|e| io::Error::other(format!("resetting the pipe I/O event: {e}")))?;
-        let mut ov = OVERLAPPED::default();
-        ov.hEvent = self.event;
-        Ok(ov)
+        Ok(OVERLAPPED {
+            hEvent: self.event,
+            ..Default::default()
+        })
     }
 }
 
@@ -440,23 +449,44 @@ impl TransportListener for PipeListener {
                 Some(h) => h,
                 None => self.create_instance()?,
             };
-            let stream = PipeStream::new(handle)?;
+            // `PipeStream` owns the handle from here on; until it exists, a
+            // failure would leak the instance we just took out of `pending`.
+            let stream = match PipeStream::new(handle) {
+                Ok(s) => s,
+                Err(e) => {
+                    // SAFETY: ours, never handed out.
+                    unsafe {
+                        let _ = CloseHandle(handle);
+                    }
+                    return Err(e);
+                }
+            };
             let mut ov = stream.armed_overlapped()?;
 
             // SAFETY: `ov` lives until `await_overlapped` returns, and that
             // function never leaves the operation outstanding.
             let started = unsafe { ConnectNamedPipe(handle, Some(&mut ov as *mut OVERLAPPED)) };
-            let outcome = match started {
+            let outcome: Result<(), AcceptFailure> = match started {
                 Ok(()) => Ok(()),
                 // The documented race: a client connected between
                 // `CreateNamedPipeW` and `ConnectNamedPipe`. Microsoft: "there
                 // is a good connection between client and server, even though
                 // the function returns zero."
                 Err(e) if e.code() == ERROR_PIPE_CONNECTED.into() => Ok(()),
-                Err(e) if e.code() == ERROR_IO_PENDING.into() => {
-                    stream.await_overlapped(&mut ov, None).map(|_| ())
-                }
-                Err(e) => Err(io::Error::other(format!("accepting on the pipe: {e}"))),
+                Err(e) if e.code() == ERROR_IO_PENDING.into() => stream
+                    .await_overlapped(&mut ov, None)
+                    .map(|_| ())
+                    .map_err(|err| AcceptFailure {
+                        // `await_overlapped` normalises a broken /
+                        // not-connected pipe to end-of-stream: the same used-up
+                        // instance, just noticed later.
+                        stale: err.kind() == io::ErrorKind::UnexpectedEof,
+                        err,
+                    }),
+                Err(e) => Err(AcceptFailure {
+                    stale: is_stale_instance(&e),
+                    err: io::Error::other(format!("accepting on the pipe: {e}")),
+                }),
             };
 
             match outcome {
@@ -469,12 +499,12 @@ impl TransportListener for PipeListener {
                     self.pending = self.create_instance().ok();
                     return Ok(Box::new(stream));
                 }
-                Err(e) if is_stale_instance(&e) => {
+                Err(f) if f.stale => {
                     // Drop `stream` (closing the used-up instance) and loop.
                     drop(stream);
                     continue;
                 }
-                Err(e) => return Err(e),
+                Err(f) => return Err(f.err),
             }
         }
         Err(io::Error::other(
@@ -494,22 +524,29 @@ impl Drop for PipeListener {
     }
 }
 
+/// A failed `accept`, plus whether the *instance* was merely used up.
+///
+/// The classification is carried alongside the error rather than recovered
+/// from it afterwards: `io::Error::other` discards `raw_os_error()`, so a
+/// downstream classifier would be reduced to substring-matching a formatted
+/// `windows::core::Error` — a match that breaks silently when that crate
+/// changes its `Display`, and whose failure mode here is the accept loop
+/// ending and the live bridge dying for the rest of the process's life.
+struct AcceptFailure {
+    /// The instance was used up, not the pipe broken: retry with a fresh one.
+    stale: bool,
+    err: io::Error,
+}
+
 /// Does this error mean "that instance was used up", rather than "the pipe is
 /// broken"? A client that connects and disconnects before the server calls
 /// `ConnectNamedPipe` leaves the instance in a closing state; the fix is a
 /// fresh instance, not a failed accept.
-fn is_stale_instance(e: &io::Error) -> bool {
-    matches!(
-        e.raw_os_error(),
-        Some(x) if x == ERROR_NO_DATA.0 as i32
-            || x == ERROR_BROKEN_PIPE.0 as i32
-            || x == ERROR_PIPE_NOT_CONNECTED.0 as i32
-    ) || {
-        // `io::Error::other` wraps the message, losing the OS code, so match the
-        // formatted `windows::core::Error` too.
-        let text = e.to_string();
-        text.contains("0x800700E8") || text.contains("(232)")
-    }
+fn is_stale_instance(e: &windows::core::Error) -> bool {
+    let code = e.code();
+    code == ERROR_NO_DATA.into()
+        || code == ERROR_BROKEN_PIPE.into()
+        || code == ERROR_PIPE_NOT_CONNECTED.into()
 }
 
 // ---------------------------------------------------------------------------
@@ -547,7 +584,10 @@ pub(super) fn connect(address: &str) -> io::Result<Box<dyn TransportStream>> {
 /// `--attach` fail outright.
 const CONNECT_PATIENCE: Duration = Duration::from_secs(5);
 
-fn connect_within(address: &str, patience: Duration) -> io::Result<Box<dyn TransportStream>> {
+pub(super) fn connect_within(
+    address: &str,
+    patience: Duration,
+) -> io::Result<Box<dyn TransportStream>> {
     let name = wide(address);
     let deadline = std::time::Instant::now() + patience;
     let mut last_busy = false;
@@ -566,7 +606,18 @@ fn connect_within(address: &str, patience: Duration) -> io::Result<Box<dyn Trans
             )
         };
         match handle {
-            Ok(h) if !h.is_invalid() => return Ok(Box::new(PipeStream::new(h)?)),
+            Ok(h) if !h.is_invalid() => {
+                return match PipeStream::new(h) {
+                    Ok(s) => Ok(Box::new(s)),
+                    Err(e) => {
+                        // SAFETY: ours, and nothing else has seen it.
+                        unsafe {
+                            let _ = CloseHandle(h);
+                        }
+                        Err(e)
+                    }
+                };
+            }
             Ok(_) => return Err(last_io_error("opening the named pipe")),
             // Busy: an instance exists but is taken. Wait for one to free up —
             // `WaitNamedPipeW` is the purpose-built call, but it fails fast when

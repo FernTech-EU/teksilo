@@ -264,19 +264,39 @@ jobs:
 
       # The bridge is debug-gated, so a release binary with the feature on must
       # contain none of it. The banner string only exists inside the gated
-      # `spawn_bridge_thread`, which makes it a reliable canary: if it survives
-      # into the release binary, the gate has regressed.
+      # `spawn_bridge_thread`, which makes it a precise canary.
+      #
+      # Both directions are checked. Absent-from-release is the assertion; but a
+      # grep for a string that no longer exists anywhere passes for the wrong
+      # reason, so the debug build is checked to still CONTAIN it. Without that,
+      # renaming the banner would retire the canary silently and nobody would
+      # learn until a release shipped a live bridge.
+      #
+      # The subject is the smoke example because it is the cheapest binary that
+      # actually wires the bridge. Note it references `TEKSILO_AUTOMATION_TOKEN`
+      # in its own *ungated* `main`, so that string is legitimately present in
+      # its release build — only the gated banner is a valid canary here.
       - name: Release canary — no bridge in a release build
         shell: bash
         run: |
+          banner="teksilo-automation: bridge endpoint"
+          suffix=""
+          [ "$RUNNER_OS" = "Windows" ] && suffix=".exe"
+
+          cargo build -p automation_bridge_smoke
+          debug_bin="target/debug/automation_bridge_smoke$suffix"
+          if ! grep -qa "$banner" "$debug_bin"; then
+            echo "::error::the canary string is absent from the DEBUG build — it no longer proves anything; update it to match the bridge's banner"
+            exit 1
+          fi
+
           cargo build --release -p automation_bridge_smoke
-          bin=target/release/automation_bridge_smoke
-          [ "$RUNNER_OS" = "Windows" ] && bin=target/release/automation_bridge_smoke.exe
-          if grep -qa "teksilo-automation: bridge endpoint" "$bin"; then
+          release_bin="target/release/automation_bridge_smoke$suffix"
+          if grep -qa "$banner" "$release_bin"; then
             echo "::error::the automation bridge leaked into a release build"
             exit 1
           fi
-          echo "clean: no bridge in $bin"
+          echo "canary ok: present in debug, absent from release"
 
   check:
     name: Check (${{ matrix.name }})

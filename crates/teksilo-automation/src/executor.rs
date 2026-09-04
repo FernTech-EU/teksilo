@@ -601,11 +601,18 @@ fn wait_for_condition(
     let budget_ms = settle.settle_timeout_ms.max(1);
     let frame_ms = WAIT_FRAME.as_millis() as u64;
     let max_frames = budget_ms.div_ceil(frame_ms);
-    // Wall-clock backstop, deliberately far above the simulated budget: it
-    // exists only so a pathological tree (an unbounded rebuild each frame)
-    // cannot spin forever, and must never be what ends an ordinary wait.
-    let backstop = Instant::now()
-        + Duration::from_millis(budget_ms.saturating_mul(10)).max(Duration::from_secs(5));
+    // Wall-clock backstop: it exists only so a pathological tree (an unbounded
+    // rebuild each frame) cannot spin forever, and must never be what ends an
+    // ordinary wait. `budget_ms` is already enormously generous for that job —
+    // the frames are pure in-memory work and finish in microseconds — while a
+    // larger multiple would break the guarantee the *caller* of this budget is
+    // relying on: the live bridge clamps `settle_timeout_ms` to 2 s precisely
+    // so no op can freeze the winit main thread for longer (see
+    // `clamp_live_settle`), and a 10× backstop quietly turned that into 20 s —
+    // past even the bridge's own 15 s reply deadline, so the client would be
+    // told the request timed out while the UI stayed frozen.
+    let backstop =
+        Instant::now() + Duration::from_millis(budget_ms).max(Duration::from_millis(250));
 
     // `..=` so a budget of one frame still gets an initial check *and* a frame.
     for _ in 0..=max_frames {

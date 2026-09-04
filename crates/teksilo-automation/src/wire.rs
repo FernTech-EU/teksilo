@@ -110,7 +110,7 @@ pub fn write_token(w: &mut impl Write, token: &str) -> io::Result<()> {
 
 /// Read the token handshake line, bounded by [`MAX_TOKEN_LINE`].
 ///
-/// Reads a byte at a time rather than through a [`BufRead`]: a buffered reader
+/// Reads a byte at a time rather than through a [`std::io::BufRead`]: a buffered reader
 /// would happily pull the first *frame* into its buffer along with the token
 /// line, so the caller would then need a second handle on the connection to
 /// read the rest — which is what forced the old code to `try_clone` the socket,
@@ -120,9 +120,29 @@ pub fn write_token(w: &mut impl Write, token: &str) -> io::Result<()> {
 /// Returns the trimmed token. Compare it with [`token_matches`] rather than
 /// `==`, so the comparison does not leak length or prefix through timing.
 pub fn read_token(r: &mut impl Read) -> io::Result<String> {
+    read_token_by(r, None)
+}
+
+/// [`read_token`], bounded by a deadline for the handshake **as a whole**.
+///
+/// A transport-level read timeout is per-`read`, and this reads one byte at a
+/// time — so on its own a 10 s read deadline lets a peer drip one byte every
+/// 9 s and hold the single connection slot for `MAX_TOKEN_LINE` × 10 s, which
+/// is the exact denial the deadline exists to prevent. The caller passes the
+/// bound it actually means; it is checked between bytes.
+pub fn read_token_by(
+    r: &mut impl Read,
+    deadline: Option<std::time::Instant>,
+) -> io::Result<String> {
     let mut line = Vec::with_capacity(64);
     let mut byte = [0u8; 1];
     while (line.len() as u64) < MAX_TOKEN_LINE {
+        if deadline.is_some_and(|d| std::time::Instant::now() >= d) {
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "the token handshake did not complete within its deadline",
+            ));
+        }
         match r.read(&mut byte) {
             Ok(0) => break, // EOF before the newline
             Ok(_) if byte[0] == b'\n' => break,
@@ -308,8 +328,25 @@ impl EndpointFile {
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
         // Write-then-rename so a reader never sees a half-written descriptor.
         let tmp = path.with_extension("json.tmp");
-        std::fs::write(&tmp, &json)?;
-        set_private_file(&tmp)?;
+        // `create_new` + the mode in the *same* `open`, never create-then-chmod:
+        // this file carries the token, and a `write`-then-`set_permissions`
+        // leaves it at the umask default (0644 as a rule) for the window in
+        // between — the same bind→chmod TOCTOU the socket ordering exists to
+        // close. `create_new` also refuses to follow a symlink planted at the
+        // temp path, so a writable parent cannot redirect the token elsewhere.
+        let _ = std::fs::remove_file(&tmp);
+        let mut file = private_file_options().create_new(true).open(&tmp)?;
+        // The empty 0600 file we just created is proof of our own uid, so the
+        // directory's owner can be checked with no `libc` and — crucially —
+        // *before* the token reaches the disk. See `create_private_dir` for why
+        // an existing directory is not taken on trust.
+        if let Err(e) = check_dir_is_ours(&dir, &file) {
+            drop(file);
+            let _ = std::fs::remove_file(&tmp);
+            return Err(e);
+        }
+        std::io::Write::write_all(&mut file, &json)?;
+        drop(file);
         std::fs::rename(&tmp, &path)?;
         Ok(path)
     }
@@ -375,19 +412,46 @@ fn runtime_dir() -> PathBuf {
 }
 
 /// Create `dir` (and parents) private to the current user.
-fn create_private_dir(dir: &Path) -> io::Result<()> {
+///
+/// An **already existing** directory is not taken on trust. `$XDG_RUNTIME_DIR`
+/// is per-user by spec and Darwin's `$TMPDIR` is per-user per-boot, but the
+/// documented fallback for a Unix with neither is the *shared* `/tmp`, where
+/// another local user can create `teksilo-automation/` first. Accepting
+/// `AlreadyExists` blindly would then publish a token-bearing descriptor into a
+/// directory somebody else controls — and let [`EndpointFile::list`] pick up
+/// descriptors they planted. So an existing entry must be a real directory (not
+/// a symlink) and is tightened to `0700` if it is not already; the *ownership*
+/// half of the check needs a file we know we created and lives in
+/// [`EndpointFile::write`], which runs it before the token reaches the disk.
+pub fn create_private_dir(dir: &Path) -> io::Result<()> {
     #[cfg(unix)]
     {
-        use std::os::unix::fs::DirBuilderExt;
+        use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
         if let Some(parent) = dir.parent() {
             std::fs::create_dir_all(parent)?;
         }
         match std::fs::DirBuilder::new().mode(0o700).create(dir) {
-            Ok(()) => Ok(()),
-            // Already ours from a previous run in this session.
-            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => Ok(()),
-            Err(e) => Err(e),
+            Ok(()) => return Ok(()),
+            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {}
+            Err(e) => return Err(e),
         }
+        // `symlink_metadata`, so a symlink pointing at a directory we do own is
+        // still rejected — the target is not what we would be protecting.
+        let meta = std::fs::symlink_metadata(dir)?;
+        if !meta.is_dir() {
+            return Err(io::Error::new(
+                io::ErrorKind::AlreadyExists,
+                format!("{} exists but is not a directory", dir.display()),
+            ));
+        }
+        if meta.permissions().mode() & 0o077 != 0 {
+            // Ours or not, it is reachable by others. An earlier
+            // `create_dir_all` (which honours the umask, so 0755 as a rule) is
+            // the common cause, so tighten in place rather than refuse — and
+            // fail loudly if we are not the one who may.
+            std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))?;
+        }
+        Ok(())
     }
     #[cfg(not(unix))]
     {
@@ -395,19 +459,42 @@ fn create_private_dir(dir: &Path) -> io::Result<()> {
     }
 }
 
-/// Restrict `path` to the current user.
-fn set_private_file(path: &Path) -> io::Result<()> {
+/// Refuse to publish into a directory somebody else owns.
+///
+/// `owned_probe` must be a file this process has just created, so its uid *is*
+/// our effective uid — which is how this manages an ownership check with no
+/// `libc` and no extra dependency, keeping the module pure `std` + `serde`.
+#[allow(unused_variables)]
+fn check_dir_is_ours(dir: &Path, owned_probe: &std::fs::File) -> io::Result<()> {
     #[cfg(unix)]
     {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
+        use std::os::unix::fs::MetadataExt;
+        let ours = owned_probe.metadata()?.uid();
+        let theirs = std::fs::symlink_metadata(dir)?.uid();
+        if ours != theirs {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                format!(
+                    "{} is owned by uid {theirs}, not by this user ({ours}) — refusing to publish \
+                     the automation token into it",
+                    dir.display()
+                ),
+            ));
+        }
     }
-    #[cfg(not(unix))]
+    Ok(())
+}
+
+/// `OpenOptions` that create a file only the current user can read.
+fn private_file_options() -> std::fs::OpenOptions {
+    let mut opts = std::fs::OpenOptions::new();
+    opts.write(true);
+    #[cfg(unix)]
     {
-        // `%LOCALAPPDATA%` is already per-user by ACL and children inherit it.
-        let _ = path;
-        Ok(())
+        use std::os::unix::fs::OpenOptionsExt;
+        opts.mode(0o600);
     }
+    opts
 }
 
 #[cfg(test)]
@@ -575,5 +662,38 @@ mod tests {
             "{:?}",
             EndpointFile::dir()
         );
+    }
+
+    /// The descriptor carries the token, so it must never exist — not even for
+    /// an instant — at anything but `0600`.
+    ///
+    /// A `write`-then-`chmod` passes an after-the-fact permissions assertion
+    /// while still leaving the token at the umask default in between, so this
+    /// checks the *temporary* file's mode as well: that is the one the window
+    /// belongs to, and it is created and left behind here on purpose.
+    #[cfg(unix)]
+    #[test]
+    fn the_descriptor_is_never_briefly_world_readable() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let file = EndpointFile::new(Endpoint::unix("/tmp/does-not-matter"), "tok");
+        let Ok(path) = file.write() else {
+            return; // a sandbox that cannot write its runtime dir is not a failure here
+        };
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600, "the published descriptor must be owner-only");
+
+        // The staging file is what a create-then-chmod would leak through.
+        let tmp = path.with_extension("json.tmp");
+        let staged = private_file_options().create_new(true).open(&tmp);
+        if let Ok(f) = staged {
+            let staged_mode = f.metadata().unwrap().permissions().mode() & 0o777;
+            let _ = std::fs::remove_file(&tmp);
+            assert_eq!(
+                staged_mode, 0o600,
+                "the staging file must be owner-only from the moment it exists"
+            );
+        }
+        EndpointFile::remove(file.pid);
     }
 }

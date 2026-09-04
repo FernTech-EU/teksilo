@@ -45,6 +45,15 @@ async fn main() -> Result<()> {
         println!("teksilo-automation-mcp {}", env!("CARGO_PKG_VERSION"));
         return Ok(());
     }
+    // A value-taking flag with its value missing must be an error, not a
+    // shrug: `flag_value` returns `None` either way, and falling through to
+    // the default would quietly start the *demo* server while the caller
+    // believes it is driving their app.
+    for flag in ["--connect", "--attach-pid", "--token"] {
+        if args.iter().any(|a| a == flag) && flag_value(&args, flag).is_none() {
+            bail!("{flag} needs a value (see --help)");
+        }
+    }
     if let Some(addr) = flag_value(&args, "--connect") {
         let token = flag_value(&args, "--token")
             .or_else(|| std::env::var("TEKSILO_AUTOMATION_TOKEN").ok())
@@ -92,12 +101,18 @@ async fn main() -> Result<()> {
 /// as they are found — otherwise `--attach` would keep picking the newest
 /// corpse and every run would need a manual cleanup.
 fn live_bridges() -> Vec<EndpointFile> {
+    use automation_transport::Liveness;
     EndpointFile::list()
         .into_iter()
-        .filter(|f| {
-            if automation_transport::probe(&f.endpoint) {
-                true
-            } else {
+        .filter(|f| match automation_transport::probe(&f.endpoint) {
+            Liveness::Live => true,
+            // Listening, but not free right now: another client holds the
+            // single slot, or the server is between accepts. Keep it — pruning
+            // here would unregister a perfectly healthy app because somebody
+            // else got there first, and `--attach-pid` would then never find it
+            // again for the life of the process.
+            Liveness::Busy => true,
+            Liveness::Dead => {
                 EndpointFile::remove(f.pid);
                 false
             }

@@ -13,7 +13,8 @@
 //! nothing ever ran it off Linux.
 
 use std::io::{BufRead, BufReader, Write};
-use std::process::{Child, ChildStdout, Command, Stdio};
+use std::process::{Child, Command, Stdio};
+use std::sync::mpsc::{Receiver, RecvTimeoutError, channel};
 use std::time::{Duration, Instant};
 
 /// Give the whole exchange a bound so a hung server fails the test instead of
@@ -22,7 +23,13 @@ const DEADLINE: Duration = Duration::from_secs(120);
 
 struct Server {
     child: Child,
-    out: BufReader<ChildStdout>,
+    /// Lines pumped off the child's stdout by a reader thread.
+    ///
+    /// The read has to happen on *another* thread for `DEADLINE` to mean
+    /// anything: a `read_line` straight on the pipe blocks forever when the
+    /// server wedges, so checking the clock around it can never fire and the
+    /// bound this test advertises would not exist. `recv_timeout` is the bound.
+    lines: Receiver<String>,
 }
 
 impl Server {
@@ -34,8 +41,17 @@ impl Server {
             .stderr(Stdio::null())
             .spawn()
             .expect("spawn teksilo-automation-mcp");
-        let out = BufReader::new(child.stdout.take().expect("stdout"));
-        Self { child, out }
+        let stdout = child.stdout.take().expect("stdout");
+        let (tx, lines) = channel();
+        std::thread::spawn(move || {
+            for line in BufReader::new(stdout).lines() {
+                let Ok(line) = line else { break };
+                if tx.send(line).is_err() {
+                    break; // the test is done with us
+                }
+            }
+        });
+        Self { child, lines }
     }
 
     fn send(&mut self, line: &str) {
@@ -52,13 +68,18 @@ impl Server {
     fn recv(&mut self, id: u64) -> serde_json::Value {
         let started = Instant::now();
         loop {
-            assert!(
-                started.elapsed() < DEADLINE,
-                "no reply to id {id} within {DEADLINE:?}"
-            );
-            let mut line = String::new();
-            let n = self.out.read_line(&mut line).expect("read stdout");
-            assert!(n > 0, "server closed stdout before answering id {id}");
+            let remaining = DEADLINE
+                .checked_sub(started.elapsed())
+                .unwrap_or(Duration::ZERO);
+            let line = match self.lines.recv_timeout(remaining) {
+                Ok(line) => line,
+                Err(RecvTimeoutError::Timeout) => {
+                    panic!("no reply to id {id} within {DEADLINE:?}")
+                }
+                Err(RecvTimeoutError::Disconnected) => {
+                    panic!("server closed stdout before answering id {id}")
+                }
+            };
             let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) else {
                 continue; // not JSON — ignore
             };

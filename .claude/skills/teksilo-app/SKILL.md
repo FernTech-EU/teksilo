@@ -21,7 +21,7 @@ part they need help with. If they name a widget (`/teksilo-app ComboBox`), go st
 2. **Live API extraction** — `scripts/teksilo-api.sh`, `cargo doc`, or docs.rs, all read
    from the version the app actually pins.
 3. **The bundled guide prose** — `reference/teksilo_app_guide.md`. A *map*, not the
-   territory: verified against teksilo **0.7**, and it MAY lag the version this app pins.
+   territory: verified against teksilo **0.9**, and it MAY lag the version this app pins.
    Never let it override the compiler or live extraction.
 
 ## Workflow
@@ -61,22 +61,25 @@ a bug, debug layout, or let an agent exercise the running app.
   --headless` — a self-contained MCP server; no display or GPU daemon needed. (The stock
   binary drives a built-in demo; to headlessly drive *your* app, build a tiny harness over
   `teksilo_automation::execute` — the toolkit is GUI-free.)
-- **Live app** (Linux/macOS, debug builds): enable the `automation` feature on the
-  `teksilo` dependency and add one builder call —
+- **Live app** (Linux / macOS / Windows, debug builds): enable the `automation` feature on
+  the `teksilo` dependency and add one builder call —
 
   ```rust
   TeksiloAppBuilder::new()
-      .install_automation_bridge_in_debug()   // debug-only; no-op in release / on Windows
+      .install_automation_bridge_in_debug()   // debug-only; a no-op in release
       // … the rest of the chain …
       .run();
   ```
 
-  It prints a socket path + token to stderr; drive it with `teksilo-automation-mcp
-  --connect <sock> --token <uuid>`.
+  On startup it binds a private endpoint (Unix socket / Windows named pipe) and publishes an
+  owner-only **endpoint descriptor** — `<runtime dir>/teksilo-automation/<pid>.json`, carrying
+  the token. Attach with `teksilo-automation-mcp --attach` (the newest live app),
+  `--attach-pid <pid>`, or `--list` to see what's live — nothing to scrape out of stderr.
+  `--connect <endpoint> --token <uuid>` names one by hand.
 
 On connect the server hands the client a "how to drive this app" briefing plus a JSON
 schema per tool, so a capable agent self-guides the **snapshot → find node → act → settle
-→ assert** loop. The full tool set (~26), by job:
+→ assert** loop. The full tool set (27), by job:
 
 - **Observe:** `snapshot_tree` / `find_node` / `read_node` — semantics: role, label, value,
   toggled/expanded/**selected**, **`bounds {x,y,width,height}`** (widget size lives here),
@@ -85,12 +88,19 @@ schema per tool, so a capable agent self-guides the **snapshot → find node →
   — the **full** widget tree incl. layout primitives the AT tree prunes (`Padding`/`Expand`/
   `FixedSize`), each with its **bounds** (position + size = a widget's full **geometry**);
   the tool for size / overlap / off-screen / clipping questions the semantic tree can't
-  answer. `screenshot {node?}`.
+  answer. `screenshot {node?}` — its pixels are **physical** and come with a
+  `{width, height, scale}` block; every other coordinate here (node `bounds`,
+  `inject_pointer`) is **logical**, so divide by `scale` to click what you can see (headless
+  is always `1.0`).
 - **Drive:** `invoke_action {node, action}` — **`action` is REQUIRED** (`click` / `focus` /
   `expand` / `collapse` / `set_value` / `increment` / `decrement` / `show_context_menu`);
   omitting it errors and changes nothing. Plus shortcuts `set_value` / `focus_node` / `scroll`
-  / **`drag_node {to_node | to_x,to_y}`** (drag-and-drop), and raw input `inject_pointer` /
-  `inject_key` / `type_text` / `type_ime`.
+  / **`drag_node {to_node | to_x,to_y}`** (drag-and-drop) / `right_click {node}` (open a
+  context menu), and raw input `inject_pointer` / `inject_key` / `type_text` / `type_ime`.
+  For an accelerator chord pass **`command: true`**, not `ctrl` — `command` is the platform's
+  primary accelerator (Control on Windows/Linux, ⌘ on macOS), and a shortcut *declared*
+  `Ctrl+S` resolves to ⌘S there, so `ctrl` injects a key that matches no binding **and still
+  reports success**. Keep `ctrl` for chords that really are Control everywhere (Ctrl+Tab).
 - **Timing (determinism — prefer over `sleep`):** mutating tools auto-settle, but for timed UI
   (tooltips, debounced reactivity, animations) drive the **simulated** clock: `settle.clock_millis`
   on any mutating call, `advance_clock {millis}`, `settle`, or poll with `wait_for_condition`
@@ -101,14 +111,18 @@ schema per tool, so a capable agent self-guides the **snapshot → find node →
   optional `window_id`).
 
 Error results carry a stable `code` — branch on it, not just `isError`: `NOT_FOUND` /
-`BAD_ARGUMENT` / `UNKNOWN_NAME` are real mistakes; `GPU_UNAVAILABLE` (screenshot, no GPU) /
-`SETTLE_TIMEOUT` (poll/animation budget) are benign/environmental. Node ids are stable for a
+`BAD_ARGUMENT` / `UNKNOWN_NAME` / `UNHANDLED_ACTION` (the node is real but nothing acted on the
+action — it advertises no such action, or its handler declined; the message names the ones it
+*does* advertise, so read those and re-call) are real mistakes; `GPU_UNAVAILABLE` (screenshot,
+no GPU) / `WAIT_TIMEOUT` (a `wait_for_condition` budget) / `SETTLE_TIMEOUT` (animation budget) /
+`BRIDGE_TIMEOUT` (a live app's main thread is in a native modal loop — the op may still land,
+so re-read the tree) are benign/environmental. Node ids are stable for a
 widget's **lifetime** (across relayout / theme / locale), but a **structural rebuild** (data-model
 change, `Switcher` swap, `Rebuild`-level binding) allocates a new id — **re-`find_node` after the
 tree structure changes**, never reuse a cached id. Full reference: `docs/automation-mcp.md` in the
 framework repo.
 
-## High-leverage gotchas (verified against 0.7 source — re-verify via step 2 if newer)
+## High-leverage gotchas (verified against 0.9 source — re-verify via step 2 if newer)
 
 - **No `Theme::default()`** — pick a preset: `intui::light()` / `intui::dark()`.
 - **Charts and Scene are separate crates** (`teksilo-charts`, `teksilo-scene`) NOT

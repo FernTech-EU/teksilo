@@ -699,7 +699,7 @@ pub mod codes {
     pub const BRIDGE_TIMEOUT: &str = "BRIDGE_TIMEOUT";
     /// The app dropped the request without answering — it is shutting down.
     pub const BRIDGE_DROPPED: &str = "BRIDGE_DROPPED";
-    /// A request could not be parsed as an [`AutomationRequest`].
+    /// A request could not be parsed as an [`AutomationRequest`](super::AutomationRequest).
     pub const BAD_REQUEST: &str = "BAD_REQUEST";
     /// The client could not talk to the bridge at all.
     pub const BRIDGE_IO: &str = "BRIDGE_IO";

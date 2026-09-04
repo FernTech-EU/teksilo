@@ -152,10 +152,19 @@ fn run_smoke() -> Result<(), String> {
                 data["scale"]
             );
         }
+        // Both GPU codes are a skip, not a failure. `GPU_READBACK_FAILED` is
+        // just as expected as `GPU_UNAVAILABLE` on the GPU-less runners this
+        // smoke is meant to pass on — a software adapter that opens and then
+        // cannot map its readback buffer takes that branch — and treating it as
+        // an error would fail the `test-automation` job for the exact hosts it
+        // exists to cover.
         AutomationReply::Err { code, message }
-            if code == teksilo::automation::dto::codes::GPU_UNAVAILABLE =>
+            if code == teksilo::automation::dto::codes::GPU_UNAVAILABLE
+                || code == teksilo::automation::dto::codes::GPU_READBACK_FAILED =>
         {
-            eprintln!("automation_bridge_smoke: no GPU for the screenshot ({message}) — skipped");
+            eprintln!(
+                "automation_bridge_smoke: no usable GPU for the screenshot ({code}: {message}) — skipped"
+            );
         }
         AutomationReply::Err { code, message } => {
             return Err(format!("screenshot failed: {code}: {message}"));
