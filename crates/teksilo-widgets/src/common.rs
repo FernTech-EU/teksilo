@@ -13,6 +13,7 @@
 pub(crate) mod column_geometry;
 pub mod datetime;
 pub(crate) mod editor_runtime;
+pub(crate) mod list_nav;
 #[cfg(test)]
 pub(crate) mod locale_switch_test;
 pub(crate) mod row_metrics;
@@ -21,5 +22,6 @@ pub(crate) mod scroll;
 pub(crate) mod text_nav;
 #[cfg(test)]
 pub(crate) mod thumb_drag_test;
+pub(crate) mod tree_expand;
 pub(crate) mod type_ahead;
 pub(crate) mod viewport;
