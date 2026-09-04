@@ -38,9 +38,7 @@
 //! assert_eq!(sel.count(), 0);
 //! ```
 
-use std::cell::Cell;
-#[cfg(debug_assertions)]
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::BTreeSet;
 use std::rc::Rc;
 
@@ -67,6 +65,26 @@ pub struct SelectionModel {
     /// Anchor index for Shift+click range extension.
     /// Shared via Rc so clones see the same anchor state.
     anchor: Rc<Cell<Option<usize>>>,
+    /// The selection as it stood when the current Shift gesture began — the
+    /// set a range extension is unioned *with*.
+    ///
+    /// Without it, `extend_to` can only grow: `Shift+End` followed by
+    /// `Shift+Home` would leave the whole collection selected instead of
+    /// reversing, because every extension would union into the previous one.
+    /// Committing a base at each non-extending mutation makes the extension a
+    /// pure function of `(base, anchor, target)`, so shrinking a range
+    /// deselects what it shrank past.
+    ///
+    /// The commit rule is what makes the disjoint workflow work: `select`
+    /// clears it (a plain click replaces everything), while `toggle` commits
+    /// the resulting selection (so a Ctrl+click followed by a Shift+click
+    /// keeps the earlier picks and adds the range). Same design as
+    /// `CellSelectionModel`, which has had it since it shipped.
+    base: Rc<RefCell<BTreeSet<usize>>>,
+    /// Whether a range extension is already in progress, so
+    /// [`SelectionModel::extend_to_additive`] captures its base once per
+    /// gesture rather than on every keystroke.
+    extending: Rc<Cell<bool>>,
     /// Strong holder for the debug-registry adapter. Shared across
     /// clones; once all `SelectionModel` handles drop, the holder Rc
     /// reaches zero and the adapter is freed, marking the registry
@@ -83,9 +101,21 @@ impl SelectionModel {
             mode,
             selection: Signal::new(BTreeSet::new()),
             anchor: Rc::new(Cell::new(None)),
+            base: Rc::new(RefCell::new(BTreeSet::new())),
+            extending: Rc::new(Cell::new(false)),
             #[cfg(debug_assertions)]
             debug_adapter_holder: Rc::new(RefCell::new(None)),
         }
+    }
+
+    /// Commit `base` and end any range gesture in progress.
+    ///
+    /// Every mutator that is not itself an extension calls this, so the next
+    /// `Shift` gesture starts from a known set rather than from whatever the
+    /// last extension happened to leave behind.
+    fn commit_base(&self, base: BTreeSet<usize>) {
+        *self.base.borrow_mut() = base;
+        self.extending.set(false);
     }
 
     /// The selection mode.
@@ -124,6 +154,9 @@ impl SelectionModel {
         set.insert(index);
         self.selection.set(set);
         self.anchor.set(Some(index));
+        // A plain click replaces the selection, so a Shift gesture starting
+        // here has nothing to preserve.
+        self.commit_base(BTreeSet::new());
     }
 
     /// Toggle selection of a single index (for Ctrl+click in Multi mode).
@@ -139,27 +172,61 @@ impl SelectionModel {
                 } else {
                     set.insert(index);
                 }
-                self.selection.set(set);
+                self.selection.set(set.clone());
+                // The anchor moves to the toggled item in *either* direction —
+                // the clause almost every reimplementation misses, and the one
+                // that makes "Ctrl+arrow away, Ctrl+Space, then Shift+arrow"
+                // extend from the new region rather than from wherever the
+                // user started.
                 self.anchor.set(Some(index));
+                // Ctrl+click keeps what is already picked, so a Shift gesture
+                // starting here extends *around* it.
+                self.commit_base(set);
             }
         }
     }
 
-    /// Extend the selection from the anchor to the given index (for Shift+click).
-    /// In Single mode, behaves like `select()`.
+    /// Extend the selection from the anchor to the given index (for Shift+click
+    /// and Shift+navigation). In Single mode, behaves like `select()`.
+    ///
+    /// The result is `base ∪ anchor..=index`, where `base` is the selection as
+    /// it stood at the last non-extending mutation — **not** the current
+    /// selection. So the range tracks the anchor in both directions: reversing
+    /// a Shift gesture shrinks it, and `Shift+End` followed by `Shift+Home`
+    /// leaves one row selected rather than the whole collection. The anchor
+    /// itself does not move.
     pub fn extend_to(&self, index: usize) {
+        self.extend_from_base(index, false);
+    }
+
+    /// Extend from the anchor to `index`, keeping whatever was selected when
+    /// this gesture began (Ctrl+Shift+navigation).
+    ///
+    /// The difference from [`extend_to`](Self::extend_to) is only which set the
+    /// range is unioned with: a plain gesture starts from the base committed by
+    /// the last click or toggle, while this one captures the live selection on
+    /// its first keystroke, so a second disjoint range can be built without
+    /// losing the first. Subsequent keystrokes in the same gesture reuse that
+    /// capture, so the range still shrinks when reversed.
+    pub fn extend_to_additive(&self, index: usize) {
+        self.extend_from_base(index, true);
+    }
+
+    fn extend_from_base(&self, index: usize, additive: bool) {
         match self.mode {
             SelectionMode::None => {}
             SelectionMode::Single => self.select(index),
             SelectionMode::Multi => {
+                if additive && !self.extending.get() {
+                    *self.base.borrow_mut() = self.selection.get();
+                }
                 let anchor = self.anchor.get().unwrap_or(index);
                 let start = anchor.min(index);
                 let end = anchor.max(index);
-                let mut set = self.selection.get();
-                for i in start..=end {
-                    set.insert(i);
-                }
+                let mut set = self.base.borrow().clone();
+                set.extend(start..=end);
                 self.selection.set(set);
+                self.extending.set(true);
                 // Anchor stays at the original position
             }
         }
@@ -183,7 +250,10 @@ impl SelectionModel {
             let last = set.iter().next_back().copied();
             set = last.into_iter().collect();
         }
-        self.selection.set(set);
+        self.selection.set(set.clone());
+        // A marquee that replaces reads like a click; one that adds reads like
+        // a Ctrl+click, and a Shift gesture after it must keep what it caught.
+        self.commit_base(if additive { set } else { BTreeSet::new() });
     }
 
     /// Select all indices from 0 to count-1.
@@ -203,13 +273,15 @@ impl SelectionModel {
             return;
         }
         let set: BTreeSet<usize> = (0..count).collect();
-        self.selection.set(set);
+        self.selection.set(set.clone());
+        self.commit_base(set);
     }
 
     /// Clear the selection.
     pub fn clear(&self) {
         self.selection.set(BTreeSet::new());
         self.anchor.set(None);
+        self.commit_base(BTreeSet::new());
     }
 
     /// Adjust selection indices after items are inserted.
@@ -232,6 +304,10 @@ impl SelectionModel {
         {
             self.anchor.set(Some(a + count));
         }
+        // The gesture base is index-space state exactly like the selection is,
+        // so it has to follow the same shift — otherwise the next Shift
+        // extension unions in rows the user never picked.
+        self.remap_base(|idx| Some(if idx >= start { idx + count } else { idx }));
     }
 
     /// Adjust selection indices after items are removed.
@@ -258,6 +334,15 @@ impl SelectionModel {
                 self.anchor.set(None);
             }
         }
+        self.remap_base(|idx| {
+            if idx < start {
+                Some(idx)
+            } else if idx >= end {
+                Some(idx - count)
+            } else {
+                None
+            }
+        });
     }
 
     /// Adjust selection indices after a block of `count` items moved from
@@ -279,6 +364,36 @@ impl SelectionModel {
             self.anchor
                 .set(Some(crate::map_index_after_move(a, from, to, count)));
         }
+        self.remap_base(|idx| Some(crate::map_index_after_move(idx, from, to, count)));
+    }
+
+    /// Rewrite the gesture base through the same index map the selection just
+    /// took, dropping the entries the map answers `None` for.
+    fn remap_base(&self, map: impl Fn(usize) -> Option<usize>) {
+        let mut base = self.base.borrow_mut();
+        if base.is_empty() {
+            return;
+        }
+        *base = base.iter().filter_map(|&idx| map(idx)).collect();
+    }
+
+    /// Drop the range anchor when a projection has renumbered the rows under
+    /// it, so the next `Shift` gesture starts from the cursor rather than from
+    /// a row that has since moved.
+    ///
+    /// A sort/filter proxy signals a blanket reset rather than a per-row
+    /// delta, so `adjust_for_*` never runs and an index anchor silently comes
+    /// to mean a different row. Views that read
+    /// `first_changed_index()` from `SortFilterListModel` / `TreeSlice` /
+    /// `TreeDataSlice` / `SortFilterTreeModel` call this with it: everything
+    /// before that index still means what it meant, so an anchor there
+    /// survives. Qt hit the same bug and fixed it by making the anchor a
+    /// persistent index; `KeyedSelectionModel` avoids it by construction.
+    pub fn invalidate_anchor_from(&self, first_changed: usize) {
+        if self.anchor.get().is_some_and(|a| a >= first_changed) {
+            self.anchor.set(None);
+        }
+        self.remap_base(|idx| (idx < first_changed).then_some(idx));
     }
 }
 
@@ -288,6 +403,8 @@ impl Clone for SelectionModel {
             mode: self.mode,
             selection: self.selection.clone(),
             anchor: self.anchor.clone(),
+            base: self.base.clone(),
+            extending: self.extending.clone(),
             #[cfg(debug_assertions)]
             debug_adapter_holder: self.debug_adapter_holder.clone(),
         }
@@ -398,6 +515,138 @@ mod tests {
         model.select(5);
         model.extend_to(2);
         assert_eq!(model.selected_indices(), vec![2, 3, 4, 5]);
+    }
+
+    #[test]
+    fn reversing_a_shift_gesture_shrinks_the_range() {
+        // Shift+Down four times then Shift+Up twice must give back the rows it
+        // took, not keep them. Unioning into the live selection instead of
+        // recomputing from the anchor is what made this grow-only.
+        let model = SelectionModel::new(SelectionMode::Multi);
+        model.select(2);
+        model.extend_to(6);
+        assert_eq!(model.selected_indices(), vec![2, 3, 4, 5, 6]);
+        model.extend_to(4);
+        assert_eq!(model.selected_indices(), vec![2, 3, 4]);
+        model.extend_to(2);
+        assert_eq!(model.selected_indices(), vec![2]);
+    }
+
+    #[test]
+    fn extending_across_the_anchor_replaces_rather_than_unions() {
+        let model = SelectionModel::new(SelectionMode::Multi);
+        model.select(5);
+        model.extend_to(8);
+        assert_eq!(model.selected_indices(), vec![5, 6, 7, 8]);
+        // Crossing back past the anchor drops the far side entirely.
+        model.extend_to(3);
+        assert_eq!(model.selected_indices(), vec![3, 4, 5]);
+    }
+
+    #[test]
+    fn shift_end_then_shift_home_selects_one_row_not_the_whole_list() {
+        // The user-visible shape of the same bug: End then Home used to leave
+        // everything selected.
+        let model = SelectionModel::new(SelectionMode::Multi);
+        model.select(4);
+        model.extend_to(9); // Shift+End
+        model.extend_to(0); // Shift+Home
+        assert_eq!(model.selected_indices(), vec![0, 1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn a_ctrl_toggle_moves_the_anchor_and_survives_the_next_shift_range() {
+        // The Explorer disjoint workflow: pick 1, Ctrl-pick 5, then Shift to 7.
+        // The range runs from the *toggled* row, and row 1 stays selected.
+        let model = SelectionModel::new(SelectionMode::Multi);
+        model.select(1);
+        model.toggle(5);
+        model.extend_to(7);
+        assert_eq!(model.selected_indices(), vec![1, 5, 6, 7]);
+        // And it still shrinks, without eating the disjoint pick.
+        model.extend_to(6);
+        assert_eq!(model.selected_indices(), vec![1, 5, 6]);
+    }
+
+    #[test]
+    fn the_anchor_moves_when_a_toggle_deselects_too() {
+        let model = SelectionModel::new(SelectionMode::Multi);
+        model.select(3);
+        model.toggle(3); // now empty, anchor at 3
+        model.extend_to(5);
+        assert_eq!(model.selected_indices(), vec![3, 4, 5]);
+    }
+
+    #[test]
+    fn an_additive_extend_keeps_the_range_built_by_the_previous_gesture() {
+        // Ctrl+Shift builds a second range without losing the first.
+        let model = SelectionModel::new(SelectionMode::Multi);
+        model.select(0);
+        model.extend_to(2);
+        assert_eq!(model.selected_indices(), vec![0, 1, 2]);
+        model.toggle(6); // Ctrl+Space moves the cursor's anchor
+        model.extend_to_additive(8);
+        assert_eq!(model.selected_indices(), vec![0, 1, 2, 6, 7, 8]);
+        // Still shrinks within the gesture, and still keeps the first range.
+        model.extend_to_additive(7);
+        assert_eq!(model.selected_indices(), vec![0, 1, 2, 6, 7]);
+    }
+
+    #[test]
+    fn a_plain_extend_after_a_click_discards_everything_else() {
+        let model = SelectionModel::new(SelectionMode::Multi);
+        model.select_indices([1, 2, 8], false);
+        model.select(4); // a plain click replaces
+        model.extend_to(6);
+        assert_eq!(model.selected_indices(), vec![4, 5, 6]);
+    }
+
+    #[test]
+    fn an_additive_marquee_is_kept_by_a_following_shift_range() {
+        let model = SelectionModel::new(SelectionMode::Multi);
+        model.select(0);
+        model.select_indices([7, 8], true);
+        model.toggle(2);
+        model.extend_to(4);
+        assert_eq!(model.selected_indices(), vec![0, 2, 3, 4, 7, 8]);
+    }
+
+    #[test]
+    fn the_gesture_base_follows_an_insert_and_a_remove() {
+        let model = SelectionModel::new(SelectionMode::Multi);
+        model.select(1);
+        model.toggle(5); // base = {1, 5}, anchor = 5
+        model.adjust_for_insert(0, 2); // everything shifts up by two
+        model.extend_to(9); // anchor is now 7
+        assert_eq!(model.selected_indices(), vec![3, 7, 8, 9]);
+
+        let model = SelectionModel::new(SelectionMode::Multi);
+        model.select(1);
+        model.toggle(5);
+        model.adjust_for_remove(0, 1); // base {1,5} -> {0,4}
+        model.extend_to(6);
+        assert_eq!(model.selected_indices(), vec![0, 4, 5, 6]);
+    }
+
+    #[test]
+    fn a_reprojection_drops_an_anchor_it_has_renumbered() {
+        let model = SelectionModel::new(SelectionMode::Multi);
+        model.select(2);
+        model.toggle(6);
+        // A sort/filter proxy reports that everything from row 4 changed.
+        model.invalidate_anchor_from(4);
+        // The next Shift starts from the target itself rather than from a row
+        // that now means something else, and the stale half of the base is gone.
+        model.extend_to(8);
+        assert_eq!(model.selected_indices(), vec![2, 8]);
+    }
+
+    #[test]
+    fn single_mode_ignores_the_additive_extend_like_every_other_mutator() {
+        let model = SelectionModel::new(SelectionMode::Single);
+        model.select(3);
+        model.extend_to_additive(7);
+        assert_eq!(model.selected_indices(), vec![7]);
     }
 
     #[test]

@@ -58,6 +58,16 @@ pub struct KeyedSelectionModel<K: ItemKey> {
     mode: SelectionMode,
     selection: Signal<HashSet<K>>,
     anchor: Rc<RefCell<Option<K>>>,
+    /// The selection as it stood when the current Shift gesture began — the
+    /// set a range extension is unioned *with*, so reversing the gesture
+    /// shrinks the range instead of growing it. Committed by every mutator
+    /// that is not itself an extension; see `SelectionModel::base`, which
+    /// carries the full rationale.
+    base: Rc<RefCell<HashSet<K>>>,
+    /// Whether a range extension is already in progress, so
+    /// [`KeyedSelectionModel::extend_to_additive`] captures its base once per
+    /// gesture rather than on every keystroke.
+    extending: Rc<std::cell::Cell<bool>>,
     /// Strong holder for the debug-registry adapter; shared across clones.
     /// Compiled out in release.
     #[cfg(debug_assertions)]
@@ -71,9 +81,17 @@ impl<K: ItemKey> KeyedSelectionModel<K> {
             mode,
             selection: Signal::new(HashSet::new()),
             anchor: Rc::new(RefCell::new(None)),
+            base: Rc::new(RefCell::new(HashSet::new())),
+            extending: Rc::new(std::cell::Cell::new(false)),
             #[cfg(debug_assertions)]
             debug_adapter_holder: Rc::new(RefCell::new(None)),
         }
+    }
+
+    /// Commit `base` and end any range gesture in progress.
+    fn commit_base(&self, base: HashSet<K>) {
+        *self.base.borrow_mut() = base;
+        self.extending.set(false);
     }
 
     /// The selection mode.
@@ -110,6 +128,7 @@ impl<K: ItemKey> KeyedSelectionModel<K> {
         set.insert(key.clone());
         self.selection.set(set);
         *self.anchor.borrow_mut() = Some(key);
+        self.commit_base(HashSet::new());
     }
 
     /// Toggle a key (Ctrl+click in Multi mode; acts as `select` in Single).
@@ -124,8 +143,11 @@ impl<K: ItemKey> KeyedSelectionModel<K> {
                 } else {
                     set.insert(key.clone());
                 }
-                self.selection.set(set);
+                self.selection.set(set.clone());
+                // The anchor moves to the toggled key in either direction, so
+                // a following Shift range runs from the row just picked.
                 *self.anchor.borrow_mut() = Some(key);
+                self.commit_base(set);
             }
         }
     }
@@ -135,6 +157,22 @@ impl<K: ItemKey> KeyedSelectionModel<K> {
     /// at click time. If the anchor isn't currently visible (scrolled out /
     /// evicted), falls back to a single-key select.
     pub fn extend_to(&self, target: K, ordered_keys: &[K]) {
+        self.extend_from_base(target, ordered_keys, false);
+    }
+
+    /// Extend from the anchor to `target`, keeping whatever was selected when
+    /// this gesture began (Ctrl+Shift+navigation).
+    ///
+    /// The keyed twin of
+    /// [`SelectionModel::extend_to_additive`](crate::SelectionModel::extend_to_additive):
+    /// the range is unioned with the live selection captured on the gesture's
+    /// first keystroke, so a second disjoint range can be built without losing
+    /// the first, and the range still shrinks when reversed.
+    pub fn extend_to_additive(&self, target: K, ordered_keys: &[K]) {
+        self.extend_from_base(target, ordered_keys, true);
+    }
+
+    fn extend_from_base(&self, target: K, ordered_keys: &[K], additive: bool) {
         match self.mode {
             SelectionMode::None => {}
             SelectionMode::Single => self.select(target),
@@ -148,12 +186,19 @@ impl<K: ItemKey> KeyedSelectionModel<K> {
                 let t = ordered_keys.iter().position(|k| *k == target);
                 match (a, t) {
                     (Some(a), Some(t)) => {
+                        if additive && !self.extending.get() {
+                            *self.base.borrow_mut() = self.selection.get();
+                        }
                         let (lo, hi) = (a.min(t), a.max(t));
-                        let mut set = self.selection.get();
+                        // Recomputed from the base rather than unioned into the
+                        // live selection, so shrinking the range gives back the
+                        // rows it took.
+                        let mut set = self.base.borrow().clone();
                         for k in &ordered_keys[lo..=hi] {
                             set.insert(k.clone());
                         }
                         self.selection.set(set);
+                        self.extending.set(true);
                         // Anchor stays put.
                     }
                     _ => self.select(target),
@@ -178,13 +223,15 @@ impl<K: ItemKey> KeyedSelectionModel<K> {
             let keep = set.iter().next().cloned();
             set = keep.into_iter().collect();
         }
-        self.selection.set(set);
+        self.selection.set(set.clone());
+        self.commit_base(if additive { set } else { HashSet::new() });
     }
 
     /// Clear the selection and anchor.
     pub fn clear(&self) {
         self.selection.set(HashSet::new());
         *self.anchor.borrow_mut() = None;
+        self.commit_base(HashSet::new());
     }
 
     /// Drop any selected key (and the anchor) for which `exists` returns false.
@@ -201,6 +248,12 @@ impl<K: ItemKey> KeyedSelectionModel<K> {
         if drop_anchor {
             *self.anchor.borrow_mut() = None;
         }
+        // The gesture base is selection state too, so a deleted row has to
+        // leave it as well or the next Shift range resurrects the key.
+        let mut base = self.base.borrow_mut();
+        if !base.is_empty() {
+            base.retain(|k| exists(k));
+        }
     }
 }
 
@@ -210,6 +263,8 @@ impl<K: ItemKey> Clone for KeyedSelectionModel<K> {
             mode: self.mode,
             selection: self.selection.clone(),
             anchor: self.anchor.clone(),
+            base: self.base.clone(),
+            extending: self.extending.clone(),
             #[cfg(debug_assertions)]
             debug_adapter_holder: self.debug_adapter_holder.clone(),
         }
@@ -293,6 +348,64 @@ mod tests {
         m.toggle(1);
         assert!(!m.is_selected(&1));
         assert!(m.is_selected(&3));
+    }
+
+    #[test]
+    fn reversing_a_keyed_shift_gesture_shrinks_the_range() {
+        let m: KeyedSelectionModel<u64> = KeyedSelectionModel::new(SelectionMode::Multi);
+        let order = vec![10_u64, 20, 30, 40, 50];
+        m.select(20);
+        m.extend_to(50, &order);
+        let mut got = m.selected_keys();
+        got.sort();
+        assert_eq!(got, vec![20, 30, 40, 50]);
+        m.extend_to(30, &order);
+        let mut got = m.selected_keys();
+        got.sort();
+        assert_eq!(got, vec![20, 30]);
+    }
+
+    #[test]
+    fn a_keyed_toggle_survives_the_next_shift_range() {
+        let m: KeyedSelectionModel<u64> = KeyedSelectionModel::new(SelectionMode::Multi);
+        let order = vec![10_u64, 20, 30, 40, 50];
+        m.select(10);
+        m.toggle(30);
+        m.extend_to(50, &order);
+        let mut got = m.selected_keys();
+        got.sort();
+        assert_eq!(got, vec![10, 30, 40, 50]);
+    }
+
+    #[test]
+    fn a_keyed_additive_extend_keeps_the_earlier_range() {
+        let m: KeyedSelectionModel<u64> = KeyedSelectionModel::new(SelectionMode::Multi);
+        let order = vec![10_u64, 20, 30, 40, 50, 60];
+        m.select(10);
+        m.extend_to(20, &order);
+        m.toggle(40);
+        m.extend_to_additive(60, &order);
+        let mut got = m.selected_keys();
+        got.sort();
+        assert_eq!(got, vec![10, 20, 40, 50, 60]);
+        m.extend_to_additive(50, &order);
+        let mut got = m.selected_keys();
+        got.sort();
+        assert_eq!(got, vec![10, 20, 40, 50]);
+    }
+
+    #[test]
+    fn pruning_a_deleted_key_also_drops_it_from_the_gesture_base() {
+        let m: KeyedSelectionModel<u64> = KeyedSelectionModel::new(SelectionMode::Multi);
+        let order = vec![10_u64, 20, 30, 40];
+        m.select(10);
+        m.toggle(20); // base = {10, 20}
+        m.prune_missing(|k| *k != 10);
+        m.extend_to(40, &order);
+        let mut got = m.selected_keys();
+        got.sort();
+        // Key 10 is gone; the range from the anchor at 20 must not revive it.
+        assert_eq!(got, vec![20, 30, 40]);
     }
 
     #[test]
