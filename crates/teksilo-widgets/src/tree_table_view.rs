@@ -6511,32 +6511,66 @@ mod tests {
     }
 
     #[test]
-    fn header_drag_to_the_leading_edge_pins_the_dropped_column() {
-        // The pane-boundary classification in `attach_header_reorder_handlers`
-        // (`insertion_display_idx <= panes.leading_count`) is the exact same
-        // code TableView's header shares — dropping at the very leading
-        // edge pins the dragged column Leading, growing the leading pane.
+    fn header_drag_to_the_leading_edge_pins_only_into_an_existing_leading_pane() {
+        // The pane classification in `attach_header_reorder_handlers` is the
+        // exact same code TableView's header shares. A pane exists only while
+        // a column is pinned to it: with nothing pinned, a drop at the very
+        // leading edge is a plain move to the first slot — it used to pin the
+        // column Leading, into a pane the user never saw. Once a leading pane
+        // exists, the same drop lands inside it and pins.
         let (mut tree, id, _proxy) = build_tt_reorder_table();
         let header = tt_header_row_cells(&tree, id);
         let from = tree.bounds(header[3]).center(); // "d"
         let to = teksilo_canvas::Point::new(5.0, from.y); // before "a"
         drag(&mut tree, from, to);
+        tree.layout(SizeProposal {
+            width: Some(400.0),
+            height: Some(200.0),
+        });
+
+        {
+            let any = tree.widget_as_any(id).unwrap();
+            let tt = any.downcast_ref::<TreeTableView<&'static str>>().unwrap();
+            assert_eq!(
+                tt.column_order_signal().get(),
+                vec![
+                    "d".to_string(),
+                    "a".to_string(),
+                    "b".to_string(),
+                    "c".to_string()
+                ],
+            );
+            assert_eq!(
+                tt.column_pinning_signal().get().get("d").copied(),
+                None,
+                "with no leading pane a drop at the leading edge must not pin"
+            );
+            // Now there *is* a leading pane.
+            tt.set_column_pinning("d", PinnedSide::Leading);
+        }
+        tree.layout(SizeProposal {
+            width: Some(400.0),
+            height: Some(200.0),
+        });
+        let header = tt_header_row_cells(&tree, id);
+        let from = tree.bounds(header[2]).center(); // "b"
+        drag(&mut tree, from, to);
 
         let any = tree.widget_as_any(id).unwrap();
         let tt = any.downcast_ref::<TreeTableView<&'static str>>().unwrap();
         assert_eq!(
-            tt.column_order_signal().get(),
-            vec![
-                "d".to_string(),
-                "a".to_string(),
-                "b".to_string(),
-                "c".to_string()
-            ],
+            tt.column_pinning_signal().get().get("b").copied(),
+            Some(PinnedSide::Leading),
+            "dropping inside an existing leading pane pins the column"
         );
         assert_eq!(
-            tt.column_pinning_signal().get().get("d").copied(),
-            Some(PinnedSide::Leading),
-            "dropping at the leading edge must pin the column, same as TableView"
+            tt.column_order_signal().get(),
+            vec![
+                "b".to_string(),
+                "d".to_string(),
+                "a".to_string(),
+                "c".to_string()
+            ],
         );
     }
 

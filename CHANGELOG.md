@@ -49,6 +49,9 @@ for a permission change on `/tmp` that was never its to make.
   write. Before, the resized column's delta was shared with every flex column,
   so the divider lagged the pointer (or stood still) while the dividers before
   it slid the other way.
+- `TableView` / `TreeTableView`: dropping a dragged column at the very front
+  or the very end of a strip with no pinned pane on that side moves it there
+  instead of pinning it `Leading` / `Trailing`.
 - `TableView` / `TreeTableView`: the header strip's column separators now
   follow a column resize and a horizontal scroll. The strip's bounds change on
   neither, so its cached paint was replayed and the lines stayed where they

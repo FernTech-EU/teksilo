@@ -646,6 +646,106 @@ fn pinned_leading_moves_to_front() {
 }
 
 #[test]
+fn dropping_a_column_at_either_end_of_an_unpinned_strip_moves_it_without_pinning() {
+    // The drop handler classifies the landing slot into a pane. With nothing
+    // pinned there is no leading pane and the middle pane runs to the end of
+    // the strip, so a drop at either end must be a plain move; it used to pin
+    // the column Leading (slot 0) or Trailing (past the last midpoint).
+    use crate::styles::recipe_table_style as cp;
+    use teksilo_canvas::Point;
+    use teksilo_core::event::{Modifiers, PointerButton, WidgetEvent};
+
+    fn fixed_col(id: &'static str) -> Column<Row> {
+        Column::<Row>::new(id, lit!(id), |row, _: &CellContext| {
+            Box::new(TextWidget::new(lit!(row.name.clone())))
+        })
+        .width(ColumnWidth::Fixed(100.0))
+    }
+    fn drag_header(tree: &mut WidgetTree, from_x: f32, to_x: f32) {
+        let y = cp::HEADER_HEIGHT * 0.5;
+        tree.dispatch_event(WidgetEvent::PointerDown {
+            position: Point::new(from_x, y),
+            button: PointerButton::Primary,
+            modifiers: Modifiers::NONE,
+        });
+        // Stepped, like a real pointer: the reorder drag is armed by the
+        // pressed cell on the first move past the threshold, so that move
+        // has to land while the pointer is still over it.
+        for i in 1..=10 {
+            let x = from_x + (to_x - from_x) * i as f32 / 10.0;
+            tree.dispatch_event(WidgetEvent::PointerMove {
+                position: Point::new(x, y),
+            });
+        }
+        tree.dispatch_event(WidgetEvent::PointerUp {
+            position: Point::new(to_x, y),
+            button: PointerButton::Primary,
+            modifiers: Modifiers::NONE,
+        });
+    }
+    fn state(tree: &WidgetTree, table: WidgetId) -> (Vec<String>, Vec<String>) {
+        let any = tree.widget_as_any(table).unwrap();
+        let tv = any.downcast_ref::<TableView<Row>>().unwrap();
+        let mut pinned: Vec<String> = tv.column_pinning_signal().get().into_keys().collect();
+        pinned.sort();
+        (tv.column_order_signal().get(), pinned)
+    }
+
+    let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+    let table = tree.add(
+        TableView::new(rows(3))
+            .add_column(fixed_col("a"))
+            .add_column(fixed_col("b"))
+            .add_column(fixed_col("c"))
+            .row_height(20.0)
+            .show_internal_scrollbars(false),
+    );
+    let proposal = SizeProposal {
+        width: Some(400.0),
+        height: Some(200.0),
+    };
+    tree.layout(proposal);
+
+    // `c` (x 200..300) to the very front.
+    drag_header(&mut tree, 250.0, 10.0);
+    tree.layout(proposal);
+    let (order, pinned) = state(&tree, table);
+    assert_eq!(order, vec!["c", "a", "b"]);
+    assert!(
+        pinned.is_empty(),
+        "a drop at the front must not pin; got {pinned:?}"
+    );
+
+    // `c` (now x 0..100) past the last column's midpoint, into the dead space.
+    drag_header(&mut tree, 50.0, 380.0);
+    tree.layout(proposal);
+    let (order, pinned) = state(&tree, table);
+    assert_eq!(order, vec!["a", "b", "c"]);
+    assert!(
+        pinned.is_empty(),
+        "a drop at the end must not pin; got {pinned:?}"
+    );
+
+    // A pane that *does* exist keeps accepting drops: pin `a` Leading, then
+    // drop `b` at the front — inside the leading pane — and it pins too.
+    {
+        let any = tree.widget_as_any(table).unwrap();
+        let tv = any.downcast_ref::<TableView<Row>>().unwrap();
+        tv.set_column_pinning("a", super::PinnedSide::Leading);
+    }
+    tree.layout(proposal);
+    drag_header(&mut tree, 150.0, 10.0);
+    tree.layout(proposal);
+    let (order, pinned) = state(&tree, table);
+    assert_eq!(
+        pinned,
+        vec!["a", "b"],
+        "a drop inside a real leading pane pins"
+    );
+    assert_eq!(order, vec!["b", "a", "c"]);
+}
+
+#[test]
 fn set_column_order_reorders_display() {
     // Three columns: id (decl 0), name (decl 1), extra (decl 2).
     let model = rows(3);

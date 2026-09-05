@@ -540,7 +540,9 @@ drag emits `ColumnReorderDragData { col_id, source_table_id }`. The
 header strip is the drop target; dropping inside the leading-pinned
 pane re-pins the column to `Leading`, dropping inside the
 trailing-pinned pane re-pins to `Trailing`, otherwise the column joins
-the unpinned middle stream. Inter-table drops are rejected by
+the unpinned middle stream. A pane exists only while a column is pinned
+to it, so with nothing pinned a drop at either end of the strip is a
+plain move to the first or last slot. Inter-table drops are rejected by
 `source_table_id` mismatch.
 
 ### Row reorder

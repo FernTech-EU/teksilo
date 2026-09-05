@@ -1419,10 +1419,17 @@ pub(crate) fn attach_header_reorder_handlers(
                     drop_x,
                 );
 
-                // Classify the drop position into a pane.
-                let new_pinning = if insertion_display_idx <= panes.leading_count {
+                // Classify the drop position into a pane. A pane only exists
+                // while a column is pinned to it: with nothing pinned the
+                // leading pane is empty and the middle pane ends at the strip's
+                // end, so a drop at either end of the strip is a plain move to
+                // the first / last slot, not a pin — without the guards it
+                // would pin the column to a pane the user never saw.
+                let new_pinning = if panes.leading_count > 0
+                    && insertion_display_idx <= panes.leading_count
+                {
                     PinnedSide::Leading
-                } else if insertion_display_idx >= panes.middle_end {
+                } else if panes.middle_end < total && insertion_display_idx >= panes.middle_end {
                     PinnedSide::Trailing
                 } else {
                     PinnedSide::None
