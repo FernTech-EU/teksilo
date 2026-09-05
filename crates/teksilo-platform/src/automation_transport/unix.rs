@@ -143,14 +143,26 @@ fn bind_over(candidates: &[PathBuf]) -> io::Result<BoundTransport> {
 fn bind_at(dir: &Path, path: &Path) -> io::Result<SocketListener> {
     // A stale directory from a crashed prior run with the same PID.
     let _ = std::fs::remove_dir_all(dir);
-    if let Some(parent) = dir.parent() {
-        // `wire`'s helper, not a bare `create_dir_all`: that honours the umask
-        // (0755 as a rule) and this runs *before* the descriptor is published,
-        // so it is what decides the mode the descriptor directory ends up with.
-        // Creating it loosely here and letting `EndpointFile::write` find it
-        // "already existing" is how the documented `0700` silently became
-        // world-readable under the shared-`/tmp` fallback.
-        teksilo_automation::wire::create_private_dir(parent)?;
+    // Only the automation-owned descriptor directory is ours to create and
+    // tighten, and only there is `wire`'s helper the right tool rather than a
+    // bare `create_dir_all`: that honours the umask (0755 as a rule) and this
+    // runs *before* the descriptor is published, so it is what decides the mode
+    // the descriptor directory ends up with. Creating it loosely here and
+    // letting `EndpointFile::write` find it "already existing" is how the
+    // documented `0700` silently became world-readable.
+    //
+    // The `/tmp` fallback's parent is emphatically *not* ours: it is a
+    // pre-existing shared system directory. On macOS `/tmp` is a symlink to
+    // `private/tmp`, which the helper rejects by design (a symlink is not what
+    // we would be protecting); on Linux it is `1777`, which the helper would
+    // "tighten" to `0700` — failing with EPERM for a normal user and, far
+    // worse, *succeeding* for one running as root, breaking `/tmp` for every
+    // other process on the machine. Neither is a mode we may impose on a
+    // directory we did not create, so the fallback relies on `dir`'s own
+    // `0700` below: a shorter path, not a weaker one.
+    let descriptor_dir = teksilo_automation::wire::EndpointFile::dir();
+    if dir.parent() == Some(descriptor_dir.as_path()) {
+        teksilo_automation::wire::create_private_dir(&descriptor_dir)?;
     }
     // `mkdir`'s own mode: the directory is never briefly world-reachable.
     std::fs::DirBuilder::new().mode(0o700).create(dir)?;
@@ -240,5 +252,24 @@ mod tests {
             "the overlong preferred path must be skipped, got {}",
             bound.endpoint.address
         );
+        // Positively: it bound *at the fallback*, rather than the assertion
+        // above passing vacuously on some third path. The parent here is a
+        // shared system directory (`/tmp`) that `bind_at` must leave alone —
+        // tightening it is EPERM for a normal user and, as root, would chmod
+        // `/tmp` to `0700` for the whole machine — while the per-process
+        // directory it creates underneath is still owner-only.
+        let sock = PathBuf::from(&bound.endpoint.address);
+        assert_eq!(
+            sock.parent(),
+            Some(PathBuf::from(format!("/tmp/tka-{pid}")).as_path()),
+            "expected the short `/tmp` fallback, got {}",
+            bound.endpoint.address
+        );
+        let dir_mode = std::fs::metadata(sock.parent().unwrap())
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(dir_mode, 0o700, "the fallback directory must be owner-only");
     }
 }

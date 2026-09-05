@@ -20,6 +20,14 @@ by crate for clarity, not because crates version independently.
 - A read deadline on the automation bridge's Unix socket now expires as
   `TimedOut` — the kind the transport trait documents and the Windows named
   pipe already returns — instead of the platform's `WouldBlock`.
+- The short `/tmp` fallback the bridge takes when `$TMPDIR` would overflow
+  `sun_path` no longer tries to make `/tmp` itself owner-only. It never could
+  on macOS, where `/tmp` is a symlink the check rejects by design, so the
+  fallback could not bind at all; on Linux the same call would chmod a `1777`
+  `/tmp` to `0700`, which fails for a normal user and succeeds — for every
+  other process on the machine — for one running as root. Only the bridge's
+  own descriptor directory is tightened now; the per-process socket directory
+  underneath is still created `0700`.
 
 ## [0.9.3] - 2026-09-04
 
