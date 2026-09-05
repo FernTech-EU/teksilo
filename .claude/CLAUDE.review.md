@@ -19,7 +19,8 @@
 - License: MPL-2.0.
 - Rust edition: 2024 (resolver 3).
 - Workspace member globs: `crates/*` (libraries) and `examples/*` (runnable demos).
-- External path dependency outside the workspace: `text-typeset` at `../text-typeset`.
+- External path dependencies outside the workspace: `text-typeset` at `../text-typeset` and `text-document` at
+  `../text-document/crates/public_api`. Both are declared with `path` **and** `version`, so the crates publish.
 
 ---
 
@@ -35,11 +36,13 @@ cargo run -p <example>               # Run a demo (see examples/ for the list)
 cargo run -p <example> --release     # Release mode
 ```
 
-Demos live under `examples/` (one crate per demo: `simple_button`, `text_and_layout`,
-`widget_catalog`, `data_collections`, `data_grid`, `tree_table_view`, `grid_view`,
-`drag_and_drop`, `file_drop`, `multi_window`, `recent_projects`, `rich_text_editor`,
-`password_field`, `scene_showcase`, `scene_corkboard`, `scene_magnetism`, `docking`,
-`native_menu`, `web_view_demo`, `toast_demo`, `async_demo`, `over_constraint`, and others).
+Demos live under `examples/` (one crate per demo). **The directory is `snake_case` but the package
+name is `kebab-case`** — `cargo run -p` takes the package name: `simple-button`, `text-and-layout`,
+`widget-catalog`, `data-collections`, `data-grid`, `tree-table-view`, `grid-view`, `drag-and-drop`,
+`file-drop`, `multi-window`, `recent-projects`, `rich-text-editor`, `password-field`,
+`scene-showcase`, `scene-corkboard`, `scene-magnetism`, `native-menu`, `web-view-demo`,
+`toast-demo`, `async-demo`, `over-constraint`, and others. A few keep the underscore form
+(`docking`, `automation_bridge_smoke`); read the example's `Cargo.toml` when in doubt.
 
 Tests are headless: no Xvfb, no GPU, no display server. The GPU glyph path is exercised by
 demos, not by headless tests.
@@ -121,13 +124,24 @@ teksilo-resources       Resource handling and embedding
 teksilo-preview         Previewer infrastructure (WidgetCatalog trait, CatalogEntry); no GUI dep
 teksilo-preview-ui      Reusable 3-pane previewer GUI
 teksilo-widgets-previewer   Bundle binary for the stock catalog
+teksilo-terminal        Embeddable terminal-emulator widget; PTY + VT delegated behind a
+                        TerminalEngine trait. Renders into the wgpu surface (unlike webview)
+teksilo-theme-material3 / teksilo-theme-fluent / teksilo-theme-macos
+                        Sibling design-language presets (tokens + Tier-3 chrome), feature-gated
+teksilo-inspector       In-app debug introspection panel; cfg(debug_assertions) only
+teksilo-automation      GUI-free automation toolkit (DTOs, execute(), tool catalog, wire protocol)
+teksilo-automation-mcp  MCP server binary driving it
+teksilo-parse           Shared parser for the teksu! surface language
+teksilo-fmt / cargo-teksilo-fmt / teksilo-fmt-lsp
+                        teksu! formatter: library, cargo subcommand, LSP server
 ```
 
 Stated dependency flow (verify):
 `tokens → canvas → core → data → widgets`, `canvas → text`, `core + data → settings`,
 `canvas → render → platform → app`, `settings → app`, `i18n-macros → i18n`,
 `core → preview`, `preview-ui → preview + widgets`, `widgets → scene`, `core → webview`,
-`(app + core) → async → {tokio, async-std}`.
+`(app + core) → async → {tokio, async-std}`, `(core + tokens + canvas + platform) → terminal`,
+`(core + canvas) → automation → automation-mcp`.
 
 ---
 
@@ -136,7 +150,7 @@ Stated dependency flow (verify):
 ### Widget trait
 
 ```rust
-pub trait Widget: std::fmt::Debug + 'static {
+pub trait Widget: std::fmt::Debug + std::any::Any {
     fn build(&mut self, _ctx: &mut BuildContext) -> Vec<WidgetId> { vec![] }
     fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> LayoutResponse; // required
     fn place_children(&self, _bounds: Rect, _proposal: SizeProposal, _children: &mut [WidgetPlacement], _ctx: &LayoutContext) {}
@@ -150,6 +164,12 @@ pub trait Widget: std::fmt::Debug + 'static {
 `layout_response` is the only required method. Widget categories: Leaf (`layout_response` +
 `paint`), Container (`+ place_children + children`), Composing (`build + layout_response`
 delegating to a child `+ accessibility`), Hybrid (`build + paint`).
+
+The block above is an **excerpt**: the trait in `crates/teksilo-core/src/widget.rs` carries ~25
+defaulted methods (`type_name`, `cacheable_layout`, `as_any` / `as_any_mut`,
+`preserves_children_on_rebuild`, `hit_shape`, `focus_reveal_rect`, `after_paint` / `post_paint`
+and their `wants_*` gates, `accessibility_children`, `a11y_redirect_descendant`,
+`declare_shortcuts`, `take_handler_set`, …). Read the trait before concluding a hook is absent.
 
 ### Layout model
 
@@ -246,7 +266,6 @@ Core:
 - WidgetBuilder: `crates/teksilo-core/src/widget_builder.rs`
 - Arena: `crates/teksilo-core/src/arena.rs`
 - Widget tree orchestrator: `crates/teksilo-core/src/widget_tree.rs`
-- State: `crates/teksilo-core/src/state.rs`
 - Accessibility: `crates/teksilo-core/src/accessibility.rs`
 - Animation: `crates/teksilo-core/src/animation.rs`, `animated_quad.rs`, `frame_tick_scheduler.rs`, `motion_visibility.rs`
 - Theme/styling: `crates/teksilo-core/src/styles/` (+ preset `presets/intui.rs`); default impls `crates/teksilo-widgets/src/styles/`
@@ -279,7 +298,7 @@ Platform / app / render:
 - Scene viewport: `crates/teksilo-scene/src/`
 
 Macros / i18n / previewer:
-- teksu! DSL macro: `crates/teksilo-macros/src/`; trybuild fixtures in `crates/teksilo/tests/teksilo/pass/`
+- teksu! DSL macro: `crates/teksilo-macros/src/`; trybuild fixtures in `crates/teksilo/tests/teksi/` (`pass/` + `fail/`)
 - i18n runtime + formatting: `crates/teksilo-i18n/src/` (`manager.rs`, `localized_string.rs`, `format.rs`)
 - i18n macros: `crates/teksilo-i18n-macros/src/lib.rs`
 - Previewer: `crates/teksilo-preview/src/`, `crates/teksilo-preview-ui/src/`, `crates/teksilo-widgets-previewer/src/main.rs`
