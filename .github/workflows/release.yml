@@ -34,10 +34,14 @@ jobs:
   # Validate the release before publishing it. No binary-artifact build —
   # Teksilo is a framework, not a shippable binary — so this workflow validates
   # the tag, publishes the workspace to crates.io, and cuts a GitHub release.
+  #
+  # Nothing is compiled here: the `ci` job above already ran the whole test
+  # matrix on this commit, so both checks below are manifest-level and the job
+  # answers in under a minute.
   validate:
     name: Validate Release
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 10
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
@@ -59,17 +63,14 @@ jobs:
             exit $rc
           fi
 
-      - name: Install Linux system dependencies
-        uses: ./.github/actions/install-linux-deps
-
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
+      # `cargo metadata` reads every member manifest, so a path dependency on a
+      # sibling repo that is not checked out here fails the read outright —
+      # even with `--no-deps`, which resolves nothing.
       - name: Strip path dependencies
         uses: ./.github/actions/strip-path-deps
-
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@v2
 
       - name: Verify version matches tag
         run: |
@@ -81,9 +82,6 @@ jobs:
             exit 1
           fi
           echo "Version validated: $CARGO_VERSION"
-
-      - name: Run tests
-        run: cargo test --workspace
 
   # Publish to crates.io
   publish:
