@@ -13,6 +13,26 @@ by crate for clarity, not because crates version independently.
 
 ## [Unreleased]
 
+### Added
+
+#### Automation
+
+- `teksilo_automation::client`: the binary name, the matching version and the
+  `cargo install` command for `teksilo-automation-mcp`, plus a `$PATH` lookup
+  for it. Pure `std`; nothing spawns a process, because the only caller is on an
+  app's startup path.
+
+### Changed
+
+- **The bridge announce now says when the MCP client is not installed**, and how
+  to get it. An app needs nothing installed to be automatable: the bridge is
+  compiled into the debug build and binds its own endpoint, and
+  `teksilo-automation-mcp` is only the client an agent drives it through. That
+  asymmetry is easy to get wrong from outside, and a harness that got it wrong
+  ended up carrying its own copy of where to look, which version to ask for, and
+  an account of this crate's protocol history. The absence is now reported where
+  the instruction to use the client is given.
+
 ## [0.9.4] - 2026-09-05
 
 One fix, to the fallback the automation bridge takes when `$TMPDIR` is too deep

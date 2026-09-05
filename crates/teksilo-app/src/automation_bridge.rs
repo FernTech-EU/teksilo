@@ -190,9 +190,13 @@ pub fn spawn_bridge_thread(proxy: crate::app::AppEventProxy, token: String) -> s
         descriptor_path.display()
     );
     eprintln!("TEKSILO_AUTOMATION_TOKEN={announce_token}");
+    // `attach_hint` also says how to *get* the client when it is not installed.
+    // The app needs nothing extra to be automatable, so its absence is not an
+    // error here — but it is the reason the next thing the reader tries will
+    // fail, and the place to say so is where the instruction is given.
     eprintln!(
-        "teksilo-automation: attach with `teksilo-automation-mcp --attach-pid {pid}` \
-         (or --connect {endpoint} --token {announce_token})"
+        "teksilo-automation: {}",
+        teksilo_automation::client::attach_hint(pid, &endpoint.to_string(), &announce_token)
     );
     Ok(())
 }

@@ -30,6 +30,8 @@
 //! test, or the live in-app bridge can all share it.
 //!
 //! ## Modules
+//! - [`client`] — finding the MCP client binary, and the install command
+//!   to name when it is absent.
 //! - [`dto`] — the serde wire protocol.
 //! - [`executor`] — [`execute`] and the settle model.
 //! - [`recording_ops`] — a non-panicking [`WindowOps`](teksilo_core::WindowOps)
@@ -38,12 +40,14 @@
 //! - [`wire`] — the live-bridge framing, token handshake and endpoint
 //!   discovery, shared verbatim by the in-app bridge and the MCP client.
 
+pub mod client;
 pub mod dto;
 pub mod executor;
 pub mod mcp_schema;
 pub mod recording_ops;
 pub mod wire;
 
+pub use client::{CLIENT_BIN, CLIENT_VERSION, find_client, install_command};
 pub use dto::{
     AnnouncementDto, Assertion, AssertionResult, AutomationOp, AutomationReply, AutomationRequest,
     LayoutNode, NodeBounds, NodeRef, PointerAction, PointerButtonDto, ScreenshotMeta, SemanticNode,
