@@ -5381,3 +5381,122 @@ fn header_separators_follow_a_column_resize_and_a_horizontal_scroll() {
         "the separators must follow a horizontal scroll"
     );
 }
+
+#[test]
+fn stretch_last_column_fills_the_gap_follows_the_display_order_and_has_no_grip_of_its_own() {
+    // Fixed 100 | 80 | 120 at 400 px leave a 100 px gap; with
+    // `stretch_last_column` the last one in display order takes it. The
+    // three widths are distinct so a reorder is visible in the widths alone.
+    use crate::styles::recipe_table_style as cp;
+    use teksilo_canvas::Point;
+    use teksilo_core::event::{Modifiers, PointerButton, WidgetEvent};
+
+    fn fixed_col(id: &'static str, w: f32) -> Column<Row> {
+        Column::<Row>::new(id, lit!(id), |row, _: &CellContext| {
+            Box::new(TextWidget::new(lit!(row.name.clone())))
+        })
+        .width(ColumnWidth::Fixed(w))
+    }
+    fn header_widths(tree: &WidgetTree, table: WidgetId) -> Vec<f32> {
+        fn walk(tree: &WidgetTree, id: WidgetId, out: &mut Vec<WidgetId>) {
+            if tree
+                .widget_type_name(id)
+                .is_some_and(|n| n.ends_with("HeaderCell"))
+            {
+                out.push(id);
+                return;
+            }
+            for k in tree.children(id) {
+                walk(tree, k, out);
+            }
+        }
+        let mut cells = Vec::new();
+        walk(tree, table, &mut cells);
+        cells.sort_by(|x, y| tree.bounds(*x).x.total_cmp(&tree.bounds(*y).x));
+        cells.iter().map(|c| tree.bounds(*c).width).collect()
+    }
+    fn overrides(tree: &WidgetTree, table: WidgetId) -> std::collections::HashMap<String, f32> {
+        let any = tree.widget_as_any(table).unwrap();
+        any.downcast_ref::<TableView<Row>>()
+            .unwrap()
+            .column_widths_signal()
+            .get()
+    }
+
+    let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+    let table = tree.add(
+        TableView::new(rows(3))
+            .add_column(fixed_col("a", 100.0))
+            .add_column(fixed_col("b", 80.0))
+            .add_column(fixed_col("c", 120.0))
+            .row_height(20.0)
+            .stretch_last_column(true)
+            .show_internal_scrollbars(false),
+    );
+    let proposal = SizeProposal {
+        width: Some(400.0),
+        height: Some(200.0),
+    };
+    tree.layout(proposal);
+    assert_eq!(
+        header_widths(&tree, table),
+        vec![100.0, 80.0, 220.0],
+        "the last column takes the 100 px gap"
+    );
+
+    // Its trailing grip is inert: a drag there writes nothing and moves
+    // nothing.
+    let y = cp::HEADER_HEIGHT * 0.5;
+    tree.dispatch_event(WidgetEvent::PointerDown {
+        position: Point::new(400.0 - cp::RESIZE_HANDLE_WIDTH * 0.5, y),
+        button: PointerButton::Primary,
+        modifiers: Modifiers::NONE,
+    });
+    tree.dispatch_event(WidgetEvent::PointerMove {
+        position: Point::new(360.0, y),
+    });
+    tree.dispatch_event(WidgetEvent::PointerUp {
+        position: Point::new(360.0, y),
+        button: PointerButton::Primary,
+        modifiers: Modifiers::NONE,
+    });
+    tree.layout(proposal);
+    assert!(
+        overrides(&tree, table).is_empty(),
+        "the stretched column must not be resizable; got {:?}",
+        overrides(&tree, table)
+    );
+    assert_eq!(header_widths(&tree, table), vec![100.0, 80.0, 220.0]);
+
+    // Resizing a *preceding* column reflows it: widen `a` by 30.
+    let down_x = 100.0 - cp::RESIZE_HANDLE_WIDTH * 0.5;
+    tree.dispatch_event(WidgetEvent::PointerDown {
+        position: Point::new(down_x, y),
+        button: PointerButton::Primary,
+        modifiers: Modifiers::NONE,
+    });
+    tree.dispatch_event(WidgetEvent::PointerMove {
+        position: Point::new(down_x + 30.0, y),
+    });
+    tree.dispatch_event(WidgetEvent::PointerUp {
+        position: Point::new(down_x + 30.0, y),
+        button: PointerButton::Primary,
+        modifiers: Modifiers::NONE,
+    });
+    tree.layout(proposal);
+    assert_eq!(header_widths(&tree, table), vec![130.0, 80.0, 190.0]);
+
+    // Positional: reorder to a | c | b — now `b` stretches and `c` goes back
+    // to its own 120 px.
+    {
+        let any = tree.widget_as_any(table).unwrap();
+        let tv = any.downcast_ref::<TableView<Row>>().unwrap();
+        tv.set_column_order(vec!["a".into(), "c".into(), "b".into()]);
+    }
+    tree.layout(proposal);
+    assert_eq!(
+        header_widths(&tree, table),
+        vec![130.0, 120.0, 150.0],
+        "after the reorder the new last column stretches"
+    );
+}

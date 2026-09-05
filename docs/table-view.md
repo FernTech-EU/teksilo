@@ -194,6 +194,33 @@ signals — keep them stable across releases.
 
 ---
 
+### Stretch the last column
+
+```rust
+table.stretch_last_column(true)   // TableView and TreeTableView; default off
+```
+
+Qt's `stretchLastSection`, NSTableView's `lastColumnOnlyAutoresizingStyle`:
+the **last column in display order** takes whatever width the other columns
+leave, so a pixel-sized table (`Fixed` / `Auto` columns, or widths the user
+has dragged) never ends in a bare strip at its trailing edge. It is
+positional, not a property of a column — after a reorder the *new* last
+column stretches and the previous one goes back to its own width.
+
+While a column stretches:
+
+- its declared width is the floor it grows from, capped by its `max_width`;
+- its own entry in `column_widths_signal` is ignored, and its trailing grip
+  is disabled (no AccessKit Increment/Decrement either), because any size the
+  user gave it the stretch would take straight back. The grip on its leading
+  edge still resizes its predecessor, and resizing any other column reflows
+  it;
+- once the other columns exceed the viewport there is nothing left to
+  stretch into: it sits at its own width and the pane scrolls, as in Qt.
+
+`Flex` columns already share every spare pixel among themselves, so a table
+of `Flex` columns looks the same with or without it.
+
 ## Sort / filter / widths / order — the signal contract
 
 Both widgets publish six reactive signals. Mutating any of them

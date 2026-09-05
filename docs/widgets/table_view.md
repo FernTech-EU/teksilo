@@ -49,7 +49,7 @@ let _table = TableView::new(model)
 
 ## Builder methods at a glance
 
-`from_source`, `from_source_keyed`, `enabled`, `overscroll_behavior`, `smooth_scrolling`, `type_ahead_label`, `type_ahead_timeout`, `smooth_scroll_duration`, `scroll_bar_style`, `add_column`, `columns`, `row_height`, `row_height_fn`, `auto_row_height`, `header_height`, `show_header`, `column_resize_policy`, `tab_traversal`, `edit_triggers`, `on_cell_edit_request`, `on_cell_edit_dismissed`, `on_row_activate`, `reorderable`, `reorderable_rows`, `exportable`, `export_external`, `on_rows_transferred_out`, `accept_foreign_rows`, `on_rows_received`, `activate_on`, `selection_mode`, `selection`, `cell_selection`, `alternating_rows`, `grid_lines`, `a11y_label`, `show_internal_scrollbars`, `empty_view`, `scroll_y_signal`, `max_scroll_y_signal`, `viewport_ratio_y_signal`, `scroll_x_signal`, `max_scroll_x_signal`, `viewport_ratio_x_signal`, `sort_signal`, `column_widths_signal`, `column_order_signal`, `column_pinning_signal`, `focused_cell_signal`, `set_focused_cell`, `clear_focused_cell`, `editing_cell_signal`, `begin_edit`, `end_edit`, `filters_signal`, `set_filter`, `clear_filters`, `scroll_to_row`, `set_sort`, `clear_sort`, `set_column_width`, `set_column_widths`, `set_column_order`, `set_column_pinning`, `ensure_row_visible`
+`from_source`, `from_source_keyed`, `enabled`, `overscroll_behavior`, `smooth_scrolling`, `type_ahead_label`, `type_ahead_timeout`, `smooth_scroll_duration`, `scroll_bar_style`, `add_column`, `columns`, `row_height`, `row_height_fn`, `auto_row_height`, `header_height`, `show_header`, `column_resize_policy`, `tab_traversal`, `edit_triggers`, `on_cell_edit_request`, `on_cell_edit_dismissed`, `on_row_activate`, `reorderable`, `reorderable_rows`, `exportable`, `export_external`, `on_rows_transferred_out`, `accept_foreign_rows`, `on_rows_received`, `activate_on`, `selection_mode`, `selection`, `cell_selection`, `alternating_rows`, `grid_lines`, `stretch_last_column`, `a11y_label`, `show_internal_scrollbars`, `empty_view`, `scroll_y_signal`, `max_scroll_y_signal`, `viewport_ratio_y_signal`, `scroll_x_signal`, `max_scroll_x_signal`, `viewport_ratio_x_signal`, `sort_signal`, `column_widths_signal`, `column_order_signal`, `column_pinning_signal`, `focused_cell_signal`, `set_focused_cell`, `clear_focused_cell`, `editing_cell_signal`, `begin_edit`, `end_edit`, `filters_signal`, `set_filter`, `clear_filters`, `scroll_to_row`, `set_sort`, `clear_sort`, `set_column_width`, `set_column_widths`, `set_column_order`, `set_column_pinning`, `ensure_row_visible`
 
 ## API reference
 
@@ -327,6 +327,28 @@ Paint every other row with a tinted background. Default: off.
 
 Draw horizontal and/or vertical grid lines between cells.
 See `GridLines`.
+
+#### `pub fn stretch_last_column(mut self, on: bool) -> Self`
+
+Let the **last column in display order** take up whatever width the
+other columns leave, so the table never ends in a bare strip at its
+trailing edge — Qt's `stretchLastSection`, NSTableView's
+`lastColumnOnlyAutoresizingStyle`. Default: off.
+
+Positional, not a property of a column: after a reorder it is the
+*new* last column that stretches and the previous one goes back to
+its own width. While a column stretches, its declared width is the
+floor it grows from, its user-resize override is ignored, and its
+trailing grip is disabled (no AccessKit Increment/Decrement either):
+any size the user gave it, the stretch would take straight back.
+Resizing any *other* column reflows it. Once the other columns
+exceed the viewport there is nothing left to stretch into — the
+last column sits at its own width and the pane scrolls, as in Qt.
+
+`Flex` columns already share every spare pixel among themselves, so
+a table of `Flex` columns looks the same either way: this is for
+pixel-sized tables (`Fixed` / `Auto`, or widths the user has set)
+that would otherwise end in a gap.
 
 #### `pub fn a11y_label(mut self, label: impl Into<LocalizedString>) -> Self`
 
@@ -861,6 +883,10 @@ the base a following Shift range extends around.
 Backs the two spreadsheet chords a rectangle cannot express: Ctrl+Space
 selects a column and Shift+Space a row, neither of which is an
 anchor-to-cursor block.
+Declines outside `MultiCell` for the reason `select_all`
+declines outside a cell mode: a set of cells is not something a
+single-selection or row-selection model can hold, and quietly storing
+one would break the mode's own invariant.
 
 #### `pub fn select_all(&self, row_count: usize, col_count: usize)`
 

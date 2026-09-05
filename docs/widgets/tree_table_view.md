@@ -62,7 +62,7 @@ let _view = TreeTableView::new(model).row_height(28.0);
 
 ## Builder methods at a glance
 
-`from_projection`, `from_source`, `from_source_keyed`, `enabled`, `overscroll_behavior`, `smooth_scrolling`, `type_ahead_label`, `type_ahead_timeout`, `smooth_scroll_duration`, `scroll_bar_style`, `add_column`, `reorderable`, `exportable`, `export_external`, `on_rows_transferred_out`, `accept_foreign_rows`, `on_rows_received`, `on_foreign_drop`, `activate_on`, `columns`, `tree_column`, `indent_per_level`, `row_height`, `row_height_fn`, `auto_row_height`, `header_height`, `show_header`, `selection_mode`, `selection`, `keyed_selection`, `cell_selection`, `alternating_rows`, `grid_lines`, `a11y_label`, `show_internal_scrollbars`, `column_resize_policy`, `tab_traversal`, `edit_triggers`, `on_cell_edit_request`, `on_cell_edit_dismissed`, `on_row_activate`, `filter_mode`, `scroll_y_signal`, `max_scroll_y_signal`, `viewport_ratio_y_signal`, `scroll_x_signal`, `max_scroll_x_signal`, `viewport_ratio_x_signal`, `sort_signal`, `filters_signal`, `column_widths_signal`, `column_order_signal`, `focused_cell_signal`, `editing_cell_signal`, `projection`, `expand`, `collapse`, `toggle`, `expand_all`, `collapse_all`, `set_focused_cell`, `clear_focused_cell`, `set_sort`, `set_filter`, `clear_filters`, `empty_view`, `clear_sort`, `scroll_to_row`, `ensure_row_visible`, `set_column_width`, `set_column_widths`, `set_column_order`, `column_pinning_signal`, `set_column_pinning`, `begin_edit`, `end_edit`
+`from_projection`, `from_source`, `from_source_keyed`, `enabled`, `overscroll_behavior`, `smooth_scrolling`, `type_ahead_label`, `type_ahead_timeout`, `smooth_scroll_duration`, `scroll_bar_style`, `add_column`, `reorderable`, `exportable`, `export_external`, `on_rows_transferred_out`, `accept_foreign_rows`, `on_rows_received`, `on_foreign_drop`, `activate_on`, `columns`, `tree_column`, `indent_per_level`, `row_height`, `row_height_fn`, `auto_row_height`, `header_height`, `show_header`, `selection_mode`, `selection`, `keyed_selection`, `cell_selection`, `alternating_rows`, `grid_lines`, `stretch_last_column`, `a11y_label`, `show_internal_scrollbars`, `column_resize_policy`, `tab_traversal`, `edit_triggers`, `on_cell_edit_request`, `on_cell_edit_dismissed`, `on_row_activate`, `filter_mode`, `scroll_y_signal`, `max_scroll_y_signal`, `viewport_ratio_y_signal`, `scroll_x_signal`, `max_scroll_x_signal`, `viewport_ratio_x_signal`, `sort_signal`, `filters_signal`, `column_widths_signal`, `column_order_signal`, `focused_cell_signal`, `editing_cell_signal`, `projection`, `expand`, `collapse`, `toggle`, `expand_all`, `collapse_all`, `set_focused_cell`, `clear_focused_cell`, `set_sort`, `set_filter`, `clear_filters`, `empty_view`, `clear_sort`, `scroll_to_row`, `ensure_row_visible`, `set_column_width`, `set_column_widths`, `set_column_order`, `column_pinning_signal`, `set_column_pinning`, `begin_edit`, `end_edit`
 
 ## API reference
 
@@ -348,6 +348,28 @@ Paint odd-indexed rows with the `SurfaceRole::AlternatingRow` tint
 #### `pub fn grid_lines(mut self, kind: GridLines) -> Self`
 
 Paint horizontal and/or vertical dividers between cells.
+
+#### `pub fn stretch_last_column(mut self, on: bool) -> Self`
+
+Let the **last column in display order** take up whatever width the
+other columns leave, so the table never ends in a bare strip at its
+trailing edge — Qt's `stretchLastSection`, NSTableView's
+`lastColumnOnlyAutoresizingStyle`. Default: off.
+
+Positional, not a property of a column: after a reorder it is the
+*new* last column that stretches and the previous one goes back to
+its own width. While a column stretches, its declared width is the
+floor it grows from, its user-resize override is ignored, and its
+trailing grip is disabled (no AccessKit Increment/Decrement either):
+any size the user gave it, the stretch would take straight back.
+Resizing any *other* column reflows it. Once the other columns
+exceed the viewport there is nothing left to stretch into — the
+last column sits at its own width and the pane scrolls, as in Qt.
+
+`Flex` columns already share every spare pixel among themselves, so
+a table of `Flex` columns looks the same either way: this is for
+pixel-sized tables (`Fixed` / `Auto`, or widths the user has set)
+that would otherwise end in a gap.
 
 #### `pub fn a11y_label(mut self, label: impl Into<LocalizedString>) -> Self`
 

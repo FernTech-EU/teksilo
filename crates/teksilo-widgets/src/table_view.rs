@@ -224,6 +224,8 @@ pub struct TableView<T: 'static> {
     cell_selection: Option<CellSelectionModel>,
     alternating_rows: bool,
     grid_lines: GridLines,
+    /// See [`Self::stretch_last_column`].
+    stretch_last_column: bool,
     a11y_label: Option<LocalizedString>,
     show_internal_scrollbars: bool,
     empty_view: Option<Rc<dyn Fn() -> Box<dyn Widget>>>,
@@ -553,6 +555,7 @@ impl<T: 'static> TableView<T> {
             cell_selection: None,
             alternating_rows: false,
             grid_lines: GridLines::None,
+            stretch_last_column: false,
             a11y_label: None,
             show_internal_scrollbars: true,
             empty_view: None,
@@ -951,6 +954,30 @@ impl<T: 'static> TableView<T> {
     /// See [`GridLines`].
     pub fn grid_lines(mut self, kind: GridLines) -> Self {
         self.grid_lines = kind;
+        self
+    }
+
+    /// Let the **last column in display order** take up whatever width the
+    /// other columns leave, so the table never ends in a bare strip at its
+    /// trailing edge — Qt's `stretchLastSection`, NSTableView's
+    /// `lastColumnOnlyAutoresizingStyle`. Default: off.
+    ///
+    /// Positional, not a property of a column: after a reorder it is the
+    /// *new* last column that stretches and the previous one goes back to
+    /// its own width. While a column stretches, its declared width is the
+    /// floor it grows from, its user-resize override is ignored, and its
+    /// trailing grip is disabled (no AccessKit Increment/Decrement either):
+    /// any size the user gave it, the stretch would take straight back.
+    /// Resizing any *other* column reflows it. Once the other columns
+    /// exceed the viewport there is nothing left to stretch into — the
+    /// last column sits at its own width and the pane scrolls, as in Qt.
+    ///
+    /// `Flex` columns already share every spare pixel among themselves, so
+    /// a table of `Flex` columns looks the same either way: this is for
+    /// pixel-sized tables (`Fixed` / `Auto`, or widths the user has set)
+    /// that would otherwise end in a gap.
+    pub fn stretch_last_column(mut self, on: bool) -> Self {
+        self.stretch_last_column = on;
         self
     }
 
@@ -2099,16 +2126,24 @@ impl<T: 'static> Widget for TableView<T> {
             self.resize_preview_x.set(None);
 
             let boundaries = *self.pane_boundaries.borrow();
+            // A stretched last column has no size of its own to drag: its
+            // trailing grip (and the AT step actions behind the same flag)
+            // is off. The grip on its *leading* edge still resizes its
+            // predecessor.
+            let stretched_slot = self
+                .stretch_last_column
+                .then(|| display_indices.len().saturating_sub(1));
             let resize_columns: header::ColumnResizeTable = Rc::new(
                 display_indices
                     .iter()
-                    .map(|&i| {
+                    .enumerate()
+                    .map(|(slot, &i)| {
                         let c = &self.columns[i];
                         header::ColumnResizeInfo {
                             id: c.id.clone(),
                             min_width: c.min_width.unwrap_or(cp::MIN_COLUMN_WIDTH_DEFAULT),
                             max_width: c.max_width,
-                            resizable: c.resizable,
+                            resizable: c.resizable && stretched_slot != Some(slot),
                             flex: matches!(c.width, ColumnWidth::Flex(_)),
                         }
                     })
@@ -2405,6 +2440,7 @@ impl<T: 'static> Widget for TableView<T> {
             body_width,
             cp::MIN_COLUMN_WIDTH_DEFAULT,
             &overrides,
+            self.stretch_last_column,
         );
 
         // Pane geometry: the Middle pane's viewport (`body_width` minus the

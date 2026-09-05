@@ -186,6 +186,8 @@ pub struct TreeTableView<T: 'static> {
     cell_selection: Option<CellSelectionModel>,
     alternating_rows: bool,
     grid_lines: GridLines,
+    /// See [`Self::stretch_last_column`].
+    stretch_last_column: bool,
     a11y_label: Option<LocalizedString>,
     show_internal_scrollbars: bool,
     column_resize_policy: ColumnResizePolicy,
@@ -451,6 +453,7 @@ impl<T: 'static> TreeTableView<T> {
             cell_selection: None,
             alternating_rows: false,
             grid_lines: GridLines::None,
+            stretch_last_column: false,
             a11y_label: None,
             show_internal_scrollbars: true,
             column_resize_policy: ColumnResizePolicy::default(),
@@ -856,6 +859,30 @@ impl<T: 'static> TreeTableView<T> {
     /// Paint horizontal and/or vertical dividers between cells.
     pub fn grid_lines(mut self, kind: GridLines) -> Self {
         self.grid_lines = kind;
+        self
+    }
+
+    /// Let the **last column in display order** take up whatever width the
+    /// other columns leave, so the table never ends in a bare strip at its
+    /// trailing edge — Qt's `stretchLastSection`, NSTableView's
+    /// `lastColumnOnlyAutoresizingStyle`. Default: off.
+    ///
+    /// Positional, not a property of a column: after a reorder it is the
+    /// *new* last column that stretches and the previous one goes back to
+    /// its own width. While a column stretches, its declared width is the
+    /// floor it grows from, its user-resize override is ignored, and its
+    /// trailing grip is disabled (no AccessKit Increment/Decrement either):
+    /// any size the user gave it, the stretch would take straight back.
+    /// Resizing any *other* column reflows it. Once the other columns
+    /// exceed the viewport there is nothing left to stretch into — the
+    /// last column sits at its own width and the pane scrolls, as in Qt.
+    ///
+    /// `Flex` columns already share every spare pixel among themselves, so
+    /// a table of `Flex` columns looks the same either way: this is for
+    /// pixel-sized tables (`Fixed` / `Auto`, or widths the user has set)
+    /// that would otherwise end in a gap.
+    pub fn stretch_last_column(mut self, on: bool) -> Self {
+        self.stretch_last_column = on;
         self
     }
 
@@ -2130,16 +2157,22 @@ impl<T: 'static> Widget for TreeTableView<T> {
             self.resize_preview_x.set(None);
 
             let boundaries = *self.pane_boundaries.borrow();
+            // A stretched last column has no size of its own to drag — see
+            // `TableView::build`.
+            let stretched_slot = self
+                .stretch_last_column
+                .then(|| display_indices.len().saturating_sub(1));
             let resize_columns: ColumnResizeTable = Rc::new(
                 display_indices
                     .iter()
-                    .map(|&i| {
+                    .enumerate()
+                    .map(|(slot, &i)| {
                         let c = &self.columns[i];
                         ColumnResizeInfo {
                             id: c.id.clone(),
                             min_width: c.min_width.unwrap_or(cp::MIN_COLUMN_WIDTH_DEFAULT),
                             max_width: c.max_width,
-                            resizable: c.resizable,
+                            resizable: c.resizable && stretched_slot != Some(slot),
                             flex: matches!(c.width, crate::ColumnWidth::Flex(_)),
                         }
                     })
@@ -2419,6 +2452,7 @@ impl<T: 'static> Widget for TreeTableView<T> {
             body_width,
             cp::MIN_COLUMN_WIDTH_DEFAULT,
             &overrides,
+            self.stretch_last_column,
         );
 
         // Pane geometry (see `TableView::place_children`).
@@ -6950,6 +6984,76 @@ mod tests {
         assert!(
             !w.contains_key("kind"),
             "kind absorbs the change; got {w:?}"
+        );
+    }
+
+    #[test]
+    fn tt_stretch_last_column_fills_the_gap_and_reflows_on_a_resize() {
+        // `size` Fixed(60) | `kind` Fixed(100) at 400 px would leave a 240 px
+        // gap; with `stretch_last_column` `kind` spans [60, 400]. Widening
+        // `size` by 40 then hands `kind` 40 px less.
+        use teksilo_canvas::Point;
+        use teksilo_core::event::{Modifiers, PointerButton, WidgetEvent};
+        let kind_col = Column::<&str>::new("kind", lit!("Kind"), |_row, _: &CellContext| {
+            Box::new(crate::primitives::TextWidget::new(lit!("k")))
+        })
+        .width(ColumnWidth::Fixed(100.0));
+        let proxy = SortFilterTreeModel::new(sample_tree());
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let id = tree.add(
+            TreeTableView::from_projection(proxy)
+                .add_column(size_col())
+                .add_column(kind_col)
+                .row_height(20.0)
+                .stretch_last_column(true)
+                .show_internal_scrollbars(false),
+        );
+        let proposal = SizeProposal {
+            width: Some(400.0),
+            height: Some(200.0),
+        };
+        tree.layout(proposal);
+        fn header_widths(tree: &WidgetTree, root: WidgetId) -> Vec<f32> {
+            fn walk(tree: &WidgetTree, id: WidgetId, out: &mut Vec<WidgetId>) {
+                if tree
+                    .widget_type_name(id)
+                    .is_some_and(|n| n.ends_with("HeaderCell"))
+                {
+                    out.push(id);
+                    return;
+                }
+                for k in tree.children(id) {
+                    walk(tree, k, out);
+                }
+            }
+            let mut cells = Vec::new();
+            walk(tree, root, &mut cells);
+            cells.sort_by(|x, y| tree.bounds(*x).x.total_cmp(&tree.bounds(*y).x));
+            cells.iter().map(|c| tree.bounds(*c).width).collect()
+        }
+        assert_eq!(header_widths(&tree, id), vec![60.0, 340.0]);
+
+        let y = cp::HEADER_HEIGHT * 0.5;
+        let down_x = 60.0 - cp::RESIZE_HANDLE_WIDTH * 0.5;
+        tree.dispatch_event(WidgetEvent::PointerDown {
+            position: Point::new(down_x, y),
+            button: PointerButton::Primary,
+            modifiers: Modifiers::NONE,
+        });
+        tree.dispatch_event(WidgetEvent::PointerMove {
+            position: Point::new(down_x + 40.0, y),
+        });
+        tree.dispatch_event(WidgetEvent::PointerUp {
+            position: Point::new(down_x + 40.0, y),
+            button: PointerButton::Primary,
+            modifiers: Modifiers::NONE,
+        });
+        tree.layout(proposal);
+        assert_eq!(header_widths(&tree, id), vec![100.0, 300.0]);
+        let w = tt_overrides(&tree, id);
+        assert!(
+            !w.contains_key("kind"),
+            "the stretched column carries no override of its own; got {w:?}"
         );
     }
 

@@ -15,6 +15,13 @@ by crate for clarity, not because crates version independently.
 
 ### Added
 
+#### Data views
+
+- `TableView::stretch_last_column` / `TreeTableView::stretch_last_column`:
+  the last column in display order takes the width the other columns leave
+  (Qt's `stretchLastSection`). Positional — it follows a reorder — and the
+  stretched column has no grip of its own.
+
 #### Automation
 
 - `teksilo_automation::client`: the binary name, the matching version and the

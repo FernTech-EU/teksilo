@@ -19,6 +19,12 @@
 //!    point (the same clamp-and-redistribute shape as the framework's
 //!    `LayoutResponse` shrink algorithm) so floor violations on one
 //!    column don't starve or overrun its siblings.
+//! 4. With `stretch_last`, whatever width the three passes left unclaimed
+//!    goes to the last column in display order (Qt's `stretchLastSection`).
+//!    Only the *gap* — a `Flex` column already takes every spare pixel, so
+//!    this is a no-op for it and matters for pixel-sized tables; and the
+//!    last column's own override is ignored while it stretches, since the
+//!    stretch would undo it anyway.
 //!
 //! The output is a parallel `Vec<f32>` of resolved widths matching the
 //! input column order.
@@ -51,18 +57,43 @@ impl ColumnSolver {
             available_width,
             min_width_default,
             overrides,
+            false,
+        )
+    }
+
+    /// Test-only convenience: [`Self::resolve`] with `stretch_last` on.
+    #[cfg(test)]
+    pub(crate) fn resolve_stretch_last<T: 'static>(
+        columns: &[Column<T>],
+        available_width: f32,
+        min_width_default: f32,
+        overrides: &HashMap<String, f32>,
+    ) -> Vec<f32> {
+        let order: Vec<usize> = (0..columns.len()).collect();
+        Self::resolve_in_order(
+            columns,
+            &order,
+            available_width,
+            min_width_default,
+            overrides,
+            true,
         )
     }
 
     /// Resolve widths for the given columns, returning a `Vec<f32>` in
     /// **display order** (parallel to `display_order`). Each entry is
     /// the resolved width of `columns[display_order[i]]`.
+    ///
+    /// `stretch_last` is pass 4 of the module docs: the last display slot
+    /// absorbs any width the other passes leave unclaimed, and its own
+    /// override is ignored.
     pub(crate) fn resolve_in_order<T: 'static>(
         columns: &[Column<T>],
         display_order: &[usize],
         available_width: f32,
         min_width_default: f32,
         overrides: &HashMap<String, f32>,
+        stretch_last: bool,
     ) -> Vec<f32> {
         if display_order.is_empty() {
             return Vec::new();
@@ -71,13 +102,24 @@ impl ColumnSolver {
         let mut widths = vec![0.0_f32; display_order.len()];
         let mut flex_total: f32 = 0.0;
         let mut consumed: f32 = 0.0;
+        let last_slot = display_order.len() - 1;
+        // The stretched column's override is ignored: the stretch would
+        // undo a smaller one on the next pass and a larger one would only
+        // push the pane into overflow, so neither can mean anything.
+        let override_of = |slot: usize, col: &Column<T>| -> Option<f32> {
+            if stretch_last && slot == last_slot {
+                None
+            } else {
+                overrides.get(&col.id).copied()
+            }
+        };
 
         // Pass 1 + 2: Fixed, Auto, and any signal-overridden columns
         // resolve to concrete widths.
         for (slot, &col_idx) in display_order.iter().enumerate() {
             let col = &columns[col_idx];
             let floor = col.min_width.unwrap_or(min_width_default);
-            if let Some(&override_w) = overrides.get(&col.id) {
+            if let Some(override_w) = override_of(slot, col) {
                 let clamped = clamp(override_w, floor, col.max_width);
                 widths[slot] = clamped;
                 consumed += clamped;
@@ -120,7 +162,7 @@ impl ColumnSolver {
                 .enumerate()
                 .filter_map(|(slot, &col_idx)| {
                     let col = &columns[col_idx];
-                    if overrides.contains_key(&col.id) {
+                    if override_of(slot, col).is_some() {
                         return None;
                     }
                     match col.width {
@@ -180,6 +222,18 @@ impl ColumnSolver {
                 }
                 pool_leftover = pool_leftover.max(0.0);
                 pool = next_pool;
+            }
+        }
+
+        // Pass 4: the last column takes the gap. Only ever *adds* — once
+        // the others overflow the pane there is nothing to stretch into and
+        // the column keeps the width the passes above gave it.
+        if stretch_last {
+            let gap = available_width - widths.iter().sum::<f32>();
+            if gap > 0.0 {
+                let col = &columns[display_order[last_slot]];
+                let floor = col.min_width.unwrap_or(min_width_default);
+                widths[last_slot] = clamp(widths[last_slot] + gap, floor, col.max_width);
             }
         }
 
@@ -583,6 +637,70 @@ mod tests {
     }
 
     // ── Pane geometry / horizontal scroll ───────────────────────────────
+
+    #[test]
+    fn stretch_last_hands_the_gap_to_the_last_column() {
+        let cols = vec![
+            col("a", ColumnWidth::Fixed(100.0)),
+            col("b", ColumnWidth::Fixed(100.0)),
+        ];
+        let widths = ColumnSolver::resolve_stretch_last(&cols, 400.0, 32.0, &HashMap::new());
+        assert_eq!(widths, vec![100.0, 300.0]);
+        // Off: the 200 px gap stays.
+        let widths = ColumnSolver::resolve(&cols, 400.0, 32.0, &HashMap::new());
+        assert_eq!(widths, vec![100.0, 100.0]);
+    }
+
+    #[test]
+    fn stretch_last_is_a_no_op_when_a_flex_column_already_fills_the_pane() {
+        let cols = vec![
+            col("a", ColumnWidth::Flex(1.0)),
+            col("b", ColumnWidth::Fixed(100.0)),
+        ];
+        let stretched = ColumnSolver::resolve_stretch_last(&cols, 400.0, 32.0, &HashMap::new());
+        let plain = ColumnSolver::resolve(&cols, 400.0, 32.0, &HashMap::new());
+        assert_eq!(stretched, plain);
+        assert_eq!(stretched, vec![300.0, 100.0]);
+    }
+
+    #[test]
+    fn stretch_last_ignores_the_last_columns_own_override() {
+        let cols = vec![
+            col("a", ColumnWidth::Fixed(100.0)),
+            col("b", ColumnWidth::Fixed(100.0)),
+        ];
+        let mut over = HashMap::new();
+        over.insert("b".to_string(), 50.0);
+        let widths = ColumnSolver::resolve_stretch_last(&cols, 400.0, 32.0, &over);
+        assert_eq!(widths, vec![100.0, 300.0]);
+        // The same override is honoured when nothing stretches.
+        let widths = ColumnSolver::resolve(&cols, 400.0, 32.0, &over);
+        assert_eq!(widths, vec![100.0, 50.0]);
+        // …and an override on a *preceding* column reflows the stretched one.
+        over.insert("a".to_string(), 150.0);
+        let widths = ColumnSolver::resolve_stretch_last(&cols, 400.0, 32.0, &over);
+        assert_eq!(widths, vec![150.0, 250.0]);
+    }
+
+    #[test]
+    fn stretch_last_stops_at_the_last_columns_max_width() {
+        let cols = vec![
+            col("a", ColumnWidth::Fixed(100.0)),
+            col("b", ColumnWidth::Fixed(100.0)).max_width(150.0),
+        ];
+        let widths = ColumnSolver::resolve_stretch_last(&cols, 400.0, 32.0, &HashMap::new());
+        assert_eq!(widths, vec![100.0, 150.0]);
+    }
+
+    #[test]
+    fn stretch_last_has_nothing_to_give_once_the_others_overflow() {
+        let cols = vec![
+            col("a", ColumnWidth::Fixed(300.0)),
+            col("b", ColumnWidth::Fixed(200.0)),
+        ];
+        let widths = ColumnSolver::resolve_stretch_last(&cols, 400.0, 32.0, &HashMap::new());
+        assert_eq!(widths, vec![300.0, 200.0]);
+    }
 
     #[test]
     fn pane_widths_splits_leading_middle_trailing() {
