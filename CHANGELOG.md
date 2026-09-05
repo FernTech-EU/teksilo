@@ -13,21 +13,25 @@ by crate for clarity, not because crates version independently.
 
 ## [Unreleased]
 
+## [0.9.4] - 2026-09-05
+
+One fix, to the fallback the automation bridge takes when `$TMPDIR` is too deep
+to hold a socket: it could not bind at all on macOS, and on Linux it reached
+for a permission change on `/tmp` that was never its to make.
+
 ### Fixed
 
 #### Automation
 
-- A read deadline on the automation bridge's Unix socket now expires as
-  `TimedOut` — the kind the transport trait documents and the Windows named
-  pipe already returns — instead of the platform's `WouldBlock`.
-- The short `/tmp` fallback the bridge takes when `$TMPDIR` would overflow
-  `sun_path` no longer tries to make `/tmp` itself owner-only. It never could
-  on macOS, where `/tmp` is a symlink the check rejects by design, so the
-  fallback could not bind at all; on Linux the same call would chmod a `1777`
-  `/tmp` to `0700`, which fails for a normal user and succeeds — for every
-  other process on the machine — for one running as root. Only the bridge's
-  own descriptor directory is tightened now; the per-process socket directory
-  underneath is still created `0700`.
+- **The short `/tmp` fallback tried to make `/tmp` itself owner-only.** The
+  bridge drops to `/tmp/tka-<pid>` when `$TMPDIR` would overflow `sun_path`,
+  and then tightened that path's *parent*. On macOS it could therefore never
+  bind: `/tmp` is a symlink, which the check rejects by design, the target
+  not being what it would be protecting. On Linux the same call chmods a
+  `1777` `/tmp` to `0700` — `EPERM` for a normal user, and a silent success,
+  for every other process on the machine, for one running as root. Only the
+  bridge's own descriptor directory is tightened now; the per-process socket
+  directory underneath is still created `0700`.
 
 ## [0.9.3] - 2026-09-04
 
@@ -172,6 +176,9 @@ table.
 - **A descriptor outlived a failed bridge start**, handing `--attach-pid` an
   endpoint that answers nobody. It is retracted if the accept thread fails to
   spawn.
+- **A read deadline on the Unix socket expired as `WouldBlock`**, not as the
+  `TimedOut` the transport trait documents and the Windows named pipe already
+  returns.
 
 #### Widgets
 
@@ -654,7 +661,8 @@ building them exposed.
 Entries before this file was introduced are not backfilled; see `git log`
 for the full history.
 
-[Unreleased]: https://github.com/FernTech-EU/teksilo/compare/v0.9.3...HEAD
+[Unreleased]: https://github.com/FernTech-EU/teksilo/compare/v0.9.4...HEAD
+[0.9.4]: https://github.com/FernTech-EU/teksilo/compare/v0.9.3...v0.9.4
 [0.9.3]: https://github.com/FernTech-EU/teksilo/compare/v0.9.2...v0.9.3
 [0.9.2]: https://github.com/FernTech-EU/teksilo/compare/v0.9.1...v0.9.2
 [0.9.1]: https://github.com/FernTech-EU/teksilo/compare/v0.9.0...v0.9.1
