@@ -724,6 +724,60 @@ mod tests {
     }
 
     #[test]
+    fn a_line_names_its_field_exactly_once() {
+        // `build()` registers the label relation, and anything that registers
+        // it again — a rebuild, an app that also calls `access_labelled_by` on
+        // the same pair — must not add a second target: the consumer builds the
+        // name by concatenating every target's value, so a duplicate makes a
+        // screen reader read "Name Name, edit text".
+        let mut tree = WidgetTree::new();
+        let label = tree.add(FixedLeaf(80.0, 20.0));
+        let field = tree.add(FixedLeaf(100.0, 20.0));
+        let _form = tree.add(FormLayout::new().line_ids(label, field));
+        tree.layout(SizeProposal::exact(400.0, 200.0));
+
+        let relations = |tree: &mut WidgetTree| {
+            let update = tree.sync_accessibility();
+            let field_nid = teksilo_core::accessibility::widget_id_to_node_id(field);
+            update
+                .nodes
+                .iter()
+                .find(|(id, _)| *id == field_nid)
+                .map(|(_, n)| n.labelled_by().len())
+                .expect("field node present in AT tree")
+        };
+        assert_eq!(relations(&mut tree), 1, "one visible label, one relation");
+
+        // Register the same pair again through the same public door
+        // `FormLayout::build` uses.
+        #[derive(Debug)]
+        struct Relabeller(WidgetId, WidgetId);
+        impl Widget for Relabeller {
+            fn build(
+                &mut self,
+                ctx: &mut teksilo_core::build_context::BuildContext,
+            ) -> Vec<WidgetId> {
+                ctx.access_labelled_by(self.0, self.1);
+                vec![]
+            }
+            fn layout_response(
+                &self,
+                _proposal: SizeProposal,
+                _ctx: &LayoutContext,
+            ) -> teksilo_core::widget::LayoutResponse {
+                Size::ZERO.into()
+            }
+        }
+        tree.add(Relabeller(field, label));
+        tree.layout(SizeProposal::exact(400.0, 200.0));
+        assert_eq!(
+            relations(&mut tree),
+            1,
+            "re-registering the same pair leaves one relation"
+        );
+    }
+
+    #[test]
     fn rtl_swaps_label_and_field_columns() {
         let mut tree = WidgetTree::new();
         tree.set_layout_direction(teksilo_core::environment::LayoutDirection::RightToLeft);

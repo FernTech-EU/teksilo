@@ -452,12 +452,17 @@ impl WidgetTree {
             }
         }
 
-        // Strip relationship targets (controls, described_by) that reference
-        // NodeIds absent from the emitted tree. Dormant widgets (e.g. inactive
-        // tab panels) are excluded from the TreeUpdate; if a node still holds a
-        // `push_controlled` or `push_described_by` reference to one of them,
-        // accesskit_macos will unwrap() it and panic when VoiceOver follows the
-        // linked_ui_elements attribute.
+        // Strip relationship targets (controls, described_by, labelled_by) that
+        // reference NodeIds absent from the emitted tree. Dormant widgets (e.g.
+        // inactive tab panels) are excluded from the TreeUpdate; if a node still
+        // holds a `push_controlled` / `push_described_by` / `push_labelled_by`
+        // reference to one of them, accesskit_macos will unwrap() it and panic
+        // when VoiceOver follows the linked_ui_elements attribute.
+        //
+        // `labelled_by` is the one that costs a name rather than a link: the
+        // consumer concatenates its targets' values to build the node's name
+        // (`accesskit_consumer::node::write_label`), and a dangling target
+        // panics the iterator before it gets there.
         let emitted: std::collections::HashSet<accesskit::NodeId> =
             nodes.iter().map(|(id, _)| *id).collect();
         for (_, node) in &mut nodes {
@@ -478,6 +483,15 @@ impl WidgetTree {
                 .collect();
             if described.len() != node.described_by().len() {
                 node.set_described_by(described);
+            }
+            let labelled: Vec<_> = node
+                .labelled_by()
+                .iter()
+                .filter(|id| emitted.contains(*id))
+                .copied()
+                .collect();
+            if labelled.len() != node.labelled_by().len() {
+                node.set_labelled_by(labelled);
             }
         }
 
@@ -1258,10 +1272,14 @@ pub(crate) mod test_helpers {
         accesskit_consumer::Tree::new(update.clone(), false);
     }
 
-    /// Assert that every NodeId referenced in `controls()` or
-    /// `described_by()` of any node is present in the tree. This is the
-    /// invariant our post-processing pass enforces; having a test here means
-    /// a future refactor can't silently drop the pass and regress it.
+    /// Assert that every NodeId referenced by a relation of any node is
+    /// present in the tree. This is the invariant our post-processing pass
+    /// enforces; having a test here means a future refactor can't silently
+    /// drop the pass and regress it.
+    ///
+    /// `next_on_line` / `previous_on_line` are checked alongside the
+    /// relation lists: a text run linked to a run that never reached the
+    /// tree hangs `accesskit_consumer`'s line walk instead of ending it.
     pub(crate) fn assert_no_dangling_relationships(update: &accesskit::TreeUpdate) {
         let emitted: std::collections::HashSet<accesskit::NodeId> =
             update.nodes.iter().map(|(id, _)| *id).collect();
@@ -1276,6 +1294,24 @@ pub(crate) mod test_helpers {
                 assert!(
                     emitted.contains(&target),
                     "node {parent_id:?} has described_by() → {target:?} which is absent from the tree"
+                );
+            }
+            for &target in node.labelled_by() {
+                assert!(
+                    emitted.contains(&target),
+                    "node {parent_id:?} has labelled_by() → {target:?} which is absent from the tree"
+                );
+            }
+            if let Some(target) = node.next_on_line() {
+                assert!(
+                    emitted.contains(&target),
+                    "node {parent_id:?} has next_on_line() → {target:?} which is absent from the tree"
+                );
+            }
+            if let Some(target) = node.previous_on_line() {
+                assert!(
+                    emitted.contains(&target),
+                    "node {parent_id:?} has previous_on_line() → {target:?} which is absent from the tree"
                 );
             }
         }
@@ -2567,6 +2603,72 @@ mod tests {
         let node = find_node(&update, id).unwrap();
         let other_nid = crate::accessibility::widget_id_to_node_id(other);
         assert!(node.labelled_by().contains(&other_nid));
+    }
+
+    #[test]
+    fn a_labelled_by_target_that_went_dormant_is_stripped() {
+        // A dangling `labelled_by` is worse than a dangling `controls`: the
+        // consumer builds the node's *name* by concatenating its targets'
+        // values, and walks the relation to do it. `accesskit_consumer`'s
+        // relation iterator unwraps the lookup, so a target that never
+        // reached the tree panics the walk rather than merely losing a link.
+        let mut tree = WidgetTree::new();
+        let title = tree.add(FillWidget::new().label("Preferences"));
+        let dialog = tree.add(FillWidget::new().access_labelled_by(title));
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        let update = tree.sync_accessibility();
+        assert!(
+            !find_node(&update, dialog).unwrap().labelled_by().is_empty(),
+            "the relation is live while the target is in the tree"
+        );
+
+        tree.set_dormant(title);
+        let update = tree.sync_accessibility();
+        assert!(
+            find_node(&update, dialog).unwrap().labelled_by().is_empty(),
+            "a target absent from the tree must not survive in the relation"
+        );
+        assert_no_dangling_relationships(&update);
+    }
+
+    #[test]
+    fn re_registering_a_labelled_by_relation_does_not_duplicate_it() {
+        // A composite that names itself from its own content registers the
+        // relation from `build()`, which runs again on every rebuild. Appending
+        // blindly would concatenate the title into the name once per rebuild.
+        let mut tree = WidgetTree::new();
+        let title = tree.add(FillWidget::new().label("Name"));
+        let field = tree.add(FillWidget::new());
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        for _ in 0..3 {
+            tree.push_access_labelled_by(field, title);
+        }
+        let update = tree.sync_accessibility();
+        assert_eq!(
+            find_node(&update, field).unwrap().labelled_by().len(),
+            1,
+            "the same target registered repeatedly is one relation"
+        );
+    }
+
+    #[test]
+    fn re_registering_a_described_by_relation_does_not_duplicate_it() {
+        let mut tree = WidgetTree::new();
+        let hint = tree.add(FillWidget::new().label("Must be unique"));
+        let field = tree.add(FillWidget::new());
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        for _ in 0..3 {
+            tree.push_access_described_by(field, hint);
+        }
+        let update = tree.sync_accessibility();
+        assert_eq!(
+            find_node(&update, field).unwrap().described_by().len(),
+            1,
+            "the same target registered repeatedly is one relation"
+        );
     }
 
     // Test 15

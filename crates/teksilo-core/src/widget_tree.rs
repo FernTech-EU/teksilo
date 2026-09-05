@@ -2582,12 +2582,16 @@ impl WidgetTree {
     /// pushes a duplicate, so call once per pairing.
     pub(crate) fn push_access_labelled_by(&mut self, id: WidgetId, label_id: WidgetId) {
         if let Some(node) = self.arena.get_mut(id) {
-            node.access_overrides
-                .get_or_insert_with(|| {
-                    Box::new(crate::widget_builder::AccessibilityOverrides::default())
-                })
-                .labelled_by
-                .push(label_id);
+            let overrides = node.access_overrides.get_or_insert_with(|| {
+                Box::new(crate::widget_builder::AccessibilityOverrides::default())
+            });
+            // A composite that names itself from its content re-registers the
+            // relation on every rebuild. Appending blindly would concatenate the
+            // title into the name once per rebuild.
+            if overrides.labelled_by.contains(&label_id) {
+                return;
+            }
+            overrides.labelled_by.push(label_id);
             self.a11y_dirty = true;
         }
     }
@@ -2597,12 +2601,13 @@ impl WidgetTree {
     /// [`push_access_labelled_by`](Self::push_access_labelled_by)).
     pub(crate) fn push_access_described_by(&mut self, id: WidgetId, target_id: WidgetId) {
         if let Some(node) = self.arena.get_mut(id) {
-            node.access_overrides
-                .get_or_insert_with(|| {
-                    Box::new(crate::widget_builder::AccessibilityOverrides::default())
-                })
-                .described_by
-                .push(target_id);
+            let overrides = node.access_overrides.get_or_insert_with(|| {
+                Box::new(crate::widget_builder::AccessibilityOverrides::default())
+            });
+            if overrides.described_by.contains(&target_id) {
+                return;
+            }
+            overrides.described_by.push(target_id);
             self.a11y_dirty = true;
         }
     }
