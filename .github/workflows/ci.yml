@@ -22,6 +22,10 @@ on:
       - "!/README*"
   schedule:
     - cron: "3 3 3 * *"
+  # Called by the Release workflow. `cargo publish` is irreversible and a
+  # burned version cannot be reused, so a tag runs the whole matrix on its own
+  # commit rather than trusting that main was green when the tag was cut.
+  workflow_call:
 
 permissions:
   contents: read
