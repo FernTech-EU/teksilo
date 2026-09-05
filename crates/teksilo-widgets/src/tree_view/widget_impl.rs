@@ -1315,7 +1315,7 @@ impl<T: 'static> Widget for TreeView<T> {
     }
 }
 
-/// Run `f` against a [`SubtreeOps`] view of `source`.
+/// Run `f` against a [`SubtreeOps`](crate::common::tree_expand::SubtreeOps) view of `source`.
 ///
 /// The recursive expand walks the *live* flattening, so it needs the three
 /// closures rebuilt against this source rather than a snapshot — expanding a
