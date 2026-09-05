@@ -2109,6 +2109,7 @@ impl<T: 'static> Widget for TableView<T> {
                             min_width: c.min_width.unwrap_or(cp::MIN_COLUMN_WIDTH_DEFAULT),
                             max_width: c.max_width,
                             resizable: c.resizable,
+                            flex: matches!(c.width, ColumnWidth::Flex(_)),
                         }
                     })
                     .collect(),
@@ -2155,6 +2156,7 @@ impl<T: 'static> Widget for TableView<T> {
                 cp::GRID_LINE_THICKNESS,
                 *self.pane_boundaries.borrow(),
                 self.scroll_x.clone(),
+                self.column_widths_signal.clone(),
             );
             // Wire reorder drag-target handlers on the header strip.
             let header_row_id = ctx.add(header_row);

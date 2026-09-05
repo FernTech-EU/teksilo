@@ -5071,3 +5071,213 @@ fn space_checks_the_focused_cell_and_leaves_the_selection_alone() {
         "row toggled off"
     );
 }
+
+#[test]
+fn resize_drag_moves_the_grabbed_divider_with_the_pointer_and_leaves_preceding_columns_alone() {
+    // Three Flex(1) columns at 300 px → 100 each, dividers at 100 and 200.
+    // Drag the b|c divider right by 30. The solver shares the leftover among
+    // every un-overridden flex column, `a` included — so without the commit
+    // freezing `a`, `a` would shrink, `b`'s leading edge would slide left,
+    // and the grabbed divider would move by only half the pointer travel.
+    use teksilo_canvas::Point;
+    use teksilo_core::event::{Modifiers, PointerButton, WidgetEvent};
+
+    fn flex_col(id: &'static str) -> Column<Row> {
+        Column::<Row>::new(id, lit!(id), |row, _: &CellContext| {
+            Box::new(TextWidget::new(lit!(row.name.clone())))
+        })
+        .width(ColumnWidth::Flex(1.0))
+    }
+    let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+    let table = tree.add(
+        TableView::new(rows(3))
+            .add_column(flex_col("a"))
+            .add_column(flex_col("b"))
+            .add_column(flex_col("c"))
+            .row_height(20.0)
+            .show_internal_scrollbars(false),
+    );
+    let proposal = SizeProposal {
+        width: Some(300.0),
+        height: Some(200.0),
+    };
+    tree.layout(proposal);
+
+    fn header_cells(tree: &WidgetTree, table: WidgetId) -> Vec<WidgetId> {
+        fn walk(tree: &WidgetTree, id: WidgetId, out: &mut Vec<WidgetId>) {
+            if tree
+                .widget_type_name(id)
+                .is_some_and(|n| n.ends_with("HeaderCell"))
+            {
+                out.push(id);
+                return;
+            }
+            for k in tree.children(id) {
+                walk(tree, k, out);
+            }
+        }
+        let mut out = Vec::new();
+        walk(tree, table, &mut out);
+        out.sort_by(|x, y| tree.bounds(*x).x.total_cmp(&tree.bounds(*y).x));
+        out
+    }
+    let cells = header_cells(&tree, table);
+    assert_eq!(cells.len(), 3);
+    assert!((tree.bounds(cells[1]).right() - 200.0).abs() < 0.01);
+
+    use crate::styles::recipe_table_style as cp;
+    let y = cp::HEADER_HEIGHT * 0.5;
+    let down_x = 200.0 - cp::RESIZE_HANDLE_WIDTH * 0.5;
+    tree.dispatch_event(WidgetEvent::PointerDown {
+        position: Point::new(down_x, y),
+        button: PointerButton::Primary,
+        modifiers: Modifiers::NONE,
+    });
+    // Several small moves with a layout between each, like real frames.
+    let mut x = down_x;
+    for _ in 0..10 {
+        x += 3.0;
+        tree.dispatch_event(WidgetEvent::PointerMove {
+            position: Point::new(x, y),
+        });
+        tree.layout(proposal);
+        let cells = header_cells(&tree, table);
+        let divider = tree.bounds(cells[1]).right();
+        assert!(
+            (divider - (x + cp::RESIZE_HANDLE_WIDTH * 0.5)).abs() < 0.01,
+            "the grabbed divider must sit under the pointer: pointer {x}, divider {divider}"
+        );
+        assert!(
+            (tree.bounds(cells[0]).width - 100.0).abs() < 0.01,
+            "the column before the divider must not move; got {}",
+            tree.bounds(cells[0]).width
+        );
+    }
+    tree.dispatch_event(WidgetEvent::PointerUp {
+        position: Point::new(x, y),
+        button: PointerButton::Primary,
+        modifiers: Modifiers::NONE,
+    });
+    tree.layout(proposal);
+
+    let widths = {
+        let any = tree.widget_as_any(table).unwrap();
+        any.downcast_ref::<TableView<Row>>()
+            .unwrap()
+            .column_widths_signal()
+            .get()
+    };
+    assert!(
+        (widths.get("b").copied().unwrap_or(0.0) - 130.0).abs() < 0.01,
+        "b grows by the pointer travel; got {widths:?}"
+    );
+    assert!(
+        (widths.get("a").copied().unwrap_or(0.0) - 100.0).abs() < 0.01,
+        "a is frozen at the width it had on screen; got {widths:?}"
+    );
+    assert!(
+        !widths.contains_key("c"),
+        "c stays flex — it is the column meant to absorb the change; got {widths:?}"
+    );
+    let cells = header_cells(&tree, table);
+    assert!((tree.bounds(cells[2]).width - 70.0).abs() < 0.01);
+}
+
+#[test]
+fn header_separators_follow_a_column_resize_and_a_horizontal_scroll() {
+    // The header strip paints its separators from the shared widths and
+    // `scroll_x`, yet its own bounds never change on either — so unless it
+    // asks for a repaint, the walker replays its cached frame and the lines
+    // stay where they were while the cells (whose bounds did change) move.
+    use crate::styles::recipe_table_style as cp;
+    use teksilo_canvas::Point;
+    use teksilo_core::event::{Modifiers, PointerButton, WidgetEvent};
+
+    fn header_separator_xs(tree: &mut WidgetTree) -> Vec<f32> {
+        let frame = tree.render();
+        let mut xs: Vec<f32> = frame
+            .decorations
+            .iter()
+            .filter(|d| {
+                let [_, y, w, h] = d.rect;
+                w <= 1.5 && y.abs() < 0.6 && (h - cp::HEADER_HEIGHT).abs() < 0.6
+            })
+            .map(|d| d.rect[0])
+            .collect();
+        xs.sort_by(f32::total_cmp);
+        xs
+    }
+    fn fixed_col(id: &'static str) -> Column<Row> {
+        Column::<Row>::new(id, lit!(id), |row, _: &CellContext| {
+            Box::new(TextWidget::new(lit!(row.name.clone())))
+        })
+        .width(ColumnWidth::Fixed(100.0))
+    }
+
+    let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+    let table = tree.add(
+        TableView::new(rows(3))
+            .add_column(fixed_col("a"))
+            .add_column(fixed_col("b"))
+            .add_column(fixed_col("c"))
+            .row_height(20.0)
+            .show_internal_scrollbars(false),
+    );
+    let proposal = SizeProposal {
+        width: Some(400.0),
+        height: Some(200.0),
+    };
+    tree.layout(proposal);
+    let dw = cp::GRID_LINE_THICKNESS.max(1.0);
+    assert_eq!(
+        header_separator_xs(&mut tree),
+        vec![100.0 - dw, 200.0 - dw],
+        "baseline: a separator at each column boundary"
+    );
+
+    // Resize `b` by +30 (grab the b|c divider) — the second separator must
+    // move to 230, the first must stay.
+    let y = cp::HEADER_HEIGHT * 0.5;
+    let down_x = 200.0 - cp::RESIZE_HANDLE_WIDTH * 0.5;
+    tree.dispatch_event(WidgetEvent::PointerDown {
+        position: Point::new(down_x, y),
+        button: PointerButton::Primary,
+        modifiers: Modifiers::NONE,
+    });
+    tree.dispatch_event(WidgetEvent::PointerMove {
+        position: Point::new(down_x + 30.0, y),
+    });
+    tree.layout(proposal);
+    assert_eq!(
+        header_separator_xs(&mut tree),
+        vec![100.0 - dw, 230.0 - dw],
+        "the separator must follow the resized column while the drag is live"
+    );
+    tree.dispatch_event(WidgetEvent::PointerUp {
+        position: Point::new(down_x + 30.0, y),
+        button: PointerButton::Primary,
+        modifiers: Modifiers::NONE,
+    });
+    tree.layout(proposal);
+    assert_eq!(header_separator_xs(&mut tree), vec![100.0 - dw, 230.0 - dw]);
+
+    // Widen `c` past the viewport so the strip can scroll, then scroll it:
+    // every separator shifts left by the offset.
+    {
+        let any = tree.widget_as_any(table).unwrap();
+        let tv = any.downcast_ref::<TableView<Row>>().unwrap();
+        tv.set_column_width("c", 300.0);
+    }
+    tree.layout(proposal);
+    {
+        let any = tree.widget_as_any(table).unwrap();
+        let tv = any.downcast_ref::<TableView<Row>>().unwrap();
+        tv.scroll_x_signal().set(40.0);
+    }
+    tree.layout(proposal);
+    assert_eq!(
+        header_separator_xs(&mut tree),
+        vec![60.0 - dw, 190.0 - dw],
+        "the separators must follow a horizontal scroll"
+    );
+}

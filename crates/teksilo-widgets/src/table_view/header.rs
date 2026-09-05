@@ -22,6 +22,7 @@ use teksilo_i18n::lit;
 
 use teksilo_canvas::{Canvas, Path, Point, Rect, Size, SizeProposal};
 use teksilo_core::accessibility::AccessNodeBuilder;
+use teksilo_core::binding::BindingLevel;
 use teksilo_core::build_context::BuildContext;
 use teksilo_core::color_prop::ColorProp;
 use teksilo_core::drag_payload::DragPayload;
@@ -85,6 +86,10 @@ pub(crate) struct ColumnResizeInfo {
     pub max_width: Option<f32>,
     /// Whether the column opted into drag-resize at all.
     pub resizable: bool,
+    /// Whether the column's declared width is `Flex` — it shares the pane's
+    /// leftover, so it would absorb part of any resize made *after* it in
+    /// display order unless [`commit_resize`] freezes it first.
+    pub flex: bool,
 }
 
 /// Shared, display-ordered [`ColumnResizeInfo`] table. Rebuilt (and re-shared
@@ -167,6 +172,10 @@ pub(crate) struct ResizeState {
     /// the gesture, since grabbing a cell's *leading* edge resizes its
     /// predecessor (see [`HeaderCell`]'s grip docs).
     pub col_id: String,
+    /// Display slot of the column being resized — the slot `col_id` occupies
+    /// in the shared [`ColumnResizeTable`] / widths vector, so the commit can
+    /// tell which columns precede it.
+    pub target_index: usize,
     /// Display slot of the cell that took the pointer capture. Only that
     /// cell may advance or commit the drag; a mismatch means the event
     /// reached the wrong cell (capture lost) and must not move a column.
@@ -630,7 +639,13 @@ impl Widget for HeaderCell {
                             );
                             match policy {
                                 ColumnResizePolicy::Live => {
-                                    write_width(&widths_signal, &state.col_id, new_w);
+                                    commit_resize(
+                                        &widths_signal,
+                                        &widths_handle,
+                                        &resize_columns,
+                                        state.target_index,
+                                        new_w,
+                                    );
                                 }
                                 ColumnResizePolicy::OnRelease => {
                                     // Nothing moves until release, so show
@@ -720,6 +735,7 @@ impl Widget for HeaderCell {
                             };
                             *resize_state.borrow_mut() = Some(ResizeState {
                                 col_id: info.id.clone(),
+                                target_index: target,
                                 anchor_index: width_index,
                                 start_pointer_x: position.x + cell_x0,
                                 start_width,
@@ -777,7 +793,13 @@ impl Widget for HeaderCell {
                                         state.min_width,
                                         state.max_width,
                                     );
-                                    write_width(&widths_signal, &state.col_id, new_w);
+                                    commit_resize(
+                                        &widths_signal,
+                                        &widths_handle,
+                                        &resize_columns,
+                                        state.target_index,
+                                        new_w,
+                                    );
                                 }
                                 resize_target.set(None);
                                 resize_preview_x.set(None);
@@ -841,7 +863,13 @@ impl Widget for HeaderCell {
                         -crate::styles::recipe_table_style::COLUMN_RESIZE_STEP
                     };
                     let next = clamp_width(current + step, info.min_width, info.max_width);
-                    write_width(&widths_signal, &info.id, next);
+                    commit_resize(
+                        &widths_signal,
+                        &widths_handle,
+                        &resize_columns,
+                        width_index,
+                        next,
+                    );
                     EventResponse::Handled
                 }
             })
@@ -932,9 +960,54 @@ impl Widget for HeaderCell {
     }
 }
 
-fn write_width(signal: &Signal<HashMap<String, f32>>, col_id: &str, new_w: f32) {
+/// Commit a user resize of the column at display slot `target` to `new_w`.
+///
+/// Writes the target's override and, in the **same** signal update, freezes
+/// every un-overridden `Flex` column that *precedes* it in display order at
+/// its current resolved width. Without that, the solver shares the leftover
+/// the resize consumed (or freed) among every flex column — the ones before
+/// the target included — so the target's leading edge slides the other way
+/// and the grabbed divider tracks the pointer at a fraction of its speed
+/// (`1 − p/m`, for `p` of the `m` remaining flex weights ahead of it), or
+/// not at all once every remaining flex column is ahead of it. What the user
+/// then sees is the dividers on the far side of the grip sweeping *against*
+/// the mouse while the grabbed one barely moves.
+///
+/// Every desktop table keeps the columns before a dragged divider where they
+/// are and reflows only the ones after it (NSTableView's column autoresizing,
+/// `QHeaderView`'s interactive sections with a stretch-last). Freezing the
+/// preceding flex columns is what makes that hold here, and it records
+/// exactly what is on screen at that moment, so the persisted
+/// `column_widths_signal` keeps matching the picture. Columns *after* the
+/// target are left alone on purpose: they are the ones meant to absorb the
+/// change, and once none of them can, the pane overflows into horizontal
+/// scroll rather than moving the divider away from the pointer.
+///
+/// The frozen values come from the widths `place_children` last resolved —
+/// already clamped to each column's `[min, max]` — so re-resolving them as
+/// overrides changes nothing visible.
+fn commit_resize(
+    signal: &Signal<HashMap<String, f32>>,
+    resolved: &SharedColumnWidths,
+    columns: &ColumnResizeTable,
+    target: usize,
+    new_w: f32,
+) {
     let mut m = signal.get();
-    m.insert(col_id.to_string(), new_w);
+    {
+        let widths = resolved.borrow();
+        for (slot, info) in columns.iter().enumerate().take(target) {
+            if info.flex
+                && !m.contains_key(&info.id)
+                && let Some(&w) = widths.get(slot)
+            {
+                m.insert(info.id.clone(), w);
+            }
+        }
+    }
+    if let Some(info) = columns.get(target) {
+        m.insert(info.id.clone(), new_w);
+    }
     signal.set(m);
 }
 
@@ -1006,6 +1079,11 @@ pub(crate) struct HeaderRow {
     divider_width: f32,
     pane_boundaries: PaneBoundaries,
     scroll_x: Signal<f32>,
+    /// The user-resize overrides the table resolves `widths` from. Bound at
+    /// `RepaintOnly` (see `build`): the strip's own bounds don't change when
+    /// a column does, so without it the walker would replay the cached
+    /// paint and leave every separator where it was.
+    column_widths_signal: Signal<HashMap<String, f32>>,
 
     // Build state.
     bands: Option<[Option<WidgetId>; 3]>,
@@ -1018,6 +1096,7 @@ impl HeaderRow {
         divider_width: f32,
         pane_boundaries: PaneBoundaries,
         scroll_x: Signal<f32>,
+        column_widths_signal: Signal<HashMap<String, f32>>,
     ) -> Self {
         Self {
             cells,
@@ -1025,6 +1104,7 @@ impl HeaderRow {
             divider_width,
             pane_boundaries,
             scroll_x,
+            column_widths_signal,
             bands: None,
         }
     }
@@ -1036,6 +1116,23 @@ impl HeaderRow {
 
 impl Widget for HeaderRow {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+        // `paint` draws the column separators from `widths` and `scroll_x`,
+        // but the strip spans the table, so neither a column resize nor a
+        // horizontal scroll changes *its* bounds — and the render walker
+        // replays a clean node's cached paint. The table root re-lays out on
+        // both (its own `Relayout` bindings) and the cells move with their
+        // new bounds; only the separators would stay behind. Repaint-only:
+        // geometry is the root's business, this node just redraws.
+        self.column_widths_signal.bind_to(
+            ctx.self_id(),
+            ctx.binding_registry(),
+            BindingLevel::RepaintOnly,
+        );
+        self.scroll_x.bind_to(
+            ctx.self_id(),
+            ctx.binding_registry(),
+            BindingLevel::RepaintOnly,
+        );
         if !self.has_pinning() {
             return Vec::new();
         }

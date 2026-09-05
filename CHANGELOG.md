@@ -41,6 +41,19 @@ for a permission change on `/tmp` that was never its to make.
 
 ### Fixed
 
+#### Data views
+
+- `TableView` / `TreeTableView`: dragging a column divider now moves it with
+  the pointer. Only the columns after the divider reflow; a `Flex` column
+  before it is frozen at its current width in the same `column_widths_signal`
+  write. Before, the resized column's delta was shared with every flex column,
+  so the divider lagged the pointer (or stood still) while the dividers before
+  it slid the other way.
+- `TableView` / `TreeTableView`: the header strip's column separators now
+  follow a column resize and a horizontal scroll. The strip's bounds change on
+  neither, so its cached paint was replayed and the lines stayed where they
+  were while the cells moved.
+
 #### Automation
 
 - **The short `/tmp` fallback tried to make `/tmp` itself owner-only.** The

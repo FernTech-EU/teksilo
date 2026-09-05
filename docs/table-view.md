@@ -495,6 +495,22 @@ Under `OnRelease` nothing moves until the button comes up, so the view paints
 a full-height guide line at the prospective divider for the duration of the
 drag — the same rubber band Qt and Excel show.
 
+**Only the columns after the divider reflow.** The grabbed divider follows the
+pointer one-for-one; the columns before it keep their widths and the `Flex`
+columns after it absorb the difference (once none of them can, the pane
+overflows into horizontal scroll). That is NSTableView's and `QHeaderView`'s
+behaviour, and it needs one thing from the write: a `Flex` column that
+precedes the resized one and has no override yet is **frozen at its current
+width** in the same `column_widths_signal` update. Otherwise the solver would
+share the resized column's delta among *every* flex column — the preceding
+ones included — so the column's leading edge would slide the other way and the
+divider would track the pointer at a fraction of its speed (or not at all,
+with all the remaining flex weight ahead of it). The frozen widths are the
+ones already on screen, so nothing jumps; they simply stop flexing on later
+window resizes, exactly as a column the user sized by hand does. Apps that
+persist `column_widths_signal` will therefore see entries for those columns
+too.
+
 The committed width is clamped to the column's `[min_width, max_width]`
 **before** it is written, so `column_widths_signal` — the handle apps read
 back and persist — always mirrors what the table actually renders (the

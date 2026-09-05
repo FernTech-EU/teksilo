@@ -2140,6 +2140,7 @@ impl<T: 'static> Widget for TreeTableView<T> {
                             min_width: c.min_width.unwrap_or(cp::MIN_COLUMN_WIDTH_DEFAULT),
                             max_width: c.max_width,
                             resizable: c.resizable,
+                            flex: matches!(c.width, crate::ColumnWidth::Flex(_)),
                         }
                     })
                     .collect(),
@@ -2183,6 +2184,7 @@ impl<T: 'static> Widget for TreeTableView<T> {
                 cp::GRID_LINE_THICKNESS,
                 *self.pane_boundaries.borrow(),
                 self.scroll_x.clone(),
+                self.column_widths_signal.clone(),
             );
             // Wire reorder drag-target handlers on the header strip — the
             // shared drop-target half of the mechanism `HeaderCell` already
@@ -6854,6 +6856,66 @@ mod tests {
             (w.get("name").copied().unwrap_or(0.0) - 310.0).abs() < 0.5,
             "dragging the divider left from `size` must shrink `name` from 340 \
              to 310; got {w:?}"
+        );
+    }
+
+    #[test]
+    fn tt_resize_keeps_preceding_flex_column_and_tracks_the_pointer() {
+        // `name` Flex(1) | `size` Fixed(60) | `kind` Flex(1) at 400 px: name
+        // and kind get 170 each, size sits at [170, 230]. Drag the size|kind
+        // divider right by 30: `size` grows to 90, `kind` absorbs it, and
+        // `name` — the flex column *before* the grip — must stay at 170. The
+        // header is shared with `TableView`, but the resize table that carries
+        // each column's flex flag is filled here, so assert it from this side.
+        use teksilo_canvas::Point;
+        use teksilo_core::event::{Modifiers, PointerButton, WidgetEvent};
+        let kind_col = Column::<&str>::new("kind", lit!("Kind"), |_row, _: &CellContext| {
+            Box::new(crate::primitives::TextWidget::new(lit!("k")))
+        })
+        .width(ColumnWidth::Flex(1.0));
+        let proxy = SortFilterTreeModel::new(sample_tree());
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let id = tree.add(
+            TreeTableView::from_projection(proxy)
+                .add_column(name_col())
+                .add_column(size_col())
+                .add_column(kind_col)
+                .row_height(20.0)
+                .show_internal_scrollbars(false),
+        );
+        let proposal = SizeProposal {
+            width: Some(400.0),
+            height: Some(200.0),
+        };
+        tree.layout(proposal);
+        let y = cp::HEADER_HEIGHT * 0.5;
+        let down_x = 230.0 - cp::RESIZE_HANDLE_WIDTH * 0.5;
+        tree.dispatch_event(WidgetEvent::PointerDown {
+            position: Point::new(down_x, y),
+            button: PointerButton::Primary,
+            modifiers: Modifiers::NONE,
+        });
+        tree.dispatch_event(WidgetEvent::PointerMove {
+            position: Point::new(down_x + 30.0, y),
+        });
+        tree.layout(proposal);
+        tree.dispatch_event(WidgetEvent::PointerUp {
+            position: Point::new(down_x + 30.0, y),
+            button: PointerButton::Primary,
+            modifiers: Modifiers::NONE,
+        });
+        let w = tt_overrides(&tree, id);
+        assert!(
+            (w.get("size").copied().unwrap_or(0.0) - 90.0).abs() < 0.5,
+            "size grows by the pointer travel; got {w:?}"
+        );
+        assert!(
+            (w.get("name").copied().unwrap_or(0.0) - 170.0).abs() < 0.5,
+            "name, ahead of the grip, is frozen where it was; got {w:?}"
+        );
+        assert!(
+            !w.contains_key("kind"),
+            "kind absorbs the change; got {w:?}"
         );
     }
 
