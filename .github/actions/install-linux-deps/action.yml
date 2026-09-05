@@ -2,7 +2,7 @@
 # SPDX-FileCopyrightText: 2026 FernTech
 
 name: 'Install Linux system dependencies'
-description: 'Install the X11 / Wayland / keyboard libraries that winit, wgpu and arboard need to build on Linux'
+description: 'Install the X11 / Wayland / keyboard libraries that winit, wgpu and arboard need to build and run on Linux'
 
 runs:
   using: 'composite'
@@ -25,3 +25,11 @@ runs:
           libwayland-dev \
           libxcb1-dev \
           libx11-dev
+        # Runtime, not build: winit reaches xkbcommon through `xkbcommon-dl`,
+        # which `dlopen`s `libxkbcommon-x11.so.0` the moment an X11 event loop
+        # is created — so nothing needs it to compile and any job that actually
+        # opens a window panics without it. The runner image does not carry it.
+        # `-0`, not `-dev`, is deliberate: the loader asks for the SONAME, and
+        # the package pulls the `libxcb-xkb1` that library itself links.
+        sudo apt-get install -y --no-install-recommends \
+          libxkbcommon-x11-0
