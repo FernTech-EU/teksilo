@@ -116,9 +116,12 @@ enum MenuItemState {
 const DEFAULT_SUBMENU_OPEN_DELAY: Duration = Duration::from_millis(400);
 const DEFAULT_SUBMENU_CLOSE_DELAY: Duration = Duration::from_millis(150);
 
-/// Glyph size for the check / dash / radio-dot rendered in the
-/// 16dp `MENU_ICON_COLUMN_WIDTH` leading slot. 12dp matches the
-/// existing `chevron_right(12.0)` used for submenu triggers.
+/// Glyph size for the check / dash / radio-dot rendered in the leading
+/// slot, whose width is the active style's
+/// [`MenuItemMetrics::icon_column_width`](teksilo_core::styles::MenuItemMetrics).
+/// 12dp matches the existing `chevron_right(12.0)` used for submenu
+/// triggers, and fits inside the smallest column any shipped preset asks
+/// for (macOS's 14dp).
 const MENU_INDICATOR_GLYPH_SIZE: f32 = 12.0;
 
 /// Internal selection mode of a `MenuItem`. `Plain` is the default
@@ -681,7 +684,6 @@ fn is_highlight(state: MenuItemState) -> bool {
 
 impl Widget for MenuItem {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        use crate::styles::recipe_menu_item_style as menu;
         let self_id = ctx.self_id();
         // Forward enabled (static or signal-bound) into the arena. A bound
         // signal makes enable/disable reactive — the framework's
@@ -705,6 +707,13 @@ impl Widget for MenuItem {
             .or_else(|| ctx.theme().style_slots.menu_item.clone())
             .unwrap_or_else(|| Rc::new(crate::styles::RecipeMenuItemStyle::default()));
         let highlighted_role = style.highlighted_label_role();
+        // The slot sizes the active style owns. `MenuItem` builds the leading
+        // icon/check column and the trailing chevron column itself — they are
+        // slot *contents*, handed to `make_body` already sized — so they have
+        // to be read here rather than inside the style. Hardcoding the IntUI
+        // constants instead is what made `MenuItemRecipe::icon_column_width` a
+        // no-op: macOS declared a 14 dp check column and got 16.
+        let metrics = style.metrics();
 
         // Combine interaction + effective_enabled so `text_role`
         // resolves to Disabled when disabled. Keeps the icon and label
@@ -825,8 +834,8 @@ impl Widget for MenuItem {
             };
             ctx.add(
                 crate::primitives::FixedSize::new()
-                    .width(menu::MENU_ICON_COLUMN_WIDTH)
-                    .height(menu::MENU_ICON_COLUMN_WIDTH)
+                    .width(metrics.icon_column_width)
+                    .height(metrics.icon_column_width)
                     .child_id(icon_child_id),
             )
         };
@@ -931,8 +940,7 @@ impl Widget for MenuItem {
                 if has_shortcut {
                     // Both set (rare) — keep the chord and the phrase apart.
                     trailing_row = trailing_row.child(
-                        crate::primitives::FixedSize::new()
-                            .width(menu::MENU_ITEM_PADDING_HORIZONTAL),
+                        crate::primitives::FixedSize::new().width(metrics.trailing_column_width),
                     );
                 }
                 let hint_role = interaction.map(move |s| {
@@ -982,8 +990,8 @@ impl Widget for MenuItem {
             };
             let chevron_column = ctx.add(
                 crate::primitives::FixedSize::new()
-                    .width(menu::MENU_ITEM_PADDING_HORIZONTAL)
-                    .height(menu::MENU_ICON_COLUMN_WIDTH)
+                    .width(metrics.trailing_column_width)
+                    .height(metrics.icon_column_width)
                     .child_id(chevron_child_id),
             );
             trailing_row = trailing_row.add_child(chevron_column);

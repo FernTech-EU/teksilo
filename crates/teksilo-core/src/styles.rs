@@ -145,7 +145,9 @@ pub use list_container_style::{
     ListContainerStyle, ListDropIntoRecipe, ListInsertionConfig, ListInsertionRecipe,
     SharedListContainerStyle,
 };
-pub use menu_item_style::{MenuItemStyle, MenuItemStyleConfig, SharedMenuItemStyle};
+pub use menu_item_style::{
+    MenuItemMetrics, MenuItemStyle, MenuItemStyleConfig, SharedMenuItemStyle,
+};
 pub use panel_style::{PanelStyle, PanelStyleConfig, PanelVariant, SharedPanelStyle};
 pub use popover_style::{PopoverStyle, PopoverStyleConfig, PopoverVariant, SharedPopoverStyle};
 pub use progress_bar_style::{

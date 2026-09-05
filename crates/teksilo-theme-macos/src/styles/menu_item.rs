@@ -30,7 +30,7 @@
 
 use teksilo_core::build_context::BuildContext;
 use teksilo_core::signal::Signal;
-use teksilo_core::styles::{MenuItemStyle, MenuItemStyleConfig};
+use teksilo_core::styles::{MenuItemMetrics, MenuItemStyle, MenuItemStyleConfig};
 use teksilo_core::widget_id::WidgetId;
 use teksilo_tokens::{CornerRadius, SurfaceRole, TextRole};
 use teksilo_widgets::primitives::{Padding, RectWidget, ZStack};
@@ -112,6 +112,14 @@ impl MenuItemStyle for MacOsMenuItemStyle {
         let row = RecipeMenuItemStyle::new(macos_menu_item_recipe()).make_body(&inner_cfg, ctx);
 
         ctx.add(ZStack::new().add_child(inset_backdrop).add_child(row))
+    }
+
+    /// Delegate the metrics alongside the row. `MenuItem` builds the icon and
+    /// chevron columns before any style runs and `MenuSeparator` is a
+    /// different widget entirely, so without this the slots would keep the
+    /// IntUI sizes while the row around them used ours.
+    fn metrics(&self) -> MenuItemMetrics {
+        RecipeMenuItemStyle::new(macos_menu_item_recipe()).metrics()
     }
 
     fn highlighted_label_role(&self) -> Option<TextRole> {

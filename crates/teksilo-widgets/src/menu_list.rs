@@ -81,6 +81,22 @@ enum MenuEntry {
     Header(PendingChild),
 }
 
+/// The active `MenuItemStyle`'s row metrics, from the theme slot.
+///
+/// A `MenuSeparator` and the scroll viewport are siblings of the rows, not
+/// rows themselves, so there is no per-call `.style(...)` to consult — the
+/// theme slot is the only style they can share with the items around them.
+fn menu_metrics(theme: &teksilo_core::Theme) -> teksilo_core::styles::MenuItemMetrics {
+    use teksilo_core::styles::MenuItemStyle;
+
+    theme
+        .style_slots
+        .menu_item
+        .as_ref()
+        .map(|s| s.metrics())
+        .unwrap_or_else(|| crate::styles::RecipeMenuItemStyle::default().metrics())
+}
+
 /// A 1 dp horizontal divider line between groups of menu items.
 #[derive(Debug)]
 pub struct MenuSeparator;
@@ -91,13 +107,8 @@ impl Widget for MenuSeparator {
         proposal: SizeProposal,
         ctx: &LayoutContext,
     ) -> teksilo_core::widget::LayoutResponse {
-        let _ = ctx;
         let width = proposal.width.unwrap_or(0.0);
-        Size::new(
-            width,
-            crate::styles::recipe_menu_item_style::MENU_SEPARATOR_HEIGHT,
-        )
-        .into()
+        Size::new(width, menu_metrics(ctx.theme).separator_height).into()
     }
 
     fn paint(&self, bounds: Rect, canvas: &mut teksilo_canvas::Canvas, ctx: &PaintContext) {
@@ -445,7 +456,6 @@ impl std::fmt::Debug for MenuList {
 
 impl Widget for MenuList {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        use crate::styles::recipe_menu_item_style as menu;
         let _theme_signal = ctx.theme_signal();
 
         // Keyboard-focused item index (shared with the key handler and wrappers).
@@ -621,7 +631,7 @@ impl Widget for MenuList {
         // matter.
         let visible_cap_id = match self.max_visible_items {
             Some(cap) if self.item_widget_ids.len() > cap => {
-                let max_height = cap as f32 * menu::MENU_ITEM_HEIGHT + 8.0;
+                let max_height = cap as f32 * menu_metrics(ctx.theme()).item_height + 8.0;
                 // Cap the HEIGHT only. `preferred_size(0.0, ..)` would set the preferred
                 // *width* to zero — and a popover proposes an unconstrained width (it
                 // hugs its content), so the zero was taken literally: the menu collapsed

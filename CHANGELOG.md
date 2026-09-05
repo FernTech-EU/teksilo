@@ -40,6 +40,23 @@ by crate for clarity, not because crates version independently.
   an account of this crate's protocol history. The absence is now reported where
   the instruction to use the client is given.
 
+### Fixed
+
+#### Menus
+
+- **Menu item labels line up on one leading inset again under the Fluent and
+  macOS presets.** Both stack the shared menu row over their own highlight
+  rect, and the row was measured at its content width and centred there — so
+  each label sat further in by half its own slack, ragged from row to row.
+- **`MenuItemRecipe`'s `icon_column_width`, `padding_horizontal` and
+  `separator_height` now reach the parts of the row they describe.** The
+  leading icon/check column, the trailing chevron column and `MenuSeparator`
+  read the active style through the new
+  `MenuItemStyle::metrics() -> MenuItemMetrics` (defaulted, so an existing
+  style needs no change) instead of the IntUI module constants. macOS menus
+  get their 14 dp check column and 11 dp separator, Fluent its 11 dp trailing
+  column and 3 dp `MenuFlyoutSeparatorThemePadding`.
+
 ## [0.9.4] - 2026-09-05
 
 One fix, to the fallback the automation bridge takes when `$TMPDIR` is too deep
