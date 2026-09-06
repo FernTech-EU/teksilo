@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
+//! Pointer, keyboard and accessibility event routing: the dispatch
+//! pipeline, hit-testing, the preview/bubble handler passes and the
+//! context-menu entry points.
+
 use super::*;
 
 use crate::gesture::{GestureEvent, RawPointerEvent, TapEvent};
@@ -831,197 +835,6 @@ impl WidgetTree {
         self.dispatch_to_widget_returning_handled(target, event, ops);
     }
 
-    /// Whether `id` carries a drag or swipe handler (hence gets a drag/swipe
-    /// recognizer once its arena is built).
-    fn widget_has_drag(&self, id: WidgetId) -> bool {
-        self.arena
-            .get(id)
-            .map(|n| n.any_handler(|h| h.on_drag.is_some() || h.on_swipe.is_some()))
-            .unwrap_or(false)
-    }
-
-    /// Whether `id` is a gesture dead-zone boundary — a press inside its
-    /// subtree must not arm a drag/swipe on any ancestor above it. See
-    /// [`WidgetNode::gesture_dead_zone`](crate::arena::WidgetNode::gesture_dead_zone).
-    fn is_gesture_dead_zone(&self, id: WidgetId) -> bool {
-        self.arena
-            .get(id)
-            .map(|n| n.gesture_dead_zone)
-            .unwrap_or(false)
-    }
-
-    /// Whether `id` is a keyboard-capture surface — while focused it
-    /// receives every `KeyDown` raw, bypassing shortcut resolution. See
-    /// [`WidgetNode::keyboard_capture`](crate::arena::WidgetNode::keyboard_capture).
-    fn is_keyboard_capture(&self, id: WidgetId) -> bool {
-        self.arena
-            .get(id)
-            .map(|n| n.keyboard_capture)
-            .unwrap_or(false)
-    }
-
-    /// On `PointerDown`, when a descendant has captured the pointer for a
-    /// non-drag gesture (a tap / long-press), arm every strict ancestor that
-    /// carries a drag/swipe recognizer so an ancestor drag can still begin
-    /// once the pointer moves past threshold — the tap-vs-drag disambiguation
-    /// across the hit-path. Without this a descendant `on_tap` permanently
-    /// shadows an ancestor `on_drag` (the bubble stops + capture routes every
-    /// move to the descendant alone).
-    ///
-    /// Skipped when the captured widget can itself drag: the innermost drag
-    /// owns the gesture, so no ancestor observation.
-    pub(super) fn arm_drag_observers(
-        &mut self,
-        captured: WidgetId,
-        down_event: &WidgetEvent,
-        ops: &mut dyn crate::window::WindowOps,
-    ) {
-        self.drag_observers.clear();
-        if self.widget_has_drag(captured) {
-            return;
-        }
-        // The press is inside a gesture dead zone (the captured control *is* the
-        // dead zone) → arm no ancestor drag at all.
-        if self.is_gesture_dead_zone(captured) {
-            return;
-        }
-        let mut observers = Vec::new();
-        let mut current = self.arena.parent(captured);
-        while let Some(id) = current {
-            // A dead-zone boundary stops the walk: ancestors AT or ABOVE it are
-            // never armed, so a control inside the dead zone can never start the
-            // ancestor's drag (the robust fix for "clicking a header button +
-            // a few px of jitter drags the whole panel").
-            if self.is_gesture_dead_zone(id) {
-                break;
-            }
-            if self.widget_has_drag(id) {
-                // Build the arena (the bubble never reached this ancestor) and
-                // feed it the press so its DragRecognizer records the origin.
-                {
-                    let WidgetTree {
-                        arena,
-                        gesture_owners,
-                        ..
-                    } = self;
-                    if let Some(node) = arena.get_mut(id) {
-                        Self::ensure_gesture_arena(node, id, gesture_owners);
-                    }
-                }
-                self.observe_drag_on_ancestor(id, down_event, ops);
-                observers.push(id);
-            }
-            current = self.arena.parent(id);
-        }
-        self.drag_observers = observers;
-    }
-
-    /// The pointer sequence ended (a tap / plain release) WITHOUT the armed
-    /// ancestor drag latching. Feed the terminating `Up` to each armed ancestor
-    /// so its `DragRecognizer` clears the press origin it recorded when it was
-    /// armed on `PointerDown` — otherwise a later *hover* move would cross the
-    /// drag threshold and start a phantom drag. This matters because the press
-    /// was captured by an interactive descendant (e.g. a card's read-only
-    /// `RichTextEditor`), so the ancestor's own arena never saw this `Up` on
-    /// its own and its recognizer would stay armed indefinitely. Also discards
-    /// the observer list.
-    pub(super) fn release_drag_observers(
-        &mut self,
-        up_event: &WidgetEvent,
-        ops: &mut dyn crate::window::WindowOps,
-    ) {
-        if self.drag_observers.is_empty() {
-            return;
-        }
-        let observers = std::mem::take(&mut self.drag_observers);
-        for id in &observers {
-            // An `Up` while the recognizer is not mid-drag resolves it to
-            // `Failed` and clears `down_position` — no gesture is produced, so
-            // this only tidies recognizer state.
-            self.observe_drag_on_ancestor(*id, up_event, ops);
-        }
-    }
-
-    /// On a captured `PointerMove`, feed the move to each armed ancestor drag
-    /// observer (innermost first). If one latches a drag, it has already called
-    /// `start_drag` (so `active_drag` now owns the pointer) — stop observing.
-    pub(super) fn advance_drag_observers(
-        &mut self,
-        move_event: &WidgetEvent,
-        ops: &mut dyn crate::window::WindowOps,
-    ) {
-        if self.drag_observers.is_empty() {
-            return;
-        }
-        let observers = std::mem::take(&mut self.drag_observers);
-        for id in &observers {
-            let recognized = self.observe_drag_on_ancestor(*id, move_event, ops);
-            if recognized || self.active_drag.is_some() {
-                // A drag latched on this ancestor — it now owns the pointer.
-                return;
-            }
-        }
-        // No drag yet — keep observing on the next move.
-        self.drag_observers = observers;
-    }
-
-    /// Feed one raw pointer event to `id`'s gesture arena WITHOUT firing its
-    /// `on_pointer_event` or taking the implicit capture (the descendant
-    /// already holds it). Returns `true` if the arena recognized a gesture
-    /// (a drag/swipe latched), in which case it is dispatched so the
-    /// `on_drag` handler's `start_drag` runs and `active_drag` takes over.
-    fn observe_drag_on_ancestor(
-        &mut self,
-        id: WidgetId,
-        event: &WidgetEvent,
-        ops: &mut dyn crate::window::WindowOps,
-    ) -> bool {
-        let localized = self.localize_event(id, event);
-        let event = localized.as_ref().unwrap_or(event);
-        let raw = match event {
-            WidgetEvent::PointerDown {
-                position,
-                button,
-                modifiers,
-            } => crate::gesture::RawPointerEvent::Down {
-                position: *position,
-                button: *button,
-                modifiers: *modifiers,
-            },
-            WidgetEvent::PointerMove { position } => crate::gesture::RawPointerEvent::Move {
-                position: *position,
-            },
-            WidgetEvent::PointerUp {
-                position,
-                button,
-                modifiers,
-            } => crate::gesture::RawPointerEvent::Up {
-                position: *position,
-                button: *button,
-                modifiers: *modifiers,
-            },
-            _ => return false,
-        };
-        let mut ctx = self.make_event_context(&mut *ops);
-        let WidgetTree { arena, .. } = self;
-        let recognized = if let Some(node) = arena.get_mut(id) {
-            if let Some(arena_ref) = node.handlers.gesture_arena.as_mut() {
-                if let Some(gesture) = arena_ref.process(&raw) {
-                    Self::dispatch_recognized_gesture(node, gesture, &mut ctx);
-                    true
-                } else {
-                    false
-                }
-            } else {
-                false
-            }
-        } else {
-            false
-        };
-        self.collect_from_ctx(ctx, id);
-        recognized
-    }
-
     /// Rebuild `event` with any pointer position converted into `id`'s
     /// **widget-local** space. Returns `None` for events that carry no
     /// position, so the caller keeps the original event.
@@ -1033,7 +846,7 @@ impl WidgetTree {
     /// `on_tap` / `on_double_tap` / `on_long_press` / `on_drag` and
     /// `on_pointer_event` all receive widget-local coordinates uniformly.
     /// See [`WidgetArena::local_pointer_position`].
-    fn localize_event(&self, id: WidgetId, event: &WidgetEvent) -> Option<WidgetEvent> {
+    pub(super) fn localize_event(&self, id: WidgetId, event: &WidgetEvent) -> Option<WidgetEvent> {
         match event {
             WidgetEvent::PointerDown {
                 position,
@@ -2663,43 +2476,6 @@ mod tests {
             !row.get(),
             "and so did the row — a container is not still hovered because the \
              pointer left it through a button"
-        );
-    }
-
-    #[test]
-    fn destroy_subtree_clears_dangling_pointer_capture() {
-        use crate::event::{EventResponse, Modifiers, PointerButton};
-        use crate::test_widgets::StackWidget;
-
-        let mut tree = WidgetTree::new();
-        let child = tree.add(FillWidget::new().on_pointer_event(|event, ctx| {
-            if matches!(event, WidgetEvent::PointerDown { .. }) {
-                ctx.capture_pointer();
-            }
-            EventResponse::Ignored
-        }));
-        let parent = tree.add(StackWidget::new().add_child(child));
-        tree.layout(SizeProposal::exact(100.0, 50.0));
-
-        // A press inside the child captures the pointer to it.
-        tree.dispatch_event(WidgetEvent::PointerDown {
-            position: Point::new(50.0, 25.0),
-            button: PointerButton::Primary,
-            modifiers: Modifiers::NONE,
-        });
-        assert_eq!(
-            tree.pointer_captured_by,
-            Some(child),
-            "PointerDown handler should have captured the pointer"
-        );
-
-        // Tearing down the capturing subtree (e.g. mid-gesture rebuild) must
-        // release the capture eagerly rather than leaving a dangling id that
-        // swallows every later Move/Up until the next layout pass heals it.
-        tree.destroy_subtree(parent);
-        assert_eq!(
-            tree.pointer_captured_by, None,
-            "destroy_subtree must clear a capture anchored at a destroyed widget"
         );
     }
 

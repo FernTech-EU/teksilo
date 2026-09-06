@@ -12,13 +12,15 @@ use crate::event::{EventResponse, Key, Modifiers, PointerButton, WidgetEvent};
 use crate::widget::{EventContext, LayoutContext, PaintContext, Widget, WidgetPlacement};
 use crate::widget_id::WidgetId;
 
+mod accessibility_emit_impl;
 mod accessibility_impl;
 mod drag_drop_impl;
-mod event_dispatch_impl;
 mod focus_impl;
 mod gesture_dispatch_impl;
 mod layout_impl;
 mod overlay_impl;
+mod pointer_router;
+mod pointer_state;
 mod query_impl;
 mod rendering_impl;
 mod test_api;
@@ -1666,34 +1668,6 @@ impl WidgetTree {
         self.animation_scheduler.has_active()
     }
 
-    /// The clock a newly promoted animation must be stamped with: the same one
-    /// the scheduler will later be ticked against.
-    ///
-    /// Normally the wall clock. But once [`tick_animations`](Self::tick_animations)
-    /// has driven this tree, the scheduler is *only* ever ticked at
-    /// [`Self::sim_clock`] — so an animation stamped `Instant::now()` is measured
-    /// against a clock that may never reach its start. A headless test
-    /// interleaving `layout()` (which promotes) with `tick_animations()` (which
-    /// ticks) advances the two clocks independently: simulated time by whatever
-    /// the test asks for, real time by however long the test actually takes. The
-    /// moment real time overtakes simulated time, every animation armed from then
-    /// on has a start in the scheduler's future and its progress **freezes** —
-    /// not slowly, completely, and no number of further ticks recovers it.
-    ///
-    /// That made animated layout tests fail as a function of machine load rather
-    /// than of behaviour: green run alone or on a couple of threads, red once the
-    /// runner filled the cores and each test's wall-clock time stretched past the
-    /// simulated time it was asking for. The overlay manager already keeps its
-    /// real and simulated timestamps apart for this reason; animations now agree
-    /// on one clock the same way.
-    fn animation_clock(&self) -> std::time::Instant {
-        if self.sim_driven {
-            self.sim_clock
-        } else {
-            std::time::Instant::now()
-        }
-    }
-
     /// Pick up pending `animate_to` requests from registered signals
     /// and start them on the animation scheduler.
     fn process_pending_animations(&mut self) {
@@ -1830,82 +1804,6 @@ impl WidgetTree {
     /// Active animated-quad slot count. Test / debug helper.
     pub fn animated_quad_count(&self) -> usize {
         self.animated_quads.active_count()
-    }
-
-    /// Advance time-driven gesture recognizers (currently only
-    /// [`crate::gesture::LongPressRecognizer`]) across every widget that
-    /// has a gesture arena. Must be called by the event loop on each
-    /// wake-up; otherwise long-press will never fire during an idle hold.
-    ///
-    /// When a recognizer transitions to `Recognized`, the corresponding
-    /// handler on the owning widget is invoked with a fresh
-    /// [`EventContext`], and any commands / overlay requests it emits are
-    /// collected through the normal post-event path.
-    pub fn tick_gestures(&mut self, now: std::time::Instant) {
-        let mut noop = crate::window::NoopWindowOps;
-        self.tick_gestures_with_ops(now, &mut noop);
-    }
-
-    /// App-facing variant of [`tick_gestures`](Self::tick_gestures)
-    /// that accepts a real [`WindowOps`](crate::window::WindowOps)
-    /// sink so gesture-recognized handlers can call the multi-window
-    /// API synchronously.
-    pub fn tick_gestures_with_ops(
-        &mut self,
-        now: std::time::Instant,
-        ops: &mut dyn crate::window::WindowOps,
-    ) {
-        // Snapshot the gesture-owners set into the reusable scratch.
-        // Previously this iterated every active widget; in practice
-        // only a tiny fraction carry a gesture arena, so visiting the
-        // rest was pure overhead.
-        // `mem::take` lets the loop borrow `&mut self` for
-        // `make_event_context` etc. without conflicting with the
-        // scratch buffer; we put the storage back at the end.
-        let mut ids = std::mem::take(&mut self.active_ids_scratch);
-        ids.clear();
-        ids.extend(
-            self.gesture_owners
-                .iter()
-                .copied()
-                .filter(|id| self.arena.is_active(*id)),
-        );
-        for &id in &ids {
-            let gesture = match self.arena.get_mut(id) {
-                Some(node) => node
-                    .handlers
-                    .gesture_arena
-                    .as_mut()
-                    .and_then(|arena| arena.tick(now)),
-                None => None,
-            };
-            let Some(gesture) = gesture else { continue };
-
-            let mut ctx = self.make_event_context(&mut *ops);
-            if let Some(node) = self.arena.get_mut(id) {
-                Self::dispatch_recognized_gesture(node, gesture, &mut ctx);
-            }
-            self.collect_from_ctx(ctx, id);
-            self.arena.mark_needs_paint(id);
-        }
-        self.active_ids_scratch = ids;
-    }
-
-    /// Earliest wall-clock deadline at which any active gesture arena
-    /// needs [`WidgetTree::tick_gestures`] called — typically a pending
-    /// long-press timeout. Returns `None` when no recognizer is waiting.
-    pub fn next_gesture_deadline(&self) -> Option<std::time::Instant> {
-        // Iterate just the widgets that actually carry a gesture arena.
-        // `filter` for `is_active` skips dormant entries that may still
-        // be in the set after a hide-without-detach.
-        self.gesture_owners
-            .iter()
-            .copied()
-            .filter(|id| self.arena.is_active(*id))
-            .filter_map(|id| self.arena.get(id))
-            .filter_map(|node| node.handlers.gesture_arena.as_ref())
-            .filter_map(|arena| arena.next_deadline())
-            .min()
     }
 
     /// Advance animations by simulated time (for deterministic testing).
