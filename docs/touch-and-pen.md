@@ -1,3 +1,6 @@
+<!-- SPDX-License-Identifier: MPL-2.0 -->
+<!-- SPDX-FileCopyrightText: 2026 FernTech -->
+
 # Touch & pen
 
 Teksilo is a desktop framework whose input model was, until now, a mouse: one
@@ -6,12 +9,14 @@ digitizers break all four of those assumptions at once. This document describes
 the vocabulary the framework uses to stop assuming them.
 
 It is written alongside the migration, so it grows as the packages land. What is
-here now is what exists now: the pointer model, the clock, and the trace switch.
+here now is what exists now: the pointer model, the clock, the trace switch, and
+the platform translator that turns an OS touch packet into pointer samples.
 
-> **Status.** A mouse behaves exactly as it always has. Nothing yet produces a
-> touch or pen sample: the platform backends still deliver mouse events, and the
-> gesture recognizers still see the same stream they always did. What this
-> package adds is the *vocabulary* those samples will arrive in.
+> **Status.** A mouse behaves exactly as it always has. The platform layer can
+> now *produce* touch samples, but nothing dispatches them yet: the app event
+> loop still feeds the tree the single-`WidgetEvent` mouse path, and the gesture
+> recognizers still see the same stream they always did. Pen is not translated
+> at all.
 
 ---
 
@@ -274,13 +279,153 @@ teksilo_core::trace_input!(Samples, "down {:?} at {:?}", id, position);
 
 ---
 
-## 5. What is not here yet
+## 5. Platform capabilities
 
-Deliberately, and in this order: the per-pointer state table (so two contacts
-can be tracked at once), gesture arbitration keyed by pointer, `TouchAction`
-declarations, the kinetic scrolling core, the platform touch backends, the
-density sweep across the widget catalogue, and touch text editing. Each has its
-own package; this file grows with them.
+The translator that turns winit packets into samples lives in
+`teksilo-platform/src/event_translation.rs`; the seam it sits behind is
+`PointerBackend` in `teksilo-platform/src/pointer_backend.rs`. A backend
+declares what it can report through `BackendCaps`, and **every `false` below is
+a platform fact read out of winit 0.30's source, not a to-do**.
+
+### 5.1 The matrix
+
+| | Windows | macOS | Wayland | X11 |
+| --- | --- | --- | --- | --- |
+| touch at all | yes | **no** | yes | yes |
+| `reports_cancel` | no | no | **yes** | no |
+| `reports_pressure` | yes (`WM_POINTER`) | — | no | no |
+| `reports_tilt` / `twist` / pen kind / palm | no | — | no | no |
+| `reports_scroll_phase` | no | **yes** | yes | no |
+| `reports_os_momentum` | no | **yes** | no | no |
+| `reports_os_pinch` | no | **yes** | no | no |
+| `synthesises_mouse_from_touch` | no | — | no | **yes** |
+| `touch_window_drag` | no | no | **no** | no |
+| `osk` | `ViaAccessibility` | `None` | `None` | `None` |
+
+`BackendCaps::for_platform(PlatformKind, WindowSystem)` is the machine-readable
+form, and it is a *pure function* — so every row above is asserted from any
+host, including the two a Linux CI runner cannot boot.
+
+`WindowSystem::Unknown` is exactly the set {Windows, macOS, headless}, because
+`window_system_for_display_handle` only ever answers `Wayland` or `X11` from a
+live Linux/BSD handle. That is what makes `Unknown` a safe default for the
+dual-stream suppressors: none of those three platforms promotes touch to mouse.
+
+### 5.2 What each backend actually does
+
+**Windows.** winit calls `RegisterTouchWindow(hwnd, TWF_WANTPALM)` and answers
+`WM_TOUCH` *and* the `WM_POINTER*` family, returning 0 without calling
+`DefWindowProc`. There is therefore **no mouse promotion to fight** — and, until
+this package, a Teksilo window received literally nothing for a finger.
+`WM_TOUCH` reports no pressure ("WM_TOUCH doesn't support pressure information",
+winit's own comment); the `WM_POINTER*` path normalises
+`POINTER_TOUCH_INFO::pressure` over `1..=1024`. Tilt, twist, eraser and the palm
+flag all exist in `POINTER_PEN_INFO` and `TOUCH_FLAG_PALM`, and winit 0.30
+surfaces none of them.
+
+**macOS.** Delivers **no touch at all** — `WindowEvent::Touch` is documented
+"macOS: Unsupported". The trackpad arrives as `PinchGesture` /
+`RotationGesture` / `DoubleTapGesture`, and a two-finger pan as `MouseWheel`
+pixel deltas. This is the one platform where the OS owns the momentum, which is
+why `reports_os_momentum` exists at all: a framework fling added on top of
+AppKit's would double the coast.
+
+**Wayland.** The only desktop backend that emits `TouchPhase::Cancelled`
+(`wl_touch.cancel`). No pressure, no tool axes.
+
+**X11.** XI2 touch. winit filters *emulated button* events by
+`XIPointerEmulated`, but it synthesises a `CursorMoved` of its **own** for the
+first concurrently-active contact — "Only the first concurrently active touch ID
+moves the mouse cursor" — on every phase of that contact, at the contact's
+location, through `util::VIRTUAL_CORE_POINTER`: the very device a real mouse
+uses. The two are therefore indistinguishable at this layer, and the translator
+suppresses the emulated stream wholesale while a contact is live. `force` is
+`None // TODO`, and `TouchPhase::Cancelled` is never emitted.
+
+### 5.3 The X11 residual
+
+winit emits its synthetic `CursorMoved` **before** the `Touch` packet that
+establishes the contact. So the very first move of a touch session that follows
+more than 150 ms of quiet leaks exactly one mouse sample, at the touch-down
+point. Closing it would need one event of lookahead, which would cost every real
+X11 mouse move a frame of latency — so it is documented rather than paid for,
+and pinned by a test
+(`the_x11_phantom_motion_does_not_double_the_stream`).
+
+### 5.4 Wayland cannot drag a window with a finger
+
+`touch_window_drag` is `false` everywhere, and on Wayland that is worth stating
+plainly rather than leaving as a gap: `xdg_toplevel::move` needs a serial from
+an input event on a toplevel the compositor agrees the client owns, and winit
+0.30's `drag_window` harvests a **pointer** serial internally. A finger cannot
+reach it however the app asks. A custom title bar therefore stays mouse-only
+under winit 0.30, and any touch-drag affordance has to be an in-app one.
+
+### 5.5 The kill switch
+
+`InputTokens::touch_enabled` is honoured **at the translator**, the first point
+at which a finger becomes a Teksilo concept. With it `false` a touch packet
+yields no sample at all: no `PointerId` is minted, no contact is tracked, no
+suppressor arms, and the mouse translation is byte-for-byte identical. That is
+the programme's rollback switch, and it has to sit at the producer for the
+rollback to be total.
+
+### 5.6 The winit 0.31 mapping
+
+winit 0.31 replaces `WindowEvent::Touch` with a unified pointer API. The seam is
+shaped so that upgrade is one package:
+
+| winit 0.30 | winit 0.31 | reaches Teksilo as |
+| --- | --- | --- |
+| `WindowEvent::Touch { phase, id, location, force }` | `PointerEntered` / `PointerMoved` / `PointerButton` / `PointerLeft` with `PointerSource::Touch { finger_id, force }` | `PointerSample` with `PointerKind::Touch` |
+| `Touch::id: u64` (reused after a lift) | `FingerId` | a fresh `PointerId` per press, either way |
+| `CursorMoved` | `PointerMoved` with `PointerSource::Mouse` | `PointerSample` with `PointerKind::Mouse` |
+| `MouseInput` | `PointerButton` | `PointerSample` with a `button` |
+| — (no pen) | `PointerSource::Tablet` + the `TabletTool*` family | `PointerKind::Pen(..)` and the tilt/twist axes |
+| `MouseWheel { phase: TouchPhase }` | `MouseWheel` with an explicit phase | `ScrollSample::phase` |
+
+Two things the upgrade fixes for free: pen becomes reachable, and the scroll
+phase stops being inferred. One thing it does not: winit 0.30's macOS backend
+**collapses** `NSEvent`'s `phase` and `momentumPhase` into one `TouchPhase`, so
+the OS's momentum arrives as a second `Started → Moved → Ended` run with nothing
+in the event to distinguish it. The translator separates the two with a 100 ms
+handoff window, and that heuristic is a winit-0.30 artefact that should be
+revisited against 0.31's own phase reporting.
+
+### 5.7 The conformance suite
+
+`crates/teksilo-platform/tests/backend_conformance.rs` runs *recorded* winit
+vectors — a Windows two-finger `WM_TOUCH` sequence, an X11 first touch with its
+phantom `CursorMoved`, a macOS wheel-with-momentum ordering, an OS contact id
+reused across two taps, a Wayland cancel — through six invariants:
+
+1. **Identity is unique across OS id reuse.**
+2. **Cancel completeness** — every `Down` is terminated by exactly one `Up` or
+   one `Cancel`, never both, never neither.
+3. **Time is monotone** within a stream.
+4. **Primacy and hover** — at most one live pointer *of a kind* is primary
+   (W3C `isPrimary`; the mouse is always primary in its own stream, and the
+   cross-stream arbitration is the tree's pointer table, not the platform
+   layer's), and no direct pointer ever hovers.
+5. **One stream per contact** — the X11 double-stream case.
+6. **Well-formed scroll phases** — `Began → Changed* → Ended`, `Momentum*` only
+   after an `Ended`.
+
+Nothing in it touches an OS: the vectors are `winit::event::WindowEvent` values
+written out by hand from a reading of the backend that would produce them, so it
+runs with no display, no touchscreen and no GPU. A future backend — winit 0.31,
+a replay backend over a captured trace, a platform Teksilo has not met — earns
+its trust by passing the same six.
+
+---
+
+## 6. What is not here yet
+
+Deliberately, and in this order: wiring the app event loop to the multi-sample
+translator (nothing dispatches a touch sample yet — the platform layer only
+*produces* them), pen translation, gesture arbitration keyed by pointer, the
+kinetic scrolling core, the density sweep across the widget catalogue, and touch
+text editing. Each has its own package; this file grows with them.
 
 See also: [Density & targets](density-and-targets.md), the
 [widget pointer inventory](widget-pointer-inventory.md), the
