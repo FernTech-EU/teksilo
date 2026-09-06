@@ -37,6 +37,8 @@ use teksilo_core::widget_builder::HandlerSet;
 use teksilo_core::widget_id::WidgetId;
 use teksilo_tokens::{Easing, Orientation};
 
+use crate::common::range_nav::{self, RangeAxis, RangeKind, RangeMove};
+
 use super::model::SplitterModel;
 
 /// Hover-dwell total before the focus indicator is fully faded in (hold
@@ -477,11 +479,12 @@ impl Widget for SplitterHandle {
             let layout_sizes = layout_sizes.clone();
             let layout_gutters = layout_gutters.clone();
             let focus_origin = self.focus_origin.clone();
+            let is_rtl = is_rtl.clone();
             handlers = handlers.on_key(move |event, _ctx| {
                 if !enabled {
                     return EventResponse::Ignored;
                 }
-                let WidgetEvent::KeyDown { key, .. } = event else {
+                let WidgetEvent::KeyDown { key, modifiers, .. } = event else {
                     return EventResponse::Ignored;
                 };
 
@@ -514,32 +517,48 @@ impl Widget for SplitterHandle {
                 };
                 let step = model.keyboard_step_px();
 
-                // `grow` = pane i takes space from pane i+1.
-                let grow = match (orientation, key) {
-                    (Orientation::Horizontal, Key::ArrowRight) => Some(true),
-                    (Orientation::Horizontal, Key::ArrowLeft) => Some(false),
-                    (Orientation::Vertical, Key::ArrowDown) => Some(true),
-                    (Orientation::Vertical, Key::ArrowUp) => Some(false),
-                    (_, Key::Home) => {
-                        commit_resize(&model, i, lo, pair);
-                        focus_origin.set(Some(FocusOrigin::Keyboard));
-                        return EventResponse::Handled;
-                    }
-                    (_, Key::End) => {
-                        commit_resize(&model, i, hi, pair);
-                        focus_origin.set(Some(FocusOrigin::Keyboard));
-                        return EventResponse::Handled;
-                    }
-                    _ => None,
+                // A divider binds the arrows and the two edges, and no page
+                // keys — the ARIA window-splitter pattern asks only for `Home`
+                // and `End`, `QSplitterHandle` binds no page keys, and a
+                // divider has no unit a page could be a multiple of.
+                //
+                // The direction comes from the cell `Splitter::place_children`
+                // already writes and the drag path already reads. The pane
+                // order and the drag math have been mirrored since this widget
+                // shipped; the arrows were not, so `->` pulled the divider left
+                // in a right-to-left window.
+                let arrows = match orientation {
+                    Orientation::Horizontal => RangeAxis::Horizontal,
+                    Orientation::Vertical => RangeAxis::Vertical,
                 };
-                let Some(grow) = grow else {
+                let Some(mv) = range_nav::range_move(
+                    *key,
+                    *modifiers,
+                    RangeKind::Divider,
+                    arrows,
+                    is_rtl.get(),
+                ) else {
                     return EventResponse::Ignored;
                 };
-                let target = if grow { size_i + step } else { size_i - step };
-                let new_i = if lo > hi {
-                    pair * 0.5
-                } else {
-                    target.clamp(lo, hi)
+                // `grow` = pane i takes space from pane i+1.
+                let new_i = match mv {
+                    RangeMove::Step { increase } => {
+                        let target = if increase {
+                            size_i + step
+                        } else {
+                            size_i - step
+                        };
+                        if lo > hi {
+                            pair * 0.5
+                        } else {
+                            target.clamp(lo, hi)
+                        }
+                    }
+                    RangeMove::ToMin => lo,
+                    RangeMove::ToMax => hi,
+                    // `Divider` never yields a page move; asserted in
+                    // `range_nav`'s own tests.
+                    RangeMove::Page { .. } => return EventResponse::Ignored,
                 };
                 commit_resize(&model, i, new_i, pair);
                 focus_origin.set(Some(FocusOrigin::Keyboard));

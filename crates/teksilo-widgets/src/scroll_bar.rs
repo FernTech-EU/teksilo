@@ -50,6 +50,8 @@ use teksilo_core::widget::{LayoutContext, LayoutResponse, Widget, WidgetPlacemen
 use teksilo_core::widget_builder::HandlerSet;
 use teksilo_core::widget_id::WidgetId;
 
+use crate::common::range_nav::{self, RangeAxis, RangeKind, RangeMove};
+
 // Re-exports so callers can write `ScrollBar::new(..)` /
 // `.visual(ScrollBarVisual::Overlay)` without a deeper import path. The
 // `ScrollBarVisual` alias preserves the historical name; new code can
@@ -479,68 +481,71 @@ impl Widget for ScrollBar {
                 if max <= 0.0 {
                     return EventResponse::Ignored;
                 }
-                match event {
-                    WidgetEvent::KeyDown { key, .. } => {
-                        use teksilo_core::event::Key;
-                        let step = step_size;
-                        match (orientation, key) {
-                            (ScrollBarOrientation::Vertical, Key::ArrowUp) => {
-                                set_scroll(scroll_position.get() - step);
-                                EventResponse::Handled
-                            }
-                            (ScrollBarOrientation::Vertical, Key::ArrowDown) => {
-                                set_scroll(scroll_position.get() + step);
-                                EventResponse::Handled
-                            }
-                            (ScrollBarOrientation::Horizontal, Key::ArrowLeft) => {
-                                set_scroll(scroll_position.get() - step);
-                                EventResponse::Handled
-                            }
-                            (ScrollBarOrientation::Horizontal, Key::ArrowRight) => {
-                                set_scroll(scroll_position.get() + step);
-                                EventResponse::Handled
-                            }
-                            (_, Key::Home) => {
-                                set_scroll(0.0);
-                                EventResponse::Handled
-                            }
-                            (_, Key::End) => {
-                                set_scroll(max);
-                                EventResponse::Handled
-                            }
-                            // A page is one viewport of content. The bar
-                            // already knows the ratio it draws its thumb from,
-                            // so `max` (which is content minus viewport)
-                            // scaled by `ratio / (1 - ratio)` recovers the
-                            // viewport in the same units — and it degrades to
-                            // the arrow step when the content barely overflows
-                            // rather than jumping nowhere.
-                            (_, Key::PageUp) => {
-                                set_scroll(scroll_position.get() - page_step(&ratio, max, step));
-                                EventResponse::Handled
-                            }
-                            (_, Key::PageDown) => {
-                                set_scroll(scroll_position.get() + page_step(&ratio, max, step));
-                                EventResponse::Handled
-                            }
-                            _ => EventResponse::Ignored,
-                        }
+                let WidgetEvent::KeyDown { key, modifiers, .. } = event else {
+                    return EventResponse::Ignored;
+                };
+                let step = step_size;
+                // One axis only: a vertical bar must leave the horizontal
+                // arrows to the horizontal bar beside it. `rtl` is false —
+                // `thumb_rect` places the horizontal thumb at
+                // `bounds.x + offset` unmirrored, so the arrows must not
+                // mirror on their own.
+                //
+                // Reachability, stated plainly: this node is `focusable(false)`
+                // and `set_hidden()`, and nothing in the framework focuses it,
+                // so today only a programmatic `tree.focus(..)` — a test, or an
+                // app that opts in — reaches this handler at all.
+                let arrows = match orientation {
+                    ScrollBarOrientation::Vertical => RangeAxis::Vertical,
+                    ScrollBarOrientation::Horizontal => RangeAxis::Horizontal,
+                };
+                let Some(mv) =
+                    range_nav::range_move(*key, *modifiers, RangeKind::Scalar, arrows, false)
+                else {
+                    return EventResponse::Ignored;
+                };
+                // A scroll offset grows *downward*, so `ArrowDown` must add to
+                // it even though `range_nav` reports that as a decrease — the
+                // value's axis and the screen's disagree on the vertical.
+                let horizontal = matches!(orientation, ScrollBarOrientation::Horizontal);
+                match mv {
+                    RangeMove::Step { increase } => {
+                        let d = if range_nav::towards_screen_positive(increase, horizontal) {
+                            step
+                        } else {
+                            -step
+                        };
+                        set_scroll(scroll_position.get() + d);
                     }
-                    _ => EventResponse::Ignored,
+                    // A page is one viewport of content. The bar already knows
+                    // the ratio it draws its thumb from, so `max` (which is
+                    // content minus viewport) scaled by `ratio / (1 - ratio)`
+                    // recovers the viewport in the same units — and it degrades
+                    // to the arrow step when the content barely overflows
+                    // rather than jumping nowhere. That the distance is
+                    // measured rather than a multiple of the step is exactly
+                    // what `RangeMove::Page` leaves to the caller.
+                    RangeMove::Page { increase } => {
+                        let p = page_step(&ratio, max, step);
+                        let d = if range_nav::towards_screen_positive(increase, horizontal) {
+                            p
+                        } else {
+                            -p
+                        };
+                        set_scroll(scroll_position.get() + d);
+                    }
+                    RangeMove::ToMin => set_scroll(0.0),
+                    RangeMove::ToMax => set_scroll(max),
                 }
+                EventResponse::Handled
             });
         }
 
-        // Access action handler
-        {
-            handlers = handlers.on_access_action(move |action, _ctx| {
-                if action == teksilo_core::accesskit::Action::SetValue {
-                    EventResponse::Handled
-                } else {
-                    EventResponse::Ignored
-                }
-            });
-        }
+        // No access-action handler: this node is `set_hidden()`, and assistive
+        // technology scrolls through the parent ScrollView's `Scroll*` actions.
+        // The `SetValue` arm that used to sit here was never advertised, so its
+        // only reachable effect was to answer `Handled` to a `SetValue`
+        // bubbling up from a descendant and drop it.
 
         ctx.apply_self_handlers(handlers);
 
@@ -646,6 +651,114 @@ mod tests {
             saw_override.get(),
             "ScrollBar::thumb_color must thread into ScrollBarStyleConfig::thumb_color"
         );
+    }
+
+    // ── Keyboard ───────────────────────────────────────────────────
+    //
+    // These reach the handler through a *programmatic* focus, which does not
+    // consult `focusable`. That is deliberate and worth stating: the bar is
+    // `focusable(false)` and `set_hidden()`, and nothing in the framework
+    // focuses it, so today no user keystroke arrives here at all. The handler
+    // is routed through the shared chord table anyway, so it is correct if an
+    // application ever opts a bar into the tab order.
+
+    fn focused_bar(ratio: f32, max: f32) -> (WidgetTree, Signal<f32>, WidgetId) {
+        let position = Signal::new(0.0_f32);
+        let mut tree = WidgetTree::new();
+        let id = tree.add(ScrollBar::new(
+            ScrollBarOrientation::Vertical,
+            position.clone(),
+            Signal::new(max),
+            Signal::new(ratio),
+        ));
+        tree.layout(SizeProposal::exact(20.0, 200.0));
+        tree.focus(id);
+        (tree, position, id)
+    }
+
+    #[test]
+    fn arrows_step_the_position() {
+        use teksilo_core::event::{Key, Modifiers};
+        let (mut tree, position, id) = focused_bar(0.5, 500.0);
+
+        // Stated first, because it is the interesting half: if focus does not
+        // even land on a `focusable(false)` node, no keystroke can reach the
+        // handler and the rest of this module's keyboard is unreachable.
+        assert_eq!(
+            tree.focused(),
+            Some(id),
+            "programmatic focus must land for any of these to mean anything"
+        );
+
+        tree.press_key(Key::ArrowDown, Modifiers::NONE);
+        let after = position.get();
+        assert!(after > 0.0, "ArrowDown scrolls down: {after}");
+
+        tree.press_key(Key::ArrowUp, Modifiers::NONE);
+        assert!(position.get() < after, "ArrowUp scrolls back");
+    }
+
+    #[test]
+    fn a_vertical_bar_ignores_the_horizontal_arrows() {
+        // The horizontal bar beside it owns them; a bar that answered both
+        // would fight its sibling.
+        use teksilo_core::event::{Key, Modifiers};
+        let (mut tree, position, _) = focused_bar(0.5, 500.0);
+
+        for key in [Key::ArrowLeft, Key::ArrowRight] {
+            tree.press_key(key, Modifiers::NONE);
+            assert_eq!(position.get(), 0.0, "{key:?} is not a vertical bar's");
+        }
+    }
+
+    #[test]
+    fn home_and_end_reach_the_ends() {
+        use teksilo_core::event::{Key, Modifiers};
+        let (mut tree, position, _) = focused_bar(0.5, 500.0);
+
+        tree.press_key(Key::End, Modifiers::NONE);
+        assert_eq!(position.get(), 500.0);
+        tree.press_key(Key::Home, Modifiers::NONE);
+        assert_eq!(position.get(), 0.0);
+    }
+
+    #[test]
+    fn page_keys_move_one_measured_viewport() {
+        // The page distance is *measured*, not a multiple of the arrow step:
+        // with `ratio = 0.2` and `max = 400`, the viewport is
+        // `400 * 0.2 / 0.8 = 100`.
+        use teksilo_core::event::{Key, Modifiers};
+        let (mut tree, position, _) = focused_bar(0.2, 400.0);
+
+        tree.press_key(Key::PageDown, Modifiers::NONE);
+        assert!(
+            (position.get() - 100.0).abs() < 0.01,
+            "one viewport is 100, got {}",
+            position.get()
+        );
+        tree.press_key(Key::PageUp, Modifiers::NONE);
+        assert!(position.get().abs() < 0.01);
+    }
+
+    #[test]
+    fn an_accelerator_chord_does_not_scroll() {
+        // Behaviour change: modifiers used to be ignored, so `Ctrl+End` jumped
+        // to the bottom and swallowed the chord.
+        use teksilo_core::event::{Key, Modifiers};
+        let (mut tree, position, _) = focused_bar(0.5, 500.0);
+
+        for (key, mods) in [
+            (Key::End, Modifiers::CTRL),
+            (Key::PageDown, Modifiers::ALT),
+            (Key::ArrowDown, Modifiers::SUPER),
+        ] {
+            tree.press_key(key, mods);
+            assert_eq!(
+                position.get(),
+                0.0,
+                "{key:?} with {mods:?} must fall through"
+            );
+        }
     }
 
     fn make_scrollbar() -> (ScrollBar, Signal<f32>, Signal<f32>, Signal<f32>) {

@@ -8,19 +8,38 @@
 Slider — a draggable value selector bound to a `Signal<f32>`.
 
 The widget owns all input handling: pointer drag (click-to-jump and
-thumb-drag), keyboard arrows (`ArrowRight`/`ArrowLeft`/`Up`/`Down`,
-`Home`, `End`), and `Increment`/`Decrement` accessibility actions.
-All visual chrome is delegated to a
+thumb-drag), the keyboard, and the `Increment` / `Decrement` /
+`SetValue` accessibility actions. All visual chrome is delegated to a
 `SliderStyle` implementation; the
 IntUI default ships out of the box and is also the theme-wide slot
 override target (`theme.style_slots.slider`).
 
+## Keyboard
+
+- `ArrowRight` / `ArrowUp` and `ArrowLeft` / `ArrowDown` — one
+  `step`, defaulting to 1 % of the range.
+- `PageUp` / `PageDown` — one `page_step`,
+  defaulting to ten times the step and so to 10 % of the range. That
+  is `QAbstractSlider::pageStep`, `GtkScale`'s page increment, and
+  what `<input type=range>` gives in both WebKit and Blink.
+- `Home` / `End` — the minimum and the maximum.
+- A chord holding `Ctrl`, `Alt` or `Super` is not the slider's and
+  falls through to the application; `Shift` does not change the step.
+
+The chord table is shared with every other bounded-scalar control; see
+`docs/range-keyboard.md`.
+
 ## Accessibility
 
-Exposes `Role::Slider` with numeric value, min, max, step, and
-orientation. Screen readers announce the current value on every
-change. The focus ring follows the `:focus-visible` heuristic —
-visible after keyboard interaction, invisible after a pointer tap.
+Exposes `Role::Slider` with numeric value, min, max, step, the page
+distance as `numeric_value_jump`, and orientation. Screen readers
+announce the current value on every change. `SetValue` accepts a
+number or a numeric string and snaps it to `step`, so an assistive
+technology's write lands on the same grid a drag does — AT-SPI's
+`Value.SetCurrentValue` is how Orca sets a slider, and macOS gates
+`setAccessibilityValue:` settability on the action being advertised.
+The focus ring follows the `:focus-visible` heuristic — visible after
+keyboard interaction, invisible after a pointer tap.
 
 ```rust
 # use teksilo_core::signal::Signal;
@@ -31,7 +50,7 @@ let _w = Slider::new(volume, 0.0, 1.0).step(0.05);
 
 ## Builder methods at a glance
 
-`step`, `orientation`, `enabled`, `variant`, `tick_count`, `style`, `label`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`
+`step`, `page_step`, `orientation`, `enabled`, `variant`, `tick_count`, `style`, `label`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`
 
 ## API reference
 
@@ -59,6 +78,15 @@ range. Use `orientation` to switch to vertical.
 Set the discrete step size for keyboard arrows and accessibility
 Increment/Decrement actions. When unset, defaults to 1 % of the
 range.
+
+#### `pub fn page_step(mut self, page_step: f32) -> Self`
+
+Set the step size for `PageUp` / `PageDown`. When unset, ten times the
+effective `step` — so with the default step of 1 % of the
+range a page is 10 % of it, which is what `QAbstractSlider::pageStep`,
+`GtkScale`'s page increment and `<input type=range>` in both WebKit and
+Blink all give, and the same `10 x` rule
+`SpinBox::page_step` uses.
 
 #### `pub fn orientation(mut self, orientation: Orientation) -> Self`
 

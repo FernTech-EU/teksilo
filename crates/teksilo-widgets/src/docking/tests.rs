@@ -2824,3 +2824,116 @@ fn rail_composition_order_places_each_cluster_correctly() {
         "only bottom_slot may follow the Pinned cluster"
     );
 }
+
+// ── Resize-handle keyboard ─────────────────────────────────────────
+
+/// Build a layout with one dock on `side`, shown and sized, and hand back the
+/// tree plus the focusable resize handle.
+fn side_with_handle(side: DockSide, size: f32) -> (WidgetTree, DockingModel, WidgetId) {
+    let model = DockingModel::new();
+    let (id, dw) = dock("Panel");
+    let mut t = tree();
+    let root = t.add(
+        DockingLayout::new(model.clone())
+            .center(FixedLeaf(200.0, 200.0))
+            .dock(dw),
+    );
+    model.open_dock(id, DockOpenLocation::side(side));
+    model.set_side_size(side, size);
+    t.layout(SizeProposal::exact(1000.0, 800.0));
+    // Let the side finish animating open so the handle has real bounds.
+    t.tick_animations(Duration::from_millis(600));
+    t.layout(SizeProposal::exact(1000.0, 800.0));
+    // One dock means no inner pane splitter, so the only `Role::Splitter` in
+    // the tree is the side's own resize handle.
+    let handle = find_first_role(&t, root, Role::Splitter).expect("a resize handle");
+    (t, model, handle)
+}
+
+#[test]
+fn a_trailing_side_grows_toward_the_leading_edge() {
+    // A trailing side's handle sits on its *leading* edge, so growing the side
+    // moves the handle left. The pointer path has always inverted per side
+    // (`side_main`); the keyboard mapped `ArrowRight` to "bigger" for every
+    // horizontal-axis side, so the handle moved the way the arrow did not
+    // point.
+    let (mut t, model, handle) = side_with_handle(DockSide::Trailing, 240.0);
+    t.focus(handle);
+
+    let before = model.side_size(DockSide::Trailing);
+    t.press_key(Key::ArrowLeft, Modifiers::NONE);
+    assert!(
+        model.side_size(DockSide::Trailing) > before,
+        "ArrowLeft moves a trailing handle left, which makes the side wider"
+    );
+
+    let mid = model.side_size(DockSide::Trailing);
+    t.press_key(Key::ArrowRight, Modifiers::NONE);
+    assert!(
+        model.side_size(DockSide::Trailing) < mid,
+        "and back the other way"
+    );
+}
+
+#[test]
+fn a_bottom_side_grows_upward() {
+    let (mut t, model, handle) = side_with_handle(DockSide::Bottom, 200.0);
+    t.focus(handle);
+
+    let before = model.side_size(DockSide::Bottom);
+    t.press_key(Key::ArrowUp, Modifiers::NONE);
+    assert!(
+        model.side_size(DockSide::Bottom) > before,
+        "ArrowUp moves a bottom handle up, which makes the side taller"
+    );
+}
+
+#[test]
+fn a_leading_side_still_grows_with_the_trailing_arrow() {
+    // The regression guard for the side that was already right.
+    let (mut t, model, handle) = side_with_handle(DockSide::Leading, 240.0);
+    t.focus(handle);
+
+    let before = model.side_size(DockSide::Leading);
+    t.press_key(Key::ArrowRight, Modifiers::NONE);
+    assert!(model.side_size(DockSide::Leading) > before);
+}
+
+#[test]
+fn home_hides_the_side() {
+    // A dock side's low extreme *is* hidden — the meaning preserved through
+    // the move onto the shared chord table.
+    //
+    // The `End` half is deliberately not asserted here: hiding the side takes
+    // its resize handle with it, so once `Home` has fired there is no focused
+    // handle left to receive `End`. Revealing a hidden side is the activity
+    // rail's job, or `set_side_visible` from outside — the same asymmetry the
+    // pre-existing code had, and one this change does not alter.
+    let (mut t, model, handle) = side_with_handle(DockSide::Leading, 240.0);
+    t.focus(handle);
+
+    t.press_key(Key::Home, Modifiers::NONE);
+    assert!(!model.is_side_visible(DockSide::Leading));
+}
+
+#[test]
+fn an_accelerator_chord_does_not_resize_a_dock_side() {
+    // Behaviour change: modifiers used to be ignored outright.
+    let (mut t, model, handle) = side_with_handle(DockSide::Leading, 240.0);
+    t.focus(handle);
+
+    let before = model.side_size(DockSide::Leading);
+    for (key, mods) in [
+        (Key::ArrowRight, Modifiers::CTRL),
+        (Key::Home, Modifiers::ALT),
+        (Key::End, Modifiers::SUPER),
+    ] {
+        t.press_key(key, mods);
+        assert_eq!(
+            model.side_size(DockSide::Leading),
+            before,
+            "{key:?} with {mods:?} must fall through"
+        );
+        assert!(model.is_side_visible(DockSide::Leading));
+    }
+}

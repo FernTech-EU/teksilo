@@ -16,6 +16,7 @@ pub(crate) mod editor_runtime;
 pub(crate) mod list_nav;
 #[cfg(test)]
 pub(crate) mod locale_switch_test;
+pub(crate) mod range_nav;
 pub(crate) mod row_metrics;
 pub(crate) mod row_offsets;
 pub(crate) mod scroll;

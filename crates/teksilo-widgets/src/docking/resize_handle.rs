@@ -27,6 +27,8 @@ use teksilo_core::widget_builder::HandlerSet;
 use teksilo_core::widget_id::WidgetId;
 use teksilo_tokens::{Easing, Orientation};
 
+use crate::common::range_nav::{self, RangeAxis, RangeKind, RangeMove};
+
 use super::geometry::DockSide;
 use super::model::DockingModel;
 
@@ -290,35 +292,79 @@ impl Widget for DockResizeHandle {
         // Keyboard resize + show/hide.
         {
             let model = model.clone();
-            handlers = handlers.on_key(move |event, _ctx| {
-                let step = match event {
-                    WidgetEvent::KeyDown { key, .. } => match (side.is_horizontal_axis(), key) {
-                        (true, Key::ArrowLeft) | (false, Key::ArrowUp) => Some(-KEYBOARD_STEP),
-                        (true, Key::ArrowRight) | (false, Key::ArrowDown) => Some(KEYBOARD_STEP),
-                        // Home collapses, Enter toggles — both suppressed when
-                        // collapsing is locked. End (show) always works.
-                        (_, Key::Home) if allow_collapse => {
-                            model.set_side_visible(side, false);
-                            return EventResponse::Handled;
-                        }
-                        (_, Key::End) => {
-                            model.set_side_visible(side, true);
-                            return EventResponse::Handled;
-                        }
-                        (_, Key::Enter) if allow_collapse => {
-                            model.toggle_side_visible(side);
-                            return EventResponse::Handled;
-                        }
-                        _ => None,
-                    },
-                    _ => None,
+            handlers = handlers.on_key(move |event, ctx| {
+                let WidgetEvent::KeyDown { key, modifiers, .. } = event else {
+                    return EventResponse::Ignored;
                 };
-                if let Some(delta) = step {
-                    let min = model.side_min_size(side);
-                    model.set_side_size(side, (model.side_size(side) + delta).max(min));
-                    EventResponse::Handled
+
+                // Enter toggles the side — suppressed when collapsing is
+                // locked, as it always was.
+                if matches!(key, Key::Enter) && allow_collapse {
+                    model.toggle_side_visible(side);
+                    return EventResponse::Handled;
+                }
+
+                // Same chord table as a `Splitter` divider: arrows and the two
+                // edges, no page keys. Direction is read at event time so a
+                // locale flip needs no rebuild.
+                let arrows = if side.is_horizontal_axis() {
+                    RangeAxis::Horizontal
                 } else {
-                    EventResponse::Ignored
+                    RangeAxis::Vertical
+                };
+                let Some(mv) = range_nav::range_move(
+                    *key,
+                    *modifiers,
+                    RangeKind::Divider,
+                    arrows,
+                    ctx.is_rtl(),
+                ) else {
+                    return EventResponse::Ignored;
+                };
+                match mv {
+                    RangeMove::Step { increase } => {
+                        // Two inversions, kept apart because they are
+                        // different facts. The first — that `increase` is
+                        // axis-relative, so `Up` increases the value while
+                        // decreasing y — belongs to every edge-anchored
+                        // control and lives in `towards_screen_positive`.
+                        //
+                        // The second is this widget's own: a side grows when
+                        // its handle moves *away* from the side — outward for
+                        // Leading and Top, inward for Trailing and Bottom. The
+                        // pointer path has always accounted for that
+                        // (`side_main`); the keyboard did not, so `Right`
+                        // moved a trailing handle the way it does not point.
+                        // The layout direction is already folded into
+                        // `increase` by `range_move`.
+                        let screen_positive =
+                            range_nav::towards_screen_positive(increase, side.is_horizontal_axis());
+                        let grows_screen_positive =
+                            matches!(side, DockSide::Leading | DockSide::Top);
+                        let delta = if screen_positive == grows_screen_positive {
+                            KEYBOARD_STEP
+                        } else {
+                            -KEYBOARD_STEP
+                        };
+                        let min = model.side_min_size(side);
+                        model.set_side_size(side, (model.side_size(side) + delta).max(min));
+                        EventResponse::Handled
+                    }
+                    // A dock side's low extreme *is* hidden: it is the only
+                    // thing "give everything to the centre" can mean for a side
+                    // that collapses. With collapsing locked, `Home` falls
+                    // through as it did before.
+                    RangeMove::ToMin if allow_collapse => {
+                        model.set_side_visible(side, false);
+                        EventResponse::Handled
+                    }
+                    RangeMove::ToMax => {
+                        model.set_side_visible(side, true);
+                        EventResponse::Handled
+                    }
+                    // `Divider` never yields a page move; asserted in
+                    // `range_nav`'s own tests.
+                    RangeMove::ToMin | RangeMove::Page { .. } => EventResponse::Ignored,
                 }
             });
         }

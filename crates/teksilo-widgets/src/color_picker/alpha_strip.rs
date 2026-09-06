@@ -23,7 +23,7 @@ use teksilo_canvas::{Canvas, Paint, Point, Rect, Size, SizeProposal};
 use teksilo_core::accessibility::AccessNodeBuilder;
 use teksilo_core::accesskit::{Action, Role};
 use teksilo_core::build_context::BuildContext;
-use teksilo_core::event::{EventResponse, Key, PointerButton, WidgetEvent};
+use teksilo_core::event::{EventResponse, PointerButton, WidgetEvent};
 use teksilo_core::focus::FocusOrigin;
 use teksilo_core::gesture::DragPhase;
 use teksilo_core::signal::Signal;
@@ -33,6 +33,8 @@ use teksilo_core::widget::{
 use teksilo_core::widget_builder::HandlerSet;
 use teksilo_core::widget_id::WidgetId;
 use teksilo_tokens::{Color, CornerRadius, Orientation};
+
+use crate::common::range_nav::{self, RangeAxis, RangeKind, RangeMove};
 
 pub(crate) struct AlphaStrip {
     /// Current bound color — for the foreground gradient color.
@@ -179,36 +181,34 @@ impl Widget for AlphaStrip {
             let set_alpha = set_alpha.clone();
             let alpha = self.alpha.clone();
             handlers = handlers.on_key(move |event, _ctx| {
-                let WidgetEvent::KeyDown { key, .. } = event else {
+                let WidgetEvent::KeyDown { key, modifiers, .. } = event else {
                     return EventResponse::Ignored;
                 };
-                match key {
-                    Key::ArrowUp | Key::ArrowRight => {
-                        (set_alpha)((alpha.get() + 0.01).clamp(0.0, 1.0));
-                        EventResponse::Handled
+                // `rtl` is false: the checkerboard gradient and the pointer
+                // mapping both run leading-to-trailing unconditionally.
+                let Some(mv) = range_nav::range_move(
+                    *key,
+                    *modifiers,
+                    RangeKind::Scalar,
+                    RangeAxis::Both,
+                    false,
+                ) else {
+                    return EventResponse::Ignored;
+                };
+                // The magnitudes stay in agreement with the
+                // `numeric_value_step` / `numeric_value_jump` published below.
+                let next = match mv {
+                    RangeMove::Step { increase } => {
+                        alpha.get() + if increase { 0.01 } else { -0.01 }
                     }
-                    Key::ArrowDown | Key::ArrowLeft => {
-                        (set_alpha)((alpha.get() - 0.01).clamp(0.0, 1.0));
-                        EventResponse::Handled
+                    RangeMove::Page { increase } => {
+                        alpha.get() + if increase { 0.10 } else { -0.10 }
                     }
-                    Key::PageUp => {
-                        (set_alpha)((alpha.get() + 0.10).clamp(0.0, 1.0));
-                        EventResponse::Handled
-                    }
-                    Key::PageDown => {
-                        (set_alpha)((alpha.get() - 0.10).clamp(0.0, 1.0));
-                        EventResponse::Handled
-                    }
-                    Key::Home => {
-                        (set_alpha)(0.0);
-                        EventResponse::Handled
-                    }
-                    Key::End => {
-                        (set_alpha)(1.0);
-                        EventResponse::Handled
-                    }
-                    _ => EventResponse::Ignored,
-                }
+                    RangeMove::ToMin => 0.0,
+                    RangeMove::ToMax => 1.0,
+                };
+                (set_alpha)(next.clamp(0.0, 1.0));
+                EventResponse::Handled
             });
         }
 

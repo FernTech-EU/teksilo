@@ -15,6 +15,32 @@ by crate for clarity, not because crates version independently.
 
 ### Added
 
+#### Bounded-scalar controls
+
+See [docs/range-keyboard.md](docs/range-keyboard.md) for the full chord table.
+
+- `common::range_nav`: the arrow, page and edge chords of a control that holds
+  one bounded number, as pure functions over
+  `(key, modifiers, kind, axis, direction)`. `Slider`, `SpinBox`, `ScrollBar`,
+  the colour picker's hue and alpha strips, the `Splitter` handle and the dock
+  resize handle each hand-rolled the same eight-key match and gave four
+  different answers for it. Like `list_nav`, it takes no platform convention:
+  Qt, GTK4, the Win32 trackbar and `<input type=range>` bind these keys
+  identically on all three desktops.
+- `PageUp` / `PageDown` in `Slider`, with `Slider::page_step` to size the jump.
+  Unset it defaults to ten times the effective `step`, so with the default step
+  of 1 % of the range a page is 10 % of it — WebKit's and Blink's rule for
+  `<input type=range>`, `QAbstractSlider::pageStep`, `GtkScale`'s page
+  increment, and the same `10 x` rule `SpinBox::page_step` already used. The
+  slider was the only one of Teksilo's bounded-scalar widgets with no coarse
+  step at all.
+- `Slider` publishes `numeric_value_jump` and services `Action::SetValue`,
+  taking either an `ActionData::NumericValue` or a numeric string and snapping
+  to `step` exactly as a drag does. AT-SPI publishes the `Value` interface off
+  `numeric_value` alone, so Orca's `Value.SetCurrentValue` already reached the
+  widget and was dropped; macOS gates `setAccessibilityValue:` settability on
+  the advertisement, which the node now carries.
+
 #### Data views
 
 - `TableView::stretch_last_column` / `TreeTableView::stretch_last_column`:
@@ -54,6 +80,50 @@ by crate for clarity, not because crates version independently.
   the instruction to use the client is given.
 
 ### Fixed
+
+#### Bounded-scalar controls
+
+- **`Ctrl` / `Alt` / `Super` chords no longer drive a bounded control.**
+  `Ctrl+ArrowUp` stepped a `SpinBox`, `Ctrl+Home` drove a `Slider` to its
+  minimum, `Ctrl+PageDown` scrolled a `ScrollBar` and `Ctrl+ArrowRight` resized
+  a `Splitter` — each answering the key and reporting it handled, so the chord
+  never reached the application's own Shortcut/Action pipeline. They fall
+  through now, which is what `QAbstractSpinBox` does. `Shift` is deliberately
+  untouched: it is not a distinct chord on any of these controls, and the
+  single-line field binds nothing to `Shift+Up`, so rejecting it would only
+  leave the chord dead. **Behaviour change.**
+- **A right-to-left `Splitter`'s resize arrows worked backwards.** The pane
+  order and the drag math have been mirrored since the widget shipped — the
+  direction is written into a cell the drag path reads — but the keyboard was
+  not, so `ArrowRight` pulled the divider left. Read at event time, so a locale
+  flip needs no rebuild. **Behaviour change.**
+- **A `Trailing` or `Bottom` dock side resized in the wrong direction from the
+  keyboard.** Its handle sits on the side's inner edge, so growing the side
+  moves the handle *towards* the centre; the pointer path already inverted per
+  side (`side_main`) and the arrows did not, so they moved the handle the way
+  they did not point. **Behaviour change.**
+- `ScrollBar` no longer claims `Action::SetValue`. Its node is `set_hidden()`
+  and it never advertised the action, so the arm was unreachable except to
+  answer `Handled` to a `SetValue` bubbling up from a descendant and drop it.
+
+#### Widgets
+
+- **A `SpinBox` now handles the `Action::SetValue` it advertises.** It carried
+  the advertisement — which macOS needs, since AXValue settability is gated on
+  it — while its handler could not see an `ActionData` payload at all, so every
+  assistive-technology write was dropped: a `NumericValue` from macOS's
+  `setAccessibilityValue:` with an `NSNumber` or from AT-SPI's
+  `Value.SetCurrentValue`, and a `Value` string from an `NSString` or from
+  Teksilo's own automation `set_value` tool, which was a silent no-op against
+  every `SpinBox` in the catalog. Both shapes now go through the widget's own
+  commit: a number is clamped and published as sent, a string takes the parse
+  `Enter` takes, so a custom `value_from_text` and the locale's decimal
+  separator are honoured and an unparseable one is *reported* unhandled rather
+  than failing quietly. A read-only spin box advertises and services none of
+  `Increment` / `Decrement` / `SetValue`.
+- `SpinBox::read_only` documented that keyboard and button stepping still
+  worked. It never did — the keys, the wheel and the buttons are all gated,
+  which is what `QAbstractSpinBox::readOnly` does too.
 
 #### Core
 

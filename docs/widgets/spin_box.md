@@ -31,7 +31,13 @@ are a synthesis of Qt's `QSpinBox` / `QDoubleSpinBox`, WinUI 3's
   - `PageUp` / `PageDown` → ±`page_step`
     (default: `10 × single_step`)
   - `Enter` → commit (stays focused)
-  - `Home` / `End` stay bound to the text cursor (Qt-compatible).
+  - `Home` / `End` stay bound to the text cursor. `QAbstractSpinBox`
+    routes both to its inner `QLineEdit`, and WinUI's `NumberBox`,
+    Blink, Avalonia and jQuery UI bind neither; typing the number
+    reaches min and max anyway. See `docs/range-keyboard.md`.
+  - A chord holding `Ctrl`, `Alt` or `Super` is not the spin box's
+    and falls through to the application; `Shift` does not change
+    the step.
 - **Mouse wheel**: adjusts by `single_step` — wheel **down**
   decreases, wheel **up** increases, matching `QAbstractSpinBox`,
   `GtkSpinButton` and WinUI's `NumberBox`. Gated by
@@ -80,9 +86,20 @@ the AccessKit node; the AT receives
 `Increment`,
 `Decrement`,
 `SetValue`, and
-`Focus` actions. The
-step buttons are structurally part of the SpinBox and publish
-no separate a11y nodes.
+`Focus` actions.
+
+`SetValue` accepts either payload shape, because both are sent in
+the field: a number (macOS `setAccessibilityValue:` with an
+`NSNumber`, AT-SPI's `Value.SetCurrentValue`) is clamped and
+published as sent; a string (an `NSString`, the automation
+`set_value` tool) takes the same parse `Enter` takes, so a custom
+`value_from_text` and the locale's
+decimal separator are honoured, and an unparseable one reverts the
+display and is reported unhandled. A
+`read_only` spin box advertises and services
+none of the three mutating actions. The step buttons are
+structurally part of the SpinBox and publish no separate a11y
+nodes.
 
 # Example
 
@@ -359,8 +376,11 @@ the arena at build time via
 
 #### `pub fn read_only(mut self, read_only: bool) -> Self`
 
-Prevent the user from typing in the field while still allowing
-keyboard and button stepping.
+Make the value uneditable: no typing, no keyboard or wheel stepping,
+no step buttons, and no assistive-technology `Increment` / `Decrement`
+/ `SetValue`. Matches `QAbstractSpinBox::readOnly`, which likewise
+stops `stepBy`. The field keeps focus and selection, so the value can
+still be read and copied.
 
 #### `pub fn text_from_value(mut self, f: impl Fn(T) -> LocalizedString + 'static) -> Self`
 

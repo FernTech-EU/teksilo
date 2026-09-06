@@ -24,7 +24,7 @@ use teksilo_canvas::{Canvas, Rect, Size, SizeProposal};
 use teksilo_core::accessibility::AccessNodeBuilder;
 use teksilo_core::accesskit::{Action, Role};
 use teksilo_core::build_context::BuildContext;
-use teksilo_core::event::{EventResponse, Key, PointerButton, WidgetEvent};
+use teksilo_core::event::{EventResponse, PointerButton, WidgetEvent};
 use teksilo_core::focus::FocusOrigin;
 use teksilo_core::gesture::DragPhase;
 use teksilo_core::signal::Signal;
@@ -34,6 +34,8 @@ use teksilo_core::widget::{
 use teksilo_core::widget_builder::HandlerSet;
 use teksilo_core::widget_id::WidgetId;
 use teksilo_tokens::{Color, CornerRadius, Orientation};
+
+use crate::common::range_nav::{self, RangeAxis, RangeKind, RangeMove};
 
 /// One texture per orientation — `draw_image` stretches without
 /// rotation, so a horizontal texture into a vertical strip would
@@ -188,40 +190,37 @@ impl Widget for HueStrip {
             let set_hue = set_hue.clone();
             let hue = self.hue.clone();
             handlers = handlers.on_key(move |event, _ctx| {
-                let WidgetEvent::KeyDown { key, .. } = event else {
+                let WidgetEvent::KeyDown { key, modifiers, .. } = event else {
                     return EventResponse::Ignored;
                 };
-                match key {
-                    Key::ArrowUp | Key::ArrowRight => {
-                        let next = (hue.get() + 1.0).rem_euclid(360.0);
-                        (set_hue)(next);
-                        EventResponse::Handled
+                // `rtl` is false: the rainbow texture and the pointer mapping
+                // both run leading-to-trailing unconditionally, so the arrows
+                // must not mirror on their own.
+                let Some(mv) = range_nav::range_move(
+                    *key,
+                    *modifiers,
+                    RangeKind::Scalar,
+                    RangeAxis::Both,
+                    false,
+                ) else {
+                    return EventResponse::Ignored;
+                };
+                // Hue is a circle cut open: a step past either edge lands on
+                // the other side, but `Home` / `End` still name the two ends of
+                // the cut. The magnitudes stay in agreement with the
+                // `numeric_value_step` / `numeric_value_jump` published below.
+                let next = match mv {
+                    RangeMove::Step { increase } => {
+                        (hue.get() + if increase { 1.0 } else { -1.0 }).rem_euclid(360.0)
                     }
-                    Key::ArrowDown | Key::ArrowLeft => {
-                        let next = (hue.get() - 1.0).rem_euclid(360.0);
-                        (set_hue)(next);
-                        EventResponse::Handled
+                    RangeMove::Page { increase } => {
+                        (hue.get() + if increase { 15.0 } else { -15.0 }).rem_euclid(360.0)
                     }
-                    Key::PageUp => {
-                        let next = (hue.get() + 15.0).rem_euclid(360.0);
-                        (set_hue)(next);
-                        EventResponse::Handled
-                    }
-                    Key::PageDown => {
-                        let next = (hue.get() - 15.0).rem_euclid(360.0);
-                        (set_hue)(next);
-                        EventResponse::Handled
-                    }
-                    Key::Home => {
-                        (set_hue)(0.0);
-                        EventResponse::Handled
-                    }
-                    Key::End => {
-                        (set_hue)(359.0);
-                        EventResponse::Handled
-                    }
-                    _ => EventResponse::Ignored,
-                }
+                    RangeMove::ToMin => 0.0,
+                    RangeMove::ToMax => 359.0,
+                };
+                (set_hue)(next);
+                EventResponse::Handled
             });
         }
 

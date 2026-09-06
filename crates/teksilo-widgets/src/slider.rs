@@ -4,19 +4,38 @@
 //! Slider — a draggable value selector bound to a `Signal<f32>`.
 //!
 //! The widget owns all input handling: pointer drag (click-to-jump and
-//! thumb-drag), keyboard arrows (`ArrowRight`/`ArrowLeft`/`Up`/`Down`,
-//! `Home`, `End`), and `Increment`/`Decrement` accessibility actions.
-//! All visual chrome is delegated to a
+//! thumb-drag), the keyboard, and the `Increment` / `Decrement` /
+//! `SetValue` accessibility actions. All visual chrome is delegated to a
 //! [`SliderStyle`] implementation; the
 //! IntUI default ships out of the box and is also the theme-wide slot
 //! override target (`theme.style_slots.slider`).
 //!
+//! ## Keyboard
+//!
+//! - `ArrowRight` / `ArrowUp` and `ArrowLeft` / `ArrowDown` — one
+//!   [`step`](Slider::step), defaulting to 1 % of the range.
+//! - `PageUp` / `PageDown` — one [`page_step`](Slider::page_step),
+//!   defaulting to ten times the step and so to 10 % of the range. That
+//!   is `QAbstractSlider::pageStep`, `GtkScale`'s page increment, and
+//!   what `<input type=range>` gives in both WebKit and Blink.
+//! - `Home` / `End` — the minimum and the maximum.
+//! - A chord holding `Ctrl`, `Alt` or `Super` is not the slider's and
+//!   falls through to the application; `Shift` does not change the step.
+//!
+//! The chord table is shared with every other bounded-scalar control; see
+//! `docs/range-keyboard.md`.
+//!
 //! ## Accessibility
 //!
-//! Exposes `Role::Slider` with numeric value, min, max, step, and
-//! orientation. Screen readers announce the current value on every
-//! change. The focus ring follows the `:focus-visible` heuristic —
-//! visible after keyboard interaction, invisible after a pointer tap.
+//! Exposes `Role::Slider` with numeric value, min, max, step, the page
+//! distance as `numeric_value_jump`, and orientation. Screen readers
+//! announce the current value on every change. `SetValue` accepts a
+//! number or a numeric string and snaps it to `step`, so an assistive
+//! technology's write lands on the same grid a drag does — AT-SPI's
+//! `Value.SetCurrentValue` is how Orca sets a slider, and macOS gates
+//! `setAccessibilityValue:` settability on the action being advertised.
+//! The focus ring follows the `:focus-visible` heuristic — visible after
+//! keyboard interaction, invisible after a pointer tap.
 //!
 //! ```rust
 //! # use teksilo_core::signal::Signal;
@@ -30,7 +49,7 @@ use std::rc::Rc;
 
 use teksilo_canvas::{Rect, SizeProposal};
 use teksilo_core::accessibility::AccessNodeBuilder;
-use teksilo_core::event::{EventResponse, Key, PointerButton, WidgetEvent};
+use teksilo_core::event::{EventResponse, PointerButton, WidgetEvent};
 use teksilo_core::focus::FocusOrigin;
 use teksilo_core::gesture::DragPhase;
 use teksilo_core::signal::{Prop, Signal};
@@ -41,6 +60,8 @@ use teksilo_core::widget::{CursorIcon, LayoutContext, LayoutResponse, Widget, Wi
 use teksilo_core::widget_builder::HandlerSet;
 use teksilo_core::widget_id::WidgetId;
 use teksilo_tokens::Orientation;
+
+use crate::common::range_nav::{self, RangeAxis, RangeKind, RangeMove};
 
 // Re-export the variant enum at module top so callers can write
 // `Slider::new(...).variant(SliderVariant::Discrete)` without a deeper
@@ -56,6 +77,7 @@ pub struct Slider {
     min: f32,
     max: f32,
     step: Option<f32>,
+    page_step: Option<f32>,
     orientation: Orientation,
     /// Enabled state, static or reactive; forwarded to the arena at
     /// build time.
@@ -92,6 +114,7 @@ impl Slider {
             min,
             max,
             step: None,
+            page_step: None,
             orientation: Orientation::Horizontal,
             enabled: Prop::Static(true),
             label: None,
@@ -115,6 +138,31 @@ impl Slider {
     pub fn step(mut self, step: f32) -> Self {
         self.step = Some(step);
         self
+    }
+
+    /// Set the step size for `PageUp` / `PageDown`. When unset, ten times the
+    /// effective [`step`](Self::step) — so with the default step of 1 % of the
+    /// range a page is 10 % of it, which is what `QAbstractSlider::pageStep`,
+    /// `GtkScale`'s page increment and `<input type=range>` in both WebKit and
+    /// Blink all give, and the same `10 x` rule
+    /// [`SpinBox::page_step`](crate::SpinBox::page_step) uses.
+    pub fn page_step(mut self, page_step: f32) -> Self {
+        self.page_step = Some(page_step);
+        self
+    }
+
+    /// The effective arrow step: the configured one, else 1 % of the range.
+    ///
+    /// One definition for the key handler, the AccessKit
+    /// `Increment`/`Decrement` path and the published `numeric_value_step`,
+    /// which had drifted into two copies of the same fallback.
+    fn effective_step(&self) -> f32 {
+        self.step.unwrap_or((self.max - self.min) * 0.01)
+    }
+
+    /// The effective `PageUp` / `PageDown` distance.
+    fn effective_page_step(&self) -> f32 {
+        self.page_step.unwrap_or(self.effective_step() * 10.0)
     }
 
     /// Set the slider orientation (`Horizontal` by default). Vertical
@@ -291,6 +339,8 @@ impl Widget for Slider {
         let thumb_radius = style.thumb_diameter(&cfg) * 0.5;
 
         let value = self.value.clone();
+        let single_step = self.effective_step();
+        let page_step = self.effective_page_step();
         let step = self.step;
         let orientation = self.orientation;
         let hovered = self.hovered.clone();
@@ -300,16 +350,33 @@ impl Widget for Slider {
 
         let adjust_by_step = {
             let value = value.clone();
-            move |positive: bool| {
-                let s = step.unwrap_or((max - min) * 0.01);
+            move |positive: bool, page: bool| {
+                let s = if page { page_step } else { single_step };
                 let current = value.get();
                 let new_val = if positive { current + s } else { current - s };
                 value.set(new_val.clamp(min, max));
             }
         };
 
-        let set_value_from_position = {
+        // Snap-and-clamp writer. `set_value_from_position` decides *where* the
+        // pointer is; this decides what a value means once you have one — so an
+        // assistive technology's `SetValue` lands on the same grid a drag does
+        // instead of between two ticks.
+        let set_value_snapped = {
             let value = value.clone();
+            move |v: f32| {
+                let mut val = v;
+                if let Some(s) = step
+                    && s > 0.0
+                {
+                    val = ((val - min) / s).round() * s + min;
+                }
+                value.set(val.clamp(min, max));
+            }
+        };
+
+        let set_value_from_position = {
+            let set_value_snapped = set_value_snapped.clone();
             let cached_bounds = cached_bounds.clone();
             move |x: f32, y: f32| {
                 let bounds = cached_bounds.get();
@@ -328,13 +395,7 @@ impl Widget for Slider {
                 // top-left), so the track starts at `thumb_radius`, not at
                 // `bounds.x` / `bounds.y`.
                 let t = ((pos - thumb_radius) / usable).clamp(0.0, 1.0);
-                let mut val = min + t * (max - min);
-                if let Some(s) = step
-                    && s > 0.0
-                {
-                    val = ((val - min) / s).round() * s + min;
-                }
-                value.set(val.clamp(min, max));
+                set_value_snapped(min + t * (max - min));
             }
         };
 
@@ -382,31 +443,36 @@ impl Widget for Slider {
             });
         }
 
-        // Key handler
+        // Key handler. The chord table is shared with every other bounded
+        // scalar (`common::range_nav`); what stays here is the arithmetic.
         {
             let adjust = adjust_by_step.clone();
             let value = value.clone();
-            handlers = handlers.on_key(move |event, _ctx| match event {
-                WidgetEvent::KeyDown { key, .. } => match key {
-                    Key::ArrowRight | Key::ArrowUp => {
-                        adjust(true);
-                        EventResponse::Handled
-                    }
-                    Key::ArrowLeft | Key::ArrowDown => {
-                        adjust(false);
-                        EventResponse::Handled
-                    }
-                    Key::Home => {
-                        value.set(min);
-                        EventResponse::Handled
-                    }
-                    Key::End => {
-                        value.set(max);
-                        EventResponse::Handled
-                    }
-                    _ => EventResponse::Ignored,
-                },
-                _ => EventResponse::Ignored,
+            handlers = handlers.on_key(move |event, _ctx| {
+                let WidgetEvent::KeyDown { key, modifiers, .. } = event else {
+                    return EventResponse::Ignored;
+                };
+                // `rtl` is false: this widget's fill and its click-to-jump both
+                // map leading-to-trailing unconditionally, so mirroring the
+                // arrows alone would leave the `<-` key and a leftward drag
+                // moving the thumb in opposite directions. All three mirror
+                // together or none do.
+                let Some(mv) = range_nav::range_move(
+                    *key,
+                    *modifiers,
+                    RangeKind::Scalar,
+                    RangeAxis::Both,
+                    false,
+                ) else {
+                    return EventResponse::Ignored;
+                };
+                match mv {
+                    RangeMove::Step { increase } => adjust(increase, false),
+                    RangeMove::Page { increase } => adjust(increase, true),
+                    RangeMove::ToMin => value.set(min),
+                    RangeMove::ToMax => value.set(max),
+                }
+                EventResponse::Handled
             });
         }
 
@@ -421,19 +487,52 @@ impl Widget for Slider {
             });
         }
 
-        // Access action handler
+        // Access action handler. `SetValue` is the assistive technology's
+        // direct value write — AT-SPI's `Value.SetCurrentValue`, which is
+        // Orca's slider value entry, and macOS's `setAccessibilityValue:` on
+        // the AXSlider. AT-SPI publishes the `Value` interface off
+        // `numeric_value` alone, so that call already reached this widget and
+        // was dropped on the floor; macOS instead gates AXValue settability on
+        // `supports_action(SetValue, ..)`, which is why `accessibility()` has
+        // to advertise it. It is the payload handler because `ActionData` is
+        // where the value rides, and the dispatcher calls that slot *instead
+        // of* `on_access_action` — so Increment and Decrement move here too or
+        // they go quiet.
         {
             let adjust = adjust_by_step.clone();
-            handlers = handlers.on_access_action(move |action, _ctx| match action {
-                teksilo_core::accesskit::Action::Increment => {
-                    adjust(true);
-                    EventResponse::Handled
+            let set_snapped = set_value_snapped.clone();
+            handlers = handlers.on_access_action_request(move |action, _node, data, _ctx| {
+                use teksilo_core::accesskit::{Action, ActionData};
+                match (action, data) {
+                    (Action::Increment, _) => {
+                        adjust(true, false);
+                        EventResponse::Handled
+                    }
+                    (Action::Decrement, _) => {
+                        adjust(false, false);
+                        EventResponse::Handled
+                    }
+                    // A non-finite value would clamp to a bound rather than be
+                    // refused, so it is declined outright: writing a number the
+                    // caller did not ask for is worse than reporting failure.
+                    (Action::SetValue, Some(ActionData::NumericValue(v))) if v.is_finite() => {
+                        set_snapped(v as f32);
+                        EventResponse::Handled
+                    }
+                    // The string shape arrives from an `NSString` write and
+                    // from Teksilo's own automation `set_value` tool, which
+                    // sends only strings.
+                    (Action::SetValue, Some(ActionData::Value(s))) => {
+                        match s.trim().parse::<f32>() {
+                            Ok(v) if v.is_finite() => {
+                                set_snapped(v);
+                                EventResponse::Handled
+                            }
+                            _ => EventResponse::Ignored,
+                        }
+                    }
+                    _ => EventResponse::Ignored,
                 }
-                teksilo_core::accesskit::Action::Decrement => {
-                    adjust(false);
-                    EventResponse::Handled
-                }
-                _ => EventResponse::Ignored,
             });
         }
 
@@ -489,12 +588,12 @@ impl Widget for Slider {
         builder.set_numeric_value(self.value.get() as f64);
         builder.set_min_numeric_value(self.min as f64);
         builder.set_max_numeric_value(self.max as f64);
-        // Publish the keyboard step so Orca / VoiceOver can announce
-        // "step by N" when the user holds an arrow key. If the caller
-        // didn't configure an explicit step, fall back to 1% of the
-        // range — same heuristic the keyboard handler uses.
-        let step = self.step.unwrap_or((self.max - self.min) * 0.01);
-        builder.set_numeric_value_step(step as f64);
+        // Publish both keyboard distances so Orca / VoiceOver can announce
+        // "step by N" for an arrow and the coarser figure for a page key.
+        // Both come from the same helpers the handlers use, so the announced
+        // number and the applied one cannot drift.
+        builder.set_numeric_value_step(self.effective_step() as f64);
+        builder.set_numeric_value_jump(self.effective_page_step() as f64);
         let orientation = match self.orientation {
             Orientation::Horizontal => teksilo_core::accesskit::Orientation::Horizontal,
             Orientation::Vertical => teksilo_core::accesskit::Orientation::Vertical,
@@ -503,6 +602,10 @@ impl Widget for Slider {
         // Framework a11y walker sets `set_disabled` from arena state.
         builder.add_action(teksilo_core::accesskit::Action::Increment);
         builder.add_action(teksilo_core::accesskit::Action::Decrement);
+        // macOS gates `setAccessibilityValue:` settability on the node
+        // supporting this action, so the advertisement is what makes
+        // VoiceOver's value entry reachable at all.
+        builder.add_action(teksilo_core::accesskit::Action::SetValue);
         builder.add_action(teksilo_core::accesskit::Action::Focus);
     }
 }
@@ -511,7 +614,7 @@ impl Widget for Slider {
 mod tests {
     use super::*;
     use teksilo_canvas::Point;
-    use teksilo_core::event::Modifiers;
+    use teksilo_core::event::{Key, Modifiers};
     use teksilo_core::widget_tree::WidgetTree;
 
     #[test]
@@ -579,6 +682,217 @@ mod tests {
 
         tree.press_key(Key::End, Modifiers::NONE);
         assert!((value.get() - 100.0).abs() < 0.01);
+    }
+
+    /// The published `(numeric_value_step, numeric_value_jump)` pair.
+    ///
+    /// Read off the raw AccessKit node rather than `AccessibilityInfo`, which
+    /// carries only role / name / actions. `accesskit::Node` is not `Clone`, so
+    /// the values come back rather than the node.
+    fn a11y_steps(
+        tree: &mut WidgetTree,
+        id: teksilo_core::widget_id::WidgetId,
+    ) -> (Option<f64>, Option<f64>) {
+        let update = tree.sync_accessibility();
+        let nid = teksilo_core::accessibility::widget_id_to_node_id(id);
+        update
+            .nodes
+            .iter()
+            .find(|(node_id, _)| *node_id == nid)
+            .map(|(_, n)| (n.numeric_value_step(), n.numeric_value_jump()))
+            .expect("the slider publishes an AT node")
+    }
+
+    fn access(
+        tree: &mut WidgetTree,
+        id: teksilo_core::widget_id::WidgetId,
+        action: teksilo_core::accesskit::Action,
+        data: Option<teksilo_core::accesskit::ActionData>,
+    ) -> bool {
+        let mut ops = teksilo_core::window::NoopWindowOps;
+        tree.dispatch_access_action(
+            teksilo_core::accessibility::widget_id_to_node_id(id),
+            action,
+            data,
+            &mut ops,
+        )
+    }
+
+    #[test]
+    fn page_keys_move_ten_arrow_steps() {
+        // The default step is 1 % of the range and the default page is ten of
+        // them, so a page is 10 % — `QAbstractSlider::pageStep`, `GtkScale`'s
+        // page increment and `<input type=range>` in WebKit and Blink all land
+        // on the same figure.
+        let value = Signal::new(50.0_f32);
+        let mut tree = WidgetTree::new();
+        let s = tree.add(Slider::new(value.clone(), 0.0, 100.0));
+        tree.layout(SizeProposal::exact(200.0, 60.0));
+        tree.focus(s);
+
+        tree.press_key(Key::PageUp, Modifiers::NONE);
+        assert!((value.get() - 60.0).abs() < 0.01, "value={}", value.get());
+        tree.press_key(Key::PageDown, Modifiers::NONE);
+        assert!((value.get() - 50.0).abs() < 0.01, "value={}", value.get());
+    }
+
+    #[test]
+    fn page_step_overrides_the_default() {
+        let value = Signal::new(50.0_f32);
+        let mut tree = WidgetTree::new();
+        let s = tree.add(Slider::new(value.clone(), 0.0, 100.0).page_step(25.0));
+        tree.layout(SizeProposal::exact(200.0, 60.0));
+        tree.focus(s);
+
+        tree.press_key(Key::PageUp, Modifiers::NONE);
+        assert!((value.get() - 75.0).abs() < 0.01, "value={}", value.get());
+    }
+
+    #[test]
+    fn page_step_follows_an_explicit_step() {
+        // Ten times *the effective step*, not ten times 1 % of the range.
+        let value = Signal::new(50.0_f32);
+        let mut tree = WidgetTree::new();
+        let s = tree.add(Slider::new(value.clone(), 0.0, 100.0).step(2.0));
+        tree.layout(SizeProposal::exact(200.0, 60.0));
+        tree.focus(s);
+
+        tree.press_key(Key::PageUp, Modifiers::NONE);
+        assert!((value.get() - 70.0).abs() < 0.01, "value={}", value.get());
+    }
+
+    #[test]
+    fn paging_clamps_at_the_bounds() {
+        let value = Signal::new(95.0_f32);
+        let mut tree = WidgetTree::new();
+        let s = tree.add(Slider::new(value.clone(), 0.0, 100.0));
+        tree.layout(SizeProposal::exact(200.0, 60.0));
+        tree.focus(s);
+
+        tree.press_key(Key::PageUp, Modifiers::NONE);
+        assert!((value.get() - 100.0).abs() < 0.01, "value={}", value.get());
+    }
+
+    #[test]
+    fn an_accelerator_chord_leaves_the_value_alone() {
+        // Behaviour change: `Ctrl+Home` used to drive the slider to its minimum
+        // and report the key handled, so the chord never reached the
+        // application's own Shortcut/Action pipeline.
+        let value = Signal::new(50.0_f32);
+        let mut tree = WidgetTree::new();
+        let s = tree.add(Slider::new(value.clone(), 0.0, 100.0).step(10.0));
+        tree.layout(SizeProposal::exact(200.0, 60.0));
+        tree.focus(s);
+
+        for (key, mods) in [
+            (Key::Home, Modifiers::CTRL),
+            (Key::End, Modifiers::ALT),
+            (Key::ArrowRight, Modifiers::CTRL),
+            (Key::PageDown, Modifiers::SUPER),
+        ] {
+            tree.press_key(key, mods);
+            assert!(
+                (value.get() - 50.0).abs() < 0.01,
+                "{key:?} with {mods:?} moved the value to {}",
+                value.get()
+            );
+        }
+    }
+
+    #[test]
+    fn a_shifted_arrow_still_steps() {
+        // `Shift` is not a distinct chord on a slider, so it must not disable
+        // the one the user pressed.
+        let value = Signal::new(50.0_f32);
+        let mut tree = WidgetTree::new();
+        let s = tree.add(Slider::new(value.clone(), 0.0, 100.0).step(10.0));
+        tree.layout(SizeProposal::exact(200.0, 60.0));
+        tree.focus(s);
+
+        tree.press_key(Key::ArrowRight, Modifiers::SHIFT);
+        assert!((value.get() - 60.0).abs() < 0.01, "value={}", value.get());
+    }
+
+    #[test]
+    fn accessibility_publishes_the_page_step_as_the_value_jump() {
+        // Orca and VoiceOver announce the coarse distance from this property,
+        // and it must be the one the page keys actually apply.
+        let mut tree = WidgetTree::new();
+        let s = tree.add(Slider::new(Signal::new(50.0_f32), 0.0, 100.0));
+        tree.layout(SizeProposal::exact(200.0, 60.0));
+        assert_eq!(a11y_steps(&mut tree, s), (Some(1.0), Some(10.0)));
+
+        let mut tree = WidgetTree::new();
+        let s = tree.add(Slider::new(Signal::new(50.0_f32), 0.0, 100.0).page_step(25.0));
+        tree.layout(SizeProposal::exact(200.0, 60.0));
+        assert_eq!(a11y_steps(&mut tree, s).1, Some(25.0));
+    }
+
+    #[test]
+    fn access_set_value_writes_and_snaps() {
+        // AT-SPI publishes the `Value` interface off `numeric_value` alone, so
+        // `Value.SetCurrentValue` — Orca's slider value entry — reached this
+        // widget long before the action was advertised, and did nothing.
+        use teksilo_core::accesskit::{Action, ActionData};
+        let value = Signal::new(50.0_f32);
+        let mut tree = WidgetTree::new();
+        let s = tree.add(Slider::new(value.clone(), 0.0, 100.0).step(10.0));
+        tree.layout(SizeProposal::exact(200.0, 60.0));
+
+        assert!(
+            tree.accessibility_node(s)
+                .actions()
+                .contains(&Action::SetValue),
+            "macOS gates AXValue settability on the advertisement"
+        );
+
+        assert!(access(
+            &mut tree,
+            s,
+            Action::SetValue,
+            Some(ActionData::NumericValue(73.0))
+        ));
+        assert!(
+            (value.get() - 70.0).abs() < 0.01,
+            "an AT write snaps to `step`, like a drag: {}",
+            value.get()
+        );
+
+        // The string shape is what the automation `set_value` tool sends.
+        assert!(access(
+            &mut tree,
+            s,
+            Action::SetValue,
+            Some(ActionData::Value("1000".into()))
+        ));
+        assert!((value.get() - 100.0).abs() < 0.01, "out of range clamps");
+
+        // A value that is not a number is declined rather than silently
+        // becoming one.
+        assert!(!access(
+            &mut tree,
+            s,
+            Action::SetValue,
+            Some(ActionData::Value("seventy".into()))
+        ));
+        assert!((value.get() - 100.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn access_increment_survives_the_payload_handler() {
+        // `on_access_action_request` is called INSTEAD of `on_access_action`,
+        // so Increment and Decrement had to move with SetValue or they would
+        // have gone quiet the moment the payload handler was installed.
+        use teksilo_core::accesskit::Action;
+        let value = Signal::new(50.0_f32);
+        let mut tree = WidgetTree::new();
+        let s = tree.add(Slider::new(value.clone(), 0.0, 100.0).step(10.0));
+        tree.layout(SizeProposal::exact(200.0, 60.0));
+
+        assert!(access(&mut tree, s, Action::Increment, None));
+        assert!((value.get() - 60.0).abs() < 0.01, "value={}", value.get());
+        assert!(access(&mut tree, s, Action::Decrement, None));
+        assert!((value.get() - 50.0).abs() < 0.01, "value={}", value.get());
     }
 
     #[test]

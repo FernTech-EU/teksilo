@@ -898,3 +898,282 @@ fn localized_false_neither_renders_nor_reads_the_locale_form() {
         assert!(!p.accepts_char::<f64>(','));
     });
 }
+
+// ── Keyboard: the deliberate deviations, and the modifier rule ─────
+
+#[test]
+fn home_and_end_stay_with_the_caret() {
+    // The one deliberate deviation from the W3C ARIA spinbutton pattern, and
+    // the reason is that `QAbstractSpinBox` routes both to its inner
+    // `QLineEdit` — as do WinUI's `NumberBox`, Blink, Avalonia and jQuery UI —
+    // while typing the number reaches min and max anyway.
+    let (mut tree, value, id) = setup_int(10, 0, 100);
+    focus_field(&mut tree, id);
+
+    tree.press_key(Key::Home, Modifiers::NONE);
+    tick(&mut tree);
+    assert_eq!(value.get(), 10, "Home belongs to the caret, not the value");
+
+    tree.press_key(Key::End, Modifiers::NONE);
+    tick(&mut tree);
+    assert_eq!(value.get(), 10, "End belongs to the caret, not the value");
+}
+
+#[test]
+fn the_horizontal_arrows_belong_to_the_caret() {
+    let (mut tree, value, id) = setup_int(10, 0, 100);
+    focus_field(&mut tree, id);
+
+    for key in [Key::ArrowLeft, Key::ArrowRight] {
+        tree.press_key(key, Modifiers::NONE);
+        tick(&mut tree);
+        assert_eq!(value.get(), 10, "{key:?} must not step the value");
+    }
+}
+
+#[test]
+fn an_accelerator_chord_does_not_step() {
+    // Behaviour change: modifiers used to be ignored outright, so `Ctrl+Up`
+    // stepped the value and reported the key handled, swallowing a chord the
+    // application may have bound.
+    let (mut tree, value, id) = setup_int(10, 0, 100);
+    focus_field(&mut tree, id);
+
+    for (key, mods) in [
+        (Key::ArrowUp, Modifiers::CTRL),
+        (Key::ArrowDown, Modifiers::ALT),
+        (Key::PageUp, Modifiers::SUPER),
+        (Key::PageDown, Modifiers::CTRL),
+    ] {
+        tree.press_key(key, mods);
+        tick(&mut tree);
+        assert_eq!(value.get(), 10, "{key:?} with {mods:?} must fall through");
+    }
+}
+
+#[test]
+fn a_shifted_arrow_still_steps() {
+    // `Shift` is not a distinct chord here, and the single-line field binds
+    // nothing to `Shift+Up`, so rejecting it would make the chord dead rather
+    // than deferential.
+    let (mut tree, value, id) = setup_int(10, 0, 100);
+    focus_field(&mut tree, id);
+
+    tree.press_key(Key::ArrowUp, Modifiers::SHIFT);
+    tick(&mut tree);
+    assert_eq!(value.get(), 11);
+}
+
+#[test]
+fn page_down_uses_page_step() {
+    // The missing mirror of `page_up_uses_page_step`.
+    let value = Signal::new(50_i32);
+    let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+    let id = tree.add(SpinBox::new(value.clone(), 0, 100).page_step(25));
+    tree.layout(SizeProposal::exact(300.0, 60.0));
+    tick(&mut tree);
+    focus_field(&mut tree, id);
+
+    tree.press_key(Key::PageDown, Modifiers::NONE);
+    tick(&mut tree);
+    assert_eq!(value.get(), 25);
+}
+
+// ── AccessKit `SetValue` ───────────────────────────────────────────
+
+/// Drive an AccessKit action the way a platform adapter does, and report
+/// whether anything acted on it — which is what the automation bridge reports
+/// back to its caller.
+fn access(
+    tree: &mut WidgetTree,
+    id: teksilo_core::widget_id::WidgetId,
+    action: teksilo_core::accesskit::Action,
+    data: Option<teksilo_core::accesskit::ActionData>,
+) -> bool {
+    let mut ops = teksilo_core::window::NoopWindowOps;
+    let handled = tree.dispatch_access_action(
+        teksilo_core::accessibility::widget_id_to_node_id(id),
+        action,
+        data,
+        &mut ops,
+    );
+    tick(tree);
+    handled
+}
+
+#[test]
+fn a11y_set_value_accepts_a_numeric_payload() {
+    // macOS sends `NumericValue` for an `NSNumber` handed to
+    // `setAccessibilityValue:`, and AT-SPI's `Value.SetCurrentValue` — what
+    // Orca calls on a spin button — sends it unconditionally.
+    use teksilo_core::accesskit::{Action, ActionData};
+    let (mut tree, value, id) = setup_int(10, 0, 100);
+    assert!(access(
+        &mut tree,
+        id,
+        Action::SetValue,
+        Some(ActionData::NumericValue(42.0))
+    ));
+    assert_eq!(value.get(), 42);
+}
+
+#[test]
+fn a11y_set_value_accepts_a_string_payload() {
+    // macOS sends `Value` for an `NSString`, and Teksilo's own automation
+    // `set_value` tool sends only this shape — so it was a silent no-op
+    // against every SpinBox in the catalog.
+    use teksilo_core::accesskit::{Action, ActionData};
+    let (mut tree, value, id) = setup_int(10, 0, 100);
+    assert!(access(
+        &mut tree,
+        id,
+        Action::SetValue,
+        Some(ActionData::Value("42".into()))
+    ));
+    assert_eq!(value.get(), 42);
+}
+
+#[test]
+fn a11y_set_value_clamps_into_the_range() {
+    use teksilo_core::accesskit::{Action, ActionData};
+    let (mut tree, value, id) = setup_int(10, 0, 100);
+    assert!(access(
+        &mut tree,
+        id,
+        Action::SetValue,
+        Some(ActionData::NumericValue(1_000.0))
+    ));
+    assert_eq!(value.get(), 100, "above max clamps to max");
+    assert!(access(
+        &mut tree,
+        id,
+        Action::SetValue,
+        Some(ActionData::Value("-50".into()))
+    ));
+    assert_eq!(value.get(), 0, "below min clamps to min");
+}
+
+#[test]
+fn a11y_set_value_declines_an_unparseable_string() {
+    // The same revert a typed rubbish string gets on Enter — and reported
+    // unhandled, so an automation client hears the refusal instead of reading
+    // a success over a stale value.
+    use teksilo_core::accesskit::{Action, ActionData};
+    let (mut tree, value, id) = setup_int(10, 0, 100);
+    assert!(!access(
+        &mut tree,
+        id,
+        Action::SetValue,
+        Some(ActionData::Value("seven".into()))
+    ));
+    assert_eq!(value.get(), 10);
+}
+
+#[test]
+fn a11y_set_value_declines_a_non_finite_number() {
+    // `SpinValue::from_f64_saturating` maps NaN to zero; a malformed request
+    // must not become a silent write of 0.
+    use teksilo_core::accesskit::{Action, ActionData};
+    let (mut tree, value, id) = setup_int(10, 0, 100);
+    assert!(!access(
+        &mut tree,
+        id,
+        Action::SetValue,
+        Some(ActionData::NumericValue(f64::NAN))
+    ));
+    assert_eq!(value.get(), 10);
+}
+
+#[test]
+fn a11y_set_value_fires_on_value_changed() {
+    // The callback is the only notification an app that does not observe the
+    // signal gets, and an assistive-technology edit is a user edit.
+    use std::cell::Cell;
+    use std::rc::Rc;
+    use teksilo_core::accesskit::{Action, ActionData};
+
+    let seen: Rc<Cell<Option<i32>>> = Rc::new(Cell::new(None));
+    let seen_h = seen.clone();
+    let value = Signal::new(10_i32);
+    let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+    let id = tree.add(
+        SpinBox::new(value.clone(), 0, 100).on_value_changed(move |v, _ctx| seen_h.set(Some(v))),
+    );
+    tree.layout(SizeProposal::exact(300.0, 60.0));
+    tick(&mut tree);
+
+    assert!(access(
+        &mut tree,
+        id,
+        Action::SetValue,
+        Some(ActionData::NumericValue(42.0))
+    ));
+    assert_eq!(seen.get(), Some(42));
+    assert_eq!(value.get(), 42);
+}
+
+#[test]
+fn a11y_set_value_honours_a_custom_value_from_text() {
+    // A string payload takes the same parse Enter takes, so a field configured
+    // for "percent with a stored fraction" reads the AT's "50 %" the way it
+    // reads the user's.
+    use teksilo_core::accesskit::{Action, ActionData};
+    let value = Signal::new(0_i32);
+    let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+    let id = tree.add(
+        SpinBox::new(value.clone(), 0, 100)
+            .value_from_text(|s| s.trim_end_matches('%').trim().parse::<i32>().ok()),
+    );
+    tree.layout(SizeProposal::exact(300.0, 60.0));
+    tick(&mut tree);
+
+    assert!(access(
+        &mut tree,
+        id,
+        Action::SetValue,
+        Some(ActionData::Value("50 %".into()))
+    ));
+    assert_eq!(value.get(), 50);
+}
+
+#[test]
+fn a11y_read_only_refuses_and_does_not_advertise_the_mutating_actions() {
+    // macOS gates AXValue settability on the advertisement alone —
+    // `is_read_only` does not veto it — so advertising here would tell
+    // VoiceOver the value is settable when it is not.
+    use teksilo_core::accesskit::{Action, ActionData};
+    let value = Signal::new(10_i32);
+    let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+    let id = tree.add(SpinBox::new(value.clone(), 0, 100).read_only(true));
+    tree.layout(SizeProposal::exact(300.0, 60.0));
+    tick(&mut tree);
+
+    let actions = tree.accessibility_node(id).actions().to_vec();
+    for refused in [Action::SetValue, Action::Increment, Action::Decrement] {
+        assert!(
+            !actions.contains(&refused),
+            "a read-only spin box must not advertise {refused:?}"
+        );
+    }
+    assert!(!access(
+        &mut tree,
+        id,
+        Action::SetValue,
+        Some(ActionData::NumericValue(42.0))
+    ));
+    assert_eq!(value.get(), 10);
+}
+
+#[test]
+fn a11y_increment_survives_the_move_to_the_payload_handler() {
+    // `on_access_action_request` is called INSTEAD of `on_access_action`, so
+    // Increment and Decrement had to move with SetValue or they would have
+    // gone quiet the moment the payload handler was installed.
+    use teksilo_core::accesskit::Action;
+    let (mut tree, value, id) = setup_int(10, 0, 100);
+
+    assert!(access(&mut tree, id, Action::Increment, None));
+    assert_eq!(value.get(), 11);
+    assert!(access(&mut tree, id, Action::Decrement, None));
+    assert_eq!(value.get(), 10);
+}

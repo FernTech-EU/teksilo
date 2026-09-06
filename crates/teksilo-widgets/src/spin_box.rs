@@ -27,7 +27,13 @@
 //!   - `PageUp` / `PageDown` → ±[`page_step`](SpinBox::page_step)
 //!     (default: `10 × single_step`)
 //!   - `Enter` → commit (stays focused)
-//!   - `Home` / `End` stay bound to the text cursor (Qt-compatible).
+//!   - `Home` / `End` stay bound to the text cursor. `QAbstractSpinBox`
+//!     routes both to its inner `QLineEdit`, and WinUI's `NumberBox`,
+//!     Blink, Avalonia and jQuery UI bind neither; typing the number
+//!     reaches min and max anyway. See `docs/range-keyboard.md`.
+//!   - A chord holding `Ctrl`, `Alt` or `Super` is not the spin box's
+//!     and falls through to the application; `Shift` does not change
+//!     the step.
 //! - **Mouse wheel**: adjusts by `single_step` — wheel **down**
 //!   decreases, wheel **up** increases, matching `QAbstractSpinBox`,
 //!   `GtkSpinButton` and WinUI's `NumberBox`. Gated by
@@ -76,9 +82,20 @@
 //! [`Increment`](teksilo_core::accesskit::Action::Increment),
 //! [`Decrement`](teksilo_core::accesskit::Action::Decrement),
 //! [`SetValue`](teksilo_core::accesskit::Action::SetValue), and
-//! [`Focus`](teksilo_core::accesskit::Action::Focus) actions. The
-//! step buttons are structurally part of the SpinBox and publish
-//! no separate a11y nodes.
+//! [`Focus`](teksilo_core::accesskit::Action::Focus) actions.
+//!
+//! `SetValue` accepts either payload shape, because both are sent in
+//! the field: a number (macOS `setAccessibilityValue:` with an
+//! `NSNumber`, AT-SPI's `Value.SetCurrentValue`) is clamped and
+//! published as sent; a string (an `NSString`, the automation
+//! `set_value` tool) takes the same parse `Enter` takes, so a custom
+//! [`value_from_text`](SpinBox::value_from_text) and the locale's
+//! decimal separator are honoured, and an unparseable one reverts the
+//! display and is reported unhandled. A
+//! [`read_only`](SpinBox::read_only) spin box advertises and services
+//! none of the three mutating actions. The step buttons are
+//! structurally part of the SpinBox and publish no separate a11y
+//! nodes.
 //!
 //! # Example
 //!
@@ -115,7 +132,7 @@ pub use self::value::SpinValue;
 use teksilo_canvas::{Path, Point, Rect, Size, SizeProposal};
 use teksilo_core::accessibility::AccessNodeBuilder;
 use teksilo_core::build_context::BuildContext;
-use teksilo_core::event::{EventResponse, Key, ScrollDelta, WidgetEvent};
+use teksilo_core::event::{EventResponse, ScrollDelta, WidgetEvent};
 use teksilo_core::signal::{Prop, Signal};
 use teksilo_core::widget::{EventContext, LayoutContext, Widget, WidgetPlacement};
 use teksilo_core::widget_builder::HandlerSet;
@@ -123,6 +140,7 @@ use teksilo_core::widget_id::WidgetId;
 use teksilo_text::SharedTypesetter;
 use teksilo_tokens::{CornerRadius, TextStyle};
 
+use crate::common::range_nav::{self, RangeAxis, RangeKind, RangeMove};
 use crate::primitives::icon_widget::IconWidget;
 use crate::primitives::text_input_field::TextInputField;
 use crate::primitives::{MinSize, Padding};
@@ -572,8 +590,11 @@ impl<T: SpinValue> SpinBox<T> {
         self
     }
 
-    /// Prevent the user from typing in the field while still allowing
-    /// keyboard and button stepping.
+    /// Make the value uneditable: no typing, no keyboard or wheel stepping,
+    /// no step buttons, and no assistive-technology `Increment` / `Decrement`
+    /// / `SetValue`. Matches `QAbstractSpinBox::readOnly`, which likewise
+    /// stops `stepBy`. The field keeps focus and selection, so the value can
+    /// still be read and copied.
     pub fn read_only(mut self, read_only: bool) -> Self {
         self.read_only = read_only;
         self
@@ -833,28 +854,23 @@ impl<T: SpinValue> Widget for SpinBox<T> {
         // current text; on success, clamps and writes the value and
         // reformats the text. On failure, reverts the text to the
         // formatted current value.
-        let commit: Rc<dyn Fn(&mut EventContext)> = {
+        // The commit *tail*: clamp into `[min, max]`, reformat the field
+        // text, publish the value and fire `on_value_changed`. Split out of
+        // `commit` because the AccessKit `SetValue` path is handed a *number*
+        // and has nothing to parse — and routing a number back through the
+        // parser would hand a machine-generated string to a user-supplied
+        // `value_from_text` that never agreed to read one. The reformat runs
+        // even when the value is unchanged, so `007` still normalises to `7`.
+        let set_committed: Rc<dyn Fn(T, &mut EventContext)> = {
             let value_signal = self.value.clone();
             let text_signal = self.text_signal.clone();
-            let value_from_text = value_from_text.clone();
             let text_from_value = text_from_value.clone();
             let special_text = special_text.clone();
             let on_value_changed = on_value_changed.clone();
-            let commit_presentation = presentation.clone();
-            Rc::new(move |ctx: &mut EventContext| {
-                let raw = text_signal.get();
-                // A user-supplied parser gets the raw text: it owns the
-                // whole convention, and de-localizing first would hand it
-                // a string it never agreed to read.
-                let parsed: Option<T> = match value_from_text.as_deref() {
-                    Some(f) => f(raw.trim()),
-                    None => commit_presentation.parse::<T>(&raw),
-                };
+            let presentation = presentation.clone();
+            Rc::new(move |candidate: T, ctx: &mut EventContext| {
                 let old = value_signal.get();
-                let new_value = match parsed {
-                    Some(v) => v.clamp_value(min, max),
-                    None => old, // revert
-                };
+                let new_value = candidate.clamp_value(min, max);
                 let formatted = format_for_display(
                     new_value,
                     decimals,
@@ -862,7 +878,7 @@ impl<T: SpinValue> Widget for SpinBox<T> {
                     text_from_value.as_deref(),
                     min,
                     false,
-                    &commit_presentation,
+                    &presentation,
                 );
                 if text_signal.get() != formatted {
                     text_signal.set(formatted);
@@ -873,6 +889,49 @@ impl<T: SpinValue> Widget for SpinBox<T> {
                         cb(new_value, ctx);
                     }
                 }
+            })
+        };
+
+        // Commit a string. The one parse site: Enter, blur and the AccessKit
+        // `SetValue` string payload all arrive here, so an assistive-technology
+        // write honours a custom `value_from_text` and the active locale's
+        // decimal separator exactly as a typed one does. Reports whether the
+        // string parsed; on failure the display is restored from the value the
+        // field still holds — the revert a typed rubbish string gets — and the
+        // caller decides how loudly to say so.
+        let commit_text: Rc<dyn Fn(&str, &mut EventContext) -> bool> = {
+            let value_signal = self.value.clone();
+            let value_from_text = value_from_text.clone();
+            let commit_presentation = presentation.clone();
+            let set_committed = set_committed.clone();
+            Rc::new(move |raw: &str, ctx: &mut EventContext| {
+                // A user-supplied parser gets the raw text: it owns the
+                // whole convention, and de-localizing first would hand it
+                // a string it never agreed to read.
+                let parsed: Option<T> = match value_from_text.as_deref() {
+                    Some(f) => f(raw.trim()),
+                    None => commit_presentation.parse::<T>(raw),
+                };
+                match parsed {
+                    Some(v) => {
+                        set_committed(v, ctx);
+                        true
+                    }
+                    None => {
+                        // Revert: reformat from the value still held.
+                        set_committed(value_signal.get(), ctx);
+                        false
+                    }
+                }
+            })
+        };
+
+        let commit: Rc<dyn Fn(&mut EventContext)> = {
+            let text_signal = self.text_signal.clone();
+            let commit_text = commit_text.clone();
+            Rc::new(move |ctx: &mut EventContext| {
+                let raw = text_signal.get();
+                let _ = commit_text(&raw, ctx);
             })
         };
 
@@ -1239,7 +1298,8 @@ impl<T: SpinValue> Widget for SpinBox<T> {
         let step_for_key = step.clone();
         let step_for_wheel = step.clone();
         let value_for_a11y = self.value.clone();
-        let field_id_for_access = field_id;
+        let set_committed_for_a11y = set_committed.clone();
+        let commit_text_for_a11y = commit_text.clone();
 
         let handlers = HandlerSet::new()
             // The SpinBox is not itself focusable — focus lands inside the
@@ -1257,30 +1317,38 @@ impl<T: SpinValue> Widget for SpinBox<T> {
             // silently break stepping. Non-arrow keys return `Ignored` and
             // fall through to the field for normal text input.
             .on_key_preview(move |event, ctx| {
-                if !enabled || read_only {
+                // `enabled` needs no test: the dispatcher gates on
+                // `arena.is_enabled` before any handler runs.
+                if read_only {
                     return EventResponse::Ignored;
                 }
-                let WidgetEvent::KeyDown { key, .. } = event else {
+                let WidgetEvent::KeyDown { key, modifiers, .. } = event else {
                     return EventResponse::Ignored;
                 };
-                match key {
-                    Key::ArrowUp => {
-                        (step_for_key)(1, false, ctx);
+                // `TextEditable` is what leaves `Home` / `End` to the caret,
+                // and `Vertical` is what leaves it the horizontal arrows. Both
+                // are decisions rather than omissions, and both are asserted in
+                // `common::range_nav`'s own tests. `rtl` is never consulted:
+                // no horizontal arrow is claimed.
+                match range_nav::range_move(
+                    *key,
+                    *modifiers,
+                    RangeKind::TextEditable,
+                    RangeAxis::Vertical,
+                    false,
+                ) {
+                    Some(RangeMove::Step { increase }) => {
+                        (step_for_key)(if increase { 1 } else { -1 }, false, ctx);
                         EventResponse::Handled
                     }
-                    Key::ArrowDown => {
-                        (step_for_key)(-1, false, ctx);
+                    Some(RangeMove::Page { increase }) => {
+                        (step_for_key)(if increase { 1 } else { -1 }, true, ctx);
                         EventResponse::Handled
                     }
-                    Key::PageUp => {
-                        (step_for_key)(1, true, ctx);
-                        EventResponse::Handled
-                    }
-                    Key::PageDown => {
-                        (step_for_key)(-1, true, ctx);
-                        EventResponse::Handled
-                    }
-                    _ => EventResponse::Ignored,
+                    // A `TextEditable` never reaches an extremum — swept in
+                    // `range_nav`'s tests — so this arm states the contract
+                    // rather than guarding a case that can occur.
+                    Some(RangeMove::ToMin | RangeMove::ToMax) | None => EventResponse::Ignored,
                 }
             })
             .on_scroll({
@@ -1319,20 +1387,64 @@ impl<T: SpinValue> Widget for SpinBox<T> {
                     EventResponse::Handled
                 }
             })
-            .on_access_action(move |action, ctx| {
-                use teksilo_core::accesskit::Action;
-                match action {
-                    Action::Increment => {
-                        (step.clone())(1, false, ctx);
+            // Full-payload AccessKit handler. `SetValue` carries its value in
+            // `ActionData`, which `on_access_action` cannot see — and the
+            // dispatcher calls the request slot *instead of* the plain one when
+            // both are set, so the whole action set moves here or Increment and
+            // Decrement go quiet. Both payload shapes are serviced, because
+            // both are sent in the field:
+            //   * `NumericValue(f64)` — macOS `setAccessibilityValue:` with an
+            //     `NSNumber` (a `Role::SpinButton` publishes a numeric
+            //     `AXValue`), and AT-SPI's `Value.SetCurrentValue`, which is how
+            //     Orca sets a spin button. AT-SPI publishes the `Value`
+            //     interface off `numeric_value` alone, so that door is open
+            //     whether or not the action is advertised.
+            //   * `Value(Box<str>)` — macOS with an `NSString`, and Teksilo's
+            //     own automation `set_value` tool, which sends only this shape.
+            // `Action::Focus` has no arm: the dispatcher services it before any
+            // widget sees it, and now walks to the focusable inner field.
+            .on_access_action_request(move |action, _target_node, data, ctx| {
+                use teksilo_core::accesskit::{Action, ActionData};
+                // A read-only spin box refuses every mutating action rather
+                // than reporting a success that never happened — the contract
+                // an automation client relies on to learn its call did nothing.
+                if read_only {
+                    return EventResponse::Ignored;
+                }
+                match (action, data) {
+                    (Action::Increment, _) => {
+                        (step)(1, false, ctx);
                         EventResponse::Handled
                     }
-                    Action::Decrement => {
-                        (step.clone())(-1, false, ctx);
+                    (Action::Decrement, _) => {
+                        (step)(-1, false, ctx);
                         EventResponse::Handled
                     }
-                    Action::Focus => {
-                        ctx.request_focus(field_id_for_access);
+                    // A number goes straight to the commit tail: clamp,
+                    // reformat, publish, notify.
+                    (Action::SetValue, Some(ActionData::NumericValue(v))) => {
+                        // `from_f64_saturating` maps NaN to zero; writing 0 for
+                        // a malformed request is worse than declining it.
+                        if !v.is_finite() {
+                            return EventResponse::Ignored;
+                        }
+                        (set_committed_for_a11y)(T::from_f64_saturating(v), ctx);
+                        ctx.request_frame();
                         EventResponse::Handled
+                    }
+                    // A string takes the same parse Enter takes, so a custom
+                    // `value_from_text` and the locale's decimal separator are
+                    // honoured. An unparseable string reverts the display and
+                    // is reported unhandled, so the caller hears about it
+                    // instead of watching a silent no-op.
+                    (Action::SetValue, Some(ActionData::Value(v))) => {
+                        let parsed = (commit_text_for_a11y)(v.as_ref(), ctx);
+                        ctx.request_frame();
+                        if parsed {
+                            EventResponse::Handled
+                        } else {
+                            EventResponse::Ignored
+                        }
                     }
                     _ => EventResponse::Ignored,
                 }
@@ -1464,10 +1576,16 @@ impl<T: SpinValue> Widget for SpinBox<T> {
         // Framework a11y walker sets `set_disabled` from arena state.
         if self.read_only {
             builder.set_read_only();
+        } else {
+            // A read-only spin box advertises none of the three mutating
+            // actions. macOS gates `setAccessibilityValue:` settability on
+            // `supports_action(SetValue, ..)` alone — `is_read_only` does not
+            // veto it — so advertising here is precisely what would tell
+            // VoiceOver the value is settable when it is not.
+            builder.add_action(Action::Increment);
+            builder.add_action(Action::Decrement);
+            builder.add_action(Action::SetValue);
         }
-        builder.add_action(Action::Increment);
-        builder.add_action(Action::Decrement);
-        builder.add_action(Action::SetValue);
         builder.add_action(Action::Focus);
     }
 }

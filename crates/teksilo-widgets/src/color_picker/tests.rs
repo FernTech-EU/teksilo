@@ -185,6 +185,65 @@ fn hue_strip_keyboard_steps() {
 }
 
 #[test]
+fn alpha_strip_keyboard_steps() {
+    // The alpha strip had no keyboard test at all, though it has bound the
+    // whole family since it shipped.
+    let alpha = Signal::new(0.50_f32);
+    let setter: Rc<dyn Fn(f32)> = {
+        let alpha = alpha.clone();
+        Rc::new(move |a| alpha.set(a))
+    };
+    let dragging = Rc::new(std::cell::Cell::new(false));
+    let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+    let id = tree.add(AlphaStrip::new(
+        Signal::new(Color::RED),
+        alpha.clone(),
+        setter,
+        dragging,
+    ));
+    tree.layout(SizeProposal::exact(20.0, 200.0));
+    tree.focus(id);
+
+    tree.press_key(Key::ArrowUp, Modifiers::NONE);
+    assert!((alpha.get() - 0.51).abs() < 0.001, "alpha={}", alpha.get());
+    tree.press_key(Key::PageUp, Modifiers::NONE);
+    assert!((alpha.get() - 0.61).abs() < 0.001, "alpha={}", alpha.get());
+    tree.press_key(Key::Home, Modifiers::NONE);
+    assert!(alpha.get().abs() < 0.001);
+    tree.press_key(Key::End, Modifiers::NONE);
+    assert!((alpha.get() - 1.0).abs() < 0.001);
+}
+
+#[test]
+fn the_strips_ignore_accelerator_chords() {
+    // Behaviour change: modifiers used to be ignored outright, so `Ctrl+Home`
+    // drove a strip to its minimum and swallowed the chord.
+    let hue = Signal::new(180.0_f32);
+    let setter: Rc<dyn Fn(f32)> = {
+        let hue = hue.clone();
+        Rc::new(move |h| hue.set(h))
+    };
+    let dragging = Rc::new(std::cell::Cell::new(false));
+    let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+    let id = tree.add(HueStrip::new(hue.clone(), setter, dragging));
+    tree.layout(SizeProposal::exact(20.0, 200.0));
+    tree.focus(id);
+
+    for (key, mods) in [
+        (Key::Home, Modifiers::CTRL),
+        (Key::PageUp, Modifiers::ALT),
+        (Key::ArrowUp, Modifiers::SUPER),
+    ] {
+        tree.press_key(key, mods);
+        assert!(
+            (hue.get() - 180.0).abs() < 0.01,
+            "{key:?} with {mods:?} moved the hue to {}",
+            hue.get()
+        );
+    }
+}
+
+#[test]
 fn swatch_emits_color_well_with_color_value() {
     let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
     let id = tree.add(ColorSwatch::new(Color::RED));

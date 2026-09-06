@@ -254,6 +254,115 @@ fn keyboard_resizes_focused_handle() {
 }
 
 #[test]
+fn rtl_mirrors_the_resize_arrows() {
+    // The pane order and the drag math have been mirrored since this widget
+    // shipped — `Splitter::place_children` writes the direction into the cell
+    // the drag path reads — but the keyboard was not, so `ArrowRight` pulled
+    // the divider the wrong way in a right-to-left window. Qt flips on
+    // `isRightToLeft()`, and only the horizontal pair.
+    let avail = 400.0 - SPLITTER_GUTTER_THICKNESS;
+    let model = h_model(&[avail * 0.5, avail * 0.5]);
+    let mut tree = theme_tree();
+    tree.set_layout_direction(teksilo_core::environment::LayoutDirection::RightToLeft);
+    let root = tree.add(
+        Splitter::new(model.clone())
+            .pane(FixedLeaf(100.0, 40.0))
+            .pane(FixedLeaf(100.0, 40.0)),
+    );
+    tree.layout(SizeProposal::exact(400.0, 200.0));
+
+    let handle = tree.child_widget(root, 1);
+    tree.focus(handle);
+    let before = model.stored_size(0);
+    tree.press_key(Key::ArrowLeft, Modifiers::NONE);
+    assert!(
+        model.stored_size(0) > before,
+        "under RTL the leading pane grows towards the left edge"
+    );
+
+    let mid = model.stored_size(0);
+    tree.press_key(Key::ArrowRight, Modifiers::NONE);
+    assert!(model.stored_size(0) < mid, "and shrinks the other way");
+}
+
+#[test]
+fn home_and_end_drive_the_boundary_to_its_limits() {
+    let avail = 400.0 - SPLITTER_GUTTER_THICKNESS;
+    let model = h_model(&[avail * 0.5, avail * 0.5]);
+    let mut tree = theme_tree();
+    let root = tree.add(
+        Splitter::new(model.clone())
+            .pane(FixedLeaf(100.0, 40.0))
+            .pane(FixedLeaf(100.0, 40.0)),
+    );
+    tree.layout(SizeProposal::exact(400.0, 200.0));
+
+    let handle = tree.child_widget(root, 1);
+    tree.focus(handle);
+    tree.press_key(Key::Home, Modifiers::NONE);
+    let at_min = model.stored_size(0);
+    tree.press_key(Key::End, Modifiers::NONE);
+    assert!(
+        model.stored_size(0) > at_min,
+        "End gives pane 0 everything Home took away"
+    );
+}
+
+#[test]
+fn page_keys_are_not_a_splitter_chord() {
+    // The ARIA window-splitter pattern asks only for `Home` and `End`, and
+    // `QSplitterHandle` binds no page keys: a divider has no unit a page could
+    // be a multiple of, and the panes either side own their own paging.
+    let avail = 400.0 - SPLITTER_GUTTER_THICKNESS;
+    let model = h_model(&[avail * 0.5, avail * 0.5]);
+    let mut tree = theme_tree();
+    let root = tree.add(
+        Splitter::new(model.clone())
+            .pane(FixedLeaf(100.0, 40.0))
+            .pane(FixedLeaf(100.0, 40.0)),
+    );
+    tree.layout(SizeProposal::exact(400.0, 200.0));
+
+    let handle = tree.child_widget(root, 1);
+    tree.focus(handle);
+    let before = model.stored_size(0);
+    tree.press_key(Key::PageUp, Modifiers::NONE);
+    tree.press_key(Key::PageDown, Modifiers::NONE);
+    assert_eq!(model.stored_size(0), before);
+}
+
+#[test]
+fn an_accelerator_chord_does_not_resize() {
+    // Behaviour change: modifiers used to be ignored, so `Ctrl+ArrowRight`
+    // resized the split and swallowed the chord.
+    let avail = 400.0 - SPLITTER_GUTTER_THICKNESS;
+    let model = h_model(&[avail * 0.5, avail * 0.5]);
+    let mut tree = theme_tree();
+    let root = tree.add(
+        Splitter::new(model.clone())
+            .pane(FixedLeaf(100.0, 40.0))
+            .pane(FixedLeaf(100.0, 40.0)),
+    );
+    tree.layout(SizeProposal::exact(400.0, 200.0));
+
+    let handle = tree.child_widget(root, 1);
+    tree.focus(handle);
+    let before = model.stored_size(0);
+    for (key, mods) in [
+        (Key::ArrowRight, Modifiers::CTRL),
+        (Key::Home, Modifiers::ALT),
+        (Key::End, Modifiers::SUPER),
+    ] {
+        tree.press_key(key, mods);
+        assert_eq!(
+            model.stored_size(0),
+            before,
+            "{key:?} with {mods:?} must fall through"
+        );
+    }
+}
+
+#[test]
 fn rtl_horizontal_mirrors_pane_order() {
     let avail = 400.0 - SPLITTER_GUTTER_THICKNESS;
     let model = h_model(&[avail * 0.3, avail * 0.7]);
