@@ -4222,6 +4222,9 @@ impl Widget for RichTextEditorBody {
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         use self::policy::AccessibilityRole;
         use self::state::SyntheticElementRef;
+        use teksilo_canvas::{Point, Rect, TextGeometry};
+        use teksilo_core::accessibility::text_runs::{TextRunSource, push_text_runs};
+        use teksilo_core::accessibility::{TextRunAttributes, TextRunSpec};
         use teksilo_core::accesskit::{Action, NodeId, Role};
         use teksilo_text::text_document::{FlowElementSnapshot, FragmentContent};
 
@@ -4236,16 +4239,16 @@ impl Widget for RichTextEditorBody {
             builder.set_read_only();
         }
 
-        // Walk the cached flow snapshot (or rebuild it if the last
-        // edit cleared the cache). For each block we emit a
-        // Role::Paragraph child (or Role::Heading when the block's
-        // heading_level is set), then for each text fragment we
-        // emit a Role::TextRun child carrying value,
-        // character_lengths, word_starts, and per-character
-        // geometry from text-typeset. Widget-local
-        // synthetic_to_element map is populated so the on-access
-        // handler can convert AccessKit TextSelection back into
-        // document-absolute cursor positions.
+        // Walk the cached flow snapshot (or rebuild it if the last edit
+        // cleared the cache) and hand each block to the shared text-run
+        // emitter. The runs land as **direct** children of this node: a
+        // `Role::Paragraph` between the two is a visible object-navigation
+        // stop that nobody asked for, and — worse —
+        // `accesskit_consumer` routes a run's update to its *filtered*
+        // parent, so a paragraph, which supports no text ranges, makes
+        // macOS, Windows and AT-SPI all drop every text-change event. A
+        // heading block keeps its `Role::Heading` node, because that one
+        // is content structure a reader navigates by.
         let snap = {
             let mut cache = st.accessibility_flow_snapshot.borrow_mut();
             if cache.is_none() {
@@ -4273,223 +4276,261 @@ impl Widget for RichTextEditorBody {
         let mut anchor_pair: Option<(NodeId, usize)> = None;
         let mut syn_map: std::collections::HashMap<NodeId, SyntheticElementRef> =
             std::collections::HashMap::new();
+        // One body node per annotation for the whole walk, not one per run it
+        // covers: `push_annotation_child` derives the id from the group alone,
+        // so a second push gives two children sharing a `NodeId`, which panics
+        // `accesskit_consumer`'s tree builder.
+        let mut annotation_bodies: std::collections::HashMap<u64, NodeId> =
+            std::collections::HashMap::new();
+
+        // The engine reports a block's lines relative to the block's own top
+        // edge, and the block's own top relative to the document's. Both have
+        // to reach the body's coordinate space, which is what the walker
+        // translates from: x loses the horizontal scroll, y gains the block's
+        // document offset less the vertical scroll. `scroll_y` rather than the
+        // engine's own offset because the engine only learns of a scroll at the
+        // next paint, and an accessibility walk can run between the two.
+        let zoom = st.engine.zoom();
+        let scroll_x = st.scroll_x.get();
+        let scroll_y = st.scroll_y.get();
+        let emits_children = !builder.emits_no_children();
 
         if let Some(snap) = snap {
             for elem in &snap.elements {
-                if let FlowElementSnapshot::Block(block) = elem {
-                    let para_id = builder.push_paragraph_child(block.block_id as u64);
-                    if let Some(level) = block.block_format.heading_level {
-                        builder.set_paragraph_as_heading(para_id, level);
+                let FlowElementSnapshot::Block(block) = elem else {
+                    continue;
+                };
+
+                let geometry = TextGeometry {
+                    lines: st.engine.block_line_geometry(block.block_id, &block.text),
+                    dropped_lines: 0,
+                    source_len: block.text.len(),
+                    rendered_text: None,
+                    links: Vec::new(),
+                };
+                let block_top = st
+                    .engine
+                    .block_visual_info(block.block_id)
+                    .map(|info| info.y)
+                    .unwrap_or(0.0);
+                let origin = Point::new(-scroll_x, (block_top - scroll_y) * zoom);
+                let source = TextRunSource::from_geometry(
+                    &block.text,
+                    &geometry,
+                    origin,
+                    block.block_id as u64,
+                );
+
+                // A heading is the one block-level node worth keeping: it is
+                // how a reader jumps through a document, and it does carry a
+                // level to announce.
+                let parent = match block.block_format.heading_level {
+                    Some(level) if emits_children => {
+                        let heading = builder.push_paragraph_child(block.block_id as u64);
+                        builder.set_paragraph_as_heading(heading, level);
+                        Some(heading)
                     }
-                    for frag in &block.fragments {
-                        if let FragmentContent::Text {
-                            text,
+                    _ => None,
+                };
+
+                let emission = push_text_runs(builder, parent, &source);
+
+                for run in &emission.runs {
+                    let absolute_start = block.position + run.char_range.start;
+                    let absolute_end = block.position + run.char_range.end;
+
+                    // Remember where this run lives in the document so the
+                    // on-access handler can resolve
+                    // SetTextSelection(TextRun NodeId, char_index).
+                    syn_map.insert(
+                        run.id,
+                        SyntheticElementRef {
+                            element_id: block.block_id as u64,
+                            absolute_start,
+                            text: source
+                                .text
+                                .get(run.byte_range.clone())
+                                .unwrap_or_default()
+                                .to_string(),
+                        },
+                    );
+
+                    // Annotations covering this run: one Role::Comment node
+                    // each, linked from the run through `details`. Linked per
+                    // run rather than once per span because a span can cross
+                    // runs (a wrapped sentence splits at every line), and every
+                    // covered run must carry the relation or the announcement
+                    // drops out halfway through the phrase.
+                    for span in &st.annotation_spans {
+                        if span.start < absolute_end && span.end > absolute_start {
+                            let body = match annotation_bodies.get(&span.group_id) {
+                                Some(body) => *body,
+                                None => {
+                                    let body = builder
+                                        .push_annotation_child(span.group_id, span.summary.clone());
+                                    annotation_bodies.insert(span.group_id, body);
+                                    body
+                                }
+                            };
+                            builder.push_detail_on_child(run.id, body);
+                        }
+                    }
+                }
+
+                // Resolve the user's cursor / anchor against this block. The
+                // emitter knows which run a character landed in, including the
+                // chunk splits it made at 255 characters, so no call site has
+                // to reproduce that arithmetic.
+                let block_chars = block.text.chars().count();
+                if user_pos >= block.position && user_pos <= block.position + block_chars {
+                    caret_pair = emission
+                        .position_of(user_pos - block.position)
+                        .or(caret_pair);
+                }
+                if user_anchor >= block.position && user_anchor <= block.position + block_chars {
+                    anchor_pair = emission
+                        .position_of(user_anchor - block.position)
+                        .or(anchor_pair);
+                }
+
+                // Inline objects: one document character each, rendered as
+                // something a reader sees but cannot read out of the text — an
+                // image, or a footnote's marker.
+                //
+                // Announced as a single-character text run whose value is that
+                // description. `character_lengths` is one entry spanning the
+                // whole string on purpose: the object *is* one character of the
+                // document, however many letters stand in for it, and telling
+                // AccessKit otherwise would put every caret offset after it out
+                // by the difference.
+                for frag in &block.fragments {
+                    let object_run = match frag {
+                        FragmentContent::Image {
+                            alt,
                             offset,
-                            length,
                             element_id,
-                            word_starts,
                             format,
                             ..
-                        } = frag
-                        {
-                            // Text attributes for AT (WCAG 1.3.1 / EN 301 549
-                            // 11.5.2.9): bold / italic / underline / strikethrough
-                            // per formatting run. AccessKit has no bold flag, so
-                            // an explicit weight wins, else bold folds to 700.
-                            let attrs = teksilo_core::accessibility::TextRunAttributes {
-                                font_weight: format.font_weight.map(|w| w as u16),
-                                bold: format.font_bold.unwrap_or(false),
-                                italic: format.font_italic.unwrap_or(false),
-                                underline: format.font_underline.unwrap_or(false),
-                                strikethrough: format.font_strikeout.unwrap_or(false),
-                            };
-                            // character_lengths: UTF-8 byte length of each char.
-                            // AccessKit indexes by char, each entry is byte count.
-                            let char_lengths: Vec<u8> =
-                                text.chars().map(|c| c.len_utf8() as u8).collect();
+                        } => Some((alt.clone(), *offset, *element_id, format)),
+                        FragmentContent::FootnoteReference {
+                            marker,
+                            offset,
+                            element_id,
+                            format,
+                            ..
+                        } => Some((marker.clone(), *offset, *element_id, format)),
+                        FragmentContent::Text { .. } => None,
+                    };
+                    let Some((value, offset, element_id, format)) = object_run else {
+                        continue;
+                    };
+                    if !emits_children {
+                        continue;
+                    }
 
-                            // Per-character geometry from text-typeset. char_start
-                            // / char_end are block-relative character offsets
-                            // (matches LayoutLine::char_range's coordinate space).
-                            let char_start = *offset;
-                            let char_end = char_start + *length;
-                            let geom =
-                                st.engine
-                                    .character_geometry(block.block_id, char_start, char_end);
-                            let char_positions: Vec<f32> =
-                                geom.iter().map(|g| g.position).collect();
-                            let char_widths: Vec<f32> = geom.iter().map(|g| g.width).collect();
+                    // Text attributes for AT (WCAG 1.3.1 / EN 301 549
+                    // 11.5.2.9). AccessKit has no bold flag, so an explicit
+                    // weight wins, else bold folds to 700.
+                    let attrs = TextRunAttributes {
+                        font_weight: format.font_weight.map(|w| w as u16),
+                        bold: format.font_bold.unwrap_or(false),
+                        italic: format.font_italic.unwrap_or(false),
+                        underline: format.font_underline.unwrap_or(false),
+                        strikethrough: format.font_strikeout.unwrap_or(false),
+                    };
 
-                            let node_id = builder.push_text_run_child(
-                                para_id,
-                                *element_id,
-                                *offset,
-                                text.clone(),
-                                char_lengths,
-                                Some(word_starts.clone()),
-                                if char_positions.is_empty() {
-                                    None
-                                } else {
-                                    Some(char_positions)
-                                },
-                                if char_widths.is_empty() {
-                                    None
-                                } else {
-                                    Some(char_widths)
-                                },
-                                attrs,
-                            );
+                    // An empty description would announce nothing at all, which
+                    // is indistinguishable from a rendering fault. A single
+                    // space is at least a spoken pause. The length rides in a
+                    // `u8`, so a description longer than that loses its tail
+                    // rather than making AccessKit's own invariant unsatisfiable.
+                    let mut value = if value.is_empty() {
+                        " ".to_string()
+                    } else {
+                        value
+                    };
+                    while value.len() > u8::MAX as usize {
+                        value.pop();
+                    }
 
-                            // Annotations covering this run: one Role::Comment
-                            // node each, linked from the run through `details`.
-                            // Emitted per run rather than once per span because a
-                            // span can cross runs (a bold word inside a commented
-                            // sentence splits it), and every covered run must
-                            // carry the relation or the announcement drops out
-                            // halfway through the phrase.
-                            let run_start = block.position + *offset;
-                            let run_end = run_start + *length;
-                            for span in &st.annotation_spans {
-                                if span.start < run_end && span.end > run_start {
-                                    let detail = builder
-                                        .push_annotation_child(span.group_id, span.summary.clone());
-                                    builder.push_detail_on_child(node_id, detail);
-                                }
-                            }
-
-                            // Remember where this run lives in the document so
-                            // the on-access handler can resolve
-                            // SetTextSelection(TextRun NodeId, char_index).
-                            let absolute_start = block.position + *offset;
-                            syn_map.insert(
-                                node_id,
-                                SyntheticElementRef {
-                                    element_id: *element_id,
-                                    absolute_start,
-                                    text: text.clone(),
-                                },
-                            );
-
-                            // Resolve user cursor / anchor to this run if they
-                            // fall within its absolute character range
-                            // [absolute_start, absolute_start + length].
-                            let absolute_end = absolute_start + *length;
-                            if user_pos >= absolute_start && user_pos <= absolute_end {
-                                let char_idx = char_index_in_text(text, user_pos - absolute_start);
-                                caret_pair = Some((node_id, char_idx));
-                            }
-                            if user_anchor >= absolute_start && user_anchor <= absolute_end {
-                                let char_idx =
-                                    char_index_in_text(text, user_anchor - absolute_start);
-                                anchor_pair = Some((node_id, char_idx));
-                            }
+                    // Geometry for the one character it occupies, anchored on
+                    // the line it sits in: a run with no bounds empties
+                    // `bounding_boxes()` for every range that touches it.
+                    let byte_offset = block
+                        .text
+                        .char_indices()
+                        .nth(offset)
+                        .map(|(index, _)| index)
+                        .unwrap_or(block.text.len());
+                    let line = source
+                        .lines
+                        .iter()
+                        .find(|line| line.byte_range.contains(&byte_offset))
+                        .or_else(|| source.lines.last());
+                    let glyph = st
+                        .engine
+                        .character_geometry(block.block_id, offset, offset + 1);
+                    let (position, width) = glyph
+                        .first()
+                        .map(|g| (g.position, g.width))
+                        .unwrap_or((0.0, 0.0));
+                    let bounds = match line {
+                        Some(line) => {
+                            Rect::new(line.rect.x + position, line.rect.y, width, line.rect.height)
                         }
+                        None => Rect::new(origin.x + position, origin.y, width, 0.0),
+                    };
 
-                        // Inline objects: one document character each, rendered
-                        // as something a reader sees but cannot read out of the
-                        // text — an image, or a footnote's marker.
-                        //
-                        // Announced as a single-character text run whose value
-                        // is that description. `character_lengths` is one entry
-                        // spanning the whole string on purpose: the object *is*
-                        // one character of the document, however many letters
-                        // stand in for it, and telling AccessKit otherwise would
-                        // put every caret offset after it out by the difference.
-                        //
-                        // Images were reaching no assistive technology at all
-                        // until now — their `alt` was carried the whole way
-                        // through the pipeline and then dropped here, at the
-                        // last step, because this loop only ever matched `Text`.
-                        let object_run = match frag {
-                            FragmentContent::Image {
-                                alt,
-                                offset,
-                                element_id,
-                                format,
-                                ..
-                            } => Some((alt.clone(), *offset, *element_id, format)),
-                            FragmentContent::FootnoteReference {
-                                marker,
-                                offset,
-                                element_id,
-                                format,
-                                ..
-                            } => Some((marker.clone(), *offset, *element_id, format)),
-                            FragmentContent::Text { .. } => None,
-                        };
+                    let Some(node_id) = builder.push_text_run(
+                        parent,
+                        TextRunSpec {
+                            element_id,
+                            character_lengths: vec![value.len() as u8],
+                            word_starts: vec![0],
+                            character_positions: vec![0.0],
+                            character_widths: vec![width],
+                            value: value.clone(),
+                            bounds,
+                            bounds_are_absolute: false,
+                            text_direction: source.base_direction,
+                            attrs,
+                        },
+                    ) else {
+                        continue;
+                    };
 
-                        if let Some((value, offset, element_id, format)) = object_run {
-                            let attrs = teksilo_core::accessibility::TextRunAttributes {
-                                font_weight: format.font_weight.map(|w| w as u16),
-                                bold: format.font_bold.unwrap_or(false),
-                                italic: format.font_italic.unwrap_or(false),
-                                underline: format.font_underline.unwrap_or(false),
-                                strikethrough: format.font_strikeout.unwrap_or(false),
-                            };
-                            // An empty description would announce nothing at
-                            // all, which is indistinguishable from a rendering
-                            // fault. A single space is at least a spoken pause.
-                            let value = if value.is_empty() {
-                                " ".to_string()
-                            } else {
-                                value
-                            };
-                            let geom =
-                                st.engine
-                                    .character_geometry(block.block_id, offset, offset + 1);
-                            let node_id = builder.push_text_run_child(
-                                para_id,
-                                element_id,
-                                offset,
-                                value.clone(),
-                                vec![value.len().min(u8::MAX as usize) as u8],
-                                None,
-                                if geom.is_empty() {
-                                    None
-                                } else {
-                                    Some(geom.iter().map(|g| g.position).collect())
-                                },
-                                if geom.is_empty() {
-                                    None
-                                } else {
-                                    Some(geom.iter().map(|g| g.width).collect())
-                                },
-                                attrs,
-                            );
-
-                            let absolute_start = block.position + offset;
-                            syn_map.insert(
-                                node_id,
-                                SyntheticElementRef {
-                                    element_id,
-                                    absolute_start,
-                                    text: value,
-                                },
-                            );
-                            if user_pos >= absolute_start && user_pos <= absolute_start + 1 {
-                                caret_pair = Some((node_id, user_pos - absolute_start));
-                            }
-                            if user_anchor >= absolute_start && user_anchor <= absolute_start + 1 {
-                                anchor_pair = Some((node_id, user_anchor - absolute_start));
-                            }
-                        }
+                    let absolute_start = block.position + offset;
+                    syn_map.insert(
+                        node_id,
+                        SyntheticElementRef {
+                            element_id,
+                            absolute_start,
+                            text: value,
+                        },
+                    );
+                    if user_pos >= absolute_start && user_pos <= absolute_start + 1 {
+                        caret_pair = Some((node_id, user_pos - absolute_start));
+                    }
+                    if user_anchor >= absolute_start && user_anchor <= absolute_start + 1 {
+                        anchor_pair = Some((node_id, user_anchor - absolute_start));
                     }
                 }
             }
         }
 
-        // Attach the text selection on the editor itself, referencing
-        // the appropriate TextRun children. If we couldn't resolve
-        // either endpoint (empty document, cursor in no fragment),
-        // fall back to a self-targeted selection so screen readers
-        // still see *something*.
+        // Attach the text selection on the editor itself, referencing the
+        // TextRun children both endpoints landed in.
         if let (Some(a), Some(c)) = (anchor_pair, caret_pair) {
             builder.set_text_selection_to(a, c);
-        } else {
-            builder.set_text_selection_on_self(user_anchor, user_pos);
         }
 
-        *st.synthetic_to_element.borrow_mut() = syn_map;
+        // Only a real walk owns the map. A name probe emits no children (see
+        // `AccessNodeBuilder::emits_no_children`), so overwriting here would
+        // wipe the mapping the last real walk left behind and break every
+        // screen-reader-initiated caret move until the next one.
+        if emits_children {
+            *st.synthetic_to_element.borrow_mut() = syn_map;
+        }
 
         builder.add_action(Action::Focus);
         builder.add_action(Action::ScrollIntoView);

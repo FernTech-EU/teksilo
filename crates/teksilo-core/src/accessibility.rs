@@ -1,9 +1,12 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
-use accesskit::{Action, Live, Node, NodeId, Role, TextPosition, TextSelection};
+use accesskit::{Action, Live, Node, NodeId, Role, TextDirection, TextPosition, TextSelection};
 
 use crate::widget_id::WidgetId;
+
+pub mod audit;
+pub mod text_runs;
 
 /// Builder wrapper around accesskit::Node for widget accessibility declarations.
 pub struct AccessNodeBuilder {
@@ -38,6 +41,115 @@ pub struct AccessNodeBuilder {
     /// the tree walker after `Widget::accessibility(&self, builder)`
     /// returns and merged into the full AccessKit `TreeUpdate`.
     children_collected: Vec<(NodeId, Node)>,
+    /// Bounds a widget declared for its synthetic children in **its own**
+    /// coordinate space, translated into window space by [`build`] —
+    /// which is the first moment the owner's absolute rect is known,
+    /// because the walker writes it onto the node just before calling.
+    ///
+    /// A widget that already holds absolute rects (a scene item, a
+    /// composite emitting geometry it got from a child it placed) calls
+    /// `set_bounds` on the child node directly and never appears here.
+    ///
+    /// [`build`]: AccessNodeBuilder::build
+    child_local_bounds: Vec<(NodeId, teksilo_canvas::Rect)>,
+    /// This builder exists only to harvest an accessible *name* — the
+    /// merge pass and the tooltip-description probe both run a widget's
+    /// `accessibility()` on a throwaway builder and read nothing but the
+    /// name off it. Emitting synthetic children there would allocate
+    /// node ids that never reach the tree, and, worse, would be
+    /// discarded along with the builder while the widget's real node
+    /// keeps its own copies.
+    name_probe: bool,
+}
+
+/// The ids of every `Role::TextRun` this node attached to **itself**, or
+/// `None` when there are none.
+///
+/// Scoped to the node's own child list on purpose. A builder's collected
+/// vector also holds *grandchildren* — a scene item is emitted through a
+/// nested builder whose whole subtree is folded into the outer one — and
+/// those belong to a parent of their own, which may well be a
+/// `Role::Label` that does support ranges. Dropping them because the
+/// *outer* node cannot carry runs would delete nodes the item's own
+/// children list still names, and `accesskit_consumer` panics on a
+/// child id that reaches no node.
+fn own_run_ids(
+    inner: &Node,
+    children: &[(NodeId, Node)],
+) -> Option<std::collections::HashSet<NodeId>> {
+    let attached: std::collections::HashSet<NodeId> = inner.children().iter().copied().collect();
+    let ids: std::collections::HashSet<NodeId> = children
+        .iter()
+        .filter(|(id, node)| node.role() == Role::TextRun && attached.contains(id))
+        .map(|(id, _)| *id)
+        .collect();
+    (!ids.is_empty()).then_some(ids)
+}
+
+/// Everything one `Role::TextRun` node needs.
+#[derive(Debug, Clone)]
+pub struct TextRunSpec {
+    /// Mixed with the owner and the run kind to derive the node id.
+    pub element_id: u64,
+    pub value: String,
+    /// UTF-8 byte length of each character of `value`. Their sum must be
+    /// `value.len()`; AccessKit panics otherwise.
+    pub character_lengths: Vec<u8>,
+    pub word_starts: Vec<u8>,
+    pub character_positions: Vec<f32>,
+    pub character_widths: Vec<f32>,
+    pub bounds: teksilo_canvas::Rect,
+    /// `true` when `bounds` is already in window space.
+    pub bounds_are_absolute: bool,
+    pub text_direction: TextDirection,
+    pub attrs: TextRunAttributes,
+}
+
+/// The text a node announces, read the way every platform adapter reads it.
+///
+/// A `Role::Label` carries its text in `value`, not `label` — Windows UIA
+/// derives the Name from `value` for that role, macOS exposes it as
+/// `AXValue`, and `accesskit_consumer` reads `value` when another control is
+/// `labelled_by` it. `AccessNodeBuilder::build` moves it there. Everything
+/// else carries its name in `label`. A test or probe that reads one property
+/// sees nothing on half the tree.
+pub fn announced_text(node: &Node) -> Option<&str> {
+    if node.role() == Role::Label {
+        node.value().or_else(|| node.label())
+    } else {
+        node.label().or_else(|| node.value())
+    }
+}
+
+/// Whether a node with this role can carry text ranges at all.
+///
+/// `accesskit_consumer::Node::supports_text_ranges` is
+/// `(is_text_input || role ∈ {Label, Document, Terminal}) && has runs`
+/// (`accesskit_consumer-0.39.0/src/text.rs:1402`). Runs under any other
+/// role are inert: no platform exposes them, and they still cost a node
+/// in every update.
+pub fn role_supports_text_ranges(role: Role) -> bool {
+    matches!(
+        role,
+        Role::Label
+            | Role::Document
+            | Role::Terminal
+            | Role::TextInput
+            | Role::MultilineTextInput
+            | Role::SearchInput
+            | Role::DateInput
+            | Role::DateTimeInput
+            | Role::WeekInput
+            | Role::MonthInput
+            | Role::TimeInput
+            | Role::EmailInput
+            | Role::NumberInput
+            | Role::PasswordInput
+            | Role::PhoneNumberInput
+            | Role::UrlInput
+            | Role::EditableComboBox
+            | Role::SpinButton
+    )
 }
 
 /// Discriminator kind for synthetic-NodeId hashing. Different
@@ -188,7 +300,7 @@ pub fn is_synthetic(id: NodeId) -> bool {
 /// cryptographic hash — just a fast, deterministic, well-distributed
 /// mix for collision-free synthetic NodeIds across the
 /// (widget, element, kind) space.
-fn fnv_mix_u64(a: u64, b: u64, c: u64) -> u64 {
+pub(crate) fn fnv_mix_u64(a: u64, b: u64, c: u64) -> u64 {
     const FNV_OFFSET: u64 = 0xcbf29ce484222325;
     const FNV_PRIME: u64 = 0x100000001b3;
     let mut h = FNV_OFFSET;
@@ -224,6 +336,27 @@ pub struct TextRunAttributes {
     pub strikethrough: bool,
 }
 
+/// Apply a run's formatting to its node.
+///
+/// WCAG 1.3.1 / EN 301 549 11.5.2.9. AccessKit has no bold flag, so an
+/// explicit weight wins and a bare `bold` folds to 700.
+fn apply_run_attrs(node: &mut Node, attrs: TextRunAttributes) {
+    if let Some(weight) = attrs.font_weight {
+        node.set_font_weight(weight as f32);
+    } else if attrs.bold {
+        node.set_font_weight(700.0);
+    }
+    if attrs.italic {
+        node.set_italic();
+    }
+    if attrs.underline {
+        node.set_underline(default_text_decoration());
+    }
+    if attrs.strikethrough {
+        node.set_strikethrough(default_text_decoration());
+    }
+}
+
 /// The `TextDecoration` used for underline / strikethrough on a text run.
 /// Screen readers key off the *presence* of a decoration, not its colour,
 /// so a solid neutral (black) decoration is sufficient; the run's own
@@ -256,6 +389,8 @@ impl AccessNodeBuilder {
             pending_self_selection: None,
             pending_explicit_selection: None,
             children_collected: Vec::new(),
+            child_local_bounds: Vec::new(),
+            name_probe: false,
         }
     }
 
@@ -266,6 +401,33 @@ impl AccessNodeBuilder {
         let mut b = Self::new();
         b.owner = Some(owner);
         b
+    }
+
+    /// A builder whose only purpose is to harvest a widget's accessible
+    /// *name*.
+    ///
+    /// The merge pass (`AccessSubtreeMode::Merge`) and the
+    /// tooltip-description probe both run a widget's `accessibility()`
+    /// against a throwaway builder and read nothing off it but the name.
+    /// Text runs must not be emitted there: their node ids would never
+    /// reach the tree, and the run-emitting helpers still need to compute
+    /// the merged text so the *name* comes out right.
+    pub fn for_name_probe(owner: WidgetId) -> Self {
+        let mut b = Self::for_widget(owner);
+        b.name_probe = true;
+        b
+    }
+
+    /// Whether this builder is a name probe (see
+    /// [`for_name_probe`](Self::for_name_probe)), or has no owner at all —
+    /// the two cases in which a widget must emit no synthetic children.
+    ///
+    /// An owner-less builder is a legitimate, if unusual, caller: the
+    /// overlay measurement path and the debug inspector both run
+    /// `accessibility()` on an arbitrary widget through
+    /// [`AccessNodeBuilder::new`] to read its role and name.
+    pub fn emits_no_children(&self) -> bool {
+        self.name_probe || self.owner.is_none()
     }
 
     pub fn set_role(&mut self, role: Role) {
@@ -672,7 +834,15 @@ impl AccessNodeBuilder {
     /// child nodes emitted by the widget via `push_paragraph_child`
     /// / `push_text_run_child`. The tree walker is responsible for
     /// merging these into the final `TreeUpdate`.
-    pub fn build(mut self, id: WidgetId) -> (NodeId, Node, Vec<(NodeId, Node)>) {
+    pub fn build(
+        mut self,
+        id: WidgetId,
+    ) -> (
+        NodeId,
+        Node,
+        Vec<(NodeId, Node)>,
+        Vec<(NodeId, teksilo_canvas::Rect)>,
+    ) {
         let node_id = widget_id_to_node_id(id);
         // Priority: explicit (child-targeting) selection wins over
         // self-targeting selection — widgets that emit TextRun
@@ -720,7 +890,59 @@ impl AccessNodeBuilder {
             self.inner.clear_label();
         }
 
-        (node_id, self.inner, self.children_collected)
+        // A role override away from a text-range-capable role leaves any
+        // runs inert: no platform exposes them, and they would still cost
+        // a node in every update and a child stop the walker has to
+        // reconcile. Drop them rather than ship them.
+        // `Role::Unknown` is exempt: it is the builder's initial value, so
+        // dropping there would punish a caller that never set a role at all
+        // rather than one that set a role text ranges cannot live under.
+        // Such a node is pruned by the walker in any case.
+        if !self.children_collected.is_empty()
+            && self.inner.role() != Role::Unknown
+            && !role_supports_text_ranges(self.inner.role())
+            && let Some(run_ids) = own_run_ids(&self.inner, &self.children_collected)
+        {
+            self.children_collected
+                .retain(|(cid, _)| !run_ids.contains(cid));
+            self.child_local_bounds
+                .retain(|(cid, _)| !run_ids.contains(cid));
+            let kept: Vec<NodeId> = self
+                .inner
+                .children()
+                .iter()
+                .copied()
+                .filter(|cid| !run_ids.contains(cid))
+                .collect();
+            self.inner.set_children(kept);
+        }
+
+        // Synthetic children declared in the widget's own space become
+        // absolute here: the walker has already written the owner's
+        // window-space rect onto `inner`, and this is the only point at
+        // which both halves are in hand.
+        let origin = self
+            .inner
+            .bounds()
+            .map(|r| (r.x0, r.y0))
+            .unwrap_or((0.0, 0.0));
+        let local_bounds = std::mem::take(&mut self.child_local_bounds);
+        for (child_id, local) in &local_bounds {
+            let absolute = accesskit::Rect {
+                x0: origin.0 + local.x as f64,
+                y0: origin.1 + local.y as f64,
+                x1: origin.0 + (local.x + local.width) as f64,
+                y1: origin.1 + (local.y + local.height) as f64,
+            };
+            for (id, node) in self.children_collected.iter_mut() {
+                if id == child_id {
+                    node.set_bounds(absolute);
+                    break;
+                }
+            }
+        }
+
+        (node_id, self.inner, self.children_collected, local_bounds)
     }
 
     /// Get a reference to the inner node for advanced use.
@@ -978,7 +1200,7 @@ impl AccessNodeBuilder {
         // closure pushed via further `push_scene_child` calls come
         // back in the third tuple field and we forward them so the
         // main TreeUpdate sees the full subtree.
-        let (_unused, node, grand_children) = child_builder.build(owner);
+        let (_unused, node, grand_children, _local) = child_builder.build(owner);
         self.children_collected.push((node_id, node));
         for (gid, gnode) in grand_children {
             self.children_collected.push((gid, gnode));
@@ -1047,7 +1269,7 @@ impl AccessNodeBuilder {
         let node_id = synthetic_node_id(owner, element_id, kind);
         let mut child_builder = AccessNodeBuilder::for_widget(owner);
         customize(&mut child_builder);
-        let (_unused, node, grand_children) = child_builder.build(owner);
+        let (_unused, node, grand_children, _local) = child_builder.build(owner);
         self.children_collected.push((node_id, node));
         for (gid, gnode) in grand_children {
             self.children_collected.push((gid, gnode));
@@ -1129,6 +1351,45 @@ impl AccessNodeBuilder {
         found
     }
 
+    /// Declare this node's base reading direction.
+    ///
+    /// AccessKit's text APIs read the direction from the *run*; the root
+    /// carries it so a consumer that asks the container — and every
+    /// platform that maps a paragraph direction onto its own attribute —
+    /// gets an answer for an empty or geometry-less node too.
+    pub fn set_text_direction(&mut self, direction: accesskit::TextDirection) {
+        self.inner.set_text_direction(direction);
+    }
+
+    /// Set the reading direction of a synthetic child pushed earlier.
+    /// Returns `true` if the child was found.
+    pub fn set_child_text_direction(
+        &mut self,
+        child: NodeId,
+        direction: accesskit::TextDirection,
+    ) -> bool {
+        self.with_collected_node(child, |node| node.set_text_direction(direction))
+    }
+
+    /// Declare a synthetic child's bounds in the **owner's own**
+    /// coordinate space; [`build`](Self::build) translates them into
+    /// window space once the owner's absolute rect is known.
+    ///
+    /// This is what a widget should use for geometry it derives from its
+    /// own layout — a label's line boxes, an editor's rows. A widget
+    /// holding rects that are *already* absolute (a scene item under a
+    /// view transform) calls `set_bounds` on the child node instead and
+    /// never comes through here.
+    ///
+    /// Returns `true` if the child was found.
+    pub fn set_child_bounds_local(&mut self, child: NodeId, rect: teksilo_canvas::Rect) -> bool {
+        if !self.children_collected.iter().any(|(id, _)| *id == child) {
+            return false;
+        }
+        self.child_local_bounds.push((child, rect));
+        true
+    }
+
     /// Link a run of `Role::TextRun` children as one visual line, so assistive
     /// technology navigating by line treats them as a continuous line rather
     /// than fracturing at each formatting or chunk boundary.
@@ -1145,6 +1406,104 @@ impl AccessNodeBuilder {
             self.with_collected_node(a, |node| node.set_next_on_line(b));
             self.with_collected_node(b, |node| node.set_previous_on_line(a));
         }
+    }
+
+    /// Push one `Role::TextRun` child, under `parent` when given and
+    /// under the widget's own node otherwise.
+    ///
+    /// The single door every text run in the framework goes through.
+    /// Returns `None` when the builder has no owner (so no id can be
+    /// derived) or when the id it derived is already taken — a duplicate
+    /// child id panics `accesskit_consumer`'s tree builder, so it is
+    /// dropped here with a diagnostic instead.
+    ///
+    /// Prefer [`text_runs::push_text_runs`], which owns the chunking,
+    /// the word segmentation, the hard-break rule and the line links;
+    /// this is the primitive underneath it.
+    pub fn push_text_run(&mut self, parent: Option<NodeId>, spec: TextRunSpec) -> Option<NodeId> {
+        let owner = self.owner?;
+        let node_id = synthetic_node_id(owner, spec.element_id, SyntheticKind::TextRun);
+        if let Some((existing, _)) = self
+            .children_collected
+            .iter()
+            .find(|(id, _)| *id == node_id)
+        {
+            debug_assert!(
+                false,
+                "Teksilo bug: two text runs of widget {owner:?} derived the same \
+                 accessibility node id {existing:?}. Give each source its own \
+                 `TextRunSource::id_seed`. Please file a bug report."
+            );
+            eprintln!(
+                "Teksilo bug: two text runs of widget {owner:?} derived the same \
+                 accessibility node id {existing:?}; the second was dropped. \
+                 Please file a bug report."
+            );
+            return None;
+        }
+
+        let TextRunSpec {
+            value,
+            character_lengths,
+            word_starts,
+            character_positions,
+            character_widths,
+            bounds,
+            bounds_are_absolute,
+            text_direction,
+            attrs,
+            ..
+        } = spec;
+
+        debug_assert_eq!(
+            character_lengths.iter().map(|n| *n as usize).sum::<usize>(),
+            value.len(),
+            "AccessKit requires the character lengths of a text run to sum to its value's byte length"
+        );
+        let mut node = Node::new(Role::TextRun);
+        node.set_value(value);
+        let expected = character_lengths.len();
+        node.set_character_lengths(character_lengths);
+        node.set_word_starts(word_starts);
+        // All four or none: `Range::bounding_boxes()` throws away every box
+        // it has already collected the moment one run is missing any of
+        // them, so a half-populated run empties the geometry of every
+        // range that touches it.
+        if character_positions.len() == expected && character_widths.len() == expected {
+            node.set_character_positions(character_positions);
+            node.set_character_widths(character_widths);
+        }
+        node.set_text_direction(text_direction);
+        if bounds_are_absolute {
+            node.set_bounds(accesskit::Rect {
+                x0: bounds.x as f64,
+                y0: bounds.y as f64,
+                x1: (bounds.x + bounds.width) as f64,
+                y1: (bounds.y + bounds.height) as f64,
+            });
+        }
+        apply_run_attrs(&mut node, attrs);
+
+        self.children_collected.push((node_id, node));
+        if !bounds_are_absolute {
+            self.child_local_bounds.push((node_id, bounds));
+        }
+
+        match parent {
+            Some(parent_node) => {
+                for (id, node) in self.children_collected.iter_mut() {
+                    if *id == parent_node {
+                        node.push_child(node_id);
+                        return Some(node_id);
+                    }
+                }
+                // Parent not found — attach to the widget's own node
+                // rather than orphaning the run. Caller misused the API.
+                self.inner.push_child(node_id);
+            }
+            None => self.inner.push_child(node_id),
+        }
+        Some(node_id)
     }
 
     /// Push a `Role::TextRun` child under `parent_node` (usually a
@@ -1492,7 +1851,7 @@ mod tests {
         let (r0, r1, r2) = (run(&mut b, 0), run(&mut b, 3), run(&mut b, 6));
         b.link_runs_on_line(&[r0, r1, r2]);
 
-        let (_id, _n, children) = b.build(fake_widget(1));
+        let (_id, _n, children, _local) = b.build(fake_widget(1));
         let node = |id| {
             children
                 .iter()
@@ -1551,7 +1910,7 @@ mod tests {
             "an unknown child is not found"
         );
 
-        let (_id, own, children) = b.build(fake_widget(1));
+        let (_id, own, children, _local) = b.build(fake_widget(1));
         let p = children
             .iter()
             .find(|(i, _)| *i == para)
@@ -1576,7 +1935,7 @@ mod tests {
         b.set_row_index(1);
         b.set_column_index(1);
         b.set_level(1);
-        let (_id, n, _children) = b.build(fake_widget(1));
+        let (_id, n, _children, _local) = b.build(fake_widget(1));
         assert_eq!(n.position_in_set(), Some(0), "the first item is index 0");
         assert_eq!(n.row_index(), Some(0), "the header row is row 0");
         assert_eq!(n.column_index(), Some(0), "the leftmost column is column 0");
@@ -1593,7 +1952,7 @@ mod tests {
         b.set_column_count(4);
         b.set_row_span(2);
         b.set_column_span(3);
-        let (_id, n, _children) = b.build(fake_widget(1));
+        let (_id, n, _children, _local) = b.build(fake_widget(1));
         assert_eq!(n.size_of_set(), Some(12));
         assert_eq!(n.row_count(), Some(100));
         assert_eq!(n.column_count(), Some(4));
@@ -1610,7 +1969,7 @@ mod tests {
             let mut b = AccessNodeBuilder::for_widget(fake_widget(1));
             let para = b.push_paragraph_child(7);
             assert!(b.set_paragraph_as_heading(para, heading));
-            let (_id, _n, children) = b.build(fake_widget(1));
+            let (_id, _n, children, _local) = b.build(fake_widget(1));
             let p = children
                 .iter()
                 .find(|(i, _)| *i == para)
@@ -1687,7 +2046,7 @@ mod tests {
         assert!(is_synthetic(para));
         assert!(is_synthetic(run));
 
-        let (_nid, _node, children) = builder.build(owner);
+        let (_nid, _node, children, _local) = builder.build(owner);
         // Two emitted children: paragraph + text run.
         assert_eq!(children.len(), 2);
         assert!(children.iter().any(|(id, _)| *id == para));
@@ -1719,7 +2078,7 @@ mod tests {
                 ..Default::default()
             },
         );
-        let (_nid, _node, children) = builder.build(owner);
+        let (_nid, _node, children, _local) = builder.build(owner);
         let (_, run_node) = children
             .iter()
             .find(|(id, _)| *id == run)
@@ -1756,7 +2115,7 @@ mod tests {
                 ..Default::default()
             },
         );
-        let (_, _, kids2) = b2.build(owner2);
+        let (_, _, kids2, _local) = b2.build(owner2);
         let (_, r2n) = kids2.iter().find(|(id, _)| *id == r2).expect("run2 node");
         assert_eq!(
             r2n.font_weight(),
@@ -1788,7 +2147,7 @@ mod tests {
         // staged — the explicit one must win.
         builder.set_text_selection_on_self(0, 0);
         builder.set_text_selection_to((run, 0), (run, 2));
-        let (_nid, node, _children) = builder.build(owner);
+        let (_nid, node, _children, _local) = builder.build(owner);
         let sel = node.text_selection().expect("text selection set");
         assert_eq!(sel.focus.node, run);
         assert_eq!(sel.focus.character_index, 2);

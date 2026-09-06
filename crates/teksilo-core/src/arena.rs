@@ -461,6 +461,25 @@ pub struct WidgetArena {
     layout_cache: std::cell::RefCell<
         std::collections::HashMap<(WidgetId, ProposalKey), crate::widget::LayoutResponse>,
     >,
+    /// Widgets whose box moved without changing size since the last
+    /// accessibility walk, and by how much.
+    ///
+    /// A move is the one geometry change the accessibility tree can absorb
+    /// without being rebuilt: nothing about a widget's *content* depends
+    /// on where it sits, so its node and every text run under it can be
+    /// re-placed in the cached tree by the same delta. A scroll frame
+    /// moves every descendant of the scroll area, so this is the common
+    /// case and re-walking for it was what made the AT tree go stale
+    /// instead — the walk was too expensive to run per frame, so it was
+    /// not run at all and every node's bounds drifted.
+    a11y_moved: std::collections::HashMap<WidgetId, teksilo_canvas::Point>,
+    /// Set when any widget's box changed *size* since the last
+    /// accessibility walk.
+    ///
+    /// A resize is not absorbable: a wrapped label re-wraps, so its lines —
+    /// and therefore its text runs — are a different set, not the same set
+    /// somewhere else.
+    a11y_resized: bool,
     /// True while [`measure_intrinsic`](Self::measure_intrinsic) is running.
     /// In this mode `cached_layout_response` measures even dormant widgets
     /// (and their dormant subtrees) and bypasses the cache, so an adaptive
@@ -529,9 +548,52 @@ impl WidgetArena {
             roots_dirty: true,
             layout_cache: std::cell::RefCell::new(std::collections::HashMap::new()),
             measuring: std::cell::Cell::new(false),
+            a11y_moved: std::collections::HashMap::new(),
+            a11y_resized: false,
             pending_activation_changes: Vec::new(),
             effective_enabled_watchers: Vec::new(),
         }
+    }
+
+    /// Record what a bounds change means for the accessibility tree.
+    ///
+    /// Called by the layout pass at each of its two bounds writers, after
+    /// the node has been updated. Same size = a move the cached tree can
+    /// absorb; any size change = a rebuild.
+    pub(crate) fn note_bounds_change(
+        &mut self,
+        id: WidgetId,
+        previous: teksilo_canvas::Rect,
+        current: teksilo_canvas::Rect,
+    ) {
+        if previous.width != current.width || previous.height != current.height {
+            self.a11y_resized = true;
+            self.a11y_moved.remove(&id);
+            return;
+        }
+        let delta = teksilo_canvas::Point::new(current.x - previous.x, current.y - previous.y);
+        // A widget can move several times between two walks; the cached
+        // tree only ever sees the total.
+        let entry = self
+            .a11y_moved
+            .entry(id)
+            .or_insert(teksilo_canvas::Point::new(0.0, 0.0));
+        entry.x += delta.x;
+        entry.y += delta.y;
+    }
+
+    /// Whether any widget changed size since the last accessibility walk,
+    /// clearing the flag.
+    pub(crate) fn take_a11y_resized(&mut self) -> bool {
+        std::mem::take(&mut self.a11y_resized)
+    }
+
+    /// The widgets that moved since the last accessibility walk, clearing
+    /// the record.
+    pub(crate) fn take_a11y_moved(
+        &mut self,
+    ) -> std::collections::HashMap<WidgetId, teksilo_canvas::Point> {
+        std::mem::take(&mut self.a11y_moved)
     }
 
     /// Clear the per-pass layout memoization cache. Called once at the start of

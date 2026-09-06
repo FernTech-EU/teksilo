@@ -153,6 +153,17 @@ pub(crate) struct ManagedWindow {
     /// layout and resizes the OS window to fit — the native-modal analogue of
     /// the in-tree overlay's size-to-content (used for dialogs / MessageBox).
     pub size_to_content: teksilo_core::window::SizeToContent,
+    /// The accessibility walk generation last delivered to the adapter, and
+    /// when that delivery happened.
+    ///
+    /// Deliveries that carry only moved geometry are throttled: a scrolling
+    /// list moves every visible node on every frame, and on Linux each
+    /// changed node costs an `object:bounds-changed` signal plus an
+    /// O(text) diff per range-supporting node. A semantic change is
+    /// delivered on its own frame; moves coalesce to at most ten a second,
+    /// with a wake timer so the last one is not left undelivered.
+    pub a11y_delivered_walk: u64,
+    pub a11y_delivered_at: Option<std::time::Instant>,
     /// Last height (logical px) applied by the size-to-content auto-resize.
     /// Guards against a measure → resize → re-measure oscillation: a resize is
     /// only issued when the freshly-measured target differs from this.
@@ -964,6 +975,8 @@ impl WindowManager {
             modal: is_modal,
             parent: modal_parent,
             size_to_content: config.size_to_content,
+            a11y_delivered_walk: 0,
+            a11y_delivered_at: None,
             last_autosize_height: None,
             title_bar_host,
             focused: true,

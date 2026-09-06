@@ -248,6 +248,106 @@ mod tests {
         );
     }
 
+    /// A widget that paints a string must not also announce it as an
+    /// ancestor's name.
+    ///
+    /// The rule is string equality against a strict ancestor's *own* name,
+    /// whatever that ancestor's role: a `Button`, a `Role::Status` banner
+    /// and a tab header all leak the same way, and a screen reader reads
+    /// the string twice on the way into the control. A container named by
+    /// pointing at its title through `labelled_by` is exempt — that
+    /// relation working is not a duplicate.
+    ///
+    /// The catalog is the closest thing to a census of the widget set, so
+    /// running the rule over it is what keeps a new widget from
+    /// reintroducing a leak the audit has just cleared.
+    #[test]
+    fn no_label_duplicates_a_name_owning_ancestor() {
+        let mut failures: Vec<String> = Vec::new();
+        for_every_catalog_subject(|label, tree| {
+            let update = tree.sync_accessibility();
+            for leak in teksilo_core::accessibility::audit::duplicate_label_leaks(&update) {
+                failures.push(format!(
+                    "{label}: {:?} named \"{}\" also has a label reading it",
+                    leak.owner_role, leak.name
+                ));
+            }
+        });
+        assert!(
+            failures.is_empty(),
+            "these labels repeat an ancestor's accessible name:\n  {}",
+            failures.join("\n  "),
+        );
+    }
+
+    /// Every visible label must be reviewable, and must review as what it
+    /// announces.
+    ///
+    /// Three failures, all invisible in a screenshot: a label with no text
+    /// runs cannot be reviewed by character or routed to on a braille
+    /// display; a label whose runs assemble to a different string than its
+    /// value makes a reader hear one thing and review another; and a label
+    /// whose range reports no bounding boxes stops a magnifier tracking —
+    /// which one geometry-less run is enough to cause for the whole label.
+    #[test]
+    fn every_visible_label_supports_text_ranges_and_never_diverges() {
+        use teksilo_core::accessibility::audit;
+
+        let mut failures: Vec<String> = Vec::new();
+        for_every_catalog_subject(|label, tree| {
+            let update = tree.sync_accessibility();
+            for id in audit::labels_without_text_ranges(&update) {
+                failures.push(format!("{label}: label {id:?} carries no text ranges"));
+            }
+            for divergence in audit::text_range_divergences(&update) {
+                failures.push(format!("{label}: {divergence:?}"));
+            }
+        });
+        assert!(
+            failures.is_empty(),
+            "these subjects fail the text-range invariants:\n  {}",
+            failures.join("\n  "),
+        );
+    }
+
+    /// Build, lay out and hand every catalog subject — each (widget,
+    /// variant) pair and every documentation snippet — to `check`.
+    ///
+    /// A real text backend is installed: without one a label reports no
+    /// geometry, and every geometry assertion below would pass by being
+    /// unmeasurable rather than by being right.
+    fn for_every_catalog_subject(
+        mut check: impl FnMut(&str, &mut teksilo_core::widget_tree::WidgetTree),
+    ) {
+        use std::cell::RefCell;
+        use std::rc::Rc;
+        use teksilo_canvas::SizeProposal;
+        use teksilo_core::widget_tree::WidgetTree;
+
+        let mut run =
+            |label: String, build: &mut dyn FnMut() -> Box<dyn teksilo_core::widget::Widget>| {
+                let backend: Rc<RefCell<dyn teksilo_canvas::TextBackend>> =
+                    Rc::new(RefCell::new(teksilo_canvas::MockTextBackend::new()));
+                let mut tree = WidgetTree::new()
+                    .with_theme(teksilo_core::presets::intui::light())
+                    .with_text_backend(backend);
+                let _ = tree.add_boxed(build());
+                tree.layout(SizeProposal::exact(800.0, 600.0));
+                check(&label, &mut tree);
+            };
+
+        for entry in iter_entries() {
+            for variant in entry.variants() {
+                let label = format!("{}/{}", entry.id(), variant.name());
+                let knobs = teksilo_preview::KnobValues::from_spec(&entry.knobs(), None);
+                run(label, &mut || entry.build(variant.name(), &knobs));
+            }
+        }
+        for snippet in teksilo_preview::iter_doc_snippets() {
+            run(snippet.source_file.to_string(), &mut || (snippet.build)());
+        }
+    }
+
     /// The documentation snippets are a second registry feeding the same
     /// image exporter, and they are only exercised by a `--export-docs`
     /// run. Build and lay out every one so a snippet that panics deep

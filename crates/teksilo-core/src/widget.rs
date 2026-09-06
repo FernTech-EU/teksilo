@@ -403,6 +403,23 @@ pub trait Widget: std::fmt::Debug + std::any::Any {
         None
     }
 
+    /// The widget that *paints* this one's title, when it has one.
+    ///
+    /// Preferred over [`accessible_title_hint`](Self::accessible_title_hint)
+    /// where both are available: an enclosing container points at the
+    /// title node through a `labelled_by` relation instead of copying
+    /// its string, so the title keeps its own node and stays reviewable
+    /// by character rather than being announced only as part of the
+    /// container's name.
+    ///
+    /// Queried right after the content is mounted — `build()` runs
+    /// eagerly on insertion, so the title node already exists by then.
+    ///
+    /// Default: `None`.
+    fn accessible_title_node(&self) -> Option<crate::widget_id::WidgetId> {
+        None
+    }
+
     /// Optional hint that directs initial focus to a specific
     /// descendant when this widget is the root of a deferred-built
     /// modal surface.

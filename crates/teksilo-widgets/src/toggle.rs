@@ -238,7 +238,12 @@ impl Widget for Toggle {
         let root = if let Some(ref label) = self.label {
             use crate::primitives::{HStack, TextWidget};
             use teksilo_tokens::TextStyleRole;
-            let label_widget = TextWidget::new(label.clone()).style(TextStyleRole::Body);
+            // The Toggle's own `Role::Switch` node already carries this text
+            // as its name (see `accessibility` below), so the embedded Label
+            // must not reach the AT tree as a second, duplicate-named stop.
+            let label_widget = TextWidget::new(label.clone())
+                .style(TextStyleRole::Body)
+                .a11y_hidden();
             let label_id = ctx.add(label_widget);
             ctx.add(
                 HStack::new()
@@ -573,6 +578,39 @@ mod tests {
         let info = tree.accessibility_node(t);
         assert_eq!(info.role(), teksilo_core::accesskit::Role::Switch);
         assert!(info.is_toggled());
+    }
+
+    #[test]
+    fn labeled_toggle_does_not_duplicate_its_label_as_a_separate_at_node() {
+        // The Toggle's own `Role::Switch` node already carries "Dark mode"
+        // as its name, so the embedded Label built alongside the switch
+        // body must not survive as a second, duplicate-named stop.
+        use teksilo_core::accessibility::widget_id_to_node_id;
+        let on = Signal::new(false);
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let id = tree.add(Toggle::new(on).label(lit!("Dark mode")));
+        tree.layout(SizeProposal::exact(200.0, 60.0));
+        let update = tree.sync_accessibility();
+
+        let toggle_node_id = widget_id_to_node_id(id);
+        let toggle_node = update
+            .nodes
+            .iter()
+            .find(|(nid, _)| *nid == toggle_node_id)
+            .map(|(_, node)| node)
+            .expect("toggle node");
+        assert_eq!(
+            toggle_node.label(),
+            Some("Dark mode"),
+            "hiding the embedded label must not take the switch's own name away with it",
+        );
+
+        assert!(
+            !update.nodes.iter().any(|(_, node)| node.role()
+                == teksilo_core::accesskit::Role::Label
+                && node.label() == Some("Dark mode")),
+            "the label Text widget must not survive as a duplicate-named AT node",
+        );
     }
 
     /// Regression: a labeled Toggle wraps its body + label in an

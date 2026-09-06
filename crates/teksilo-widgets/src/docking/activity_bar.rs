@@ -1989,7 +1989,10 @@ impl Widget for DockRailItem {
             ctx.add(
                 TextWidget::new(lit!(ch))
                     .style(TextStyleRole::BodyBold)
-                    .color(TextRole::Primary),
+                    .color(TextRole::Primary)
+                    // Purely visual fallback glyph; the rail `Role::Tab` node
+                    // already carries the full label as its own name.
+                    .a11y_hidden(),
             )
         };
         let centered = ctx.add(Center::new().child_id(glyph));
@@ -2270,7 +2273,9 @@ impl Widget for DockOverflowRow {
             TextWidget::new(self.label.clone())
                 .style(TextStyleRole::Body)
                 .color(TextRole::Primary)
-                .single_line(),
+                .single_line()
+                // The row's own `Role::MenuItem` name already carries this text.
+                .a11y_hidden(),
         );
         let spacer = ctx.add(Spacer::new());
         let row = ctx.add(
@@ -2619,6 +2624,99 @@ mod tests {
         assert_eq!(
             overflow_focus_target(&row_ids, &vc, 2, RailNav::Prev),
             Some(wid(13))
+        );
+    }
+
+    #[test]
+    fn rail_glyph_fallback_letter_is_hidden_from_accessibility_tree() {
+        // The rail item's own `Role::Tab` node is named after the dock's full
+        // title ("Explorer"); its icon-less fallback glyph shows only the
+        // first letter ("E"). "E" != "Explorer", so the string-equality rule
+        // would not flag this pair — but the glyph is still a meaningless
+        // extra AT stop beside a tab that already announces its name.
+        use crate::docking::model::DockWidgetId;
+        use crate::docking::{DockOpenLocation, DockWidget, DockingLayout};
+        use teksilo_canvas::Size;
+        use teksilo_core::accesskit::Role;
+        use teksilo_core::widget_tree::WidgetTree;
+
+        #[derive(Debug)]
+        struct FixedLeaf(f32, f32);
+        impl Widget for FixedLeaf {
+            fn layout_response(&self, _p: SizeProposal, _c: &LayoutContext) -> LayoutResponse {
+                Size::new(self.0, self.1).into()
+            }
+        }
+
+        let model = DockingModel::new();
+        model.set_side_rail(DockSide::Leading, 48.0);
+        let dock_id = DockWidgetId::fresh();
+        let dw = DockWidget::new(dock_id, lit!("Explorer"), |_| FixedLeaf(120.0, 120.0));
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        tree.add(
+            DockingLayout::new(model.clone())
+                .center(FixedLeaf(200.0, 200.0))
+                .dock(dw),
+        );
+        model.open_dock(dock_id, DockOpenLocation::side(DockSide::Leading));
+        tree.layout(SizeProposal::exact(1000.0, 800.0));
+
+        let tab_id = tree
+            .find_by_role(Role::Tab)
+            .expect("the rail item is a Role::Tab node");
+        assert_eq!(
+            tree.accessibility_node(tab_id).name(),
+            Some("Explorer"),
+            "hiding the glyph must not take the rail item's own name away with it",
+        );
+
+        let update = tree.sync_accessibility();
+        assert!(
+            !update
+                .nodes
+                .iter()
+                .any(|(_, node)| node.role() == Role::Label && node.label() == Some("E")),
+            "the single-letter fallback glyph must not survive as its own AT node",
+        );
+    }
+
+    #[test]
+    fn overflow_row_label_is_hidden_from_accessibility_tree() {
+        // `DockOverflowRow`'s own `Role::MenuItem` node already carries the
+        // tab's title as its name; the embedded label must not reach the AT
+        // tree as a second, duplicate-named stop.
+        use teksilo_core::accesskit::Role;
+        use teksilo_core::widget_tree::WidgetTree;
+
+        let model = DockingModel::new();
+        let row_ids: RailItemIds = Rc::new(RefCell::new(Vec::new()));
+        let visible_count = Signal::new(0usize);
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let id = tree.add(DockOverflowRow::new(
+            DockSide::Leading,
+            0,
+            0,
+            DockTabId::fresh(),
+            lit!("Explorer"),
+            model,
+            row_ids,
+            visible_count,
+        ));
+        tree.layout(SizeProposal::exact(200.0, 40.0));
+
+        assert_eq!(
+            tree.accessibility_node(id).name(),
+            Some("Explorer"),
+            "hiding the label must not take the row's own name away with it",
+        );
+
+        let update = tree.sync_accessibility();
+        assert!(
+            !update
+                .nodes
+                .iter()
+                .any(|(_, node)| node.role() == Role::Label && node.label() == Some("Explorer")),
+            "the row's label must not survive as a duplicate-named node",
         );
     }
 }

@@ -63,6 +63,7 @@ use teksilo_i18n::tr_widget;
 
 use teksilo_canvas::{Canvas, Point, Rect, Size, SizeProposal};
 use teksilo_core::accessibility::AccessNodeBuilder;
+use teksilo_core::accessibility::text_runs::{RetainedText, TextRunSource, push_text_runs};
 use teksilo_core::build_context::BuildContext;
 use teksilo_core::event::{EventResponse, Key};
 use teksilo_core::shortcut::KeyStroke;
@@ -276,6 +277,16 @@ pub struct TextInputField {
     /// like `DateEdit` rely on this so their unconstrained natural
     /// width tracks the format pattern.
     natural_width: f32,
+    /// What the field's text measured, kept for the accessibility pass.
+    ///
+    /// A reader reviewing the field by character, word or line needs
+    /// per-character extents, and the editing engine's own layout is not
+    /// reachable from `accessibility()`. Written by `place_children` — the
+    /// first pass that knows the final width — and again by `paint`, because
+    /// a keystroke dirties the field at `RepaintOnly` / `AccessibilityOnly`
+    /// and never relayouts: geometry taken from `place_children` alone would
+    /// be one edit stale for as long as anyone is typing.
+    retained: Rc<std::cell::RefCell<Option<RetainedText>>>,
 }
 
 impl std::fmt::Debug for TextInputField {
@@ -323,6 +334,7 @@ impl TextInputField {
             state_slot: std::rc::Rc::new(std::cell::RefCell::new(None)),
             focus_signal: Signal::new(false),
             natural_width: 200.0,
+            retained: Rc::new(std::cell::RefCell::new(None)),
         }
     }
 
@@ -1448,7 +1460,7 @@ impl Widget for TextInputField {
         bounds: Rect,
         _proposal: SizeProposal,
         _children: &mut [WidgetPlacement],
-        _ctx: &LayoutContext,
+        ctx: &LayoutContext,
     ) {
         // Layout runs before paint, so this is the authoritative point to adopt
         // the field's viewport. `sync_viewport` welds the width write to the
@@ -1456,6 +1468,15 @@ impl Widget for TextInputField {
         // docs); paint calls it again as an idempotent echo.
         if let Some(state) = self.state.as_ref() {
             state.borrow_mut().sync_viewport(bounds);
+        }
+
+        if let Some(backend) = ctx.text_backend {
+            self.retain_text_geometry(
+                bounds,
+                &ctx.theme.typography.body,
+                backend,
+                base_text_direction(ctx.layout_direction),
+            );
         }
     }
 
@@ -1614,6 +1635,23 @@ impl Widget for TextInputField {
             });
             canvas.clear_clip();
         }
+
+        // Re-measure for the accessibility pass. `place_children` is the
+        // authority on the width, but an edit dirties the field at
+        // `RepaintOnly` / `AccessibilityOnly` and never relayouts — so
+        // without this echo every keystroke would leave the runs describing
+        // the text as it was before it. Same shape as the `sync_viewport`
+        // echo above; the backend caches by (text, style), so a frame that
+        // only blinks the caret pays a lookup.
+        drop(st);
+        if let Some(backend) = canvas.text_backend() {
+            self.retain_text_geometry(
+                bounds,
+                &ctx.theme.typography.body,
+                backend,
+                base_text_direction(ctx.layout_direction),
+            );
+        }
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
@@ -1668,34 +1706,66 @@ impl Widget for TextInputField {
                 builder.set_value(&text);
             }
 
-            // Expose the editable content as a child `Role::TextRun`, NOT as
+            // Expose the editable content as child `Role::TextRun`s, NOT as
             // `character_lengths` on the input node itself. accesskit_consumer's
             // `supports_text_ranges()` is false for a childless input that only
             // hosts character data on its own node, so the macOS adapter never
             // fires `AXSelectedTextChanged` — VoiceOver reads the value once on
-            // focus but never echoes characters/words while typing. Emit the run
-            // even when empty so `supports_text_ranges()` is already true before
-            // the first keystroke (the change-diff's *old* node must support
-            // ranges too for the notification to fire). `position()` / `anchor()`
-            // are character indices (text-document is char-space), matching the
-            // TextRun's `character_index` contract — correct for multibyte text.
-            let char_lengths: Vec<u8> = text.chars().map(|c| c.len_utf8() as u8).collect();
-            let word_starts = compute_word_starts(&text);
-            let word_starts = (!word_starts.is_empty()).then_some(word_starts);
-            let run_id =
-                builder.push_text_run_child_on_self(0, text.clone(), char_lengths, word_starts);
+            // focus but never echoes characters/words while typing. Runs are
+            // emitted even for an empty field so `supports_text_ranges()` is
+            // already true before the first keystroke (the change-diff's *old*
+            // node must support ranges too for the notification to fire).
+            let retained = self.retained.borrow();
+            let source = match retained.as_ref() {
+                // A retained measurement describes the text it was taken of.
+                // The document can move on between two layouts, so compare
+                // rather than trust — a run whose ranges index a text that no
+                // longer exists is worse than one with no extents.
+                Some(placed) if placed.text == text => match placed.geometry.as_deref() {
+                    // The measurement covers the whole line; the field shows a
+                    // window onto it, so slide the rects back by the scroll
+                    // offset to land in the field's own space. `build`
+                    // translates them into window space from there.
+                    Some(geometry) => TextRunSource::from_geometry(
+                        &placed.text,
+                        geometry,
+                        Point::new(-st.scroll_x, 0.0),
+                        0,
+                    )
+                    .with_base_direction(placed.base_direction),
+                    None => TextRunSource::flat(&placed.text, 0)
+                        .with_fallback_rect(Rect::new(
+                            0.0,
+                            0.0,
+                            placed.bounds.width,
+                            placed.bounds.height,
+                        ))
+                        .with_base_direction(placed.base_direction),
+                },
+                // Never placed, painted without a measuring backend, or one
+                // edit ahead of the last measurement.
+                _ => TextRunSource::flat(&text, 0),
+            };
+            let emission = push_text_runs(builder, None, &source);
 
             // While composing (IME preedit active), expose the composition
             // as a selection so screen readers / braille track the tentative
             // text — the composing characters are already in `value`. Falls
             // back to the live cursor/selection when not composing. (The
             // secure branch above never reaches here, so a password preedit
-            // is never exposed.) Selection now references the TextRun child.
+            // is never exposed.) `position()` / `anchor()` are character
+            // indices (text-document is char-space), which the emission maps
+            // onto the run that holds them — a caret past 255 characters is
+            // in the second run, at its own offset.
             let (anchor, pos) = match st.ime_preedit_range.clone() {
                 Some(range) => (range.start, range.end),
                 None => (st.cursor.anchor(), st.cursor.position()),
             };
-            builder.set_text_selection_to((run_id, anchor), (run_id, pos));
+            if let (Some(anchor), Some(focus)) =
+                (emission.position_of(anchor), emission.position_of(pos))
+            {
+                builder.set_text_selection_to(anchor, focus);
+            }
         }
 
         if !st.placeholder.is_empty() {
@@ -1744,6 +1814,47 @@ impl Widget for TextInputField {
 }
 
 impl TextInputField {
+    /// Shape the field's text once more and keep the geometry.
+    ///
+    /// The whole line is measured with no width cap: the field scrolls
+    /// rather than ellipsizes, so every character has an extent even while
+    /// it sits outside the viewport, and `accessibility` slides the result
+    /// by the scroll offset.
+    fn retain_text_geometry(
+        &self,
+        bounds: Rect,
+        style: &TextStyle,
+        backend: &Rc<std::cell::RefCell<dyn teksilo_canvas::TextBackend>>,
+        base_direction: teksilo_core::accesskit::TextDirection,
+    ) {
+        let Some(state) = self.state.as_ref() else {
+            return;
+        };
+        let (text, masked) = {
+            let st = state.borrow();
+            (
+                st.document.to_plain_text().unwrap_or_default(),
+                st.should_mask(),
+            )
+        };
+        if masked {
+            // Masking happens inside the editing engine precisely so the
+            // secret never reaches the shaper or the glyph atlas; measuring
+            // it here would put it there. A masked field is also
+            // `Role::PasswordInput`, whose branch emits no runs to carry
+            // geometry anyway.
+            *self.retained.borrow_mut() = None;
+            return;
+        }
+        let layout = backend.borrow_mut().layout_single_line(&text, style, None);
+        *self.retained.borrow_mut() = Some(RetainedText {
+            text,
+            geometry: layout.geometry.clone(),
+            bounds,
+            base_direction,
+        });
+    }
+
     /// Borrow the shared state. Panics if called before `build()`
     /// has run — the state is allocated in `build()` from the
     /// builder config.
@@ -1751,6 +1862,23 @@ impl TextInputField {
         self.state
             .as_ref()
             .expect("TextInputField::state called before build")
+    }
+}
+
+/// The reading direction the field's runs are announced with.
+///
+/// The single-line editing engine reports no per-segment direction, so the
+/// ambient layout direction is the only answer available; a right-to-left
+/// field therefore announces right-to-left even for Latin content, which is
+/// what the surrounding UI does too.
+fn base_text_direction(
+    direction: teksilo_core::environment::LayoutDirection,
+) -> teksilo_core::accesskit::TextDirection {
+    match direction {
+        teksilo_core::environment::LayoutDirection::RightToLeft => {
+            teksilo_core::accesskit::TextDirection::RightToLeft
+        }
+        _ => teksilo_core::accesskit::TextDirection::LeftToRight,
     }
 }
 
@@ -2039,23 +2167,6 @@ fn handle_access_action(
     }
 }
 
-/// Compute word-start character indices for AccessKit.
-fn compute_word_starts(text: &str) -> Vec<u8> {
-    let mut starts = Vec::new();
-    let mut in_word = false;
-    for (char_index, ch) in text.chars().enumerate() {
-        let is_word_char = ch.is_alphanumeric() || ch == '_';
-        if is_word_char
-            && !in_word
-            && let Ok(idx) = u8::try_from(char_index)
-        {
-            starts.push(idx);
-        }
-        in_word = is_word_char;
-    }
-    starts
-}
-
 /// Build a fresh right-click context menu widget. Called from the
 /// `.context_menu(...)` factory on every right-click, so each open
 /// reads live `has_selection` / `is_empty` state when computing each
@@ -2227,6 +2338,98 @@ fn measure_width_px(ctx: &mut BuildContext, text: &str, style: &TextStyle) -> f3
         })
         .map(|w: f32| w * em)
         .sum()
+}
+
+#[cfg(test)]
+mod text_run_tests {
+    use super::*;
+    use std::cell::RefCell;
+    use teksilo_canvas::{MockTextBackend, SizeProposal};
+    use teksilo_core::accesskit::Role;
+    use teksilo_core::signal::Signal;
+    use teksilo_core::widget_id::WidgetId;
+    use teksilo_core::widget_tree::WidgetTree;
+    use teksilo_text::text_document::MoveMode;
+
+    fn tree_with_mock_backend() -> WidgetTree {
+        WidgetTree::new()
+            .with_theme(teksilo_core::presets::intui::light())
+            .with_text_backend(Rc::new(RefCell::new(MockTextBackend::new())))
+    }
+
+    fn state_of(tree: &WidgetTree, id: WidgetId) -> SharedState {
+        tree.widget_as_any(id)
+            .and_then(|w| w.downcast_ref::<TextInputField>())
+            .map(|field| field.state().clone())
+            .expect("a built TextInputField")
+    }
+
+    #[test]
+    fn a_caret_past_255_chars_lands_in_the_second_chunk() {
+        // `accesskit_consumer` probes a position's character index as a `u8`,
+        // so the emitter splits a long line into 255-character runs. The
+        // field still speaks in document character offsets, and a caret at
+        // 260 has to resolve to the run that holds it — reporting it against
+        // the first run would put the caret 255 characters behind the text.
+        let mut tree = tree_with_mock_backend();
+        let id = tree.add(TextInputField::new(Signal::new("a".repeat(300))));
+        tree.layout(SizeProposal::exact(200.0, 20.0));
+
+        state_of(&tree, id)
+            .borrow_mut()
+            .cursor
+            .set_position(260, MoveMode::MoveAnchor);
+
+        let update = tree.sync_accessibility();
+        let (_, input) = update
+            .nodes
+            .iter()
+            .find(|(_, node)| node.role() == Role::TextInput)
+            .expect("the field reports a text-input node");
+        let runs = input.children();
+        assert_eq!(runs.len(), 2, "300 characters split at the 255 cap");
+
+        let selection = input
+            .text_selection()
+            .expect("the field exposes its caret to assistive technology");
+        assert_eq!(selection.focus.node, runs[1]);
+        assert_eq!(selection.focus.character_index, 5);
+    }
+
+    #[test]
+    fn a_protected_field_emits_no_text_runs() {
+        // A run publishes the character count, the per-character extents and
+        // the word boundaries of what it carries. On a masked field that is a
+        // description of the password, so the protected branch emits the
+        // bullet string and nothing else.
+        let mut tree = tree_with_mock_backend();
+        let _id = tree
+            .add(TextInputField::new(Signal::new("hunter2".to_string())).secure(EchoMode::Masked));
+        tree.layout(SizeProposal::exact(200.0, 20.0));
+
+        let update = tree.sync_accessibility();
+        let (_, field) = update
+            .nodes
+            .iter()
+            .find(|(_, node)| node.role() == Role::PasswordInput)
+            .expect("a masked field reports Role::PasswordInput");
+        assert_eq!(field.value(), Some("•••••••"));
+        assert!(
+            field.children().is_empty(),
+            "a masked field must own no text runs"
+        );
+        assert!(
+            !update
+                .nodes
+                .iter()
+                .any(|(_, node)| node.role() == Role::TextRun),
+            "no text run may be emitted anywhere for a masked field"
+        );
+        assert!(
+            field.text_selection().is_none(),
+            "the caret model stays opaque so no structure about the secret leaks"
+        );
+    }
 }
 
 #[cfg(test)]

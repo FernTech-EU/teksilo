@@ -769,6 +769,27 @@ impl RichTextEngine {
         self.flow.character_geometry(block_id, char_start, char_end)
     }
 
+    /// Per-line, per-character geometry for one laid-out block.
+    ///
+    /// The accessibility pass needs a line at a time, not a character
+    /// range: an AccessKit text run may not span a line boundary, must
+    /// carry its own bounding box and reading direction, and must know
+    /// whether its line ends in a hard break. `text` is the block's own
+    /// text — the layout stores char offsets, not the string they index
+    /// — and every byte range in the result indexes it. Line boxes are
+    /// relative to the block's top edge.
+    pub fn block_line_geometry(
+        &self,
+        block_id: usize,
+        text: &str,
+    ) -> Vec<teksilo_canvas::text_backend::TextLine> {
+        self.flow
+            .block_line_geometry(block_id, text)
+            .iter()
+            .map(crate::typesetter_bridge::to_canvas_line)
+            .collect()
+    }
+
     /// Reading direction of the text at `position` — the direction of
     /// the bidi run the caret sits in, not the paragraph's.
     ///

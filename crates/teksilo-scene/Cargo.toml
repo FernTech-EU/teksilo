@@ -31,6 +31,10 @@ accesskit = { workspace = true }
 # Test-only: property-based testing (see the `proptest` entry in the
 # workspace manifest for why proptest rather than cargo-fuzz).
 proptest = { workspace = true }
+# Test-only: every platform adapter answers its text API through this
+# consumer, so it — not what the scene believes it emitted — is what
+# decides whether a text item can be reviewed by character and word.
+accesskit_consumer = { workspace = true }
 
 [package.metadata.docs.rs]
 all-features = true

@@ -531,6 +531,34 @@ a live bridge. (On Windows both paths take a `.exe` suffix.)
 
 Headless mode has no endpoint at all.
 
+## Reading text (`snapshot_tree` / `read_node`)
+
+Every visible label now carries AccessKit text runs — one per visual line —
+so a screen reader can review it by character, word and line. Those runs are
+**not** listed in a node's `children`: `accesskit_consumer`'s own filter
+excludes them from object navigation, so a reader never lands on one, and
+listing them would bury a snapshot under nodes nothing can reach. They stay
+in the update and stay addressable by `read_node`, `assert_node` and
+`invoke_action`.
+
+What a probe usually wants is on the node itself:
+
+```json
+{ "id": 42, "role": "Label", "label": "Unsaved changes",
+  "text": { "run_count": 1, "document_text": "Unsaved changes",
+            "has_geometry": true, "direction": "left_to_right" } }
+```
+
+`text` is absent on a node that carries no ranges — which is the thing to
+assert about a label, because a label can have a name and still be
+unreviewable. `assert_node` gained `supports_text_ranges` and
+`document_text_equals` for exactly that.
+
+`label` is now the name an **adapter** would announce, resolved through
+`labelled_by`: a dialog named by pointing at its visible title reports that
+title here, where the raw property is empty. The unresolved property is kept
+as `raw_label`, and only when the two differ.
+
 ## Documented limitations
 
 - **WebView pixels** in screenshots (compositor hole — warned, not captured).

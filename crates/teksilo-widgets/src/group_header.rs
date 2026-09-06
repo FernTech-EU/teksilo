@@ -20,6 +20,7 @@
 
 use teksilo_canvas::{Rect, SizeProposal};
 use teksilo_core::accessibility::AccessNodeBuilder;
+use teksilo_core::accessibility::text_runs::{TextGeometryHandle, TextRunSource, push_text_runs};
 use teksilo_core::build_context::BuildContext;
 use teksilo_core::color_prop::{ColorProp, TextStyleProp};
 use teksilo_core::widget::{LayoutContext, Widget, WidgetPlacement};
@@ -48,6 +49,11 @@ pub struct GroupHeader {
     gap: f32,
     // Build state
     root_child_id: Option<WidgetId>,
+    /// What the hidden caption last measured. The header owns its
+    /// accessible name, so it also owns the text runs behind it; the label
+    /// lends its layout through this handle. Empty until the label has been
+    /// placed.
+    label_geometry: Option<TextGeometryHandle>,
 }
 
 impl GroupHeader {
@@ -60,6 +66,7 @@ impl GroupHeader {
             color: None,
             gap: 8.0,
             root_child_id: None,
+            label_geometry: None,
         }
     }
 
@@ -114,6 +121,7 @@ impl Widget for GroupHeader {
             .color(color)
             .single_line()
             .a11y_hidden();
+        self.label_geometry = Some(label.geometry_handle());
         let label_id = ctx.add(label);
 
         // Fill the remaining horizontal space with a horizontal Divider.
@@ -165,7 +173,38 @@ impl Widget for GroupHeader {
         // is the closest accesskit role — screen readers read it as a
         // non-interactive caption.
         builder.set_role(teksilo_core::accesskit::Role::Label);
-        builder.set_name(self.label.resolve_now());
+
+        // The header owns the accessible name, so its caption is hidden
+        // from AT — which would leave the text announceable but not
+        // reviewable, since `supports_text_ranges` needs `Role::TextRun`
+        // children. Borrowing the hidden caption's layout puts them on this
+        // node instead, one level up from where they were measured.
+        //
+        // Those rects are in window space, which is sound only while the
+        // caption sits rigidly inside the header: `place_children` gives
+        // the row the header's own bounds on every pass, and the row places
+        // the caption at its leading edge. A composite that positioned its
+        // donor independently would have to register local rects instead.
+        let unplaced;
+        let source = match self
+            .label_geometry
+            .as_ref()
+            .and_then(|handle| TextRunSource::from_handle(handle, 0))
+        {
+            Some(source) => source,
+            // Never placed — a name probe, or a tree asked for its
+            // accessibility before its first layout.
+            None => {
+                unplaced = self.label.resolve_now();
+                TextRunSource::flat(&unplaced, 0)
+            }
+        };
+        let emission = push_text_runs(builder, None, &source);
+        // The name must be byte-identical to the runs' concatenation: the
+        // consumer derives the document text from the runs, and every
+        // divergence is a place where what a reader reviews and what it
+        // announces disagree.
+        builder.set_name(&emission.value);
     }
 
     fn children(&self) -> Vec<WidgetId> {
@@ -236,9 +275,45 @@ mod tests {
         );
     }
 
+    /// A tree whose text is measured, so the runs carry real extents
+    /// rather than the degenerate boxes an unmeasured caption falls back
+    /// to.
+    fn measured_tree() -> WidgetTree {
+        WidgetTree::new()
+            .with_theme(teksilo_core::presets::intui::light())
+            .with_text_backend(std::rc::Rc::new(std::cell::RefCell::new(
+                teksilo_canvas::MockTextBackend::new(),
+            )))
+    }
+
+    /// The `Role::TextRun` children one node published, in tree order.
+    fn run_values(
+        update: &teksilo_core::accesskit::TreeUpdate,
+        owner: WidgetId,
+    ) -> Vec<(String, teksilo_core::accesskit::Rect)> {
+        let node_id = teksilo_core::accessibility::widget_id_to_node_id(owner);
+        let node = update
+            .nodes
+            .iter()
+            .find(|(id, _)| *id == node_id)
+            .map(|(_, node)| node)
+            .expect("the header is absent from the emitted tree");
+        node.children()
+            .iter()
+            .filter_map(|child| update.nodes.iter().find(|(id, _)| id == child))
+            .filter(|(_, node)| node.role() == teksilo_core::accesskit::Role::TextRun)
+            .map(|(_, node)| {
+                (
+                    node.value().unwrap_or_default().to_string(),
+                    node.bounds().expect("a run without bounds"),
+                )
+            })
+            .collect()
+    }
+
     #[test]
     fn accessibility_role_and_name() {
-        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let mut tree = measured_tree();
         let header = tree.add(GroupHeader::new(lit!("Appearance")));
         tree.layout(SizeProposal {
             width: Some(400.0),
@@ -247,6 +322,57 @@ mod tests {
         let info = tree.accessibility_node(header);
         assert_eq!(info.role(), teksilo_core::accesskit::Role::Label);
         assert_eq!(info.name(), Some("Appearance"));
+
+        // The caption is hidden from AT, so without borrowed runs the
+        // header would be announceable but not reviewable:
+        // `supports_text_ranges` is false for a `Role::Label` with no
+        // `Role::TextRun` children.
+        let update = tree.sync_accessibility();
+        let runs = run_values(&update, header);
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0].0, "Appearance");
+        // Borrowed rects are absolute, so the run has the caption's own
+        // width rather than the header's full 400 dp.
+        assert!(
+            runs[0].1.x1 - runs[0].1.x0 < 400.0,
+            "the run spans the whole header: {:?}",
+            runs[0].1
+        );
+    }
+
+    #[test]
+    fn a_group_header_is_reviewable_by_character() {
+        // `supports_text_ranges` is a consumer method and the gate every
+        // platform's text API sits behind, and `bounding_boxes` is where a
+        // single geometry-less run silently empties a whole label. Neither
+        // can be asserted off the emitted node.
+        let mut tree = measured_tree();
+        let header = tree.add(GroupHeader::new(lit!("Appearance")));
+        tree.layout(SizeProposal {
+            width: Some(400.0),
+            height: None,
+        });
+        let update = tree.sync_accessibility();
+        let node_id = teksilo_core::accessibility::widget_id_to_node_id(header);
+
+        let consumer = accesskit_consumer::Tree::new(update, false);
+        let state = consumer.state();
+        let mut stack = vec![state.root()];
+        let node = loop {
+            let node = stack
+                .pop()
+                .expect("the header is absent from the emitted tree");
+            if node.locate().0 == node_id {
+                break node;
+            }
+            stack.extend(node.children());
+        };
+        assert!(node.supports_text_ranges());
+        assert_eq!(node.document_range().text(), "Appearance");
+        assert!(
+            !node.document_range().bounding_boxes().is_empty(),
+            "the header reports no geometry, so a magnifier cannot follow it"
+        );
     }
 
     #[test]

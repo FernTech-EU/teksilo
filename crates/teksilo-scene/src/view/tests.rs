@@ -12,6 +12,7 @@ mod multi_view;
 mod nested;
 mod raster_scale_tests;
 mod runtime_mutation;
+mod text_runs;
 
 use super::*;
 use teksilo_core::widget_tree::WidgetTree;
@@ -4440,6 +4441,7 @@ fn item_cache_clears_on_glyph_epoch_change() {
                 line_count: 1,
                 spans: Vec::new(),
                 raster_scale: 1.0,
+                geometry: None,
             }
         }
         fn ensure_glyphs(

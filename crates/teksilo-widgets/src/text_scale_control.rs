@@ -170,32 +170,40 @@ impl Widget for TextScaleControl {
             }
         });
 
-        let at_name = self
-            .label
-            .clone()
-            .unwrap_or_else(|| LocalizedString::literal("Text scale"));
-
-        let spin = SpinBox::new(self.percent_signal.clone(), MIN_PERCENT, MAX_PERCENT)
+        let mut spin = SpinBox::new(self.percent_signal.clone(), MIN_PERCENT, MAX_PERCENT)
             .single_step(STEP_PERCENT)
             .page_step(PAGE_PERCENT)
             // Plain unit string — `suffix` is not localized; acceptable for a
             // settings unit. The percent value itself is what the user reads.
-            .suffix(" %")
-            .label(at_name)
-            .on_value_changed({
-                let factor = self.factor_signal.clone();
-                move |pct, ectx| {
-                    let f = pct as f32 / 100.0;
-                    // Persist (settings-backed signals auto-save on set)…
-                    factor.set(f);
-                    // …and apply app-wide immediately (every window re-scales).
-                    ectx.set_text_scale(f);
-                }
-            });
+            .suffix(" %");
+        // With a visible label the control is named by pointing at it (below);
+        // a name set here would win over the relation in the consumer and
+        // announce a copy that no longer tracks the label. Without one there
+        // is nothing to point at, so the fallback string stands.
+        if self.label.is_none() {
+            spin = spin.label(LocalizedString::literal("Text scale"));
+        }
+        let spin = spin.on_value_changed({
+            let factor = self.factor_signal.clone();
+            move |pct, ectx| {
+                let f = pct as f32 / 100.0;
+                // Persist (settings-backed signals auto-save on set)…
+                factor.set(f);
+                // …and apply app-wide immediately (every window re-scales).
+                ectx.set_text_scale(f);
+            }
+        });
         let spin_id = ctx.add(spin);
 
         let root = if let Some(label) = &self.label {
             let label_id = ctx.add(TextWidget::new(label.clone()));
+            // Name the control from the label it already paints instead of
+            // from a copy: the label then stays reachable and reviewable in
+            // its own right, and one string cannot drift from the other. The
+            // enclosing group takes its name from the same place.
+            ctx.access_labelled_by(spin_id, label_id);
+            let self_id = ctx.self_id();
+            ctx.access_labelled_by(self_id, label_id);
             ctx.add(
                 HStack::new()
                     .spacing(8.0)
@@ -245,11 +253,11 @@ impl Widget for TextScaleControl {
     }
 
     fn accessibility(&self, builder: &mut teksilo_core::accessibility::AccessNodeBuilder) {
-        // A labelled group wrapping the inner SpinButton.
+        // A group wrapping the inner SpinButton, named — like the spin box
+        // itself — by pointing at the label it already paints. Copying the
+        // string here instead made a reader hear it twice on the way in,
+        // once for the group and once for the label under it.
         builder.set_role(teksilo_core::accesskit::Role::Group);
-        if let Some(label) = &self.label {
-            builder.set_name(label.resolve_now());
-        }
     }
 
     fn children(&self) -> Vec<WidgetId> {

@@ -64,6 +64,27 @@ See [docs/range-keyboard.md](docs/range-keyboard.md) for the full chord table.
   convention. An app that registers `F4` as a `Shortcut` keeps it: shortcuts
   resolve before the focused widget sees the key, and `Alt+F4` is unaffected.
 
+#### Accessibility
+
+- **Every visible label that owns its own accessible name is reviewable by
+  character, word and line**, routable on a braille display and trackable by a
+  screen magnifier. `TextWidget` — the building block behind every label in the
+  framework — now carries AccessKit text runs with real per-character extents,
+  so a screen reader's review cursor can walk a paragraph, a braille cell can
+  be routed to the word under it, and `AXBoundsForRange` / UIA's `TextPattern`
+  / AT-SPI's `GetCharacterExtents` all answer. Before, a label was one
+  unreviewable chunk; only the editors and the terminal exposed ranges, and
+  even those exposed no geometry.
+- `TextWidget::geometry_handle`, for a control that owns its name but paints
+  its text through a hidden label. `Badge`, `GroupHeader` and the scene's
+  `TextItem` use it and are now reviewable too.
+- `teksilo_core::accessibility::text_runs`: the shared emitter every text
+  surface goes through, and `teksilo_core::accessibility::audit`, which reports
+  labels that repeat an ancestor's name, labels with no text ranges, and runs
+  that disagree with the node they hang off.
+- `DocumentFlow::block_line_geometry` and the `*_with_geometry` layout methods
+  in text-typeset 1.11, which is where the per-character extents come from.
+
 #### Data views
 
 - `TableView::stretch_last_column` / `TreeTableView::stretch_last_column`:
@@ -93,6 +114,8 @@ See [docs/range-keyboard.md](docs/range-keyboard.md) for the full chord table.
 
 ### Changed
 
+#### Widgets
+
 - `TextInputField::on_access_set_value` (and `TextInput`'s forwarder) now takes
   a callback returning `bool` — whether the host accepted the string — so the
   field can report a refused write to the assistive technology instead of
@@ -101,6 +124,26 @@ See [docs/range-keyboard.md](docs/range-keyboard.md) for the full chord table.
   `SliderStyle::make_body` does: a horizontal bar's `scroll_ratio == 0.0` is the
   start of the content, which is the right-hand edge there, and the widget
   cannot enforce that a custom style mirrors.
+
+#### Accessibility
+
+- Dialogs and groups are named by their visible title through a `labelled_by`
+  relation rather than by a copy of it, so the title stays reviewable in its own
+  right. Live regions — `Banner`, `Toast`, `MessageBox` — keep their own name
+  instead, because the announcement path reads a node's own value.
+- The code editor and log view no longer announce "line 42 of 200". The ordinal
+  needed a `Role::Paragraph` node per line, and that node is what dropped every
+  text-change event on all three platforms; line position is available through
+  line navigation everywhere, and in `CodeGutter`.
+- `TextLayout` carries an optional `geometry`, `AccessNodeBuilder::build`
+  returns a fourth element (the widget-local rects of any synthetic children),
+  and `MockTextBackend` measures characters rather than bytes and treats a
+  newline as a hard break.
+- A markup label with `TextOverflow::Ellipsis` now measures as one line, which
+  is how it was already painted.
+
+#### Automation
+
 - **The bridge announce now says when the MCP client is not installed**, and how
   to get it. An app needs nothing installed to be automatable: the bridge is
   compiled into the debug build and binds its own endpoint, and
@@ -327,6 +370,26 @@ See [docs/range-keyboard.md](docs/range-keyboard.md) for the full chord table.
   used to un-highlight as soon as the pointer left the row, which is the whole
   time the submenu is up, leaving the open panel with no visible parent. Its
   `set_expanded` was reporting collapsed over the same window.
+
+#### Accessibility
+
+- Eleven labels announced their control's name a second time — in `Banner`,
+  the docking activity bar (twice), `MessageBox`, `SearchField`, `Stepper`, the
+  calendar's zoom cell, a tab header, `Toast`, `Toggle` and `TooltipWidget`.
+  They are hidden now; the control keeps the name.
+- The privacy-settings rows painted their label twice on screen.
+- A markup label announced its raw source — brackets, parentheses and URL and
+  all — instead of its rendered text, and its links were labelled with a
+  mis-sliced fragment of that source and re-identified whenever the label
+  rewrapped.
+- A label bound to a signal changed on screen without telling assistive
+  technology, and a widget that moved, resized, or was re-themed or re-scaled
+  went on reporting the position and metrics it had before.
+- A `labelled_by` relation pointing at a node absent from the tree — a dormant
+  tab panel, a pruned stack — crashed the consumer as it built the name.
+- The rich-text and code editors emitted no text-change events at all: their
+  runs sat under `Role::Paragraph` nodes, and a run's update routes to its
+  filtered parent, which supports no text ranges.
 
 ## [0.9.4] - 2026-09-05
 

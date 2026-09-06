@@ -70,7 +70,7 @@ fn node_by_label<'a>(
     update
         .nodes
         .iter()
-        .find(|(_, n)| n.label() == Some(label))
+        .find(|(_, n)| teksilo_core::accessibility::announced_text(n) == Some(label))
         .map(|(_, n)| n)
 }
 
@@ -78,7 +78,7 @@ fn node_id_by_label(update: &accesskit::TreeUpdate, label: &str) -> Option<acces
     update
         .nodes
         .iter()
-        .find(|(_, n)| n.label() == Some(label))
+        .find(|(_, n)| teksilo_core::accessibility::announced_text(n) == Some(label))
         .map(|(id, _)| *id)
 }
 
@@ -792,6 +792,40 @@ fn a11y_content_pane_labelled_by_indicator_no_dangling() {
             );
         }
     }
+}
+
+#[test]
+fn step_title_label_is_a11y_hidden_but_supporting_text_stays_visible() {
+    let mut t = tree();
+    t.add(Stepper::new().non_linear(true).steps(vec![
+        Step::new(lit!("One"))
+            .supporting_text(lit!("optional"))
+            .content(|| crate::button::Button::new(lit!("body 1"))),
+        Step::new(lit!("Two")).content(|| crate::button::Button::new(lit!("body 2"))),
+    ]));
+    layout(&mut t);
+    let update = t.sync_accessibility();
+
+    // The indicator's own Tab node already carries the title as its name, so
+    // the embedded title TextWidget must not surface it a second time.
+    assert!(
+        nodes_with_role(&update, accesskit::Role::Label)
+            .iter()
+            .all(|(_, n)| n.label() != Some("One")),
+        "title must not duplicate the indicator's own name as a Label node"
+    );
+
+    // Hiding the title label must not have taken the indicator's own name
+    // away.
+    let indicator = node_by_label(&update, "One").expect("indicator keeps its name");
+    assert_eq!(indicator.role(), accesskit::Role::Tab);
+
+    // Only the title was hidden — the supporting line is a different string
+    // and stays reviewable.
+    assert!(
+        node_by_label(&update, "optional").is_some(),
+        "supporting text stays visible"
+    );
 }
 
 // ── wizard modal launcher ────────────────────────────────────────────────────

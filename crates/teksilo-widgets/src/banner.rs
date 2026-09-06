@@ -137,7 +137,11 @@ impl Widget for Banner {
             TextWidget::new(self.title.clone())
                 .style(TextStyleRole::BodyBold)
                 .color(TextRole::Primary)
-                .single_line(),
+                .single_line()
+                // The banner's own Role::Status node carries this title as
+                // its name; the live-region announcement reads that node's
+                // value, not a `labelled_by` relation.
+                .a11y_hidden(),
         );
         let mut text_column = VStack::new()
             .spacing(banner_tokens::BANNER_TITLE_DESCRIPTION_GAP)
@@ -318,6 +322,61 @@ mod tests {
             (b.width - 640.0).abs() < 0.5,
             "Banner inside VStack should span the proposed width 640 dp, got {}",
             b.width
+        );
+    }
+
+    #[test]
+    fn banner_title_label_is_hidden_from_accessibility_tree() {
+        // The Banner's Role::Status node already carries the title as its
+        // own name (the live-region announcement reads that value, not a
+        // `labelled_by` relation), so the embedded title Label must not
+        // reach the AT tree as a second, duplicate-named stop. The
+        // description is a distinct, non-duplicate label and must stay.
+        use teksilo_core::accessibility::widget_id_to_node_id;
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let id = tree.add(
+            Banner::warning(lit!("Unsaved changes"))
+                .description(lit!("Close will discard your edits.")),
+        );
+        tree.layout(SizeProposal {
+            width: Some(640.0),
+            height: None,
+        });
+        let update = tree.sync_accessibility();
+
+        let banner_node_id = widget_id_to_node_id(id);
+        let banner_node = update
+            .nodes
+            .iter()
+            .find(|(nid, _)| *nid == banner_node_id)
+            .map(|(_, node)| node)
+            .expect("banner node");
+        assert_eq!(banner_node.role(), teksilo_core::accesskit::Role::Status);
+        assert_eq!(
+            banner_node.label(),
+            Some("Unsaved changes"),
+            "hiding the title label must not take the banner's own name away with it",
+        );
+        let banner_name = banner_node.label().unwrap_or_default().to_string();
+
+        assert!(
+            !update.nodes.iter().any(|(_, node)| {
+                node.role() == teksilo_core::accesskit::Role::Label
+                    && node.label() == Some(banner_name.as_str())
+            }),
+            "the title Label must not survive as a duplicate-named node",
+        );
+
+        // Exactly one Role::Label node remains: the description's. Were
+        // the title's label not hidden, there would be two.
+        let label_count = update
+            .nodes
+            .iter()
+            .filter(|(_, node)| node.role() == teksilo_core::accesskit::Role::Label)
+            .count();
+        assert_eq!(
+            label_count, 1,
+            "only the description Label should remain once the title is hidden",
         );
     }
 

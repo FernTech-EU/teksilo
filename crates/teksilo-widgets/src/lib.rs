@@ -14,6 +14,8 @@
 )]
 
 #[cfg(test)]
+pub(crate) mod a11y_container_naming;
+pub(crate) mod a11y_label_invariant;
 pub(crate) mod a11y_set_semantics;
 pub mod accordion;
 pub mod animations;

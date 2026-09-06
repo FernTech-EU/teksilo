@@ -41,6 +41,7 @@ use std::rc::Rc;
 use teksilo_canvas::raster::RasterIcon;
 use teksilo_canvas::{Canvas, Rect, Size, SizeProposal};
 use teksilo_core::accessibility::AccessNodeBuilder;
+use teksilo_core::accessibility::text_runs::{TextRunSource, push_text_runs};
 use teksilo_core::build_context::BuildContext;
 use teksilo_core::color_prop::ColorProp;
 use teksilo_core::signal::{Prop, Signal};
@@ -869,7 +870,7 @@ impl Widget for Avatar {
         let label = self.current_label();
         let initials = self.current_initials();
 
-        if clickable {
+        let name = if clickable {
             builder.set_role(teksilo_core::accesskit::Role::Button);
             // A clickable avatar without an explicit label is missing
             // its activation hint. Catch this in dev to prevent silent
@@ -878,10 +879,9 @@ impl Widget for Avatar {
                 label.is_some() || alt.is_some(),
                 "Avatar::on_activate_fn requires a `.label(\"...\")` (preferred) or `.alt(\"...\")` (or a `.label(...)` / `.alt_signal(...)`) for screen readers"
             );
-            let name = label.or(alt).unwrap_or_else(|| initials.clone());
-            builder.set_name(name);
             builder.add_action(teksilo_core::accesskit::Action::Click);
             builder.add_action(teksilo_core::accesskit::Action::Focus);
+            label.or(alt).unwrap_or_else(|| initials.clone())
         } else if has_image {
             builder.set_role(teksilo_core::accesskit::Role::Image);
             // A pure-image avatar without alt text is missing its
@@ -890,13 +890,30 @@ impl Widget for Avatar {
                 alt.is_some() || label.is_some(),
                 "Avatar::with_image requires a `.alt(\"...\")` (or `.alt_signal(...)`) for meaningful images, or call `.a11y_hidden()` if decorative"
             );
-            let name = alt.or(label).unwrap_or_else(|| initials.clone());
-            builder.set_name(name);
+            alt.or(label).unwrap_or_else(|| initials.clone())
         } else {
             builder.set_role(teksilo_core::accesskit::Role::Label);
-            let name = label.unwrap_or_else(|| initials.clone());
-            builder.set_name(name);
-        }
+            label.unwrap_or_else(|| initials.clone())
+        };
+
+        // No donor label to borrow runs from: the announced name is the
+        // alt text or the initials, and the initials leaf paints something
+        // else entirely. So the avatar emits one degenerate run over its
+        // own box — enough for `supports_text_ranges`, and enough to keep
+        // `bounding_boxes()` answering, which is what a magnifier tracks.
+        // The rect is widget-local; the builder translates it once the
+        // walker has written this node's window-space box. Under `Button`
+        // or `Image` the run supports no ranges on any platform, and
+        // `AccessNodeBuilder::build` drops it.
+        let side = avatar_pixel_size(self.size);
+        let source =
+            TextRunSource::flat(&name, 0).with_fallback_rect(Rect::new(0.0, 0.0, side, side));
+        let emission = push_text_runs(builder, None, &source);
+        // The name must be byte-identical to the runs' concatenation: the
+        // consumer derives the document text from the runs, and every
+        // divergence is a place where what a reader reviews and what it
+        // announces disagree.
+        builder.set_name(&emission.value);
 
         if let Some(presence) = self.current_presence() {
             builder.set_description(presence.label());
@@ -1352,6 +1369,74 @@ mod tests {
         assert_eq!(
             tree.accessibility_node(id).role(),
             teksilo_core::accesskit::Role::Label
+        );
+    }
+
+    #[test]
+    fn an_initials_avatar_is_reviewable_by_character() {
+        // A `Role::Label` with no `Role::TextRun` children supports no text
+        // ranges at all, so the avatar's name would be announceable and
+        // nothing more. `supports_text_ranges` and `bounding_boxes` are
+        // consumer methods; neither can be asserted off the emitted node.
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let id = tree.add(Avatar::with_initials(lit!("JD")));
+        tree.layout(SizeProposal::exact(32.0, 32.0));
+        let update = tree.sync_accessibility();
+        let node_id = teksilo_core::accessibility::widget_id_to_node_id(id);
+
+        let consumer = accesskit_consumer::Tree::new(update, false);
+        let state = consumer.state();
+        let mut stack = vec![state.root()];
+        let node = loop {
+            let node = stack
+                .pop()
+                .expect("the avatar is absent from the emitted tree");
+            if node.locate().0 == node_id {
+                break node;
+            }
+            stack.extend(node.children());
+        };
+        assert!(node.supports_text_ranges());
+        assert_eq!(node.document_range().text(), "JD");
+        assert!(
+            !node.document_range().bounding_boxes().is_empty(),
+            "the avatar reports no geometry, so a magnifier cannot follow it"
+        );
+    }
+
+    #[test]
+    fn a_clickable_avatar_keeps_its_button_role_and_drops_the_runs() {
+        // Runs under a role no platform reads them for are inert, and
+        // `AccessNodeBuilder::build` drops them rather than paying a node
+        // per update for something nobody can reach.
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let id = tree.add(
+            Avatar::with_initials(lit!("JD"))
+                .label(lit!("Open user menu"))
+                .on_activate_fn(|_| {}),
+        );
+        tree.layout(SizeProposal::exact(32.0, 32.0));
+        let update = tree.sync_accessibility();
+        let node_id = teksilo_core::accessibility::widget_id_to_node_id(id);
+
+        let consumer = accesskit_consumer::Tree::new(update, false);
+        let state = consumer.state();
+        let mut stack = vec![state.root()];
+        let node = loop {
+            let node = stack
+                .pop()
+                .expect("the avatar is absent from the emitted tree");
+            if node.locate().0 == node_id {
+                break node;
+            }
+            stack.extend(node.children());
+        };
+        assert_eq!(node.role(), teksilo_core::accesskit::Role::Button);
+        assert!(!node.supports_text_ranges());
+        assert!(
+            node.children()
+                .all(|child| child.role() != teksilo_core::accesskit::Role::TextRun),
+            "the inert runs must be gone"
         );
     }
 

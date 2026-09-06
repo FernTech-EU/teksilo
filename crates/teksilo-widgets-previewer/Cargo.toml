@@ -33,6 +33,10 @@ teksilo-preview = { workspace = true }
 teksilo-core = { workspace = true }
 teksilo-canvas = { workspace = true }
 teksilo-tokens = { workspace = true }
+# The accessibility invariants are asserted through the consumer every
+# platform adapter runs, not against the framework's own view of what it
+# emitted.
+accesskit_consumer = { workspace = true }
 
 [package.metadata.docs.rs]
 all-features = true

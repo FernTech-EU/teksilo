@@ -58,6 +58,10 @@ pub(crate) struct TerminalState {
     pub(crate) cols: usize,
     pub(crate) rows: usize,
     pub(crate) origin: Point,
+    /// Window-space top-left of the widget's own bounds, recorded alongside
+    /// [`Self::origin`] so the accessibility pass can report the grid's rects in
+    /// widget-local coordinates.
+    pub(crate) bounds_origin: Point,
     pub(crate) geom: PtyGeom,
 
     pub(crate) scheme: ColorScheme,
@@ -105,6 +109,7 @@ impl TerminalState {
             cols: 80,
             rows: 24,
             origin: Point::ZERO,
+            bounds_origin: Point::ZERO,
             geom: PtyGeom::new(80, 24, 0, 0),
             scheme,
             focused: false,

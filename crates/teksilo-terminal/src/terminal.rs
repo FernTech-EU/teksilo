@@ -730,6 +730,7 @@ impl Widget for Terminal {
             origin = o;
             let mut st = self.state.borrow_mut();
             st.origin = origin;
+            st.bounds_origin = bounds.origin();
             dims_changed = (cols, rows) != (st.cols, st.rows);
             if dims_changed {
                 st.cols = cols;
@@ -830,7 +831,14 @@ impl Widget for Terminal {
 
     fn accessibility(&self, builder: &mut teksilo_core::accessibility::AccessNodeBuilder) {
         let st = self.state.borrow();
-        a11y::build_terminal_a11y(builder, &st.snapshot, &self.label);
+        // The grid's offset inside the widget: `AccessNodeBuilder::build`
+        // translates the emitted rects into window space itself, once the walker
+        // has written the terminal's own box.
+        let origin = Point::new(
+            st.origin.x - st.bounds_origin.x,
+            st.origin.y - st.bounds_origin.y,
+        );
+        a11y::build_terminal_a11y(builder, &st.snapshot, st.metrics, origin, &self.label);
     }
 
     fn children(&self) -> Vec<WidgetId> {

@@ -802,6 +802,7 @@ mod tests {
                 line_count: 1,
                 spans: Vec::new(),
                 raster_scale: self.raster_scale,
+                geometry: None,
             }
         }
 

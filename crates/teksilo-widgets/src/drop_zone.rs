@@ -85,6 +85,9 @@ pub struct DropZone {
     on_urls: Option<UrlsCallback>,
     style_override: Option<SharedDropZoneStyle>,
     root_child_id: Option<WidgetId>,
+    /// The label that paints the prompt, pointed at by the group's own
+    /// `labelled_by` relation so the prompt is not announced twice.
+    label_node: Option<WidgetId>,
 }
 
 impl DropZone {
@@ -109,6 +112,7 @@ impl DropZone {
             on_urls: None,
             style_override: None,
             root_child_id: None,
+            label_node: None,
         }
     }
 
@@ -354,7 +358,12 @@ impl Widget for DropZone {
             content = content.add_child(icon_id);
         }
 
-        content = content.child(TextWidget::new(self.label.clone()));
+        // Kept by id: the zone names itself by pointing at the prompt it
+        // already paints, so the prompt stays a label a reader can review
+        // rather than a string announced only as the group's name.
+        let label_id = ctx.add(TextWidget::new(self.label.clone()));
+        self.label_node = Some(label_id);
+        content = content.add_child(label_id);
 
         if let Some(subtitle) = &self.subtitle {
             content = content.child(TextWidget::new(subtitle.clone()).color(TextRole::Secondary));
@@ -501,6 +510,10 @@ impl Widget for DropZone {
         ctx.apply_self_handlers(handlers);
 
         self.root_child_id = Some(body);
+        if let Some(label_id) = self.label_node {
+            let self_id = ctx.self_id();
+            ctx.access_labelled_by(self_id, label_id);
+        }
         self.children()
     }
 
@@ -528,7 +541,12 @@ impl Widget for DropZone {
         // The composite node is the drop target and the labelled group; the
         // Live status line lives inside the content column.
         builder.set_role(Role::Group);
-        builder.set_name(self.label.clone());
+        // Named through the relation wired in `build`. Setting a name here
+        // as well would win over it in the consumer and announce a copy
+        // that no longer tracks the prompt.
+        if self.label_node.is_none() {
+            builder.set_name(self.label.clone());
+        }
     }
 
     fn children(&self) -> Vec<WidgetId> {

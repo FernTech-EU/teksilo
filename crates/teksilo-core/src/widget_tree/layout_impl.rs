@@ -91,11 +91,16 @@ impl WidgetTree {
         // The accessibility walk skips dormant nodes, so any
         // active↔dormant transition changes the AccessKit tree shape
         // and must dirty the cached snapshot. Other Relayout-causing
-        // signal flips (e.g. a Switcher visibility binding that doesn't
-        // straddle activation, an opacity change, a text-width change)
-        // do not change the AT tree — the unconditional `a11y_dirty = true`
-        // was removed from `layout()` and is now set only by events that
-        // actually change the AT tree shape.
+        // signal flips (a Switcher visibility binding that doesn't
+        // straddle activation, an opacity change) do not — the
+        // unconditional `a11y_dirty = true` was removed from `layout()`
+        // and is now set only by events that actually change the AT tree.
+        //
+        // A *resize* is one of them: since a label carries its text one
+        // run per visual line, re-wrapping it at a new width produces a
+        // different set of runs, not the same set somewhere else. A pure
+        // translation is absorbed by `sync_accessibility` instead, which
+        // re-places the cached nodes without walking.
         if !to_dormant.is_empty() || !to_activate.is_empty() {
             self.a11y_dirty = true;
         }
@@ -644,6 +649,15 @@ impl WidgetTree {
         {
             self.focus_ops(target, &mut *ops);
         }
+
+        // A widget that changed size may have re-wrapped its text, and a
+        // wrapped label carries one accessibility text run per visual line
+        // — a different set of runs, not the same set somewhere else. Pure
+        // translations stay recorded on the arena for `sync_accessibility`
+        // to absorb without walking.
+        if self.arena.take_a11y_resized() {
+            self.a11y_dirty = true;
+        }
     }
 }
 
@@ -690,12 +704,17 @@ fn layout_widget_recursive(
         proposal.width.unwrap_or(desired_size.width),
         proposal.height.unwrap_or(desired_size.height),
     );
-    if let Some(node) = arena.get_mut(id) {
-        if node.bounds != bounds {
+    let previous = arena.get_mut(id).and_then(|node| {
+        let previous = node.bounds;
+        (previous != bounds).then(|| {
             node.cached_paint = None;
             node.dirty.needs_paint = true;
-        }
-        node.bounds = bounds;
+            node.bounds = bounds;
+            previous
+        })
+    });
+    if let Some(previous) = previous {
+        arena.note_bounds_change(id, previous, bounds);
     }
 
     let child_ids: Vec<WidgetId> = arena.children(id).to_vec();
@@ -739,12 +758,17 @@ fn layout_widget_recursive(
 
     for placement in &placements {
         let child_bounds = Rect::from_origin_size(placement.origin, placement.size);
-        if let Some(child_node) = arena.get_mut(placement.id) {
-            if child_node.bounds != child_bounds {
+        let previous = arena.get_mut(placement.id).and_then(|child_node| {
+            let previous = child_node.bounds;
+            (previous != child_bounds).then(|| {
                 child_node.cached_paint = None;
                 child_node.dirty.needs_paint = true;
-            }
-            child_node.bounds = child_bounds;
+                child_node.bounds = child_bounds;
+                previous
+            })
+        });
+        if let Some(previous) = previous {
+            arena.note_bounds_change(placement.id, previous, child_bounds);
         }
 
         let child_proposal = SizeProposal::exact(placement.size.width, placement.size.height);

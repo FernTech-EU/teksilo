@@ -49,6 +49,7 @@ impl teksilo_canvas::TextBackend for ScaleRecordingBackend {
             line_count: 1,
             spans: Vec::new(),
             raster_scale: self.raster_scale,
+            geometry: None,
         }
     }
 
@@ -82,6 +83,23 @@ fn text_scene_tree() -> (WidgetTree, WidgetId, Rc<RefCell<Vec<f32>>>) {
     (tree, view_id, layout_scales)
 }
 
+/// Assert that every layout the last paint ran used `expected`, and that
+/// at least one did.
+///
+/// A `TextItem` paint queries the backend twice — once to retain the
+/// geometry its AccessKit text runs report, once to draw — with
+/// identical arguments, so a real backend answers the second from its
+/// layout cache. What matters here is that neither query saw a
+/// stale ambient scale, not how many there were.
+fn assert_all_layouts_at(layout_scales: &Rc<RefCell<Vec<f32>>>, expected: f32) {
+    let recorded = layout_scales.borrow();
+    assert!(!recorded.is_empty(), "the text item did not lay out at all");
+    assert!(
+        recorded.iter().all(|s| *s == expected),
+        "scene text must lay out at the quantized zoom scale {expected}, got {recorded:?}"
+    );
+}
+
 #[test]
 fn scene_text_lays_out_at_quantized_zoom_scale() {
     let (mut tree, view_id, layout_scales) = text_scene_tree();
@@ -89,7 +107,7 @@ fn scene_text_lays_out_at_quantized_zoom_scale() {
     // Zoom 1.0: the view transform is identity-scaled, text lays out at
     // the root ambient scale.
     let _ = tree.render();
-    assert_eq!(layout_scales.borrow().as_slice(), &[1.0]);
+    assert_all_layouts_at(&layout_scales, 1.0);
 
     // Zoom to 2.0: the walker derives the ambient scale from the view's
     // content transform and the item re-rasterizes at the nearest
@@ -99,16 +117,12 @@ fn scene_text_lays_out_at_quantized_zoom_scale() {
     view_handle(&tree, view_id).set_zoom(2.0);
     tree.layout(SizeProposal::exact(800.0, 600.0));
     let _ = tree.render();
-    assert_eq!(
-        layout_scales.borrow().as_slice(),
-        &[1.25_f32.powi(3)],
-        "scene text must re-lay out exactly once, at the quantized zoom scale"
-    );
+    assert_all_layouts_at(&layout_scales, 1.25_f32.powi(3));
 
     // And back to 1.0.
     layout_scales.borrow_mut().clear();
     view_handle(&tree, view_id).set_zoom(1.0);
     tree.layout(SizeProposal::exact(800.0, 600.0));
     let _ = tree.render();
-    assert_eq!(layout_scales.borrow().as_slice(), &[1.0]);
+    assert_all_layouts_at(&layout_scales, 1.0);
 }

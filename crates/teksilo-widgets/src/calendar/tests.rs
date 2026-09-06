@@ -535,3 +535,57 @@ fn calendar_re_derives_its_first_day_of_week_when_the_locale_switches() {
         "fr-FR should start the week on Monday after the switch; got `{fr}`"
     );
 }
+
+#[test]
+fn zoom_cell_label_is_hidden_from_accessibility_tree() {
+    // `ZoomCell` (Role::GridCell, used by both MonthsGrid and YearsGrid)
+    // already carries the cell's text as its own name, so the embedded
+    // `TextWidget` inside it must not reach the AT tree as a second,
+    // duplicate-named stop.
+    let date = Signal::new(Some(Date::constant(2026, 5, 2)));
+    let cal = Calendar::single(date);
+    cal.mode_signal().set(CalendarMode::Months);
+    let mut tree = light_tree();
+    let _id = tree.add(cal);
+    tree.layout(SizeProposal {
+        width: Some(400.0),
+        height: None,
+    });
+    // Second pass settles visibility / activation flips (same as
+    // `calendar_months_body_does_not_collapse_to_left_edge`).
+    tree.layout(SizeProposal {
+        width: Some(400.0),
+        height: None,
+    });
+    let update = tree.sync_accessibility();
+
+    // Without a registered i18n manager, resolution falls back to the
+    // literal Fluent key — computed the same way `MonthsGrid::build`
+    // computes the cell's own label, so this matches regardless of
+    // whether a manager is installed.
+    let expected =
+        teksilo_i18n::resolve_message_widget(crate::common::datetime::month_long_key(5), &[]);
+
+    let cell_node = update
+        .nodes
+        .iter()
+        .find(|(_, node)| {
+            node.role() == teksilo_core::accesskit::Role::GridCell
+                && node.label() == Some(expected.as_str())
+        })
+        .map(|(_, node)| node)
+        .expect("May zoom cell present in AT update");
+    assert_eq!(
+        cell_node.label(),
+        Some(expected.as_str()),
+        "hiding the embedded label must not take the cell's own name away with it",
+    );
+
+    assert!(
+        !update.nodes.iter().any(
+            |(_, node)| node.role() == teksilo_core::accesskit::Role::Label
+                && node.label() == Some(expected.as_str())
+        ),
+        "the zoom cell's embedded label must not survive as a duplicate-named node",
+    );
+}

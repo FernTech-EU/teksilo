@@ -19,6 +19,26 @@ The default color role is `TextRole::Primary`, resolved against the active
 theme at paint time, so theme switches update text color without any explicit
 binding or rebuild.
 
+# Accessibility
+
+A `TextWidget` is reviewable by default: it emits AccessKit text runs —
+one per visual line, with a position and an advance for every character
+— so a screen reader's review cursor can walk it, a braille cell can be
+routed to the word under it, and `AXBoundsForRange` and its Windows and
+Linux equivalents can answer. Runs are excluded from object navigation
+by `accesskit_consumer`'s own filter, so they add no stops to anyone's
+traversal and no targets to any hit test.
+
+Geometry is always present: real when a text backend measured the label,
+and a zero-width box at its leading edge when none did. Never absent —
+`Range::bounding_boxes()` discards every box it has collected on the
+first run missing any of bounds, direction, positions or widths, so one
+geometry-less run would take the whole label's geometry with it.
+
+A label *inside* a control that owns the same accessible name must call
+`a11y_hidden`, or a reader hears the string
+twice. Standalone body text should not.
+
 Single-line / ellipsis text opts into shrink by default: an over-constrained
 stack compresses the label down to the ellipsis-glyph width before the label
 overflows. Call `no_shrink` to restore rigid behavior,
@@ -35,7 +55,7 @@ let _w = TextWidget::new(lit!("Save document")).single_line();
 
 ## Builder methods at a glance
 
-`color`, `style`, `overflow`, `single_line`, `min_shrink_width`, `no_shrink`, `max_lines`, `text_backend`, `text`, `resolved_text`, `markup`, `on_link_click`, `on_link_hover`, `a11y_hidden`
+`color`, `style`, `overflow`, `single_line`, `min_shrink_width`, `no_shrink`, `max_lines`, `text_backend`, `text`, `resolved_text`, `markup`, `on_link_click`, `on_link_hover`, `a11y_hidden`, `geometry_handle`
 
 ## API reference
 
@@ -154,3 +174,18 @@ otherwise screen readers announce the same string twice
 Standalone body text (dialog descriptions, form instructions,
 read-only display values) should NOT set this — it stays as a
 `Role::Label` node.
+
+#### `pub fn geometry_handle(&self) -> TextGeometryHandle`
+
+A handle onto what this label last measured.
+
+For the controls that own their accessible name but paint their
+text through a hidden `TextWidget` — `Badge`, `GroupHeader` — and
+so have to emit that text's runs from their *own* node. The handle
+is empty until the label has been placed, and the geometry it
+carries is in window space, so the borrower reports it as absolute.
+
+The borrower must place the donor rigidly at its own origin: a
+move re-places absolute rects by the *borrower's* delta, so a
+composite that repositions its donor independently should register
+local rects instead.

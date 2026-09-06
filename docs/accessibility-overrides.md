@@ -70,6 +70,41 @@ Naming: `.access_*` prefix throughout. Three tiers by frequency of use.
 | `.access_has_popup(kind)` | `Node::has_popup` | Disclosure flag — `Menu`, `Listbox`, `Dialog`, … |
 | `.access_orientation(o)` | `Node::orientation` | Sliders, scrollbars, separators. |
 
+#### Naming a container from its visible title
+
+A container that copies its title into its own name says the same string
+twice: once as the container's name, once as the label under it. Point at
+the label instead — `accesskit_consumer` builds the container's name by
+concatenating its `labelled_by` targets' values, so the title is announced
+once and stays a label a reader can still find, review by character, and
+route a braille cell to.
+
+```rust
+let title = ctx.add(TextWidget::new(tr!(unsaved_changes())));
+let panel = ctx.add(VStack::new().add_child(title).add_child(body));
+ctx.access_labelled_by(panel, title);
+```
+
+Two rules the framework enforces, and one it cannot:
+
+- **A container named through the relation must not also set a name.** The
+  consumer prefers a node's own label, so setting both silently drops the
+  relation and announces a copy that no longer tracks the title.
+- A relation target absent from the emitted tree — a dormant tab panel, a
+  pruned stack — used to panic the consumer's relation walk. The walker now
+  strips such a target; the relation simply goes quiet.
+- **Live regions are the exception.** `Banner`, `Toast` and `MessageBox`
+  keep their own `set_name` and hide their title label instead: the
+  announcement path reads a node's own value or label, never its relations,
+  so a live region named only through `labelled_by` announces nothing.
+
+A composite whose content carries the title implements
+[`Widget::accessible_title_node`](https://docs.rs/teksilo-core/latest/teksilo_core/widget/trait.Widget.html)
+and the shell wires the relation for it — that is how `Dialog` and
+`InputDialog` are named. It supersedes `accessible_title_hint`, which
+returns a copy of the string; the hint remains for content that has no
+label node to point at.
+
 ### Tier 3 — subtree modes, numeric, actions, escape hatch
 
 | Method | Effect |

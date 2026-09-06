@@ -302,6 +302,9 @@ impl SceneView {
                         view_transform,
                         screen_bounds,
                         item_id,
+                        local_to_screen: scene.scene_transform(item_id).then(&view_transform),
+                        advertised_bounds,
+                        bounds_space: self.a11y_bounds_space,
                     };
                     builder.push_scene_child_under(
                         parent_id,

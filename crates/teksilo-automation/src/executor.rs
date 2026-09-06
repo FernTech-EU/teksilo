@@ -329,6 +329,7 @@ pub fn execute(
         AutomationOp::ListLiveRegions => {
             let update = tree.sync_accessibility();
             let focus = update.focus;
+            let semantic_ctx = SemanticContext::new(&update);
             let regions: Vec<SemanticNode> = update
                 .nodes
                 .iter()
@@ -338,7 +339,7 @@ pub fn execute(
                         Some(accesskit::Live::Polite) | Some(accesskit::Live::Assertive)
                     )
                 })
-                .map(|(id, n)| semantic_node(*id, n, focus))
+                .map(|(id, n)| semantic_node(*id, n, focus, &semantic_ctx))
                 .collect();
             AutomationReply::ok_json(&regions)
         }
@@ -704,11 +705,36 @@ fn node_point(tree: &WidgetTree, update: &accesskit::TreeUpdate, node: NodeRef) 
     Some(center(tree.bounds(widget)))
 }
 
+/// What a probe needs about a whole update that only the consumer can
+/// answer: which nodes are reviewable, and what name each announces once
+/// `labelled_by` is resolved.
+///
+/// Computed once per snapshot — building a consumer tree is O(nodes), so
+/// asking node by node would be quadratic.
+struct SemanticContext {
+    text: std::collections::HashMap<
+        accesskit::NodeId,
+        teksilo_core::accessibility::audit::NodeTextInfo,
+    >,
+    names: std::collections::HashMap<accesskit::NodeId, String>,
+}
+
+impl SemanticContext {
+    fn new(update: &accesskit::TreeUpdate) -> Self {
+        use teksilo_core::accessibility::audit;
+        Self {
+            text: audit::text_infos(update),
+            names: audit::resolved_names(update),
+        }
+    }
+}
+
 /// Build a [`SemanticNode`] from a raw AccessKit node.
 fn semantic_node(
     id: accesskit::NodeId,
     node: &accesskit::Node,
     focus: accesskit::NodeId,
+    ctx: &SemanticContext,
 ) -> SemanticNode {
     let toggled = node.toggled().map(|t| {
         match t {
@@ -734,10 +760,39 @@ fn semantic_node(
         .filter(|(a, _)| node.supports_action(*a))
         .map(|(_, name)| name.to_string())
         .collect();
+    // Runs are excluded from object navigation by the consumer's own
+    // filter, so a reader never lands on one; listing them as children
+    // would bury every snapshot under nodes nobody can reach. They stay in
+    // `nodes` and stay addressable.
+    let children: Vec<_> = node
+        .children()
+        .iter()
+        .filter(|_| node.role() != accesskit::Role::TextRun)
+        .map(|c| c.0)
+        .collect();
+    let own_label = node.label().map(|s| s.to_string());
+    let label = ctx.names.get(&id).cloned().or_else(|| own_label.clone());
+    let raw_label = own_label.filter(|own| Some(own) != label.as_ref());
+    let text = ctx.text.get(&id).map(|info| crate::dto::TextRangeInfo {
+        run_count: info.run_count,
+        document_text: info.document_text.clone(),
+        has_geometry: info.has_geometry,
+        direction: info.direction.map(|d| {
+            match d {
+                accesskit::TextDirection::LeftToRight => "left_to_right",
+                accesskit::TextDirection::RightToLeft => "right_to_left",
+                accesskit::TextDirection::TopToBottom => "top_to_bottom",
+                accesskit::TextDirection::BottomToTop => "bottom_to_top",
+            }
+            .to_string()
+        }),
+    });
     SemanticNode {
         id: id.0,
         role: format!("{:?}", node.role()),
-        label: node.label().map(|s| s.to_string()),
+        label,
+        raw_label,
+        text,
         value: node.value().map(|s| s.to_string()),
         description: node.description().map(|s| s.to_string()),
         toggled,
@@ -750,7 +805,7 @@ fn semantic_node(
         numeric_value: node.numeric_value(),
         bounds,
         actions,
-        children: node.children().iter().map(|c| c.0).collect(),
+        children,
     }
 }
 
@@ -820,11 +875,12 @@ fn layout_tree_json(
 
 fn find_node(update: &accesskit::TreeUpdate, node: NodeRef) -> Option<SemanticNode> {
     let focus = update.focus;
+    let semantic_ctx = SemanticContext::new(update);
     update
         .nodes
         .iter()
         .find(|(id, _)| id.0 == node)
-        .map(|(id, n)| semantic_node(*id, n, focus))
+        .map(|(id, n)| semantic_node(*id, n, focus, &semantic_ctx))
 }
 
 /// First node (in AT/build order) whose role and/or label match. A `None`
@@ -854,6 +910,7 @@ fn snapshot_json(update: &accesskit::TreeUpdate, max_depth: Option<usize>) -> se
     let map: HashMap<accesskit::NodeId, &accesskit::Node> =
         update.nodes.iter().map(|(id, n)| (*id, n)).collect();
     let root = update.tree.as_ref().map(|t| t.root);
+    let semantic_ctx = SemanticContext::new(update);
     let mut out: Vec<SemanticNode> = Vec::new();
     match root {
         Some(root) => {
@@ -866,7 +923,7 @@ fn snapshot_json(update: &accesskit::TreeUpdate, max_depth: Option<usize>) -> se
                 }
                 if let Some(node) = map.get(&nid) {
                     let descend = max_depth.map(|d| depth < d).unwrap_or(true);
-                    let mut sn = semantic_node(nid, node, focus);
+                    let mut sn = semantic_node(nid, node, focus, &semantic_ctx);
                     // At the depth cap the children aren't emitted, so drop the
                     // child refs rather than leave dangling ids pointing at
                     // nodes absent from `nodes`.
@@ -884,7 +941,7 @@ fn snapshot_json(update: &accesskit::TreeUpdate, max_depth: Option<usize>) -> se
         }
         None => {
             for (id, n) in &update.nodes {
-                out.push(semantic_node(*id, n, focus));
+                out.push(semantic_node(*id, n, focus, &semantic_ctx));
             }
         }
     }
@@ -1007,6 +1064,36 @@ fn evaluate_assertion(
                 ok,
                 (!ok).then(|| format!("disabled is {actual}, expected {value}")),
             )
+        }
+        Assertion::SupportsTextRanges => {
+            let info = teksilo_core::accessibility::audit::text_infos(update);
+            let ok = info.contains_key(id);
+            pass(
+                ok,
+                (!ok).then(|| {
+                    "node carries no text ranges, so a screen reader cannot review it by \
+                     character, word or line"
+                        .to_string()
+                }),
+            )
+        }
+        Assertion::DocumentTextEquals { value } => {
+            let info = teksilo_core::accessibility::audit::text_infos(update);
+            match info.get(id) {
+                Some(text) => {
+                    let ok = &text.document_text == value;
+                    pass(
+                        ok,
+                        (!ok).then(|| {
+                            format!(
+                                "the reviewable text is '{}', expected '{value}'",
+                                text.document_text
+                            )
+                        }),
+                    )
+                }
+                None => pass(false, Some("node carries no text ranges".to_string())),
+            }
         }
     };
     if result.passed {

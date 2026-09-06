@@ -73,4 +73,33 @@ line-height multiplier), the tokens threaded through `TypographyTokens` →
 spacing-override mechanism); text enlargement is covered by the text-scale
 control. Defensible under EN 301 549 / RGAA per WCAG2ICT.
 
-_Last reviewed: 2026-07-02._
+## `described_by` reaches no assistive technology (AccessKit-blocked)
+
+**Status: not met upstream. There is nothing for Teksilo to write.**
+
+AccessKit 0.25 carries a `described_by` relation on the node, but nothing
+resolves it: `accesskit_consumer::Node::description()` reads only the node's own
+`description` property, and none of the three adapters exports the relation —
+macOS maps `AXHelp` from `description()`, Windows maps
+`UIA_FullDescriptionPropertyId` from `description`, and the AT-SPI relation set
+carries `controls` alone. A node described *only* through the relation therefore
+describes itself to nobody.
+
+Teksilo consequently copies the description string onto the described node
+(`set_description`) wherever a description must actually be heard — the plain
+tooltip tier does this — and keeps the relation for the day upstream resolves
+it. Note also that VoiceOver exposes a description as `AXHelp`, a *hint*: it is
+read after a delay or on VO-Shift-H, not in the focus utterance, so the ARIA
+`aria-describedby` reading behaviour is an NVDA / Orca one on AccessKit 0.25.
+
+## Text-run colour and per-run language (AccessKit-shaped, Teksilo-side work)
+
+A text run carries weight, italic, underline and strikethrough but no
+foreground colour and no per-run language, so a syntax-highlighted editor
+exposes runs whose colours assistive technology cannot see, and a quoted
+sentence in another language is read in the document's voice. AccessKit *has*
+the properties (`set_foreground_color`, `set_background_color`, `set_language`);
+Teksilo does not yet emit them. Tracked as §5.9 of the internal audit — a
+Teksilo omission, not an upstream block.
+
+_Last reviewed: 2026-09-06._

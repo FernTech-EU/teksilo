@@ -771,9 +771,12 @@ impl Widget for MessageBox {
 
         let mut header_text_stack = VStack::new().spacing(6.0);
         header_text_stack = header_text_stack.child(
+            // The MessageBox itself already carries the title as its
+            // AlertDialog name (see `Widget::accessibility` below).
             TextWidget::new(self.title.clone())
                 .style(theme.typography.body_bold.clone())
-                .color(theme.colors.text_primary),
+                .color(theme.colors.text_primary)
+                .a11y_hidden(),
         );
         if let Some(text) = self.text.clone() {
             header_text_stack = header_text_stack.child(
@@ -1108,6 +1111,53 @@ mod tests {
         let info = tree.accessibility_node(mb_id);
         assert_eq!(info.role(), teksilo_core::accesskit::Role::AlertDialog);
         assert_eq!(info.name(), Some("Title"));
+    }
+
+    #[test]
+    fn title_label_is_hidden_but_body_label_survives() {
+        // The MessageBox's own AlertDialog node already carries the title
+        // as its name (the live-region announcement reads that value, not
+        // a `labelled_by` relation), so the embedded title Label must not
+        // reach the AT tree as a second, duplicate-named stop. The body
+        // text, which is not a duplicate, must still be present.
+        use teksilo_core::accessibility::widget_id_to_node_id;
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let mb = MessageBox::warning(lit!("Title"))
+            .text(lit!("Body"))
+            .buttons(MessageBoxButtons::Ok);
+        let content = present_and_lay_out(&mut tree, mb);
+        let panel = tree.children(content).first().copied().unwrap();
+        let mb_id = tree.children(panel).first().copied().unwrap();
+
+        let update = tree.sync_accessibility();
+
+        let mb_node_id = widget_id_to_node_id(mb_id);
+        let mb_node = update
+            .nodes
+            .iter()
+            .find(|(nid, _)| *nid == mb_node_id)
+            .map(|(_, node)| node)
+            .expect("MessageBox node");
+        assert_eq!(mb_node.role(), teksilo_core::accesskit::Role::AlertDialog);
+        assert_eq!(
+            mb_node.label(),
+            Some("Title"),
+            "hiding the title label must not take the dialog's own name away with it",
+        );
+
+        assert!(
+            !update.nodes.iter().any(|(_, node)| node.role()
+                == teksilo_core::accesskit::Role::Label
+                && teksilo_core::accessibility::announced_text(node) == Some("Title")),
+            "the title Label must not survive as a duplicate-named node",
+        );
+
+        assert!(
+            update.nodes.iter().any(|(_, node)| node.role()
+                == teksilo_core::accesskit::Role::Label
+                && teksilo_core::accessibility::announced_text(node) == Some("Body")),
+            "the body label is not a name duplicate and must stay visible",
+        );
     }
 
     #[test]

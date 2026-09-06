@@ -1829,8 +1829,58 @@ impl TeksiloAppHandler {
             }
         }
 
+        // Kept unconditional: `sync_accessibility` is not a pure builder —
+        // it steps the framework's live-region announcers, fills the
+        // automation announcement ring and maintains `at_version` — and all
+        // three must run every frame whether or not anything is listening.
         let a11y_update = current.tree.sync_accessibility();
-        current.platform_window.update_accessibility(a11y_update);
+        let walk = current.tree.a11y_walk_generation();
+        let delivered_walk = current.a11y_delivered_walk;
+        let delivered_at = current.a11y_delivered_at;
+        let now = std::time::Instant::now();
+        let needs_full = current.platform_window.take_accessibility_needs_full_tree();
+        // Ten a second is fast enough that a magnifier tracking a scroll
+        // never looks stuck, and slow enough that a flung list does not
+        // bury AT-SPI under a bounds-changed signal per node per frame.
+        const MOVE_DELIVERY_INTERVAL: std::time::Duration = std::time::Duration::from_millis(100);
+        let mut attached = false;
+        let mut delivered = false;
+        {
+            let a11y_update = &a11y_update;
+            current.platform_window.update_accessibility_with(
+                || {
+                    // Decided in here, not outside: the closure runs only
+                    // when an assistive technology is attached, so a window
+                    // nobody is reading neither builds nor throttles.
+                    attached = true;
+                    let due = needs_full
+                        || walk != delivered_walk
+                        || delivered_at
+                            .is_none_or(|at| now.duration_since(at) >= MOVE_DELIVERY_INTERVAL);
+                    due.then(|| {
+                        delivered = true;
+                        a11y_update.clone()
+                    })
+                },
+                || a11y_update.clone(),
+            );
+        }
+        if delivered {
+            current.a11y_delivered_walk = walk;
+            current.a11y_delivered_at = Some(now);
+        } else if attached {
+            // Held back by the throttle, and nothing else will wake the loop
+            // once the scroll stops — so the last frame's moves would sit
+            // undelivered. Ask for one frame at the end of the window.
+            //
+            // Gated on `attached`: with no assistive technology listening the
+            // closure never runs, and asking for a wake here would spin the
+            // event loop at full rate forever on every app nobody is reading.
+            let deadline = delivered_at
+                .map(|at| at + MOVE_DELIVERY_INTERVAL)
+                .unwrap_or(now);
+            current.tree.request_wake_at(deadline);
+        }
 
         // Catch-all IME reconcile: covers focus changes from any source
         // (access actions, programmatic focus, rebuild) that didn't go

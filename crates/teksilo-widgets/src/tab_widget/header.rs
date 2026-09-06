@@ -499,9 +499,15 @@ impl Widget for TabHeader {
             // `Signal<String>` that tracks the i18n manager's locale
             // version. Color is bound to the per-state role above so
             // the selected/idle/disabled distinction is visible.
+            //
+            // Hidden from AT: the tab's own node already carries the name
+            // (`at_name`, falling back to tooltip/label — see
+            // `accessibility()` below), so this Label would be a redundant
+            // extra stop even when `at_name` diverges from the visible text.
             let label_widget = TextWidget::new(self.label.clone())
                 .single_line()
-                .color(role_signal.clone());
+                .color(role_signal.clone())
+                .a11y_hidden();
             let label_id = ctx.add(label_widget);
             row = row.add_child(label_id);
 

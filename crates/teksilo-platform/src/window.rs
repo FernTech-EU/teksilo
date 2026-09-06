@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, mpsc};
 
 use winit::event::WindowEvent;
@@ -45,6 +46,10 @@ pub struct PlatformWindow {
     renderer: Renderer,
     scale_factor: f64,
     a11y_adapter: Option<accesskit_winit::Adapter>,
+    /// Set by the activation handler when an assistive technology asks for
+    /// the tree; cleared by the first delivery after it. Shared because the
+    /// handler may run off the main thread.
+    a11y_needs_full_tree: Arc<AtomicBool>,
     /// Receiver for accessibility action requests from the adapter.
     a11y_action_rx: mpsc::Receiver<ActionRequest>,
 }
@@ -207,10 +212,13 @@ impl PlatformWindow {
         // Create AccessKit adapter with action channel
         let (action_tx, action_rx) = mpsc::channel();
 
+        let a11y_needs_full_tree = Arc::new(AtomicBool::new(true));
         let a11y_adapter = accesskit_winit::Adapter::with_direct_handlers(
             event_loop,
             &window,
-            TeksiloActivationHandler,
+            TeksiloActivationHandler {
+                needs_full_tree: a11y_needs_full_tree.clone(),
+            },
             TeksiloActionHandler { tx: action_tx },
             TeksiloDeactivationHandler,
         );
@@ -226,6 +234,7 @@ impl PlatformWindow {
             scale_factor,
             a11y_adapter: Some(a11y_adapter),
             a11y_action_rx: action_rx,
+            a11y_needs_full_tree,
         }
     }
 
@@ -244,6 +253,7 @@ impl PlatformWindow {
             scale_factor,
             a11y_adapter: None,
             a11y_action_rx: action_rx,
+            a11y_needs_full_tree: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -443,6 +453,45 @@ impl PlatformWindow {
         }
     }
 
+    /// Push an update the adapter builds only when it is actually going to
+    /// be delivered, and only when `build` says there is one worth sending.
+    ///
+    /// The caller decides *inside* the closure, because that is where the
+    /// decision belongs: `update_if_active` runs its closure only when an
+    /// assistive technology is attached, and on Linux it runs it under the
+    /// adapter's own state lock. Deciding outside would build a tree for
+    /// nobody on every frame, and would make the throttle count frames
+    /// nothing was listening to.
+    ///
+    /// `build` returning `None` means "nothing to deliver"; the previously
+    /// delivered tree is re-sent, which the consumer treats as a no-op.
+    pub fn update_accessibility_with(
+        &mut self,
+        build: impl FnOnce() -> Option<accesskit::TreeUpdate>,
+        previous: impl FnOnce() -> accesskit::TreeUpdate,
+    ) {
+        if let Some(adapter) = &mut self.a11y_adapter {
+            adapter.update_if_active(|| build().unwrap_or_else(previous));
+        }
+    }
+
+    /// Whether an assistive technology has asked this window for its tree
+    /// and has not yet been given a full one.
+    ///
+    /// Set by the activation handler, which runs on whichever thread the
+    /// platform's accessibility layer calls it from, and cleared by the
+    /// first delivery after it — so a reader that attaches mid-session gets
+    /// a complete tree rather than a geometry patch onto a tree it has
+    /// never seen.
+    pub fn accessibility_needs_full_tree(&self) -> bool {
+        self.a11y_needs_full_tree.load(Ordering::Relaxed)
+    }
+
+    /// Clear the flag above, reporting what it was.
+    pub fn take_accessibility_needs_full_tree(&self) -> bool {
+        self.a11y_needs_full_tree.swap(false, Ordering::Relaxed)
+    }
+
     /// Forward a winit WindowEvent to the AccessKit adapter.
     pub fn process_accessibility_event(&mut self, event: &WindowEvent) {
         if let Some(adapter) = &mut self.a11y_adapter {
@@ -464,10 +513,18 @@ impl PlatformWindow {
 
 /// Activation handler — returns an empty initial tree.
 /// The real tree is sent via `update_if_active` on the next frame.
-struct TeksiloActivationHandler;
+///
+/// The flag is what makes that next frame send a *full* tree: deliveries
+/// are otherwise throttled to the moves-only rate, and a reader that
+/// attaches mid-session would be handed a geometry patch onto a tree
+/// consisting of one empty window.
+struct TeksiloActivationHandler {
+    needs_full_tree: Arc<AtomicBool>,
+}
 
 impl accesskit::ActivationHandler for TeksiloActivationHandler {
     fn request_initial_tree(&mut self) -> Option<accesskit::TreeUpdate> {
+        self.needs_full_tree.store(true, Ordering::Relaxed);
         // Return a minimal tree; the real one arrives on the next frame
         let root = accesskit::Node::new(accesskit::Role::Window);
         Some(accesskit::TreeUpdate {

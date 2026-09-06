@@ -217,6 +217,9 @@ struct InputDialogBody {
     /// Whether the field has been edited since the dialog opened.
     touched: Rc<std::cell::Cell<bool>>,
     root_child_id: Option<WidgetId>,
+    /// The label that paints the title, handed to the enclosing modal so
+    /// it can name itself by pointing at it.
+    title_node: Option<WidgetId>,
 }
 
 impl InputDialogBody {
@@ -249,6 +252,7 @@ impl InputDialogBody {
             validation: Signal::new(ValidationState::None),
             touched: Rc::new(std::cell::Cell::new(false)),
             root_child_id: None,
+            title_node: None,
         }
     }
 
@@ -278,11 +282,17 @@ impl std::fmt::Debug for InputDialogBody {
 
 impl Widget for InputDialogBody {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        let title = TextWidget::new(self.title.clone())
-            .style(TextStyleRole::BodyBold)
-            .single_line();
+        // Kept by id so the enclosing modal can name itself by pointing at
+        // this label rather than by a second copy of its string, leaving the
+        // title reviewable by character in its own right.
+        let title_id = ctx.add(
+            TextWidget::new(self.title.clone())
+                .style(TextStyleRole::BodyBold)
+                .single_line(),
+        );
+        self.title_node = Some(title_id);
 
-        let mut column = VStack::new().spacing(10.0).child(title);
+        let mut column = VStack::new().spacing(10.0).add_child(title_id);
         if let Some(p) = &self.prompt {
             column = column.child(TextWidget::new(p.clone()).style(TextStyleRole::Body));
         }
@@ -403,6 +413,10 @@ impl Widget for InputDialogBody {
         builder.set_role(teksilo_core::accesskit::Role::GenericContainer);
     }
 
+    fn accessible_title_node(&self) -> Option<WidgetId> {
+        self.title_node
+    }
+
     fn children(&self) -> Vec<WidgetId> {
         self.root_child_id.into_iter().collect()
     }
@@ -432,6 +446,7 @@ mod tests {
             validation: body.validation.clone(),
             touched: body.touched.clone(),
             root_child_id: None,
+            title_node: None,
         };
         tree.add(body);
         tree.layout(SizeProposal {
@@ -439,6 +454,48 @@ mod tests {
             height: None,
         });
         (tree, probe)
+    }
+
+    #[test]
+    fn the_modal_is_named_by_the_title_the_body_paints() {
+        // The container points at the body's title label rather than
+        // announcing a copy, so the title stays a label a reader can find
+        // and review by character.
+        use crate::dialog::ModalContainer;
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let dialog = tree.add(ModalContainer::new(InputDialogBody::new(InputDialog::new(
+            teksilo_i18n::lit!("Rename"),
+        ))));
+        tree.layout(SizeProposal {
+            width: Some(420.0),
+            height: None,
+        });
+        let update = tree.sync_accessibility();
+
+        let node_id = teksilo_core::accessibility::widget_id_to_node_id(dialog);
+        let consumer = accesskit_consumer::Tree::new(update.clone(), false);
+        let state = consumer.state();
+        let mut stack = vec![state.root()];
+        let mut announced = None;
+        while let Some(node) = stack.pop() {
+            if node.locate().0 == node_id {
+                announced = node.label();
+                break;
+            }
+            for child in node.children() {
+                stack.push(child);
+            }
+        }
+        assert_eq!(announced.as_deref(), Some("Rename"));
+
+        let copies = update
+            .nodes
+            .iter()
+            .filter(|(_, n)| {
+                n.role() == teksilo_core::accesskit::Role::Label && n.value() == Some("Rename")
+            })
+            .count();
+        assert_eq!(copies, 1, "the title is one label, not two");
     }
 
     fn reject_empty() -> impl Fn(&str) -> ValidateResult {

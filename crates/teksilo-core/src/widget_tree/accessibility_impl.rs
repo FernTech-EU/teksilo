@@ -5,6 +5,17 @@ use super::*;
 
 use crate::accessibility::{AccessNodeBuilder, AccessibilityInfo};
 
+/// A Teksilo rect as AccessKit expresses one: two corners rather than an
+/// origin and a size.
+fn to_accesskit_rect(rect: teksilo_canvas::Rect) -> accesskit::Rect {
+    accesskit::Rect {
+        x0: rect.x as f64,
+        y0: rect.y as f64,
+        x1: (rect.x + rect.width) as f64,
+        y1: (rect.y + rect.height) as f64,
+    }
+}
+
 impl WidgetTree {
     /// Build an AccessKit `TreeUpdate` from the current state of all active
     /// widgets. Call this once per frame, between layout and paint, and push
@@ -63,10 +74,28 @@ impl WidgetTree {
         if !self.a11y_dirty
             && let Some(cached) = &self.cached_a11y
         {
-            return cached.clone();
+            // Nothing about a widget's *content* depends on where it sits,
+            // so a pure translation is re-placed in the cached tree rather
+            // than rebuilt: the alternative — walking on every scroll frame
+            // — was too expensive to do, so it was not done, and every
+            // node's bounds went stale the moment anything scrolled.
+            //
+            // The full-tree contract is unchanged. Around twenty callers
+            // read this return value as a complete description of the tree
+            // (`wait_for_condition`, `snapshot_json`, `find_node`, the
+            // headless harness), and the consumer panics on an update
+            // naming a node it has never seen, so a partial update is not
+            // an option here.
+            let _ = cached;
+            self.patch_accessibility_bounds();
+            return self
+                .cached_a11y
+                .as_ref()
+                .expect("the cache was present a line ago")
+                .clone();
         }
 
-        let (update, parents) = self.build_accessibility_tree();
+        let (update, parents, local_bounds) = self.build_accessibility_tree();
         // A `&mut self` post-pass: diff the freshly-built live nodes and
         // record any changed text into the announcement ring buffer. Must
         // run here (not in the `&self` `build_accessibility_tree`) and
@@ -82,7 +111,13 @@ impl WidgetTree {
         let content_changed = self.cached_a11y.as_ref() != Some(&update);
         self.cached_a11y = Some(update.clone());
         self.synthetic_parent_map = parents;
+        self.synthetic_local_bounds = local_bounds;
         self.a11y_dirty = false;
+        // A walk has just described every node's current position, so the
+        // moves recorded up to now are already reflected.
+        self.arena.take_a11y_moved();
+        self.arena.take_a11y_resized();
+        self.a11y_walk_generation = self.a11y_walk_generation.saturating_add(1);
         if content_changed {
             // Mirror of the shortcut-registry version signal; saturating so the
             // documented "monotonic" contract holds even past `u64::MAX`.
@@ -93,6 +128,80 @@ impl WidgetTree {
             self.request_frame();
         }
         update
+    }
+
+    /// How many accessibility walks have happened.
+    ///
+    /// A delivery that has not seen the latest walk is holding a tree whose
+    /// *shape* may be stale, not merely its geometry — so it must push the
+    /// full tree rather than rely on the geometry patch.
+    pub fn a11y_walk_generation(&self) -> u64 {
+        self.a11y_walk_generation
+    }
+
+    /// Re-place the nodes that moved, in the cached tree, without walking.
+    ///
+    /// Only geometry changes here: `at_version` is not bumped (its
+    /// contract is *semantic* change), no announcement is collected, and
+    /// the next full walk's `PartialEq` comparison stays correct because
+    /// the cache already holds the new bounds.
+    ///
+    /// A moved id absent from the cache is skipped rather than inserted:
+    /// it is a node the walk deliberately left out — a pruned layout
+    /// stack, an excluded or merged descendant — and inventing an entry
+    /// for it would put a node in the update that has no parent.
+    fn patch_accessibility_bounds(&mut self) {
+        let moved = self.arena.take_a11y_moved();
+        if moved.is_empty() {
+            return;
+        }
+        let Some(cached) = self.cached_a11y.as_mut() else {
+            return;
+        };
+        let index: std::collections::HashMap<accesskit::NodeId, usize> = cached
+            .nodes
+            .iter()
+            .enumerate()
+            .map(|(i, (id, _))| (*id, i))
+            .collect();
+
+        for &id in moved.keys() {
+            let bounds = self.arena.bounds(id);
+            if let Some(&slot) = index.get(&crate::accessibility::widget_id_to_node_id(id)) {
+                cached.nodes[slot].1.set_bounds(to_accesskit_rect(bounds));
+            }
+        }
+
+        // Synthetic children ride their owner. Those that declared local
+        // bounds are re-derived from the owner's new origin — exact, and
+        // immune to a delta that accumulated across several passes. The
+        // rest already hold window-space rects (a scene item under a view
+        // transform) and are shifted by the owner's own delta.
+        for (&syn_id, &owner) in &self.synthetic_parent_map {
+            let Some(delta) = moved.get(&owner) else {
+                continue;
+            };
+            let Some(&slot) = index.get(&syn_id) else {
+                continue;
+            };
+            let node = &mut cached.nodes[slot].1;
+            if let Some(local) = self.synthetic_local_bounds.get(&syn_id) {
+                let origin = self.arena.bounds(owner).origin();
+                node.set_bounds(to_accesskit_rect(teksilo_canvas::Rect::new(
+                    origin.x + local.x,
+                    origin.y + local.y,
+                    local.width,
+                    local.height,
+                )));
+            } else if let Some(rect) = node.bounds() {
+                node.set_bounds(accesskit::Rect {
+                    x0: rect.x0 + delta.x as f64,
+                    y0: rect.y0 + delta.y as f64,
+                    x1: rect.x1 + delta.x as f64,
+                    y1: rect.y1 + delta.y as f64,
+                });
+            }
+        }
     }
 
     /// Build a `TreeUpdate` describing the tree right now, without touching any
@@ -226,11 +335,13 @@ impl WidgetTree {
         self.access_action_handled
     }
 
+    #[allow(clippy::type_complexity)]
     fn build_accessibility_tree(
         &self,
     ) -> (
         accesskit::TreeUpdate,
         std::collections::HashMap<accesskit::NodeId, WidgetId>,
+        std::collections::HashMap<accesskit::NodeId, teksilo_canvas::Rect>,
     ) {
         use crate::accessibility::{root_node_id, widget_id_to_node_id};
 
@@ -243,6 +354,11 @@ impl WidgetTree {
         // Track which widget first claimed each child so we can skip duplicates
         // and emit a diagnostic pointing at the two conflicting parents.
         let mut seen_children: std::collections::HashMap<accesskit::NodeId, WidgetId> =
+            std::collections::HashMap::new();
+        // Where each synthetic child sits inside its owner, for the ones
+        // that declared local bounds. A pure translation re-places them
+        // from here without walking again.
+        let mut local_bounds: std::collections::HashMap<accesskit::NodeId, teksilo_canvas::Rect> =
             std::collections::HashMap::new();
 
         let mut root = accesskit::Node::new(accesskit::Role::Window);
@@ -295,6 +411,7 @@ impl WidgetTree {
                 root_id,
                 &mut nodes,
                 &mut synthetic_parents,
+                &mut local_bounds,
                 &mut seen_children,
                 &mut handled_tooltips,
             );
@@ -503,6 +620,7 @@ impl WidgetTree {
                 focus,
             },
             synthetic_parents,
+            local_bounds,
         )
     }
 
@@ -517,11 +635,13 @@ impl WidgetTree {
         self.synthetic_parent_map.get(&node_id).copied()
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn build_accessibility_recursive(
         &self,
         id: WidgetId,
         nodes: &mut Vec<(accesskit::NodeId, accesskit::Node)>,
         synthetic_parents: &mut std::collections::HashMap<accesskit::NodeId, WidgetId>,
+        local_bounds: &mut std::collections::HashMap<accesskit::NodeId, teksilo_canvas::Rect>,
         seen_children: &mut std::collections::HashMap<accesskit::NodeId, WidgetId>,
         // Tooltips whose text has already been placed on a node this pass.
         // One tooltip describes one control, so once an owner has taken it the
@@ -638,12 +758,7 @@ impl WidgetTree {
         }
 
         let bounds = self.arena.bounds(id);
-        builder.inner_mut().set_bounds(accesskit::Rect {
-            x0: bounds.x as f64,
-            y0: bounds.y as f64,
-            x1: (bounds.x + bounds.width) as f64,
-            y1: (bounds.y + bounds.height) as f64,
-        });
+        builder.inner_mut().set_bounds(to_accesskit_rect(bounds));
 
         // Framework-driven disabled gate. Respects an
         // `access_disabled(false)` override that wants to clear
@@ -701,8 +816,12 @@ impl WidgetTree {
             }
         }
 
-        let (node_id, ak_node, synthetic_children) = builder.build(id);
+        // The fourth element — the widget-local rects of any synthetic
+        // children — is what lets a pure translation re-place the runs
+        // without a full walk. Recorded by `sync_accessibility`.
+        let (node_id, ak_node, synthetic_children, synthetic_local_bounds) = builder.build(id);
         nodes.push((node_id, ak_node));
+        local_bounds.extend(synthetic_local_bounds);
         // Merge the widget's emitted synthetic children into the
         // tree update and record their parent-widget mapping so
         // `handle_accessibility_actions` can route incoming
@@ -721,6 +840,7 @@ impl WidgetTree {
                     child_id,
                     nodes,
                     synthetic_parents,
+                    local_bounds,
                     seen_children,
                     handled_tooltips,
                 );
@@ -922,7 +1042,10 @@ impl WidgetTree {
     fn build_overridden_builder(&self, id: WidgetId) -> AccessNodeBuilder {
         use crate::widget_builder::AccessSubtreeMode;
         let node = self.arena.get(id).expect("widget id is active in arena");
-        let mut builder = AccessNodeBuilder::for_widget(id);
+        // Every consumer of this builder reads scalars off it — role, name,
+        // actions, the tri-state flags — and discards it. A name probe so a
+        // text-bearing widget does not shape and emit runs nobody collects.
+        let mut builder = AccessNodeBuilder::for_name_probe(id);
         node.widget.accessibility(&mut builder);
         self.announce_context_menu(id, &mut builder);
         self.announce_focusable(id, &mut builder);
@@ -972,7 +1095,7 @@ impl WidgetTree {
     pub(crate) fn tooltip_access_description(&self, content_id: WidgetId) -> Option<String> {
         let content_id = self.tooltip_content_node(content_id);
         let node = self.arena.get(content_id)?;
-        let mut probe = AccessNodeBuilder::for_widget(content_id);
+        let mut probe = AccessNodeBuilder::for_name_probe(content_id);
         node.widget.accessibility(&mut probe);
         if let Some(ov) = node.access_overrides.as_deref() {
             ov.apply(&mut probe);
@@ -1147,7 +1270,11 @@ fn merge_collect_recursive(
     // would: widget.accessibility() then override apply(). This means
     // a descendant's `.access_label(...)` contributes its resolved
     // override string, not its raw widget label.
-    let mut tmp = AccessNodeBuilder::for_widget(id);
+    // A name probe: `absorb` takes the descendant's name, value, actions and
+    // relations, never its synthetic children — and the runs a text widget
+    // would emit here would be discarded with `tmp` while the widget's own
+    // node keeps its copies.
+    let mut tmp = AccessNodeBuilder::for_name_probe(id);
     node.widget.accessibility(&mut tmp);
     if let Some(ov) = node.access_overrides.as_deref() {
         ov.apply(&mut tmp);
@@ -2083,6 +2210,194 @@ mod tests {
             !tree.a11y_dirty,
             "pure Relayout (no activation / focus / overlay / a11y-binding change) must not dirty the AT cache"
         );
+    }
+
+    /// A container that places its single child at a settable offset,
+    /// without changing its size — the shape of a scroll.
+    #[derive(Debug)]
+    struct Mover {
+        offset: crate::signal::Signal<f32>,
+        child: WidgetId,
+    }
+
+    impl crate::widget::Widget for Mover {
+        fn children(&self) -> Vec<WidgetId> {
+            vec![self.child]
+        }
+        fn layout_response(
+            &self,
+            proposal: SizeProposal,
+            _ctx: &crate::widget::LayoutContext,
+        ) -> crate::widget::LayoutResponse {
+            proposal.resolve(200.0, 100.0).into()
+        }
+        fn place_children(
+            &self,
+            bounds: teksilo_canvas::Rect,
+            _proposal: SizeProposal,
+            children: &mut [crate::widget::WidgetPlacement],
+            _ctx: &crate::widget::LayoutContext,
+        ) {
+            if let Some(placement) = children.first_mut() {
+                placement.origin =
+                    teksilo_canvas::Point::new(bounds.x + self.offset.get(), bounds.y);
+                placement.size = teksilo_canvas::Size::new(50.0, 20.0);
+            }
+        }
+    }
+
+    /// A widget that only moved is re-placed in the cached tree.
+    ///
+    /// This is the scroll case, and the reason the AT tree's bounds used to
+    /// go stale: re-walking on every scroll frame was too expensive to do,
+    /// so it was not done, and every node in a scrolled view reported the
+    /// position it had before the scroll.
+    #[test]
+    fn translating_a_widget_patches_the_cache_without_a_walk() {
+        let mut tree = WidgetTree::new();
+        let inner = tree.add(FillWidget::new().label("Row"));
+        let offset = crate::signal::Signal::new(0.0f32);
+        let root = tree.add(Mover {
+            offset: offset.clone(),
+            child: inner,
+        });
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+        let update = tree.sync_accessibility();
+        let walks = tree.a11y_walk_generation();
+        let before = find_node(&update, inner)
+            .unwrap()
+            .bounds()
+            .expect("the node carries bounds");
+
+        // Move the row without resizing it.
+        offset.set(20.0);
+        tree.arena.mark_needs_layout(root);
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        let update = tree.sync_accessibility();
+        assert_eq!(
+            tree.a11y_walk_generation(),
+            walks,
+            "a pure translation must not cost a walk"
+        );
+        let after = find_node(&update, inner)
+            .unwrap()
+            .bounds()
+            .expect("the node still carries bounds");
+        assert!(
+            (after.x0 - before.x0 - 20.0).abs() < 0.01,
+            "the cached node must follow the move: {before:?} -> {after:?}"
+        );
+    }
+
+    #[test]
+    fn at_version_does_not_bump_for_a_move() {
+        // `at_version`'s contract is semantic change. A widget that moved
+        // says the same thing from somewhere else, and a harness waiting on
+        // the version must not wake for it.
+        let mut tree = WidgetTree::new();
+        let inner = tree.add(FillWidget::new().label("Row"));
+        let offset = crate::signal::Signal::new(0.0f32);
+        let root = tree.add(Mover {
+            offset: offset.clone(),
+            child: inner,
+        });
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+        let _ = tree.sync_accessibility();
+        let version = tree.at_version().get();
+
+        offset.set(20.0);
+        tree.arena.mark_needs_layout(root);
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+        let _ = tree.sync_accessibility();
+
+        assert_eq!(tree.at_version().get(), version);
+    }
+
+    #[test]
+    fn resizing_a_widget_dirties_the_accessibility_tree() {
+        // A wrapped label re-wraps at a new width, so its lines — and
+        // therefore its text runs — are a different set, not the same set
+        // somewhere else. Only a full walk can produce them.
+        let mut tree = WidgetTree::new();
+        let id = tree.add(FillWidget::new().label("Static"));
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+        let _ = tree.sync_accessibility();
+        let walks = tree.a11y_walk_generation();
+
+        tree.layout(SizeProposal::exact(300.0, 100.0));
+        let _ = tree.sync_accessibility();
+
+        assert!(
+            tree.a11y_walk_generation() > walks,
+            "a resize must be walked, not patched"
+        );
+        let _ = id;
+    }
+
+    #[test]
+    fn changing_the_theme_dirties_the_accessibility_tree() {
+        // Typography is re-resolved, so every label re-shapes — inside
+        // bounds the layout pass may leave untouched, which records no
+        // resize and would otherwise leave the runs describing the old
+        // metrics.
+        let mut tree = WidgetTree::new();
+        tree.add(FillWidget::new().label("Static"));
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+        let _ = tree.sync_accessibility();
+        let walks = tree.a11y_walk_generation();
+
+        tree.set_theme(crate::presets::intui::dark());
+        let _ = tree.sync_accessibility();
+
+        assert!(tree.a11y_walk_generation() > walks);
+    }
+
+    #[test]
+    fn changing_the_text_scale_dirties_the_accessibility_tree() {
+        let mut tree = WidgetTree::new();
+        tree.add(FillWidget::new().label("Static"));
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+        let _ = tree.sync_accessibility();
+        let walks = tree.a11y_walk_generation();
+
+        tree.set_user_text_scale(1.5);
+        let _ = tree.sync_accessibility();
+
+        assert!(tree.a11y_walk_generation() > walks);
+    }
+
+    #[test]
+    fn a_moved_node_absent_from_the_cache_is_skipped() {
+        // A layout stack the walker prunes, an excluded or merged
+        // descendant: the id moved, but the tree never had a node for it.
+        // Inventing one would put a node in the update with no parent,
+        // which panics the consumer's tree builder.
+        use crate::widget_builder::WidgetBuilder;
+        let mut tree = WidgetTree::new();
+        let hidden = tree.add(FillWidget::new().label("Inner"));
+        let offset = crate::signal::Signal::new(0.0f32);
+        let root = tree.add(
+            Mover {
+                offset: offset.clone(),
+                child: hidden,
+            }
+            .access_exclude_subtree(),
+        );
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+        let update = tree.sync_accessibility();
+        assert!(
+            find_node(&update, hidden).is_none(),
+            "the excluded descendant must be absent for this test to mean anything"
+        );
+
+        offset.set(20.0);
+        tree.arena.mark_needs_layout(root);
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+        let update = tree.sync_accessibility();
+
+        assert!(find_node(&update, hidden).is_none());
+        assert_no_dangling_relationships(&update);
     }
 
     /// Companion to the regression above: the dormant→active path

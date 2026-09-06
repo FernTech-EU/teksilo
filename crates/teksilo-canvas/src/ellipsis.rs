@@ -24,6 +24,75 @@ use crate::text_backend::{EllipsisMode, TextBackend};
 
 pub const ELLIPSIS: char = '\u{2026}';
 
+/// What an ellipsized label actually shows, and which parts of the source
+/// it dropped.
+///
+/// The display string is what gets painted; the two byte ranges say which
+/// spans of the *source* survived into it, so an accessibility pass can
+/// report the full text while giving real geometry only to the part that
+/// was drawn. Without them the elided span would have to be guessed from
+/// the display string, and a source containing its own `…` would guess
+/// wrong.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Ellipsized {
+    /// The string to paint, with the ellipsis already inserted.
+    pub display: String,
+    /// Source bytes kept before the ellipsis. Empty for
+    /// [`EllipsisMode::Leading`].
+    pub head: std::ops::Range<usize>,
+    /// Source bytes the ellipsis stands for. Empty when nothing was
+    /// dropped.
+    pub elided: std::ops::Range<usize>,
+    /// Source bytes kept after the ellipsis. Empty for
+    /// [`EllipsisMode::Trailing`].
+    pub tail: std::ops::Range<usize>,
+}
+
+impl Ellipsized {
+    /// The whole source, untouched.
+    fn whole(text: &str) -> Self {
+        Self {
+            display: text.to_string(),
+            head: 0..text.len(),
+            elided: text.len()..text.len(),
+            tail: text.len()..text.len(),
+        }
+    }
+}
+
+/// [`ellipsize`], reporting which source spans survived.
+///
+/// Same result and same cost — `ellipsize` is a thin wrapper over this —
+/// but the caller learns where the ellipsis stands, which is what an
+/// accessibility pass needs in order to announce the full text while
+/// anchoring the elided part at the glyph that replaced it.
+pub fn ellipsize_ranges(
+    text: &str,
+    style: &TextStyle,
+    max_width: f32,
+    mode: EllipsisMode,
+    backend: &mut dyn TextBackend,
+) -> Ellipsized {
+    if text.is_empty() || max_width <= 0.0 {
+        return Ellipsized {
+            display: String::new(),
+            head: 0..0,
+            elided: 0..text.len(),
+            tail: text.len()..text.len(),
+        };
+    }
+    if measure(text, style, backend) <= max_width {
+        return Ellipsized::whole(text);
+    }
+    match mode {
+        // text-typeset appends the ellipsis itself, so the display string
+        // is the source and the caller hands the width budget on.
+        EllipsisMode::Trailing => Ellipsized::whole(text),
+        EllipsisMode::Middle => middle_ellipsize_ranges(text, style, max_width, backend),
+        EllipsisMode::Leading => leading_ellipsize_ranges(text, style, max_width, backend),
+    }
+}
+
 /// Produce the truncated display string for `mode` so the resulting
 /// shaped width is ≤ `max_width`.
 ///
@@ -55,8 +124,8 @@ pub fn ellipsize(
 
     match mode {
         EllipsisMode::Trailing => text.to_string(),
-        EllipsisMode::Middle => middle_ellipsize(text, style, max_width, backend),
-        EllipsisMode::Leading => leading_ellipsize(text, style, max_width, backend),
+        EllipsisMode::Middle => middle_ellipsize_ranges(text, style, max_width, backend).display,
+        EllipsisMode::Leading => leading_ellipsize_ranges(text, style, max_width, backend).display,
     }
 }
 
@@ -81,12 +150,12 @@ fn ellipsis_str() -> String {
 /// `tail_len` split as evenly as possible (head gets the extra char for
 /// odd totals). Linear scan from `n` downward — O(n) iterations, each
 /// doing one measurement.
-fn middle_ellipsize(
+fn middle_ellipsize_ranges(
     text: &str,
     style: &TextStyle,
     max_width: f32,
     backend: &mut dyn TextBackend,
-) -> String {
+) -> Ellipsized {
     let boundaries: Vec<usize> = text
         .char_indices()
         .map(|(i, _)| i)
@@ -95,7 +164,12 @@ fn middle_ellipsize(
     let n = boundaries.len().saturating_sub(1); // number of chars
 
     if n == 0 {
-        return String::new();
+        return Ellipsized {
+            display: String::new(),
+            head: 0..0,
+            elided: 0..0,
+            tail: 0..0,
+        };
     }
 
     // Walk down from keeping n-1 chars to keeping 0. Skip `n` because we
@@ -113,12 +187,22 @@ fn middle_ellipsize(
         candidate.push_str(&text[tail_start_byte..]);
 
         if measure(&candidate, style, backend) <= max_width {
-            return candidate;
+            return Ellipsized {
+                display: candidate,
+                head: 0..head_end_byte,
+                elided: head_end_byte..tail_start_byte,
+                tail: tail_start_byte..text.len(),
+            };
         }
     }
 
     // Nothing fit — the budget is smaller than a bare ellipsis.
-    ellipsis_str()
+    Ellipsized {
+        display: ellipsis_str(),
+        head: 0..0,
+        elided: 0..text.len(),
+        tail: text.len()..text.len(),
+    }
 }
 
 /// Leading ellipsis: `"…dolor sit amet"`.
@@ -127,12 +211,12 @@ fn middle_ellipsize(
 /// each char boundary `start`, the candidate is `"…" + text[start..]`.
 /// Return the first candidate that fits, which is also the longest
 /// (preserves as much trailing content as possible).
-fn leading_ellipsize(
+fn leading_ellipsize_ranges(
     text: &str,
     style: &TextStyle,
     max_width: f32,
     backend: &mut dyn TextBackend,
-) -> String {
+) -> Ellipsized {
     let boundaries: Vec<usize> = text
         .char_indices()
         .map(|(i, _)| i)
@@ -140,7 +224,12 @@ fn leading_ellipsize(
         .collect();
 
     if boundaries.len() <= 1 {
-        return String::new();
+        return Ellipsized {
+            display: String::new(),
+            head: 0..0,
+            elided: 0..0,
+            tail: 0..0,
+        };
     }
 
     // Try cutting 1 char, then 2, etc. from the start. `start = 0`
@@ -151,11 +240,21 @@ fn leading_ellipsize(
         candidate.push_str(&text[start_byte..]);
 
         if measure(&candidate, style, backend) <= max_width {
-            return candidate;
+            return Ellipsized {
+                display: candidate,
+                head: 0..0,
+                elided: 0..start_byte,
+                tail: start_byte..text.len(),
+            };
         }
     }
 
-    ellipsis_str()
+    Ellipsized {
+        display: ellipsis_str(),
+        head: 0..0,
+        elided: 0..text.len(),
+        tail: text.len()..text.len(),
+    }
 }
 
 #[cfg(test)]
@@ -250,10 +349,10 @@ mod tests {
     #[test]
     fn leading_picks_longest_fitting_suffix() {
         let mut backend = MockTextBackend::new();
-        // MockTextBackend measures by UTF-8 byte length (8px per byte).
-        // "…" is 3 bytes in UTF-8, so a bare "…" measures 24px. At budget
-        // 40 we have 16 bytes of tail headroom, i.e. 2 ASCII chars.
-        // Longest fitting suffix of "ABCDEFGHIJ" is "IJ" → "…IJ" = 40px.
+        // The mock measures characters, not bytes (8 dp each), so a bare
+        // "…" is 8 dp however many bytes it takes. At a 40 dp budget that
+        // leaves four characters of tail: "…GHIJ" is exactly 40 dp, and
+        // "…FGHIJ" would be 48.
         let s = ellipsize(
             "ABCDEFGHIJ",
             &style(),
@@ -261,6 +360,6 @@ mod tests {
             EllipsisMode::Leading,
             &mut backend,
         );
-        assert_eq!(s, "\u{2026}IJ");
+        assert_eq!(s, "\u{2026}GHIJ");
     }
 }

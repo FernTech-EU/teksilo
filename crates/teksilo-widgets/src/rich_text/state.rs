@@ -543,13 +543,14 @@ pub(crate) struct EditorState {
     pub select_all_level: u8,
 
     /// Cached flow snapshot used by the accessibility pass. The
-    /// `Widget::accessibility` walk iterates blocks and fragments
-    /// to emit AccessKit `Role::Paragraph` / `Role::TextRun`
-    /// children; the snapshot itself doesn't change between
-    /// rebuilds triggered by focus / resize, so caching it avoids
-    /// re-walking the document tree. Invalidated from
-    /// `drain_events` when a `ContentsChanged` or `FormatChanged`
-    /// event arrives.
+    /// `Widget::accessibility` walk hands each block to the shared
+    /// text-run emitter, which emits `Role::TextRun` children
+    /// directly under the editor's node (a `Role::Heading` block
+    /// keeps its heading node in between); the snapshot itself
+    /// doesn't change between rebuilds triggered by focus / resize,
+    /// so caching it avoids re-walking the document tree.
+    /// Invalidated from `drain_events` when a `ContentsChanged` or
+    /// `FormatChanged` event arrives.
     pub accessibility_flow_snapshot: RefCell<Option<teksilo_text::text_document::FlowSnapshot>>,
 
     /// Per-synthetic-NodeId lookup table populated during the

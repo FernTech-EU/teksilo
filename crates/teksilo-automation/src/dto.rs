@@ -87,8 +87,51 @@ pub struct SemanticNode {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub actions: Vec<String>,
     /// Child node refs, in AT order.
+    ///
+    /// `Role::TextRun` children are **omitted**: every visible label now
+    /// carries one run per visual line, and an assistive technology never
+    /// navigates to them — `accesskit_consumer`'s own filter excludes them
+    /// from object navigation. Listing them here would bury every snapshot
+    /// under nodes no reader can reach. They remain in the update and stay
+    /// addressable by `read_node` / `assert_node` / `invoke_action`; what a
+    /// probe usually wants about them is in [`text`](Self::text).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub children: Vec<NodeRef>,
+    /// What a screen reader could review on this node, when it carries text
+    /// ranges at all.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text: Option<TextRangeInfo>,
+    /// The node's own `label` property, before `labelled_by` resolution.
+    ///
+    /// Present only when it differs from [`label`](Self::label) — i.e. when
+    /// the node is named by pointing at another node rather than by a copy
+    /// of its string.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub raw_label: Option<String>,
+}
+
+/// What a screen reader could review on a node that carries text ranges.
+///
+/// A probe that wants to know whether a label is reviewable should read
+/// this rather than counting `Role::TextRun` children, which the snapshot
+/// deliberately omits.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct TextRangeInfo {
+    /// How many text runs the node carries. At least one on any node that
+    /// supports ranges — an empty label still emits one, so a change event
+    /// has an old node that supports ranges to diff against.
+    pub run_count: usize,
+    /// The text a reader would review, as the consumer assembles it from
+    /// the runs. Must equal the node's announced value; when it does not,
+    /// what a reader hears and what it reviews are different strings.
+    pub document_text: String,
+    /// Whether the range reports bounding boxes — `false` means a magnifier
+    /// cannot follow the review cursor and braille cannot be routed.
+    pub has_geometry: bool,
+    /// The node's base reading direction, when it declares one:
+    /// `"left_to_right"` or `"right_to_left"`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub direction: Option<String>,
 }
 
 /// A node's bounds in logical pixels.
@@ -260,6 +303,15 @@ pub enum Assertion {
     Selected { value: bool },
     /// The node's disabled state matches.
     Disabled { value: bool },
+    /// The node can be reviewed by character, word and line.
+    ///
+    /// This is what a screen reader is gated on
+    /// (`accesskit_consumer::Node::supports_text_ranges`), and it is not
+    /// implied by the node having a name: a label with no text runs is
+    /// reachable but unreviewable, and unroutable on a braille display.
+    SupportsTextRanges,
+    /// The text a reader would review equals the given string.
+    DocumentTextEquals { value: String },
 }
 
 /// Result of an [`Assertion`].

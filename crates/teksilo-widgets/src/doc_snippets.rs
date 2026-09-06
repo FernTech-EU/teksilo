@@ -732,7 +732,11 @@ doc_snippet!(
         let step = |title: &'static str, status: StepStatus| {
             Step::new(lit!(title))
                 .status(status)
-                .content(move || TextWidget::new(lit!(title)))
+                // Filler, and deliberately neither the step's own title nor
+                // the stepper's own accessible name: a panel named "Account"
+                // whose only content reads "Account" makes a screen reader say
+                // it twice on the way in.
+                .content(move || TextWidget::new(lit!("Details for this step")))
         };
         Box::new(
             Stepper::new()
@@ -978,11 +982,15 @@ doc_snippet!(
             .dock(DockWidget::new(explorer, lit!("Explorer"), |_| {
                 panel_scene("Files", &["src", "crates", "docs", "Cargo.toml"])
             }))
+            // The panel heading names the *content*, never the dock — an
+            // "Outline" panel whose heading also reads "Outline" makes a
+            // screen reader say it twice on the way in. Explorer / Files
+            // above is the pairing to copy.
             .dock(DockWidget::new(outline, lit!("Outline"), |_| {
-                panel_scene("Outline", &["main", "build", "layout_response"])
+                panel_scene("Symbols", &["main", "build", "layout_response"])
             }))
             .dock(DockWidget::new(problems, lit!("Problems"), |_| {
-                panel_scene("Problems", &["2 warnings", "0 errors"])
+                panel_scene("Diagnostics", &["2 warnings", "0 errors"])
             }));
         // `.dock(...)` only registers; a side stays empty until its dock is
         // opened — same order the `docking` example uses.

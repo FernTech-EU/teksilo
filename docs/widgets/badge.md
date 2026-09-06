@@ -23,7 +23,10 @@ theme-wide via `theme.style_slots.badge`.
 ## Accessibility
 
 Announces as `Role::Label` with its resolved text as the AT name.
-The inner `TextWidget` is hidden from AT to avoid double-announcement.
+The inner `TextWidget` is hidden from AT to avoid double-announcement;
+the badge emits that label's text runs from its own node instead, so a
+reader can review the text by character, word and line rather than only
+hear it.
 
 ```rust
 # use teksilo_widgets::Badge;

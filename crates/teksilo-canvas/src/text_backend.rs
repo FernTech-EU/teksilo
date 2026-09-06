@@ -38,6 +38,136 @@ pub enum EllipsisMode {
     Leading,
 }
 
+/// Reading direction of a [`TextLineSegment`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TextDirection {
+    LeftToRight,
+    RightToLeft,
+}
+
+/// One character's extent along its segment's reading direction.
+///
+/// `position` is measured from the segment's *leading* edge — its left
+/// edge in [`TextDirection::LeftToRight`], its right edge in
+/// [`TextDirection::RightToLeft`] — so positions are non-decreasing and
+/// widths are never negative in both directions. A character with no
+/// advance of its own (a combining mark, the interior of a ligature)
+/// reports its cluster's leading position and a width of `0.0`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CharGeom {
+    pub position: f32,
+    pub width: f32,
+}
+
+/// How a laid-out line ends.
+///
+/// A screen reader distinguishes a paragraph break — which it announces,
+/// and which occupies a character in the accessible text — from a soft
+/// wrap, which occupies nothing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LineEnd {
+    /// Broken to fit the wrap width; nothing in the source separates this
+    /// line from the next.
+    SoftWrap,
+    /// Ends with an explicit break in the source. `chars` is how many
+    /// source characters the break occupies (`\n` → 1, `\r\n` → 2);
+    /// `bytes` how many source bytes (likewise 1 and 2). AccessKit counts
+    /// a `\r\n` as one character whose `character_lengths` entry is 2 —
+    /// that is `bytes`.
+    HardBreak { chars: u8, bytes: u8 },
+    /// Ends because the source does.
+    EndOfText,
+}
+
+/// Where a truncated line's ellipsis was drawn.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct LineTruncation {
+    /// Leading edge of the ellipsis, in layout-local coordinates.
+    pub ellipsis_x: f32,
+    /// Advance width of the ellipsis. Zero when the backend clipped
+    /// rather than ellipsized.
+    pub ellipsis_width: f32,
+}
+
+/// One direction-uniform stretch of a laid-out line.
+///
+/// A pure LTR or pure RTL line has exactly one segment; a bidirectional
+/// line has one per direction change, in *logical* order.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TextLineSegment {
+    /// Byte range in the text the geometry indexes (see
+    /// [`TextGeometry::rendered_text`]).
+    pub byte_range: std::ops::Range<usize>,
+    /// Character range in the same text.
+    pub char_range: std::ops::Range<usize>,
+    pub direction: TextDirection,
+    /// Bounding box `[x, y, width, height]` in layout-local coordinates.
+    pub rect: [f32; 4],
+    /// One entry per character of `char_range`, in logical order.
+    pub characters: Vec<CharGeom>,
+}
+
+/// One laid-out visual line.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TextLine {
+    /// Zero-based index within the layout.
+    pub index: usize,
+    /// Byte range of the line, including any trailing hard break.
+    pub byte_range: std::ops::Range<usize>,
+    /// Character range of the line, in the same text.
+    pub char_range: std::ops::Range<usize>,
+    /// Bounding box `[x, y, width, height]`; `y` is the top of the line
+    /// box and `height` its full line height.
+    pub rect: [f32; 4],
+    /// Baseline y in layout-local coordinates.
+    pub baseline: f32,
+    /// Where a caret sits on a line with no glyphs of its own.
+    pub caret_x: f32,
+    /// Direction-uniform stretches in logical order.
+    ///
+    /// Empty means *unmeasurable* — a consumer must fall back to
+    /// degenerate geometry for the whole line rather than for part of it
+    /// — except on a line whose `char_range` is empty, which simply has
+    /// no characters and locates its caret with `caret_x`.
+    pub segments: Vec<TextLineSegment>,
+    pub end: LineEnd,
+    /// Set when the line was cut short.
+    pub truncation: Option<LineTruncation>,
+}
+
+/// One hyperlink in a markup layout, reported against the rendered text.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TextLink {
+    /// Byte range of the link's label in [`TextGeometry::rendered_text`]
+    /// — *not* in the markup source.
+    pub rendered_byte_range: std::ops::Range<usize>,
+    pub url: String,
+}
+
+/// Per-line, per-character geometry for one laid-out text.
+///
+/// Accessibility needs what the shaper already knows one *character* at
+/// a time: AccessKit's `Role::TextRun` carries `character_positions` and
+/// `character_widths` so a screen reader can route a braille cell to a
+/// word, a magnifier can follow the review cursor, and
+/// `AXBoundsForRange` can answer.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct TextGeometry {
+    /// One entry per emitted line, in visual top-to-bottom order.
+    pub lines: Vec<TextLine>,
+    /// How many further lines the layout produced but did not emit,
+    /// because a `max_lines` cap cut them.
+    pub dropped_lines: usize,
+    /// Byte length of the text every range indexes.
+    pub source_len: usize,
+    /// The text the ranges index, when it differs from the caller's input
+    /// — i.e. on the markup paths, where the syntax has been stripped.
+    /// `None` on the plain-text paths, where the input *is* that text.
+    pub rendered_text: Option<String>,
+    /// Hyperlinks found in the markup, against the rendered text.
+    pub links: Vec<TextLink>,
+}
+
 /// Result of measuring text.
 #[derive(Debug, Clone)]
 pub struct TextLayout {
@@ -68,6 +198,15 @@ pub struct TextLayout {
     /// on the mismatch; widgets that retain layouts across paints
     /// should re-layout when the scale changed.
     pub raster_scale: f32,
+    /// Per-line, per-character geometry, when the backend produced it.
+    ///
+    /// Shared rather than owned: a `TextLayout` is cloned out of the
+    /// backend's layout cache on every hit, and the geometry is the
+    /// largest thing it carries. Behind an `Rc` a cache hit costs a
+    /// refcount, and the geometry lives exactly as long as the cache
+    /// entry that produced it — no second map to invalidate, no key to
+    /// look up backwards.
+    pub geometry: Option<std::rc::Rc<TextGeometry>>,
 }
 
 /// One laid-out span inside a [`TextLayout`]. Populated by
@@ -356,10 +495,30 @@ pub struct AtlasInfo {
 }
 
 /// A mock text backend for headless testing.
-/// Returns fixed-size measurements without real font rendering.
+///
+/// Deliberately simple, but not *degenerate*: it measures characters
+/// (not bytes), treats `\n` as a hard break, wraps at word boundaries,
+/// hands out a distinct `layout_key` per layout, and reports the same
+/// per-line, per-character [`TextGeometry`] a real backend does. Tests
+/// that assert on accessible text runs need geometry that is real
+/// enough to be wrong when the code under test is wrong; a backend that
+/// reported nothing would make every such test vacuous.
+///
+/// Every character advances by `char_width` (8 dp) except the `\r` and
+/// `\n` of a line terminator, which advance by nothing.
 pub struct MockTextBackend {
     char_width: f32,
     line_height: f32,
+    next_key: u64,
+    texts: std::collections::HashMap<u64, String>,
+    cache_generation: u64,
+}
+
+/// One line the mock broke the source into.
+struct MockLine {
+    bytes: std::ops::Range<usize>,
+    chars: std::ops::Range<usize>,
+    end: LineEnd,
 }
 
 impl MockTextBackend {
@@ -367,6 +526,262 @@ impl MockTextBackend {
         Self {
             char_width: 8.0,
             line_height: 16.0,
+            next_key: 1,
+            texts: std::collections::HashMap::new(),
+            cache_generation: 0,
+        }
+    }
+
+    /// Forget every layout key handed out so far, as a real backend does
+    /// when its layout cache is cleared. Bumps
+    /// [`layout_cache_generation`](TextBackend::layout_cache_generation)
+    /// so a widget holding a retained layout re-shapes instead of
+    /// drawing a dangling key.
+    pub fn invalidate(&mut self) {
+        self.texts.clear();
+        self.cache_generation += 1;
+    }
+
+    fn take_key(&mut self, text: &str) -> u64 {
+        let key = self.next_key;
+        self.next_key += 1;
+        self.texts.insert(key, text.to_string());
+        key
+    }
+
+    /// Advance width of one character. A line terminator takes no space.
+    fn advance_of(&self, ch: char) -> f32 {
+        if ch == '\n' || ch == '\r' {
+            0.0
+        } else {
+            self.char_width
+        }
+    }
+
+    /// Split `text` at explicit breaks. Always yields at least one line,
+    /// and the ranges are contiguous and cover the whole source — a
+    /// trailing `\n` therefore produces an empty final line, as a real
+    /// engine's does.
+    fn split_hard_lines(text: &str) -> Vec<(std::ops::Range<usize>, LineEnd)> {
+        let bytes = text.as_bytes();
+        let mut out = Vec::new();
+        let mut start = 0usize;
+        for i in 0..bytes.len() {
+            if bytes[i] == b'\n' {
+                let crlf = i > start && bytes[i - 1] == b'\r';
+                let n = if crlf { 2 } else { 1 };
+                out.push((start..i + 1, LineEnd::HardBreak { chars: n, bytes: n }));
+                start = i + 1;
+            }
+        }
+        out.push((start..text.len(), LineEnd::EndOfText));
+        out
+    }
+
+    /// Greedily wrap `range` at spaces, or mid-word when a word is wider
+    /// than the line. The pieces are contiguous and cover `range`.
+    fn wrap_range(
+        text: &str,
+        range: std::ops::Range<usize>,
+        max_chars: usize,
+    ) -> Vec<std::ops::Range<usize>> {
+        if max_chars == 0 || range.is_empty() {
+            return vec![range];
+        }
+        let mut pieces = Vec::new();
+        let mut piece_start = range.start;
+        let mut chars_in_piece = 0usize;
+        let mut last_break: Option<usize> = None;
+        for (offset, ch) in text[range.clone()].char_indices() {
+            let at = range.start + offset;
+            if chars_in_piece >= max_chars {
+                let cut = match last_break {
+                    Some(b) if b > piece_start && b <= at => b,
+                    _ => at,
+                };
+                if cut > piece_start {
+                    pieces.push(piece_start..cut);
+                    piece_start = cut;
+                    chars_in_piece = text[piece_start..at].chars().count();
+                    last_break = None;
+                }
+            }
+            chars_in_piece += 1;
+            if ch == ' ' {
+                last_break = Some(at + ch.len_utf8());
+            }
+        }
+        pieces.push(piece_start..range.end);
+        pieces
+    }
+
+    /// Break `text` into display lines: explicit breaks first, then word
+    /// wrapping within each. A line's terminator stays on the line it
+    /// ends, so the ranges remain contiguous.
+    fn break_lines(text: &str, max_chars: Option<usize>) -> Vec<MockLine> {
+        let mut out: Vec<MockLine> = Vec::new();
+        let mut char_cursor = 0usize;
+        for (range, end) in Self::split_hard_lines(text) {
+            let term = match end {
+                LineEnd::HardBreak { bytes, .. } => bytes as usize,
+                _ => 0,
+            };
+            let body = range.start..range.end - term;
+            let mut pieces = match max_chars {
+                Some(n) => Self::wrap_range(text, body, n),
+                None => vec![body],
+            };
+            if term > 0
+                && let Some(last) = pieces.last_mut()
+            {
+                last.end += term;
+            }
+            let last_index = pieces.len() - 1;
+            for (i, piece) in pieces.into_iter().enumerate() {
+                let count = text[piece.clone()].chars().count();
+                out.push(MockLine {
+                    chars: char_cursor..char_cursor + count,
+                    bytes: piece,
+                    end: if i == last_index {
+                        end
+                    } else {
+                        LineEnd::SoftWrap
+                    },
+                });
+                char_cursor += count;
+            }
+        }
+        out
+    }
+
+    /// Geometry for a set of broken lines stacked from the origin.
+    ///
+    /// `visible_chars` limits the first line to a prefix, which is how
+    /// the single-line path reports a trailing ellipsis: the line still
+    /// covers the whole source, but only the drawn prefix is measured.
+    fn geometry_for(
+        &self,
+        text: &str,
+        lines: &[MockLine],
+        dropped_lines: usize,
+        visible_chars: Option<usize>,
+        rendered_text: Option<String>,
+        links: Vec<TextLink>,
+    ) -> TextGeometry {
+        let out = lines
+            .iter()
+            .enumerate()
+            .map(|(index, line)| {
+                let y = index as f32 * self.line_height;
+                let mut characters = Vec::new();
+                let mut position = 0.0f32;
+                let mut measured_bytes = line.bytes.start;
+                for (offset, ch) in text[line.bytes.clone()].char_indices() {
+                    if visible_chars.is_some_and(|n| characters.len() >= n) {
+                        break;
+                    }
+                    let width = self.advance_of(ch);
+                    characters.push(CharGeom { position, width });
+                    position += width;
+                    measured_bytes = line.bytes.start + offset + ch.len_utf8();
+                }
+                let segments = if characters.is_empty() {
+                    Vec::new()
+                } else {
+                    vec![TextLineSegment {
+                        byte_range: line.bytes.start..measured_bytes,
+                        char_range: line.chars.start..line.chars.start + characters.len(),
+                        direction: TextDirection::LeftToRight,
+                        rect: [0.0, y, position, self.line_height],
+                        characters,
+                    }]
+                };
+                TextLine {
+                    index,
+                    byte_range: line.bytes.clone(),
+                    char_range: line.chars.clone(),
+                    rect: [0.0, y, position, self.line_height],
+                    baseline: y + self.line_height * 0.75,
+                    caret_x: 0.0,
+                    segments,
+                    end: line.end,
+                    truncation: visible_chars.map(|_| LineTruncation {
+                        ellipsis_x: position,
+                        ellipsis_width: self.char_width,
+                    }),
+                }
+            })
+            .collect();
+        TextGeometry {
+            lines: out,
+            dropped_lines,
+            source_len: text.len(),
+            rendered_text,
+            links,
+        }
+    }
+
+    /// Strip the supported markup (`[label](url)`, `**bold**`,
+    /// `*italic*`) and report each link against the rendered text.
+    ///
+    /// An approximation of the real parser, enough for tests to assert
+    /// that a markup label announces its rendered text and that its
+    /// links carry rendered — not source — offsets.
+    fn flatten_markup(source: &str) -> (String, Vec<TextLink>) {
+        let mut rendered = String::with_capacity(source.len());
+        let mut links = Vec::new();
+        let bytes = source.as_bytes();
+        let mut i = 0usize;
+        while i < bytes.len() {
+            if bytes[i] == b'['
+                && let Some(close) = source[i..].find("](").map(|o| i + o)
+                && let Some(end) = source[close + 2..].find(')').map(|o| close + 2 + o)
+            {
+                let label = &source[i + 1..close];
+                let url = &source[close + 2..end];
+                let start = rendered.len();
+                rendered.push_str(label);
+                links.push(TextLink {
+                    rendered_byte_range: start..rendered.len(),
+                    url: url.to_string(),
+                });
+                i = end + 1;
+                continue;
+            }
+            if bytes[i] == b'*' {
+                i += if source[i..].starts_with("**") { 2 } else { 1 };
+                continue;
+            }
+            let ch = source[i..]
+                .chars()
+                .next()
+                .expect("byte index on a boundary");
+            rendered.push(ch);
+            i += ch.len_utf8();
+        }
+        (rendered, links)
+    }
+
+    fn layout_from_lines(
+        &mut self,
+        source_key_text: &str,
+        geometry: TextGeometry,
+        width: f32,
+    ) -> TextLayout {
+        let line_count = geometry.lines.len().max(1);
+        let key = self.take_key(source_key_text);
+        TextLayout {
+            width,
+            height: line_count as f32 * self.line_height,
+            ascent: self.line_height * 0.75,
+            descent: self.line_height * 0.25,
+            underline_offset: 2.0,
+            underline_thickness: 1.0,
+            layout_key: key,
+            line_count,
+            spans: Vec::new(),
+            raster_scale: 1.0,
+            geometry: Some(std::rc::Rc::new(geometry)),
         }
     }
 }
@@ -384,23 +799,29 @@ impl TextBackend for MockTextBackend {
         _style: &TextStyle,
         max_width: Option<f32>,
     ) -> TextLayout {
-        let width = text.len() as f32 * self.char_width;
-        let clamped_width = match max_width {
-            Some(max) => width.min(max),
-            None => width,
+        let char_count = text.chars().count();
+        let width = char_count as f32 * self.char_width;
+        let (clamped_width, visible) = match max_width {
+            Some(max) if width > max => {
+                let budget = (max - self.char_width).max(0.0);
+                let kept = (budget / self.char_width).floor() as usize;
+                (kept as f32 * self.char_width + self.char_width, Some(kept))
+            }
+            Some(max) => (width.min(max), None),
+            None => (width, None),
         };
-        TextLayout {
-            width: clamped_width,
-            height: self.line_height,
-            ascent: self.line_height * 0.75,
-            descent: self.line_height * 0.25,
-            underline_offset: 2.0,
-            underline_thickness: 1.0,
-            layout_key: 0,
-            line_count: 1,
-            spans: Vec::new(),
-            raster_scale: 1.0,
-        }
+        // One display line: the single-line path never breaks, so an
+        // embedded `\n` is an ordinary (zero-advance) character.
+        let lines = vec![MockLine {
+            bytes: 0..text.len(),
+            chars: 0..char_count,
+            end: LineEnd::EndOfText,
+        }];
+        let geometry = self.geometry_for(text, &lines, 0, visible, None, Vec::new());
+        let mut layout = self.layout_from_lines(text, geometry, clamped_width);
+        layout.height = self.line_height;
+        layout.line_count = 1;
+        layout
     }
 
     fn layout_paragraph(
@@ -410,84 +831,94 @@ impl TextBackend for MockTextBackend {
         max_width: f32,
         max_lines: Option<usize>,
     ) -> TextLayout {
-        let max_chars_per_line = (max_width / self.char_width).floor() as usize;
-        if max_chars_per_line == 0 {
-            return TextLayout {
-                width: 0.0,
-                height: self.line_height,
-                ascent: self.line_height * 0.75,
-                descent: self.line_height * 0.25,
-                underline_offset: 2.0,
-                underline_thickness: 1.0,
-                layout_key: 0,
-                line_count: 1,
-                spans: Vec::new(),
-                raster_scale: 1.0,
-            };
-        }
-
-        let words: Vec<&str> = text.split_whitespace().collect();
-        let mut lines: Vec<f32> = Vec::new(); // width of each line
-        let mut current_line_chars: usize = 0;
-
-        for word in &words {
-            let word_len = word.len();
-            let needed = if current_line_chars == 0 {
-                word_len
-            } else {
-                current_line_chars + 1 + word_len // space + word
-            };
-
-            if needed > max_chars_per_line && current_line_chars > 0 {
-                // Wrap: finish current line, start new one
-                lines.push(current_line_chars as f32 * self.char_width);
-                current_line_chars = word_len;
-            } else {
-                current_line_chars = needed;
+        let max_chars = (max_width / self.char_width).floor() as usize;
+        let mut lines = Self::break_lines(text, Some(max_chars));
+        let dropped = match max_lines {
+            Some(n) if lines.len() > n => {
+                let dropped = lines.len() - n;
+                lines.truncate(n);
+                dropped
             }
-        }
-        // Finish last line
-        if current_line_chars > 0 || lines.is_empty() {
-            lines.push(current_line_chars as f32 * self.char_width);
-        }
+            _ => 0,
+        };
+        let geometry = self.geometry_for(text, &lines, dropped, None, None, Vec::new());
+        let width = geometry
+            .lines
+            .iter()
+            .map(|l| l.rect[2])
+            .fold(0.0f32, f32::max);
+        self.layout_from_lines(text, geometry, width)
+    }
 
-        // Apply max_lines limit
-        if let Some(max) = max_lines {
-            lines.truncate(max);
+    fn layout_single_line_markup(
+        &mut self,
+        source: &str,
+        style: &TextStyle,
+        max_width: Option<f32>,
+    ) -> TextLayout {
+        let (rendered, links) = Self::flatten_markup(source);
+        let mut layout = self.layout_single_line(&rendered, style, max_width);
+        if let Some(geometry) = layout.geometry.as_mut().and_then(std::rc::Rc::get_mut) {
+            geometry.rendered_text = Some(rendered);
+            geometry.links = links;
         }
+        layout
+    }
 
-        let line_count = lines.len();
-        let max_line_width = lines.iter().cloned().fold(0.0_f32, f32::max);
-
-        TextLayout {
-            width: max_line_width,
-            height: line_count as f32 * self.line_height,
-            ascent: self.line_height * 0.75,
-            descent: self.line_height * 0.25,
-            underline_offset: 2.0,
-            underline_thickness: 1.0,
-            layout_key: 0,
-            line_count,
-            spans: Vec::new(),
-            raster_scale: 1.0,
+    fn layout_paragraph_markup(
+        &mut self,
+        source: &str,
+        style: &TextStyle,
+        max_width: f32,
+        max_lines: Option<usize>,
+    ) -> TextLayout {
+        let (rendered, links) = Self::flatten_markup(source);
+        let mut layout = self.layout_paragraph(&rendered, style, max_width, max_lines);
+        if let Some(geometry) = layout.geometry.as_mut().and_then(std::rc::Rc::get_mut) {
+            geometry.rendered_text = Some(rendered);
+            geometry.links = links;
         }
+        layout
     }
 
     fn ensure_glyphs(&mut self, layout: &TextLayout) -> Vec<GlyphQuad> {
-        // Return one fake glyph per 8px of width (matching the mock char width)
-        // so that draw_text_layout tests can verify rendering happens.
-        let char_count = (layout.width / 8.0).ceil() as usize;
-        if char_count == 0 {
+        // One quad per laid-out character with an advance of its own, at
+        // the position the geometry reports — so a test that reads quad
+        // positions and a test that reads character positions cannot
+        // disagree.
+        let Some(geometry) = layout.geometry.as_ref() else {
             return Vec::new();
+        };
+        let mut quads = Vec::new();
+        for line in &geometry.lines {
+            for segment in &line.segments {
+                for ch in &segment.characters {
+                    if ch.width <= 0.0 {
+                        continue;
+                    }
+                    quads.push(GlyphQuad {
+                        screen: [
+                            segment.rect[0] + ch.position,
+                            line.rect[1],
+                            ch.width,
+                            self.line_height,
+                        ],
+                        atlas: [0.0, 0.0, ch.width, self.line_height],
+                        color: [0.0, 0.0, 0.0, 1.0],
+                        is_color: false,
+                    });
+                }
+            }
         }
-        (0..char_count)
-            .map(|i| GlyphQuad {
-                screen: [i as f32 * 8.0, 0.0, 8.0, layout.height],
-                atlas: [0.0, 0.0, 8.0, layout.height],
-                color: [0.0, 0.0, 0.0, 1.0],
-                is_color: false,
-            })
-            .collect()
+        quads
+    }
+
+    fn layout_cache_generation(&self) -> u64 {
+        self.cache_generation
+    }
+
+    fn debug_layout_text(&self, layout_key: u64) -> Option<String> {
+        self.texts.get(&layout_key).cloned()
     }
 }
 

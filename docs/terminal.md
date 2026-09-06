@@ -113,9 +113,11 @@ re-themes live when you swap the scheme.
 ## Accessibility
 
 The terminal exposes a native **`Role::Terminal`** node (all three OS backends).
-Its children are one `Role::Paragraph` → `Role::TextRun` per visible row, so a
-screen reader reviews the screen with its normal text-navigation commands; the
-VT cursor maps to the AT caret. **New output** is announced through a separate,
+Its children are one `Role::TextRun` per visible row — several linked runs on a
+row past 255 columns — so a screen reader reviews the screen with its normal
+text-navigation commands; the VT cursor maps to the AT caret. Each run carries
+its own box and per-character extents, so a magnifier follows the review cursor
+and a braille cell routes to the cell under it. **New output** is announced through a separate,
 small `Role::Status` + `Live::Polite` region (the last completed line) rather
 than by re-announcing the whole screen — the way screen readers actually consume
 ARIA live regions. Verify with the automation MCP (`snapshot_tree`,

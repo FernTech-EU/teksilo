@@ -86,6 +86,13 @@ impl<L: Widget, R: Widget> Widget for TeksiBranch<L, R> {
         }
     }
 
+    fn accessible_title_node(&self) -> Option<crate::widget_id::WidgetId> {
+        match self {
+            TeksiBranch::L(w) => w.accessible_title_node(),
+            TeksiBranch::R(w) => w.accessible_title_node(),
+        }
+    }
+
     fn initial_focus_hint(&self) -> Option<WidgetId> {
         match self {
             TeksiBranch::L(w) => w.initial_focus_hint(),
@@ -182,6 +189,14 @@ impl<A: Widget, B: Widget, C: Widget> Widget for TeksiBranch3<A, B, C> {
             TeksiBranch3::A(w) => w.accessible_title_hint(),
             TeksiBranch3::B(w) => w.accessible_title_hint(),
             TeksiBranch3::C(w) => w.accessible_title_hint(),
+        }
+    }
+
+    fn accessible_title_node(&self) -> Option<crate::widget_id::WidgetId> {
+        match self {
+            TeksiBranch3::A(w) => w.accessible_title_node(),
+            TeksiBranch3::B(w) => w.accessible_title_node(),
+            TeksiBranch3::C(w) => w.accessible_title_node(),
         }
     }
 
@@ -292,6 +307,15 @@ impl<A: Widget, B: Widget, C: Widget, D: Widget> Widget for TeksiBranch4<A, B, C
             TeksiBranch4::B(w) => w.accessible_title_hint(),
             TeksiBranch4::C(w) => w.accessible_title_hint(),
             TeksiBranch4::D(w) => w.accessible_title_hint(),
+        }
+    }
+
+    fn accessible_title_node(&self) -> Option<crate::widget_id::WidgetId> {
+        match self {
+            TeksiBranch4::A(w) => w.accessible_title_node(),
+            TeksiBranch4::B(w) => w.accessible_title_node(),
+            TeksiBranch4::C(w) => w.accessible_title_node(),
+            TeksiBranch4::D(w) => w.accessible_title_node(),
         }
     }
 

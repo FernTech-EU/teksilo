@@ -181,6 +181,22 @@ pub struct SceneItemA11yContext {
     pub screen_bounds: Rect,
     /// The id under which this item is being emitted.
     pub item_id: ItemId,
+    /// The item's own local coordinates projected all the way into
+    /// window space — its `scene_transform` composed with
+    /// `view_transform`.
+    ///
+    /// An item emitting sub-element geometry of its own (a
+    /// [`TextItem`](crate::TextItem)'s AccessKit text runs, whose
+    /// per-character positions AT reads in window space) needs the whole
+    /// chain, not just the view half: `screen_bounds` is an axis-aligned
+    /// box and says nothing about where a point *inside* the item lands.
+    pub local_to_screen: Transform2D,
+    /// The box actually written onto the item's AccessKit node, in
+    /// whichever space [`bounds_space`](Self::bounds_space) names.
+    pub advertised_bounds: Rect,
+    /// Which space the item's bounds — and therefore any geometry it
+    /// emits itself — are advertised in.
+    pub bounds_space: crate::a11y::A11yBoundsSpace,
 }
 
 /// A lightweight, paint-only scene-graph item.

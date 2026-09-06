@@ -92,6 +92,11 @@ pub struct ModalContainer {
     style_override: Option<SharedDialogStyle>,
     /// Build state — the `DialogStyle::make_panel` root.
     root_child_id: Option<WidgetId>,
+    /// True once the container has been wired to the title its content
+    /// paints. It must then set no name of its own: the consumer prefers a
+    /// node's own label over its `labelled_by` targets, so doing both would
+    /// silently drop the relation.
+    named_by_content: bool,
 }
 
 impl ModalContainer {
@@ -109,6 +114,7 @@ impl ModalContainer {
             title: None,
             style_override: None,
             root_child_id: None,
+            named_by_content: false,
         }
     }
 
@@ -167,7 +173,19 @@ impl Widget for ModalContainer {
                 // at present time (dialogs rebuild on show).
                 self.title = Some(LocalizedString::literal(hint));
             }
-            self.content_id = Some(ctx.add_boxed(content));
+            let content_id = ctx.add_boxed(content);
+            self.content_id = Some(content_id);
+            // Name the dialog by pointing at the title it already paints,
+            // rather than by a second copy of the string. `build()` runs
+            // eagerly on insertion, so the content's title node exists by
+            // now; an explicit `.title(..)` on the container yields to it,
+            // because the visible title is what a reader will find when
+            // they go looking for the name they heard.
+            if let Some(title_id) = ctx.accessible_title_node(content_id) {
+                let self_id = ctx.self_id();
+                ctx.access_labelled_by(self_id, title_id);
+                self.named_by_content = true;
+            }
         }
 
         // The panel chrome (rounded surface + border + content
@@ -218,12 +236,17 @@ impl Widget for ModalContainer {
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         builder.set_role(teksilo_core::accesskit::Role::Dialog);
-        let name = self
-            .title
-            .as_ref()
-            .map(|t| t.resolve_now())
-            .unwrap_or_else(|| teksilo_i18n::tr_widget!(a11y_dialog_name()).resolve_now());
-        builder.set_name(name);
+        // A container named through a relation must not also set a name:
+        // the consumer prefers the node's own label, so setting both would
+        // silently drop the relation and announce a stale copy.
+        if !self.named_by_content {
+            let name = self
+                .title
+                .as_ref()
+                .map(|t| t.resolve_now())
+                .unwrap_or_else(|| teksilo_i18n::tr_widget!(a11y_dialog_name()).resolve_now());
+            builder.set_name(name);
+        }
         // ModalContainer is always modal — it's the one path that goes
         // through `ModalRequest` / `ModalPresentation`. A dialog that
         // doesn't block outside interaction would use `Popover` instead.
@@ -410,6 +433,9 @@ pub struct DialogContent {
     pending_body: Option<PendingChild>,
     pending_footer: Option<PendingChild>,
     root_child_id: Option<WidgetId>,
+    /// The label that paints the title, handed to the enclosing container
+    /// so it can name itself by pointing at it.
+    title_node: Option<WidgetId>,
 }
 
 impl DialogContent {
@@ -421,6 +447,7 @@ impl DialogContent {
             pending_body: None,
             pending_footer: None,
             root_child_id: None,
+            title_node: None,
         }
     }
 
@@ -485,12 +512,18 @@ impl Widget for DialogContent {
         if self.title.is_some() || self.supporting_text.is_some() {
             let mut header = VStack::new().spacing(8.0);
             if let Some(title) = self.title.clone() {
-                header = header.child(
+                // Kept by id, not by value: the enclosing container names
+                // itself by pointing at this node rather than copying its
+                // string, so the title stays a label a reader can review by
+                // character in its own right.
+                let title_id = ctx.add(
                     TextWidget::new(title)
                         .style(TextStyleRole::BodyBold)
                         .color(TextRole::Primary)
                         .single_line(),
                 );
+                self.title_node = Some(title_id);
+                header = header.add_child(title_id);
             }
             if let Some(text) = self.supporting_text.clone() {
                 header = header.child(
@@ -557,6 +590,10 @@ impl Widget for DialogContent {
     /// (or any other shell) so it can use it as its own accessible
     /// name without the caller having to thread the same string
     /// through twice.
+    fn accessible_title_node(&self) -> Option<WidgetId> {
+        self.title_node
+    }
+
     fn accessible_title_hint(&self) -> Option<String> {
         self.title.as_ref().map(|t| t.resolve_now())
     }
@@ -968,12 +1005,31 @@ mod tests {
         assert!(tree.bounds(content_id).width > 0.0);
     }
 
+    /// The name an adapter would announce for `id`, resolved the way the
+    /// consumer resolves it — through `labelled_by` when the node carries
+    /// no name of its own.
+    fn announced_name(tree: &mut WidgetTree, id: WidgetId) -> Option<String> {
+        let update = tree.sync_accessibility();
+        let target = teksilo_core::accessibility::widget_id_to_node_id(id);
+        let consumer = accesskit_consumer::Tree::new(update, false);
+        let state = consumer.state();
+        let mut stack = vec![state.root()];
+        while let Some(node) = stack.pop() {
+            if node.locate().0 == target {
+                return node.label();
+            }
+            for child in node.children() {
+                stack.push(child);
+            }
+        }
+        None
+    }
+
     #[test]
-    fn modal_container_inherits_title_from_dialog_content() {
-        // When a ModalContainer wraps a DialogContent and the
-        // caller didn't set an explicit title on the container,
-        // the title should propagate automatically via
-        // `Widget::accessible_title_hint`.
+    fn modal_container_is_named_by_the_title_its_content_paints() {
+        // The container points at the title label rather than copying its
+        // string, so the title is announced once and stays a label a reader
+        // can find and review by character.
         let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
         let container = tree.add(ModalContainer::new(
             DialogContent::new()
@@ -981,15 +1037,23 @@ mod tests {
                 .body(FixedLeaf(100.0, 40.0)),
         ));
         tree.layout(SizeProposal::exact(600.0, 400.0));
-        let info = tree.accessibility_node(container);
-        assert_eq!(info.role(), teksilo_core::accesskit::Role::Dialog);
-        assert_eq!(info.name(), Some("Delete file?"));
+        assert_eq!(
+            tree.accessibility_node(container).role(),
+            teksilo_core::accesskit::Role::Dialog
+        );
+        assert_eq!(
+            announced_name(&mut tree, container).as_deref(),
+            Some("Delete file?")
+        );
     }
 
     #[test]
-    fn modal_container_explicit_title_wins_over_hint() {
-        // An explicit `.title(...)` on ModalContainer takes
-        // precedence over whatever the content suggests.
+    fn an_explicit_title_yields_to_the_one_on_screen() {
+        // `.title(..)` on the container used to win. It no longer does: a
+        // name a reader hears but cannot find anywhere on screen is worse
+        // than one they can, and the two are only ever meant to be the same
+        // string. The explicit title still stands when the content paints
+        // no title of its own.
         let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
         let container = tree.add(
             ModalContainer::new(
@@ -1000,8 +1064,21 @@ mod tests {
             .title(lit!("Outer title")),
         );
         tree.layout(SizeProposal::exact(600.0, 400.0));
-        let info = tree.accessibility_node(container);
-        assert_eq!(info.name(), Some("Outer title"));
+        assert_eq!(
+            announced_name(&mut tree, container).as_deref(),
+            Some("Inner title")
+        );
+
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let untitled = tree.add(
+            ModalContainer::new(DialogContent::new().body(FixedLeaf(100.0, 40.0)))
+                .title(lit!("Outer title")),
+        );
+        tree.layout(SizeProposal::exact(600.0, 400.0));
+        assert_eq!(
+            announced_name(&mut tree, untitled).as_deref(),
+            Some("Outer title")
+        );
     }
 
     /// A panel that directs initial focus to its *second* child.

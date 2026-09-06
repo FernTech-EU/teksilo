@@ -3,51 +3,53 @@
 
 //! The accessibility walk shared by the editor and log bodies.
 //!
-//! Both surfaces present their text to assistive technology the same way — a
-//! `Role::Paragraph` per line, a `Role::TextRun` per formatting run under it,
-//! each run carrying the per-character byte lengths, word starts, and geometry a
-//! screen reader needs to speak and navigate character-by-character. The two
-//! differ only in *which* lines they walk: the editor walks the whole (bounded)
-//! document; the log walks only the visible window, because re-emitting a
-//! paragraph per line of a 100 000-line buffer on every appended line would be
-//! O(N) per line.
+//! Both surfaces present their text the same way: one `Role::TextRun` per
+//! visual line of a block, hung directly off the body's own node, carrying the
+//! per-character lengths, word starts and geometry a screen reader needs to
+//! speak and navigate by character, word and line. Everything about how a run
+//! is shaped — the 255-character cap, the hard break at the end of a line,
+//! UAX #29 word starts, the `next_on_line` chain, the degenerate box for text
+//! the layout never measured — belongs to
+//! [`teksilo_core::accessibility::text_runs`], which this walk feeds one
+//! [`TextRunSource`] per block.
 //!
-//! Four things this does that a naive per-fragment emit does not:
+//! The two surfaces differ only in *which* blocks they walk: the editor walks
+//! the whole (bounded) document; the log walks only the visible window, because
+//! re-emitting a node per line of a 100 000-line buffer on every appended line
+//! would be O(N) per line.
 //!
-//! - **Links runs on a line.** Syntax highlighting splits one source line into
-//!   several runs; without `next_on_line`/`previous_on_line` a screen reader
-//!   navigating by line would stop at each colour boundary. The runs of a line
-//!   are linked into one chain.
-//! - **Ends each line with a newline.** AccessKit's contract puts the hard line
-//!   break at the end of a line's last run (in the value and the length slices);
-//!   the caret can never address it, but line navigation needs it.
-//! - **Chunks runs over 255 characters.** `word_starts` are character indices
-//!   stored as `u8`, so a run longer than 255 characters silently loses every
-//!   word boundary past 255 — real for long log lines. Such a run is split into
-//!   linked ≤255-character runs, each with its own valid word starts.
-//! - **Numbers the lines.** Each paragraph carries `position_in_set`, and the
-//!   body's own node carries the matching `size_of_set`. That is the split
-//!   `set_child_position_in_set` writes, because AccessKit resolves a set size
-//!   by walking up from the item; together they read "line 42 of 200".
+//! Runs are direct children of the body, with no `Role::Paragraph` between.
+//! `accesskit_consumer`'s `common_filter` excludes `Role::TextRun` but not
+//! `Role::Paragraph`, so one would be a visible object-navigation stop; worse,
+//! a run's text-change event routes to its *filtered* parent, and a paragraph's
+//! `supports_text_ranges()` is false, so macOS, Windows and AT-SPI would each
+//! drop the event. A heading block is the one exception: it earns a
+//! `Role::Heading` node of its own with its runs beneath it, because the
+//! heading level is information no run carries.
+//!
+//! **Removed with the paragraphs: the "line 42 of 200" ordinal.** Carrying it
+//! as `position_in_set` required a node per line, which is exactly what breaks
+//! text-change events. Line position is reachable through line navigation on
+//! every platform, and visible in `CodeGutter`.
+//!
+//! Per-run formatting (bold / italic / underline) is not announced either: a
+//! source declares one set of attributes for all its runs and this walk builds
+//! one source per block. Neither surface's own highlighter sets those flags —
+//! the code editor colours tokens, it does not embolden them.
 
 use std::collections::HashMap;
 
-use teksilo_core::accessibility::{AccessNodeBuilder, TextRunAttributes};
+use teksilo_canvas::{LineEnd, Point, Rect, TextGeometry};
+use teksilo_core::accessibility::AccessNodeBuilder;
+use teksilo_core::accessibility::text_runs::{TextRunSource, push_text_runs};
 use teksilo_core::accesskit::{Action, ActionData, NodeId, Role, TextPosition};
 use teksilo_core::event::EventResponse;
 use teksilo_core::widget::EventContext;
 use teksilo_text::RichTextEngine;
-use teksilo_text::text_document::{
-    BlockSnapshot, FlowElementSnapshot, FragmentContent, MoveMode, TextFormat,
-};
+use teksilo_text::text_document::{BlockSnapshot, FlowElementSnapshot, MoveMode};
 
 use super::state::{CodeEditorState, SharedState, SyntheticElementRef};
 use crate::common::editor_runtime::AccessibilityRole;
-
-/// The most characters one `Role::TextRun` may hold. `word_starts` are character
-/// indices stored as `u8`, so a word starting past 255 is inexpressible; split
-/// longer runs at this boundary.
-const MAX_RUN_CHARS: usize = 255;
 
 /// Set the role and read-only flag — the header both bodies share.
 pub(crate) fn set_role(st: &CodeEditorState, builder: &mut AccessNodeBuilder) {
@@ -95,7 +97,7 @@ impl WalkAcc {
     }
 }
 
-/// The editor's walk: a paragraph + runs per block of the whole document. The
+/// The editor's walk: the runs of every block of the whole document. The
 /// snapshot is cached (rebuilt only when an edit cleared it) since the document
 /// is bounded.
 pub(crate) fn build_editor_a11y(st: &CodeEditorState, builder: &mut AccessNodeBuilder) {
@@ -109,35 +111,29 @@ pub(crate) fn build_editor_a11y(st: &CodeEditorState, builder: &mut AccessNodeBu
         cache.as_ref().cloned()
     };
 
+    let scroll_y = st.scroll_y.get();
     let mut acc = WalkAcc::new(st);
     if let Some(snap) = snap {
-        let total = snap
-            .elements
-            .iter()
-            .filter(|e| matches!(e, FlowElementSnapshot::Block(_)))
-            .count();
-        let mut line = 0usize;
         for elem in &snap.elements {
             if let FlowElementSnapshot::Block(block) = elem {
-                emit_block(builder, &st.engine, block, line, total, &mut acc);
-                line += 1;
+                emit_block(builder, &st.engine, block, scroll_y, &mut acc);
             }
         }
     }
     finish(st, builder, acc);
 }
 
-/// The log's walk: a paragraph + runs per line of the *visible window* only,
-/// numbered by global line so a screen reader still hears "line 41 002 of
-/// 128 449". Fresh each walk (not cached) — the window moves, and caching the
-/// whole document would defeat the point.
+/// The log's walk: the runs of the *visible window* only. Fresh each walk (not
+/// cached) — the window moves, and caching the whole document would defeat the
+/// point.
 pub(crate) fn build_log_a11y(st: &CodeEditorState, builder: &mut AccessNodeBuilder) {
     set_role(st, builder);
 
-    let (first, total, snaps) = super::log_stream::a11y_window(st);
+    let (_first, _total, snaps) = super::log_stream::a11y_window(st);
+    let scroll_y = st.scroll_y.get();
     let mut acc = WalkAcc::new(st);
-    for (i, block) in snaps.iter().enumerate() {
-        emit_block(builder, &st.engine, block, first + i, total, &mut acc);
+    for block in &snaps {
+        emit_block(builder, &st.engine, block, scroll_y, &mut acc);
     }
     finish(st, builder, acc);
 }
@@ -163,237 +159,102 @@ fn finish(st: &CodeEditorState, builder: &mut AccessNodeBuilder, acc: WalkAcc) {
     }
 }
 
-/// Emit one block as a `Role::Paragraph` with its `Role::TextRun` children.
+/// Emit one block's runs, and resolve the caret / anchor if they fall in it.
 fn emit_block(
     builder: &mut AccessNodeBuilder,
     engine: &RichTextEngine,
     block: &BlockSnapshot,
-    line_index: usize,
-    total_lines: usize,
+    scroll_y: f32,
     acc: &mut WalkAcc,
 ) {
-    let para_id = builder.push_paragraph_child(block.block_id as u64);
-    if let Some(level) = block.block_format.heading_level {
-        builder.set_paragraph_as_heading(para_id, level);
-    }
-    builder.set_child_position_in_set(para_id, line_index + 1, total_lines.max(1));
+    // The separator between two blocks is a character of the document, and
+    // AccessKit's line-navigation contract puts it at the end of the line's
+    // last run; a block snapshot's own text stops short of it. Appending it
+    // here also makes the source's character space identical to the document's
+    // — `position + length` addresses the same character in both — so a caret
+    // maps across with a subtraction and no correction.
+    let mut text = block.text.clone();
+    text.push('\n');
 
-    // Split the block's text fragments into ≤255-char run chunks. Each carries
-    // its block-relative char start (for geometry + the disambiguating NodeId).
-    struct Chunk<'a> {
-        text: &'a str,
-        char_start: usize,
-        char_count: usize,
-        element_id: u64,
-        format: &'a TextFormat,
-        // The fragment's own (UAX-29) word starts, reused verbatim when the whole
-        // fragment fits one run; `None` forces a recompute for a chunk.
-        own_word_starts: Option<&'a Vec<u8>>,
-        // Whether the character before this chunk was whitespace — so a chunk
-        // split mid-word does not report a spurious word start at index 0.
-        prev_ws: bool,
-    }
-    let mut chunks: Vec<Chunk> = Vec::new();
-    for frag in &block.fragments {
-        if let FragmentContent::Text {
-            text,
-            offset,
-            length,
-            element_id,
-            word_starts,
-            format,
-        } = frag
-        {
-            if *length == 0 {
-                continue;
-            }
-            let char_byte: Vec<usize> = text.char_indices().map(|(b, _)| b).collect();
-            let nchars = char_byte.len();
-            let whole_fits = nchars <= MAX_RUN_CHARS;
-            let mut cs = 0usize;
-            let mut prev_ws = true; // the run start counts as a word boundary
-            while cs < nchars {
-                let ce = (cs + MAX_RUN_CHARS).min(nchars);
-                let bs = char_byte[cs];
-                let be = char_byte.get(ce).copied().unwrap_or(text.len());
-                let chunk_text = &text[bs..be];
-                chunks.push(Chunk {
-                    text: chunk_text,
-                    char_start: *offset + cs,
-                    char_count: ce - cs,
-                    element_id: *element_id,
-                    format,
-                    own_word_starts: whole_fits.then_some(word_starts),
-                    prev_ws,
-                });
-                prev_ws = chunk_text.chars().last().is_some_and(|c| c.is_whitespace());
-                cs = ce;
-            }
-        }
+    let mut lines = engine.block_line_geometry(block.block_id, &block.text);
+    if let Some(last) = lines.last_mut() {
+        last.byte_range.end = text.len();
+        last.char_range.end += 1;
+        last.end = LineEnd::HardBreak { chars: 1, bytes: 1 };
     }
 
-    let mut run_ids: Vec<NodeId> = Vec::with_capacity(chunks.len().max(1));
-    let default_format = TextFormat::default();
-    if chunks.is_empty() {
-        // An empty line still needs a run carrying the line break, so line
-        // navigation has a node and a boundary.
-        run_ids.push(emit_run(
-            builder,
-            engine,
-            para_id,
-            block,
-            0,
-            "",
-            0,
-            block.block_id as u64,
-            &default_format,
-            None,
-            true,
-            true,
-            acc,
-        ));
+    // The layout reports line boxes from the block's own top edge, so the
+    // block's place in the scrolled document is what turns them into the body's
+    // coordinate space; `AccessNodeBuilder::build` takes them the rest of the
+    // way once the walker has written the body's window-space box.
+    let top = engine
+        .block_visual_info(block.block_id)
+        .map(|info| info.y - scroll_y)
+        .unwrap_or(0.0);
+
+    let source = if lines.is_empty() {
+        // Nothing was shaped for this block — it sits outside the log's laid-out
+        // window, or no layout has run yet. The text is still announced and
+        // still reviewable, with a caret-shaped box rather than none at all:
+        // one geometry-less run empties `bounding_boxes()` for every range that
+        // touches it.
+        let mut flat = TextRunSource::flat(&text, block.block_id as u64);
+        flat.lines[0].end = LineEnd::HardBreak { chars: 1, bytes: 1 };
+        flat.with_fallback_rect(Rect::new(0.0, top, 0.0, engine.default_line_height()))
     } else {
-        let n = chunks.len();
-        for (i, ch) in chunks.iter().enumerate() {
-            run_ids.push(emit_run(
-                builder,
-                engine,
-                para_id,
-                block,
-                ch.char_start,
-                ch.text,
-                ch.char_count,
-                ch.element_id,
-                ch.format,
-                ch.own_word_starts,
-                ch.prev_ws,
-                i + 1 == n,
-                acc,
-            ));
-        }
-    }
-    // Link the runs into one line so AT line navigation is continuous. A block is
-    // one line here — for a wrapped block (a `PlainTextEditor`), the runs still
-    // read as one AT line, and their per-character geometry is per-visual-line, a
-    // limitation shared with the rich text editor.
-    builder.link_runs_on_line(&run_ids);
-}
-
-/// Emit one `Role::TextRun`, appending the line-break to the line's last run,
-/// and resolve the caret / anchor if they fall inside it.
-#[allow(clippy::too_many_arguments)]
-fn emit_run(
-    builder: &mut AccessNodeBuilder,
-    engine: &RichTextEngine,
-    para_id: NodeId,
-    block: &BlockSnapshot,
-    char_start: usize,
-    text: &str,
-    char_count: usize,
-    element_id: u64,
-    format: &TextFormat,
-    own_word_starts: Option<&Vec<u8>>,
-    prev_ws: bool,
-    is_last: bool,
-    acc: &mut WalkAcc,
-) -> NodeId {
-    let mut value = text.to_string();
-    let mut char_lengths: Vec<u8> = text.chars().map(|c| c.len_utf8() as u8).collect();
-    let word_starts: Vec<u8> = match own_word_starts {
-        Some(ws) => ws.clone(),
-        None => word_starts_for(text, prev_ws),
+        let geometry = TextGeometry {
+            lines,
+            dropped_lines: 0,
+            source_len: text.len(),
+            rendered_text: None,
+            links: Vec::new(),
+        };
+        TextRunSource::from_geometry(
+            &text,
+            &geometry,
+            Point::new(0.0, top),
+            block.block_id as u64,
+        )
     };
 
-    let geom = engine.character_geometry(block.block_id, char_start, char_start + char_count);
-    let mut char_positions: Vec<f32> = geom.iter().map(|g| g.position).collect();
-    let mut char_widths: Vec<f32> = geom.iter().map(|g| g.width).collect();
-
-    if is_last {
-        // AccessKit line-break contract: the last run of a line ends with the
-        // newline, counted as one character. The caret can never address it.
-        value.push('\n');
-        char_lengths.push(1);
-        if !char_positions.is_empty() {
-            let end = char_positions.last().copied().unwrap_or(0.0)
-                + char_widths.last().copied().unwrap_or(0.0);
-            char_positions.push(end);
-            char_widths.push(0.0);
+    // A heading is the one block that keeps a node of its own: its level is
+    // information no run carries. Every other block hangs its runs straight off
+    // the body, where a text-change event can reach a parent that supports text
+    // ranges.
+    let parent = match block.block_format.heading_level {
+        Some(level) if !builder.emits_no_children() => {
+            let id = builder.push_paragraph_child(block.block_id as u64);
+            builder.set_paragraph_as_heading(id, level);
+            Some(id)
         }
-    }
-
-    let attrs = TextRunAttributes {
-        font_weight: format.font_weight.map(|w| w as u16),
-        bold: format.font_bold.unwrap_or(false),
-        italic: format.font_italic.unwrap_or(false),
-        underline: format.font_underline.unwrap_or(false),
-        strikethrough: format.font_strikeout.unwrap_or(false),
+        _ => None,
     };
 
-    // AccessKit's contract requires the geometry slices, when present, to have
-    // exactly one entry per character (the same length as `character_lengths`).
-    // Pass them only when they line up — an unlaid-out block yields none, and a
-    // partial measurement must not be handed over as if it were complete.
-    let n = char_lengths.len();
-    let positions = (char_positions.len() == n).then_some(char_positions);
-    let widths = (char_widths.len() == n).then_some(char_widths);
-    let node_id = builder.push_text_run_child(
-        para_id,
-        element_id,
-        char_start,
-        value,
-        char_lengths,
-        Some(word_starts),
-        positions,
-        widths,
-        attrs,
-    );
+    let emission = push_text_runs(builder, parent, &source);
 
-    // Remember where this run lives so an AT-driven SetTextSelection resolves to
-    // a document position. `text` here excludes the synthetic newline.
-    let absolute_start = block.position + char_start;
-    acc.syn_map.insert(
-        node_id,
-        SyntheticElementRef {
-            element_id,
-            absolute_start,
-            text: text.to_string(),
-        },
-    );
+    for run in &emission.runs {
+        // Remember where this run lives so an AT-driven SetTextSelection
+        // resolves to a document position. `text` here excludes the block
+        // separator, so a caret clamped against it can never land on it.
+        acc.syn_map.insert(
+            run.id,
+            SyntheticElementRef {
+                element_id: block.block_id as u64,
+                absolute_start: block.position + run.char_range.start,
+                text: text.get(run.byte_range.clone()).unwrap_or("").to_string(),
+            },
+        );
+    }
 
-    // Positions are character offsets, so the AT character index within this run
-    // is simply the document offset minus the run's start. A caret at the very
-    // end lands on the newline slot (index == char_count), which is the AT-correct
-    // end-of-line focus.
-    let run_end = absolute_start + char_count;
-    if acc.user_pos >= absolute_start && acc.user_pos <= run_end {
-        acc.caret_pair = Some((node_id, acc.user_pos - absolute_start));
+    // `position + length` is the end-of-line caret, which the emitter places on
+    // the separator's slot — the AT-correct end-of-line focus.
+    let end = block.position + block.length;
+    if acc.user_pos >= block.position && acc.user_pos <= end {
+        acc.caret_pair = emission.position_of(acc.user_pos - block.position);
     }
-    if acc.user_anchor >= absolute_start && acc.user_anchor <= run_end {
-        acc.anchor_pair = Some((node_id, acc.user_anchor - absolute_start));
+    if acc.user_anchor >= block.position && acc.user_anchor <= end {
+        acc.anchor_pair = emission.position_of(acc.user_anchor - block.position);
     }
-    node_id
-}
-
-/// Word starts (character indices) for a run, for the chunked path where the
-/// fragment's own UAX-29 list would be truncated at 255. A word starts at each
-/// non-whitespace character following whitespace. `prev_ws` is whether the
-/// character *before* this chunk was whitespace, so a chunk that splits a word
-/// mid-way does not report a spurious word start at its index 0. Every index is
-/// < the chunk length (≤ 255), so it always fits `u8`.
-fn word_starts_for(text: &str, prev_ws: bool) -> Vec<u8> {
-    let mut out = Vec::new();
-    let mut prev_ws = prev_ws;
-    for (ci, ch) in text.chars().enumerate() {
-        let ws = ch.is_whitespace();
-        if !ws && prev_ws {
-            match u8::try_from(ci) {
-                Ok(idx) => out.push(idx),
-                Err(_) => break,
-            }
-        }
-        prev_ws = ws;
-    }
-    out
 }
 
 /// Resolve an AT-initiated action against the editor. Wired on both wrappers via

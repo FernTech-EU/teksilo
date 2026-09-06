@@ -112,7 +112,8 @@ pub struct AssertParams {
     pub window_id: Option<u64>,
     pub node: u64,
     /// One of: exists, focused, role_equals, label_equals, label_contains,
-    /// value_equals, toggled, expanded, selected, disabled.
+    /// value_equals, toggled, expanded, selected, disabled,
+    /// supports_text_ranges, document_text_equals.
     pub kind: String,
     /// The expected string, for the *_equals / *_contains kinds.
     pub value: Option<String>,
@@ -807,7 +808,10 @@ stays literal Control, for the chords that genuinely are Control everywhere \
 (Ctrl+Tab).
 3. Verify. Re-`snapshot_tree`, `read_node {node}`, or `assert_node {node, kind, \
 value?/flag?}` where kind is role_equals, label_equals, label_contains, \
-value_equals, toggled, expanded, selected, disabled, exists, or focused. \
+value_equals, toggled, expanded, selected, disabled, exists, focused, \
+supports_text_ranges, or document_text_equals. The last two ask whether a \
+screen reader could review the node by character, word and line, and what it \
+would read — a node can have a name and still be unreviewable. \
 A failed assert_node comes back as a tool error (isError=true) with code ASSERTION_FAILED, and a node reference that names nothing comes back as NOT_FOUND — those are different bugs and the code tells you which.
 
 Error results carry a stable `code` (in the text body and in structured_content) \
@@ -907,6 +911,8 @@ fn build_assertion(p: &AssertParams) -> Result<Assertion, McpError> {
         "expanded" => Assertion::Expanded { value: flag()? },
         "selected" => Assertion::Selected { value: flag()? },
         "disabled" => Assertion::Disabled { value: flag()? },
+        "supports_text_ranges" => Assertion::SupportsTextRanges,
+        "document_text_equals" => Assertion::DocumentTextEquals { value: value()? },
         other => {
             return Err(McpError::invalid_params(
                 format!("unknown assertion kind '{other}'"),

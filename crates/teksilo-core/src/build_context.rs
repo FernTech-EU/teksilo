@@ -1142,6 +1142,19 @@ impl<'a> BuildContext<'a> {
         self.tree.push_access_labelled_by(id, label_id);
     }
 
+    /// The widget that paints `id`'s title, when it has one.
+    ///
+    /// A container names itself from its visible title by pointing at that
+    /// node — see [`Widget::accessible_title_node`](crate::widget::Widget::accessible_title_node).
+    /// `build()` runs eagerly on insertion, so the answer is already there
+    /// the moment the content is mounted.
+    pub fn accessible_title_node(
+        &self,
+        id: crate::widget_id::WidgetId,
+    ) -> Option<crate::widget_id::WidgetId> {
+        self.tree.widget_accessible_title_node(id)
+    }
+
     /// Wire an accessibility `described_by` relation from an already-mounted
     /// child (`id`) to a description/error node (`target_id`) — the
     /// post-mount, override-preserving counterpart of the

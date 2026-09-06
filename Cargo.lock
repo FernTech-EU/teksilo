@@ -11005,6 +11005,7 @@ dependencies = [
  "teksilo-canvas",
  "teksilo-tokens",
  "thiserror 2.0.20",
+ "unicode-segmentation",
 ]
 
 [[package]]
@@ -11192,6 +11193,7 @@ name = "teksilo-scene"
 version = "0.9.4"
 dependencies = [
  "accesskit 0.25.0",
+ "accesskit_consumer",
  "proptest",
  "teksilo-canvas",
  "teksilo-core",
@@ -11366,6 +11368,7 @@ dependencies = [
 name = "teksilo-widgets-previewer"
 version = "0.9.4"
 dependencies = [
+ "accesskit_consumer",
  "teksilo-canvas",
  "teksilo-core",
  "teksilo-preview",
@@ -11597,7 +11600,7 @@ dependencies = [
 
 [[package]]
 name = "text-typeset"
-version = "1.10.0"
+version = "1.11.0"
 dependencies = [
  "etagere 0.3.0",
  "fontdb",

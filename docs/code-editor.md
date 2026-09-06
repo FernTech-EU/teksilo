@@ -156,25 +156,32 @@ mechanics. Without a provider there is no completion.
 
 ## Accessibility
 
-Both the editor and the log present their text to assistive technology as a tree
-— a `Role::Paragraph` per line, a `Role::TextRun` per formatting run — built by
-the shared walk in
-[`a11y.rs`](../crates/teksilo-widgets/src/code_editor/a11y.rs). Each run carries
-the per-character byte lengths, word starts, and geometry a screen reader needs
-to speak and navigate character by character, plus:
+Both the editor and the log present their text to assistive technology as
+`Role::TextRun` children of their own node — one run per visual line, or
+several linked runs where a line is split by syntax highlighting or by the
+255-character cap — built by the shared walk in
+[`a11y.rs`](../crates/teksilo-widgets/src/code_editor/a11y.rs) on top of
+`teksilo_core::accessibility::text_runs`. Each run carries the per-character
+byte lengths, word starts, bounding box, reading direction and per-character
+extents a screen reader needs to speak, navigate and route braille to, plus:
 
 - **Same-line run linking** (`next_on_line` / `previous_on_line`) so a reader
   navigating by line does not stop at each syntax-highlight colour boundary.
 - **A trailing newline** on each line's last run (AccessKit's line-break
   contract; the caret can never address it).
-- **Chunking of runs over 255 characters** into linked ≤255-char runs —
+- **Chunking of runs over 255 characters** into linked ≤255-character runs —
   `word_starts` are character indices stored as `u8`, so a long line would
   otherwise lose word navigation past character 255.
-- **Per-line numbering** ("line 42 of 200"): each line carries its own
-  `position_in_set`, while the total (`size_of_set`) lands on the editor's own
-  node. AccessKit resolves a set size by walking *up* from the item, so a total
-  written on the line is read by no adapter on any platform. Neither number is
-  announced from the gutter, which is hidden from AT.
+
+The runs hang **directly** off the editor's node. They used to hang off a
+`Role::Paragraph` per line, and that node was doing two kinds of damage:
+`accesskit_consumer::common_filter` does not exclude Paragraph, so every line
+was an object-navigation stop of its own; and a run's update routes to its
+*filtered* parent, which was the Paragraph, which supports no text ranges — so
+macOS, Windows and AT-SPI all dropped every text-change event the editor
+produced. Removing it cost the "line 42 of 200" ordinal, which needed
+`position_in_set` on those nodes. Line position is available through line
+navigation on every platform, and in the gutter, which is hidden from AT.
 
 Editable surfaces report `Role::MultilineTextInput` and advertise `SetValue` /
 `ReplaceSelectedText` / `SetTextSelection`; read-only ones report `Role::Document`

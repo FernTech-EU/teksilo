@@ -66,6 +66,11 @@ notify = "8.2.0"
 # that hasn't needed to change, so its low maintenance churn is a
 # feature here, not a risk.
 fs2 = "0.4"
+# UAX #29 word segmentation, for the word boundaries an AccessKit text run
+# advertises. A reader stepping by word through "l'anticonstitutionnellement,
+# dit-il" must stop where the language stops, which is not something a
+# whitespace split can approximate.
+unicode-segmentation = "1"
 intl-memoizer = "0.5"
 icu_decimal = "2"
 icu_datetime = "2"
@@ -107,7 +112,7 @@ bytemuck = { version = "1", features = ["derive"] }
 # the user's local "today" from the OS.
 jiff = "0.2"
 text-document = { path = "../text-document/crates/public_api", version = "1.12" }
-text-typeset = { path = "../text-typeset", version = "1.10" }
+text-typeset = { path = "../text-typeset", version = "1.11" }
 
 # Terminal engine (consumed only by the opt-in `teksilo-terminal` crate,
 # feature-gated so a default workspace build never pulls them). `portable-pty`

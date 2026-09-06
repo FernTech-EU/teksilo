@@ -477,12 +477,13 @@ solve it to three different standards:
 - **`SegmentedControl`** — correct. Overflowed segments become real `Role::MenuItemRadio`
   rows behind a `HasPopup::Menu` chevron. This is the house pattern.
 - **`LogView`** — partial and defensible. The AT walk covers only the visible window
-  ([a11y.rs:128-141](../crates/teksilo-widgets/src/code_editor/a11y.rs)), numbered by
-  global line index so a reader still hears "line 41002 of 128449". The alternative is
-  a 128k-node tree per walk. Keyboard scrolling moves the window and re-walks, so it is
+  ([a11y.rs](../crates/teksilo-widgets/src/code_editor/a11y.rs)); the alternative is a
+  128k-node tree per walk. Keyboard scrolling moves the window and re-walks, so it is
   not a 1.3.1 failure — but AT-action-driven traversal stops at the window edge, because
   `ScrollUp`/`ScrollDown` are not advertised. **Recommendation:** advertise and service
-  them, as Terminal does.
+  them, as Terminal does. The global "line 41002 of 128449" ordinal is gone with the
+  Paragraph nodes that carried it (see §5.8b); line position now comes from line
+  navigation.
 - **`CommandPalette`** — solved. See §5.4.
 
 ### 5.6 High contrast overwrites the active preset's palette — EN 11.7(a) · framework
@@ -557,6 +558,62 @@ untouched.
 no node carries it as a `keyboard_shortcut`, unlike Terminal's Ctrl+Tab escape (§5.1).
 Docking's `split_into_tab`/`stack_into_tab` drop zones still have no menu equivalent to
 reach, keyboard route or not (§3.2).
+
+### 5.8b Static text carried no text ranges, and no text carried geometry — EN 11.5.2.5 / 11.5.2.9 · framework · **FIXED**
+
+**As found.** `TextWidget` — the building block behind every visible label —
+emitted one `Role::Label` node with a string and nothing else. So
+`accesskit_consumer::Node::supports_text_ranges()` was `false` for every label in the
+framework: a reader could reach a paragraph and hear it as one chunk, but could not
+review it by character, word or line, could not route a braille cell to a word in it,
+and could not select through AT. Firefox bug 1601537's failure mode, framework-wide.
+
+Separately, and worse where ranges *did* exist: no consumer anywhere set a run's
+`bounds`, `text_direction`, `character_positions` or `character_widths`. `AXBoundsForRange`,
+UIA's `GetBoundingRectangles` and AT-SPI's `GetCharacterExtents` all returned nothing, so
+a screen magnifier could not follow the review cursor in a code editor, a terminal or a
+text field. `Range::bounding_boxes()` is all-or-nothing per *range*, not per node: one
+run missing any of the four empties the geometry of every range that touches it.
+
+**Fixed.** Text ranges are on by default. `TextWidget` shapes once more at its final
+width in `place_children` and emits one run per visual line, with real per-character
+extents; the four existing text surfaces were migrated onto the same shared emitter
+(`teksilo_core::accessibility::text_runs`) and gained geometry with them. Geometry is
+now universal: real when measured, a zero-width box at the label's leading edge when
+not, so a range's boxes are never empty. A label embedded in a control that owns its own
+name is hidden instead, so nothing is announced twice; a container names itself by
+pointing at its visible title rather than copying it.
+
+Two defects fell out of the same change and are worth recording separately:
+
+- **The `Role::Paragraph` trap.** `accesskit_consumer::common_filter` excludes
+  `Role::TextRun` and `Role::GenericContainer` but **not** `Role::Paragraph`. The rich-text
+  and code editors put their runs under Paragraph nodes, which made each line a visible
+  object-navigation stop *and* dropped every text-change event on all three platforms: a
+  run's update routes to its filtered parent, and a Paragraph supports no text ranges.
+  Runs are now direct children of the text root. The cost is the code editor's
+  "line 42 of 200" ordinal, which needed those nodes; line position is available through
+  line navigation on every platform, and in `CodeGutter`.
+- **A composite input announces a summary its sub-fields do not spell out.**
+  `supports_text_ranges` walks *through* intermediates, so a `DateTimeEdit`
+  over three fields, a `DateRangeEdit` over two, or a `SpinBox` over one reports
+  the concatenation of its descendants' runs as its reviewable text while its
+  own `value` is a synthesized string: `"09:30:00"` announced against `"09:30"`
+  reviewed, `"2026-03-02/2026-03-14"` against `"2026-03-022026-03-14"`,
+  `"100 %"` against `"100"`. A reader therefore hears seconds, a separator or a
+  unit it cannot then review character by character. Not flagged by
+  `audit::text_range_divergences`, which only compares a node against runs it
+  owns directly — the two properties mean different things on a composite, and a
+  gate has to be free of false positives to be worth running. Closing it means
+  either emitting the summary's own runs on the composite or dropping the parts
+  the fields do not show; both change what these controls announce, so neither
+  belongs in the change that made them reviewable in the first place.
+- **`described_by` is inert in AccessKit 0.25.** `Node::description()` reads only the
+  node's own property, and no adapter exports the relation — macOS maps `AXHelp` from
+  `description()`, Windows `UIA_FullDescriptionPropertyId` from `description`, and the
+  AT-SPI relation set carries `controls` alone. The walker's shown-tooltip
+  `push_described_by` therefore announces nothing today. Revisit when upstream resolves
+  it; the copied-string fallback is what actually reaches a reader.
 
 ### 5.9 Text-run colour and per-run language never reach AT — EN 11.5.2.9, WCAG 3.1.2 · framework
 

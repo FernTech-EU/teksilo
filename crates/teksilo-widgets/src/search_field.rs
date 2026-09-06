@@ -871,7 +871,10 @@ impl Widget for SuggestionPanel {
             let label_id = ctx.add(
                 TextWidget::new(lit!(&value))
                     .style(TextStyleRole::Body)
-                    .single_line(),
+                    .single_line()
+                    // `SuggestionRow::accessibility` already carries `value`
+                    // as the `Role::ListBoxOption` node's own name.
+                    .a11y_hidden(),
             );
             let inner_padded = ctx.add(
                 Padding::symmetric(sf::ROW_PADDING_VERTICAL, sf::ROW_PADDING_HORIZONTAL)
@@ -1187,6 +1190,52 @@ mod tests {
         assert!(
             calls.get() > baseline,
             "provider should fire on text change"
+        );
+    }
+
+    #[test]
+    fn suggestion_row_label_does_not_duplicate_the_listbox_options_name() {
+        // `SuggestionRow::accessibility` already carries `value` as the
+        // `Role::ListBoxOption` node's own name, so the embedded Label
+        // built for the row's text must not survive as a second,
+        // duplicate-named stop.
+        let q = Signal::new(String::new());
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let id = tree.add(SearchField::new(q.clone()).with_suggestions(|s| {
+            if s.is_empty() {
+                Vec::new()
+            } else {
+                vec!["alpha".into()]
+            }
+        }));
+        tree.layout(SizeProposal::exact(300.0, 200.0));
+
+        let field = tree
+            .first_focusable_descendant(id)
+            .expect("SearchField should have a focusable inner input");
+        tree.focus(field);
+        tree.type_text(id, "a");
+        tree.layout(SizeProposal::exact(300.0, 200.0));
+
+        let update = tree.sync_accessibility();
+
+        let row_node = update
+            .nodes
+            .iter()
+            .find(|(_, node)| node.role() == teksilo_core::accesskit::Role::ListBoxOption)
+            .map(|(_, node)| node)
+            .expect("suggestion row should be in the AT tree once the popover is open");
+        assert_eq!(
+            row_node.label(),
+            Some("alpha"),
+            "hiding the embedded label must not take the row's own name away with it",
+        );
+
+        assert!(
+            !update.nodes.iter().any(|(_, node)| node.role()
+                == teksilo_core::accesskit::Role::Label
+                && node.label() == Some("alpha")),
+            "the row's Text widget must not survive as a duplicate-named AT node",
         );
     }
 }

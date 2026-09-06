@@ -19,7 +19,10 @@
 //! ## Accessibility
 //!
 //! Announces as `Role::Label` with its resolved text as the AT name.
-//! The inner `TextWidget` is hidden from AT to avoid double-announcement.
+//! The inner `TextWidget` is hidden from AT to avoid double-announcement;
+//! the badge emits that label's text runs from its own node instead, so a
+//! reader can review the text by character, word and line rather than only
+//! hear it.
 //!
 //! ```rust
 //! # use teksilo_widgets::Badge;
@@ -33,6 +36,7 @@ use std::rc::Rc;
 
 use teksilo_canvas::{Rect, Size, SizeProposal};
 use teksilo_core::accessibility::AccessNodeBuilder;
+use teksilo_core::accessibility::text_runs::{TextGeometryHandle, TextRunSource, push_text_runs};
 use teksilo_core::build_context::BuildContext;
 use teksilo_core::color_prop::ColorProp;
 use teksilo_core::styles::{BadgeStyleConfig, SharedBadgeStyle};
@@ -54,6 +58,10 @@ pub struct Badge {
     /// Per-call override for the pill chrome.
     style_override: Option<SharedBadgeStyle>,
     root_child_id: Option<WidgetId>,
+    /// What the hidden label last measured. The badge owns its accessible
+    /// name, so it also owns the text runs behind it; the label lends its
+    /// layout through this handle. Empty until the label has been placed.
+    label_geometry: Option<TextGeometryHandle>,
     /// Optional plain tooltip text shown after a hover delay. Mutually exclusive
     /// with the rich / composite slots — every setter clears the other two so
     /// the last call wins.
@@ -74,6 +82,7 @@ impl Badge {
             text_style: None,
             style_override: None,
             root_child_id: None,
+            label_geometry: None,
             tooltip_text: None,
             rich_tooltip_source: None,
             composite_tooltip_content: None,
@@ -187,6 +196,7 @@ impl Widget for Badge {
             Some(style) => text_widget.style(style.clone()),
             None => text_widget.style(TextStyleRole::Tiny),
         };
+        self.label_geometry = Some(text_widget.geometry_handle());
         let content = ctx.add(text_widget);
 
         // The pill chrome (rounded background + padding inset) is owned
@@ -248,7 +258,38 @@ impl Widget for Badge {
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         builder.set_role(teksilo_core::accesskit::Role::Label);
-        builder.set_name(self.label.resolve_now());
+
+        // The badge owns the accessible name, so its label is hidden from
+        // AT — which would leave the text announceable but not reviewable,
+        // since `supports_text_ranges` needs `Role::TextRun` children.
+        // Borrowing the hidden label's layout puts them on this node
+        // instead, one level up from where they were measured.
+        //
+        // Those rects are in window space, which is sound only while the
+        // label sits rigidly inside the badge: `place_children` gives the
+        // whole subtree the badge's own bounds on every pass, so a move
+        // re-places the label too. A composite that positioned its donor
+        // independently would have to register local rects instead.
+        let unplaced;
+        let source = match self
+            .label_geometry
+            .as_ref()
+            .and_then(|handle| TextRunSource::from_handle(handle, 0))
+        {
+            Some(source) => source,
+            // Never placed — a name probe, or a tree asked for its
+            // accessibility before its first layout.
+            None => {
+                unplaced = self.label.resolve_now();
+                TextRunSource::flat(&unplaced, 0)
+            }
+        };
+        let emission = push_text_runs(builder, None, &source);
+        // The name must be byte-identical to the runs' concatenation: the
+        // consumer derives the document text from the runs, and every
+        // divergence is a place where what a reader reviews and what it
+        // announces disagree.
+        builder.set_name(&emission.value);
     }
 
     fn children(&self) -> Vec<WidgetId> {
@@ -272,14 +313,136 @@ mod tests {
         assert!(b.height > 0.0);
     }
 
+    /// The `Role::TextRun` children one node published, in tree order,
+    /// as `(value, window-space bounds)`.
+    fn runs_of(
+        update: &teksilo_core::accesskit::TreeUpdate,
+        owner: WidgetId,
+    ) -> Vec<(String, teksilo_core::accesskit::Rect)> {
+        let node_id = teksilo_core::accessibility::widget_id_to_node_id(owner);
+        let node = update
+            .nodes
+            .iter()
+            .find(|(id, _)| *id == node_id)
+            .map(|(_, node)| node)
+            .expect("the badge is absent from the emitted tree");
+        node.children()
+            .iter()
+            .filter_map(|child| update.nodes.iter().find(|(id, _)| id == child))
+            .filter(|(_, node)| node.role() == teksilo_core::accesskit::Role::TextRun)
+            .map(|(_, node)| {
+                (
+                    node.value().unwrap_or_default().to_string(),
+                    node.bounds().expect("a run without bounds"),
+                )
+            })
+            .collect()
+    }
+
+    /// A tree whose text is measured, so the runs carry real extents
+    /// rather than the degenerate boxes an unmeasured label falls back to.
+    fn measured_tree() -> WidgetTree {
+        WidgetTree::new()
+            .with_theme(teksilo_core::presets::intui::light())
+            .with_text_backend(std::rc::Rc::new(std::cell::RefCell::new(
+                teksilo_canvas::MockTextBackend::new(),
+            )))
+    }
+
     #[test]
     fn badge_accessibility() {
-        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let mut tree = measured_tree();
         let badge = tree.add(Badge::new(lit!("3")));
         tree.layout(SizeProposal::exact(200.0, 50.0));
         let info = tree.accessibility_node(badge);
         assert_eq!(info.role(), teksilo_core::accesskit::Role::Label);
         assert_eq!(info.name(), Some("3"));
+
+        // The label is hidden from AT, so without borrowed runs the badge
+        // would be announceable but not reviewable: `supports_text_ranges`
+        // is false for a `Role::Label` with no `Role::TextRun` children.
+        let update = tree.sync_accessibility();
+        let runs = runs_of(&update, badge);
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0].0, "3");
+        // Borrowed rects are absolute, so the run sits where the label was
+        // painted — inside the pill, not at the window origin.
+        assert!(
+            runs[0].1.x0 > 0.0,
+            "the run was not placed: {:?}",
+            runs[0].1
+        );
+    }
+
+    #[test]
+    fn a_badge_is_reviewable_by_character() {
+        // `supports_text_ranges` is a consumer method and the gate every
+        // platform's text API sits behind, and `bounding_boxes` is where a
+        // single geometry-less run silently empties a whole label. Neither
+        // can be asserted off the emitted node.
+        let mut tree = measured_tree();
+        let badge = tree.add(Badge::new(lit!("NEW")));
+        tree.layout(SizeProposal::exact(200.0, 50.0));
+        let update = tree.sync_accessibility();
+        let node_id = teksilo_core::accessibility::widget_id_to_node_id(badge);
+
+        let consumer = accesskit_consumer::Tree::new(update, false);
+        let state = consumer.state();
+        let mut stack = vec![state.root()];
+        let node = loop {
+            let node = stack
+                .pop()
+                .expect("the badge is absent from the emitted tree");
+            if node.locate().0 == node_id {
+                break node;
+            }
+            stack.extend(node.children());
+        };
+        assert!(node.supports_text_ranges());
+        assert_eq!(node.document_range().text(), "NEW");
+        assert!(
+            !node.document_range().bounding_boxes().is_empty(),
+            "the badge reports no geometry, so a magnifier cannot follow it"
+        );
+    }
+
+    #[test]
+    fn a_translated_badge_moves_its_runs_by_the_same_delta() {
+        // The borrowed rects are in window space, so they are only right
+        // while the label is re-placed with the badge. A leading spacer
+        // that grows moves both.
+        use crate::primitives::{FixedSize, HStack};
+        use teksilo_core::signal::Signal;
+
+        let offset = Signal::new(0.0f32);
+        let mut tree = measured_tree();
+        let spacer = tree.add(FixedSize::new().width(offset.clone()).height(1.0));
+        let badge = tree.add(Badge::new(lit!("NEW")));
+        let _row = tree.add(HStack::new().add_child(spacer).add_child(badge));
+        offset.bind_to(
+            spacer,
+            tree.binding_registry(),
+            teksilo_core::binding::BindingLevel::Relayout,
+        );
+
+        tree.layout(SizeProposal::exact(400.0, 50.0));
+        let before = runs_of(&tree.sync_accessibility(), badge);
+        let x_before = tree.bounds(badge).x;
+
+        offset.set(60.0);
+        tree.layout(SizeProposal::exact(400.0, 50.0));
+        let after = runs_of(&tree.sync_accessibility(), badge);
+        let delta = f64::from(tree.bounds(badge).x - x_before);
+
+        assert_eq!(before.len(), after.len());
+        assert!(delta > 0.0, "the badge did not move");
+        for ((text, before), (_, after)) in before.iter().zip(after.iter()) {
+            assert!(
+                (after.x0 - before.x0 - delta).abs() < 0.01,
+                "run {text:?} moved by {} rather than {delta}",
+                after.x0 - before.x0
+            );
+        }
     }
 
     #[test]

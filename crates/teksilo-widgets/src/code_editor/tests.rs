@@ -448,7 +448,7 @@ fn a11y_children(
     let body = body_for(st, None, None);
     let mut b = teksilo_core::accessibility::AccessNodeBuilder::for_widget(WidgetId::default());
     body.accessibility(&mut b);
-    let (_id, _node, children) = b.build(WidgetId::default());
+    let (_id, _node, children, _local) = b.build(WidgetId::default());
     children
 }
 
@@ -510,47 +510,24 @@ fn a_caret_move_alone_rewalks_the_accessibility_selection() {
     );
 }
 
-/// Each line becomes a `Role::Paragraph` with at least one `Role::TextRun`.
+/// Each line becomes at least one `Role::TextRun`, hung straight off the body.
 #[test]
-fn the_walk_emits_a_paragraph_and_runs_per_line() {
+fn the_walk_emits_runs_per_line() {
     use teksilo_core::accesskit::Role;
     let st = editor_state("alpha\nbeta\ngamma");
     let children = a11y_children(&st);
-    assert_eq!(
-        roles(&children, Role::Paragraph).len(),
-        3,
-        "one paragraph a line"
-    );
     assert!(
         roles(&children, Role::TextRun).len() >= 3,
         "at least one run a line"
     );
-}
-
-/// Every paragraph is numbered in the set ("line 2 of 3") — carried on the line,
-/// not spoken from a gutter.
-#[test]
-fn each_line_is_numbered_in_the_set() {
-    use teksilo_core::accesskit::Role;
-    let st = editor_state("one\ntwo\nthree");
-    let children = a11y_children(&st);
-    let paras = roles(&children, Role::Paragraph);
-    assert_eq!(paras.len(), 3);
-    for (i, p) in paras.iter().enumerate() {
-        // The widget passes the 1-based line number; AccessKit stores it
-        // zero-based, and the Windows and AT-SPI adapters add the 1 back.
-        assert_eq!(
-            p.position_in_set(),
-            Some(i),
-            "line {i} is AccessKit index {i}"
-        );
-    }
-    // The total belongs on the container, not on each line: the consumer
-    // resolves a set size by walking up from the item's parent, so a size on
-    // the paragraph itself is read by no adapter.
-    for p in &paras {
-        assert_eq!(p.size_of_set(), None, "the total must not sit on the line");
-    }
+    // A paragraph between the body and its runs is an object-navigation stop
+    // `accesskit_consumer`'s filter does not remove, and a run's text-change
+    // event routes to its filtered parent — a paragraph supports no text
+    // ranges, so macOS, Windows and AT-SPI would each drop that event.
+    assert!(
+        roles(&children, Role::Paragraph).is_empty(),
+        "runs must be direct children of the body"
+    );
 }
 
 /// Each line's last run ends with the newline AccessKit's line-navigation
@@ -597,6 +574,45 @@ fn a_long_line_is_split_into_linked_runs() {
             "a chunk (plus its optional newline) stays within the cap"
         );
     }
+}
+
+/// Every range of the editor's text reports a bounding box.
+///
+/// `Range::bounding_boxes` throws away every box it has already collected the
+/// moment one run lacks bounds, direction, positions or widths, so one
+/// half-populated run empties the geometry of the whole document and a
+/// magnifier stops following the review cursor. Only `accesskit_consumer` can
+/// answer this — it is what every platform adapter reads through.
+#[test]
+fn bounding_boxes_are_non_empty_for_the_editor() {
+    let st = editor_state("alpha\nbeta");
+    let mut tree = WidgetTree::new();
+    let id = tree.add(body_for(&st, None, None));
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    let update = tree.sync_accessibility();
+
+    let consumer = accesskit_consumer::Tree::new(update, false);
+    let state = consumer.state();
+    let body_id = teksilo_core::accessibility::widget_id_to_node_id(id);
+    let mut stack = vec![state.root()];
+    let node = loop {
+        let node = stack
+            .pop()
+            .expect("the editor body is absent from the AT tree");
+        if node.locate().0 == body_id {
+            break node;
+        }
+        stack.extend(node.children());
+    };
+
+    assert!(
+        node.supports_text_ranges(),
+        "the body must be reviewable by character, word and line"
+    );
+    assert!(
+        !node.document_range().bounding_boxes().is_empty(),
+        "a single geometry-less run empties the geometry of the whole document"
+    );
 }
 
 /// The synthetic map an AT SetTextSelection resolves through points each run at
@@ -1084,8 +1100,8 @@ fn a_changed_line_count_forces_a_relayout() {
 }
 
 /// The gutter is presentational: a reader must not have to arrow past thirty
-/// numbers to reach the code. Line position is conveyed on the paragraph nodes
-/// instead, where it is spoken *with* the line.
+/// numbers to reach the code. Line position is reachable through the line
+/// navigation every platform provides over the body's text runs.
 #[test]
 fn the_gutter_is_hidden_from_assistive_technology() {
     let st = editor_state("a\nb\nc");
@@ -1094,8 +1110,8 @@ fn the_gutter_is_hidden_from_assistive_technology() {
     g.accessibility(&mut b);
     assert!(
         b.is_hidden(),
-        "the gutter must be hidden — its numbers belong on the paragraphs, not \
-         as thirty nodes in the reader's path"
+        "the gutter must be hidden — line navigation already reports the line, \
+         so these are thirty extra nodes in the reader's path"
     );
 }
 
@@ -2635,8 +2651,8 @@ mod log {
     }
 
     /// The log's accessibility tree is windowed like its render: a 1000-line log
-    /// emits only the visible lines as paragraphs, so an append re-walks the AT
-    /// tree in O(window), not O(document).
+    /// emits runs for the visible lines only, so an append re-walks the AT tree
+    /// in O(window), not O(document).
     #[test]
     fn the_a11y_tree_is_windowed() {
         use teksilo_core::accesskit::Role;
@@ -2648,29 +2664,23 @@ mod log {
 
         let mut b = teksilo_core::accessibility::AccessNodeBuilder::for_widget(WidgetId::default());
         crate::code_editor::a11y::build_log_a11y(&st.borrow(), &mut b);
-        let (_id, own, children) = b.build(WidgetId::default());
+        let (_id, own, children, _local) = b.build(WidgetId::default());
 
-        let paras: Vec<_> = children
+        // One line is one `next_on_line` chain, so its head is the run with no
+        // predecessor — the count a reader navigating by line would traverse.
+        let lines = children
             .iter()
-            .filter(|(_, n)| n.role() == Role::Paragraph)
-            .map(|(_, n)| n)
-            .collect();
-        assert!(!paras.is_empty(), "some visible lines are exposed");
+            .filter(|(_, n)| n.role() == Role::TextRun && n.previous_on_line().is_none())
+            .count();
+        assert!(lines > 0, "some visible lines are exposed");
         assert!(
-            paras.len() < 100,
-            "the tree is windowed, not all 1000 lines: got {}",
-            paras.len()
+            lines < 100,
+            "the tree is windowed, not all 1000 lines: got {lines}"
         );
-        // The total sits on the container — the log's own node — because the
-        // consumer resolves an item's set size by walking up from its parent.
-        // It is the logical line count, not the size of the realized window,
-        // so a line is "N of 1000" rather than "N of 40".
-        assert_eq!(own.size_of_set(), Some(1000));
-        assert_eq!(
-            paras[0].size_of_set(),
-            None,
-            "the total must not sit on the line, where no adapter reads it"
-        );
+        // Nothing carries a set size any more: the ordinal that needed one was
+        // a per-line node, and a per-line node is what breaks text-change
+        // events. Line position comes from line navigation instead.
+        assert_eq!(own.size_of_set(), None);
     }
 
     /// The a11y tree re-walk is driven by the visible window, not by raw scroll /

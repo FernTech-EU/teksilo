@@ -2927,13 +2927,12 @@ fn read_only_editor_paste_unformatted_rejected_by_command_filter() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn accessibility_emits_paragraph_and_text_run_children() {
-    // The rewritten `accessibility()` walks `document.snapshot_flow()`
-    // and emits one `Role::Paragraph` per block with one
-    // `Role::TextRun` per fragment. This test dispatches
-    // `tree.sync_accessibility()` and asserts the resulting
-    // `TreeUpdate` contains at least one paragraph node and one
-    // text-run node attached to the editor.
+fn accessibility_emits_text_run_children_directly_under_the_root() {
+    // `accesskit_consumer::common_filter` excludes `Role::TextRun` but not
+    // `Role::Paragraph`, so a paragraph between the editor and its runs is a
+    // visible object-navigation stop — and it breaks text-change events on all
+    // three platforms, because a run's update routes to its *filtered* parent,
+    // whose `supports_text_ranges()` is then false.
     use teksilo_core::accesskit::Role;
 
     let doc = TextDocument::new();
@@ -2946,16 +2945,68 @@ fn accessibility_emits_paragraph_and_text_run_children() {
     let _ = tree.render();
 
     let update = tree.sync_accessibility();
-    let has_paragraph = update
+    assert!(
+        !update
+            .nodes
+            .iter()
+            .any(|(_, n)| n.role() == Role::Paragraph),
+        "a plain block must emit no Paragraph node"
+    );
+
+    let editor_node = &update
         .nodes
         .iter()
-        .any(|(_, n)| n.role() == Role::Paragraph);
-    let has_text_run = update.nodes.iter().any(|(_, n)| n.role() == Role::TextRun);
+        .find(|(_, n)| n.role() == Role::MultilineTextInput)
+        .expect("the editor's own node must be in the update")
+        .1;
+    let runs: Vec<_> = update
+        .nodes
+        .iter()
+        .filter(|(_, n)| n.role() == Role::TextRun)
+        .map(|(node_id, _)| *node_id)
+        .collect();
+    assert!(!runs.is_empty(), "editor must emit at least one TextRun");
     assert!(
-        has_paragraph,
-        "editor must emit at least one Paragraph child"
+        runs.iter().all(|run| editor_node.children().contains(run)),
+        "every run must be a direct child of the editor's node"
     );
-    assert!(has_text_run, "editor must emit at least one TextRun child");
+}
+
+/// A heading block keeps its `Role::Heading` node, with its runs beneath it: a
+/// heading is content structure a reader navigates by, unlike the paragraph
+/// wrapper that used to sit under every block.
+#[test]
+fn a_heading_block_keeps_its_heading_node() {
+    use teksilo_core::accesskit::Role;
+
+    let doc = TextDocument::new();
+    doc.set_plain_text("Chapter one").unwrap();
+    let editor = RichTextEditor::editor(doc);
+    editor.set_caret_position(0);
+    editor.set_heading_level(1);
+
+    let mut tree = WidgetTree::new();
+    let _id = tree.add(editor);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    let _ = tree.render();
+
+    let update = tree.sync_accessibility();
+    let heading = update
+        .nodes
+        .iter()
+        .find(|(_, n)| n.role() == Role::Heading)
+        .expect("a heading block must emit a Role::Heading node");
+    let runs: Vec<_> = update
+        .nodes
+        .iter()
+        .filter(|(_, n)| n.role() == Role::TextRun)
+        .map(|(node_id, _)| *node_id)
+        .collect();
+    assert!(!runs.is_empty(), "the heading must still carry its runs");
+    assert!(
+        runs.iter().all(|run| heading.1.children().contains(run)),
+        "a heading's runs belong under the heading node"
+    );
 }
 
 /// Pull the reported caret (the selection focus) out of a `TreeUpdate` as an

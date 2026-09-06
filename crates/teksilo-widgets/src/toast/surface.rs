@@ -196,12 +196,16 @@ impl Widget for ToastSurface {
             )),
         };
 
-        // Title + optional body column.
+        // Title + optional body column. The toast's own AT node (see `accessibility`
+        // below) already carries this text as its name — a live region reads its own
+        // value/label, not a `labelled_by` relation — so the title label would repeat
+        // it; hide it from AT.
         let title = ctx.add(
             TextWidget::new(self.data.title.clone())
                 .style(TextStyleRole::BodyBold)
                 .color(TextRole::Primary)
-                .single_line(),
+                .single_line()
+                .a11y_hidden(),
         );
         let mut text_column = VStack::new()
             .spacing(toast_tokens::TOAST_TITLE_BODY_GAP)
@@ -396,4 +400,68 @@ impl Widget for ToastSurface {
 #[doc(hidden)]
 pub fn _default_dismiss() -> std::time::Duration {
     DEFAULT_TOAST_AUTO_DISMISS
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use teksilo_core::accessibility::widget_id_to_node_id;
+    use teksilo_core::accesskit::Role;
+    use teksilo_core::widget_tree::WidgetTree;
+    use teksilo_i18n::lit;
+
+    fn fresh_registry() -> ToastRegistry {
+        ToastRegistry::new(crate::toast::host::ToastInstallOptions::default())
+    }
+
+    /// The title's `TextWidget` duplicates the toast's own announced name. Toast is a
+    /// live region, so it must keep `set_name` on its own node — the announcement path
+    /// reads the node's own value/label, not a `labelled_by` relation — and hide the
+    /// title label instead. The body is a different string and must stay reviewable.
+    #[test]
+    fn toast_title_label_is_hidden_but_the_toast_keeps_its_name_and_the_body_label() {
+        let data = ToastSurfaceData {
+            entry_id: 1,
+            severity: ToastSeverity::Info,
+            priority: teksilo_core::styles::ToastPriority::Normal,
+            title: lit!("Saved"),
+            body: Some(lit!("Your changes were saved.")),
+            announcement: None,
+            actions: Rc::new(Vec::new()),
+            show_close_button: false,
+            on_click: None,
+            style_override: None,
+            body_state: teksilo_core::signal::Signal::new(0),
+        };
+
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let id = tree.add(ToastSurface::new(data, None, fresh_registry(), false));
+        tree.layout(SizeProposal::exact(320.0, 200.0));
+        let update = tree.sync_accessibility();
+
+        let toast_node_id = widget_id_to_node_id(id);
+        let (_, toast_node) = update
+            .nodes
+            .iter()
+            .find(|(nid, _)| *nid == toast_node_id)
+            .expect("toast surface node");
+        assert_eq!(
+            toast_node.label(),
+            Some("Saved"),
+            "hiding the title label must not take the toast's own announced name with it"
+        );
+
+        assert!(
+            !update.nodes.iter().any(|(_, n)| n.role() == Role::Label
+                && teksilo_core::accessibility::announced_text(n) == Some("Saved")),
+            "the title label must not survive as a duplicate announcement"
+        );
+
+        assert!(
+            update.nodes.iter().any(|(_, n)| n.role() == Role::Label
+                && teksilo_core::accessibility::announced_text(n)
+                    == Some("Your changes were saved.")),
+            "the body label is a different string from the title and must remain visible"
+        );
+    }
 }

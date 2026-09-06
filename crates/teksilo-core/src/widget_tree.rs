@@ -287,6 +287,18 @@ pub struct WidgetTree {
     /// to the owning rich-text editor, since synthetic NodeIds
     /// can't be decoded back to a WidgetId by value alone.
     pub(crate) synthetic_parent_map: std::collections::HashMap<accesskit::NodeId, WidgetId>,
+    /// Where each synthetic child sits inside its owner, for the ones that
+    /// declared their bounds in the owner's own space (a label's line
+    /// boxes, an editor's rows). A pure translation re-places them from
+    /// here; a synthetic node absent from this map — a scene item under a
+    /// view transform, which reports absolute rects — is moved by the
+    /// owner's delta instead.
+    pub(crate) synthetic_local_bounds:
+        std::collections::HashMap<accesskit::NodeId, teksilo_canvas::Rect>,
+    /// Monotonic count of accessibility walks. A consumer that has not
+    /// seen the latest one is holding a tree whose *shape* may be stale,
+    /// not merely its geometry.
+    pub(crate) a11y_walk_generation: u64,
     /// Cached full render frame — reused when no widget needs painting.
     /// `Rc<RenderFrame>` rather than `RenderFrame` so cache-hit frames
     /// cost an atomic refcount bump instead of a deep clone of every
@@ -694,6 +706,8 @@ impl WidgetTree {
             last_synced_shortcut_version: 0,
             last_synced_locale: None,
             synthetic_parent_map: std::collections::HashMap::new(),
+            synthetic_local_bounds: std::collections::HashMap::new(),
+            a11y_walk_generation: 0,
             cached_frame: None,
             pointer_captured_by: None,
             drag_observers: Vec::new(),
@@ -1905,6 +1919,12 @@ impl WidgetTree {
         self.theme_signal.set(theme);
         self.recompute_effective_theme();
         self.arena.mark_all_dirty();
+        // A theme change re-resolves typography, so every label re-shapes —
+        // inside bounds the layout pass may leave untouched, which means no
+        // resize is recorded and nothing else would dirty the tree. The
+        // label's lines, and therefore its text runs, can be a different
+        // set at the same size.
+        self.a11y_dirty = true;
     }
 
     /// Recompute [`Self::effective_theme`] from the current `theme` and the
@@ -1956,6 +1976,9 @@ impl WidgetTree {
         self.user_text_scale = clamped;
         self.recompute_effective_theme();
         self.arena.mark_all_dirty();
+        // Same reasoning as `set_theme`: bigger text re-wraps inside a box
+        // whose size the parent may hold fixed.
+        self.a11y_dirty = true;
     }
 
     /// The current user-controlled text-scale factor (`1.0` = 100 %).
@@ -3186,6 +3209,13 @@ impl WidgetTree {
     /// Add a pre-boxed widget to the tree.
     pub fn add_boxed(&mut self, widget: Box<dyn Widget>) -> WidgetId {
         self.insert_widget(widget)
+    }
+
+    /// The widget that paints `id`'s title, when it has one.
+    ///
+    /// See [`Widget::accessible_title_node`].
+    pub fn widget_accessible_title_node(&self, id: WidgetId) -> Option<WidgetId> {
+        self.arena.get(id)?.widget.accessible_title_node()
     }
 
     /// Add a widget as a child of another widget.

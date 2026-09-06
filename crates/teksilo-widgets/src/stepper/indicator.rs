@@ -123,7 +123,10 @@ impl Widget for StepIndicator {
                 } else {
                     TextRole::Secondary
                 })
-                .single_line(),
+                .single_line()
+                // The `Role::Tab`/`Role::ListItem` node above already carries
+                // this title as its own name.
+                .a11y_hidden(),
         );
         if let Some(ref supporting) = self.supporting_text {
             let supporting = supporting.clone();

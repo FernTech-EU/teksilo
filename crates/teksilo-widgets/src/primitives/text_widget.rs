@@ -15,6 +15,26 @@
 //! theme at paint time, so theme switches update text color without any explicit
 //! binding or rebuild.
 //!
+//! # Accessibility
+//!
+//! A `TextWidget` is reviewable by default: it emits AccessKit text runs —
+//! one per visual line, with a position and an advance for every character
+//! — so a screen reader's review cursor can walk it, a braille cell can be
+//! routed to the word under it, and `AXBoundsForRange` and its Windows and
+//! Linux equivalents can answer. Runs are excluded from object navigation
+//! by `accesskit_consumer`'s own filter, so they add no stops to anyone's
+//! traversal and no targets to any hit test.
+//!
+//! Geometry is always present: real when a text backend measured the label,
+//! and a zero-width box at its leading edge when none did. Never absent —
+//! `Range::bounding_boxes()` discards every box it has collected on the
+//! first run missing any of bounds, direction, positions or widths, so one
+//! geometry-less run would take the whole label's geometry with it.
+//!
+//! A label *inside* a control that owns the same accessible name must call
+//! [`a11y_hidden`](TextWidget::a11y_hidden), or a reader hears the string
+//! twice. Standalone body text should not.
+//!
 //! Single-line / ellipsis text opts into shrink by default: an over-constrained
 //! stack compresses the label down to the ellipsis-glyph width before the label
 //! overflows. Call [`no_shrink`](TextWidget::no_shrink) to restore rigid behavior,
@@ -32,10 +52,17 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use teksilo_canvas::text_backend::{HitTarget, TextLayout};
-use teksilo_canvas::{Canvas, EllipsisMode, Rect, Size, SizeProposal, TextOverflow};
+use teksilo_canvas::ellipsis::{ELLIPSIS, Ellipsized, ellipsize_ranges};
+use teksilo_canvas::text_backend::{
+    CharGeom, HitTarget, LineEnd, LineTruncation, TextDirection, TextGeometry, TextLayout,
+    TextLine, TextLineSegment,
+};
+use teksilo_canvas::{Canvas, EllipsisMode, Point, Rect, Size, SizeProposal, TextOverflow};
 
 use teksilo_core::accessibility::AccessNodeBuilder;
+use teksilo_core::accessibility::text_runs::{
+    RetainedText, TextGeometryHandle, TextRunSource, push_text_runs,
+};
 use teksilo_core::color_prop::{ColorProp, TextStyleProp};
 use teksilo_core::signal::Prop;
 use teksilo_core::widget::{CursorIcon, EventContext, LayoutContext, PaintContext, Widget};
@@ -88,6 +115,21 @@ pub struct TextWidget {
     /// closure). Used to detect enter/leave transitions between link
     /// spans inside a single widget.
     hovered_link: Rc<RefCell<Option<String>>>,
+    /// What the last placement measured: the text as painted, the
+    /// geometry behind it, and the box it occupies — everything the
+    /// accessibility pass needs to describe this label one character at a
+    /// time, and everything a control that paints through a *hidden*
+    /// `TextWidget` needs to describe it on the label's behalf (see
+    /// [`geometry_handle`](TextWidget::geometry_handle)).
+    ///
+    /// Written from `place_children`, the first point at which the final
+    /// width is known: `layout_response` runs speculatively, more than
+    /// once, at proposals the widget may not end up with.
+    retained: TextGeometryHandle,
+    /// Absolute line box of every text run the last accessibility pass
+    /// emitted. An assistive technology asking to scroll a run into view
+    /// names the *run*, not the label, so the reveal needs its line.
+    run_lines: Rc<RefCell<Vec<(teksilo_core::accesskit::NodeId, Rect)>>>,
     /// When true, this TextWidget emits no accessibility node at all
     /// (no role, no name, no synthetic link children). Controls that
     /// own their accessible name — Button, Checkbox, MenuItem, etc. —
@@ -122,6 +164,8 @@ impl TextWidget {
             on_link_click: None,
             on_link_hover: None,
             last_layout: Rc::new(RefCell::new(None)),
+            retained: Rc::new(RefCell::new(None)),
+            run_lines: Rc::new(RefCell::new(Vec::new())),
             hovered_link: Rc::new(RefCell::new(None)),
             a11y_hidden: false,
         }
@@ -259,6 +303,160 @@ impl TextWidget {
         self.a11y_hidden = true;
         self
     }
+
+    /// A handle onto what this label last measured.
+    ///
+    /// For the controls that own their accessible name but paint their
+    /// text through a hidden `TextWidget` — `Badge`, `GroupHeader` — and
+    /// so have to emit that text's runs from their *own* node. The handle
+    /// is empty until the label has been placed, and the geometry it
+    /// carries is in window space, so the borrower reports it as absolute.
+    ///
+    /// The borrower must place the donor rigidly at its own origin: a
+    /// move re-places absolute rects by the *borrower's* delta, so a
+    /// composite that repositions its donor independently should register
+    /// local rects instead.
+    pub fn geometry_handle(&self) -> TextGeometryHandle {
+        self.retained.clone()
+    }
+}
+
+/// Map a laid-out ellipsis display string back onto the source it stands for.
+///
+/// Middle and leading ellipsis paint a *different string* from the
+/// source: `"Lorem…amet"` for `"Lorem ipsum dolor sit amet"`. The
+/// geometry the backend returns indexes that display string, but a reader
+/// must be able to review the whole source — so the kept spans keep their
+/// real measurements, re-labelled with source offsets, and the elided
+/// span is left uncovered for the emitter to anchor at the ellipsis glyph
+/// it was replaced by.
+///
+/// Yields no segments for a right-to-left line: the kept spans would have
+/// to be re-derived from the right edge, and a degenerate label is honest
+/// where a wrong rectangle is not.
+fn remap_ellipsized(source: &str, display: &TextGeometry, cut: &Ellipsized) -> TextGeometry {
+    /// One contiguous stretch of source characters kept from the display.
+    struct Bucket {
+        bytes: std::ops::Range<usize>,
+        chars: std::ops::Range<usize>,
+        geometry: Vec<CharGeom>,
+    }
+
+    let head_len = cut.head.len();
+    let ellipsis_len = ELLIPSIS.len_utf8();
+    let display_text = cut.display.as_str();
+    // How many source characters the ellipsis stands for, so the kept
+    // tail's char indices carry on from the head's.
+    let elided_chars = source
+        .get(cut.elided.clone())
+        .map(|s| s.chars().count())
+        .unwrap_or(0);
+
+    let mut lines = Vec::with_capacity(display.lines.len());
+    for line in &display.lines {
+        let mut segments: Vec<TextLineSegment> = Vec::new();
+        let mut ellipsis_x: Option<f32> = None;
+        let mut usable = true;
+
+        for segment in &line.segments {
+            if segment.direction == TextDirection::RightToLeft {
+                usable = false;
+                break;
+            }
+            let Some(slice) = display_text.get(segment.byte_range.clone()) else {
+                usable = false;
+                break;
+            };
+
+            let mut buckets: Vec<Bucket> = Vec::new();
+            let mut display_char = segment.char_range.start;
+            for ((offset, ch), geometry) in slice.char_indices().zip(&segment.characters) {
+                let display_byte = segment.byte_range.start + offset;
+                let in_head = display_byte < head_len;
+                if !in_head && display_byte < head_len + ellipsis_len {
+                    ellipsis_x.get_or_insert(segment.rect[0] + geometry.position);
+                    display_char += 1;
+                    continue;
+                }
+                let (source_byte, source_char) = if in_head {
+                    (display_byte, display_char)
+                } else {
+                    (
+                        cut.tail.start + (display_byte - head_len - ellipsis_len),
+                        display_char - 1 + elided_chars,
+                    )
+                };
+                let end_byte = source_byte + ch.len_utf8();
+                match buckets.last_mut() {
+                    Some(bucket) if bucket.bytes.end == source_byte => {
+                        bucket.bytes.end = end_byte;
+                        bucket.chars.end = source_char + 1;
+                        bucket.geometry.push(*geometry);
+                    }
+                    _ => buckets.push(Bucket {
+                        bytes: source_byte..end_byte,
+                        chars: source_char..source_char + 1,
+                        geometry: vec![*geometry],
+                    }),
+                }
+                display_char += 1;
+            }
+
+            for bucket in buckets {
+                let base = bucket.geometry.first().map(|c| c.position).unwrap_or(0.0);
+                let extent = bucket
+                    .geometry
+                    .last()
+                    .map(|c| c.position + c.width - base)
+                    .unwrap_or(0.0);
+                segments.push(TextLineSegment {
+                    byte_range: bucket.bytes,
+                    char_range: bucket.chars,
+                    direction: segment.direction,
+                    rect: [
+                        segment.rect[0] + base,
+                        segment.rect[1],
+                        extent,
+                        segment.rect[3],
+                    ],
+                    characters: bucket
+                        .geometry
+                        .iter()
+                        .map(|c| CharGeom {
+                            position: c.position - base,
+                            width: c.width,
+                        })
+                        .collect(),
+                });
+            }
+        }
+
+        if !usable {
+            segments.clear();
+        }
+        lines.push(TextLine {
+            index: line.index,
+            byte_range: 0..source.len(),
+            char_range: 0..source.chars().count(),
+            rect: line.rect,
+            baseline: line.baseline,
+            caret_x: line.caret_x,
+            segments,
+            end: LineEnd::EndOfText,
+            truncation: ellipsis_x.map(|x| LineTruncation {
+                ellipsis_x: x,
+                ellipsis_width: 0.0,
+            }),
+        });
+    }
+
+    TextGeometry {
+        lines,
+        dropped_lines: display.dropped_lines,
+        source_len: source.len(),
+        rendered_text: None,
+        links: Vec::new(),
+    }
 }
 
 impl Widget for TextWidget {
@@ -273,6 +471,16 @@ impl Widget for TextWidget {
             registry,
             teksilo_core::binding::BindingLevel::Relayout,
         );
+        // A text change is a relayout AND a semantic change. `Relayout`
+        // alone never dirties the accessibility tree — deliberately, so a
+        // per-frame animation does not re-walk it — so a label bound to a
+        // signal would re-shape, repaint, and go on announcing the old
+        // string.
+        self.text.register_if_bound(
+            self_id,
+            registry,
+            teksilo_core::binding::BindingLevel::AccessibilityOnly,
+        );
         self.color.register_if_bound(
             self_id,
             registry,
@@ -283,8 +491,54 @@ impl Widget for TextWidget {
         // link handler is registered. Shares the last_layout cell with
         // the closures so taps can hit-test against the most recently
         // measured spans.
+        let mut handler_set = HandlerSet::new();
+
+        // Reveal-on-request. An assistive technology scrolling a run into
+        // view names the *run*, not the label, and every adapter offers
+        // the action on any node that carries text ranges whether or not
+        // it was advertised — so handle it, and do not advertise it: an
+        // advertised `ScrollIntoView` puts a scroll pattern on every
+        // label on Windows and macOS.
+        //
+        // `SetTextSelection` is likewise offered everywhere and is
+        // meaningless on a label; taking it and doing nothing is the
+        // honest answer, and keeps a stray request from bubbling to an
+        // ancestor that would act on it.
+        {
+            let run_lines = self.run_lines.clone();
+            let retained = self.retained.clone();
+            handler_set = handler_set.on_access_action_request(move |action, target, data, ctx| {
+                use teksilo_core::accesskit::{Action, ActionData, ScrollHint};
+                use teksilo_core::event::{EventResponse, ScrollMotion};
+                match action {
+                    Action::ScrollIntoView => {
+                        let rect = run_lines
+                            .borrow()
+                            .iter()
+                            .find(|(id, _)| *id == target)
+                            .map(|(_, rect)| *rect)
+                            .or_else(|| retained.borrow().as_ref().map(|r| r.bounds));
+                        let Some(rect) = rect else {
+                            return EventResponse::Ignored;
+                        };
+                        match data {
+                            Some(ActionData::ScrollHint(
+                                ScrollHint::TopLeft | ScrollHint::TopEdge,
+                            )) => ctx.ensure_visible_aligned(rect, 0.0, ScrollMotion::Instant),
+                            Some(ActionData::ScrollHint(
+                                ScrollHint::BottomRight | ScrollHint::BottomEdge,
+                            )) => ctx.ensure_visible_aligned(rect, 1.0, ScrollMotion::Instant),
+                            _ => ctx.ensure_visible(rect),
+                        }
+                        EventResponse::Handled
+                    }
+                    Action::SetTextSelection => EventResponse::Handled,
+                    _ => EventResponse::Ignored,
+                }
+            });
+        }
+
         if self.markup && (self.on_link_click.is_some() || self.on_link_hover.is_some()) {
-            let mut handler_set = HandlerSet::new();
             if let Some(on_click) = self.on_link_click.clone() {
                 let last_layout = self.last_layout.clone();
                 handler_set = handler_set.on_tap(move |event, ctx| {
@@ -388,10 +642,9 @@ impl Widget for TextWidget {
                     _ => EventResponse::Ignored,
                 }
             });
-
-            ctx.apply_self_handlers(handler_set);
         }
 
+        ctx.apply_self_handlers(handler_set);
         Vec::new()
     }
 
@@ -428,13 +681,19 @@ impl Widget for TextWidget {
         // field carries per-run rects (including links) that we stash
         // for hit-testing during event dispatch.
         if self.markup {
-            let layout = match max_width {
-                Some(w) => backend.layout_paragraph_markup(&text, &style, w, self.max_lines),
-                None => backend.layout_single_line_markup(&text, &style, None),
+            // Branch on the overflow mode, exactly as `paint` does. Keying
+            // on whether a width was proposed instead meant an `Ellipsis`
+            // markup label measured as a wrapped paragraph and painted as
+            // one clipped line, so it reserved height for lines that were
+            // never drawn.
+            let layout = match self.overflow {
+                TextOverflow::Wrap => match max_width {
+                    Some(w) => backend.layout_paragraph_markup(&text, &style, w, self.max_lines),
+                    None => backend.layout_single_line_markup(&text, &style, None),
+                },
+                _ => backend.layout_single_line_markup(&text, &style, max_width),
             };
-            let size = Size::new(layout.width, layout.height);
-            *self.last_layout.borrow_mut() = Some(layout);
-            return (size).into();
+            return Size::new(layout.width, layout.height).into();
         }
 
         let is_ellipsis = matches!(self.overflow, TextOverflow::Ellipsis(_));
@@ -497,6 +756,113 @@ impl Widget for TextWidget {
         } else {
             size.into()
         }
+    }
+
+    /// Shape once more at the final width, and keep what came back.
+    ///
+    /// This is the only pass that sees the width the label actually got:
+    /// `layout_response` runs speculatively, more than once, at proposals
+    /// the parent may not honour. The accessibility tree needs the real
+    /// one — a label that wraps at 200 dp has a different set of lines,
+    /// and therefore of text runs, from the same label at 400 dp.
+    ///
+    /// The call mirrors `paint`'s exactly, including its `+ 0.5` width
+    /// epsilon, so both land on the same backend cache entry. Under a
+    /// scale transform (a zoomed `SceneView`, a `Scale` wrapper) the
+    /// ambient raster scale differs between this pass and paint, so the
+    /// two hit different entries: the metrics are identical — the cache
+    /// keys on raster scale only for glyph density — and the geometry is
+    /// right either way, at the cost of one extra shaping per (text,
+    /// scale).
+    fn place_children(
+        &self,
+        bounds: Rect,
+        _proposal: SizeProposal,
+        _children: &mut [teksilo_core::widget::WidgetPlacement],
+        ctx: &LayoutContext,
+    ) {
+        let text = self.text.get();
+        let base_direction = match ctx.layout_direction {
+            teksilo_core::environment::LayoutDirection::RightToLeft => {
+                teksilo_core::accesskit::TextDirection::RightToLeft
+            }
+            _ => teksilo_core::accesskit::TextDirection::LeftToRight,
+        };
+        let style = self.style.resolve(&ctx.theme.typography);
+        let Some(backend) = self.text_backend.as_ref().or(ctx.text_backend) else {
+            // Painted without a measuring backend. The label is still
+            // announced and still reviewable; its characters simply have
+            // no extents, which the emitter reports as a zero-width box at
+            // the label's leading edge rather than as no box at all.
+            *self.retained.borrow_mut() = Some(RetainedText {
+                text,
+                geometry: None,
+                bounds,
+                base_direction,
+            });
+            return;
+        };
+        let mut backend = backend.borrow_mut();
+        let max_width = bounds.width + 0.5;
+
+        let (layout, retained_text, remapped) = if self.markup {
+            let layout = match self.overflow {
+                TextOverflow::Wrap => backend.layout_paragraph_markup(
+                    &text,
+                    &style,
+                    max_width.max(0.0),
+                    self.max_lines,
+                ),
+                _ => backend.layout_single_line_markup(&text, &style, Some(max_width)),
+            };
+            // Markup ranges index the rendered text, so that is what the
+            // label announces and what a reader reviews — not the source
+            // with its brackets and parentheses in it.
+            let rendered = layout
+                .geometry
+                .as_deref()
+                .and_then(|g| g.rendered_text.clone())
+                .unwrap_or_else(|| text.clone());
+            (Some(layout), rendered, None)
+        } else {
+            match self.overflow {
+                TextOverflow::Wrap => {
+                    let layout =
+                        backend.layout_paragraph(&text, &style, max_width.max(0.0), self.max_lines);
+                    (Some(layout), text.clone(), None)
+                }
+                TextOverflow::Ellipsis(EllipsisMode::Trailing) => {
+                    let layout = backend.layout_single_line(&text, &style, Some(max_width));
+                    (Some(layout), text.clone(), None)
+                }
+                TextOverflow::Ellipsis(mode) => {
+                    // Middle and leading ellipsis paint a different string
+                    // from the source, so the geometry has to be mapped
+                    // back onto it before anyone can review the label.
+                    let cut = ellipsize_ranges(&text, &style, bounds.width, mode, &mut *backend);
+                    let layout = backend.layout_single_line(&cut.display, &style, None);
+                    let remapped = layout
+                        .geometry
+                        .as_deref()
+                        .map(|g| Rc::new(remap_ellipsized(&text, g, &cut)));
+                    (Some(layout), text.clone(), remapped)
+                }
+            }
+        };
+
+        let Some(layout) = layout else { return };
+        let geometry = remapped.or_else(|| layout.geometry.clone());
+        if self.markup {
+            // Hit-testing reads the spans the label was actually placed
+            // at, so a tap lands on the right link before the first paint.
+            *self.last_layout.borrow_mut() = Some(layout);
+        }
+        *self.retained.borrow_mut() = Some(RetainedText {
+            text: retained_text,
+            geometry,
+            bounds,
+            base_direction,
+        });
     }
 
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
@@ -566,38 +932,94 @@ impl Widget for TextWidget {
         if self.a11y_hidden {
             return;
         }
-        let text = self.text.get();
         builder.set_role(teksilo_core::accesskit::Role::Label);
-        builder.set_name(&text);
 
-        // Markup mode: surface inline links as synthetic `Role::Link`
-        // children so screen readers can focus them individually. The
-        // rects from `last_layout` are in widget-local space and carry
-        // enough information to identify each unique URL.
-        if self.markup
-            && let Some(layout) = self.last_layout.borrow().as_ref()
-        {
-            // Dedupe by (url, byte_range.start): a link that wraps
-            // across two lines produces two LaidOutSpan entries sharing
-            // the same URL and byte range, but we only want one
-            // accessible node per source link.
-            let mut seen: Vec<(String, usize)> = Vec::new();
-            for span in &layout.spans {
-                if let teksilo_canvas::text_backend::TextSpanKind::Link { url } = &span.kind {
-                    let key = (url.clone(), span.byte_range.start);
-                    if seen.iter().any(|k| k == &key) {
-                        continue;
-                    }
-                    seen.push(key.clone());
-                    // Use the byte offset as the element_id so the
-                    // synthetic NodeId is stable across re-layouts.
-                    let element_id = span.byte_range.start as u64;
-                    let label = text
-                        .get(span.byte_range.clone())
-                        .map(|s| s.to_string())
-                        .unwrap_or_else(|| url.clone());
-                    builder.push_link_child(element_id, label, url.clone());
+        // A `Role::Label` with `Role::TextRun` children is what makes a
+        // label reviewable by character, word and line — and braille-
+        // routable, and trackable by a magnifier. The runs are excluded
+        // from object navigation by `accesskit_consumer`'s own filter, so
+        // they add stops to no reader's tab order and targets to no
+        // hit-test.
+        let retained = self.retained.borrow();
+        let unplaced;
+        let source = match retained.as_ref() {
+            Some(placed) => match placed.geometry.as_deref() {
+                // Rects are reported in the label's own space; the builder
+                // translates them once the walker has written the label's
+                // window-space box.
+                Some(geometry) => {
+                    TextRunSource::from_geometry(&placed.text, geometry, Point::ZERO, 0)
+                        .with_base_direction(placed.base_direction)
                 }
+                None => TextRunSource::flat(&placed.text, 0)
+                    .with_fallback_rect(Rect::new(
+                        0.0,
+                        0.0,
+                        placed.bounds.width,
+                        placed.bounds.height,
+                    ))
+                    .with_base_direction(placed.base_direction),
+            },
+            // Never placed — a name probe, or a tree asked for its
+            // accessibility before its first layout.
+            None => {
+                unplaced = self.text.get();
+                TextRunSource::flat(&unplaced, 0)
+            }
+        };
+
+        let emission = push_text_runs(builder, None, &source);
+        // The name must be byte-identical to the runs' concatenation: the
+        // consumer derives the document text from the runs, and every
+        // divergence is a place where what a reader reviews and what it
+        // announces disagree.
+        builder.set_name(&emission.value);
+
+        let origin = retained
+            .as_ref()
+            .map(|r| r.bounds.origin())
+            .unwrap_or(Point::ZERO);
+        let mut run_lines = self.run_lines.borrow_mut();
+        run_lines.clear();
+        for run in &emission.runs {
+            let Some(line) = source
+                .lines
+                .iter()
+                .find(|line| line.byte_range.contains(&run.byte_range.start))
+                .or_else(|| source.lines.last())
+            else {
+                continue;
+            };
+            run_lines.push((
+                run.id,
+                Rect::new(
+                    origin.x + line.rect.x,
+                    origin.y + line.rect.y,
+                    line.rect.width,
+                    line.rect.height,
+                ),
+            ));
+        }
+        drop(run_lines);
+
+        // Markup links become `Role::Link` children beside the runs, so a
+        // reader can reach each one as an object. Identified and labelled
+        // by their *rendered* offsets: the source offsets shift when the
+        // label rewraps, and slicing the source with a rendered range gave
+        // "[doc" for a link labelled "docs".
+        if self.markup
+            && let Some(geometry) = retained.as_ref().and_then(|r| r.geometry.as_deref())
+        {
+            for link in &geometry.links {
+                let label = source
+                    .text
+                    .get(link.rendered_byte_range.clone())
+                    .unwrap_or(&link.url);
+                builder.push_link_child(
+                    link.rendered_byte_range.start as u64,
+                    label.to_string(),
+                    link.url.clone(),
+                );
             }
         }
     }

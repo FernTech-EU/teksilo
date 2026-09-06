@@ -346,3 +346,42 @@ fn dynamic_model_tab_count_is_reflected() {
     assert_no_dangling_relationships(&update);
     assert_a11y_tree_valid(&update);
 }
+
+#[test]
+fn tab_label_does_not_survive_as_a_duplicate_at_node() {
+    // The audit's detection rule (an ancestor whose own name equals a
+    // strict-descendant Label's name) does not, strictly, cover this site:
+    // `TabHeader::accessibility` names the tab from `at_name`, falling back to
+    // the tooltip then the visible label, so a tab whose accessible name has
+    // been steered away from its painted title (e.g. a divergent tooltip
+    // fallback) would not trip a plain string-equality check — yet the label
+    // is still a redundant extra stop for AT users navigating the strip. So
+    // assert directly against the painted title rather than against equality
+    // with the tab's current name.
+    let n = 3;
+    let (mut tree, _) = make_tree(n);
+    let update = tree.sync_accessibility();
+
+    let titles: Vec<String> = (0..n).map(|i| format!("Tab {i}")).collect();
+
+    let tab_node_ids = nodes_with_role(&update, accesskit::Role::Tab);
+    assert_eq!(tab_node_ids.len(), n);
+    for (i, &tab_node_id) in tab_node_ids.iter().enumerate() {
+        let tab_node = find_node(&update, tab_node_id).unwrap();
+        assert_eq!(
+            tab_node.label(),
+            Some(titles[i].as_str()),
+            "hiding the embedded label must not take the tab's own name away with it",
+        );
+    }
+
+    assert!(
+        !update.nodes.iter().any(|(_, node)| {
+            node.role() == accesskit::Role::Label
+                && titles.iter().any(|t| node.label() == Some(t.as_str()))
+        }),
+        "a tab title must not survive as a separate, duplicate-named Role::Label node",
+    );
+
+    assert_a11y_tree_valid(&update);
+}

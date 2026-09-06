@@ -1365,6 +1365,7 @@ mod tests {
             line_count: 1,
             spans: Vec::new(),
             raster_scale: 1.0,
+            geometry: None,
         };
         let mut canvas = Canvas::new();
         assert!(!canvas.draw_text_layout(&layout, Point::new(0.0, 0.0), Color::BLACK));

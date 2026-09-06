@@ -26,6 +26,16 @@
 //! `.follow_text_scale(true)` for labels that should track the app-wide
 //! setting instead.
 //!
+//! ## Accessibility
+//!
+//! The item emits a `Role::Label` carrying `Role::TextRun` children, so a
+//! screen reader can review it by character, word and line, braille can be
+//! routed into it, and a magnifier can follow it. The per-character extents
+//! are the layout the last paint drew, projected into window space — real
+//! when the item is upright under a pan/zoom view, degenerate (present but
+//! zero-width) when it is rotated, when the view advertises scene-space
+//! bounds, or before the first paint.
+//!
 //! ## When to use
 //!
 //! Use `TextItem` for card labels, node titles, annotation text, or any text
@@ -52,9 +62,16 @@
 //!
 //! [`measure`]: TextItem::measure
 
+use std::cell::RefCell;
+use std::rc::Rc;
+
 use accesskit::Role;
-use teksilo_canvas::{Canvas, Rect, Size, TextBackend, Transform2D};
+use teksilo_canvas::text_backend::{
+    CharGeom, LineTruncation, TextGeometry, TextLine, TextLineSegment,
+};
+use teksilo_canvas::{Canvas, Point, Rect, Size, TextBackend, Transform2D};
 use teksilo_core::accessibility::AccessNodeBuilder;
+use teksilo_core::accessibility::text_runs::{TextRunSource, push_text_runs};
 use teksilo_core::binding::BindingLevel;
 use teksilo_core::build_context::BuildContext;
 use teksilo_core::color_prop::ColorProp;
@@ -115,6 +132,93 @@ fn align_offset(align: TextAlign, available: f32, text_width: f32) -> f32 {
     }
 }
 
+/// The layout one paint produced, kept for the accessibility pass.
+///
+/// AccessKit's text runs carry a position and a width per character, and
+/// [`SceneItem::accessibility`] runs with neither a text backend nor a
+/// draw rect to derive them from. Paint is the one place both are in
+/// hand.
+#[derive(Debug)]
+struct PlacedText {
+    /// The string that was drawn.
+    text: String,
+    /// Per-character geometry, in coordinates local to `origin`.
+    geometry: Rc<TextGeometry>,
+    /// Draw origin in the item's own coordinates.
+    origin: Point,
+}
+
+/// The scale factor of a transform that is a translation plus a uniform
+/// positive scale, or `None` for anything else.
+///
+/// A text run describes its characters as offsets along one reading
+/// direction inside one axis-aligned box, which cannot express a rotated
+/// baseline, a shear, or a mirrored axis. Under any of those the honest
+/// answer is a degenerate box: a wrong rectangle sends a magnifier
+/// somewhere the text is not, while a zero-width one only stops it
+/// magnifying.
+fn uniform_scale(transform: &Transform2D) -> Option<f32> {
+    let [a, b, c, d, _, _] = transform.m;
+    if !a.is_finite() || a <= 0.0 {
+        return None;
+    }
+    let tolerance = 1e-4 * a;
+    if b.abs() > tolerance || c.abs() > tolerance || (a - d).abs() > tolerance {
+        return None;
+    }
+    Some(a)
+}
+
+/// The same geometry with every coordinate multiplied by `scale`.
+///
+/// Zoom never reflows scene text — the view paints one logical layout
+/// larger — so the window-space extents AT reads are the layout's own,
+/// scaled by the view.
+fn scale_geometry(geometry: &TextGeometry, scale: f32) -> TextGeometry {
+    let scale_rect = |r: [f32; 4]| [r[0] * scale, r[1] * scale, r[2] * scale, r[3] * scale];
+    TextGeometry {
+        lines: geometry
+            .lines
+            .iter()
+            .map(|line| TextLine {
+                index: line.index,
+                byte_range: line.byte_range.clone(),
+                char_range: line.char_range.clone(),
+                rect: scale_rect(line.rect),
+                baseline: line.baseline * scale,
+                caret_x: line.caret_x * scale,
+                segments: line
+                    .segments
+                    .iter()
+                    .map(|segment| TextLineSegment {
+                        byte_range: segment.byte_range.clone(),
+                        char_range: segment.char_range.clone(),
+                        direction: segment.direction,
+                        rect: scale_rect(segment.rect),
+                        characters: segment
+                            .characters
+                            .iter()
+                            .map(|c| CharGeom {
+                                position: c.position * scale,
+                                width: c.width * scale,
+                            })
+                            .collect(),
+                    })
+                    .collect(),
+                end: line.end,
+                truncation: line.truncation.map(|t| LineTruncation {
+                    ellipsis_x: t.ellipsis_x * scale,
+                    ellipsis_width: t.ellipsis_width * scale,
+                }),
+            })
+            .collect(),
+        dropped_lines: geometry.dropped_lines,
+        source_len: geometry.source_len,
+        rendered_text: geometry.rendered_text.clone(),
+        links: geometry.links.clone(),
+    }
+}
+
 /// Text in a local-coord rectangle, with optional alignment and rotation.
 ///
 /// Text wraps within the `local_bounds` rectangle; the caller is responsible
@@ -139,6 +243,9 @@ pub struct TextItem {
     /// [`follow_text_scale`](Self::follow_text_scale) for labels that should
     /// track the app-wide "grow all text" setting.
     follow_text_scale: bool,
+    /// What the last paint laid out. Feeds the AccessKit text runs; see
+    /// [`PlacedText`].
+    placed: RefCell<Option<PlacedText>>,
 }
 
 impl TextItem {
@@ -158,6 +265,7 @@ impl TextItem {
             flags: ItemFlags::default(),
             a11y: ItemA11yOverrides::default(),
             follow_text_scale: false,
+            placed: RefCell::new(None),
         }
     }
 
@@ -176,6 +284,7 @@ impl TextItem {
             flags: ItemFlags::default(),
             a11y: ItemA11yOverrides::default(),
             follow_text_scale: false,
+            placed: RefCell::new(None),
         }
     }
 
@@ -287,6 +396,31 @@ impl SceneItem for TextItem {
             lb.height,
         );
 
+        // Retain what is about to be drawn, for the accessibility pass.
+        // The layout call is `draw_paragraph`'s own, argument for
+        // argument, so the backend answers the draw from its layout
+        // cache and the geometry AT reports is the geometry of the
+        // glyphs on screen.
+        // Cleared when there is no backend, or none that measures
+        // characters: an item that painted nothing must not keep
+        // advertising a previous frame's extents.
+        {
+            let placed = canvas.text_backend().and_then(|backend| {
+                let layout = backend.borrow_mut().layout_paragraph(
+                    &text,
+                    &style,
+                    (draw_rect.width + 0.5).max(0.0),
+                    None,
+                );
+                layout.geometry.map(|geometry| PlacedText {
+                    text: text.clone(),
+                    geometry,
+                    origin: draw_rect.origin(),
+                })
+            });
+            *self.placed.borrow_mut() = placed;
+        }
+
         // Rotation about the item's centre wraps the whole draw.
         //
         // This MUST compose in the item's **local** space: `paint_band` has
@@ -346,11 +480,70 @@ impl SceneItem for TextItem {
         self.a11y.subtree_mode()
     }
 
-    fn accessibility(&self, builder: &mut AccessNodeBuilder, _ctx: &SceneItemA11yContext) {
+    /// A `Role::Label` carrying `Role::TextRun` children — what makes the
+    /// item reviewable by character, word and line, braille-routable, and
+    /// trackable by a magnifier. The runs are direct children of the
+    /// label: `accesskit_consumer` routes a run's update to its filtered
+    /// parent, and any node between them that does not support text
+    /// ranges makes every platform drop the text-change event.
+    fn accessibility(&self, builder: &mut AccessNodeBuilder, ctx: &SceneItemA11yContext) {
         builder.set_role(Role::Label);
-        if let Some(label) = self.label() {
-            builder.set_name(label);
-        }
+
+        // What AT announces: an `access_label` override, else the item's
+        // own label override, else the painted text. The runs must spell
+        // out that same string — a consumer derives the node's document
+        // text from its runs, so any divergence is a place where what a
+        // reader reviews and what it hears disagree.
+        let painted = self.text.current();
+        let announced = self
+            .a11y
+            .label
+            .as_ref()
+            .or(self.label.as_ref())
+            .map(|l| l.resolve_now())
+            .unwrap_or_else(|| painted.clone());
+
+        let placed = self.placed.borrow();
+        // Real extents only when they describe *this* string, in the
+        // space the node's own box is advertised in, under a mapping a
+        // text run can express. A label override announces a different
+        // string from the one that was measured; scene-space bounds put
+        // the runs and their owner in different coordinate systems; the
+        // item's own rotation and any non-uniform view transform cannot
+        // be expressed at all.
+        let measured = placed
+            .as_ref()
+            .filter(|p| {
+                p.text == announced
+                    && ctx.bounds_space == crate::a11y::A11yBoundsSpace::Screen
+                    && self.rotation.abs() <= f32::EPSILON
+            })
+            .and_then(|p| uniform_scale(&ctx.local_to_screen).map(|scale| (p, scale)));
+
+        // Rects are already in window space here, and the nested builder a
+        // scene item is emitted through discards local ones — a run with
+        // no box at all would empty `bounding_boxes()` for every range
+        // touching it.
+        let scaled;
+        let source = match measured {
+            Some((p, scale)) => {
+                scaled = scale_geometry(&p.geometry, scale);
+                TextRunSource::from_geometry(
+                    &announced,
+                    &scaled,
+                    ctx.local_to_screen.apply_point(p.origin),
+                    ctx.item_id.as_u64(),
+                )
+                .with_absolute_rects()
+            }
+            None => TextRunSource::flat(&announced, ctx.item_id.as_u64())
+                .with_fallback_rect(ctx.advertised_bounds)
+                .with_absolute_rects(),
+        };
+
+        let emission = push_text_runs(builder, None, &source);
+        builder.set_name(&emission.value);
+
         self.a11y.apply(builder);
     }
 
@@ -406,6 +599,7 @@ mod tests {
                 line_count: 1,
                 spans: Vec::new(),
                 raster_scale: self.raster_scale,
+                geometry: None,
             }
         }
         fn ensure_glyphs(
@@ -522,6 +716,94 @@ mod tests {
                 .any(|c| matches!(c, DrawCommand::SetTransform(_))),
             "upright text must not push a transform"
         );
+    }
+
+    #[test]
+    fn uniform_scale_accepts_translation_and_scale_and_nothing_else() {
+        // The predicate that decides whether a text run can express the
+        // mapping at all. Anything it lets through is reported as real
+        // per-character geometry, so a false positive puts a magnifier
+        // somewhere the text is not.
+        assert_eq!(uniform_scale(&Transform2D::identity()), Some(1.0));
+        assert_eq!(
+            uniform_scale(&Transform2D::translate(10.0, -4.0)),
+            Some(1.0)
+        );
+        assert_eq!(
+            uniform_scale(&Transform2D::scale(2.0, 2.0).then(&Transform2D::translate(5.0, 5.0))),
+            Some(2.0)
+        );
+        assert_eq!(uniform_scale(&Transform2D::scale(2.0, 3.0)), None);
+        assert_eq!(uniform_scale(&Transform2D::scale(-1.0, -1.0)), None);
+        assert_eq!(uniform_scale(&Transform2D::scale(0.0, 0.0)), None);
+        assert_eq!(
+            uniform_scale(&Transform2D::rotate(std::f32::consts::FRAC_PI_2)),
+            None
+        );
+        assert_eq!(uniform_scale(&Transform2D::rotate(0.4)), None);
+    }
+
+    #[test]
+    fn scale_geometry_multiplies_every_coordinate() {
+        let mut backend = teksilo_canvas::MockTextBackend::new();
+        let layout = backend.layout_single_line("ab", &teksilo_tokens::TextStyle::default(), None);
+        let geometry = layout.geometry.expect("the mock measures characters");
+        let scaled = scale_geometry(&geometry, 2.0);
+
+        let before = &geometry.lines[0];
+        let after = &scaled.lines[0];
+        assert_eq!(after.rect[2], before.rect[2] * 2.0);
+        assert_eq!(after.rect[3], before.rect[3] * 2.0);
+        assert_eq!(after.baseline, before.baseline * 2.0);
+        for (a, b) in after.segments[0]
+            .characters
+            .iter()
+            .zip(&before.segments[0].characters)
+        {
+            assert_eq!(a.position, b.position * 2.0);
+            assert_eq!(a.width, b.width * 2.0);
+        }
+        // Byte and character ranges index the text, not the screen.
+        assert_eq!(after.byte_range, before.byte_range);
+        assert_eq!(after.char_range, before.char_range);
+    }
+
+    #[test]
+    fn paint_retains_the_layout_it_drew() {
+        // `accessibility` has neither a text backend nor a draw rect;
+        // paint is the one place both are in hand.
+        let theme = teksilo_core::presets::intui::light();
+        let item = TextItem::new(lit!("abcd"), Rect::new(4.0, 6.0, 100.0, 30.0));
+        let backend: std::rc::Rc<std::cell::RefCell<dyn TextBackend>> = std::rc::Rc::new(
+            std::cell::RefCell::new(teksilo_canvas::MockTextBackend::new()),
+        );
+        let mut canvas = Canvas::with_text_backend(backend);
+        item.paint(&mut canvas, &ctx(&theme));
+
+        let placed = item.placed.borrow();
+        let placed = placed.as_ref().expect("a measuring backend was present");
+        assert_eq!(placed.text, "abcd");
+        assert_eq!(placed.origin, Point::new(4.0, 6.0));
+        assert_eq!(placed.geometry.lines.len(), 1);
+    }
+
+    #[test]
+    fn paint_without_a_measuring_backend_retains_nothing() {
+        // A stale layout would keep advertising extents for glyphs that
+        // are no longer on screen.
+        let theme = teksilo_core::presets::intui::light();
+        let item = TextItem::new(lit!("abcd"), Rect::new(0.0, 0.0, 100.0, 30.0));
+        let mut canvas = Canvas::new();
+        item.paint(&mut canvas, &ctx(&theme));
+        assert!(item.placed.borrow().is_none());
+
+        // A backend that measures but reports no geometry is the same
+        // case: there is nothing to report per character.
+        let backend: std::rc::Rc<std::cell::RefCell<dyn TextBackend>> =
+            std::rc::Rc::new(std::cell::RefCell::new(StubBackend::default()));
+        let mut canvas = Canvas::with_text_backend(backend);
+        item.paint(&mut canvas, &ctx(&theme));
+        assert!(item.placed.borrow().is_none());
     }
 
     #[test]

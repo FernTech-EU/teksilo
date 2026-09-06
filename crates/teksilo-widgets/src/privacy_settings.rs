@@ -426,16 +426,27 @@ fn scope_row(
     });
     ctx.own_handle(handle);
 
+    // The row paints the label once, on its leading edge; the toggle
+    // trailing it is named by pointing at that label. Giving the toggle its
+    // own `.label(..)` painted the same string a second time — visibly on
+    // screen, and again in the announcement.
+    let label_id = ctx.add(TextWidget::new(label).style(TextStyleRole::Body));
+    let description_id = ctx.add(TextWidget::new(description).style(TextStyleRole::Small));
+    let toggle_id = ctx.add(Toggle::new(signal).enabled(enabled));
+    ctx.access_labelled_by(toggle_id, label_id);
+
     HStack::new()
         .spacing(12.0)
-        .child(
-            VStack::new()
-                .spacing(2.0)
-                .child(TextWidget::new(label.clone()).style(TextStyleRole::Body))
-                .child(TextWidget::new(description).style(TextStyleRole::Small)),
+        .add_child(
+            ctx.add(
+                VStack::new()
+                    .spacing(2.0)
+                    .add_child(label_id)
+                    .add_child(description_id),
+            ),
         )
         .child(Spacer::new())
-        .child(Toggle::new(signal).label(label).enabled(enabled))
+        .add_child(toggle_id)
 }
 
 fn build_accept_reject(telemetry: &OpenedTelemetry, endpoint: &str) -> HStack {

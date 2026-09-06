@@ -34,6 +34,7 @@ pub use svg::{
     SvgStroke,
 };
 pub use text_backend::{
-    AtlasInfo, EllipsisMode, GlyphValidation, HitTarget, MockTextBackend, TextBackend, TextLayout,
-    TextLayoutSpan, TextOverflow, TextSpanKind, quantize_raster_scale,
+    AtlasInfo, CharGeom, EllipsisMode, GlyphValidation, HitTarget, LineEnd, LineTruncation,
+    MockTextBackend, TextBackend, TextDirection, TextGeometry, TextLayout, TextLayoutSpan,
+    TextLine, TextLineSegment, TextLink, TextOverflow, TextSpanKind, quantize_raster_scale,
 };

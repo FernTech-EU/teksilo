@@ -194,7 +194,11 @@ impl Widget for TooltipWidget {
         let text = TextWidget::new(lit!(""))
             .text(self.text.clone())
             .style(TextStyleRole::Small)
-            .color(TextRole::TooltipText);
+            .color(TextRole::TooltipText)
+            // The TooltipWidget node itself already carries this string as
+            // its own name (see `accessibility` below); an unhidden Label
+            // here would announce the body twice.
+            .a11y_hidden();
         let text_id = ctx.add(text);
 
         let style: SharedTooltipStyle = self
@@ -390,6 +394,38 @@ mod tests {
         assert!(
             !frame.shadows.is_empty(),
             "tooltip overlay should emit at least one shadow even under fade scope"
+        );
+    }
+
+    #[test]
+    fn tooltip_body_label_is_hidden_from_at_since_the_tooltip_node_owns_the_name() {
+        // The TooltipWidget's own accessibility() sets its Role::Tooltip
+        // name to the body text; the inner TextWidget must not also expose
+        // a Role::Label carrying that same string, or a screen reader
+        // announces the body twice.
+        use teksilo_core::accessibility::widget_id_to_node_id;
+        use teksilo_core::accesskit::Role;
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let id = tree.add(TooltipWidget::new(lit!("Save the current file")));
+        tree.layout(SizeProposal::exact(400.0, 200.0));
+        let update = tree.sync_accessibility();
+
+        let (_, node) = update
+            .nodes
+            .iter()
+            .find(|(nid, _)| *nid == widget_id_to_node_id(id))
+            .expect("tooltip node present");
+        assert_eq!(node.role(), Role::Tooltip);
+        assert_eq!(
+            node.label().unwrap_or_default(),
+            "Save the current file",
+            "hiding the body Label must not take the tooltip's own name away with it"
+        );
+
+        assert!(
+            !update.nodes.iter().any(|(_, n)| n.role() == Role::Label
+                && n.label().unwrap_or_default() == "Save the current file"),
+            "no separate Label node should duplicate the tooltip's own announced name"
         );
     }
 }

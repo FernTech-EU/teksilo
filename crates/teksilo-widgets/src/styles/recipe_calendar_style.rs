@@ -230,7 +230,8 @@ impl CalendarStyle for RecipeCalendarStyle {
         let text = TextWidget::new(lit!(cfg.label.clone()))
             .style(TextStyleRole::Body)
             .color(ColorProp::DynamicTextRole(text_role))
-            .single_line();
+            .single_line()
+            .a11y_hidden();
         let text_id = ctx.add(Center::new().child(text));
 
         let z_id = ctx.add(ZStack::new().add_child(bg_id).add_child(text_id));

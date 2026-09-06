@@ -5,7 +5,8 @@ use std::collections::HashMap;
 
 use teksilo_canvas::GlyphQuad;
 use teksilo_canvas::text_backend::{
-    AtlasInfo, GlyphValidation, TextBackend, TextLayout, TextLayoutSpan, TextSpanKind,
+    AtlasInfo, CharGeom, GlyphValidation, LineEnd, LineTruncation, TextBackend, TextDirection,
+    TextGeometry, TextLayout, TextLayoutSpan, TextLine, TextLineSegment, TextLink, TextSpanKind,
 };
 use teksilo_tokens::TextStyle;
 
@@ -554,6 +555,71 @@ impl Default for TypesetterBridge {
     }
 }
 
+/// Translate text-typeset's layout geometry into the canvas DTOs.
+///
+/// The two shapes are deliberately identical; the copy is what keeps
+/// `teksilo-canvas` free of a text-typeset dependency, so a host can
+/// supply its own backend without pulling in the shaper.
+pub(crate) fn to_canvas_geometry(geometry: text_typeset::LayoutGeometry) -> TextGeometry {
+    TextGeometry {
+        lines: geometry.lines.iter().map(to_canvas_line).collect(),
+        dropped_lines: geometry.dropped_lines,
+        source_len: geometry.source_len,
+        rendered_text: geometry.rendered_text,
+        links: geometry
+            .links
+            .into_iter()
+            .map(|l| TextLink {
+                rendered_byte_range: l.rendered_byte_range,
+                url: l.url,
+            })
+            .collect(),
+    }
+}
+
+pub(crate) fn to_canvas_line(line: &text_typeset::LineGeometry) -> TextLine {
+    TextLine {
+        index: line.index,
+        byte_range: line.byte_range.clone(),
+        char_range: line.char_range.clone(),
+        rect: line.rect,
+        baseline: line.baseline,
+        caret_x: line.caret_x,
+        segments: line
+            .segments
+            .iter()
+            .map(|s| TextLineSegment {
+                byte_range: s.byte_range.clone(),
+                char_range: s.char_range.clone(),
+                direction: match s.direction {
+                    text_typeset::GeometryDirection::LeftToRight => TextDirection::LeftToRight,
+                    text_typeset::GeometryDirection::RightToLeft => TextDirection::RightToLeft,
+                },
+                rect: s.rect,
+                characters: s
+                    .characters
+                    .iter()
+                    .map(|c| CharGeom {
+                        position: c.position,
+                        width: c.width,
+                    })
+                    .collect(),
+            })
+            .collect(),
+        end: match line.end {
+            text_typeset::LineEnd::SoftWrap => LineEnd::SoftWrap,
+            text_typeset::LineEnd::HardBreak { chars, bytes } => {
+                LineEnd::HardBreak { chars, bytes }
+            }
+            text_typeset::LineEnd::EndOfText => LineEnd::EndOfText,
+        },
+        truncation: line.truncation.map(|t| LineTruncation {
+            ellipsis_x: t.ellipsis_x,
+            ellipsis_width: t.ellipsis_width,
+        }),
+    }
+}
+
 impl TextBackend for TypesetterBridge {
     fn set_scale_factor(&mut self, scale_factor: f32) {
         if (self.service.scale_factor() - scale_factor).abs() > 0.001 {
@@ -602,13 +668,14 @@ impl TextBackend for TypesetterBridge {
 
         self.had_text_activity = true;
         let format = Self::to_text_format(style);
-        let result: SingleLineResult = self.label_flow.layout_single_line(
-            &mut self.service,
-            text,
-            &format,
-            max_width,
-            self.raster_scale,
-        );
+        let (result, geometry): (SingleLineResult, _) =
+            self.label_flow.layout_single_line_with_geometry(
+                &mut self.service,
+                text,
+                &format,
+                max_width,
+                self.raster_scale,
+            );
 
         let key = self.next_layout_key;
         self.next_layout_key += 1;
@@ -625,6 +692,7 @@ impl TextBackend for TypesetterBridge {
             line_count: 1,
             spans: Vec::new(),
             raster_scale: self.raster_scale,
+            geometry: Some(std::rc::Rc::new(to_canvas_geometry(geometry))),
         };
 
         self.layout_cache.insert(cache_key.clone(), layout.clone());
@@ -669,14 +737,15 @@ impl TextBackend for TypesetterBridge {
 
         self.had_text_activity = true;
         let format = Self::to_text_format(style);
-        let result: ParagraphResult = self.label_flow.layout_paragraph(
-            &mut self.service,
-            text,
-            &format,
-            max_width,
-            max_lines,
-            self.raster_scale,
-        );
+        let (result, geometry): (ParagraphResult, _) =
+            self.label_flow.layout_paragraph_with_geometry(
+                &mut self.service,
+                text,
+                &format,
+                max_width,
+                max_lines,
+                self.raster_scale,
+            );
 
         let key = self.next_layout_key;
         self.next_layout_key += 1;
@@ -693,6 +762,7 @@ impl TextBackend for TypesetterBridge {
             line_count: result.line_count.max(1),
             spans: Vec::new(),
             raster_scale: self.raster_scale,
+            geometry: Some(std::rc::Rc::new(to_canvas_geometry(geometry))),
         };
 
         self.layout_cache.insert(cache_key.clone(), layout.clone());
@@ -737,13 +807,14 @@ impl TextBackend for TypesetterBridge {
         self.had_text_activity = true;
         let format = Self::to_text_format(style);
         let tt_markup = InlineMarkup::parse(source);
-        let result: SingleLineResult = self.label_flow.layout_single_line_markup(
-            &mut self.service,
-            &tt_markup,
-            &format,
-            max_width,
-            self.raster_scale,
-        );
+        let (result, geometry): (SingleLineResult, _) =
+            self.label_flow.layout_single_line_markup_with_geometry(
+                &mut self.service,
+                &tt_markup,
+                &format,
+                max_width,
+                self.raster_scale,
+            );
 
         let key = self.next_layout_key;
         self.next_layout_key += 1;
@@ -772,6 +843,7 @@ impl TextBackend for TypesetterBridge {
                 })
                 .collect(),
             raster_scale: self.raster_scale,
+            geometry: Some(std::rc::Rc::new(to_canvas_geometry(geometry))),
         };
 
         self.layout_cache.insert(cache_key, layout.clone());
@@ -820,14 +892,15 @@ impl TextBackend for TypesetterBridge {
         self.had_text_activity = true;
         let format = Self::to_text_format(style);
         let tt_markup = InlineMarkup::parse(source);
-        let result: ParagraphResult = self.label_flow.layout_paragraph_markup(
-            &mut self.service,
-            &tt_markup,
-            &format,
-            max_width,
-            max_lines,
-            self.raster_scale,
-        );
+        let (result, geometry): (ParagraphResult, _) =
+            self.label_flow.layout_paragraph_markup_with_geometry(
+                &mut self.service,
+                &tt_markup,
+                &format,
+                max_width,
+                max_lines,
+                self.raster_scale,
+            );
 
         let key = self.next_layout_key;
         self.next_layout_key += 1;
@@ -856,6 +929,7 @@ impl TextBackend for TypesetterBridge {
                 })
                 .collect(),
             raster_scale: self.raster_scale,
+            geometry: Some(std::rc::Rc::new(to_canvas_geometry(geometry))),
         };
 
         self.layout_cache.insert(cache_key, layout.clone());
