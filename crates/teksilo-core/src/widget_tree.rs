@@ -21,6 +21,7 @@ mod gesture_dispatch_impl;
 mod hit_targeting_tests;
 mod layout_impl;
 mod overlay_impl;
+pub mod pan_arbiter;
 mod pointer_cancel;
 mod pointer_router;
 mod pointer_state;
@@ -285,6 +286,19 @@ pub struct WidgetTree {
     /// `frame_tick_requested` if any subscriber's owner was painted
     /// this frame.
     pub(crate) frame_tick_scheduler: crate::frame_tick_scheduler::FrameTickScheduler,
+    /// Live pans, live coasts, the window's pinch, and the palm watches — the
+    /// whole touch-motion layer, in one field. See
+    /// [`pan_arbiter`](self::pan_arbiter).
+    touch_motion: pan_arbiter::TouchMotion,
+    /// The claimant chain the next synthesised scroll is to walk.
+    ///
+    /// Armed immediately before that scroll is pushed through
+    /// [`dispatch_scroll`](Self::dispatch_scroll) and taken by the router arm
+    /// that routes it, because the two producers know different things: a pan
+    /// has a live session to read, a coast has only the chain it was launched
+    /// with. `None` for every scroll from a backend, which derives its own
+    /// chain from the sample's position.
+    armed_chain: Option<Vec<(WidgetId, crate::pointer::touch_action::PanClaim)>>,
     /// Monotonic counter bumped at the start of each `render()` call.
     /// Each widget's `last_painted_epoch` is set to this value whenever
     /// the paint pass (or the cache-hit early-out) confirms the widget
@@ -708,6 +722,10 @@ impl WidgetTree {
         // here, so a single `advance_time` moves gesture deadlines, tooltips,
         // overlays and animations against the same origin.
         let epoch = std::time::Instant::now();
+        // ONE scheduler. The fling pump shares the tree's per-frame table
+        // rather than making a second one, so a coast wakes the loop through
+        // the same path a `Pulse` does.
+        let scheduler = crate::frame_tick_scheduler::FrameTickScheduler::new();
         Self {
             arena: WidgetArena::new(),
             theme: initial_theme.clone(),
@@ -757,7 +775,9 @@ impl WidgetTree {
             animation_scheduler: crate::animation::AnimationScheduler::new(),
             animated_values: Vec::new(),
             animated_quads: crate::animated_quad::AnimatedQuadRegistry::new(),
-            frame_tick_scheduler: crate::frame_tick_scheduler::FrameTickScheduler::new(),
+            frame_tick_scheduler: scheduler.clone(),
+            touch_motion: pan_arbiter::TouchMotion::new(scheduler),
+            armed_chain: None,
             paint_epoch: 0,
             cached_a11y: None,
             a11y_dirty: true,
@@ -3175,6 +3195,9 @@ impl WidgetTree {
                         if let Some(claim) = handler_set.pan_claim {
                             node.pan_claim = Some(claim);
                         }
+                        if let Some(behavior) = handler_set.overscroll_behavior {
+                            node.overscroll_behavior = behavior;
+                        }
                         if let Some(activation) = handler_set.drag_activation {
                             node.drag_activation = activation;
                         }
@@ -3349,6 +3372,9 @@ impl WidgetTree {
                         }
                         if let Some(claim) = handler_set.pan_claim {
                             node.pan_claim = Some(claim);
+                        }
+                        if let Some(behavior) = handler_set.overscroll_behavior {
+                            node.overscroll_behavior = behavior;
                         }
                         if let Some(activation) = handler_set.drag_activation {
                             node.drag_activation = activation;

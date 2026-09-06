@@ -14,9 +14,11 @@
 //! in `widget_tree/pointer_state.rs`, next to the rest of the pointer/hover/
 //! capture bookkeeping.
 //!
-//! **Nothing in this module is read at dispatch time yet.** It declares the
-//! vocabulary, the node properties, and their builders; the arbitration
-//! package wires them into real gesture recognition.
+//! Both are read at dispatch time. [`TouchAction`] gates the pan claimants a
+//! press enrols (`WidgetTree::begin_sequence`) and whether a subtree admits a
+//! two-contact pinch at all; [`PanClaim`] is what
+//! `WidgetTree::pan_candidates` collects into the chain a synthesised pan is
+//! delivered along. See `widget_tree::pan_arbiter`.
 //!
 //! # Mouse is unaffected
 //!

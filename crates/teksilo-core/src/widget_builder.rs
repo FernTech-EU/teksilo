@@ -318,6 +318,7 @@ pub struct HandlerSet {
     /// When `Some(..)`, declares this node a pan surface. See
     /// [`super::arena::WidgetNode::pan_claim`].
     pub(crate) pan_claim: Option<PanClaim>,
+    pub(crate) overscroll_behavior: Option<crate::OverscrollBehavior>,
     /// When `Some(..)`, overrides when a drag on this node may begin. See
     /// [`super::arena::WidgetNode::drag_activation`].
     pub(crate) drag_activation: Option<teksilo_tokens::DragActivation>,
@@ -383,6 +384,7 @@ impl HandlerSet {
             drag_activation: None,
             touch_action: None,
             pan_claim: None,
+            overscroll_behavior: None,
             multi_contact: None,
             keyboard_capture: None,
             hit_transparent: None,
@@ -672,6 +674,16 @@ impl HandlerSet {
     /// mask. See [`super::arena::WidgetNode::pan_claim`].
     pub fn pan_claim(mut self, claim: PanClaim) -> Self {
         self.pan_claim = Some(claim);
+        self
+    }
+
+    /// Whether this widget absorbs a scroll it cannot use
+    /// ([`Contain`](crate::OverscrollBehavior::Contain)) or lets it chain
+    /// outward at its boundary ([`Chain`](crate::OverscrollBehavior::Chain),
+    /// the default). The CSS `overscroll-behavior` model, read by the pan
+    /// claimant chain. See [`super::arena::WidgetNode::overscroll_behavior`].
+    pub fn overscroll_behavior(mut self, behavior: crate::OverscrollBehavior) -> Self {
+        self.overscroll_behavior = Some(behavior);
         self
     }
 
@@ -1143,6 +1155,13 @@ impl<W: Widget> WidgetWithHandlers<W> {
     /// [`HandlerSet::pan_claim`].
     pub fn pan_claim(mut self, claim: PanClaim) -> Self {
         self.handler_set.pan_claim = Some(claim);
+        self
+    }
+
+    /// Whether this widget absorbs a boundary scroll or chains it outward. See
+    /// [`HandlerSet::overscroll_behavior`].
+    pub fn overscroll_behavior(mut self, behavior: crate::OverscrollBehavior) -> Self {
+        self.handler_set.overscroll_behavior = Some(behavior);
         self
     }
 
@@ -1894,6 +1913,12 @@ pub trait WidgetBuilder: Widget + Sized + 'static {
     /// [`HandlerSet::pan_claim`].
     fn pan_claim(self, claim: PanClaim) -> WidgetWithHandlers<Self> {
         WidgetWithHandlers::new(self).pan_claim(claim)
+    }
+
+    /// Whether this widget absorbs a boundary scroll or chains it outward. See
+    /// [`HandlerSet::overscroll_behavior`].
+    fn overscroll_behavior(self, behavior: crate::OverscrollBehavior) -> WidgetWithHandlers<Self> {
+        WidgetWithHandlers::new(self).overscroll_behavior(behavior)
     }
 
     /// Declare when a drag on this widget may begin relative to the press that

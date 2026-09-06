@@ -42,9 +42,13 @@ fn fire_event_handler_both(
 pub(super) enum QueuedDispatch {
     /// A nested `dispatch_*` call, replayed verbatim — event *and* input
     /// snapshot — once the outer sample completes.
+    ///
+    /// The snapshot is boxed: it carries the packet's coalesced positions, so
+    /// it is by some way the largest thing either variant holds, and a queue
+    /// entry that is mostly padding would be paid for on the cancel path too.
     Event {
         event: WidgetEvent,
-        snapshot: crate::pointer::InputSnapshot,
+        snapshot: Box<crate::pointer::InputSnapshot>,
     },
     /// A revocation raised through
     /// [`WidgetTree::cancel_pointer`](crate::WidgetTree::cancel_pointer).
@@ -364,8 +368,10 @@ impl WidgetTree {
         // state it started with and the nested one replays immediately
         // afterwards, so from a caller's side nothing changed — the queue is
         // empty again before the top-level call returns.
-        self.pending_dispatch
-            .push_back(QueuedDispatch::Event { event, snapshot });
+        self.pending_dispatch.push_back(QueuedDispatch::Event {
+            event,
+            snapshot: Box::new(snapshot),
+        });
         if self.dispatch_depth > 0 {
             return;
         }
@@ -381,7 +387,7 @@ impl WidgetTree {
         while let Some(queued) = self.pending_dispatch.pop_front() {
             match queued {
                 QueuedDispatch::Event { event, snapshot } => {
-                    self.run_one_dispatch(event, snapshot, &mut *ops);
+                    self.run_one_dispatch(event, *snapshot, &mut *ops);
                 }
                 QueuedDispatch::Cancel {
                     pointer,
@@ -746,6 +752,12 @@ impl WidgetTree {
                 // Timers before positional thresholds, and before the move
                 // reaches any recognizer — see `tick_sequence_timers`.
                 self.tick_sequence_timers();
+                // The multi-contact and palm layers see every sample, decided
+                // or not: a pinch is arbitrated by contact count rather than by
+                // the press arbitration, and the palm watch has to know whether
+                // this contact ever moved.
+                self.note_palm_sample(*position);
+                self.feed_pinch(super::pan_arbiter::PinchFeed::Move, *position, &mut *ops);
                 if let Some(captured) = self.current_pointer_capture() {
                     self.dispatch_to_widget(
                         captured,
@@ -781,6 +793,9 @@ impl WidgetTree {
                         );
                     }
                 }
+                // After the arbitration, so a claim taken on *this* sample
+                // already delivers its own movement rather than waiting a frame.
+                self.advance_pan(*position, &mut *ops);
                 self.update_pointer_leave_overlays(*position, &mut *ops);
             }
             WidgetEvent::PointerDown {
@@ -813,6 +828,17 @@ impl WidgetTree {
                     // `capture_pointer()` made there needs a sequence to enrol
                     // into.
                     self.begin_sequence(target, *position);
+                    // Straight after the sequence, so the frozen `TouchAction`
+                    // and the enrolled pan members are already in hand — and so
+                    // a press on a coasting list catches it before anything
+                    // else runs.
+                    let modifiers = match &event {
+                        WidgetEvent::PointerDown { modifiers, .. } => *modifiers,
+                        _ => crate::event::Modifiers::NONE,
+                    };
+                    self.begin_pan(target, *position, modifiers);
+                    self.begin_palm_watch(*position);
+                    self.feed_pinch(super::pan_arbiter::PinchFeed::Down, *position, &mut *ops);
                     if let Some(focusable) = self.find_focusable_at_or_above(target) {
                         self.focus_with_origin_ops(
                             focusable,
@@ -845,6 +871,28 @@ impl WidgetTree {
                     );
                     return;
                 }
+                // The palm verdict, before anything else acts on the release:
+                // a contact the heuristic rejects must fire no tap at all, and
+                // the only way to guarantee that is to take the cancel funnel
+                // instead of the release path. Judged on the `Up` and never
+                // earlier — a contact is not revoked while the user might still
+                // be doing something with it.
+                self.feed_pinch(super::pan_arbiter::PinchFeed::Up, *position, &mut *ops);
+                if self.take_palm_verdict(released) {
+                    crate::trace_input!(
+                        Samples,
+                        "{released:?} released as a palm: large, and it never moved"
+                    );
+                    self.cancel_pointer(
+                        released,
+                        crate::pointer::CancelReason::PalmRejected,
+                        &mut *ops,
+                    );
+                    return;
+                }
+                // A pan hands its release velocity to the fling driver here,
+                // and closes its session either way.
+                self.end_pan(*position, &mut *ops);
                 // The pointer sequence ends here — the release sweep feeds the
                 // `Up` to every member still following the press so its
                 // recognizer clears the press origin it recorded. Without this,
@@ -880,18 +928,31 @@ impl WidgetTree {
                 self.cancel_pointer(pointer, reason, &mut *ops);
             }
             WidgetEvent::Scroll { position, .. } => {
-                // A positioned scroll routes by hit test; a positionless one
-                // keeps the historical hover-then-focus fallback. A mouse wheel
-                // is positionless, so this is a no-op for it — the change
-                // exists for a pan synthesised from a direct pointer, which
-                // never writes hover and would otherwise route nowhere.
-                let scrolling = self.current_input.pointer;
-                let target = match position {
-                    Some(p) => self.hit_test_for(*p, &scrolling),
-                    None => self.hovered_id().or(self.focused),
-                };
-                if let Some(target) = target {
-                    self.dispatch_to_widget(target, &event, &mut *ops);
+                use super::pan_arbiter::ScrollDelivery;
+                match ScrollDelivery::for_source(self.current_input.scroll_source) {
+                    // A synthesised pan (and the coast that follows it) walks
+                    // the pan claimants and nothing else — see
+                    // `widget_tree::pan_arbiter` for why the generic bubble
+                    // would be wrong here.
+                    ScrollDelivery::ClaimantChain => {
+                        let position = *position;
+                        self.route_scroll_along_chain(&event, position, &mut *ops);
+                    }
+                    // A positioned scroll routes by hit test; a positionless one
+                    // keeps the historical hover-then-focus fallback. A mouse wheel
+                    // is positionless, so this is a no-op for it — the change
+                    // exists for a pan synthesised from a direct pointer, which
+                    // never writes hover and would otherwise route nowhere.
+                    ScrollDelivery::Bubble => {
+                        let scrolling = self.current_input.pointer;
+                        let target = match position {
+                            Some(p) => self.hit_test_for(*p, &scrolling),
+                            None => self.hovered_id().or(self.focused),
+                        };
+                        if let Some(target) = target {
+                            self.dispatch_to_widget(target, &event, &mut *ops);
+                        }
+                    }
                 }
             }
             WidgetEvent::KeyDown { key, modifiers, .. } => {
@@ -1516,8 +1577,26 @@ impl WidgetTree {
         event: &WidgetEvent,
         ops: &mut dyn crate::window::WindowOps,
     ) {
+        self.dispatch_to_widget_direct_returning_handled(target, event, ops);
+    }
+
+    /// [`dispatch_to_widget_direct`](Self::dispatch_to_widget_direct), reporting
+    /// whether the node consumed the event.
+    ///
+    /// The claimant chain needs the answer: `Handled` means the container
+    /// absorbed some of the delta and the walk stops, `Ignored` means it is at
+    /// a boundary and the same whole event goes to the next container outward.
+    /// Addressed rather than bubbled, which is exactly what a claimant chain is
+    /// — a list of named recipients, like the one the cancel funnel delivers
+    /// to.
+    pub(super) fn dispatch_to_widget_direct_returning_handled(
+        &mut self,
+        target: WidgetId,
+        event: &WidgetEvent,
+        ops: &mut dyn crate::window::WindowOps,
+    ) -> bool {
         if !self.arena.is_enabled(target) {
-            return;
+            return false;
         }
 
         let mut ctx = self
@@ -1550,9 +1629,19 @@ impl WidgetTree {
         self.collect_from_ctx(ctx, target);
 
         if response == EventResponse::Handled {
-            self.arena.mark_needs_paint(target);
+            // A scroll changes geometry, so it earns a layout pass rather than
+            // a repaint — the same distinction the bubble path makes.
+            if matches!(
+                event,
+                WidgetEvent::Scroll { .. } | WidgetEvent::ScrollIntoView { .. }
+            ) {
+                self.arena.mark_needs_layout(target);
+            } else {
+                self.arena.mark_needs_paint(target);
+            }
             self.note_pointer_acceptance(target, event);
         }
+        response == EventResponse::Handled
     }
 
     /// Remember that `target` answered `Handled` to one of the current
@@ -6020,14 +6109,24 @@ mod input_ingress_tests {
         let sink = seen.clone();
 
         let mut tree = WidgetTree::new();
-        tree.add(FillWidget::new().on_scroll(move |_event, ctx| {
-            sink.borrow_mut().push((
-                ctx.scroll_phase(),
-                ctx.scroll_source(),
-                ctx.pointer_position(),
-            ));
-            EventResponse::Handled
-        }));
+        // A `ScrollSource::TouchPan` sample is delivered along the pan
+        // claimants and nowhere else (see `widget_tree::pan_arbiter`), so the
+        // fixture has to be a pan surface for the sample below to reach it at
+        // all. Nothing about what this test *asserts* changes — only that the
+        // widget it asserts against is now the kind of widget a touch pan is
+        // addressed to.
+        tree.add(
+            FillWidget::new()
+                .scroll_container(crate::pointer::touch_action::PanAxes::BOTH)
+                .on_scroll(move |_event, ctx| {
+                    sink.borrow_mut().push((
+                        ctx.scroll_phase(),
+                        ctx.scroll_source(),
+                        ctx.pointer_position(),
+                    ));
+                    EventResponse::Handled
+                }),
+        );
         tree.layout(SizeProposal::exact(100.0, 100.0));
 
         tree.dispatch_scroll(ScrollSample {

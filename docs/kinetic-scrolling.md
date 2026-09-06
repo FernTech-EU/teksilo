@@ -323,9 +323,103 @@ its own: `FlingDriver::with_scheduler(tree_scheduler.clone())` takes one
 `FrameTickScheduler` is an `Rc` handle, so the clone shares the tree's table
 rather than creating a second one.
 
+The tree builds one at construction and drives it from `tick_flings_with_ops`,
+which rides the pass a host already runs each wake (`tick_gestures_with_ops`) —
+a coast is an input deadline like a long press, and giving it a second call site
+would mean every host had to learn one. `WidgetTree::advance_time` ticks it too,
+so a headless test moves a fling with the same call that moves an animation.
+
 ---
 
-## 6. Testing
+## 6. The hand-off rule
+
+A coast, and the pan that launches it, are delivered along the **claimant
+chain**: the frozen `pan_candidates` list, from the container that took the claim
+outward, and nothing else. `teksilo-core::widget_tree::pan_arbiter` owns the
+walk. Three rules govern the boundary, and all three exist to keep an existing
+contract rather than to invent one.
+
+### Whole events, never remainders
+
+Per event, delivery is all-or-nothing, exactly as the wheel already is:
+`scroll_response` answers `Handled` if the axis absorbed anything and `Ignored`
+at a hard boundary
+([`common/scroll.rs`](../crates/teksilo-widgets/src/common/scroll.rs)). On
+`Ignored` the router re-delivers **the same whole event** to the next container
+outward.
+
+There is **no fractional residual and no back-channel**. Both are tempting, and
+both are wrong here:
+
+- `EventResponse` is binary. It cannot carry "I took 30 of your 50 pixels", so a
+  residual would mean a new return type on every scroll handler in the
+  workspace — a delta-path change in fourteen scrollables.
+- What it would buy is invisible. The difference between handing the ancestor
+  the whole 50 and handing it the leftover 20 is one frame of one gesture, at a
+  boundary the user is already crossing.
+
+So the chain hands over *events*. A container that declines one is offered the
+next one first again, because the claim never left it.
+
+### Nothing is told a lie
+
+The claimant the chain moves past receives **no `PointerCancel` and no
+pan-ended**. It did not lose the gesture; it declined one event. Cancelling it
+would tear down its own gesture state in the middle of a drag it is still
+winning, and a terminal phase would make it release a rubber band it is still
+holding.
+
+`OverscrollBehavior::Contain` — declared on the node via
+`.overscroll_behavior(..)`, read by the chain — **stops** the walk even when the
+claimant absorbed nothing, so a self-contained panel never lets a boundary pan
+escape into the page behind it.
+
+### Claimants only
+
+The chain visits the `PanClaim` holders and **never the generic bubble**. This is
+not an optimisation. The bubble path from a nested list to the window root passes
+through nodes that handle `on_scroll` without being scroll containers at all: a
+`SpinBox` increments its value on wheel, a `TabBar` remaps wheel to horizontal
+tab scrolling. A boundary pan that reached either would change a number or switch
+a tab, silently, because the user ran out of list. `PanClaim` is the declaration
+that tells them apart, and the chain reads nothing else.
+
+Wheel and trackpad keep `ScrollDelivery::Bubble` — the route they have always
+had. Only `ScrollSource::TouchPan` chains along claimants, and a mouse never
+forms a pan claim, so **mouse wheel chaining is unchanged**.
+
+A fling chains identically, because it is dispatched through the same door
+(`dispatch_scroll`, with `ScrollPhase::Fling`) and walks the same frozen list. A
+coast the whole chain declines is stopped: it has nothing left to move.
+
+---
+
+## 7. One pinch ingress
+
+`WidgetTree::dispatch_os_gesture(gesture, at, ops)` is the only way a
+`GestureEvent::Pinch*` reaches a widget. Two producers arrive there:
+
+- the OS trackpad stream (`PinchGesture` / `RotationGesture`), which winit
+  reports without a position — `at` is `None` and the route falls back to the
+  hover owner's last position, then the hovered widget, then the focused one,
+  then the root;
+- `TouchPinchRecognizer` (`gesture/pinch.rs`), which derives the same three
+  phases from two contacts under a `PINCH_ZOOM`-permitting subtree and supplies
+  the contact midpoint as `at`.
+
+One ingress is the point. `SceneView::on_pinch` used to be reachable on macOS
+and nowhere else, and a second, touch-only event family would have doubled the
+handler surface and guaranteed the same drift again. A test asserts the two
+streams are *identical*, not merely similar.
+
+Third and later contacts are ignored: rotation through three moving points has no
+unique rigid transform, so the recognizer takes the two **earliest** contacts and
+says so rather than averaging something. A contact leaving mid-pinch ends the
+gesture — promoting a spare into its slot would teleport the centre and the span.
+
+---
+
+## 8. Testing
 
 Unit tests assert **hand-derived closed-form reference values**, not goldens this
 implementation produced, so a reader can re-derive them from upstream without
@@ -354,12 +448,27 @@ dependent generator inputs must be coupled with `prop_flat_map`, so an extent of
 
 ---
 
-## 7. Status
+## 9. Status
 
-The module is pure computation and is **not yet wired into the widget tree**.
-Nothing constructs a `FlingDriver` on a tree, no scrollable owns a
-`KineticScroller`, and `WidgetTree::next_input_deadline` does not yet fold
-`next_deadline()` into the event loop's `WaitUntil`. Both driver types are
-deliberately self-contained — each owns its own deadline, and the driver takes a
-`FrameTickScheduler` by clone rather than reaching for a tree — so installation
-is a construction and a few call sites, not a redesign.
+The physics is wired at the **tree** level and not yet at the widget level.
+
+Landed:
+
+- the tree owns a `FlingDriver`, built in `WidgetTree::new` from the tree's own
+  `FrameTickScheduler`, driven from `tick_flings_with_ops` (and from
+  `advance_time` in tests);
+- `WidgetTree::next_input_deadline` folds the driver's `next_deadline()` in
+  beside the gesture deadlines, and `next_timer_deadline` folds *that* into the
+  one `ControlFlow::WaitUntil`;
+- a finger's pan is synthesised as `Scroll { source: TouchPan }` and delivered
+  along the claimant chain, with the release handing its velocity to the driver.
+
+Still to come, in the widget packages:
+
+- **no scrollable owns a `KineticScroller`.** `ScrollArea`, the four data views
+  and the rest still hand-roll their clamp and their 150 ms tween, so a pan
+  moves them but the rubber band and the per-surface settle are not theirs yet.
+  That is `ScrollableBehavior`'s job (P21/P22).
+- the platform layer does not yet produce `ScrollSource::TouchPan` samples of its
+  own; the core door (`dispatch_scroll` with that source, which derives its own
+  chain from the sample's position) is open and waiting for it.

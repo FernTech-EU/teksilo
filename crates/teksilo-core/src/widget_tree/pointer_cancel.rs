@@ -359,8 +359,21 @@ impl WidgetTree {
             self.cancel_active_drag(ops);
         }
 
-        // 5. P11 clears the framework press signal here, and P13/P21 stop this
-        //    pointer's fling — neither subject exists in the tree yet.
+        // 5. The touch-motion layer. The pan session goes without delivering a
+        //    release — there is no velocity to hand on from an interaction that
+        //    was taken away — and any coast the claimant chain is running stops
+        //    with it. The palm watch is dropped rather than judged: a cancel is
+        //    not a release, so there is nothing to be a palm *of*. The pinch is
+        //    told, because a handler that has been zooming since `PinchStarted`
+        //    must be given its `Cancelled` to unwind on. P11 clears the
+        //    framework press signal here; that subject does not exist yet.
+        let pan_chain: Vec<WidgetId> = self.pan_chain_ids(pointer);
+        self.abandon_pan(pointer);
+        for id in pan_chain {
+            self.stop_fling(id);
+        }
+        self.forget_palm_watch(pointer);
+        self.cancel_pinch(pointer, reason, ops);
 
         // 6. The table entry, for a pointer that ceases to exist when it is
         //    taken away. A hovering-capable pointer does not: a mouse whose

@@ -132,6 +132,7 @@ pub use widget_builder_branching::{
 };
 pub use widget_id::WidgetId;
 pub use widget_tree::WidgetTree;
+pub use widget_tree::pan_arbiter::ScrollDelivery;
 pub use window::state::WindowStateInit;
 pub use window::{
     CloseBlockedCallback, CloseGuard, CloseResponse, DecorationsMode, ModalConfig, NoopWindowOps,

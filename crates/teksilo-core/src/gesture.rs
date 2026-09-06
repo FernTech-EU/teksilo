@@ -39,6 +39,9 @@ mod config;
 mod drag;
 mod long_press;
 mod multi_tap;
+mod palm;
+mod pan;
+mod pinch;
 mod sequence;
 mod swipe;
 mod tap;
@@ -49,6 +52,9 @@ pub use config::{MultiContact, RecognizerContext, TapStreak, default_profile};
 pub use drag::DragRecognizer;
 pub use long_press::LongPressRecognizer;
 pub use multi_tap::{DoubleTapRecognizer, TripleTapRecognizer};
+pub use palm::{PALM_CONTACT_THRESHOLD, PalmWatch};
+pub use pan::PanRecognizer;
+pub use pinch::TouchPinchRecognizer;
 pub use sequence::{MemberRole, MemberState, PointerSequence, SequenceMember, TapBoundary};
 pub use swipe::SwipeRecognizer;
 pub use tap::TapRecognizer;
@@ -231,8 +237,9 @@ pub enum GestureEvent {
         rotation: f32,
     },
     PinchEnded,
-    /// The pinch was revoked rather than released. Nothing emits one yet — the
-    /// producer lands with the touch pinch recognizer.
+    /// The pinch was revoked rather than released. Emitted by
+    /// [`TouchPinchRecognizer`] when the cancel funnel takes one of its two
+    /// contacts away.
     PinchCancelled {
         reason: CancelReason,
     },
@@ -389,15 +396,27 @@ pub trait GestureRecognizer {
 
     /// Whether this recognizer takes part in cross-node sequence arbitration —
     /// the "who owns this press" negotiation between a scrollable and the row
-    /// inside it. Nothing consults it yet; the arbitration package reads it.
+    /// inside it. [`PanRecognizer`] is the one that says `true`.
+    ///
+    /// It is a **declaration, not a hook**: the router arbitrates on the
+    /// sequence's own [`MemberRole`], which it holds directly, so nothing on
+    /// the dispatch path has to interrogate a boxed recognizer to find out
+    /// what kind of competitor it is. The flag is what a reader — and a
+    /// third-party recognizer author — reads to know which side of that
+    /// negotiation a type belongs on.
     fn competes_for_sequence(&self) -> bool {
         false
     }
 
     /// Whether this recognizer wants every live contact rather than just the
-    /// one its arena was created for. A pinch recognizer says `true`; every
-    /// single-contact recognizer says `false`. Nothing consults it yet; the
-    /// multi-touch package reads it.
+    /// one its arena was created for. [`TouchPinchRecognizer`] says `true`;
+    /// every single-contact recognizer says `false`.
+    ///
+    /// Also a declaration rather than a hook, and for a structural reason: a
+    /// [`GestureArena`] serves exactly one contact, so a recognizer that needs
+    /// two cannot live in one at all. The tree owns its pinch directly and
+    /// feeds it every contact (`widget_tree::pan_arbiter::feed_pinch`); the
+    /// flag is how such a type declares that it must be owned that way.
     fn wants_all_pointers(&self) -> bool {
         false
     }
@@ -669,6 +688,9 @@ mod source_scan_tests {
             "drag.rs",
             "long_press.rs",
             "multi_tap.rs",
+            "palm.rs",
+            "pan.rs",
+            "pinch.rs",
             "swipe.rs",
             "tap.rs",
         ] {

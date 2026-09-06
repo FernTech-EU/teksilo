@@ -667,6 +667,15 @@ pub(crate) struct InputSnapshot {
     pub(crate) position: Option<Point>,
     pub(crate) scroll_phase: ScrollPhase,
     pub(crate) scroll_source: ScrollSource,
+    /// The positions the OS batched into this packet, oldest first and
+    /// excluding [`position`](Self::position).
+    ///
+    /// Carried onto the snapshot — rather than left on the
+    /// [`PointerSample`] the dispatcher discards — because the velocity fit
+    /// behind a fling has to see them: a 500 Hz digitiser decimated to frame
+    /// rate under-reads a flick by the ratio of the two rates. Empty for every
+    /// producer that does not coalesce, which costs no allocation.
+    pub(crate) coalesced: Vec<(EventTime, Point)>,
 }
 
 impl Default for InputSnapshot {
@@ -676,6 +685,7 @@ impl Default for InputSnapshot {
             position: None,
             scroll_phase: ScrollPhase::Discrete,
             scroll_source: ScrollSource::Wheel,
+            coalesced: Vec::new(),
         }
     }
 }
@@ -686,6 +696,11 @@ impl InputSnapshot {
         Self {
             pointer: sample.pointer,
             position: Some(sample.position),
+            coalesced: sample
+                .coalesced
+                .iter()
+                .map(|&(time, point, _)| (time, point))
+                .collect(),
             ..Self::default()
         }
     }
@@ -697,6 +712,7 @@ impl InputSnapshot {
             position: sample.position,
             scroll_phase: sample.phase,
             scroll_source: sample.source,
+            coalesced: Vec::new(),
         }
     }
 
@@ -725,6 +741,7 @@ impl InputSnapshot {
                 // has always been. `dispatch_scroll` overrides this from the
                 // sample.
                 scroll_source: ScrollSource::Wheel,
+                coalesced: Vec::new(),
             },
             WidgetEvent::PointerCancel {
                 position, pointer, ..

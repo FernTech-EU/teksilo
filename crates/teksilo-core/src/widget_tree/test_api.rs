@@ -176,6 +176,11 @@ impl WidgetTree {
     /// and tooltip timers. Enables deterministic testing without real delays.
     pub fn advance_time(&mut self, duration: std::time::Duration) {
         self.sim_clock += duration;
+        // The input timeline moves with the simulated one, for a clock that has
+        // to be told (a `ManualClock`); a `MonotonicClock` advances on its own
+        // and ignores this. That is what makes one `advance_time` move a
+        // gesture deadline, an animation and a fling to the same virtual now.
+        self.input_clock().advance(duration);
         // Mirror the new sim_clock onto the overlay manager so any
         // dismiss triggered by the process_* steps below stamps its
         // sim-time start in lockstep with real time.
@@ -185,6 +190,9 @@ impl WidgetTree {
         self.process_pointer_leave_overlays();
         self.process_auto_dismiss_overlays();
         self.process_overlay_fade_dismissals_sim();
+        // Live simulations move too, or a test could advance an hour and find
+        // a fling exactly where it started.
+        self.tick_flings(self.sim_clock);
     }
 
     /// Get the current simulated clock value.

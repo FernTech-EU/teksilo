@@ -210,16 +210,33 @@ pub struct WidgetNode {
     /// `WidgetTree::effective_touch_action` — an ancestor can only narrow
     /// what a descendant permits, never widen it. Default
     /// [`TouchAction::AUTO`] (everything permitted). Set via
-    /// `.touch_action(..)`. A mouse never consults this field. **Not yet
-    /// read at dispatch time** — see [`crate::pointer::touch_action`].
+    /// `.touch_action(..)`. A mouse never consults this field. Read at press
+    /// time, to gate pan claimants and the two-contact pinch — see
+    /// [`crate::pointer::touch_action`].
     pub touch_action: TouchAction,
     /// This node's declaration that it is a **pan surface** — it wants to
     /// consume a direct pointer's drag as content panning. `None` (the
     /// default) means the node makes no such claim. `WidgetTree::
     /// pan_candidates` collects every claim from a target up to the root.
-    /// Set via `.pan_claim(..)` or the `.scroll_container(..)` sugar. **Not
-    /// yet read at dispatch time** — see [`crate::pointer::touch_action`].
+    /// Set via `.pan_claim(..)` or the `.scroll_container(..)` sugar. Read at
+    /// press time to build the chain a synthesised pan walks — see
+    /// [`crate::pointer::touch_action`].
     pub pan_claim: Option<PanClaim>,
+    /// Whether this node absorbs a scroll it cannot use, or lets it chain to
+    /// the next scrollable outward — the CSS `overscroll-behavior` model.
+    ///
+    /// Read by `WidgetTree::deliver_pan` when it walks the claimant chain: an
+    /// [`OverscrollBehavior::Contain`](crate::OverscrollBehavior::Contain)
+    /// claimant **stops** the chain even when it absorbed nothing, so a
+    /// self-contained panel never lets a boundary pan escape into the page
+    /// behind it. Default
+    /// [`Chain`](crate::OverscrollBehavior::Chain). Set via
+    /// `.overscroll_behavior(..)`.
+    ///
+    /// Declared on the node rather than left inside each scrollable's own
+    /// `on_scroll` closure because the *chain* has to read it, and the chain
+    /// runs in the router, above every handler.
+    pub overscroll_behavior: crate::OverscrollBehavior,
     /// When a drag on this node may begin relative to the press that starts
     /// it. [`DragActivation::Auto`](teksilo_tokens::DragActivation::Auto) — the
     /// default — resolves to `Immediate`
@@ -480,6 +497,7 @@ impl WidgetNode {
             gesture_dead_zone: false,
             touch_action: TouchAction::AUTO,
             pan_claim: None,
+            overscroll_behavior: crate::OverscrollBehavior::Chain,
             drag_activation: teksilo_tokens::DragActivation::Auto,
             multi_contact: MultiContact::First,
             keyboard_capture: false,
@@ -1966,6 +1984,9 @@ impl WidgetArena {
             }
             if let Some(claim) = handler_set.pan_claim {
                 node.pan_claim = Some(claim);
+            }
+            if let Some(behavior) = handler_set.overscroll_behavior {
+                node.overscroll_behavior = behavior;
             }
             if let Some(activation) = handler_set.drag_activation {
                 node.drag_activation = activation;

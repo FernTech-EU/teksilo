@@ -476,7 +476,7 @@ impl WidgetTree {
     /// A hand-built `WidgetEvent` carries no timestamp, so it reads the tree
     /// clock — which is what lets a test drive a deadline with a
     /// [`ManualClock`](crate::pointer::clock::ManualClock).
-    fn sequence_now(&self) -> crate::pointer::EventTime {
+    pub(super) fn sequence_now(&self) -> crate::pointer::EventTime {
         let stamped = self.current_input.pointer.time;
         if stamped == crate::pointer::EventTime::ZERO {
             self.input_now()
@@ -619,6 +619,15 @@ impl WidgetTree {
             if won || self.active_drag.is_some() {
                 let winner = if won { id } else { owner.unwrap_or(id) };
                 self.decide_sequence(winner);
+                // A pan claimant that won owns the rest of the press as a
+                // *scroll*: from here every sample for this contact is
+                // synthesised onto the claimant chain rather than delivered as
+                // a pointer move. Recorded only for a genuine pan win — an
+                // `active_drag` takeover names a different winner entirely.
+                if won && matches!(role, MemberRole::Pan(_)) {
+                    let pointer = self.current_pointer_id();
+                    self.note_pan_claimed(pointer, winner);
+                }
                 return;
             }
         }
@@ -1128,6 +1137,12 @@ impl WidgetTree {
         // `mem::take` lets the loop borrow `&mut self` for
         // `make_event_context` etc. without conflicting with the
         // scratch buffer; we put the storage back at the end.
+        // The fling pump rides the same pass. It is an input deadline like a
+        // long press, it is folded into the same `WaitUntil`
+        // (`next_input_deadline`), and giving it its own call site would mean
+        // every host had to learn a second one.
+        self.tick_flings_with_ops(now, &mut *ops);
+
         let mut ids = std::mem::take(&mut self.active_ids_scratch);
         ids.clear();
         ids.extend(
@@ -1176,7 +1191,7 @@ impl WidgetTree {
     /// [`ManualClock`](crate::pointer::clock::ManualClock) in a test — ignores
     /// the argument and answers with its own reading, which is the whole point
     /// of installing one.
-    fn event_time_for(&self, now: std::time::Instant) -> crate::pointer::EventTime {
+    pub(super) fn event_time_for(&self, now: std::time::Instant) -> crate::pointer::EventTime {
         match self.input_clock.epoch() {
             Some(epoch) => {
                 crate::pointer::EventTime::from_duration(now.saturating_duration_since(epoch))
@@ -1187,7 +1202,7 @@ impl WidgetTree {
 
     /// Turn an input-timeline deadline back into an `Instant` for the event
     /// loop, which schedules in wall-clock terms.
-    fn instant_for(&self, time: crate::pointer::EventTime) -> std::time::Instant {
+    pub(super) fn instant_for(&self, time: crate::pointer::EventTime) -> std::time::Instant {
         match self.input_clock.epoch() {
             Some(epoch) => epoch + time.as_duration(),
             // An unanchored clock has no wall-clock answer; the best available
@@ -1221,9 +1236,9 @@ impl WidgetTree {
     /// `crate::pointer::touch_action`), so this needs no early exit to get
     /// that right; it just folds the whole chain.
     ///
-    /// One of the two path folds the arbitration package consumes. **Not
-    /// called from any dispatch path yet.**
-    #[allow(dead_code)] // plumbing for the P08 arbitration package; exercised by tests today
+    /// One of the two path folds the arbitration reads: `begin_sequence` asks
+    /// it what a press may do, and `feed_pinch` asks it whether a subtree
+    /// admits a two-contact pinch.
     pub(crate) fn effective_touch_action(&self, target: WidgetId) -> TouchAction {
         let mut chain = Vec::new();
         let mut current = Some(target);
@@ -1255,9 +1270,8 @@ impl WidgetTree {
     /// is excluded entirely — never narrowed — when `allowed` forbids any
     /// axis it declares.
     ///
-    /// The second of the two path folds the arbitration package consumes.
-    /// **Not called from any dispatch path yet.**
-    #[allow(dead_code)] // plumbing for the P08 arbitration package; exercised by tests today
+    /// The second of the two path folds the arbitration reads, and the chain
+    /// a synthesised pan is delivered along — see `widget_tree::pan_arbiter`.
     pub(crate) fn pan_candidates(
         &self,
         target: WidgetId,

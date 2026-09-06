@@ -1775,7 +1775,12 @@ impl WidgetTree {
         let animated_quad_deadline = self
             .animated_quads
             .next_deadline(&self.arena, self.paint_epoch);
-        let gesture_deadline = self.next_gesture_deadline();
+        // Every deadline the input layer owns — a pending long press, a
+        // press-feedback delay, a live fling simulation — folded into the one
+        // `WaitUntil` over the one clock. Without the fling term a coast would
+        // only advance on unrelated wakes, which is a list that scrolls when
+        // the mouse happens to move.
+        let gesture_deadline = self.next_input_deadline();
         let wake_at_deadline = self.pending_wake_at.get();
         // Per-frame-effect path (Pulse / Cycle / caret blink / drag
         // auto-scroll): a fixed 60 Hz deadline instead of the old

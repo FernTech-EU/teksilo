@@ -625,13 +625,16 @@ struct FlingEntry {
 /// The driver holds simulations only. Bounds live with the widgets that
 /// receive the deltas, so the simulations here are unbounded coasts.
 ///
-/// # Not yet installed
+/// # Where the tree's one lives
 ///
-/// Nothing constructs one of these on the widget tree yet; that is the fling
-/// delivery package's job. It is deliberately self-contained — it owns its own
-/// [`next_deadline`](Self::next_deadline) and takes a [`FrameTickScheduler`] by
-/// clone rather than reaching for a tree — so that installation is a
-/// construction and two call sites, not a redesign.
+/// [`WidgetTree`](crate::WidgetTree) builds one in its constructor from its own
+/// [`FrameTickScheduler`] and drives it from `tick_flings_with_ops`, on the
+/// pass a host already runs each wake. Its
+/// [`next_deadline`](Self::next_deadline) is folded into
+/// `WidgetTree::next_input_deadline`, and from there into the one
+/// `ControlFlow::WaitUntil`. A caller that wants a coast of its own — a
+/// headless test, a surface driving its own release — can still build one
+/// directly: it reaches for no tree.
 #[derive(Debug)]
 pub struct FlingDriver {
     entries: Vec<FlingEntry>,

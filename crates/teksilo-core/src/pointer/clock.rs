@@ -57,6 +57,19 @@ pub trait InputClock {
     fn epoch(&self) -> Option<Instant> {
         None
     }
+
+    /// Move this clock forward by `d`, for a clock that has to be moved.
+    ///
+    /// A no-op by default, which is right for [`MonotonicClock`]: it already
+    /// advances on its own, and shifting its epoch would make every pending
+    /// deadline fire the moment a test nudged the *simulated* clock for an
+    /// unrelated reason. [`ManualClock`] overrides it, so
+    /// [`WidgetTree::advance_time`](crate::WidgetTree::advance_time) moves the
+    /// input timeline and the simulated one together and a fling advances by
+    /// exactly the duration the caller named.
+    fn advance(&self, d: Duration) {
+        let _ = d;
+    }
 }
 
 /// A clock that reads the wall clock, measured from a fixed epoch.
@@ -133,6 +146,13 @@ impl Default for ManualClock {
 impl InputClock for ManualClock {
     fn now(&self) -> EventTime {
         self.0.get()
+    }
+
+    /// The owner said to move, so it moves — this is exactly the inherent
+    /// [`advance`](Self::advance), reached through the trait so
+    /// `WidgetTree::advance_time` can move any clock it happens to hold.
+    fn advance(&self, d: Duration) {
+        ManualClock::advance(self, d);
     }
 }
 
