@@ -1468,7 +1468,7 @@ mod tests {
     fn dead_zone_in_center_does_not_arm_the_window_drag() {
         // The widget-land half of the same bug, live on every platform: a
         // press on a control inside the drag region armed the DragRegion's
-        // `on_drag` via `arm_drag_observers`, so a few px of pointer jitter
+        // `on_drag` via `PointerSequence` enrolment, so a few px of pointer jitter
         // during an ordinary click started a window move and ate the tap.
         // The `DeadZone` boundary must stop that arming.
 

@@ -622,9 +622,13 @@ impl Widget for HeaderCell {
                         //    capture was lost, and moving a column then would
                         //    look like the table resizing itself with no
                         //    button held.
+                        // …and only while this cell still *owns* the press:
+                        // capture is an arbitration act, so a grip that lost it
+                        // must stop resizing even though its own state is set.
                         let active = resize_state.borrow().clone();
                         if let Some(state) = active
                             && state.anchor_index == width_index
+                            && ctx.owns_pointer()
                         {
                             // Window-space delta — stable across the
                             // relayouts a Live resize triggers (see

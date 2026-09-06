@@ -191,7 +191,13 @@ impl WidgetTree {
                 // Auto-capture the pointer for the duration of the drag so
                 // the widget keeps receiving `Moved` / `Ended` even when
                 // the cursor leaves its bounds. Released on `DragEnded`.
-                ctx.capture_pointer();
+                // Implicit: the recognizer has already won the arbitration,
+                // so this is bookkeeping rather than a fresh claim.
+                ctx.capture_pointer_implicit();
+                // A drag owns the rest of the press: tell the router so the
+                // sequence records this node as its winner and every peer is
+                // cancelled exactly once.
+                ctx.recognized_owning_gesture = true;
                 let phase = DragPhase::Started {
                     position,
                     button,
@@ -256,6 +262,8 @@ impl WidgetTree {
                 direction,
                 velocity,
             } => {
+                // Like a drag, a swipe owns the press it completes.
+                ctx.recognized_owning_gesture = true;
                 if let Some(h) = node.external_handlers.on_swipe.as_mut() {
                     h(direction, velocity, ctx);
                 }
@@ -650,19 +658,35 @@ mod tests {
         drag_started.set(false);
 
         // 2) Press on the child, then move past threshold → the ANCESTOR drag
-        // starts (it observed the pointer while the child tap held capture),
-        // and the descendant tap does NOT fire.
+        // starts (it competes for the sequence while the child tap holds
+        // capture), and the descendant tap does NOT fire.
         tree.dispatch_event(WidgetEvent::PointerDown {
             position: Point::new(50.0, 25.0),
             button: PointerButton::Primary,
             modifiers: Modifiers::NONE,
         });
+        // The arbitration is observable: exactly one competitor, the ancestor,
+        // enrolled as a `Gesture` member and still in the running. This is the
+        // migration contract for the deleted `drag_observers`.
+        assert_eq!(
+            tree.sequence_members(crate::pointer::PointerId::MOUSE),
+            vec![(
+                _parent,
+                crate::gesture::MemberRole::Gesture,
+                crate::gesture::MemberState::Possible
+            )],
+        );
         tree.dispatch_event(WidgetEvent::PointerMove {
             position: Point::new(80.0, 25.0),
         });
         assert!(
             drag_started.get(),
             "dragging from the child must start the ancestor drag"
+        );
+        assert_eq!(
+            tree.sequence_winner(crate::pointer::PointerId::MOUSE),
+            Some(_parent),
+            "and the ancestor is the sequence's winner"
         );
         tree.dispatch_event(WidgetEvent::PointerUp {
             position: Point::new(80.0, 25.0),
@@ -713,12 +737,26 @@ mod tests {
             button: PointerButton::Primary,
             modifiers: Modifiers::NONE,
         });
+        // Enrolment walks the whole frozen path, not just the immediate
+        // parent: the canvas two levels up is the one competitor.
+        assert_eq!(
+            tree.sequence_members(crate::pointer::PointerId::MOUSE),
+            vec![(
+                _canvas,
+                crate::gesture::MemberRole::Gesture,
+                crate::gesture::MemberState::Possible
+            )],
+        );
         tree.dispatch_event(WidgetEvent::PointerMove {
             position: Point::new(80.0, 25.0),
         });
         assert!(
             drag_started.get(),
             "dragging a deeply-nested tappable child must start the ancestor drag"
+        );
+        assert_eq!(
+            tree.sequence_winner(crate::pointer::PointerId::MOUSE),
+            Some(_canvas),
         );
     }
 
@@ -763,6 +801,13 @@ mod tests {
             button: PointerButton::Primary,
             modifiers: Modifiers::NONE,
         });
+        // The release sweep closed the sequence, so nothing is competing any
+        // more — the state that used to leak was an armed ancestor recognizer.
+        assert!(
+            tree.sequence_members(crate::pointer::PointerId::MOUSE)
+                .is_empty(),
+            "the release sweep ends the sequence"
+        );
         // Now hover somewhere (no button down). Must NOT start the drag.
         tree.dispatch_event(WidgetEvent::PointerMove {
             position: Point::new(85.0, 25.0),
@@ -1103,5 +1148,636 @@ mod tests {
         }
         assert_eq!(doubles.get(), 1, "click 2 fires DoubleTap");
         assert_eq!(triples.get(), 1, "click 3 fires TripleTap");
+    }
+}
+
+// -------------------------------------------------------------------------
+// P08: the arbitration spine — `PointerSequence` and the ordered procedure
+// -------------------------------------------------------------------------
+
+#[cfg(test)]
+mod arbitration_tests {
+    use super::*;
+    use crate::event::EventResponse;
+    use crate::event::{Modifiers, PointerButton, WidgetEvent};
+    use crate::gesture::{DragPhase, MemberRole, MemberState};
+    use crate::pointer::touch_action::{PanClaim, TouchAction};
+    use crate::pointer::{
+        BackendDeviceKey, EventTime, PointerId, PointerIdAllocator, PointerInfo, PointerPhase,
+        PointerSample,
+    };
+    use crate::test_widgets::{FillWidget, StackWidget};
+    use crate::widget_builder::WidgetBuilder;
+    use std::cell::Cell;
+    use std::rc::Rc;
+    use teksilo_canvas::{Point, SizeProposal};
+    use teksilo_tokens::{DragActivation, PointerKind, TargetDensity};
+
+    /// A fresh contact: the platform mints a new id per press.
+    fn new_contact() -> PointerId {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static NEXT: AtomicU64 = AtomicU64::new(9_000);
+        PointerIdAllocator::global().begin(
+            BackendDeviceKey::DEFAULT,
+            NEXT.fetch_add(1, Ordering::Relaxed),
+        )
+    }
+
+    fn touch(id: PointerId, phase: PointerPhase, at: Point, ms: u64) -> PointerSample {
+        PointerSample {
+            pointer: PointerInfo::touch(id, EventTime::from_millis(ms)),
+            phase,
+            position: at,
+            button: None,
+            modifiers: Modifiers::NONE,
+            coalesced: Vec::new(),
+        }
+    }
+
+    fn press(tree: &mut WidgetTree, at: Point) {
+        tree.dispatch_event(WidgetEvent::PointerDown {
+            position: at,
+            button: PointerButton::Primary,
+            modifiers: Modifiers::NONE,
+        });
+    }
+
+    fn moved(tree: &mut WidgetTree, at: Point) {
+        tree.dispatch_event(WidgetEvent::PointerMove { position: at });
+    }
+
+    fn release(tree: &mut WidgetTree, at: Point) {
+        tree.dispatch_event(WidgetEvent::PointerUp {
+            position: at,
+            button: PointerButton::Primary,
+            modifiers: Modifiers::NONE,
+        });
+    }
+
+    /// **The single most important test in the package.** A mouse drag latches
+    /// at 5.0 dp whatever the frozen `TouchAction` and whatever the density —
+    /// reading `slop_precise` (2.0) for a precise pointer would silently
+    /// retune every mouse drag in the framework.
+    #[test]
+    fn a_mouse_drag_latches_at_five_in_every_configuration() {
+        for density in [
+            TargetDensity::Compact,
+            TargetDensity::Comfortable,
+            TargetDensity::Touch,
+        ] {
+            for action in [
+                TouchAction::AUTO,
+                TouchAction::NONE,
+                TouchAction::PAN,
+                TouchAction::PAN_X,
+                TouchAction::PAN_Y,
+                TouchAction::MANIPULATION,
+            ] {
+                // `DragPhase::Started` reports the press origin, not the
+                // sample that latched it, so measure the latch by *when* the
+                // handler fired: walk one pixel at a time and record the
+                // travel at the first Started.
+                let latched = Rc::new(Cell::new(None::<f32>));
+                let travel = Rc::new(Cell::new(0.0_f32));
+                let l = latched.clone();
+                let t = travel.clone();
+                let mut theme = crate::presets::intui::light();
+                theme.input = teksilo_tokens::InputTokens::for_density(density);
+                let mut tree = WidgetTree::new().with_theme(theme);
+                let child = tree.add(FillWidget::new().on_tap(|_e, _c| {}));
+                tree.add(
+                    StackWidget::new()
+                        .add_child(child)
+                        .touch_action(action)
+                        .on_drag(move |phase, _c| {
+                            if matches!(phase, DragPhase::Started { .. }) && l.get().is_none() {
+                                l.set(Some(t.get()));
+                            }
+                        }),
+                );
+                tree.layout(SizeProposal::exact(200.0, 50.0));
+
+                press(&mut tree, Point::new(20.0, 25.0));
+                for step in 1..=10 {
+                    travel.set(step as f32);
+                    moved(&mut tree, Point::new(20.0 + step as f32, 25.0));
+                    if latched.get().is_some() {
+                        break;
+                    }
+                }
+                let at = latched
+                    .get()
+                    .unwrap_or_else(|| panic!("no drag latched at {density:?} under {action:?}"));
+                assert_eq!(
+                    at, 5.0,
+                    "a mouse latched after {at} dp of travel under {action:?} at \
+                     {density:?}; the mouse drag slop is 5.0 and must stay 5.0"
+                );
+                release(&mut tree, Point::new(30.0, 25.0));
+            }
+        }
+    }
+
+    /// `slop_precise` reaches only a **direct** pointer under a frozen
+    /// `TouchAction::NONE`.
+    #[test]
+    fn slop_precise_is_direct_pointer_only() {
+        use crate::gesture::PointerSequence;
+
+        let tokens = teksilo_tokens::InputTokens::for_density(TargetDensity::Compact);
+        let path = Vec::new();
+        let mouse = PointerSequence::new(
+            PointerInfo::mouse(EventTime::ZERO),
+            path.clone(),
+            TouchAction::NONE,
+            None,
+            Point::ZERO,
+            EventTime::ZERO,
+        );
+        assert_eq!(
+            mouse.latch_slop(tokens.profile(PointerKind::Mouse)),
+            5.0,
+            "a mouse under a frozen NONE still latches at 5.0"
+        );
+
+        let contact = PointerSequence::new(
+            PointerInfo::touch(new_contact(), EventTime::ZERO),
+            path,
+            TouchAction::NONE,
+            None,
+            Point::ZERO,
+            EventTime::ZERO,
+        );
+        let touch_profile = tokens.profile(PointerKind::Touch);
+        assert_eq!(
+            contact.latch_slop(touch_profile),
+            touch_profile.slop_precise,
+            "a contact under a frozen NONE drops to the jitter floor"
+        );
+    }
+
+    /// The raw-preview pass runs root-first, and the first `Handled` claims the
+    /// press. A nested pair of previewers pins the order.
+    #[test]
+    fn nested_previewers_run_root_first() {
+        let order = Rc::new(std::cell::RefCell::new(Vec::<&'static str>::new()));
+        let outer_order = order.clone();
+        let inner_order = order.clone();
+
+        let mut tree = WidgetTree::new();
+        let leaf = tree.add(FillWidget::new());
+        let inner = tree.add(StackWidget::new().add_child(leaf).on_pointer_event(
+            move |event, _ctx| {
+                if matches!(event, WidgetEvent::PointerDown { .. }) {
+                    inner_order.borrow_mut().push("inner");
+                }
+                EventResponse::Ignored
+            },
+        ));
+        let outer = tree.add(StackWidget::new().add_child(inner).on_pointer_event(
+            move |event, _ctx| {
+                if matches!(event, WidgetEvent::PointerDown { .. }) {
+                    outer_order.borrow_mut().push("outer");
+                    // The outer previewer claims: the inner one must never run.
+                    return EventResponse::Handled;
+                }
+                EventResponse::Ignored
+            },
+        ));
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+
+        press(&mut tree, Point::new(50.0, 25.0));
+        assert_eq!(
+            *order.borrow(),
+            vec!["outer"],
+            "the preview pass is root-first and the first Handled wins"
+        );
+        assert_eq!(
+            tree.sequence_winner(PointerId::MOUSE),
+            Some(outer),
+            "and that claim decides the sequence"
+        );
+        assert_eq!(
+            tree.sequence_members(PointerId::MOUSE),
+            vec![(outer, MemberRole::RawPreview, MemberState::Won)],
+        );
+        release(&mut tree, Point::new(50.0, 25.0));
+    }
+
+    /// An explicit `capture_pointer()` from an undecided sequence enrols the
+    /// caller as a `RawDrag` member and, for a precise pointer, decides the
+    /// sequence there and then — the Splitter / dock-handle / column-grip
+    /// shape, which owns no recognizer at all.
+    #[test]
+    fn explicit_capture_enrols_a_raw_drag_and_decides_a_precise_pointer() {
+        let dragged = Rc::new(Cell::new(false));
+        let d = dragged.clone();
+
+        let mut tree = WidgetTree::new();
+        // The handle: captures on Down, answers Ignored, works from Move — the
+        // Splitter / dock-handle / column-grip shape. Like the real Splitter it
+        // also carries a double-tap handler, so it owns an arena and the press
+        // stops bubbling at it.
+        let handle = tree.add(
+            FillWidget::new()
+                .on_double_tap(|_e, _c| {})
+                .on_pointer_event(|event, ctx| {
+                    if matches!(event, WidgetEvent::PointerDown { .. }) {
+                        ctx.capture_pointer();
+                    }
+                    EventResponse::Ignored
+                }),
+        );
+        let ancestor = tree.add(
+            StackWidget::new()
+                .add_child(handle)
+                .on_drag(move |phase, _c| {
+                    if matches!(phase, DragPhase::Started { .. }) {
+                        d.set(true);
+                    }
+                }),
+        );
+        tree.layout(SizeProposal::exact(200.0, 50.0));
+
+        press(&mut tree, Point::new(20.0, 25.0));
+        assert_eq!(
+            tree.sequence_winner(PointerId::MOUSE),
+            Some(handle),
+            "the explicit captor owns the press immediately"
+        );
+        let members = tree.sequence_members(PointerId::MOUSE);
+        assert_eq!(members[0], (handle, MemberRole::RawDrag, MemberState::Won));
+        assert_eq!(
+            members[1],
+            (ancestor, MemberRole::Gesture, MemberState::Rejected),
+            "the ancestor is still enrolled — as a rejected competitor, which is \
+             what keeps its recognizers out of the rest of the press"
+        );
+
+        // Drag well past the ancestor's threshold: it must not steal the press.
+        for step in 1..=20 {
+            moved(&mut tree, Point::new(20.0 + step as f32 * 4.0, 25.0));
+        }
+        assert!(
+            !dragged.get(),
+            "a decided sequence keeps the ancestor out of the running"
+        );
+        release(&mut tree, Point::new(100.0, 25.0));
+    }
+
+    /// A touch `RawDrag` does **not** decide at press: it defers to
+    /// `drag_slop` (18) and still beats a pan claimant, whose `pan_slop` is 36.
+    #[test]
+    fn a_touch_raw_drag_defers_to_drag_slop_and_still_beats_a_pan() {
+        let mut tree = WidgetTree::new();
+        let handle = tree.add(FillWidget::new().on_pointer_event(|event, ctx| {
+            if matches!(event, WidgetEvent::PointerDown { .. }) {
+                ctx.capture_pointer();
+            }
+            EventResponse::Ignored
+        }));
+        let scroller = tree.add(
+            StackWidget::new()
+                .add_child(handle)
+                .pan_claim(PanClaim::vertical()),
+        );
+        tree.layout(SizeProposal::exact(200.0, 400.0));
+
+        let id = new_contact();
+        let at = Point::new(100.0, 20.0);
+        tree.dispatch_pointer(touch(id, PointerPhase::Down, at, 0));
+        assert_eq!(
+            tree.sequence_winner(id),
+            None,
+            "a contact's explicit capture does NOT decide at press"
+        );
+        let members = tree.sequence_members(id);
+        assert!(
+            members
+                .iter()
+                .any(|(id, role, _)| *id == handle && *role == MemberRole::RawDrag),
+            "the captor competes as a RawDrag: {members:?}"
+        );
+        assert!(
+            members
+                .iter()
+                .any(|(id, role, _)| *id == scroller && matches!(role, MemberRole::Pan(_))),
+            "and the scroller competes as a Pan: {members:?}"
+        );
+
+        // 17 dp: below the 18 dp drag slop, so nobody has won.
+        tree.dispatch_pointer(touch(id, PointerPhase::Move, Point::new(100.0, 37.0), 20));
+        assert_eq!(tree.sequence_winner(id), None, "17 dp is below drag_slop");
+
+        // 19 dp: past drag_slop (18) but well below pan_slop (36) — the
+        // innermost RawDrag wins.
+        tree.dispatch_pointer(touch(id, PointerPhase::Move, Point::new(100.0, 39.0), 30));
+        assert_eq!(
+            tree.sequence_winner(id),
+            Some(handle),
+            "the RawDrag latches at 18 and the pan claimant needs 36"
+        );
+        tree.dispatch_pointer(touch(id, PointerPhase::Up, Point::new(100.0, 39.0), 40));
+    }
+
+    /// `DragActivation::AfterLongPress` cannot win before its timer, and
+    /// self-rejects once the press leaves the tap boundary.
+    #[test]
+    fn after_long_press_defers_and_self_rejects_past_the_tap_boundary() {
+        let mut tree = WidgetTree::new();
+        let row = tree.add(FillWidget::new().on_tap(|_e, _c| {}));
+        let list = tree.add(
+            StackWidget::new()
+                .add_child(row)
+                .drag_activation(DragActivation::AfterLongPress)
+                .on_drag(|_phase, _c| {}),
+        );
+        tree.layout(SizeProposal::exact(200.0, 50.0));
+
+        press(&mut tree, Point::new(20.0, 25.0));
+        let member = tree
+            .sequence_members(PointerId::MOUSE)
+            .into_iter()
+            .find(|(id, ..)| *id == list)
+            .expect("the list competes");
+        assert_eq!(member.1, MemberRole::Gesture);
+        assert_eq!(member.2, MemberState::Possible);
+
+        // Travelling past the tap boundary before the timer withdraws it: that
+        // travel is a pan, not a considered grab.
+        moved(&mut tree, Point::new(60.0, 25.0));
+        assert_eq!(
+            tree.sequence_winner(PointerId::MOUSE),
+            None,
+            "a deferred drag cannot win before its long-press timer"
+        );
+        let member = tree
+            .sequence_members(PointerId::MOUSE)
+            .into_iter()
+            .find(|(id, ..)| *id == list)
+            .expect("the list is still listed");
+        assert_eq!(
+            member.2,
+            MemberState::Rejected,
+            "and self-rejects once the press leaves the tap boundary"
+        );
+        release(&mut tree, Point::new(60.0, 25.0));
+    }
+
+    /// Losing the **captor** cancels the whole sequence: the press belongs to
+    /// the node that took it, and there is nothing left to arbitrate for.
+    ///
+    /// Per-member death is the unit-level half of the same rule and is pinned
+    /// in `gesture::sequence`'s own tests — in a tree a member is always an
+    /// ancestor of the captor, so it cannot die on its own.
+    #[test]
+    fn losing_the_captor_cancels_the_sequence() {
+        let mut tree = WidgetTree::new();
+        let child = tree.add(FillWidget::new().on_tap(|_e, _c| {}));
+        let mid = tree.add(StackWidget::new().add_child(child).on_drag(|_phase, _c| {}));
+        let outer = tree.add(StackWidget::new().add_child(mid).on_drag(|_phase, _c| {}));
+        tree.layout(SizeProposal::exact(200.0, 50.0));
+
+        press(&mut tree, Point::new(20.0, 25.0));
+        let members: Vec<_> = tree
+            .sequence_members(PointerId::MOUSE)
+            .into_iter()
+            .map(|(id, ..)| id)
+            .collect();
+        assert_eq!(members, vec![mid, outer], "innermost first");
+
+        tree.arena.destroy(child);
+        moved(&mut tree, Point::new(21.0, 25.0));
+        assert!(
+            tree.sequence_members(PointerId::MOUSE).is_empty(),
+            "losing the captor cancels the sequence"
+        );
+        assert_eq!(tree.sequence_winner(PointerId::MOUSE), None);
+    }
+
+    /// `hold_gesture` blocks every peer, and auto-releases at
+    /// `profile.max_hold` (250 ms) — the framework never trusts a holder to
+    /// answer.
+    #[test]
+    fn a_hold_blocks_peers_and_auto_releases_at_max_hold() {
+        use crate::pointer::clock::ManualClock;
+
+        let dragged = Rc::new(Cell::new(false));
+        let d = dragged.clone();
+
+        let mut tree = WidgetTree::new();
+        let clock = Rc::new(ManualClock::new(EventTime::ZERO));
+        tree.set_input_clock(clock.clone());
+
+        // The child holds the sequence on the press, then never answers.
+        let child = tree.add(FillWidget::new().on_tap(|_e, _c| {}).on_pointer_event(
+            |event, ctx| {
+                if matches!(event, WidgetEvent::PointerDown { .. }) {
+                    ctx.hold_gesture();
+                }
+                EventResponse::Ignored
+            },
+        ));
+        tree.add(
+            StackWidget::new()
+                .add_child(child)
+                .on_drag(move |phase, _c| {
+                    if matches!(phase, DragPhase::Started { .. }) {
+                        d.set(true);
+                    }
+                }),
+        );
+        tree.layout(SizeProposal::exact(300.0, 50.0));
+
+        press(&mut tree, Point::new(20.0, 25.0));
+        assert!(
+            tree.sequence_members(PointerId::MOUSE)
+                .iter()
+                .any(|(id, _, state)| *id == child && *state == MemberState::Held),
+            "the holder is listed as Held"
+        );
+
+        // Well past the ancestor's 5 dp threshold, but nothing may win.
+        clock.set(EventTime::from_millis(100));
+        moved(&mut tree, Point::new(80.0, 25.0));
+        assert!(!dragged.get(), "no peer wins while a member is holding");
+
+        // 250 ms: the hold expires and the ancestor is free to latch.
+        clock.set(EventTime::from_millis(250));
+        moved(&mut tree, Point::new(90.0, 25.0));
+        assert!(
+            dragged.get(),
+            "the hold auto-releases at max_hold and the peer latches"
+        );
+    }
+
+    /// `claim_gesture` / `reject_gesture` are the explicit forms of the same
+    /// decision.
+    #[test]
+    fn claim_and_reject_are_arbitration_acts() {
+        let mut tree = WidgetTree::new();
+        let child = tree.add(FillWidget::new().on_tap(|_e, _c| {}).on_pointer_event(
+            |event, ctx| {
+                if matches!(event, WidgetEvent::PointerDown { .. }) {
+                    ctx.claim_gesture();
+                }
+                EventResponse::Ignored
+            },
+        ));
+        let ancestor = tree.add(StackWidget::new().add_child(child).on_drag(|_phase, _c| {}));
+        tree.layout(SizeProposal::exact(200.0, 50.0));
+
+        press(&mut tree, Point::new(20.0, 25.0));
+        assert_eq!(tree.sequence_winner(PointerId::MOUSE), Some(child));
+        let ancestor_state = tree
+            .sequence_members(PointerId::MOUSE)
+            .into_iter()
+            .find(|(id, ..)| *id == ancestor)
+            .map(|(_, _, state)| state);
+        assert_eq!(
+            ancestor_state,
+            Some(MemberState::Rejected),
+            "a claim knocks every peer out exactly once"
+        );
+        release(&mut tree, Point::new(20.0, 25.0));
+    }
+
+    /// With the touch kill switch off, a direct-pointer sample forms no
+    /// sequence at all — while a mouse on the same tree still does.
+    #[test]
+    fn touch_disabled_forms_no_sequence() {
+        let mut tree = WidgetTree::new();
+        let child = tree.add(FillWidget::new().on_tap(|_e, _c| {}));
+        tree.add(StackWidget::new().add_child(child).on_drag(|_phase, _c| {}));
+        tree.layout(SizeProposal::exact(200.0, 50.0));
+        tree.set_touch_enabled(false);
+
+        let id = new_contact();
+        let at = Point::new(20.0, 25.0);
+        tree.dispatch_pointer(touch(id, PointerPhase::Down, at, 0));
+        assert!(
+            tree.sequence_members(id).is_empty(),
+            "the kill switch means a contact arbitrates nothing"
+        );
+        assert_eq!(tree.sequence_winner(id), None);
+        tree.dispatch_pointer(touch(id, PointerPhase::Up, at, 10));
+
+        press(&mut tree, at);
+        assert!(
+            !tree.sequence_members(PointerId::MOUSE).is_empty(),
+            "the mouse is unaffected by the touch kill switch"
+        );
+        release(&mut tree, at);
+    }
+
+    /// One [`TapBoundary`](crate::gesture::TapBoundary) predicate, two answers:
+    /// a precise pointer keeps its `tap_slop` radius, and a coarse one keeps
+    /// its target's **bounds** — a finger's reported centre wanders while
+    /// resting on a control, and a tap that never left its target is a tap.
+    #[test]
+    fn a_coarse_tap_survives_inside_its_bounds_where_a_mouse_would_not() {
+        let taps = Rc::new(Cell::new(0));
+        let t = taps.clone();
+
+        let mut tree = WidgetTree::new();
+        let row = tree.add(FillWidget::new().on_tap(move |_e, _c| t.set(t.get() + 1)));
+        tree.layout(SizeProposal::exact(200.0, 60.0));
+
+        // 30 dp of travel: past the touch profile's 18 dp tap_slop, but well
+        // inside the 200 x 60 row.
+        let down = Point::new(40.0, 30.0);
+        let up = Point::new(70.0, 30.0);
+
+        let id = new_contact();
+        tree.dispatch_pointer(touch(id, PointerPhase::Down, down, 0));
+        tree.dispatch_pointer(touch(id, PointerPhase::Move, up, 10));
+        tree.dispatch_pointer(touch(id, PointerPhase::Up, up, 20));
+        assert_eq!(taps.get(), 1, "a finger that stayed on the row tapped it");
+
+        // The same travel on a mouse is 30 dp past a 5 dp radius: not a tap.
+        taps.set(0);
+        press(&mut tree, down);
+        moved(&mut tree, up);
+        release(&mut tree, up);
+        assert_eq!(taps.get(), 0, "a mouse keeps its tap_slop radius");
+
+        // And a finger that leaves the row is not a tap either.
+        taps.set(0);
+        let id = new_contact();
+        let out = Point::new(40.0, 200.0);
+        tree.dispatch_pointer(touch(id, PointerPhase::Down, down, 30));
+        tree.dispatch_pointer(touch(id, PointerPhase::Move, out, 40));
+        tree.dispatch_pointer(touch(id, PointerPhase::Up, out, 50));
+        assert_eq!(taps.get(), 0, "sliding off the row abandons the activation");
+        let _ = row;
+    }
+
+    /// Sliding off a control revokes its **tap family** once — WCAG 2.2
+    /// SC 2.5.2's "slide off to abort" — while a drag the same press started
+    /// runs on.
+    #[test]
+    fn leaving_the_tap_boundary_revokes_the_tap_family_but_not_the_drag() {
+        let tapped = Rc::new(Cell::new(false));
+        let dragged = Rc::new(Cell::new(0));
+        let ta = tapped.clone();
+        let dr = dragged.clone();
+
+        let mut tree = WidgetTree::new();
+        let control = tree.add(
+            FillWidget::new()
+                .on_tap(move |_e, _c| ta.set(true))
+                .on_drag(move |phase, _c| {
+                    if matches!(phase, DragPhase::Started { .. }) {
+                        dr.set(dr.get() + 1);
+                    }
+                }),
+        );
+        tree.layout(SizeProposal::exact(200.0, 60.0));
+
+        press(&mut tree, Point::new(40.0, 30.0));
+        moved(&mut tree, Point::new(120.0, 30.0));
+        release(&mut tree, Point::new(120.0, 30.0));
+
+        assert!(!tapped.get(), "the activation is abandoned");
+        assert_eq!(dragged.get(), 1, "the drag the same press started is not");
+        let _ = control;
+    }
+
+    /// The frozen `TouchAction` is readable from inside the press handler, and
+    /// is the intersection of the whole root-to-target chain.
+    #[test]
+    fn the_frozen_touch_action_reaches_the_press_handler() {
+        let seen = Rc::new(Cell::new(TouchAction::AUTO));
+        let s = seen.clone();
+
+        let mut tree = WidgetTree::new();
+        let leaf = tree.add(FillWidget::new().on_pointer_event(move |event, ctx| {
+            if matches!(event, WidgetEvent::PointerDown { .. }) {
+                s.set(ctx.touch_action());
+            }
+            EventResponse::Ignored
+        }));
+        let inner = tree.add(
+            StackWidget::new()
+                .add_child(leaf)
+                .touch_action(TouchAction::PAN),
+        );
+        tree.add(
+            StackWidget::new()
+                .add_child(inner)
+                .touch_action(TouchAction::PAN_Y),
+        );
+        tree.layout(SizeProposal::exact(200.0, 50.0));
+
+        let id = new_contact();
+        let at = Point::new(20.0, 25.0);
+        tree.dispatch_pointer(touch(id, PointerPhase::Down, at, 0));
+        assert_eq!(
+            seen.get(),
+            TouchAction::PAN_Y,
+            "PAN ∩ PAN_Y = PAN_Y, frozen at press and readable from the handler"
+        );
+        assert_eq!(tree.sequence_touch_action(id), TouchAction::PAN_Y);
+        tree.dispatch_pointer(touch(id, PointerPhase::Up, at, 10));
     }
 }

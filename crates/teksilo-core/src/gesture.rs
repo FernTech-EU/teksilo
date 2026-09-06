@@ -39,6 +39,7 @@ mod config;
 mod drag;
 mod long_press;
 mod multi_tap;
+mod sequence;
 mod swipe;
 mod tap;
 
@@ -48,6 +49,7 @@ pub use config::{MultiContact, RecognizerContext, TapStreak, default_profile};
 pub use drag::DragRecognizer;
 pub use long_press::LongPressRecognizer;
 pub use multi_tap::{DoubleTapRecognizer, TripleTapRecognizer};
+pub use sequence::{MemberRole, MemberState, PointerSequence, SequenceMember, TapBoundary};
 pub use swipe::SwipeRecognizer;
 pub use tap::TapRecognizer;
 

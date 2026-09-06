@@ -63,7 +63,12 @@ impl Widget for ResizeHandle {
                     EventResponse::Handled
                 }
                 WidgetEvent::PointerMove { position } => {
-                    if let Some((anchor_y, start_h)) = state.panel_drag_anchor.get() {
+                    // The anchor says "I started a resize"; `owns_pointer` says
+                    // "and I still own the press" — capture is an arbitration
+                    // act, so a handle that lost it stops driving.
+                    if let Some((anchor_y, start_h)) =
+                        state.panel_drag_anchor.get().filter(|_| ctx.owns_pointer())
+                    {
                         // Cursor moved UP from anchor → grow the
                         // panel by that amount; cursor moved DOWN →
                         // shrink. Total height is always derived from

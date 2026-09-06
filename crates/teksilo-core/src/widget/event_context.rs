@@ -95,6 +95,26 @@ pub struct EventContext<'ops> {
     /// dispatched, as the tree knew it when this context was made. Read by
     /// [`owns_pointer`](EventContext::owns_pointer).
     pub(crate) pointer_captor: Option<WidgetId>,
+    /// Whether the capture request above came from a **widget handler** rather
+    /// than from framework plumbing.
+    ///
+    /// The distinction is the whole of A4's "explicit capture is an
+    /// arbitration act": the gesture arena and the drag pipeline both capture
+    /// the pointer for their own bookkeeping, and neither is a widget staking
+    /// a claim. Only a `capture_pointer()` written in a handler enrols its
+    /// caller as a [`MemberRole::RawDrag`](crate::gesture::MemberRole::RawDrag)
+    /// competitor.
+    pub(crate) explicit_capture: bool,
+    /// A recognizer on this node produced a gesture that **owns the rest of
+    /// the press** — a drag or a swipe, as opposed to a tap, which completes
+    /// the press rather than claiming it. Set by `dispatch_recognized_gesture`
+    /// and read by `collect_from_ctx`, which decides the pointer's sequence in
+    /// the recognizer's favour.
+    pub(crate) recognized_owning_gesture: bool,
+    /// Arbitration acts the handler performed on the sequence owning the
+    /// pointer it is serving, in the order it performed them. Applied by
+    /// `WidgetTree::collect_from_ctx` against that sequence.
+    pub(crate) gesture_acts: Vec<GestureAct>,
     /// The node whose handler is running, when the dispatcher knows it.
     /// `None` for a context made outside per-node dispatch (a gesture timer, a
     /// key-capture callback, an async completion).
@@ -321,6 +341,23 @@ pub struct EventContext<'ops> {
     pub(crate) in_focus_dispatch: Option<std::rc::Rc<std::cell::Cell<bool>>>,
 }
 
+/// One arbitration act a handler performed on its pointer's sequence.
+///
+/// Queued on the context and applied in order by
+/// `WidgetTree::collect_from_ctx`, so a handler that claims and then rejects
+/// leaves the sequence in the state its last word describes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum GestureAct {
+    /// [`EventContext::claim_gesture`].
+    Claim,
+    /// [`EventContext::reject_gesture`].
+    Reject,
+    /// [`EventContext::hold_gesture`].
+    Hold,
+    /// [`EventContext::release_gesture`].
+    Release,
+}
+
 /// Deferred edit to the tree's shortcut registry, queued on an
 /// `EventContext` and applied in `collect_from_ctx`.
 #[derive(Debug, Clone)]
@@ -449,7 +486,17 @@ impl<'ops> EventContext<'ops> {
             input: crate::pointer::InputSnapshot::default(),
             touch_action: TouchAction::AUTO,
             in_focus_dispatch: None,
+            explicit_capture: false,
+            recognized_owning_gesture: false,
+            gesture_acts: Vec::new(),
         }
+    }
+
+    /// Record the [`TouchAction`] frozen at press for the sequence owning the
+    /// pointer being dispatched. Called by `make_event_context`.
+    pub(crate) fn with_touch_action(mut self, action: TouchAction) -> Self {
+        self.touch_action = action;
+        self
     }
 
     /// Record what the tree knows about the sample being dispatched. Called by
@@ -522,14 +569,14 @@ impl<'ops> EventContext<'ops> {
 
     /// The [`TouchAction`] governing the gesture being handled.
     ///
-    /// This is meant to be the value **frozen at press** for the whole
-    /// gesture's lifetime — the arbitration package (P08) computes it once,
-    /// from `WidgetTree::effective_touch_action` of the pressed target, and
-    /// writes it onto the context's private `touch_action` field (`pub(crate)`,
-    /// like `input`) so a recognizer never re-reads a subtree that may have
-    /// rebuilt mid-gesture. **No dispatch path populates it yet**: every
-    /// context today reports [`TouchAction::AUTO`], the neutral value a
-    /// mouse (which never consults this at all) already behaves as. See
+    /// The value is **frozen at press** for the whole gesture's lifetime: the
+    /// router computes it once, from `WidgetTree::effective_touch_action` of
+    /// the pressed target, and stores it on that pointer's
+    /// [`PointerSequence`](crate::gesture::PointerSequence), so a handler never
+    /// re-reads a subtree that may have rebuilt mid-gesture.
+    ///
+    /// [`TouchAction::AUTO`] — the neutral value — outside a press, and for a
+    /// hand-constructed context. A mouse never consults this at all. See
     /// `crate::pointer::touch_action`.
     pub fn touch_action(&self) -> TouchAction {
         self.touch_action
@@ -1683,14 +1730,71 @@ impl<'ops> EventContext<'ops> {
     /// Cancel — so a second contact lifting can no longer steal the first
     /// one's stream. A mouse call site is unaffected: there is one mouse, and
     /// this captures it.
+    /// **Also an arbitration act.** Taking the pointer from an undecided
+    /// [`PointerSequence`](crate::gesture::PointerSequence) enrols this widget
+    /// as a [`MemberRole::RawDrag`](crate::gesture::MemberRole::RawDrag)
+    /// competitor, and for a precise pointer with no eligible pan competitor
+    /// it decides the sequence outright — which is what makes the splitter
+    /// handle, the dock resize handle and the table column grip (all of which
+    /// answer `Ignored` from `on_pointer_event` and work from `PointerMove`
+    /// with no recognizer at all) first-class competitors rather than widgets
+    /// the arbitration cannot see.
     pub fn capture_pointer(&mut self) {
         self.pointer_capture = Some((None, true));
+        self.explicit_capture = true;
     }
 
     /// Capture a *named* pointer, for a handler driving a pointer other than
     /// the one whose sample it is serving.
     pub fn capture_pointer_id(&mut self, pointer: crate::pointer::PointerId) {
         self.pointer_capture = Some((Some(pointer), true));
+        self.explicit_capture = true;
+    }
+
+    /// Capture the pointer as **framework plumbing**, without staking an
+    /// arbitration claim.
+    ///
+    /// The gesture arena takes the pointer for the Down..Up window so a
+    /// recognizer keeps seeing moves that leave the widget's bounds, and the
+    /// drag pipeline takes it for the life of a drag. Neither is a widget
+    /// saying "this press is mine"; routing them through the public
+    /// [`capture_pointer`](Self::capture_pointer) would enrol every
+    /// arena-bearing node as a `RawDrag` member and decide every mouse
+    /// sequence at press.
+    pub(crate) fn capture_pointer_implicit(&mut self) {
+        self.pointer_capture = Some((None, true));
+    }
+
+    /// Claim the pointer sequence for the widget whose handler is running:
+    /// arbitration ends, every other competitor is cancelled.
+    ///
+    /// The explicit form of what a recognizer does when it recognizes. Use it
+    /// from an application recognizer that decides by its own rules.
+    pub fn claim_gesture(&mut self) {
+        self.gesture_acts.push(GestureAct::Claim);
+    }
+
+    /// Withdraw the widget whose handler is running from the sequence. It can
+    /// no longer win this press; its peers carry on.
+    pub fn reject_gesture(&mut self) {
+        self.gesture_acts.push(GestureAct::Reject);
+    }
+
+    /// Defer this widget's own decision without withdrawing: no peer may win
+    /// while a member is holding.
+    ///
+    /// **The framework never holds.** This exists for an application
+    /// recognizer awaiting an answer it does not have yet (a hit test against
+    /// an off-thread model, a network round trip). The hold auto-releases at
+    /// [`GestureProfile::max_hold`](teksilo_tokens::GestureProfile::max_hold)
+    /// — 250 ms — so a holder that never answers cannot strand the press.
+    pub fn hold_gesture(&mut self) {
+        self.gesture_acts.push(GestureAct::Hold);
+    }
+
+    /// End this widget's hold, putting it back in the running.
+    pub fn release_gesture(&mut self) {
+        self.gesture_acts.push(GestureAct::Release);
     }
 
     /// Release the capture of the pointer this handler is serving. Its events

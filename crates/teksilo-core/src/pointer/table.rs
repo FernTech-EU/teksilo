@@ -77,6 +77,11 @@ pub struct PointerEntry {
     /// Strict ancestors of [`hovered`](Self::hovered) whose `hover_within`
     /// signal this pointer currently holds `true`.
     pub hover_within: Vec<WidgetId>,
+    /// The arbitration in progress for this pointer's press: who is competing
+    /// for it, and who won. `None` between presses — a hovering mouse has an
+    /// entry but no sequence. See
+    /// [`PointerSequence`](crate::gesture::PointerSequence).
+    pub sequence: Option<crate::gesture::PointerSequence>,
 }
 
 impl PointerEntry {
@@ -89,6 +94,7 @@ impl PointerEntry {
             hovered: None,
             captured_by: None,
             hover_within: Vec::new(),
+            sequence: None,
         }
     }
 

@@ -59,6 +59,27 @@ fn pointer_event_position(event: &WidgetEvent) -> Option<Point> {
     }
 }
 
+/// What the bubble pass is allowed to run on one node.
+///
+/// Two independent gates, kept together because they answer the same
+/// question — "how much of this node takes part in *this* dispatch".
+#[derive(Copy, Clone)]
+struct BubbleGates {
+    /// Gates the pre-gesture `on_pointer_event` intercept. `true` for the
+    /// bubble target (the widget the event was dispatched at) and `false`
+    /// for every ancestor, because ancestors already fired their
+    /// `on_pointer_event` during the preview pass — firing it again in
+    /// bubble was the source of double-toggle / double-select bugs when a
+    /// wrapper widget (e.g. `ListItemWrapper`) held the handler and a child
+    /// leaf was the hit target.
+    fire_on_pointer_event: bool,
+    /// This node lost the pointer's arbitration, so its **recognizers** stay
+    /// out of the event and it bubbles on as if it carried none. Its own
+    /// handlers still run: losing an arbitration is not the same as being
+    /// removed from the tree. See `WidgetTree::sequence_blocks_arena`.
+    arena_blocked: bool,
+}
+
 impl WidgetTree {
     /// Hops from `focus` up to `scope_id` (0 when equal), or `None` when
     /// `scope_id` is not an ancestor-or-self of `focus`. Fewer hops means
@@ -664,6 +685,14 @@ impl WidgetTree {
 
         match &event {
             WidgetEvent::PointerMove { position } => {
+                // Every sample: re-check the sequence's members against the
+                // arena, and record where the pointer now is so each threshold
+                // reads one number.
+                self.note_sequence_position(*position);
+                self.revalidate_sequence(&mut *ops);
+                // Timers before positional thresholds, and before the move
+                // reaches any recognizer — see `tick_sequence_timers`.
+                self.tick_sequence_timers();
                 if let Some(captured) = self.current_pointer_capture() {
                     self.dispatch_to_widget(
                         captured,
@@ -672,12 +701,12 @@ impl WidgetTree {
                         },
                         &mut *ops,
                     );
-                    // Let armed ancestor drag recognizers observe the move so
-                    // an ancestor drag can start while a descendant tap holds
-                    // the capture. Once a drag latches, `active_drag` takes
-                    // over and the capture branch above is bypassed.
+                    // Advance the arbitration so an ancestor drag can still
+                    // begin while a descendant tap holds the capture. Once a
+                    // drag latches, `active_drag` takes over and the capture
+                    // branch above is bypassed.
                     if self.active_drag.is_none() {
-                        self.advance_drag_observers(
+                        self.advance_sequence(
                             &WidgetEvent::PointerMove {
                                 position: *position,
                             },
@@ -686,6 +715,18 @@ impl WidgetTree {
                     }
                 } else {
                     self.handle_pointer_move(*position, &mut *ops);
+                    // No capture: for a mouse there is nothing enrolled (a
+                    // gesture member is only enrolled *through* a capture), so
+                    // this is a no-op. A contact panning from empty space has
+                    // its pan claimants here.
+                    if self.active_drag.is_none() {
+                        self.advance_sequence(
+                            &WidgetEvent::PointerMove {
+                                position: *position,
+                            },
+                            &mut *ops,
+                        );
+                    }
                 }
                 self.update_pointer_leave_overlays(*position, &mut *ops);
             }
@@ -705,6 +746,12 @@ impl WidgetTree {
                     {
                         return;
                     }
+                    // Open the arbitration BEFORE any handler runs: the frozen
+                    // `TouchAction` has to be readable from `ctx.touch_action()`
+                    // inside the press handler, and an explicit
+                    // `capture_pointer()` made there needs a sequence to enrol
+                    // into.
+                    self.begin_sequence(target, *position);
                     if let Some(focusable) = self.find_focusable_at_or_above(target) {
                         self.focus_with_origin_ops(
                             focusable,
@@ -713,25 +760,24 @@ impl WidgetTree {
                         );
                     }
                     self.dispatch_to_widget(target, &event, &mut *ops);
-                    // If a descendant captured the pointer for a tap (no drag
-                    // started), arm ancestor drag recognizers so an ancestor
-                    // drag can still begin on move (tap-vs-drag across the
-                    // hit-path).
-                    if self.active_drag.is_none()
-                        && let Some(captured) = self.current_pointer_capture()
-                    {
-                        self.arm_drag_observers(captured, &event, &mut *ops);
+                    // Enrol the competitors that only become knowable once the
+                    // press has been dispatched: the drag-capable ancestors of
+                    // whoever took the capture (tap-vs-drag across the hit
+                    // path).
+                    if self.active_drag.is_none() {
+                        self.enrol_sequence_members(&event, &mut *ops);
                     }
                 }
             }
             WidgetEvent::PointerUp { position, .. } => {
-                // The pointer sequence ends here — feed the `Up` to any armed
-                // ancestor drag observers so their recognizer clears the press
-                // origin it recorded on the press. Without this, a press that
-                // an interactive descendant captured (a card's editor, a row's
-                // button) leaves the ancestor's DragRecognizer armed, and the
-                // next hover move starts a phantom drag. Also discards the list.
-                self.release_drag_observers(&event, &mut *ops);
+                // The pointer sequence ends here — the release sweep feeds the
+                // `Up` to every member still following the press so its
+                // recognizer clears the press origin it recorded. Without this,
+                // a press that an interactive descendant captured (a card's
+                // editor, a row's button) leaves the ancestor's DragRecognizer
+                // armed, and the next hover move starts a phantom drag.
+                self.note_sequence_position(*position);
+                self.end_sequence(&event, &mut *ops);
                 if let Some(captured) = self.current_pointer_capture() {
                     self.dispatch_to_widget(captured, &event, &mut *ops);
                     // Per pointer: this Up releases *this* pointer's capture and
@@ -751,6 +797,11 @@ impl WidgetTree {
                 let target = self
                     .current_pointer_capture()
                     .or_else(|| position.and_then(|p| self.hit_test(p)));
+                // Arbitration is over either way: nobody won this press.
+                let pointer = self.current_pointer_id();
+                if let Some(entry) = self.pointers.get_mut(pointer) {
+                    entry.sequence = None;
+                }
                 if let Some(target) = target {
                     self.dispatch_to_widget(target, &event, &mut *ops);
                 }
@@ -1298,6 +1349,16 @@ impl WidgetTree {
             self.collect_from_ctx(ctx, id);
             if response == EventResponse::Handled {
                 self.arena.mark_needs_paint(id);
+                // Step 1 of the decision procedure: the raw-preview pass runs
+                // FIRST and keeps its root-first order, and the first `Handled`
+                // claims the press. Deliberately not folded into the
+                // innermost-first member order — `rich_text/mouse.rs` documents
+                // relying on an outer wrapper seeing a press before an inner
+                // one, and reordering it would silently invert a precedence
+                // real widgets depend on.
+                if matches!(event, WidgetEvent::PointerDown { .. }) {
+                    self.note_preview_claim(id);
+                }
                 return true;
             }
         }
@@ -1316,6 +1377,9 @@ impl WidgetTree {
             // space before its handlers (and its gesture arena) see it.
             let localized = self.localize_event(id, event);
             let gesture_cx = self.recognizer_context(id);
+            // A member that lost the arbitration keeps its handlers and loses
+            // only its recognizers — see `sequence_blocks_arena`.
+            let arena_blocked = self.sequence_blocks_arena(id);
             let WidgetTree {
                 arena,
                 gesture_owners,
@@ -1327,7 +1391,10 @@ impl WidgetTree {
                     node,
                     event,
                     &mut ctx,
-                    is_target,
+                    BubbleGates {
+                        fire_on_pointer_event: is_target,
+                        arena_blocked,
+                    },
                     id,
                     gesture_owners,
                     gesture_cx,
@@ -1381,6 +1448,7 @@ impl WidgetTree {
             .make_event_context(&mut *ops)
             .with_dispatch_node(target);
         let gesture_cx = self.recognizer_context(target);
+        let arena_blocked = self.sequence_blocks_arena(target);
         let WidgetTree {
             arena,
             gesture_owners,
@@ -1391,7 +1459,10 @@ impl WidgetTree {
                 node,
                 event,
                 &mut ctx,
-                true,
+                BubbleGates {
+                    fire_on_pointer_event: true,
+                    arena_blocked,
+                },
                 target,
                 gesture_owners,
                 gesture_cx,
@@ -1464,23 +1535,19 @@ impl WidgetTree {
         }
     }
 
-    /// `fire_on_pointer_event` gates the pre-gesture `on_pointer_event`
-    /// intercept. Set it to `true` for the bubble target (the widget the
-    /// event was dispatched at) and `false` for every ancestor, because
-    /// ancestors already fired their `on_pointer_event` during the
-    /// preview pass — firing it again in bubble was the source of
-    /// double-toggle / double-select bugs when a wrapper widget (e.g.
-    /// `ListItemWrapper`) held the handler and a child leaf was the hit
-    /// target.
     fn try_handler_bubble(
         node: &mut crate::arena::WidgetNode,
         event: &WidgetEvent,
         ctx: &mut EventContext,
-        fire_on_pointer_event: bool,
+        gates: BubbleGates,
         node_id: WidgetId,
         gesture_owners: &mut std::collections::HashSet<WidgetId>,
         gesture_cx: crate::gesture::RecognizerContext<'_>,
     ) -> Option<EventResponse> {
+        let BubbleGates {
+            fire_on_pointer_event,
+            arena_blocked,
+        } = gates;
         match event {
             WidgetEvent::PointerEnter => {
                 if let Some(cursor) = node.node_cursor {
@@ -1715,6 +1782,12 @@ impl WidgetTree {
                         return Some(EventResponse::Handled);
                     }
                 }
+                if arena_blocked {
+                    // This node lost the arbitration for the press: its
+                    // recognizers stay out of it, and the event goes on
+                    // bubbling as if the node carried none.
+                    return None;
+                }
                 Self::ensure_gesture_arena(node, node_id, gesture_owners);
                 if let Some(arena) = node.handlers.gesture_arena.as_mut() {
                     let cx = gesture_cx;
@@ -1726,7 +1799,13 @@ impl WidgetTree {
                     // the press-origin arena would never see a `Move`.
                     // Released unconditionally by the `PointerUp` branch
                     // in `dispatch_event`.
-                    ctx.capture_pointer();
+                    //
+                    // **Implicit**: this is plumbing, not a claim. Routing it
+                    // through the public `capture_pointer` would enrol every
+                    // arena-bearing node as a `RawDrag` competitor and decide
+                    // every mouse sequence at press. See
+                    // `EventContext::capture_pointer_implicit`.
+                    ctx.capture_pointer_implicit();
                     let result = arena.process(
                         &RawPointerEvent::Down {
                             position: *position,
@@ -1760,6 +1839,9 @@ impl WidgetTree {
                         return Some(EventResponse::Handled);
                     }
                 }
+                if arena_blocked {
+                    return None;
+                }
                 if let Some(arena) = node.handlers.gesture_arena.as_mut() {
                     let cx = gesture_cx;
                     let result = arena.process(
@@ -1790,6 +1872,9 @@ impl WidgetTree {
                     if r == EventResponse::Handled {
                         return Some(EventResponse::Handled);
                     }
+                }
+                if arena_blocked {
+                    return None;
                 }
                 if let Some(arena) = node.handlers.gesture_arena.as_mut() {
                     let cx = gesture_cx;
@@ -2068,8 +2153,24 @@ impl WidgetTree {
             // Per pointer, and by default the pointer whose sample the handler
             // was serving — so a mouse call site means exactly what it meant
             // before, and two contacts on two widgets hold two captures.
+            let named = pointer;
             let pointer = pointer.unwrap_or_else(|| self.current_pointer_id());
             self.set_pointer_capture(pointer, capture.then_some(source_widget));
+            // An explicit `capture_pointer()` from a handler is an arbitration
+            // act; the arena's and the drag pipeline's own captures are
+            // plumbing and route through `capture_pointer_implicit`.
+            if capture && ctx.explicit_capture && named.is_none() {
+                self.note_explicit_capture(source_widget);
+            }
+        }
+        if ctx.recognized_owning_gesture {
+            // A drag or a swipe recognized on this node owns the rest of the
+            // press, however the recognizer was reached.
+            self.note_gesture_recognized(source_widget);
+        }
+        if !ctx.gesture_acts.is_empty() {
+            let acts = std::mem::take(&mut ctx.gesture_acts);
+            self.apply_gesture_acts(&acts, source_widget);
         }
         for (mut request, delay, focus_target, replace_siblings) in ctx.delayed_overlay_requests {
             if request.parent_overlay.is_none() {

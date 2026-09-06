@@ -318,6 +318,9 @@ pub struct HandlerSet {
     /// When `Some(..)`, declares this node a pan surface. See
     /// [`super::arena::WidgetNode::pan_claim`].
     pub(crate) pan_claim: Option<PanClaim>,
+    /// When `Some(..)`, overrides when a drag on this node may begin. See
+    /// [`super::arena::WidgetNode::drag_activation`].
+    pub(crate) drag_activation: Option<teksilo_tokens::DragActivation>,
 
     /// How many simultaneous contacts this node's recognizers serve. See
     /// [`super::arena::WidgetNode::multi_contact`].
@@ -370,6 +373,7 @@ impl HandlerSet {
             ime: None,
             event_pass_through: None,
             gesture_dead_zone: None,
+            drag_activation: None,
             touch_action: None,
             pan_claim: None,
             multi_contact: None,
@@ -624,7 +628,7 @@ impl HandlerSet {
     /// draggable / swipeable container (a dock-panel header, a card, a list
     /// row) without a few px of click jitter starting the ancestor's drag.
     /// The container's own drag still works everywhere else. Honored by
-    /// `arm_drag_observers`; see the `DeadZone` wrapper widget.
+    /// `PointerSequence` member enrolment; see the `DeadZone` wrapper widget.
     pub fn gesture_dead_zone(mut self, dead_zone: bool) -> Self {
         self.gesture_dead_zone = Some(dead_zone);
         self
@@ -659,6 +663,23 @@ impl HandlerSet {
     /// mask. See [`super::arena::WidgetNode::pan_claim`].
     pub fn pan_claim(mut self, claim: PanClaim) -> Self {
         self.pan_claim = Some(claim);
+        self
+    }
+
+    /// When a drag on this widget may begin relative to the press that starts
+    /// it.
+    ///
+    /// [`DragActivation::Auto`](teksilo_tokens::DragActivation::Auto) — the
+    /// default — is `Immediate` for a precise pointer, which is exactly
+    /// today's behaviour, and `AfterLongPress` for a coarse pointer whose axis
+    /// a pan surface has already claimed. Declare
+    /// [`Immediate`](teksilo_tokens::DragActivation::Immediate) for a control
+    /// whose drag *is* the interaction (a slider thumb, a splitter handle) and
+    /// [`AfterLongPress`](teksilo_tokens::DragActivation::AfterLongPress) for
+    /// one that must not steal a scroll (a reorderable list row). See
+    /// [`super::arena::WidgetNode::drag_activation`].
+    pub fn drag_activation(mut self, activation: teksilo_tokens::DragActivation) -> Self {
+        self.drag_activation = Some(activation);
         self
     }
 
@@ -1065,6 +1086,13 @@ impl<W: Widget> WidgetWithHandlers<W> {
     /// [`HandlerSet::pan_claim`].
     pub fn pan_claim(mut self, claim: PanClaim) -> Self {
         self.handler_set.pan_claim = Some(claim);
+        self
+    }
+
+    /// When a drag on this widget may begin. See
+    /// [`HandlerSet::drag_activation`].
+    pub fn drag_activation(mut self, activation: teksilo_tokens::DragActivation) -> Self {
+        self.handler_set.drag_activation = Some(activation);
         self
     }
 
@@ -1740,6 +1768,15 @@ pub trait WidgetBuilder: Widget + Sized + 'static {
     /// [`HandlerSet::pan_claim`].
     fn pan_claim(self, claim: PanClaim) -> WidgetWithHandlers<Self> {
         WidgetWithHandlers::new(self).pan_claim(claim)
+    }
+
+    /// Declare when a drag on this widget may begin relative to the press that
+    /// starts it. See [`HandlerSet::drag_activation`].
+    fn drag_activation(
+        self,
+        activation: teksilo_tokens::DragActivation,
+    ) -> WidgetWithHandlers<Self> {
+        WidgetWithHandlers::new(self).drag_activation(activation)
     }
 
     /// Declare how many simultaneous contacts this widget serves. Default

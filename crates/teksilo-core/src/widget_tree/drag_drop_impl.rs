@@ -1013,11 +1013,27 @@ mod tests {
         );
     }
 
+    /// Every competitor the current mouse press enrolled, innermost first.
+    ///
+    /// The successor to the deleted `armed_drag_observers()`: the same
+    /// question, asked of the `PointerSequence` that replaced
+    /// `drag_observers`.
+    fn mouse_members(
+        tree: &WidgetTree,
+    ) -> Vec<(
+        WidgetId,
+        crate::gesture::MemberRole,
+        crate::gesture::MemberState,
+    )> {
+        tree.sequence_members(crate::pointer::PointerId::MOUSE)
+    }
+
     #[test]
     fn drag_arming_walks_to_an_ancestor_without_a_dead_zone() {
-        // Baseline: pressing a button inside a draggable ancestor arms the
-        // ancestor's drag recognizer (so a press-drag can start the ancestor
-        // drag — the cross-widget tap/drag disambiguation).
+        // Baseline: pressing a button inside a draggable ancestor enrols the
+        // ancestor as a `Gesture` member (so a press-drag can start the
+        // ancestor drag — the cross-widget tap/drag disambiguation).
+        use crate::gesture::{MemberRole, MemberState};
         let mut tree = WidgetTree::new();
         let button = tree.add(FillWidget::new().on_tap(|_e, _ctx| {}));
         let inner = tree.add(StackWidget::new().add_child(button));
@@ -1034,9 +1050,9 @@ mod tests {
             PointerButton::Primary,
         );
         assert_eq!(
-            tree.drag_observers,
-            vec![ancestor],
-            "the draggable ancestor is armed when the button press is not in a dead zone"
+            mouse_members(&tree),
+            vec![(ancestor, MemberRole::Gesture, MemberState::Possible)],
+            "the draggable ancestor competes when the button press is not in a dead zone"
         );
         tree.pointer_up_button(
             Point::new(b.x + b.width / 2.0, b.y + b.height / 2.0),
@@ -1047,9 +1063,9 @@ mod tests {
     #[test]
     fn gesture_dead_zone_blocks_ancestor_drag_arming() {
         // The fix: a `gesture_dead_zone` boundary between the button and the
-        // draggable ancestor stops the arming walk — the ancestor is NEVER
-        // armed, so no amount of pointer jitter while clicking the button can
-        // start the ancestor's drag (capture-release-proof, unlike a
+        // draggable ancestor stops the enrolment walk — the ancestor is NEVER
+        // a member, so no amount of pointer jitter while clicking the button
+        // can start the ancestor's drag (capture-release-proof, unlike a
         // recognizer-shadowing absorber).
         use crate::widget_builder::WidgetBuilder;
         let mut tree = WidgetTree::new();
@@ -1068,13 +1084,60 @@ mod tests {
             PointerButton::Primary,
         );
         assert!(
-            tree.drag_observers.is_empty(),
-            "a dead zone blocks the draggable ancestor from being armed"
+            mouse_members(&tree).is_empty(),
+            "a dead zone blocks the draggable ancestor from competing"
         );
         tree.pointer_up_button(
             Point::new(b.x + b.width / 2.0, b.y + b.height / 2.0),
             PointerButton::Primary,
         );
+    }
+
+    #[test]
+    fn a_dead_zone_boundary_blocks_a_mouse_exactly_as_it_blocks_a_finger() {
+        // `gesture_dead_zone` is NOT sugar for `touch_action(NONE)`: a mouse
+        // ignores touch actions entirely, so the substitution would delete the
+        // mouse behaviour the flag exists for. Same tree, same press, two
+        // pointer kinds, one answer.
+        use crate::pointer::{
+            BackendDeviceKey, PointerIdAllocator, PointerInfo, PointerPhase, PointerSample,
+        };
+        use crate::widget_builder::WidgetBuilder;
+
+        let mut tree = WidgetTree::new();
+        let button = tree.add(FillWidget::new().on_tap(|_e, _ctx| {}));
+        let dead_zone = tree.add(StackWidget::new().add_child(button).gesture_dead_zone(true));
+        tree.add(
+            StackWidget::new()
+                .add_child(dead_zone)
+                .on_drag(|_phase, _ctx| {}),
+        );
+        tree.layout(SizeProposal::exact(100.0, 100.0));
+        let b = tree.bounds(button);
+        let at = Point::new(b.x + b.width / 2.0, b.y + b.height / 2.0);
+
+        tree.pointer_down_button(at, PointerButton::Primary);
+        assert!(
+            mouse_members(&tree).is_empty(),
+            "the mouse enrols no ancestor across the dead zone"
+        );
+        tree.pointer_up_button(at, PointerButton::Primary);
+
+        let contact = PointerIdAllocator::global().begin(BackendDeviceKey::DEFAULT, 41);
+        let sample = |phase| PointerSample {
+            pointer: PointerInfo::touch(contact, crate::pointer::EventTime::from_millis(1)),
+            phase,
+            position: at,
+            button: None,
+            modifiers: Modifiers::NONE,
+            coalesced: Vec::new(),
+        };
+        tree.dispatch_pointer(sample(PointerPhase::Down));
+        assert!(
+            tree.sequence_members(contact).is_empty(),
+            "and neither does a finger"
+        );
+        tree.dispatch_pointer(sample(PointerPhase::Up));
     }
 
     #[test]

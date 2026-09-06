@@ -178,7 +178,7 @@ pub struct WidgetNode {
     /// interactive controls (buttons, a `⋮` menu) placed inside a draggable /
     /// swipeable container (a dock-panel header, a card, a list row) can be
     /// clicked without a few px of pointer jitter starting the ancestor's drag.
-    /// The boundary is honored by `arm_drag_observers`. Mirrors Electron's
+    /// The boundary is honored by `PointerSequence` member enrolment. Mirrors Electron's
     /// `-webkit-app-region: no-drag`. Default `false`. See the `DeadZone`
     /// wrapper widget.
     pub gesture_dead_zone: bool,
@@ -197,6 +197,14 @@ pub struct WidgetNode {
     /// Set via `.pan_claim(..)` or the `.scroll_container(..)` sugar. **Not
     /// yet read at dispatch time** — see [`crate::pointer::touch_action`].
     pub pan_claim: Option<PanClaim>,
+    /// When a drag on this node may begin relative to the press that starts
+    /// it. [`DragActivation::Auto`](teksilo_tokens::DragActivation::Auto) — the
+    /// default — resolves to `Immediate`
+    /// for a precise pointer (today's behaviour, unchanged) and to
+    /// `AfterLongPress` for a coarse pointer whose axis is already claimed by
+    /// a pan surface. Set via `.drag_activation(..)`, read by the arbitration
+    /// when the node is enrolled as a sequence member.
+    pub drag_activation: teksilo_tokens::DragActivation,
     /// How many simultaneous contacts this node's gesture recognizers serve.
     /// Default [`MultiContact::First`] — one press at a time, which is what
     /// every widget written before the touch programme assumes. Under it a
@@ -432,6 +440,7 @@ impl WidgetNode {
             gesture_dead_zone: false,
             touch_action: TouchAction::AUTO,
             pan_claim: None,
+            drag_activation: teksilo_tokens::DragActivation::Auto,
             multi_contact: MultiContact::First,
             keyboard_capture: false,
             hit_transparent: false,
@@ -1434,6 +1443,9 @@ impl WidgetArena {
             }
             if let Some(claim) = handler_set.pan_claim {
                 node.pan_claim = Some(claim);
+            }
+            if let Some(activation) = handler_set.drag_activation {
+                node.drag_activation = activation;
             }
             if let Some(policy) = handler_set.multi_contact {
                 node.multi_contact = policy;

@@ -351,12 +351,6 @@ pub struct WidgetTree {
     /// How many dispatches are on the stack. Non-zero means "queue, do not
     /// re-enter"; see [`Self::pending_dispatch`].
     dispatch_depth: u32,
-    /// Strict ancestors of the captured widget that carry a drag/swipe
-    /// recognizer, armed on `PointerDown` so an ancestor drag can still start
-    /// while a descendant tap holds the capture (tap-vs-drag disambiguation
-    /// across the hit-path). Innermost-first. Drained when a drag latches or
-    /// the pointer sequence ends. See `arm_drag_observers`.
-    drag_observers: Vec<WidgetId>,
     /// Current cursor selected by hover/interaction routing.
     current_cursor: crate::widget::CursorIcon,
     /// Delayed overlay requests (e.g., submenu hover-open delay).
@@ -761,7 +755,6 @@ impl WidgetTree {
             cached_frame: None,
             pending_dispatch: std::collections::VecDeque::new(),
             dispatch_depth: 0,
-            drag_observers: Vec::new(),
             current_cursor: crate::widget::CursorIcon::Default,
             pending_delayed_overlays: Vec::new(),
             active_ids_scratch: Vec::new(),
@@ -848,6 +841,7 @@ impl WidgetTree {
             .with_layout_direction(self.layout_direction)
             .with_window_active(self.is_window_active())
             .with_input_snapshot(self.current_input.clone())
+            .with_touch_action(self.current_frozen_touch_action())
             .with_focus_dispatch_flag(self.in_focus_dispatch.clone())
     }
 
@@ -3152,6 +3146,9 @@ impl WidgetTree {
                         if let Some(claim) = handler_set.pan_claim {
                             node.pan_claim = Some(claim);
                         }
+                        if let Some(activation) = handler_set.drag_activation {
+                            node.drag_activation = activation;
+                        }
                         if let Some(policy) = handler_set.multi_contact {
                             node.multi_contact = policy;
                         }
@@ -3317,6 +3314,9 @@ impl WidgetTree {
                         }
                         if let Some(claim) = handler_set.pan_claim {
                             node.pan_claim = Some(claim);
+                        }
+                        if let Some(activation) = handler_set.drag_activation {
+                            node.drag_activation = activation;
                         }
                         if let Some(policy) = handler_set.multi_contact {
                             node.multi_contact = policy;

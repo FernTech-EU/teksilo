@@ -393,50 +393,206 @@ area would give the button the first and the scroll area the second, and the sec
 would start a pan out from under a press the user thinks is a click. `All` opts a genuine
 multi-touch surface (a pinch-zoom canvas, a piano keyboard) into per-contact arenas.
 
-### 4.2 Cross-widget tap/drag disambiguation — drag observers
+### 4.2 The pointer sequence — cross-widget arbitration
 
 The `GestureArena` is **per-widget**; there is no cross-widget arena. That
-leaves one gap: a descendant's `on_tap` installs a `TapRecognizer` that
+leaves a gap: a descendant's `on_tap` installs a `TapRecognizer` that
 **captures** the pointer on `PointerDown`, which would otherwise route every
 following `PointerMove`/`PointerUp` to the descendant alone — so an *ancestor*
 that wants to start a drag (a `SceneView` behind tappable cards, a draggable
 container wrapping tappable rows) would never see the move and could never
-begin its drag.
+begin its drag. A scroll container, a widget driving its whole interaction
+from an explicit `capture_pointer()`, and a wrapper claiming a press from the
+preview pass all have the same problem, and the same right to compete for it.
 
-The framework closes this without cross-arena arbitration, by leaning on the
-existing **`active_drag` takeover** (an in-flight `start_drag` is consulted
-*before* capture routing). On `PointerDown`, after the normal dispatch, if a
-descendant captured the pointer the framework **arms drag observers**: it walks
-the captured widget's strict ancestors and, for each one that carries an
-`on_drag` / `on_swipe` recognizer, feeds the down event into *that ancestor's
-own* gesture arena (no `on_pointer_event`, no second capture). On each
-subsequent `PointerMove` (while no drag is yet active) it advances those
-observers; the moment one recognizes a drag it calls `start_drag`, and the
-`active_drag` takeover pulls the pointer away from the descendant. If no
-ancestor drag fires, the descendant's tap completes normally on `PointerUp`.
+The framework closes all of that with **one arbitration object per live
+pointer**: a [`PointerSequence`](../crates/teksilo-core/src/gesture/sequence.rs),
+stored on that pointer's entry in the `PointerTable`, carrying the frozen hit
+path, the frozen `TouchAction`, every enrolled competitor, and the winner once
+one is decided.
 
-Two consequences worth knowing:
+```rust
+pub struct PointerSequence {
+    pointer: PointerInfo,
+    path: Vec<WidgetId>,              // frozen at press, target -> root
+    touch_action: TouchAction,        // frozen at press
+    dead_zone_boundary: Option<WidgetId>,
+    members: Vec<SequenceMember>,     // innermost first
+    winner: Option<WidgetId>,
+    capture: Option<WidgetId>,
+    press_origin: Point,
+    last_position: Point,
+    started_at: EventTime,
+    pressed_owner: Option<WidgetId>,
+}
 
-- A widget that has its **own** `on_drag` (a slider, a DnD row) is left
-  untouched — the arming step skips a captured widget that already carries a
-  drag recognizer, so only *pure-tap* descendants inside a draggable ancestor
-  change behavior.
-- A quick press-release on the card is still a **tap** (no move crossed the
-  drag threshold); only a press-and-drag escalates to the ancestor. This is
-  exactly what makes "drag from on top of a select-only scene card starts a
-  marquee, click selects it" work (see
+pub struct SequenceMember {
+    pub id: WidgetId,
+    pub role: MemberRole,             // Gesture | Pan(PanClaim) | RawDrag | RawPreview
+    pub eligible_at: Option<EventTime>,
+    pub state: MemberState,           // Possible | Held | Rejected | Won
+}
+```
+
+Read it with `WidgetTree::sequence_members(PointerId)` and
+`WidgetTree::sequence_winner(PointerId)`.
+
+#### The ordered decision procedure
+
+**At press**, the router hit-tests to a target and then, in order:
+
+1. Freezes the hit path (target → root) and the effective `TouchAction`
+   (`effective_touch_action`, the root-to-target intersection). Both are frozen
+   for the life of the press: a rebuild mid-gesture cannot change who was
+   competing, and `EventContext::touch_action()` reports the frozen value from
+   inside every handler.
+2. Records the **innermost `gesture_dead_zone`** node on that path as the
+   enrolment boundary. Nothing at or above it may be enrolled — for a mouse
+   exactly as for a finger.
+3. Enrols the **pan claimants** on the path (`pan_candidates`), innermost
+   first. Only for a direct pointer, only where the claim's device mask admits
+   it, and only on an axis the frozen `TouchAction` still permits.
+
+**Then**, in this order:
+
+4. **The raw-preview pass runs FIRST and keeps its ROOT-FIRST order.** The
+   first ancestor whose `on_pointer_event` answers `Handled` claims the press
+   as a `RawPreview` winner. This order is load-bearing — `rich_text/mouse.rs`
+   relies on an outer wrapper seeing a press before an inner one — so
+   previewers are deliberately *not* folded into the innermost-first member
+   order.
+5. **An explicit `capture_pointer()` from an undecided sequence is an
+   arbitration act**, not plumbing: the caller is enrolled as a `RawDrag`
+   member, and for a precise pointer with no eligible pan competitor the
+   sequence is decided there and then. Three shipped widgets drive their whole
+   interaction this way — the splitter handle, the dock resize handle and the
+   table column grip all answer `Ignored` from `on_pointer_event`, capture, and
+   work from `PointerMove` with no recognizer at all. The framework's own
+   captures (the gesture arena's Down..Up window, the drag pipeline's) go
+   through a private implicit door and stake no claim.
+6. Direct pointers take an implicit capture on the bubble target; mouse capture
+   stays explicit, exactly as before.
+7. **On move while undecided: timers before positional thresholds**, then
+   members innermost-first.
+   - a `RawDrag` member wins past the sequence's latch slop;
+   - a `Gesture` member wins when its own recognizer recognizes — for a mouse,
+     at `drag_slop`;
+   - a `Pan` member wins only on an axis the frozen `TouchAction` permits and
+     only past `pan_slop`, and a diagonal tie resolves by dominant axis then
+     innermost;
+   - a member with `DragActivation::AfterLongPress` cannot win before its timer
+     and **self-rejects** the instant the press leaves the tap boundary;
+   - `slop_precise` applies **only** to a direct pointer under a frozen
+     `TouchAction::NONE`. A precise pointer always uses `profile.drag_slop`.
+   The member that took the press (the `pressed_owner`) is driven by the
+   ordinary capture route and **stops the walk**: nothing above the innermost
+   drag may win, which is the pre-existing "the innermost drag owns the
+   gesture" rule.
+8. **On up**: the release sweep. Every member still following the press is fed
+   the terminating `Up` so its recognizer clears the origin it recorded — which
+   is what stops an ancestor `DragRecognizer` from staying armed and starting a
+   phantom drag on the next *hover* move — and the pressed owner's own arena
+   resolves its tap through the normal capture dispatch.
+
+A member that loses keeps its handlers and loses only its **recognizers**: the
+router silences the arena of a rejected member, of every non-winner once a
+winner exists, of a peer while another member is holding, and of a member whose
+deferral timer has not yet elapsed. Losing an arbitration is not the same as
+being removed from the tree.
+
+#### Why the mouse is unchanged
+
+`GestureProfile::pan_slop` is `None` for a mouse and `PanClaim::devices`
+defaults to direct pointers, so **no pan member is ever eligible for a mouse**.
+Every mouse sequence is therefore decided at press (an explicit capture, a
+preview claim) or arbitrated exactly as the old drag-observer mechanism
+arbitrated it: ancestors innermost-first, each latching at its own `drag_slop`,
+which on the mouse profile is the 5.0 dp it has always been. On touch the same
+widget defers by `drag_slop` (18) and still beats a scroller, because
+`pan_slop` (36) is larger.
+
+Two consequences worth knowing, unchanged from before:
+
+- A widget with its **own** `on_drag` (a slider, a DnD row) is untouched — it
+  is the innermost member and stops the walk, so only *pure-tap* descendants
+  inside a draggable ancestor change behaviour.
+- A quick press-release on a card is still a **tap**; only a press-and-drag
+  escalates to the ancestor. That is what makes "drag from on top of a
+  select-only scene card starts a marquee, click selects it" work (see
   [teksilo-scene.md](teksilo-scene.md) "Drag mode").
+
+#### `TapBoundary` — one predicate, three consumers
+
+Where a press stops being a tap is decided once, by
+`TapBoundary::for_pointer(&pointer, &profile)`:
+
+| Pointer | Boundary |
+| --- | --- |
+| Precise (mouse, pen) | `Radius(profile.tap_slop)` — 5 dp for a mouse, exactly as before. |
+| Coarse (finger) | `Bounds` — the pressed node's own rect. |
+
+A finger's reported centre wanders several device pixels while resting on the
+control it is pressing, so `tap_slop` must **not** independently cancel a coarse
+tap that never left its target. The same predicate is (a) what `TapRecognizer`
+fails on, (b) what the router uses to fire `GestureArenaSet::cancel_taps` — once
+per press — when the pointer slides off, and (c) what will clear the framework's
+press visual. WCAG 2.2 SC 2.5.2's "slide off to abort" is exactly rule (b): the
+activation is abandoned, and a drag the same press started is not.
+
+#### Handler-side arbitration API
+
+| Call | Meaning |
+| --- | --- |
+| `ctx.claim_gesture()` | This node owns the press; every peer is cancelled. |
+| `ctx.reject_gesture()` | This node withdraws; its peers carry on. |
+| `ctx.hold_gesture()` | Defer this node's own answer — **no peer may win while it holds**. Auto-releases at `profile.max_hold` (250 ms). For an *application* recognizer awaiting an answer it does not have yet; the framework never holds. |
+| `ctx.release_gesture()` | End the hold. |
+| `ctx.owns_pointer()` | Whether this node still holds the pointer's capture. A widget driving an interaction from `PointerMove` should gate on it: capture is an arbitration act, so a widget that lost the press must stop driving even though its own state says it started one. |
+
+#### `gesture_dead_zone` stays itself
+
+`.gesture_dead_zone(true)` (and the [`DeadZone`](../crates/teksilo-widgets/src/primitives/dead_zone.rs)
+wrapper) marks a subtree whose presses may not enrol any ancestor as a
+`Gesture`, `Pan` or `RawDrag` member — kind-independently.
+
+It is **not** sugar for `.touch_action(TouchAction::NONE)`. A mouse ignores
+touch actions entirely, so the substitution would delete the mouse behaviour
+the flag exists for; and on a direct pointer it would drop the latch to
+`slop_precise` and turn the dead zone's own regression — "a jittery click on a
+header button must not drag the panel" — into a 2 px hair trigger.
+
+`DeadZone` also installs a no-op `on_tap` / `on_drag` pair. That is **not**
+redundant with the boundary and is deliberately kept: the flag governs
+*enrolment*, and a press landing on the wrapper's own bare area (a gap between
+the controls it wraps) needs something to take the press so it never reaches
+the ancestor's recognizer at all. The absorbing `on_tap` is what gives the
+wrapper an arena, which stops the bubble; the boundary is what stops the
+ancestors from competing anyway.
+
+#### `sequence_members` in tests
+
+The observable form of the arbitration, and the successor to the deleted
+`armed_drag_observers()`:
+
+```rust
+tree.pointer_down_button(button_center, PointerButton::Primary);
+assert!(
+    tree.sequence_members(PointerId::MOUSE).is_empty(),
+    "a dead zone blocks the draggable ancestor from competing",
+);
+```
 
 ### 4.3 Touch action and pan claims
 
 Two node properties declare what a **direct pointer** (touch, pen) may do to a
 subtree, independently of whether the widget has attached any handler at all.
-Both are pure vocabulary today — the types, the builders, and the two path
-folds that read them are declared in
-[`crates/teksilo-core/src/pointer/touch_action.rs`](../crates/teksilo-core/src/pointer/touch_action.rs),
-but **nothing in the dispatch path consults them yet**; the arbitration
-package that wires them into real gesture recognition is a later step in the
-touch-gesture programme.
+The types, the builders, and the two path folds that read them live in
+[`crates/teksilo-core/src/pointer/touch_action.rs`](../crates/teksilo-core/src/pointer/touch_action.rs).
+Both are read **at press**, folded once and frozen onto the press's
+[`PointerSequence`](#42-the-pointer-sequence--cross-widget-arbitration) —
+`TouchAction` gates which axes a pan member may win on and is what
+`EventContext::touch_action()` reports; `PanClaim` is what enrols a scroll
+container as a competitor in the first place.
 
 **`TouchAction`** — the CSS `touch-action` model. A node declares one; the
 effective value for a target is the *intersection* of its own declaration
@@ -463,8 +619,8 @@ through.
 to consume a direct pointer's drag as content panning. Declared
 *independently* of `TouchAction` — a scrollable states "I pan" via
 `PanClaim` regardless of what its own `touch_action` permits; `TouchAction`
-is what the eventual arbitration consults to decide whether a claim further
-down the chain is still reachable. `WidgetTree::pan_candidates` collects
+is what the arbitration consults to decide whether a claim further down the
+chain is still reachable. `WidgetTree::pan_candidates` collects
 every claim from a target up to the root, **innermost first** — the order a
 boundary pan will chain along once nested scrollables hand off at their
 edges.

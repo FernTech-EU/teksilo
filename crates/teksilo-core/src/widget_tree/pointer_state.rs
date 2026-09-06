@@ -240,117 +240,717 @@ impl WidgetTree {
             .unwrap_or(false)
     }
 
-    /// On `PointerDown`, when a descendant has captured the pointer for a
-    /// non-drag gesture (a tap / long-press), arm every strict ancestor that
-    /// carries a drag/swipe recognizer so an ancestor drag can still begin
-    /// once the pointer moves past threshold — the tap-vs-drag disambiguation
-    /// across the hit-path. Without this a descendant `on_tap` permanently
-    /// shadows an ancestor `on_drag` (the bubble stops + capture routes every
-    /// move to the descendant alone).
+    // -----------------------------------------------------------------
+    // The arbitration spine: one `PointerSequence` per live pointer
+    // -----------------------------------------------------------------
+
+    /// The frozen hit path for `target`: target → root.
+    fn hit_path(&self, target: WidgetId) -> Vec<WidgetId> {
+        let mut path = Vec::new();
+        let mut current = Some(target);
+        while let Some(id) = current {
+            path.push(id);
+            current = self.arena.parent(id);
+        }
+        path
+    }
+
+    /// The **innermost** gesture dead zone on `path`.
     ///
-    /// Skipped when the captured widget can itself drag: the innermost drag
-    /// owns the gesture, so no ancestor observation.
-    pub(super) fn arm_drag_observers(
+    /// Nothing at or above it may be enrolled — for a mouse exactly as for a
+    /// finger. A dead zone is deliberately *not* sugar for
+    /// [`TouchAction::NONE`]: a mouse ignores touch actions entirely, so the
+    /// substitution would delete the mouse behaviour the flag exists for, and
+    /// on a direct pointer it would drop the latch to `slop_precise` and turn
+    /// the `DeadZone` widget's own regression into a 2 px hair trigger.
+    fn dead_zone_on(&self, path: &[WidgetId]) -> Option<WidgetId> {
+        path.iter()
+            .copied()
+            .find(|id| self.is_gesture_dead_zone(*id))
+    }
+
+    /// The gesture profile for the pointer this dispatch is serving.
+    pub(super) fn current_profile(&self) -> teksilo_tokens::GestureProfile {
+        *self
+            .effective_theme
+            .input
+            .profile(self.current_input.pointer.kind)
+    }
+
+    /// The sequence for the pointer this dispatch is serving.
+    pub(crate) fn current_sequence(&self) -> Option<&crate::gesture::PointerSequence> {
+        self.pointers
+            .get(self.current_pointer_id())
+            .and_then(|e| e.sequence.as_ref())
+    }
+
+    /// Run `f` against the current pointer's sequence, taking it out of the
+    /// table for the duration so `self` stays fully borrowable.
+    ///
+    /// The sequence is put back only if the pointer is still live afterwards —
+    /// a handler that ended the pointer must not have its sequence resurrected.
+    fn with_sequence<R>(
         &mut self,
-        captured: WidgetId,
+        f: impl FnOnce(&mut Self, &mut crate::gesture::PointerSequence) -> R,
+    ) -> Option<R> {
+        let pointer = self.current_pointer_id();
+        let mut sequence = self.pointers.get_mut(pointer)?.sequence.take()?;
+        let result = f(self, &mut sequence);
+        if let Some(entry) = self.pointers.get_mut(pointer) {
+            entry.sequence = Some(sequence);
+        }
+        Some(result)
+    }
+
+    /// Open the arbitration for the press being dispatched, **before** any
+    /// handler runs.
+    ///
+    /// It has to be before: `ctx.touch_action()` reports the frozen value from
+    /// inside the press handler, and an explicit `capture_pointer()` made there
+    /// needs a sequence to enrol into. Pan claimants are enrolled here too, so
+    /// that the `DragActivation::Auto` question — "is anything else already
+    /// claiming this axis?" — has an answer during the press.
+    ///
+    /// A direct pointer forms **no sequence at all** when
+    /// [`InputTokens::touch_enabled`](teksilo_tokens::InputTokens::touch_enabled)
+    /// is off: the kill switch means the framework arbitrates nothing for a
+    /// contact, and the sample takes the legacy route unchanged.
+    pub(super) fn begin_sequence(&mut self, target: WidgetId, position: teksilo_canvas::Point) {
+        use crate::gesture::{MemberRole, PointerSequence};
+
+        let pointer = self.current_input.pointer;
+        if pointer.kind.is_direct() && !self.effective_theme.input.touch_enabled {
+            crate::trace_input!(
+                Gestures,
+                "no sequence for {:?}: touch_enabled=false",
+                pointer.id
+            );
+            return;
+        }
+        let path = self.hit_path(target);
+        let touch_action = self.effective_touch_action(target);
+        let boundary = self.dead_zone_on(&path);
+        let now = self.recognizer_context(target).now;
+        let mut sequence =
+            PointerSequence::new(pointer, path, touch_action, boundary, position, now);
+
+        // Pan claimants: direct pointers only. `PanClaim::devices` defaults to
+        // DIRECT and the mouse profile has no `pan_slop` at all, so this loop
+        // adds nothing for a mouse — which is what keeps every mouse sequence
+        // arbitrating exactly as `drag_observers` did.
+        let profile = self.current_profile();
+        if pointer.kind.is_direct() {
+            for (id, claim) in self.pan_candidates(target, touch_action) {
+                if sequence.pan_is_eligible(&claim, &profile) {
+                    sequence.enrol(id, MemberRole::Pan(claim));
+                }
+            }
+        }
+
+        crate::trace_input!(
+            Gestures,
+            "sequence opened for {:?}: action={:?} dead_zone={:?} pan_members={}",
+            pointer.id,
+            touch_action,
+            boundary,
+            sequence.members().len()
+        );
+        if let Some(entry) = self.pointers.get_mut(pointer.id) {
+            entry.sequence = Some(sequence);
+        }
+    }
+
+    /// Enrol the competitors that only become knowable once the press has been
+    /// dispatched, and feed each of them the `Down`.
+    ///
+    /// The gesture members are the pre-existing drag observers, expressed on
+    /// the sequence and with the same three rules:
+    ///
+    /// * the captured widget's own drag owns the gesture — it is enrolled as
+    ///   the innermost member and no ancestor is;
+    /// * a dead-zone boundary stops the walk;
+    /// * only nodes carrying `on_drag` / `on_swipe` compete.
+    ///
+    /// The captured widget's arena has already seen this `Down` through the
+    /// normal bubble, so only the ancestors are fed here.
+    pub(super) fn enrol_sequence_members(
+        &mut self,
         down_event: &WidgetEvent,
         ops: &mut dyn crate::window::WindowOps,
     ) {
-        self.drag_observers.clear();
-        if self.widget_has_drag(captured) {
-            return;
-        }
-        // The press is inside a gesture dead zone (the captured control *is* the
-        // dead zone) → arm no ancestor drag at all.
-        if self.is_gesture_dead_zone(captured) {
-            return;
-        }
-        let mut observers = Vec::new();
-        let mut current = self.arena.parent(captured);
-        while let Some(id) = current {
-            // A dead-zone boundary stops the walk: ancestors AT or ABOVE it are
-            // never armed, so a control inside the dead zone can never start the
-            // ancestor's drag (the robust fix for "clicking a header button +
-            // a few px of jitter drags the whole panel").
-            if self.is_gesture_dead_zone(id) {
-                break;
+        use crate::gesture::MemberRole;
+        use teksilo_tokens::DragActivation;
+
+        let captured = self.current_pointer_capture();
+        let profile = self.current_profile();
+
+        // Which ancestors compete, decided against the frozen path.
+        let Some(to_enrol) = self.with_sequence(|tree, sequence| {
+            sequence.set_capture(captured);
+            sequence.set_pressed_owner(captured);
+            // A decided sequence still enrols its competitors — as **rejected**
+            // ones. Enrolling them is what lets the router stop their
+            // recognizers from being fed at all: an ancestor that never becomes
+            // a member is invisible to the arbitration, and an explicit captor
+            // would lose the press to it on the very next move.
+            let decided = sequence.is_decided();
+            let Some(captured) = captured else {
+                // Nothing took the press, so there is nothing for an ancestor
+                // to observe *through* — the pre-existing gate, kept verbatim.
+                return Vec::new();
+            };
+            if tree.widget_has_drag(captured) {
+                // The innermost drag owns the gesture: it is the member, and no
+                // ancestor is. Its own arena drives it through the capture
+                // route, so it is never fed here.
+                if sequence.enrol(captured, MemberRole::Gesture) && decided {
+                    sequence.reject(captured);
+                }
+                return Vec::new();
             }
-            if self.widget_has_drag(id) {
-                // Build the arena (the bubble never reached this ancestor) and
-                // feed it the press so its DragRecognizer records the origin.
-                {
-                    let WidgetTree {
-                        arena,
-                        gesture_owners,
-                        ..
-                    } = self;
-                    if let Some(node) = arena.get_mut(id) {
-                        Self::ensure_gesture_arena(node, id, gesture_owners);
+            if !sequence.may_enrol(captured) {
+                // The press landed inside a dead zone (the captured control
+                // *is* the dead zone) — arm no ancestor at all.
+                return Vec::new();
+            }
+            let mut out = Vec::new();
+            let mut current = tree.arena.parent(captured);
+            while let Some(id) = current {
+                if !sequence.may_enrol(id) {
+                    break;
+                }
+                if tree.widget_has_drag(id) {
+                    let activation = tree
+                        .arena
+                        .get(id)
+                        .map(|n| n.drag_activation)
+                        .unwrap_or(DragActivation::Auto);
+                    if sequence.enrol_drag(id, MemberRole::Gesture, activation, &profile) {
+                        if decided {
+                            sequence.reject(id);
+                        } else {
+                            out.push((id, true));
+                        }
                     }
                 }
-                self.observe_drag_on_ancestor(id, down_event, ops);
-                observers.push(id);
+                current = tree.arena.parent(id);
             }
-            current = self.arena.parent(id);
-        }
-        self.drag_observers = observers;
-    }
-
-    /// The pointer sequence ended (a tap / plain release) WITHOUT the armed
-    /// ancestor drag latching. Feed the terminating `Up` to each armed ancestor
-    /// so its `DragRecognizer` clears the press origin it recorded when it was
-    /// armed on `PointerDown` — otherwise a later *hover* move would cross the
-    /// drag threshold and start a phantom drag. This matters because the press
-    /// was captured by an interactive descendant (e.g. a card's read-only
-    /// `RichTextEditor`), so the ancestor's own arena never saw this `Up` on
-    /// its own and its recognizer would stay armed indefinitely. Also discards
-    /// the observer list.
-    pub(super) fn release_drag_observers(
-        &mut self,
-        up_event: &WidgetEvent,
-        ops: &mut dyn crate::window::WindowOps,
-    ) {
-        if self.drag_observers.is_empty() {
+            out
+        }) else {
             return;
-        }
-        let observers = std::mem::take(&mut self.drag_observers);
-        for id in &observers {
-            // An `Up` while the recognizer is not mid-drag resolves it to
-            // `Failed` and clears `down_position` — no gesture is produced, so
-            // this only tidies recognizer state.
-            self.observe_drag_on_ancestor(*id, up_event, ops);
+        };
+
+        for (id, feed) in to_enrol {
+            if !feed {
+                continue;
+            }
+            // Build the arena (the bubble never reached this ancestor) and feed
+            // it the press so its DragRecognizer records the origin.
+            {
+                let WidgetTree {
+                    arena,
+                    gesture_owners,
+                    ..
+                } = self;
+                if let Some(node) = arena.get_mut(id) {
+                    Self::ensure_gesture_arena(node, id, gesture_owners);
+                }
+            }
+            self.feed_member_arena(id, down_event, &mut *ops);
         }
     }
 
-    /// On a captured `PointerMove`, feed the move to each armed ancestor drag
-    /// observer (innermost first). If one latches a drag, it has already called
-    /// `start_drag` (so `active_drag` now owns the pointer) — stop observing.
-    pub(super) fn advance_drag_observers(
+    /// Record where the pointer is, so every positional threshold reads one
+    /// number rather than each member tracking its own.
+    pub(super) fn note_sequence_position(&mut self, position: teksilo_canvas::Point) {
+        let pointer = self.current_pointer_id();
+        if let Some(entry) = self.pointers.get_mut(pointer)
+            && let Some(sequence) = entry.sequence.as_mut()
+        {
+            sequence.set_last_position(position);
+        }
+    }
+
+    /// Now, on the input timeline, for the sample being dispatched.
+    ///
+    /// A hand-built `WidgetEvent` carries no timestamp, so it reads the tree
+    /// clock — which is what lets a test drive a deadline with a
+    /// [`ManualClock`](crate::pointer::clock::ManualClock).
+    fn sequence_now(&self) -> crate::pointer::EventTime {
+        let stamped = self.current_input.pointer.time;
+        if stamped == crate::pointer::EventTime::ZERO {
+            self.input_now()
+        } else {
+            stamped
+        }
+    }
+
+    /// **Timers before positional thresholds** — step 4 of the decision
+    /// procedure, run before the move is dispatched anywhere.
+    ///
+    /// It has to be before: a member reached through the ordinary capture
+    /// bubble would otherwise recognize on this very sample, and a deferred
+    /// drag that should have withdrawn — or a peer that should have been frozen
+    /// by a hold — would already have won by the time the arbitration was
+    /// consulted.
+    ///
+    /// Three rules, all no-ops for a press that stayed where it landed:
+    ///
+    /// * a hold older than `profile.max_hold` is released, because the
+    ///   framework never trusts a holder to answer;
+    /// * a member armed by [`DragActivation::AfterLongPress`] withdraws once
+    ///   the press leaves the tap boundary — that travel is a pan, not a
+    ///   considered grab;
+    /// * the pressed node's **tap family** is revoked, once, when the press
+    ///   leaves the tap boundary — WCAG 2.2 SC 2.5.2's "slide off to abort":
+    ///   the activation is abandoned, a drag the same press started is not.
+    ///
+    /// All three read the one [`TapBoundary`](crate::gesture::TapBoundary)
+    /// predicate, which is also what `TapRecognizer` fails on, so the router
+    /// and the recognizer cannot disagree about whether a press has slid off.
+    pub(super) fn tick_sequence_timers(&mut self) {
+        use crate::gesture::MemberState;
+
+        let profile = self.current_profile();
+        let now = self.sequence_now();
+        let Some(revoke) = self.with_sequence(|tree, sequence| {
+            sequence.expire_holds(now, &profile);
+            if sequence.is_decided() {
+                return None;
+            }
+            let origin = sequence.press_origin();
+            let position = sequence.last_position();
+            let boundary = crate::gesture::TapBoundary::for_pointer(&sequence.pointer(), &profile);
+            let left = |id: WidgetId| {
+                let bounds = tree.arena.is_active(id).then(|| tree.arena.bounds(id));
+                boundary.left(origin, position, bounds, &profile)
+            };
+            let rejects: Vec<WidgetId> = sequence
+                .members()
+                .iter()
+                .filter(|m| m.state == MemberState::Possible && m.rejects_on_tap_slop)
+                .filter(|m| left(m.id))
+                .map(|m| m.id)
+                .collect();
+            for id in rejects {
+                sequence.reject(id);
+            }
+            let owner = sequence.pressed_owner()?;
+            if sequence.taps_cancelled() || !left(owner) {
+                return None;
+            }
+            sequence.set_taps_cancelled();
+            Some(owner)
+        }) else {
+            return;
+        };
+        let Some(owner) = revoke else {
+            return;
+        };
+        let pointer = self.current_pointer_id();
+        if let Some(node) = self.arena.get_mut(owner)
+            && let Some(set) = node.handlers.gesture_arena.as_mut()
+        {
+            set.cancel_taps(pointer);
+        }
+    }
+
+    /// Advance an undecided sequence with a move: **timers before positional
+    /// thresholds**, then members innermost-first.
+    ///
+    /// * a `RawDrag` member wins past the sequence's latch slop;
+    /// * a `Gesture` member wins when its own recognizer recognizes — which for
+    ///   a mouse is at `drag_slop`, the 5.0 it has always been;
+    /// * a `Pan` member wins only on an axis the frozen `TouchAction` permits
+    ///   and only past `pan_slop`, which a mouse profile does not have;
+    /// * a member deferred by [`DragActivation::AfterLongPress`] cannot win
+    ///   before its timer and self-rejects once the press leaves the tap
+    ///   boundary.
+    ///
+    /// The member whose id is the captor is skipped **and stops the walk**: it
+    /// is already being driven by the capture dispatch, and letting an ancestor
+    /// past it is exactly the "innermost drag owns the gesture" rule.
+    pub(super) fn advance_sequence(
         &mut self,
         move_event: &WidgetEvent,
         ops: &mut dyn crate::window::WindowOps,
     ) {
-        if self.drag_observers.is_empty() {
+        use crate::gesture::MemberRole;
+
+        let profile = self.current_profile();
+        let now = self.sequence_now();
+
+        let Some(candidates) = self.with_sequence(|_, sequence| {
+            if sequence.is_decided() || sequence.is_held() {
+                // No peer may win while a member is deferring its own answer.
+                return Vec::new();
+            }
+            sequence
+                .members()
+                .iter()
+                .filter(|m| m.is_eligible_at(now))
+                .map(|m| (m.id, m.role))
+                .collect()
+        }) else {
             return;
-        }
-        let observers = std::mem::take(&mut self.drag_observers);
-        for id in &observers {
-            let recognized = self.observe_drag_on_ancestor(*id, move_event, ops);
-            if recognized || self.active_drag.is_some() {
-                // A drag latched on this ancestor — it now owns the pointer.
+        };
+
+        // The stop rule reads the node whose arena took the **press**, not the
+        // live captor: a member that wins mid-dispatch takes the capture, and
+        // keying on the live value would make the winner look like the thing
+        // that stops the walk.
+        let owner = self.current_sequence().and_then(|s| s.pressed_owner());
+        for (id, role) in candidates {
+            if Some(id) == owner && !matches!(role, MemberRole::RawDrag) {
+                // Driven by the capture dispatch; nothing above it may win.
+                break;
+            }
+            let won = match role {
+                MemberRole::Gesture => self.feed_member_arena(id, move_event, &mut *ops),
+                MemberRole::RawDrag => self
+                    .current_sequence()
+                    .is_some_and(|s| s.travel() >= s.latch_slop(&profile)),
+                MemberRole::Pan(claim) => self
+                    .current_sequence()
+                    .and_then(|s| s.pan_axis_past_slop(&claim, &profile))
+                    .is_some(),
+                MemberRole::RawPreview => false,
+            };
+            if won || self.active_drag.is_some() {
+                let winner = if won { id } else { owner.unwrap_or(id) };
+                self.decide_sequence(winner);
                 return;
             }
         }
-        // No drag yet — keep observing on the next move.
-        self.drag_observers = observers;
     }
 
-    /// Feed one raw pointer event to `id`'s gesture arena WITHOUT firing its
-    /// `on_pointer_event` or taking the implicit capture (the descendant
-    /// already holds it). Returns `true` if the arena recognized a gesture
-    /// (a drag/swipe latched), in which case it is dispatched so the
-    /// `on_drag` handler's `start_drag` runs and `active_drag` takes over.
-    fn observe_drag_on_ancestor(
+    /// Declare `winner` the owner of the current sequence and cancel every
+    /// competitor it knocked out — each exactly once.
+    pub(super) fn decide_sequence(&mut self, winner: WidgetId) {
+        let Some(losers) = self.with_sequence(|_, sequence| {
+            if sequence.is_decided() {
+                return Vec::new();
+            }
+            crate::trace_input!(
+                Gestures,
+                "sequence for {:?} decided: {:?}",
+                sequence.pointer().id,
+                winner
+            );
+            sequence.decide(winner)
+        }) else {
+            return;
+        };
+        let pointer = self.current_pointer_id();
+        for id in losers {
+            self.cancel_member_arena(id, pointer);
+        }
+    }
+
+    /// Take a member out of the running and revoke whatever its recognizers had
+    /// accumulated for this contact.
+    fn cancel_member_arena(&mut self, id: WidgetId, pointer: crate::pointer::PointerId) {
+        if let Some(node) = self.arena.get_mut(id)
+            && let Some(set) = node.handlers.gesture_arena.as_mut()
+        {
+            set.cancel(pointer);
+        }
+    }
+
+    /// Re-check every member against the arena, once per sample.
+    ///
+    /// A member whose node was destroyed is cancelled **individually** and
+    /// dropped; the sequence itself dies only when its winner or its captor
+    /// goes away, because those are the two nodes the press actually belongs
+    /// to.
+    pub(super) fn revalidate_sequence(&mut self, ops: &mut dyn crate::window::WindowOps) {
+        let pointer = self.current_pointer_id();
+        let capture = self.current_pointer_capture();
+        let Some((dead, lost_owner)) = self.with_sequence(|tree, sequence| {
+            sequence.set_capture(capture);
+            let dead = sequence.revalidate(&tree.arena);
+            (dead, sequence.lost_owner(&tree.arena))
+        }) else {
+            return;
+        };
+        for id in dead {
+            self.cancel_member_arena(id, pointer);
+        }
+        if lost_owner {
+            crate::trace_input!(
+                Gestures,
+                "sequence for {pointer:?} cancelled: its owner is gone"
+            );
+            self.end_sequence_state(pointer, ops);
+        }
+    }
+
+    /// The release sweep. The pointer sequence ended without a positional
+    /// competitor latching, so feed the terminating `Up` to every member that
+    /// is still following the press.
+    ///
+    /// This is what stops an ancestor `DragRecognizer` — armed on the press
+    /// while an interactive descendant held the capture — from staying armed
+    /// indefinitely and starting a phantom drag on the next *hover* move.
+    pub(super) fn end_sequence(
+        &mut self,
+        up_event: &WidgetEvent,
+        ops: &mut dyn crate::window::WindowOps,
+    ) {
+        use crate::gesture::MemberRole;
+
+        let pointer = self.current_pointer_id();
+        let capture = self.current_pointer_capture();
+        let Some(members) = self.with_sequence(|_, sequence| {
+            sequence.set_terminating(true);
+            sequence.live_ids_with(|role| matches!(role, MemberRole::Gesture))
+        }) else {
+            return;
+        };
+        for id in members {
+            if Some(id) == capture {
+                // Its own arena is about to see this `Up` through the capture
+                // dispatch; feeding it twice would count the release twice.
+                continue;
+            }
+            // An `Up` while the recognizer is not mid-drag resolves it to
+            // `Failed` and clears `down_position` — no gesture is produced, so
+            // this only tidies recognizer state.
+            self.feed_member_arena(id, up_event, &mut *ops);
+        }
+        if let Some(entry) = self.pointers.get_mut(pointer) {
+            entry.sequence = None;
+        }
+    }
+
+    /// Tear the sequence down without a release: every member is cancelled and
+    /// the capture is given back.
+    fn end_sequence_state(
+        &mut self,
+        pointer: crate::pointer::PointerId,
+        _ops: &mut dyn crate::window::WindowOps,
+    ) {
+        let Some(sequence) = self
+            .pointers
+            .get_mut(pointer)
+            .and_then(|e| e.sequence.take())
+        else {
+            return;
+        };
+        for member in sequence.members() {
+            self.cancel_member_arena(member.id, pointer);
+        }
+        self.set_pointer_capture(pointer, None);
+    }
+
+    /// Apply the arbitration acts a handler queued on its context.
+    pub(super) fn apply_gesture_acts(
+        &mut self,
+        acts: &[crate::widget::GestureAct],
+        source: WidgetId,
+    ) {
+        use crate::widget::GestureAct;
+
+        let now = self.sequence_now();
+        let mut claim = false;
+        self.with_sequence(|_, sequence| {
+            for act in acts {
+                match act {
+                    GestureAct::Claim => claim = true,
+                    GestureAct::Reject => {
+                        claim = false;
+                        sequence.reject(source);
+                    }
+                    GestureAct::Hold => {
+                        claim = false;
+                        if !sequence.has_member(source) {
+                            sequence.enrol(source, crate::gesture::MemberRole::Gesture);
+                        }
+                        sequence.hold(source, now);
+                    }
+                    GestureAct::Release => {
+                        sequence.release_hold(source);
+                    }
+                }
+            }
+        });
+        if claim {
+            self.with_sequence(|_, sequence| {
+                if !sequence.has_member(source) {
+                    sequence.enrol(source, crate::gesture::MemberRole::Gesture);
+                }
+            });
+            self.decide_sequence(source);
+        }
+    }
+
+    /// A handler took the pointer with an explicit
+    /// [`capture_pointer`](crate::widget::EventContext::capture_pointer).
+    ///
+    /// That is an arbitration act, not plumbing: the caller is enrolled as a
+    /// [`MemberRole::RawDrag`](crate::gesture::MemberRole::RawDrag) competitor,
+    /// and for a precise pointer with no eligible pan competitor the sequence
+    /// is decided there and then — which is what makes the splitter handle, the
+    /// dock resize handle and the table column grip win their own presses
+    /// instead of losing them to an ancestor that happens to carry `on_drag`.
+    pub(super) fn note_explicit_capture(&mut self, source: WidgetId) {
+        use crate::gesture::MemberRole;
+
+        let Some(decide) = self.with_sequence(|_, sequence| {
+            if sequence.is_decided() {
+                return false;
+            }
+            if !sequence.enrol(source, MemberRole::RawDrag) && !sequence.has_member(source) {
+                return false;
+            }
+            // A precise pointer has no pan competitor by construction
+            // (`GestureProfile::pan_slop` is `None` for a mouse), so this is a
+            // decision at press. A contact defers to `drag_slop` instead, which
+            // is what lets a scroller still beat it at `pan_slop`.
+            !sequence.pointer().kind.is_direct() && !sequence.has_eligible_pan()
+        }) else {
+            return;
+        };
+        if decide {
+            self.decide_sequence(source);
+        }
+    }
+
+    /// A recognizer on `source` produced a gesture that owns the rest of the
+    /// press (a drag or a swipe). That is the observable act of winning, so it
+    /// decides the sequence — whether the recognizer was reached through the
+    /// ordinary capture bubble or fed by the arbitration itself.
+    pub(super) fn note_gesture_recognized(&mut self, source: WidgetId) {
+        use crate::gesture::MemberRole;
+
+        let claimed = self
+            .with_sequence(|_, sequence| {
+                if sequence.is_decided() {
+                    return false;
+                }
+                if !sequence.has_member(source) {
+                    sequence.enrol(source, MemberRole::Gesture);
+                }
+                sequence.has_member(source)
+            })
+            .unwrap_or(false);
+        if claimed {
+            self.decide_sequence(source);
+        }
+    }
+
+    /// Whether `id`'s gesture recognizers must be kept out of this pointer
+    /// event.
+    ///
+    /// A member that lost — because a peer won, because it withdrew, or because
+    /// another member is holding — must not go on recognizing through the
+    /// ordinary bubble. Only its *recognizers* are silenced: its
+    /// `on_pointer_event`, `on_hover` and everything else still run, because
+    /// losing an arbitration is not the same as being removed from the tree.
+    ///
+    /// Inert for every sequence nothing has decided, held or rejected — which
+    /// is every plain mouse tap.
+    pub(super) fn sequence_blocks_arena(&self, id: WidgetId) -> bool {
+        use crate::gesture::MemberState;
+
+        let Some(sequence) = self.current_sequence() else {
+            return false;
+        };
+        let Some(member) = sequence.members().iter().find(|m| m.id == id) else {
+            return false;
+        };
+        match member.state {
+            MemberState::Rejected => true,
+            MemberState::Won => false,
+            _ => {
+                if let Some(winner) = sequence.winner() {
+                    return winner != id;
+                }
+                // A hold freezes every peer: no one may win while a member is
+                // still deciding.
+                if sequence.is_held() && member.state != MemberState::Held {
+                    return true;
+                }
+                // A member deferred by `DragActivation::AfterLongPress` cannot
+                // win before its timer, and that has to hold on the ordinary
+                // bubble too — otherwise the deferral would only bind the
+                // arbitration's own walk.
+                !member.is_eligible_at(self.sequence_now())
+            }
+        }
+    }
+
+    /// A preview handler answered `Handled` on a press. The **root-first**
+    /// preview pass is the first step of the decision procedure, so this claims
+    /// the sequence outright.
+    pub(super) fn note_preview_claim(&mut self, source: WidgetId) {
+        use crate::gesture::MemberRole;
+
+        let claimed = self
+            .with_sequence(|_, sequence| {
+                if sequence.is_decided() {
+                    return false;
+                }
+                sequence.enrol(source, MemberRole::RawPreview)
+            })
+            .unwrap_or(false);
+        if claimed {
+            self.decide_sequence(source);
+        }
+    }
+
+    /// The winner of `pointer`'s sequence, if one has been decided.
+    pub fn sequence_winner(&self, pointer: crate::pointer::PointerId) -> Option<WidgetId> {
+        self.pointers
+            .get(pointer)
+            .and_then(|e| e.sequence.as_ref())
+            .and_then(|s| s.winner())
+    }
+
+    /// Every competitor for `pointer`'s press, innermost first.
+    ///
+    /// The observable form of the cross-widget arbitration, and the successor
+    /// to the old `armed_drag_observers()`: an app can assert that a press on a
+    /// control inside a draggable container enrols no ancestor at all.
+    pub fn sequence_members(
+        &self,
+        pointer: crate::pointer::PointerId,
+    ) -> Vec<(
+        WidgetId,
+        crate::gesture::MemberRole,
+        crate::gesture::MemberState,
+    )> {
+        self.pointers
+            .get(pointer)
+            .and_then(|e| e.sequence.as_ref())
+            .map(|s| s.member_report())
+            .unwrap_or_default()
+    }
+
+    /// The [`TouchAction`] frozen for the pointer this dispatch is serving —
+    /// what [`EventContext::touch_action`](crate::widget::EventContext::touch_action)
+    /// reports.
+    pub(crate) fn current_frozen_touch_action(&self) -> TouchAction {
+        self.current_sequence()
+            .map(|s| s.touch_action())
+            .unwrap_or(TouchAction::AUTO)
+    }
+
+    /// The [`TouchAction`] frozen for `pointer`'s press.
+    pub fn sequence_touch_action(&self, pointer: crate::pointer::PointerId) -> TouchAction {
+        self.pointers
+            .get(pointer)
+            .and_then(|e| e.sequence.as_ref())
+            .map(|s| s.touch_action())
+            .unwrap_or(TouchAction::AUTO)
+    }
+
+    /// Feed one raw pointer event to `id`'s gesture arena set WITHOUT firing
+    /// its `on_pointer_event` or taking the implicit capture (another node
+    /// already holds it). Returns `true` if a gesture was recognized, in which
+    /// case it is dispatched so the `on_drag` handler's `start_drag` runs and
+    /// `active_drag` takes over.
+    fn feed_member_arena(
         &mut self,
         id: WidgetId,
         event: &WidgetEvent,

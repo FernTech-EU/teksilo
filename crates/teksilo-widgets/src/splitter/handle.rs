@@ -306,7 +306,12 @@ impl Widget for SplitterHandle {
                         EventResponse::Ignored
                     }
                     WidgetEvent::PointerMove { position } => {
-                        if !is_dragging.get() {
+                        // `owns_pointer` as well as the local flag: capturing
+                        // the pointer is an arbitration act, and a handle that
+                        // lost the press (a peer claimed it, the sequence was
+                        // cancelled) must stop driving even though its own flag
+                        // is still set.
+                        if !is_dragging.get() || !ctx.owns_pointer() {
                             return EventResponse::Ignored;
                         }
                         let container = container_bounds.get();

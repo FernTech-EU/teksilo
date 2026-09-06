@@ -252,7 +252,11 @@ impl Widget for DockResizeHandle {
                         EventResponse::Ignored
                     }
                     WidgetEvent::PointerMove { position } => {
-                        if !is_dragging_h.get() {
+                        // The local flag says "I started a resize";
+                        // `owns_pointer` says "and I still own the press".
+                        // Capture is an arbitration act, so a handle that lost
+                        // it must stop driving.
+                        if !is_dragging_h.get() || !ctx.owns_pointer() {
                             return EventResponse::Ignored;
                         }
                         let container = container_bounds.get();
