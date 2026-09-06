@@ -33,6 +33,12 @@ pub(crate) type CommandFactory = Box<dyn Fn(&mut EventContext)>;
 /// field cannot receive disallowed characters through any path.
 pub(crate) type CharFilter = Rc<dyn Fn(char) -> bool>;
 
+/// Handler for an assistive technology's whole-value write. Handed the string
+/// the technology set, so a host whose text only *projects* a typed value can
+/// parse it directly instead of re-reading a bound signal the field has not
+/// synced yet.
+pub(crate) type AccessSetValue = Rc<dyn Fn(&str, &mut EventContext)>;
+
 pub(crate) type SharedState = Rc<RefCell<TextInputState>>;
 
 /// Drag-select session lifecycle.
@@ -129,6 +135,20 @@ pub(crate) struct TextInputState {
     pub max_length: Option<usize>,
     pub read_only: bool,
     pub on_submit: Option<Rc<CommandFactory>>,
+    /// Called after an assistive technology sets the field's whole value,
+    /// with the string it set.
+    ///
+    /// `None` for a field whose bound `Signal<String>` **is** the value: the
+    /// write has already landed and there is nothing to derive. A host whose
+    /// text is a *projection* of a typed value — `SpinBox`, the date and time
+    /// editors — installs one, because otherwise the typed value stays stale
+    /// behind a string nothing ever parses.
+    ///
+    /// The string is passed rather than read back from the bound signal
+    /// because the document→signal sync is deferred to the next frame tick:
+    /// a host reading the signal here would parse the text from *before* this
+    /// edit and revert.
+    pub on_access_set_value: Option<AccessSetValue>,
     /// Fired exactly once per focus-loss, AFTER the cursor/selection
     /// have been cleared and scroll reset. Used by SpinBox-style
     /// widgets to parse/clamp/reformat on blur.
@@ -212,6 +232,20 @@ pub(crate) struct TextInputConfig {
     pub max_length: Option<usize>,
     pub read_only: bool,
     pub on_submit: Option<Rc<CommandFactory>>,
+    /// Called after an assistive technology sets the field's whole value,
+    /// with the string it set.
+    ///
+    /// `None` for a field whose bound `Signal<String>` **is** the value: the
+    /// write has already landed and there is nothing to derive. A host whose
+    /// text is a *projection* of a typed value — `SpinBox`, the date and time
+    /// editors — installs one, because otherwise the typed value stays stale
+    /// behind a string nothing ever parses.
+    ///
+    /// The string is passed rather than read back from the bound signal
+    /// because the document→signal sync is deferred to the next frame tick:
+    /// a host reading the signal here would parse the text from *before* this
+    /// edit and revert.
+    pub on_access_set_value: Option<AccessSetValue>,
     pub on_blur: Option<Rc<CommandFactory>>,
     pub char_filter: Option<CharFilter>,
     pub placeholder: String,
@@ -236,6 +270,7 @@ impl TextInputState {
             max_length,
             read_only,
             on_submit,
+            on_access_set_value,
             on_blur,
             char_filter,
             placeholder,
@@ -306,6 +341,7 @@ impl TextInputState {
             max_length,
             read_only,
             on_submit,
+            on_access_set_value,
             on_blur,
             char_filter,
             placeholder,
@@ -519,6 +555,7 @@ mod secure_tests {
             max_length: None,
             read_only: false,
             on_submit: None,
+            on_access_set_value: None,
             on_blur: None,
             char_filter: None,
             placeholder: String::new(),

@@ -1177,3 +1177,67 @@ fn a11y_increment_survives_the_move_to_the_payload_handler() {
     assert!(access(&mut tree, id, Action::Decrement, None));
     assert_eq!(value.get(), 10);
 }
+
+#[test]
+fn a11y_set_value_on_the_inner_field_still_commits() {
+    // The composite publishes two AT nodes: a `Role::SpinButton` root and the
+    // `Role::TextInput` beneath it. Setting the *root* goes through the spin
+    // box's own handler; setting the *field* used to replace the displayed
+    // string and stop there, so the typed value stayed stale until the next
+    // blur and `on_value_changed` never fired — an assistive technology or an
+    // automation client that resolved the text node saw a success and the
+    // wrong value.
+    use std::cell::Cell;
+    use std::rc::Rc;
+    use teksilo_core::accesskit::{Action, ActionData};
+
+    let seen: Rc<Cell<Option<i32>>> = Rc::new(Cell::new(None));
+    let seen_h = seen.clone();
+    let value = Signal::new(10_i32);
+    let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+    let id = tree.add(
+        SpinBox::new(value.clone(), 0, 100).on_value_changed(move |v, _ctx| seen_h.set(Some(v))),
+    );
+    tree.layout(SizeProposal::exact(300.0, 60.0));
+    tick(&mut tree);
+
+    let field = tree
+        .first_focusable_descendant(id)
+        .expect("SpinBox has a focusable inner field");
+    assert!(access(
+        &mut tree,
+        field,
+        Action::SetValue,
+        Some(ActionData::Value("42".into()))
+    ));
+
+    assert_eq!(value.get(), 42, "the typed value follows the text");
+    assert_eq!(seen.get(), Some(42), "and the change is announced");
+}
+
+#[test]
+fn a11y_set_value_on_the_inner_field_clamps_and_reverts_like_typing() {
+    // The commit is the widget's own, so it is the same parse, clamp and
+    // revert `Enter` performs — not a second, looser path.
+    use teksilo_core::accesskit::{Action, ActionData};
+    let (mut tree, value, id) = setup_int(10, 0, 100);
+    let field = tree
+        .first_focusable_descendant(id)
+        .expect("SpinBox has a focusable inner field");
+
+    assert!(access(
+        &mut tree,
+        field,
+        Action::SetValue,
+        Some(ActionData::Value("1000".into()))
+    ));
+    assert_eq!(value.get(), 100, "out of range clamps");
+
+    assert!(access(
+        &mut tree,
+        field,
+        Action::SetValue,
+        Some(ActionData::Value("seven".into()))
+    ));
+    assert_eq!(value.get(), 100, "an unparseable string reverts");
+}

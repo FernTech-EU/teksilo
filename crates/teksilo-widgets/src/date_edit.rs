@@ -756,6 +756,18 @@ impl Widget for DateEdit {
         let mask_string = mask_for_pattern(&pattern_rc);
         let mut text_input = TextInput::new(self.text_signal.clone())
             .placeholder(placeholder.clone())
+            // An assistive-technology `SetValue` on the inner text node is a
+            // finished edit, not a keystroke: push the string the technology
+            // set and run the same commit `Enter` runs, or the typed value
+            // stays stale behind a display nothing ever parses.
+            .on_access_set_value({
+                let text_signal = self.text_signal.clone();
+                let commit = commit.clone();
+                move |text: &str, ctx: &mut EventContext| {
+                    text_signal.set(text.to_string());
+                    commit(ctx);
+                }
+            })
             .enabled(enabled)
             .read_only(read_only)
             .input_mask(mask_string)

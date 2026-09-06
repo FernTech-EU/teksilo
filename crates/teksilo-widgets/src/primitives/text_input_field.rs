@@ -194,6 +194,7 @@ pub struct TextInputField {
     max_length: Option<usize>,
     placeholder: String,
     on_submit: Option<CommandFactory>,
+    on_access_set_value: Option<super::text_input_field::state::AccessSetValue>,
     on_blur: Option<CommandFactory>,
     char_filter: Option<CharFilter>,
     /// Fixed trailing label rendered inside the field's border.
@@ -297,6 +298,7 @@ impl TextInputField {
             max_length: None,
             placeholder: String::new(),
             on_submit: None,
+            on_access_set_value: None,
             on_blur: None,
             char_filter: None,
             suffix: Prop::Static(String::new()),
@@ -363,6 +365,31 @@ impl TextInputField {
     /// stays where it was.
     pub fn on_submit_fn(mut self, f: impl Fn(&mut EventContext) + 'static) -> Self {
         self.on_submit = Some(Box::new(f));
+        self
+    }
+
+    /// Handle an assistive technology's whole-value write, given the string it
+    /// set.
+    ///
+    /// Leave it unset for a field whose bound `Signal<String>` **is** the
+    /// value: the write has already landed and there is nothing to derive.
+    ///
+    /// Install one for a field whose text is a *projection* of a typed value,
+    /// as `SpinBox` and the date and time editors are. There the string is
+    /// only a display of the real value, so without this an
+    /// `Action::SetValue` resolved against the inner text node changes what is
+    /// shown, leaves the typed value stale until the next blur, and never
+    /// fires the host's change callback — an assistive technology or an
+    /// automation client sees a success and the wrong value. The composite's
+    /// own node handles `SetValue` properly; this closes the same door on the
+    /// text node beneath it.
+    ///
+    /// The string is handed over rather than read back from the bound signal
+    /// because the document→signal sync is deferred to the next frame tick, so
+    /// a host reading the signal here would parse the text from *before* this
+    /// edit and revert.
+    pub fn on_access_set_value(mut self, f: impl Fn(&str, &mut EventContext) + 'static) -> Self {
+        self.on_access_set_value = Some(std::rc::Rc::new(f));
         self
     }
 
@@ -789,6 +816,7 @@ impl Widget for TextInputField {
             max_length: self.max_length,
             read_only: read_only_effective,
             on_submit,
+            on_access_set_value: self.on_access_set_value.clone(),
             on_blur,
             char_filter: self.char_filter.take(),
             placeholder: self.placeholder.clone(),
@@ -1930,8 +1958,18 @@ fn handle_access_action(
             let st = state.borrow();
             st.cursor.select(SelectionType::Document);
             let _ = st.cursor.insert_text(value.as_ref());
+            // A composite whose text only *projects* a typed value handles the
+            // write itself, because an assistive technology's `SetValue` is a
+            // finished edit, not a keystroke: without it a `SpinBox` would
+            // show the new number, keep the old value until the next blur, and
+            // never fire `on_value_changed`. It is handed the string, not left
+            // to read the bound signal, which this edit has not synced yet.
+            let host = st.on_access_set_value.clone();
             drop(st);
             sync_cursor_signals(state);
+            if let Some(host) = host {
+                host(value.as_ref(), ctx);
+            }
             ctx.request_frame();
             EventResponse::Handled
         }

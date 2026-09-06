@@ -50,6 +50,14 @@ See [docs/range-keyboard.md](docs/range-keyboard.md) for the full chord table.
   and the W3C ARIA combobox pattern: "displays the popup without moving focus",
   which is why the modified form exists beside a bare `ArrowDown` that both
   opens and advances.
+- `TextInputField::on_access_set_value` (forwarded by `TextInput`): handle an
+  assistive technology's whole-value write, given the string it set. Unset for
+  a field whose bound `Signal<String>` **is** the value — the write has already
+  landed and there is nothing to derive. `SpinBox` and the four date and time
+  editors install one, because their text is only a projection of a typed
+  value. The string is handed over rather than read back from the signal
+  because the field defers its document→signal sync to the next frame tick, so
+  a host reading the signal there would parse the text from *before* the edit.
 - **`F4` toggles the popup** on the drop-down *fields* — `ComboBox` and
   `DateEdit` — the Win32 / Qt / WPF chord. Deliberately not on `PopoverWidget`,
   which also backs toolbar chevrons and menu buttons and carries no such
@@ -143,6 +151,13 @@ See [docs/range-keyboard.md](docs/range-keyboard.md) for the full chord table.
   separator are honoured and an unparseable one is *reported* unhandled rather
   than failing quietly. A read-only spin box advertises and services none of
   `Increment` / `Decrement` / `SetValue`.
+- **An assistive-technology `SetValue` aimed at a composite's inner text node
+  now commits.** A `SpinBox` or a date editor publishes two nodes — the value
+  root and the `Role::TextInput` beneath it — and setting the field replaced
+  the displayed string and stopped there, so the typed value stayed stale
+  until the next blur and `on_value_changed` never fired. The field commits
+  through its host now, by the same parse, clamp and revert `Enter` performs.
+  A plain `TextInput` is unchanged: its bound signal already *is* the value.
 - **A modified letter chord over a focused `ComboBox` no longer changes the
   selection.** Type-ahead matched any key carrying a character and returned
   `Handled`, so an unregistered `Ctrl+C` appended `c` to the prefix, jumped the

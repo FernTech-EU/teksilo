@@ -32,7 +32,7 @@ TextInput::new(search.clone())
 
 ## Builder methods at a glance
 
-`variant`, `style`, `placeholder`, `label`, `enabled`, `read_only`, `max_length`, `show_clear_button`, `min_width`, `leading_slot`, `trailing_slot`, `on_submit_fn`, `on_blur_fn`, `char_filter`, `suffix`, `input_mask`, `input_purpose`, `active_descendant`, `controls`, `validator`, `caret_position`, `handle`, `field_id`, `caret_setter`, `validation_feedback_signal`, `validation`, `validation_feedback`, `tooltip`, `rich_tooltip_key`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`, `text`
+`variant`, `style`, `placeholder`, `label`, `enabled`, `read_only`, `max_length`, `show_clear_button`, `min_width`, `leading_slot`, `trailing_slot`, `on_submit_fn`, `on_access_set_value`, `on_blur_fn`, `char_filter`, `suffix`, `input_mask`, `input_purpose`, `active_descendant`, `controls`, `validator`, `caret_position`, `handle`, `field_id`, `caret_setter`, `validation_feedback_signal`, `validation`, `validation_feedback`, `tooltip`, `rich_tooltip_key`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`, `text`
 
 ## API reference
 
@@ -143,6 +143,13 @@ Typically an `IconButton` or `IconWidget`.
 #### `pub fn on_submit_fn(mut self, f: impl Fn(&mut EventContext) + 'static) -> Self`
 
 Closure invoked on Enter. Forwarded to `TextInputField`.
+
+#### `pub fn on_access_set_value(mut self, f: impl Fn(&str, &mut EventContext) + 'static) -> Self`
+
+Handle an assistive technology's whole-value write, given the string it
+set. Forwarded 1:1 to `TextInputField::on_access_set_value`, where the
+reasoning lives. Composites whose text projects a typed value —
+`SpinBox`, the date and time editors — install one.
 
 #### `pub fn on_blur_fn(mut self, f: impl Fn(&mut EventContext) + 'static) -> Self`
 

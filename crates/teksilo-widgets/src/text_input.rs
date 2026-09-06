@@ -88,6 +88,7 @@ pub struct TextInput {
     read_only: bool,
     max_length: Option<usize>,
     on_submit: Option<Box<dyn Fn(&mut EventContext)>>,
+    on_access_set_value: Option<std::rc::Rc<dyn Fn(&str, &mut EventContext)>>,
     on_blur: Option<Box<dyn Fn(&mut EventContext)>>,
     char_filter: Option<std::rc::Rc<dyn Fn(char) -> bool>>,
     suffix: String,
@@ -180,6 +181,7 @@ impl TextInput {
             read_only: false,
             max_length: None,
             on_submit: None,
+            on_access_set_value: None,
             on_blur: None,
             char_filter: None,
             suffix: String::new(),
@@ -312,6 +314,15 @@ impl TextInput {
     /// Closure invoked on Enter. Forwarded to `TextInputField`.
     pub fn on_submit_fn(mut self, f: impl Fn(&mut EventContext) + 'static) -> Self {
         self.on_submit = Some(Box::new(f));
+        self
+    }
+
+    /// Handle an assistive technology's whole-value write, given the string it
+    /// set. Forwarded 1:1 to `TextInputField::on_access_set_value`, where the
+    /// reasoning lives. Composites whose text projects a typed value —
+    /// `SpinBox`, the date and time editors — install one.
+    pub fn on_access_set_value(mut self, f: impl Fn(&str, &mut EventContext) + 'static) -> Self {
+        self.on_access_set_value = Some(std::rc::Rc::new(f));
         self
     }
 
@@ -587,6 +598,9 @@ impl Widget for TextInput {
             // Re-wrap the Rc'd closure into a plain closure for the
             // primitive's builder surface, which owns its own Rc.
             field = field.char_filter(move |c| (f)(c));
+        }
+        if let Some(cb) = self.on_access_set_value.take() {
+            field = field.on_access_set_value(move |text, ctx| (cb)(text, ctx));
         }
         if let Some(cb) = self.on_submit.take() {
             field = field.on_submit_fn(move |ctx| (cb)(ctx));

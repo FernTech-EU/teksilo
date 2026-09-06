@@ -1065,6 +1065,16 @@ impl<T: SpinValue> Widget for SpinBox<T> {
 
         let mut field = TextInputField::new(self.text_signal.clone())
             .enabled(enabled)
+            // An assistive-technology `SetValue` on the inner text node is a
+            // finished edit, not a keystroke, so it takes the same parse,
+            // clamp and revert `Enter` takes. Handed the string rather than
+            // reading `text_signal`, which this edit has not synced yet.
+            .on_access_set_value({
+                let commit_text = commit_text.clone();
+                move |text: &str, ctx: &mut EventContext| {
+                    let _ = commit_text(text, ctx);
+                }
+            })
             .read_only(read_only)
             .placeholder(self.placeholder.clone())
             .text_height(text_area_height)

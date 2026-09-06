@@ -1100,6 +1100,18 @@ impl DateTimeEdit {
         let is_time_half = matches!(kind, DateTimeHalfKind::Time { .. });
         let mut field = TextInputField::new(text_signal.clone())
             .enabled(self.enabled.clone())
+            // An assistive-technology `SetValue` on the inner text node is a
+            // finished edit, not a keystroke: push the string the technology
+            // set and run the same commit `Enter` runs, or the typed value
+            // stays stale behind a display nothing ever parses.
+            .on_access_set_value({
+                let text_signal = text_signal.clone();
+                let commit = commit.clone();
+                move |text: &str, ctx: &mut EventContext| {
+                    text_signal.set(text.to_string());
+                    commit(ctx);
+                }
+            })
             .read_only(self.read_only)
             .placeholder(placeholder)
             .text_height(text_area_height)

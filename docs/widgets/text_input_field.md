@@ -55,7 +55,7 @@ ctx.add(
 
 ## Builder methods at a glance
 
-`placeholder`, `enabled`, `read_only`, `max_length`, `on_submit_fn`, `on_blur_fn`, `char_filter`, `suffix`, `text_height`, `interaction_signal`, `input_mask`, `mask_placeholder`, `validator`, `secure`, `input_purpose`, `active_descendant`, `controls`, `echo_char`, `revealed`, `at_reveal_policy`, `allow_copy`, `validation_feedback_signal`, `text`, `share_handle`, `handle`, `interaction`, `caret_position`, `caret_setter`
+`placeholder`, `enabled`, `read_only`, `max_length`, `on_submit_fn`, `on_access_set_value`, `on_blur_fn`, `char_filter`, `suffix`, `text_height`, `interaction_signal`, `input_mask`, `mask_placeholder`, `validator`, `secure`, `input_purpose`, `active_descendant`, `controls`, `echo_char`, `revealed`, `at_reveal_policy`, `allow_copy`, `validation_feedback_signal`, `text`, `share_handle`, `handle`, `interaction`, `caret_position`, `caret_setter`
 
 ## API reference
 
@@ -163,6 +163,29 @@ approximated — each `char` counts as one unit, matching
 Closure fired on `Enter`. Unlike `on_blur_fn`, this does
 not move focus — the field stays focused and the caret
 stays where it was.
+
+#### `pub fn on_access_set_value(mut self, f: impl Fn(&str, &mut EventContext) + 'static) -> Self`
+
+Handle an assistive technology's whole-value write, given the string it
+set.
+
+Leave it unset for a field whose bound `Signal<String>` **is** the
+value: the write has already landed and there is nothing to derive.
+
+Install one for a field whose text is a *projection* of a typed value,
+as `SpinBox` and the date and time editors are. There the string is
+only a display of the real value, so without this an
+`Action::SetValue` resolved against the inner text node changes what is
+shown, leaves the typed value stale until the next blur, and never
+fires the host's change callback — an assistive technology or an
+automation client sees a success and the wrong value. The composite's
+own node handles `SetValue` properly; this closes the same door on the
+text node beneath it.
+
+The string is handed over rather than read back from the bound signal
+because the document→signal sync is deferred to the next frame tick, so
+a host reading the signal here would parse the text from *before* this
+edit and revert.
 
 #### `pub fn on_blur_fn(mut self, f: impl Fn(&mut EventContext) + 'static) -> Self`
 
