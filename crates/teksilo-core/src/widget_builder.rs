@@ -548,8 +548,10 @@ impl HandlerSet {
     /// action, target NodeId (may be a synthetic widget-emitted
     /// child), and optional `ActionData` payload (e.g.
     /// `SetTextSelection(TextSelection)` or `Value(Box<str>)`).
-    /// When this slot is set it's called INSTEAD of
-    /// `on_access_action` for the same event.
+    ///
+    /// Layered with [`on_access_action`](Self::on_access_action) rather than
+    /// replacing it: both fire for the same dispatched action, and it counts as
+    /// handled if either says so.
     pub fn on_access_action_request(
         mut self,
         f: impl FnMut(

@@ -50,7 +50,7 @@ use teksilo_i18n::lit;
 use teksilo_canvas::{Rect, Size, SizeProposal};
 use teksilo_core::accessibility::{AccessNodeBuilder, widget_id_to_node_id};
 use teksilo_core::build_context::BuildContext;
-use teksilo_core::event::{EventResponse, Key, Modifiers, WidgetEvent};
+use teksilo_core::event::{EventResponse, Key, WidgetEvent};
 use teksilo_core::overlay::{
     DismissBehavior, OverlayDismissCallback, OverlayLayer, OverlayPlacement, OverlayRequest,
 };
@@ -62,6 +62,7 @@ use teksilo_core::widget_id::WidgetId;
 use teksilo_data::{DataChange, ListDataSource, ListModel};
 use teksilo_tokens::{TextRole, TextStyleRole};
 
+use crate::common::range_nav;
 use crate::primitives::TextWidget;
 
 mod item;
@@ -901,59 +902,49 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
                         return EventResponse::Ignored;
                     };
 
-                    // `Alt+ArrowDown` opens the list **without moving the
-                    // selection**, `Alt+ArrowUp` closes it — the Win32 /
-                    // WinForms / WPF combo chord and the W3C ARIA combobox
-                    // pattern ("if the popup is available but not displayed,
-                    // displays the popup without moving focus"). Bare
-                    // `ArrowDown` both opens and advances, which is the whole
-                    // reason the modified form exists. Claimed above the
-                    // rejection below, which turns every other Alt chord away.
-                    if modifiers.alt() && !modifiers.ctrl() && !modifiers.super_key() {
-                        match key {
-                            Key::ArrowDown => {
-                                if !is_open.get() {
-                                    open_overlay(ctx);
-                                }
+                    // The platform drop-down chords — `Alt+ArrowDown` opens
+                    // the list without moving the selection, `Alt+ArrowUp`
+                    // closes it, `F4` toggles. One table, shared with
+                    // `PopoverWidget` and `DateEdit`, so the three cannot
+                    // drift. Claimed above the rejection below, which turns
+                    // every other accelerator chord away, and below the
+                    // shortcut pipeline, so an app that binds `F4` itself keeps
+                    // it.
+                    match range_nav::disclosure_chord(*key, *modifiers) {
+                        Some(range_nav::DisclosureChord::Open) => {
+                            if !is_open.get() {
+                                open_overlay(ctx);
+                            }
+                            return EventResponse::Handled;
+                        }
+                        Some(range_nav::DisclosureChord::Close) => {
+                            if is_open.get() {
+                                is_open.set(false);
+                                ctx.dismiss_all_except_hosts();
                                 return EventResponse::Handled;
                             }
-                            Key::ArrowUp => {
-                                if is_open.get() {
-                                    is_open.set(false);
-                                    ctx.dismiss_all_except_hosts();
-                                    return EventResponse::Handled;
-                                }
-                                return EventResponse::Ignored;
+                            return EventResponse::Ignored;
+                        }
+                        Some(range_nav::DisclosureChord::Toggle) => {
+                            if is_open.get() {
+                                is_open.set(false);
+                                ctx.dismiss_all_except_hosts();
+                            } else {
+                                open_overlay(ctx);
                             }
-                            _ => {}
+                            return EventResponse::Handled;
                         }
+                        None => {}
                     }
 
-                    // `F4` toggles the list: the Win32 / Qt / WPF combo-box
-                    // chord. Below the Alt branch, so `Alt+F4` still reaches
-                    // the window, and below the shortcut pipeline, so an app
-                    // that binds F4 itself keeps it.
-                    if *key == Key::F4 && *modifiers == Modifiers::NONE {
-                        if is_open.get() {
-                            is_open.set(false);
-                            ctx.dismiss_all_except_hosts();
-                        } else {
-                            open_overlay(ctx);
-                        }
-                        return EventResponse::Handled;
-                    }
-
-                    // Everything below is a bare or `Shift`-only chord.
-                    //
-                    // Reject the union of `Ctrl` / `Alt` / `Super` rather than
-                    // `Modifiers::command()`: this is a *refusal*, and
-                    // `command()` is Ctrl off macOS and Cmd on it, so matching
-                    // on it would let a real macOS `Ctrl+letter` through into
-                    // type-ahead and let `Super+letter` through everywhere.
-                    // `Shift` is deliberately accepted: a capital letter is how
-                    // people type, and on a Latin layout the shifted character
-                    // arrives with SHIFT still set. Same rule, and the same
-                    // reason, as `MenuList` and `list_nav::tree_chord`.
+                    // Everything below is a chord that typed a character —
+                    // bare, `Shift`-only, or `AltGr`, which is `Ctrl+Alt` on
+                    // every platform that has it and is how a German keyboard
+                    // types `@`. `Ctrl` alone and `Alt` alone are accelerators
+                    // and fall through; see `range_nav::is_text_entry_chord`
+                    // for why this is not simply the negation of the
+                    // accelerator test, and why neither spells
+                    // `Modifiers::command()`.
                     //
                     // Without this, `Ctrl+C` over a focused combo appended 'c'
                     // to the type-ahead prefix and jumped the selection to the
@@ -961,15 +952,25 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
                     // returned `Handled`, so no ancestor ever saw the chord.
                     // Registered `Shortcut`s resolve before any of this, so an
                     // app-bound chord was never at risk; an *unbound* one was.
-                    if modifiers.ctrl() || modifiers.alt() || modifiers.super_key() {
+                    if !range_nav::is_text_entry_chord(*modifiers) {
                         return EventResponse::Ignored;
                     }
+
+                    // …but only *type-ahead* runs for `AltGr`. `AltGr` is
+                    // `Ctrl+Alt`, which is still an accelerator to everything
+                    // that is not a character: `disclosure_chord` above
+                    // deliberately declines `Ctrl+Alt+↓` so the application
+                    // gets it, and it would be undone here if the arrow arm
+                    // below then opened the list, moved the selection and
+                    // reported the chord handled. The navigation keys are
+                    // therefore the unmodified (or `Shift`-ed) forms only.
+                    let nav = !range_nav::is_accelerator_chord(*modifiers);
 
                     match event {
                         WidgetEvent::KeyDown {
                             key: Key::Enter | Key::Space,
                             ..
-                        } => {
+                        } if nav => {
                             if is_open.get() {
                                 is_open.set(false);
                                 ctx.dismiss_all_except_hosts();
@@ -980,7 +981,7 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
                         }
                         WidgetEvent::KeyDown {
                             key: Key::Escape, ..
-                        } => {
+                        } if nav => {
                             if is_open.get() {
                                 is_open.set(false);
                                 ctx.dismiss_all_except_hosts();
@@ -1001,7 +1002,7 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
                         WidgetEvent::KeyDown {
                             key: Key::ArrowDown,
                             ..
-                        } => {
+                        } if nav => {
                             if !is_open.get() {
                                 open_overlay(ctx);
                             }
@@ -1034,7 +1035,7 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
                         }
                         WidgetEvent::KeyDown {
                             key: Key::ArrowUp, ..
-                        } => {
+                        } if nav => {
                             if !is_open.get() {
                                 open_overlay(ctx);
                             }
@@ -1051,14 +1052,14 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
                             pick_at(target, ctx);
                             EventResponse::Handled
                         }
-                        WidgetEvent::KeyDown { key: Key::Home, .. } => {
+                        WidgetEvent::KeyDown { key: Key::Home, .. } if nav => {
                             if source.len() == 0 {
                                 return EventResponse::Handled;
                             }
                             pick_at(0, ctx);
                             EventResponse::Handled
                         }
-                        WidgetEvent::KeyDown { key: Key::End, .. } => {
+                        WidgetEvent::KeyDown { key: Key::End, .. } if nav => {
                             let n = source.len();
                             if n == 0 {
                                 return EventResponse::Handled;
@@ -1073,7 +1074,7 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
                         // follow via `register_scroll_into_view`.
                         WidgetEvent::KeyDown {
                             key: Key::PageDown, ..
-                        } => {
+                        } if nav => {
                             let n = source.len();
                             if n == 0 {
                                 return EventResponse::Handled;
@@ -1092,7 +1093,7 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
                         }
                         WidgetEvent::KeyDown {
                             key: Key::PageUp, ..
-                        } => {
+                        } if nav => {
                             let n = source.len();
                             if n == 0 {
                                 return EventResponse::Handled;

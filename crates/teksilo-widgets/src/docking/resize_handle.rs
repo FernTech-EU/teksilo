@@ -297,6 +297,14 @@ impl Widget for DockResizeHandle {
                     return EventResponse::Ignored;
                 };
 
+                // Nothing here is the application's chord. `Enter` was
+                // matched before this test, so `Ctrl+Enter` hid the side and
+                // reported the key handled — the one row of
+                // `docs/range-keyboard.md` the handle did not honour.
+                if range_nav::is_accelerator_chord(*modifiers) {
+                    return EventResponse::Ignored;
+                }
+
                 // Enter toggles the side — suppressed when collapsing is
                 // locked, as it always was.
                 if matches!(key, Key::Enter) && allow_collapse {

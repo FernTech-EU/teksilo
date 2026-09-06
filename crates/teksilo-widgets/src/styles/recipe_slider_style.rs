@@ -213,9 +213,16 @@ impl Widget for SliderBody {
                     (bounds.height - thumb_radius * 2.0).max(0.0),
                 );
                 let usable = track.height;
-                let thumb_pos = track.y + usable * t;
-                let fill_h = (thumb_pos - track.y).max(0.0);
-                let fill = Rect::new(tx, track.y, track_height, fill_h);
+                // A vertical slider's minimum is at the **bottom** and its
+                // maximum at the top — Qt's `QSlider`, GTK4's `GtkScale`, the
+                // Win32 trackbar and `<input type=range>` all agree, and it is
+                // what makes `ArrowUp` (which `range_nav` reports as an
+                // increase) move the thumb up. Growing the thumb position with
+                // `t` sent it *down* on every increase, so the keys and the
+                // pointer both drove the control backwards.
+                let thumb_pos = track.bottom() - usable * t;
+                let fill_h = (track.bottom() - thumb_pos).max(0.0);
+                let fill = Rect::new(tx, thumb_pos, track_height, fill_h);
                 (track, fill, bounds.x + bounds.width * 0.5, thumb_pos)
             }
         };

@@ -161,6 +161,45 @@ fn a_modified_letter_chord_falls_through_instead_of_running_type_ahead() {
 }
 
 #[test]
+fn an_alt_gr_character_is_type_ahead_not_an_accelerator() {
+    // `AltGr` is the third-level shift on every non-US layout and reaches the
+    // application as `Ctrl+Alt` — it is how a German keyboard types `@`, a
+    // French one `€`, a Polish one `ą`. Refusing the union of Ctrl / Alt /
+    // Super therefore made every character behind `AltGr` dead for type-ahead
+    // while the unshifted ones kept working, so the feature half-worked in
+    // exactly the locales that needed it most.
+    use teksilo_core::event::Modifiers;
+    let alt_gr = Modifiers::CTRL | Modifiers::ALT;
+
+    let mut tree = light_tree();
+    let selected = Signal::new(None::<String>);
+    let cb = tree.add(ComboBox::new(
+        vec!["Apple", "€uro", "Zürich"],
+        selected.clone(),
+    ));
+    tree.layout(SizeProposal::exact(300.0, 50.0));
+    tree.focus(cb);
+
+    tree.press_key(Key::Character('€'), alt_gr);
+    assert_eq!(
+        selected.get().as_deref(),
+        Some("€uro"),
+        "an AltGr-composed character types"
+    );
+
+    // Ctrl alone and Alt alone are still accelerators, which is what keeps this
+    // from being a blanket "accept everything".
+    for mods in [Modifiers::CTRL, Modifiers::ALT, Modifiers::SUPER] {
+        tree.press_key(Key::Z, mods);
+        assert_eq!(
+            selected.get().as_deref(),
+            Some("€uro"),
+            "Z with {mods:?} must fall through"
+        );
+    }
+}
+
+#[test]
 fn a_modified_nav_key_falls_through_too() {
     // `Ctrl+Home` used to pick item 0 and eat the chord. A combo box's cursor
     // *is* its value, so there is nothing for the accelerator to scope — unlike
@@ -202,6 +241,45 @@ fn alt_arrow_down_opens_the_list_without_moving_the_selection() {
         "the list closes"
     );
     assert_eq!(selected.get().as_deref(), Some("Apple"));
+}
+
+#[test]
+fn an_altgr_chord_types_but_does_not_navigate() {
+    // `AltGr` is `Ctrl+Alt`, and it is how a non-US layout types a character —
+    // so it must reach type-ahead. It is still an accelerator to everything
+    // that is not a character: `disclosure_chord` declines `Ctrl+Alt+ArrowDown`
+    // precisely so the application gets it, and the widget must not take it
+    // back through the plain arrow arm.
+    let mut tree = light_tree();
+    let selected = Signal::new(Some("Apple".to_string()));
+    let cb = tree.add(ComboBox::new(fruits(), selected.clone()));
+    tree.layout(SizeProposal::exact(300.0, 200.0));
+    tree.focus(cb);
+
+    let altgr = teksilo_core::event::Modifiers::CTRL | teksilo_core::event::Modifiers::ALT;
+    for key in [
+        Key::ArrowDown,
+        Key::ArrowUp,
+        Key::Home,
+        Key::End,
+        Key::PageDown,
+    ] {
+        tree.press_key(key, altgr);
+        tree.layout(SizeProposal::exact(300.0, 200.0));
+        assert_eq!(
+            selected.get().as_deref(),
+            Some("Apple"),
+            "{key:?} with AltGr must not move the selection"
+        );
+        assert!(
+            !tree.accessibility_node(cb).is_expanded(),
+            "{key:?} with AltGr must not open the list"
+        );
+    }
+
+    // …and the character path is untouched.
+    tree.press_key(Key::C, altgr);
+    assert_eq!(selected.get().as_deref(), Some("Cherry"));
 }
 
 #[test]

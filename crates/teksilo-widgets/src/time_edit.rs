@@ -493,7 +493,8 @@ impl Widget for TimeEdit {
 
         // Commit-side: read (now-corrected) text and update value.
         // Skips on Invalid so the user's typed text stays visible.
-        let commit: Rc<dyn Fn(&mut EventContext)> = {
+        // Returns whether the text committed — see `DateEdit`'s twin.
+        let commit: Rc<dyn Fn(&mut EventContext) -> bool> = {
             let value_signal = self.value.clone();
             let text_signal = self.text_signal.clone();
             let feedback_signal = self.feedback.clone();
@@ -501,16 +502,16 @@ impl Widget for TimeEdit {
             let on_value_changed = on_value_changed.clone();
             Rc::new(move |ctx_evt: &mut EventContext| {
                 if matches!(feedback_signal.get(), ValidationFeedback::Invalid { .. }) {
-                    return;
+                    return false;
                 }
                 let raw = text_signal.get();
                 let trimmed = raw.trim();
-                let new_value: Option<Time> = if trimmed.is_empty() {
-                    None
+                let (new_value, accepted): (Option<Time>, bool) = if trimmed.is_empty() {
+                    (None, true)
                 } else {
                     match parse_value(&pattern, trimmed, ParseTarget::TimeOnly) {
-                        Some(ParsedValue::Time(t)) => Some(clamp_time(t, min, max)),
-                        _ => value_signal.get(),
+                        Some(ParsedValue::Time(t)) => (Some(clamp_time(t, min, max)), true),
+                        _ => (value_signal.get(), false),
                     }
                 };
                 if value_signal.get() != new_value {
@@ -519,6 +520,7 @@ impl Widget for TimeEdit {
                         cb(new_value, ctx_evt);
                     }
                 }
+                accepted
             })
         };
 
@@ -549,9 +551,13 @@ impl Widget for TimeEdit {
             .on_access_set_value({
                 let text_signal = self.text_signal.clone();
                 let commit = commit.clone();
+                // The commit's verdict is the technology's answer: an
+                // unparseable string leaves the value where it was, and
+                // saying `Handled` there would report a write that never
+                // landed.
                 move |text: &str, ctx: &mut EventContext| {
                     text_signal.set(text.to_string());
-                    commit(ctx);
+                    commit(ctx)
                 }
             })
             .enabled(enabled)
@@ -579,11 +585,15 @@ impl Widget for TimeEdit {
             })
             .on_submit_fn({
                 let commit = commit.clone();
-                move |ctx_evt| commit(ctx_evt)
+                move |ctx_evt| {
+                    commit(ctx_evt);
+                }
             })
             .on_blur_fn({
                 let commit = commit.clone();
-                move |ctx_evt| commit(ctx_evt)
+                move |ctx_evt| {
+                    commit(ctx_evt);
+                }
             });
         if let Some(label) = self.label.clone() {
             text_input = text_input.label(label);

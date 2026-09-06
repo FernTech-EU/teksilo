@@ -88,7 +88,7 @@ pub struct TextInput {
     read_only: bool,
     max_length: Option<usize>,
     on_submit: Option<Box<dyn Fn(&mut EventContext)>>,
-    on_access_set_value: Option<std::rc::Rc<dyn Fn(&str, &mut EventContext)>>,
+    on_access_set_value: Option<std::rc::Rc<dyn Fn(&str, &mut EventContext) -> bool>>,
     on_blur: Option<Box<dyn Fn(&mut EventContext)>>,
     char_filter: Option<std::rc::Rc<dyn Fn(char) -> bool>>,
     suffix: String,
@@ -321,7 +321,10 @@ impl TextInput {
     /// set. Forwarded 1:1 to `TextInputField::on_access_set_value`, where the
     /// reasoning lives. Composites whose text projects a typed value —
     /// `SpinBox`, the date and time editors — install one.
-    pub fn on_access_set_value(mut self, f: impl Fn(&str, &mut EventContext) + 'static) -> Self {
+    pub fn on_access_set_value(
+        mut self,
+        f: impl Fn(&str, &mut EventContext) -> bool + 'static,
+    ) -> Self {
         self.on_access_set_value = Some(std::rc::Rc::new(f));
         self
     }
@@ -599,7 +602,12 @@ impl Widget for TextInput {
             // primitive's builder surface, which owns its own Rc.
             field = field.char_filter(move |c| (f)(c));
         }
-        if let Some(cb) = self.on_access_set_value.take() {
+        // Cloned, not taken: the payload is already an `Rc`, and `build` runs
+        // again on every rebuild of this widget. Taking it would leave the
+        // second build with no assistive-technology write path, so a `SpinBox`
+        // or date editor would silently stop committing an AT `SetValue` after
+        // the first rebuild.
+        if let Some(cb) = self.on_access_set_value.clone() {
             field = field.on_access_set_value(move |text, ctx| (cb)(text, ctx));
         }
         if let Some(cb) = self.on_submit.take() {

@@ -1162,13 +1162,31 @@ fn a11y_read_only_refuses_and_does_not_advertise_the_mutating_actions() {
         Some(ActionData::NumericValue(42.0))
     ));
     assert_eq!(value.get(), 10);
+
+    // …and the *inner text node* refuses too. Not advertising an action is not
+    // the same as refusing it: an adapter dispatches what the technology asks
+    // for, and AT-SPI publishes `EditableText` off the interface set rather
+    // than off the action list, so a write aimed at the field went straight
+    // through the composite's read-only gate and rewrote the value.
+    let field = tree
+        .first_focusable_descendant(id)
+        .expect("SpinBox has an inner field");
+    assert!(!access(
+        &mut tree,
+        field,
+        Action::SetValue,
+        Some(ActionData::Value("42".into()))
+    ));
+    assert_eq!(value.get(), 10, "a read-only spin box keeps its value");
 }
 
 #[test]
 fn a11y_increment_survives_the_move_to_the_payload_handler() {
-    // `on_access_action_request` is called INSTEAD of `on_access_action`, so
-    // Increment and Decrement had to move with SetValue or they would have
-    // gone quiet the moment the payload handler was installed.
+    // Increment and Decrement moved into the payload handler with SetValue,
+    // because that is where `ActionData` rides. They used to have to: the
+    // dispatcher called `on_access_action_request` *instead of*
+    // `on_access_action`. It now fires both, but the pair still lives there —
+    // one handler, one match, one place to read.
     use teksilo_core::accesskit::Action;
     let (mut tree, value, id) = setup_int(10, 0, 100);
 
@@ -1233,11 +1251,54 @@ fn a11y_set_value_on_the_inner_field_clamps_and_reverts_like_typing() {
     ));
     assert_eq!(value.get(), 100, "out of range clamps");
 
-    assert!(access(
+    assert!(
+        !access(
+            &mut tree,
+            field,
+            Action::SetValue,
+            Some(ActionData::Value("seven".into()))
+        ),
+        "a string the widget cannot read is a refused write, not a handled one"
+    );
+    assert_eq!(value.get(), 100, "an unparseable string reverts");
+}
+
+#[test]
+fn a11y_set_value_on_the_inner_field_puts_a_refused_string_back() {
+    // The field overwrites its document *before* asking the host, and the
+    // host's revert writes the bound `Signal<String>` — which still holds the
+    // pre-edit display, because the document→signal sync is deferred. So the
+    // revert was a no-op and the deferred sync then published the refused
+    // string: the field read `"seven"` to a screen reader while the value it
+    // stands for was still 10, which is the exact confusion this whole path
+    // exists to prevent.
+    use teksilo_core::accesskit::{Action, ActionData};
+    let (mut tree, value, id) = setup_int(10, 0, 100);
+    let field = tree
+        .first_focusable_descendant(id)
+        .expect("SpinBox has a focusable inner field");
+
+    assert!(!access(
         &mut tree,
         field,
         Action::SetValue,
         Some(ActionData::Value("seven".into()))
     ));
-    assert_eq!(value.get(), 100, "an unparseable string reverts");
+    for _ in 0..3 {
+        tick(&mut tree);
+    }
+
+    assert_eq!(value.get(), 10, "the value is untouched");
+    let update = tree.sync_accessibility();
+    let nid = teksilo_core::accessibility::widget_id_to_node_id(field);
+    let shown = update
+        .nodes
+        .iter()
+        .find(|(n, _)| *n == nid)
+        .and_then(|(_, n)| n.value().map(|s| s.to_string()));
+    assert_eq!(
+        shown.as_deref(),
+        Some("10"),
+        "a refused write must not leave its string in the field"
+    );
 }

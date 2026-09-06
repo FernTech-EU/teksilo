@@ -232,7 +232,7 @@ pub(crate) fn selection_op(modifiers: Modifiers) -> SelectionOp {
 /// `Key::to_char` answers `Some('*')`, so type-ahead would otherwise swallow
 /// the chord.
 pub(crate) fn tree_chord(key: Key, modifiers: Modifiers) -> Option<TreeChord> {
-    if modifiers.ctrl() || modifiers.alt() || modifiers.super_key() {
+    if super::range_nav::is_accelerator_chord(modifiers) {
         return None;
     }
     match key {

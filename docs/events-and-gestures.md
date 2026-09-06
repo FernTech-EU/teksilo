@@ -115,6 +115,17 @@ Under the hood, the builder wraps the widget in a `WidgetWithHandlers<W>` that c
 | `on_access_action` | AccessKit action request targets the widget | `FnMut(accesskit::Action, &mut EventContext) -> EventResponse` |
 | `on_access_action_request` | Full AccessKit action with payload (`SetTextSelection`, `SetValue`, `SetScrollOffset`) | see source |
 
+The two AccessKit slots are **layered, not alternatives**. Every installed one
+fires for a single dispatched action — both shapes, and within each shape both
+the app-installed handler and the widget's own — and the action counts as
+handled if any of them says so. They have different owners:
+`on_access_action_request` is what a widget reaches for when it needs
+`target_node` or the payload (`Slider`, `SpinBox`, `TextInputField`,
+`CodeEditor`, `TabBar` all do), while `.on_access_action(..)` is the
+application's hook. The dispatcher used to *prefer* the payload shape when it
+was set, which did not choose between two handlers for one job — it silently
+disabled the app's handler on exactly the widgets that had migrated.
+
 ### 3.1.1 `TapEvent` — button + modifiers in the callback
 
 The four click-style handlers (`on_tap` / `on_double_tap` / `on_triple_tap` / `on_long_press`) all receive a borrowed [`TapEvent`](../crates/teksilo-core/src/gesture.rs):
@@ -367,6 +378,8 @@ Focus is a single `Option<WidgetId>` stored on the tree. Tab / Shift+Tab moves i
 Programmatic focus transfer goes through `ctx.request_focus(id)`. The framework also exposes `first_focusable_descendant(id)` for modal openers (dialogs that should land focus on the primary action button — it returns the widget Tab would land on *first*, respecting the scope rules below) and `ScrollIntoView` synthesized on focus change so that tab-focusing an offscreen widget scrolls the nearest clipping ancestor to reveal it.
 
 Focus cleanup on destroy is automatic: destroying a focused widget clears focus; the next input event that requires focus routes to the nearest focusable ancestor or root.
+
+An assistive technology's `Action::Focus` takes the same walk, but only from a node that **advertises the action**. A composite publishes one AT node on a root that is not itself focusable — a `SpinBox`, a `ComboBox`, a `DateEdit` keeps focus on an inner leaf — and each adds `Action::Focus` in its own `accessibility()`, so the walk lands where the keys go. Everything else (a `Panel`, a `GroupBox`, a landmark, a label) is not focusable and offers no `Focus`; walking in from *any* non-focusable node moved the keyboard onto the first control inside it — a node the technology could have named itself and did not — and then reported success. Such a node now reports the action unhandled instead.
 
 ### 6.1 Traversal scopes (`FocusScope`)
 

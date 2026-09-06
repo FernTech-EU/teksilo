@@ -498,6 +498,38 @@ fn enter_on_focused_handle_toggles_adjacent_collapse() {
 }
 
 #[test]
+fn a_modified_enter_on_a_handle_belongs_to_the_application() {
+    // `Enter` was matched before any modifier test, so `Ctrl+Enter` collapsed
+    // the pane and reported the key handled — the one row of
+    // `docs/range-keyboard.md` ("`Ctrl` / `Alt` / `Super` + any → falls
+    // through") the divider did not honour, while every other key on it did.
+    let model = SplitterModel::from_panes(
+        vec![
+            PaneDescriptor::new().collapsible(true),
+            PaneDescriptor::new(),
+        ],
+        Orientation::Horizontal,
+    );
+    let mut tree = theme_tree();
+    let root = tree.add(
+        Splitter::new(model.clone())
+            .pane(FixedLeaf(100.0, 40.0))
+            .pane(FixedLeaf(100.0, 40.0)),
+    );
+    tree.layout(SizeProposal::exact(400.0, 200.0));
+    let handle = tree.child_widget(root, 1);
+    tree.focus(handle);
+
+    for mods in [Modifiers::CTRL, Modifiers::ALT, Modifiers::SUPER] {
+        tree.press_key(Key::Enter, mods);
+        assert!(
+            !model.is_collapsed(0),
+            "Enter with {mods:?} must fall through to the application"
+        );
+    }
+}
+
+#[test]
 fn double_click_handle_toggles_adjacent_collapse() {
     let model = SplitterModel::from_panes(
         vec![

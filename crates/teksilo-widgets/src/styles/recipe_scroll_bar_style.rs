@@ -23,6 +23,7 @@ use teksilo_core::accessibility::AccessNodeBuilder;
 use teksilo_core::binding::BindingLevel;
 use teksilo_core::build_context::BuildContext;
 use teksilo_core::color_prop::ColorProp;
+use teksilo_core::environment::LayoutDirection;
 use teksilo_core::signal::Signal;
 use teksilo_core::styles::{
     ScrollBarOrientation, ScrollBarStyle, ScrollBarStyleConfig, ScrollBarVariant,
@@ -243,6 +244,33 @@ impl std::fmt::Debug for ThinIndicatorPainter {
     }
 }
 
+/// The thumb's leading offset turned into an `x`, mirrored for a right-to-left
+/// window.
+///
+/// A horizontal bar's zero is the *start* of the content, which is the
+/// right-hand edge in a right-to-left window — `ScrollArea` places its content
+/// that way, and the widget's own hit-test and drag already mirror
+/// (`scroll_bar.rs`'s widget-local `thumb_rect`). A painter that pinned the
+/// thumb to the geometric left therefore drew it at the far end of the track
+/// while the content showed its beginning, and dragging it jumped.
+///
+/// The direction is read at **paint** time, not at build time, because a locale
+/// change repaints without rebuilding — the same obligation
+/// [`SliderStyle`](teksilo_core::styles::SliderStyle) documents.
+fn horizontal_thumb_x(
+    track_x: f32,
+    track_width: f32,
+    offset: f32,
+    thumb_len: f32,
+    ctx: &PaintContext,
+) -> f32 {
+    if ctx.layout_direction == LayoutDirection::RightToLeft {
+        track_x + track_width - offset - thumb_len
+    } else {
+        track_x + offset
+    }
+}
+
 impl Widget for ThinIndicatorPainter {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let id = ctx.self_id();
@@ -297,9 +325,12 @@ impl Widget for ThinIndicatorPainter {
             ScrollBarOrientation::Vertical => {
                 Rect::new(thin_bounds.x, thin_bounds.y + offset, thin, thumb_len)
             }
-            ScrollBarOrientation::Horizontal => {
-                Rect::new(thin_bounds.x + offset, thin_bounds.y, thumb_len, thin)
-            }
+            ScrollBarOrientation::Horizontal => Rect::new(
+                horizontal_thumb_x(thin_bounds.x, thin_bounds.width, offset, thumb_len, ctx),
+                thin_bounds.y,
+                thumb_len,
+                thin,
+            ),
         };
         // Thin indicator has no hover/drag state — it's the resting strip.
         let thumb_color = resolve_thumb_color(self.thumb_color.as_ref(), ctx, false, false);
@@ -400,9 +431,12 @@ impl Widget for FullBarPainter {
             ScrollBarOrientation::Vertical => {
                 Rect::new(bounds.x, bounds.y + offset, bounds.width, thumb_len)
             }
-            ScrollBarOrientation::Horizontal => {
-                Rect::new(bounds.x + offset, bounds.y, thumb_len, bounds.height)
-            }
+            ScrollBarOrientation::Horizontal => Rect::new(
+                horizontal_thumb_x(bounds.x, bounds.width, offset, thumb_len, ctx),
+                bounds.y,
+                thumb_len,
+                bounds.height,
+            ),
         };
         let thumb_color = resolve_thumb_color(
             self.thumb_color.as_ref(),

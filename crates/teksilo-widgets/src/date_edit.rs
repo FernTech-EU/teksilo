@@ -66,7 +66,7 @@ use teksilo_canvas::{Path, Point, Rect, SizeProposal};
 use teksilo_core::accessibility::{AccessNodeBuilder, widget_id_to_node_id};
 use teksilo_core::accesskit::{Action, HasPopup, Role};
 use teksilo_core::build_context::BuildContext;
-use teksilo_core::event::{EventResponse, Key, Modifiers, WidgetEvent};
+use teksilo_core::event::{EventResponse, Key, WidgetEvent};
 use teksilo_core::overlay::{
     DismissBehavior, OverlayDismissCallback, OverlayLayer, OverlayPlacement, OverlayRequest,
 };
@@ -83,6 +83,7 @@ use crate::common::datetime::pattern::{
     mask_for_pattern, parse_value, segment_at_position, step_date_field,
 };
 use crate::common::datetime::types::{YearMonth, today_local};
+use crate::common::range_nav;
 use crate::icon_button::{IconButton, IconButtonSize};
 use crate::primitives::IconWidget;
 use crate::primitives::text_input_field::{ValidationFeedback, ValidationOutcome};
@@ -568,7 +569,10 @@ impl Widget for DateEdit {
         // can fix it; do NOT silently revert (the user's complaint
         // that triggered this whole feature). The bound value stays
         // unchanged.
-        let commit: Rc<dyn Fn(&mut EventContext)> = {
+        // Returns whether the text committed — `false` while the validator is
+        // unhappy, and `false` for a string the pattern cannot read. Only the
+        // assistive-technology write reads it; `Enter` and blur discard it.
+        let commit: Rc<dyn Fn(&mut EventContext) -> bool> = {
             let value_signal = self.value.clone();
             let text_signal = self.text_signal.clone();
             let feedback_signal = self.feedback.clone();
@@ -579,16 +583,16 @@ impl Widget for DateEdit {
                 if matches!(fb, ValidationFeedback::Invalid { .. }) {
                     // Don't touch value or reformat text; let the
                     // user fix what they typed.
-                    return;
+                    return false;
                 }
                 let raw = text_signal.get();
                 let trimmed = raw.trim();
-                let new_value: Option<Date> = if trimmed.is_empty() {
-                    None
+                let (new_value, accepted): (Option<Date>, bool) = if trimmed.is_empty() {
+                    (None, true)
                 } else {
                     match parse_value(&pattern, trimmed, ParseTarget::DateOnly) {
-                        Some(ParsedValue::Date(d)) => Some(clamp_date(d, min, max)),
-                        _ => value_signal.get(),
+                        Some(ParsedValue::Date(d)) => (Some(clamp_date(d, min, max)), true),
+                        _ => (value_signal.get(), false),
                     }
                 };
                 if value_signal.get() != new_value {
@@ -597,6 +601,7 @@ impl Widget for DateEdit {
                         cb(new_value, ctx_evt);
                     }
                 }
+                accepted
             })
         };
 
@@ -763,9 +768,13 @@ impl Widget for DateEdit {
             .on_access_set_value({
                 let text_signal = self.text_signal.clone();
                 let commit = commit.clone();
+                // The commit's verdict is the technology's answer: an
+                // unparseable string leaves the value where it was, and
+                // saying `Handled` there would report a write that never
+                // landed.
                 move |text: &str, ctx: &mut EventContext| {
                     text_signal.set(text.to_string());
-                    commit(ctx);
+                    commit(ctx)
                 }
             })
             .enabled(enabled)
@@ -790,11 +799,15 @@ impl Widget for DateEdit {
             })
             .on_submit_fn({
                 let commit = commit.clone();
-                move |ctx_evt| commit(ctx_evt)
+                move |ctx_evt| {
+                    commit(ctx_evt);
+                }
             })
             .on_blur_fn({
                 let commit = commit.clone();
-                move |ctx_evt| commit(ctx_evt)
+                move |ctx_evt| {
+                    commit(ctx_evt);
+                }
             });
         // NB (audit G9): the label is intentionally NOT forwarded to the inner
         // TextInput. DateEdit's own accessibility() node (Role::DateInput)
@@ -936,31 +949,35 @@ impl Widget for DateEdit {
                 // field: the calendar is added detached, so it is not an arena
                 // child of this widget and a key pressed inside it never
                 // previews through. Escape remains the close from in there.
+                // The platform drop-down chords, from the one table `ComboBox`
+                // and `PopoverWidget` read.
                 if let Some(toggle) = toggle_for_key.as_ref() {
-                    let bare_alt = modifiers.alt() && !modifiers.ctrl() && !modifiers.super_key();
-                    if bare_alt && matches!(key, Key::ArrowDown) {
-                        if !popover_open_for_key.get() {
-                            toggle(ctx_evt);
+                    match range_nav::disclosure_chord(*key, *modifiers) {
+                        Some(range_nav::DisclosureChord::Open) => {
+                            if !popover_open_for_key.get() {
+                                toggle(ctx_evt);
+                            }
+                            return EventResponse::Handled;
                         }
-                        return EventResponse::Handled;
-                    }
-                    if bare_alt && matches!(key, Key::ArrowUp) {
-                        if popover_open_for_key.get() {
+                        Some(range_nav::DisclosureChord::Close) => {
+                            if popover_open_for_key.get() {
+                                toggle(ctx_evt);
+                                return EventResponse::Handled;
+                            }
+                            return EventResponse::Ignored;
+                        }
+                        Some(range_nav::DisclosureChord::Toggle) => {
                             toggle(ctx_evt);
                             return EventResponse::Handled;
                         }
-                        return EventResponse::Ignored;
-                    }
-                    if matches!(key, Key::F4) && *modifiers == Modifiers::NONE {
-                        toggle(ctx_evt);
-                        return EventResponse::Handled;
+                        None => {}
                     }
                 }
 
                 // Any other accelerator-modified chord is not ours. The segment
                 // stepper reads `Shift` alone, so `Ctrl+ArrowUp` used to step
                 // the date and swallow the chord on the way.
-                if modifiers.ctrl() || modifiers.alt() || modifiers.super_key() {
+                if range_nav::is_accelerator_chord(*modifiers) {
                     return EventResponse::Ignored;
                 }
 

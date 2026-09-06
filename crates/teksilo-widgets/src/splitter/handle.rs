@@ -488,6 +488,14 @@ impl Widget for SplitterHandle {
                     return EventResponse::Ignored;
                 };
 
+                // Nothing here is the application's chord. `Enter` was
+                // matched before this test, so `Ctrl+Enter` collapsed a pane
+                // and reported the key handled — the one row of
+                // `docs/range-keyboard.md` the divider did not honour.
+                if range_nav::is_accelerator_chord(*modifiers) {
+                    return EventResponse::Ignored;
+                }
+
                 // Enter toggles the adjacent collapsible pane (animated).
                 if matches!(key, Key::Enter) {
                     if let Some(t) = collapse_target(&model, index) {

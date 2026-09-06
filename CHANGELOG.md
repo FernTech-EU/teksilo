@@ -93,6 +93,14 @@ See [docs/range-keyboard.md](docs/range-keyboard.md) for the full chord table.
 
 ### Changed
 
+- `TextInputField::on_access_set_value` (and `TextInput`'s forwarder) now takes
+  a callback returning `bool` — whether the host accepted the string — so the
+  field can report a refused write to the assistive technology instead of
+  claiming success. **Breaking.**
+- `ScrollBarStyle::make_body` documents its right-to-left obligation, the way
+  `SliderStyle::make_body` does: a horizontal bar's `scroll_ratio == 0.0` is the
+  start of the content, which is the right-hand edge there, and the widget
+  cannot enforce that a custom style mirrors.
 - **The bridge announce now says when the MCP client is not installed**, and how
   to get it. An app needs nothing installed to be automatable: the bridge is
   compiled into the debug build and binds its own endpoint, and
@@ -150,6 +158,37 @@ See [docs/range-keyboard.md](docs/range-keyboard.md) for the full chord table.
 - `ScrollBar` no longer claims `Action::SetValue`. Its node is `set_hidden()`
   and it never advertised the action, so the arm was unreachable except to
   answer `Handled` to a `SetValue` bubbling up from a descendant and drop it.
+- **The right-to-left horizontal `ScrollBar`'s *painted* thumb now mirrors
+  too.** The widget's hit-test and drag were mirrored; the style that draws the
+  thumb was not, so the thumb was rendered at one end of the track while the
+  region that grabs it sat at the other, and it jumped the moment it was
+  touched. Both painters in the default `RecipeScrollBarStyle` read
+  `PaintContext::layout_direction`, and the trait now states the obligation the
+  way `SliderStyle`'s does. **Behaviour change.**
+- **A horizontal `ScrollBar`'s `PageUp` scrolled forward and its `PageDown`
+  back**, the opposite of the vertical bar beside it. The page keys name a
+  direction in the *content*, not on screen, so unlike the arrows they do not
+  follow the bar's orientation — reading `increase` geometrically for them was
+  what inverted the horizontal case. **Behaviour change.**
+- **A vertical `Slider`, `HueStrip` and `AlphaStrip` put their maximum at the
+  top.** All three grew their value downward, so `ArrowUp` — which the chord
+  table reports as an increase — moved the thumb *down*: the keys and the
+  pointer drove the control in opposite directions on screen. Qt's `QSlider`,
+  GTK4's `GtkScale`, the Win32 trackbar and `<input type=range>` all put a
+  vertical minimum at the bottom, so the geometry moved rather than the chord
+  table. The hue strip's rainbow is reversed to match. **Behaviour change.**
+- **`Ctrl+Enter` on a `Splitter` divider or a dock resize handle reaches the
+  application.** Both matched `Enter` before any modifier test, so the chord
+  collapsed a pane or hid a side and reported the key handled — the one row of
+  the documented chord table those two did not honour, while every other key on
+  them did. **Behaviour change.**
+- **An assistive technology's `Slider` write lands on the grid its arrows
+  walk.** The advertised `numeric_value_step`, an arrow press and `Increment`
+  all move by the effective step — 1 % of the range when none is configured —
+  while `SetValue` snapped to the *configured* step, so on a stepless slider a
+  write landed between two values every other path could reach, and a screen
+  reader then announced a number its own Up arrow could not produce.
+  **Behaviour change.**
 
 #### Widgets
 
@@ -202,6 +241,25 @@ See [docs/range-keyboard.md](docs/range-keyboard.md) for the full chord table.
 - `SpinBox::read_only` documented that keyboard and button stepping still
   worked. It never did — the keys, the wheel and the buttons are all gated,
   which is what `QAbstractSpinBox::readOnly` does too.
+- **A read-only `SpinBox`, `DateEdit`, `TimeEdit`, `DateTimeEdit` or
+  `DateRangeEdit` refuses an assistive technology's write on its *inner text
+  node* as well as on its root.** Not advertising an action is not the same as
+  refusing it: an adapter dispatches what the technology asks for, and AT-SPI
+  publishes `EditableText` off the interface set rather than off the action
+  list, so a write aimed at the field went straight past the composite's
+  read-only gate and rewrote the value. **Behaviour change.**
+- **An assistive technology's whole-value write reports the host's verdict.**
+  `SetValue` on a text-projected composite answered `Handled` whatever the
+  parse said, so `"twelve"` in Orca's value entry and in macOS's
+  `setAccessibilityValue:` both read back as success while the field quietly
+  reverted to the value it still held. `TextInputField::on_access_set_value`
+  now returns whether the host accepted the string. **Behaviour change.**
+- **`AltGr`-composed characters reach a `ComboBox`'s and a `MenuList`'s
+  type-ahead.** Both refused the union of `Ctrl` / `Alt` / `Super`, and `AltGr`
+  arrives as `Ctrl+Alt` on Windows, X11 and Wayland alike — so every character
+  behind it (`@` on a German layout, `€` on a French one, `ą` on a Polish one)
+  was dead for type-ahead while the unshifted ones kept working. `Ctrl` alone
+  and `Alt` alone stay refused. **Behaviour change.**
 
 #### Core
 
@@ -212,7 +270,19 @@ See [docs/range-keyboard.md](docs/range-keyboard.md) for the full chord table.
   `focus_node` tool — aimed at a `SpinBox`, `DateEdit` or `TextInput` parked
   focus on a composite root that accepts no keystrokes, and, because
   `on_key_preview` fires only on *strict* ancestors of the focused node,
-  disarmed the composite's own stepping keys in the process.
+  disarmed the composite's own stepping keys in the process. The walk is taken
+  only from a node that **advertises** `Action::Focus`, which is what a
+  composite does and a `Panel`, a `GroupBox`, a landmark or a label does not:
+  walking in from any non-focusable node moved the keyboard onto the first
+  control inside it — one the technology could have named itself and did not —
+  and then reported success.
+- **An app-installed `.on_access_action(..)` fires on a widget that services
+  the payload shape itself.** The dispatcher called
+  `on_access_action_request` *instead of* `on_access_action` whenever the
+  former was set, so adding an application handler to a `Slider`, `SpinBox`,
+  `TextInput`, `CodeEditor` or `TabBar` produced a handler that never ran, with
+  nothing at the call site to say so. Every installed slot now fires for one
+  dispatched action, and the action counts as handled if any of them says so.
 
 #### Menus
 

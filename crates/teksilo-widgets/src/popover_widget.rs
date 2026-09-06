@@ -61,7 +61,7 @@ use teksilo_canvas::{Point, Rect, Size, SizeProposal};
 use teksilo_core::accessibility::AccessNodeBuilder;
 use teksilo_core::accesskit::HasPopup;
 use teksilo_core::build_context::BuildContext;
-use teksilo_core::event::{EventResponse, Key, WidgetEvent};
+use teksilo_core::event::{EventResponse, WidgetEvent};
 use teksilo_core::overlay::{
     DismissBehavior, OverlayDismissCallback, OverlayLayer, OverlayPlacement, OverlayRequest,
 };
@@ -73,6 +73,7 @@ use teksilo_core::widget_id::WidgetId;
 use teksilo_tokens::TextRole;
 
 use crate::button::{Button, InteractionState, resolve_text_role};
+use crate::common::range_nav::DisclosureChord;
 use crate::icon_button::{
     IconButton, IconButtonSize, resolve_icon_role_embedded, resolve_icon_role_standalone,
 };
@@ -790,18 +791,19 @@ impl<T: PopoverTrigger> Widget for PopoverWidget<T> {
 
         // `Alt+ArrowDown` opens the popover and `Alt+ArrowUp` closes it — the
         // platform disclosure chord (Win32 / WinForms / WPF drop-downs, and the
-        // W3C ARIA combobox pattern). It lives on the generic rather than in
-        // each consumer, so `PopoverButton`, `PopoverIconButton` and
-        // `ColorEdit` — whose module doc has always promised it — inherit one
-        // implementation and cannot drift from each other.
+        // W3C ARIA combobox pattern), read from the one table `ComboBox` and
+        // `DateEdit` read. It lives on the generic rather than in each
+        // consumer, so `PopoverButton`, `PopoverIconButton` and `ColorEdit` —
+        // whose module doc has always promised it — inherit one implementation
+        // and cannot drift from each other.
         //
         // Bubble phase, not preview: the panel's own content (a `MenuList`, a
         // `ColorPicker`) must keep first refusal on every key, and the trigger
         // is a child of this node, so an unclaimed chord still arrives here.
         //
-        // No `F4`: this generic also backs toolbar chevrons and menu buttons,
-        // which carry no such convention. The drop-down *fields* bind it
-        // themselves.
+        // `DisclosureChord::Toggle` (`F4`) is deliberately unmatched: this
+        // generic also backs toolbar chevrons and menu buttons, which carry no
+        // such convention. The drop-down *fields* bind it themselves.
         ctx.apply_self_handlers(HandlerSet::new().on_key({
             let popover_open = popover_open.clone();
             let activate = activate.clone();
@@ -809,18 +811,17 @@ impl<T: PopoverTrigger> Widget for PopoverWidget<T> {
                 let WidgetEvent::KeyDown { key, modifiers, .. } = event else {
                     return EventResponse::Ignored;
                 };
-                if !modifiers.alt() || modifiers.ctrl() || modifiers.super_key() {
-                    return EventResponse::Ignored;
-                }
-                match key {
-                    Key::ArrowDown if !popover_open.get() => {
-                        activate(ctx_evt);
+                match crate::common::range_nav::disclosure_chord(*key, *modifiers) {
+                    Some(DisclosureChord::Open) => {
+                        if !popover_open.get() {
+                            activate(ctx_evt);
+                        }
+                        // Already open: the chord is ours, so swallow it rather
+                        // than letting a second `Alt+ArrowDown` reach an
+                        // ancestor.
                         EventResponse::Handled
                     }
-                    // Already open: the chord is ours, so swallow it rather
-                    // than letting a second `Alt+ArrowDown` reach an ancestor.
-                    Key::ArrowDown => EventResponse::Handled,
-                    Key::ArrowUp if popover_open.get() => {
+                    Some(DisclosureChord::Close) if popover_open.get() => {
                         activate(ctx_evt);
                         EventResponse::Handled
                     }

@@ -881,6 +881,30 @@ impl WidgetTree {
         }
     }
 
+    /// Whether the node `id` publishes to assistive technology offers
+    /// `Action::Focus`.
+    ///
+    /// Answered off the same builder the AT tree is emitted from — widget
+    /// emission, then `announce_focusable`, then the app's overrides (which can
+    /// both add an action and `access_remove_action` one) — so it is exactly
+    /// what the assistive technology was told.
+    ///
+    /// This is the gate on the `Action::Focus` walk into a subtree. A focusable
+    /// leaf gets the action from `announce_focusable` and resolves to itself; a
+    /// composite that keeps focus on an inner leaf — `SpinBox`, `ComboBox`,
+    /// `DateEdit` and its siblings — adds the action in its own
+    /// `accessibility()` and means the walk. Everything else — a `Panel`, a
+    /// `GroupBox`, a landmark, a label — offers no `Focus`, and moving focus
+    /// into it would land the keyboard on a descendant the assistive technology
+    /// could have named itself and did not.
+    pub(crate) fn advertises_focus_action(&self, id: WidgetId) -> bool {
+        self.arena.get(id).is_some()
+            && self
+                .build_overridden_builder(id)
+                .actions()
+                .contains(&accesskit::Action::Focus)
+    }
+
     fn build_overridden_builder(&self, id: WidgetId) -> AccessNodeBuilder {
         use crate::widget_builder::AccessSubtreeMode;
         let node = self.arena.get(id).expect("widget id is active in arena");
@@ -1603,6 +1627,48 @@ mod tests {
         assert_eq!(tree.focused(), Some(id));
     }
 
+    /// A composite that is not itself focusable but publishes one AT node and
+    /// keeps its keyboard focus on an inner leaf — the shape `SpinBox`,
+    /// `ComboBox` and `DateEdit` all have. What marks it as one is that it
+    /// advertises `Action::Focus` from its own `accessibility()`, which is
+    /// exactly what those three do.
+    #[derive(Debug)]
+    struct CompositeWidget {
+        child_ids: Vec<WidgetId>,
+    }
+
+    impl Widget for CompositeWidget {
+        fn layout_response(
+            &self,
+            proposal: SizeProposal,
+            _ctx: &LayoutContext,
+        ) -> crate::widget::LayoutResponse {
+            proposal.resolve(0.0, 0.0).into()
+        }
+
+        fn place_children(
+            &self,
+            bounds: Rect,
+            _proposal: SizeProposal,
+            children: &mut [crate::widget::WidgetPlacement],
+            _ctx: &LayoutContext,
+        ) {
+            for child in children.iter_mut() {
+                child.origin = bounds.origin();
+                child.size = bounds.size();
+            }
+        }
+
+        fn children(&self) -> Vec<WidgetId> {
+            self.child_ids.clone()
+        }
+
+        fn accessibility(&self, builder: &mut crate::accessibility::AccessNodeBuilder) {
+            builder.set_role(accesskit::Role::SpinButton);
+            builder.add_action(accesskit::Action::Focus);
+        }
+    }
+
     /// An assistive-tech `Focus` on a composite lands on the node that takes
     /// the keys, not on the root that publishes the AT node.
     ///
@@ -1617,7 +1683,9 @@ mod tests {
     fn an_at_focus_on_a_non_focusable_composite_lands_on_its_focusable_leaf() {
         let mut tree = WidgetTree::new();
         let leaf = tree.add(ClickableWidget.focusable(true));
-        let root = tree.add(StackWidget::new().add_child(leaf));
+        let root = tree.add(CompositeWidget {
+            child_ids: vec![leaf],
+        });
         tree.layout(SizeProposal::exact(100.0, 100.0));
 
         let mut ops = crate::window::NoopWindowOps;
@@ -1631,6 +1699,38 @@ mod tests {
             tree.focused(),
             Some(leaf),
             "focus must reach the focusable leaf, not the composite root"
+        );
+    }
+
+    /// …and only a composite gets that walk.
+    ///
+    /// A plain container — a `Panel`, a `GroupBox`, a landmark, a label — is
+    /// not focusable and offers no `Focus`, so an assistive technology asking
+    /// to focus it is asking for something the node never advertised. Walking
+    /// in anyway moved the keyboard onto the first control inside it, which the
+    /// technology could have named itself and did not, and then reported
+    /// success. The honest answer is that the action was not handled.
+    #[test]
+    fn an_at_focus_on_a_plain_container_does_not_walk_into_it() {
+        let mut tree = WidgetTree::new();
+        let leaf = tree.add(ClickableWidget.focusable(true));
+        let root = tree.add(StackWidget::new().add_child(leaf));
+        tree.layout(SizeProposal::exact(100.0, 100.0));
+
+        let mut ops = crate::window::NoopWindowOps;
+        assert!(
+            !tree.dispatch_access_action(
+                crate::accessibility::widget_id_to_node_id(root),
+                accesskit::Action::Focus,
+                None,
+                &mut ops,
+            ),
+            "a node that never advertised `Focus` must report the action unhandled"
+        );
+        assert_eq!(
+            tree.focused(),
+            None,
+            "focus must stay where it was, not fall into the container's first control"
         );
     }
 

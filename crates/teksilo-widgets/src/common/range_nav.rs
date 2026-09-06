@@ -46,6 +46,18 @@
 //! reachable from one host's test run — the same split
 //! [`text_nav`](super::text_nav) and
 //! [`list_nav::mac_alias`](super::list_nav::mac_alias) already use.
+//!
+//! ## The two chord predicates
+//!
+//! Beside the value table this module owns the two questions every one of these
+//! controls — and the drop-downs wrapped around them — has to answer before it
+//! reads a key at all: *is this chord the application's?*
+//! ([`is_accelerator_chord`]) and *did this chord type a character?*
+//! ([`is_text_entry_chord`]). They were spelled out at five call sites, and had
+//! already diverged: one of them rejected `AltGr`, which is how a non-US
+//! keyboard types half its punctuation. [`disclosure_chord`] is here for the
+//! same reason — three drop-downs hand-rolled the platform `Alt+↓` / `Alt+↑` /
+//! `F4` table and disagreed about `F4`.
 
 use teksilo_core::event::{Key, Modifiers};
 
@@ -128,6 +140,100 @@ pub(crate) enum RangeMove {
     ToMax,
 }
 
+/// Whether this chord belongs to the **application** rather than to the widget
+/// under the keys.
+///
+/// `Ctrl`, `Alt` and `Super` mark an accelerator, and a widget that answers one
+/// swallows it: before this rule existed `Ctrl+Home` drove a slider to its
+/// minimum, `Ctrl+ArrowUp` stepped a spin box and `Ctrl+ArrowDown` opened a
+/// split button's menu, each reporting the key handled so no ancestor and no
+/// registered `Shortcut` ever saw it.
+///
+/// `Shift` is **not** an accelerator here. It is not a distinct chord on any of
+/// these controls, several of them give it their own meaning (the date and time
+/// editors read it as a ×10 multiplier), and on a Latin layout it is simply how
+/// a capital letter arrives.
+///
+/// This is a *refusal*, so it names `ctrl` explicitly rather than
+/// [`Modifiers::command`]: `command()` is Ctrl off macOS and Cmd on it, so
+/// matching on it would let a real macOS `Ctrl+letter` through and let
+/// `Super+letter` through everywhere.
+///
+/// Not the negation of [`is_text_entry_chord`] — see there.
+pub(crate) fn is_accelerator_chord(modifiers: Modifiers) -> bool {
+    modifiers.ctrl() || modifiers.alt() || modifiers.super_key()
+}
+
+/// Whether this chord can have produced a character the user meant to type —
+/// the question a type-ahead or mnemonic arm asks, and the one place
+/// [`is_accelerator_chord`] is the wrong test.
+///
+/// **`AltGr` is text.** The third-level shift on every non-US layout reaches an
+/// application as `Ctrl+Alt` on Windows, X11 and Wayland alike — it is how a
+/// German keyboard types `@`, a French one `€`, a Polish one `ą`. Refusing the
+/// union of `Ctrl` / `Alt` / `Super` therefore made every character behind
+/// `AltGr` dead for type-ahead while the unshifted ones kept working, so the
+/// feature half-worked in exactly the locales that needed it most. `Ctrl` alone
+/// and `Alt` alone stay refused: those are accelerators, and a bare
+/// `Alt+letter` is the menu mnemonic.
+///
+/// macOS has no `AltGr`; it composes with `Option` (`⌥E` → `´`) and the OS
+/// rewrites the keystroke before it reaches the application, exactly as
+/// `MenuBarDispatcher` documents. Nothing here needs a platform branch for it:
+/// a rewritten `⌥` chord arrives as `Alt` alone, which this refuses on every
+/// host, and a Mac user reaches a type-ahead by typing the character itself.
+pub(crate) fn is_text_entry_chord(modifiers: Modifiers) -> bool {
+    if modifiers.super_key() {
+        return false;
+    }
+    // `AltGr` — both, and only both.
+    if modifiers.ctrl() && modifiers.alt() {
+        return true;
+    }
+    !modifiers.ctrl() && !modifiers.alt()
+}
+
+/// The platform chords that show and hide a drop-down attached to a control.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum DisclosureChord {
+    /// `Alt+↓` — show the popup **without moving the selection**. The Win32 /
+    /// WinForms / WPF drop-down chord, and the W3C ARIA combobox pattern ("if
+    /// the popup is available but not displayed, displays the popup without
+    /// moving focus"). Bare `↓` both opens and advances, which is the whole
+    /// reason the modified form exists.
+    Open,
+    /// `Alt+↑` — hide it.
+    Close,
+    /// `F4` — toggle. Bound by the drop-down *fields* (`ComboBox`, `DateEdit`
+    /// and its siblings); deliberately **not** by
+    /// [`PopoverWidget`](crate::popover_widget::PopoverWidget), which also backs
+    /// toolbar chevrons and menu buttons, where no such convention exists. A
+    /// caller that does not bind it ignores this variant — which is why the
+    /// divergence is one match arm here rather than three hand-rolled tables.
+    Toggle,
+}
+
+/// What `key` means with `modifiers` held, to a control that owns a drop-down —
+/// or `None` when the chord is not one of the three.
+///
+/// `Alt+↓` / `Alt+↑` are recognised with any other modifier *except* `Ctrl` and
+/// `Super`, so `Ctrl+Alt+↓` and `Super+Alt+↓` fall through to the application
+/// the way [`is_accelerator_chord`] demands. `F4` is recognised bare only, so
+/// `Alt+F4` still reaches the window.
+pub(crate) fn disclosure_chord(key: Key, modifiers: Modifiers) -> Option<DisclosureChord> {
+    if modifiers.alt() && !modifiers.ctrl() && !modifiers.super_key() {
+        match key {
+            Key::ArrowDown => return Some(DisclosureChord::Open),
+            Key::ArrowUp => return Some(DisclosureChord::Close),
+            _ => {}
+        }
+    }
+    if key == Key::F4 && modifiers == Modifiers::NONE {
+        return Some(DisclosureChord::Toggle);
+    }
+    None
+}
+
 /// Does this move go towards the **trailing** edge — or, on the vertical
 /// axis, **down**?
 ///
@@ -186,7 +292,7 @@ pub(crate) fn range_move(
     // minimum and reported the key handled, and no ancestor ever saw it. Same
     // rule, and the same reason, as `list_nav::tree_chord` and `MenuList`'s
     // type-ahead guard.
-    if modifiers.ctrl() || modifiers.alt() || modifiers.super_key() {
+    if is_accelerator_chord(modifiers) {
         return None;
     }
     let (increase_key, decrease_key) = if rtl {
@@ -241,6 +347,83 @@ mod tests {
 
     fn mv(key: Key, kind: RangeKind, arrows: RangeAxis) -> Option<RangeMove> {
         range_move(key, NONE, kind, arrows, false)
+    }
+
+    #[test]
+    fn an_accelerator_chord_is_named_once_for_every_caller() {
+        // `range_move`, `list_nav::tree_chord`, `MenuList`'s letter arm, the
+        // combo box's type-ahead and the two handles' `Enter` all asked this
+        // question, and one of them had already got a different answer.
+        for mods in [CTRL, ALT, SUPER, CMD] {
+            assert!(is_accelerator_chord(mods), "{mods:?}");
+        }
+        assert!(!is_accelerator_chord(NONE));
+        assert!(
+            !is_accelerator_chord(SHIFT),
+            "Shift is how a capital letter arrives, not an accelerator"
+        );
+    }
+
+    #[test]
+    fn alt_gr_types_a_character_but_is_still_not_an_accelerator_key() {
+        // The two predicates are deliberately not each other's negation: this
+        // is the one chord they disagree about, and it is the reason the pair
+        // exists rather than a single test.
+        let alt_gr = Modifiers::CTRL | Modifiers::ALT;
+        assert!(is_accelerator_chord(alt_gr), "an arrow key is not text");
+        assert!(
+            is_text_entry_chord(alt_gr),
+            "AltGr is how a German keyboard types `@`"
+        );
+
+        assert!(is_text_entry_chord(NONE));
+        assert!(is_text_entry_chord(SHIFT));
+        for mods in [CTRL, ALT, SUPER] {
+            assert!(!is_text_entry_chord(mods), "{mods:?} is an accelerator");
+        }
+        // `Super` poisons the chord even alongside AltGr's pair.
+        assert!(!is_text_entry_chord(alt_gr | Modifiers::SUPER));
+        // …and `Shift+AltGr` is still text: it is the fourth level on the same
+        // layouts.
+        assert!(is_text_entry_chord(alt_gr | SHIFT));
+    }
+
+    #[test]
+    fn the_disclosure_chords_are_one_table() {
+        assert_eq!(
+            disclosure_chord(Key::ArrowDown, ALT),
+            Some(DisclosureChord::Open)
+        );
+        assert_eq!(
+            disclosure_chord(Key::ArrowUp, ALT),
+            Some(DisclosureChord::Close)
+        );
+        assert_eq!(
+            disclosure_chord(Key::F4, NONE),
+            Some(DisclosureChord::Toggle)
+        );
+        // Bare arrows are the *unmodified* form, which opens **and** advances;
+        // that is the caller's, not this table's.
+        assert_eq!(disclosure_chord(Key::ArrowDown, NONE), None);
+    }
+
+    #[test]
+    fn a_disclosure_chord_yields_to_the_application_and_to_the_window() {
+        // `Ctrl+Alt+Down` and `Super+Alt+Down` are accelerators, and `Alt+F4`
+        // is the window's on Windows — three drop-downs each decided this for
+        // themselves, and one of them bound no `F4` at all.
+        for extra in [CTRL, SUPER] {
+            for key in [Key::ArrowDown, Key::ArrowUp] {
+                assert_eq!(
+                    disclosure_chord(key, ALT | extra),
+                    None,
+                    "{key:?} {extra:?}"
+                );
+            }
+        }
+        for mods in [ALT, CTRL, SUPER, SHIFT] {
+            assert_eq!(disclosure_chord(Key::F4, mods), None, "{mods:?}+F4");
+        }
     }
 
     #[test]

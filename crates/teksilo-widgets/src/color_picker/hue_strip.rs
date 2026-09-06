@@ -52,6 +52,23 @@ const HUE_TEXTURE_LENGTH: u32 = 256;
 /// 1×256 RGBA buffer.
 static HUE_PIXELS: LazyLock<Vec<u8>> = LazyLock::new(generate_hue_pixels);
 
+/// The same rainbow read bottom-up, for the vertical strip.
+///
+/// A vertical bounded scalar's maximum sits at the **top** in Teksilo, as it
+/// does in Qt, GTK4, the Win32 trackbar and `<input type=range>` — that is what
+/// makes `ArrowUp` raise the thumb. Scan-line order runs downward, so the
+/// vertical texture has to carry the hues in reverse or the strip would paint
+/// its maximum where its minimum now is.
+static HUE_PIXELS_VERTICAL: LazyLock<Vec<u8>> = LazyLock::new(|| {
+    HUE_PIXELS
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .rev()
+        .flat_map(|px| px.iter().copied())
+        .collect()
+});
+
 pub(crate) struct HueStrip {
     hue: Signal<f32>,
     set_hue: Rc<dyn Fn(f32)>,
@@ -134,11 +151,15 @@ impl Widget for HueStrip {
                 // `x` / `y` arrive widget-local (origin at the strip's own
                 // top-left), so no `bounds.x` / `bounds.y` subtraction.
                 let t = match orientation {
+                    // `y` grows downward and the maximum is at the top, so the
+                    // pointer's ratio is the value's complement — the same
+                    // mirror `Slider` applies on its vertical axis, and what
+                    // keeps `ArrowUp` and a drag upward moving the same way.
                     Orientation::Vertical => {
                         if bounds.height <= 0.0 {
                             return;
                         }
-                        (y / bounds.height).clamp(0.0, 1.0)
+                        1.0 - (y / bounds.height).clamp(0.0, 1.0)
                     }
                     Orientation::Horizontal => {
                         if bounds.width <= 0.0 {
@@ -280,20 +301,25 @@ impl Widget for HueStrip {
         self.cached_bounds.set(bounds);
         let radius = CornerRadius::uniform(cp::STRIP_CORNER_RADIUS);
 
-        // Register the rainbow texture for the strip's orientation.
-        // Same pixel data either way (256 RGBA quartets in hue order);
-        // dimensions decide whether scan-line order maps onto the
-        // strip's long axis horizontally or vertically.
-        let (texture_name, tex_w, tex_h) = match self.orientation {
-            Orientation::Horizontal => (HUE_TEXTURE_NAME_HORIZONTAL, HUE_TEXTURE_LENGTH, 1),
-            Orientation::Vertical => (HUE_TEXTURE_NAME_VERTICAL, 1, HUE_TEXTURE_LENGTH),
+        // Register the rainbow texture for the strip's orientation. The
+        // dimensions decide whether scan-line order maps onto the strip's long
+        // axis horizontally or vertically; the vertical buffer is the reversed
+        // one, because that strip's maximum is at the top.
+        let (texture_name, tex_w, tex_h, pixels) = match self.orientation {
+            Orientation::Horizontal => (
+                HUE_TEXTURE_NAME_HORIZONTAL,
+                HUE_TEXTURE_LENGTH,
+                1,
+                HUE_PIXELS.as_slice(),
+            ),
+            Orientation::Vertical => (
+                HUE_TEXTURE_NAME_VERTICAL,
+                1,
+                HUE_TEXTURE_LENGTH,
+                HUE_PIXELS_VERTICAL.as_slice(),
+            ),
         };
-        canvas.ensure_image_registered(
-            texture_name,
-            tex_w,
-            tex_h,
-            Cow::Borrowed(HUE_PIXELS.as_slice()),
-        );
+        canvas.ensure_image_registered(texture_name, tex_w, tex_h, Cow::Borrowed(pixels));
 
         // Background frame (under the rainbow) — protects against
         // rounded-rect corner anti-aliasing leaving the picker surface
@@ -310,7 +336,11 @@ impl Widget for HueStrip {
         let thumb_h = cp::STRIP_THUMB_HEIGHT;
         let thumb_radius = CornerRadius::uniform(cp::STRIP_THUMB_CORNER_RADIUS);
         let (cx, cy) = match self.orientation {
-            Orientation::Vertical => (bounds.x + bounds.width * 0.5, bounds.y + bounds.height * t),
+            // Maximum at the top, so the thumb travels up as the hue grows.
+            Orientation::Vertical => (
+                bounds.x + bounds.width * 0.5,
+                bounds.bottom() - bounds.height * t,
+            ),
             Orientation::Horizontal => {
                 (bounds.x + bounds.width * t, bounds.y + bounds.height * 0.5)
             }

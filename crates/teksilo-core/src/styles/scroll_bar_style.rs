@@ -69,6 +69,22 @@ pub struct ScrollBarStyleConfig {
 }
 
 pub trait ScrollBarStyle: 'static {
+    /// Build the bar's chrome — track and thumb.
+    ///
+    /// A horizontal bar's `scroll_ratio == 0.0` is the **start** of the
+    /// content, which sits at the right-hand edge in a right-to-left window:
+    /// `ScrollArea` places its content that way, and the host widget mirrors
+    /// its thumb hit-test and its drag there. A style that offsets the thumb
+    /// from `bounds.x` unconditionally therefore paints it at the far end of
+    /// the track while the content shows its beginning, and grabbing it jumps.
+    /// Read `PaintContext::layout_direction` at paint time — not at build
+    /// time, because a locale change repaints without rebuilding — and mirror
+    /// the thumb's offset. The vertical orientation has no leading/trailing to
+    /// mirror.
+    ///
+    /// The widget cannot enforce this, and getting it wrong is only visible in
+    /// an RTL locale — the same obligation
+    /// [`SliderStyle::make_body`](super::SliderStyle::make_body) carries.
     fn make_body(&self, cfg: &ScrollBarStyleConfig, ctx: &mut BuildContext) -> WidgetId;
 }
 

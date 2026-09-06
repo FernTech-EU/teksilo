@@ -829,8 +829,12 @@ impl Widget for MenuList {
                             // (otherwise Shift-Lock users couldn't
                             // mnemonic-activate items at all). Ctrl
                             // / Alt / Cmd chords fall through to the
-                            // global Shortcut/Action pipeline.
-                            if modifiers.ctrl() || modifiers.alt() || modifiers.super_key() {
+                            // global Shortcut/Action pipeline —
+                            // except `AltGr`, which is how a non-US
+                            // layout types a character rather than an
+                            // accelerator. See
+                            // `range_nav::is_text_entry_chord`.
+                            if !crate::common::range_nav::is_text_entry_chord(*modifiers) {
                                 return EventResponse::Ignored;
                             }
                             let ch = match key {

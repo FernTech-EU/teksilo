@@ -88,9 +88,8 @@ pub struct ScrollBar {
     /// Current bounds, cached from last layout for event handling.
     cached_bounds: Rc<Cell<Rect>>,
     /// Layout direction captured at `place_children`, so the thumb geometry —
-    /// computed in `build()`'s pointer closures and in `thumb_rect`, neither of
-    /// which has a `PaintContext` — can mirror a horizontal bar without every
-    /// caller threading it.
+    /// computed in `build()`'s pointer closures, which have no `PaintContext` —
+    /// can mirror a horizontal bar without every caller threading it.
     cached_rtl: Rc<Cell<bool>>,
     /// Body subtree id returned by the active style — kept in
     /// `children()` so layout traverses through it.
@@ -209,63 +208,6 @@ impl ScrollBar {
     pub fn thumb_color(mut self, color: impl Into<ColorProp>) -> Self {
         self.thumb_color = Some(color.into());
         self
-    }
-
-    // --- geometry helpers (kept on the parent because event handlers
-    // need them; the style body re-derives the same numbers from cfg).
-
-    /// The total length of the track (along the scroll axis).
-    fn track_length(&self) -> f32 {
-        let bounds = self.cached_bounds.get();
-        match self.orientation {
-            ScrollBarOrientation::Vertical => bounds.height,
-            ScrollBarOrientation::Horizontal => bounds.width,
-        }
-    }
-
-    /// Computed thumb length based on viewport ratio.
-    fn thumb_length(&self) -> f32 {
-        let ratio = self.viewport_ratio.get().clamp(0.0, 1.0);
-        let track = self.track_length();
-        (track * ratio).max(self.min_thumb_length).min(track)
-    }
-
-    /// Thumb offset from the start of the track.
-    fn thumb_offset(&self) -> f32 {
-        let max = self.max_scroll.get();
-        if max <= 0.0 {
-            return 0.0;
-        }
-        let pos = self.scroll_position.get();
-        let ratio = (pos / max).clamp(0.0, 1.0);
-        let available = self.track_length() - self.thumb_length();
-        ratio * available
-    }
-
-    /// The thumb rect in absolute coordinates.
-    fn thumb_rect(&self) -> Rect {
-        let bounds = self.cached_bounds.get();
-        let offset = self.thumb_offset();
-        let thumb_len = self.thumb_length();
-        match self.orientation {
-            ScrollBarOrientation::Vertical => {
-                Rect::new(bounds.x, bounds.y + offset, bounds.width, thumb_len)
-            }
-            ScrollBarOrientation::Horizontal => {
-                // A horizontal bar's zero is the *start* of the content, which
-                // is the right-hand edge in a right-to-left window —
-                // `ScrollArea` already places its content that way
-                // (`bounds.right() - width + scroll_x`), so a thumb pinned to
-                // the geometric left showed the far end of the track while the
-                // content showed its beginning.
-                let x = if self.cached_rtl.get() {
-                    bounds.right() - offset - thumb_len
-                } else {
-                    bounds.x + offset
-                };
-                Rect::new(x, bounds.y, thumb_len, bounds.height)
-            }
-        }
     }
 }
 
@@ -573,12 +515,16 @@ impl Widget for ScrollBar {
                     // what `RangeMove::Page` leaves to the caller.
                     RangeMove::Page { increase } => {
                         let p = page_step(&ratio, max, step);
-                        let d = if range_nav::towards_trailing(increase, horizontal) {
-                            p
-                        } else {
-                            -p
-                        };
-                        set_scroll(scroll_position.get() + d);
+                        // Deliberately *not* through `towards_trailing`: the
+                        // page keys name a direction in the content, not on
+                        // screen, so unlike the arrows they do not follow the
+                        // bar's orientation. `PageUp` is one viewport back and
+                        // `PageDown` one forward on either axis — which is what
+                        // every scroll view binds them to, and what the
+                        // vertical bar beside a horizontal one already did.
+                        // Reading `increase` geometrically made a horizontal
+                        // bar's `PageUp` scroll *forward*.
+                        set_scroll(scroll_position.get() + if increase { -p } else { p });
                     }
                     RangeMove::ToMin => set_scroll(0.0),
                     RangeMove::ToMax => set_scroll(max),
@@ -787,6 +733,49 @@ mod tests {
         );
         tree.press_key(Key::PageUp, Modifiers::NONE);
         assert!(position.get().abs() < 0.01);
+    }
+
+    #[test]
+    fn the_page_keys_read_the_content_not_the_screen() {
+        // `PageUp` is one viewport *back* and `PageDown` one forward on either
+        // axis. The horizontal bar used to run them through the same
+        // `towards_trailing` mapping the arrows use, which reads `increase`
+        // geometrically — so its `PageUp` scrolled forward and its `PageDown`
+        // back, the opposite of the vertical bar sitting beside it.
+        use teksilo_core::event::{Key, Modifiers};
+
+        for orientation in [
+            ScrollBarOrientation::Vertical,
+            ScrollBarOrientation::Horizontal,
+        ] {
+            let position = Signal::new(200.0_f32);
+            let mut tree = WidgetTree::new();
+            let id = tree.add(ScrollBar::new(
+                orientation,
+                position.clone(),
+                Signal::new(400.0),
+                Signal::new(0.2),
+            ));
+            tree.layout(match orientation {
+                ScrollBarOrientation::Vertical => SizeProposal::exact(20.0, 200.0),
+                ScrollBarOrientation::Horizontal => SizeProposal::exact(200.0, 20.0),
+            });
+            tree.focus(id);
+
+            tree.press_key(Key::PageDown, Modifiers::NONE);
+            assert!(
+                position.get() > 200.0,
+                "{orientation:?}: PageDown moves forward through the content, got {}",
+                position.get()
+            );
+            let forward = position.get();
+            tree.press_key(Key::PageUp, Modifiers::NONE);
+            assert!(
+                position.get() < forward,
+                "{orientation:?}: PageUp moves back, got {}",
+                position.get()
+            );
+        }
     }
 
     #[test]
@@ -1020,6 +1009,39 @@ mod tests {
             position.get() > 0.0,
             "a click left of a right-anchored thumb pages forward, got {}",
             position.get()
+        );
+    }
+
+    #[test]
+    fn a_horizontal_bar_mirrors_its_painted_thumb_in_rtl() {
+        // The style paints the thumb; the widget hit-tests and drags it. Both
+        // have to mirror or the two disagree — the painted thumb sat at the
+        // geometric left while the grab region was on the right, so the thumb
+        // jumped the moment it was touched. The direction is read at paint
+        // time, so a locale change needs no rebuild.
+        let position = Signal::new(0.0_f32);
+        let mut tree = WidgetTree::new();
+        tree.set_layout_direction(teksilo_core::environment::LayoutDirection::RightToLeft);
+        tree.add(ScrollBar::new(
+            ScrollBarOrientation::Horizontal,
+            position.clone(),
+            Signal::new(500.0),
+            Signal::new(0.5),
+        ));
+        tree.layout(SizeProposal::exact(400.0, 12.0));
+        let frame = tree.render();
+
+        // Half a 400 px track is a 200 px thumb; at scroll 0 it is flush with
+        // the *start* of the content, which is the right edge here.
+        let thumb = frame
+            .shapes
+            .iter()
+            .find(|q| (q.screen[2] - 200.0).abs() < 1.0)
+            .expect("the bar paints a 200 px thumb");
+        assert!(
+            (thumb.screen[0] - 200.0).abs() < 1.0,
+            "the thumb must be flush right at scroll 0 under RTL, got x={}",
+            thumb.screen[0]
         );
     }
 

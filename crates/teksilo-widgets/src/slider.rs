@@ -341,7 +341,7 @@ impl Widget for Slider {
         let value = self.value.clone();
         let single_step = self.effective_step();
         let page_step = self.effective_page_step();
-        let step = self.step;
+        let snap_step = self.effective_step();
         let orientation = self.orientation;
         let hovered = self.hovered.clone();
         let dragging = self.dragging.clone();
@@ -362,14 +362,21 @@ impl Widget for Slider {
         // pointer is; this decides what a value means once you have one — so an
         // assistive technology's `SetValue` lands on the same grid a drag does
         // instead of between two ticks.
+        //
+        // The grid is [`effective_step`](Self::effective_step), not the
+        // configured `step`: that is the distance the arrows move, the distance
+        // `Increment` / `Decrement` move, and the one published as
+        // `numeric_value_step`, so snapping to anything else would let a write
+        // land between two values every other path can reach. A slider that
+        // configures no step gets the same 1 %-of-range grid its arrows already
+        // walk — a hundred positions, which is what `<input type=range>` gives
+        // a stepless range too.
         let set_value_snapped = {
             let value = value.clone();
             move |v: f32| {
                 let mut val = v;
-                if let Some(s) = step
-                    && s > 0.0
-                {
-                    val = ((val - min) / s).round() * s + min;
+                if snap_step > 0.0 {
+                    val = ((val - min) / snap_step).round() * snap_step + min;
                 }
                 value.set(val.clamp(min, max));
             }
@@ -397,10 +404,22 @@ impl Widget for Slider {
                 let mut t = ((pos - thumb_radius) / usable).clamp(0.0, 1.0);
                 // The minimum sits at the leading edge, which is the right one
                 // in a right-to-left window, so a horizontal slider reads its
-                // pointer position from the other end. The vertical axis has
-                // no leading/trailing to mirror.
-                if rtl && matches!(orientation, Orientation::Horizontal) {
-                    t = 1.0 - t;
+                // pointer position from the other end.
+                //
+                // A vertical slider mirrors unconditionally instead: its
+                // minimum is at the **bottom** and its maximum at the top —
+                // Qt, GTK4, the Win32 trackbar and `<input type=range>` all
+                // agree, and it is what makes `ArrowUp` raise the thumb rather
+                // than lower it. `y` grows downward, so the raw ratio is the
+                // value's complement. The layout direction does not reach this
+                // axis: there is no leading/trailing on the vertical.
+                match orientation {
+                    Orientation::Horizontal => {
+                        if rtl {
+                            t = 1.0 - t;
+                        }
+                    }
+                    Orientation::Vertical => t = 1.0 - t,
                 }
                 set_value_snapped(min + t * (max - min));
             }
@@ -502,9 +521,9 @@ impl Widget for Slider {
         // was dropped on the floor; macOS instead gates AXValue settability on
         // `supports_action(SetValue, ..)`, which is why `accessibility()` has
         // to advertise it. It is the payload handler because `ActionData` is
-        // where the value rides, and the dispatcher calls that slot *instead
-        // of* `on_access_action` — so Increment and Decrement move here too or
-        // they go quiet.
+        // where the value rides, and Increment and Decrement sit beside it so
+        // the whole action set reads as one match rather than being split
+        // across two slots.
         {
             let adjust = adjust_by_step.clone();
             let set_snapped = set_value_snapped.clone();
@@ -887,9 +906,11 @@ mod tests {
 
     #[test]
     fn access_increment_survives_the_payload_handler() {
-        // `on_access_action_request` is called INSTEAD of `on_access_action`,
-        // so Increment and Decrement had to move with SetValue or they would
-        // have gone quiet the moment the payload handler was installed.
+        // Increment and Decrement moved into the payload handler with
+        // SetValue, because that is where `ActionData` rides. They used to have
+        // to: the dispatcher called `on_access_action_request` *instead of*
+        // `on_access_action`. It now fires both, but the pair still lives here
+        // — one handler, one match, one place to read.
         use teksilo_core::accesskit::Action;
         let value = Signal::new(50.0_f32);
         let mut tree = WidgetTree::new();
@@ -900,6 +921,44 @@ mod tests {
         assert!((value.get() - 60.0).abs() < 0.01, "value={}", value.get());
         assert!(access(&mut tree, s, Action::Decrement, None));
         assert!((value.get() - 50.0).abs() < 0.01, "value={}", value.get());
+    }
+
+    #[test]
+    fn an_app_installed_access_action_still_fires_on_a_payload_widget() {
+        // `.on_access_action(..)` is the app's hook; `on_access_action_request`
+        // is what a widget reaches for when it needs `target_node` or `data`.
+        // The dispatcher used to prefer the payload slot when it was set, so
+        // installing an app handler on a `Slider`, `SpinBox`, `TextInput`,
+        // `CodeEditor` or `TabBar` produced a handler that never ran and no
+        // diagnostic anywhere.
+        use std::cell::Cell;
+        use std::rc::Rc;
+        use teksilo_core::accesskit::Action;
+        use teksilo_core::widget_builder::WidgetBuilder;
+
+        let seen: Rc<Cell<u32>> = Rc::new(Cell::new(0));
+        let seen_h = seen.clone();
+        let value = Signal::new(50.0_f32);
+        let mut tree = WidgetTree::new();
+        let s = tree.add(
+            Slider::new(value.clone(), 0.0, 100.0)
+                .step(10.0)
+                .on_access_action(move |action, _ctx| {
+                    if action == Action::Increment {
+                        seen_h.set(seen_h.get() + 1);
+                    }
+                    EventResponse::Ignored
+                }),
+        );
+        tree.layout(SizeProposal::exact(200.0, 60.0));
+
+        assert!(access(&mut tree, s, Action::Increment, None));
+        assert_eq!(seen.get(), 1, "the app's handler runs");
+        assert!(
+            (value.get() - 60.0).abs() < 0.01,
+            "and the widget's own still steps: {}",
+            value.get()
+        );
     }
 
     #[test]
@@ -945,6 +1004,104 @@ mod tests {
             value.get() < 20.0,
             "a click near the right edge is near the minimum under RTL, got {}",
             value.get()
+        );
+    }
+
+    #[test]
+    fn an_at_write_lands_on_the_grid_the_arrows_walk() {
+        // The advertised `numeric_value_step`, the arrows and `Increment` all
+        // move by `effective_step` — 1 % of the range when no step is
+        // configured. The write snapped to the *configured* step instead, so on
+        // a stepless slider it landed between two values every other path could
+        // reach, and Orca then announced a number its own Up arrow could never
+        // produce.
+        use teksilo_core::accesskit::{Action, ActionData};
+        let value = Signal::new(50.0_f32);
+        let mut tree = WidgetTree::new();
+        let s = tree.add(Slider::new(value.clone(), 0.0, 100.0));
+        tree.layout(SizeProposal::exact(200.0, 60.0));
+
+        assert!(access(
+            &mut tree,
+            s,
+            Action::SetValue,
+            Some(ActionData::NumericValue(37.3))
+        ));
+        assert!(
+            (value.get() - 37.0).abs() < 0.01,
+            "a stepless 0..100 slider steps by 1, so the write snaps there: {}",
+            value.get()
+        );
+
+        // …and the arrow lands on the same grid from there.
+        tree.focus(s);
+        tree.press_key(Key::ArrowRight, Modifiers::NONE);
+        assert!((value.get() - 38.0).abs() < 0.01, "value={}", value.get());
+    }
+
+    #[test]
+    fn a_vertical_slider_puts_its_maximum_at_the_top() {
+        // Qt's `QSlider`, GTK4's `GtkScale`, the Win32 trackbar and
+        // `<input type=range>` all put a vertical slider's minimum at the
+        // bottom, and it is what makes `ArrowUp` — which `range_nav` reports as
+        // an increase — raise the thumb. Growing the thumb position with the
+        // value sent it *down*, so the keys and the pointer both drove the
+        // control backwards.
+        let value = Signal::new(50.0_f32);
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let s = tree.add(Slider::new(value.clone(), 0.0, 100.0).orientation(Orientation::Vertical));
+        tree.layout(SizeProposal::exact(60.0, 200.0));
+        tree.render();
+
+        // A click near the top is near the maximum.
+        let top = Point::new(30.0, 12.0);
+        tree.pointer_move(top);
+        for ev in [
+            WidgetEvent::PointerDown {
+                position: top,
+                button: PointerButton::Primary,
+                modifiers: Modifiers::NONE,
+            },
+            WidgetEvent::PointerUp {
+                position: top,
+                button: PointerButton::Primary,
+                modifiers: Modifiers::NONE,
+            },
+        ] {
+            tree.dispatch_event(ev);
+        }
+        assert!(
+            value.get() > 90.0,
+            "a click near the top is near the maximum, got {}",
+            value.get()
+        );
+
+        // …and the arrow that increases the value moves towards it.
+        value.set(50.0);
+        tree.focus(s);
+        tree.press_key(Key::ArrowUp, Modifiers::NONE);
+        let raised = value.get();
+        assert!(raised > 50.0, "ArrowUp increases, got {raised}");
+
+        // The painted thumb agrees: higher value, smaller y.
+        let thumb_y = |tree: &mut WidgetTree| -> f32 {
+            let radius = crate::styles::recipe_slider_style::SLIDER_THUMB_DIAMETER;
+            tree.render()
+                .shapes
+                .iter()
+                .filter(|q| (q.screen[3] - radius).abs() < 1.0)
+                .map(|q| q.screen[1])
+                .fold(f32::MAX, f32::min)
+        };
+        value.set(10.0);
+        let low = thumb_y(&mut tree);
+        value.set(90.0);
+        let high = thumb_y(&mut tree);
+        assert!(
+            high < low,
+            "the thumb rises as the value grows: y({}) at 90 vs y({}) at 10",
+            high,
+            low
         );
     }
 

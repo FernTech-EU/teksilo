@@ -954,7 +954,8 @@ impl DateTimeEdit {
         let date_signal = self.date_part.clone();
         let text_signal = self.date_text.clone();
 
-        let commit: Rc<dyn Fn(&mut EventContext)> = {
+        // Returns whether the text committed — see `DateEdit`'s twin.
+        let commit: Rc<dyn Fn(&mut EventContext) -> bool> = {
             let text_signal = text_signal.clone();
             let date_signal = date_signal.clone();
             let pattern = pattern_rc.clone();
@@ -962,18 +963,19 @@ impl DateTimeEdit {
             Rc::new(move |ctx_evt: &mut EventContext| {
                 let raw = text_signal.get();
                 let trimmed = raw.trim();
-                let parsed: Option<Date> = if trimmed.is_empty() {
-                    None
+                let (parsed, accepted): (Option<Date>, bool) = if trimmed.is_empty() {
+                    (None, true)
                 } else {
                     match parse_value(&pattern, trimmed, ParseTarget::DateOnly) {
-                        Some(ParsedValue::Date(d)) => Some(clamp_date(d, min, max)),
-                        _ => date_signal.get(),
+                        Some(ParsedValue::Date(d)) => (Some(clamp_date(d, min, max)), true),
+                        _ => (date_signal.get(), false),
                     }
                 };
                 if date_signal.get() != parsed {
                     date_signal.set(parsed);
                 }
                 merge(parsed, ctx_evt);
+                accepted
             })
         };
 
@@ -1027,7 +1029,8 @@ impl DateTimeEdit {
         let time_signal = self.time_part.clone();
         let text_signal = self.time_text.clone();
 
-        let commit: Rc<dyn Fn(&mut EventContext)> = {
+        // Returns whether the text committed — see `DateEdit`'s twin.
+        let commit: Rc<dyn Fn(&mut EventContext) -> bool> = {
             let text_signal = text_signal.clone();
             let time_signal = time_signal.clone();
             let pattern = pattern_rc.clone();
@@ -1035,18 +1038,19 @@ impl DateTimeEdit {
             Rc::new(move |ctx_evt: &mut EventContext| {
                 let raw = text_signal.get();
                 let trimmed = raw.trim();
-                let parsed: Option<Time> = if trimmed.is_empty() {
-                    None
+                let (parsed, accepted): (Option<Time>, bool) = if trimmed.is_empty() {
+                    (None, true)
                 } else {
                     match parse_value(&pattern, trimmed, ParseTarget::TimeOnly) {
-                        Some(ParsedValue::Time(t)) => Some(clamp_time(t, min, max)),
-                        _ => time_signal.get(),
+                        Some(ParsedValue::Time(t)) => (Some(clamp_time(t, min, max)), true),
+                        _ => (time_signal.get(), false),
                     }
                 };
                 if time_signal.get() != parsed {
                     time_signal.set(parsed);
                 }
                 merge(parsed, ctx_evt);
+                accepted
             })
         };
 
@@ -1082,7 +1086,7 @@ impl DateTimeEdit {
         mask_string: &str,
         validator: crate::primitives::text_input_field::ValidatorFn,
         placeholder: LocalizedString,
-        commit: Rc<dyn Fn(&mut EventContext)>,
+        commit: Rc<dyn Fn(&mut EventContext) -> bool>,
         a11y_label_key: &str,
         a11y_role: Role,
         kind: DateTimeHalfKind,
@@ -1107,9 +1111,13 @@ impl DateTimeEdit {
             .on_access_set_value({
                 let text_signal = text_signal.clone();
                 let commit = commit.clone();
+                // The commit's verdict is the technology's answer: an
+                // unparseable string leaves the value where it was, and
+                // saying `Handled` there would report a write that never
+                // landed.
                 move |text: &str, ctx: &mut EventContext| {
                     text_signal.set(text.to_string());
-                    commit(ctx);
+                    commit(ctx)
                 }
             })
             .read_only(self.read_only)
@@ -1154,11 +1162,15 @@ impl DateTimeEdit {
         }
         {
             let commit = commit.clone();
-            field = field.on_submit_fn(move |ctx_evt| commit(ctx_evt));
+            field = field.on_submit_fn(move |ctx_evt| {
+                commit(ctx_evt);
+            });
         }
         {
             let commit = commit.clone();
-            field = field.on_blur_fn(move |ctx_evt| commit(ctx_evt));
+            field = field.on_blur_fn(move |ctx_evt| {
+                commit(ctx_evt);
+            });
         }
 
         let caret = field.caret_position();

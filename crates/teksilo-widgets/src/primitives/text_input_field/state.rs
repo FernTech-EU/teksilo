@@ -37,7 +37,13 @@ pub(crate) type CharFilter = Rc<dyn Fn(char) -> bool>;
 /// the technology set, so a host whose text only *projects* a typed value can
 /// parse it directly instead of re-reading a bound signal the field has not
 /// synced yet.
-pub(crate) type AccessSetValue = Rc<dyn Fn(&str, &mut EventContext)>;
+/// A composite's hook for an assistive technology's whole-value write.
+///
+/// Returns whether the host **accepted** the string. A `SpinBox` handed
+/// `"twelve"` reverts its display and returns `false`, and the field reports
+/// the action unhandled rather than telling the technology a write it refused
+/// succeeded.
+pub(crate) type AccessSetValue = Rc<dyn Fn(&str, &mut EventContext) -> bool>;
 
 pub(crate) type SharedState = Rc<RefCell<TextInputState>>;
 

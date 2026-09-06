@@ -388,7 +388,10 @@ impl TextInputField {
     /// because the document→signal sync is deferred to the next frame tick, so
     /// a host reading the signal here would parse the text from *before* this
     /// edit and revert.
-    pub fn on_access_set_value(mut self, f: impl Fn(&str, &mut EventContext) + 'static) -> Self {
+    pub fn on_access_set_value(
+        mut self,
+        f: impl Fn(&str, &mut EventContext) -> bool + 'static,
+    ) -> Self {
         self.on_access_set_value = Some(std::rc::Rc::new(f));
         self
     }
@@ -1954,7 +1957,30 @@ fn handle_access_action(
             ctx.request_frame();
             EventResponse::Handled
         }
+        // Both write arms are gated on the field being editable. The node
+        // advertises neither action while `read_only` is set, but an adapter
+        // dispatches what the technology asks for rather than what the node
+        // offered — AT-SPI publishes `EditableText` off the interface set, not
+        // off the action list — so a read-only `SpinBox`, `DateEdit`,
+        // `TimeEdit`, `DateTimeEdit` or `DateRangeEdit` had its value rewritten
+        // by anything that tried. Refusing here is the only place that covers
+        // every host at once, and it reports the refusal instead of a silent
+        // no-op.
+        (Action::SetValue | Action::ReplaceSelectedText, _) if state.borrow().read_only => {
+            EventResponse::Ignored
+        }
         (Action::SetValue, Some(ActionData::Value(value))) => {
+            // Snapshot the document before overwriting it. A host that refuses
+            // the string has to be able to put the field back, and it cannot do
+            // it from its own side: its revert writes the bound
+            // `Signal<String>`, which still holds the *pre-edit* display at
+            // this point (the document→signal sync is deferred to the next
+            // frame tick), so the write is a no-op and the rejected string is
+            // what the deferred sync then publishes.
+            let before = {
+                let st = state.borrow();
+                st.document.to_plain_text().unwrap_or_default()
+            };
             let st = state.borrow();
             st.cursor.select(SelectionType::Document);
             let _ = st.cursor.insert_text(value.as_ref());
@@ -1967,11 +1993,27 @@ fn handle_access_action(
             let host = st.on_access_set_value.clone();
             drop(st);
             sync_cursor_signals(state);
-            if let Some(host) = host {
-                host(value.as_ref(), ctx);
-            }
             ctx.request_frame();
-            EventResponse::Handled
+            // The host owns the verdict: it parses, clamps and — on a string it
+            // cannot read — reverts the display to the value the composite
+            // still holds. Reporting `Handled` regardless told the technology a
+            // write had landed when the field had just thrown it away, so
+            // Orca's value entry and macOS's `setAccessibilityValue:` both read
+            // back success on `"twelve"`.
+            match host {
+                Some(host) if !host(value.as_ref(), ctx) => {
+                    // Refused, so the field must not keep the refused string:
+                    // reporting `Ignored` over a document still showing it is
+                    // the same lie the other way round.
+                    let st = state.borrow();
+                    st.cursor.select(SelectionType::Document);
+                    let _ = st.cursor.insert_text(&before);
+                    drop(st);
+                    sync_cursor_signals(state);
+                    EventResponse::Ignored
+                }
+                _ => EventResponse::Handled,
+            }
         }
         (Action::ReplaceSelectedText, Some(ActionData::Value(value))) => {
             // Insert at the caret, replacing the active selection (if

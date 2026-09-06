@@ -2917,6 +2917,29 @@ fn home_hides_the_side() {
 }
 
 #[test]
+fn a_modified_enter_does_not_hide_a_dock_side() {
+    // `Enter` was matched before any modifier test, so `Ctrl+Enter` hid the
+    // side and reported the key handled — the one row of
+    // `docs/range-keyboard.md` ("`Ctrl` / `Alt` / `Super` + any → falls
+    // through") the handle did not honour, while every other key on it did.
+    let (mut t, model, handle) = side_with_handle(DockSide::Leading, 240.0);
+    t.focus(handle);
+
+    for mods in [Modifiers::CTRL, Modifiers::ALT, Modifiers::SUPER] {
+        t.press_key(Key::Enter, mods);
+        assert!(
+            model.is_side_visible(DockSide::Leading),
+            "Enter with {mods:?} must fall through to the application"
+        );
+    }
+
+    // Bare `Enter` still toggles, which is what makes the guard a refusal
+    // rather than a removal.
+    t.press_key(Key::Enter, Modifiers::NONE);
+    assert!(!model.is_side_visible(DockSide::Leading));
+}
+
+#[test]
 fn an_accelerator_chord_does_not_resize_a_dock_side() {
     // Behaviour change: modifiers used to be ignored outright.
     let (mut t, model, handle) = side_with_handle(DockSide::Leading, 240.0);

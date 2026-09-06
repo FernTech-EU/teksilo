@@ -563,7 +563,7 @@ impl WidgetTree {
                     if *action == accesskit::Action::Focus {
                         // Land where the keys go. A composite publishes one AT
                         // node on a root that is not itself focusable — a
-                        // `SpinBox`, `TextInput` or `DateEdit` keeps focus on an
+                        // `SpinBox`, `ComboBox` or `DateEdit` keeps focus on an
                         // inner leaf — and `ctx.request_focus` has always walked
                         // into the subtree for exactly that reason. The AT path
                         // must too: focusing the root parks `self.focused` on a
@@ -573,15 +573,30 @@ impl WidgetTree {
                         // stepping keys. `first_focusable_descendant` returns the
                         // node itself when it is focusable, so every leaf control
                         // is unchanged.
-                        let target = self.first_focusable_descendant(id).unwrap_or(id);
-                        self.focus_with_origin_ops(
-                            target,
-                            crate::focus::FocusOrigin::Programmatic,
-                            &mut *ops,
-                        );
-                        // Focus is serviced here rather than by the widget, so
-                        // "handled" means the focus actually landed.
-                        self.access_action_handled = self.focused == Some(target);
+                        //
+                        // The walk is gated on the node actually offering
+                        // `Action::Focus`, which is what makes the sentence
+                        // above true of composites and only of them. Walking
+                        // from *any* non-focusable node meant an AT `Focus` on a
+                        // `Panel`, a `GroupBox`, a landmark or a label moved the
+                        // keyboard onto the first control inside it — a node the
+                        // assistive technology could have named itself and did
+                        // not — and reported success. A node that offers no
+                        // `Focus` now reports the action unhandled instead,
+                        // which is the honest answer.
+                        if self.advertises_focus_action(id) {
+                            let target = self.first_focusable_descendant(id).unwrap_or(id);
+                            self.focus_with_origin_ops(
+                                target,
+                                crate::focus::FocusOrigin::Programmatic,
+                                &mut *ops,
+                            );
+                            // Focus is serviced here rather than by the widget,
+                            // so "handled" means the focus actually landed.
+                            self.access_action_handled = self.focused == Some(target);
+                        } else {
+                            self.access_action_handled = false;
+                        }
                     } else if *action == accesskit::Action::ShowContextMenu {
                         // A "show context menu" AT action — a screen reader's
                         // menu key, or an automation `right_click` /
@@ -1430,65 +1445,53 @@ impl WidgetTree {
                 data,
                 ..
             } => {
-                // Prefer the full-payload handler when the widget has
-                // opted in; it's the one that receives `target_node` and
-                // `data`. Within each payload variant, fire BOTH external
-                // and own handlers — Button (own) and Dialog (external)
-                // layered together rely on both firing for a single
-                // accesskit click.
-                // Assistive-tech action paths run under
-                // the `Accessibility` source label. Restored after
-                // the inner if/else.
+                // Every installed slot fires — both payload shapes, and
+                // within each shape both the external (app-installed
+                // `.on_access_action*`) and the widget's own. Button (own)
+                // and Dialog (external) layered together rely on that for a
+                // single accesskit click.
+                //
+                // The two shapes are layered, not alternatives, because they
+                // have different owners: `on_access_action_request` is what a
+                // widget reaches for when it needs `target_node` or `data`
+                // (`Slider`, `SpinBox`, `TextInputField`, `CodeEditor`,
+                // `TabBar`), while `.on_access_action(..)` is the app's
+                // builder-level hook. Preferring the payload shape when it was
+                // set therefore did not choose between two handlers for the
+                // same job — it silently disabled the app's handler on exactly
+                // the widgets that had migrated, with nothing at the call site
+                // to say so.
+                //
+                // Assistive-tech action paths run under the `Accessibility`
+                // source label. Restored after the block.
                 let saved_a11y_source = ctx
                     .current_source
                     .replace(crate::telemetry::IntentSource::Accessibility);
-                let request_is_set = node.handlers.on_access_action_request.is_some()
-                    || node.external_handlers.on_access_action_request.is_some();
-                let user_handled = if request_is_set {
-                    let r1 = node
-                        .external_handlers
-                        .on_access_action_request
-                        .as_mut()
-                        .map(|h| h(*action, *target_node, data.clone(), ctx))
-                        .unwrap_or(EventResponse::Ignored);
-                    let r2 = node
-                        .handlers
-                        .on_access_action_request
-                        .as_mut()
-                        .map(|h| h(*action, *target_node, data.clone(), ctx))
-                        .unwrap_or(EventResponse::Ignored);
-                    Some(
-                        if r1 == EventResponse::Handled || r2 == EventResponse::Handled {
-                            EventResponse::Handled
-                        } else {
-                            EventResponse::Ignored
-                        },
-                    )
-                } else if node.handlers.on_access_action.is_some()
-                    || node.external_handlers.on_access_action.is_some()
-                {
-                    let r1 = node
-                        .external_handlers
-                        .on_access_action
-                        .as_mut()
-                        .map(|h| h(*action, ctx))
-                        .unwrap_or(EventResponse::Ignored);
-                    let r2 = node
-                        .handlers
-                        .on_access_action
-                        .as_mut()
-                        .map(|h| h(*action, ctx))
-                        .unwrap_or(EventResponse::Ignored);
-                    Some(
-                        if r1 == EventResponse::Handled || r2 == EventResponse::Handled {
-                            EventResponse::Handled
-                        } else {
-                            EventResponse::Ignored
-                        },
-                    )
+                let mut any_slot = false;
+                let mut any_handled = false;
+                if let Some(h) = node.external_handlers.on_access_action_request.as_mut() {
+                    any_slot = true;
+                    any_handled |=
+                        h(*action, *target_node, data.clone(), ctx) == EventResponse::Handled;
+                }
+                if let Some(h) = node.handlers.on_access_action_request.as_mut() {
+                    any_slot = true;
+                    any_handled |=
+                        h(*action, *target_node, data.clone(), ctx) == EventResponse::Handled;
+                }
+                if let Some(h) = node.external_handlers.on_access_action.as_mut() {
+                    any_slot = true;
+                    any_handled |= h(*action, ctx) == EventResponse::Handled;
+                }
+                if let Some(h) = node.handlers.on_access_action.as_mut() {
+                    any_slot = true;
+                    any_handled |= h(*action, ctx) == EventResponse::Handled;
+                }
+                let user_handled = any_slot.then_some(if any_handled {
+                    EventResponse::Handled
                 } else {
-                    None
-                };
+                    EventResponse::Ignored
+                });
 
                 // Builder-level access_action / access_custom_action
                 // callbacks. These layer on top of any user-installed

@@ -51,6 +51,11 @@ have a range the user can page through, and does something else already own
 | `Ctrl` / `Alt` / `Super` + any | falls through | falls through | falls through |
 | `Enter` | — | toggle the adjacent collapsible pane | commit |
 
+`Enter` sits **under** the modifier rule like everything else in the table. It
+was matched before the modifier test on both handles, so `Ctrl+Enter` collapsed
+a splitter pane or hid a dock side and reported the key handled — the one row of
+this table those two did not honour, while every other key on them did.
+
 ### The modifier rule, stated once
 
 A chord holding `Ctrl`, `Alt` or `Super` is **not** the control's, and reaches
@@ -68,7 +73,27 @@ multiplier) read it themselves.
 
 This is the same rule, for the same reason, as
 [`list_nav::tree_chord`](../crates/teksilo-widgets/src/common/list_nav.rs) and
-`MenuList`'s type-ahead guard.
+`MenuList`'s type-ahead guard — and it is now literally the same function,
+`range_nav::is_accelerator_chord`. It had been spelled out at five call sites,
+and they had already diverged.
+
+**`AltGr` is the one exception, and it belongs to text, not to this table.** The
+third-level shift on every non-US layout reaches an application as `Ctrl+Alt` on
+Windows, X11 and Wayland alike — it is how a German keyboard types `@`, a French
+one `€`, a Polish one `ą`. Refusing it in a *type-ahead* arm made every
+character behind `AltGr` dead while the unshifted ones kept working, so the
+feature half-worked in exactly the locales that needed it most. That question is
+`range_nav::is_text_entry_chord`, deliberately **not** the negation of the
+accelerator test: an `AltGr+↓` is still not this table's chord, because an arrow
+key is not a character. macOS has no `AltGr` — it composes with `Option`, and
+the OS rewrites the keystroke before the application sees it, exactly as the
+menu bar's mnemonics document — so neither predicate needs a platform branch.
+
+`range_nav` also owns `disclosure_chord`, the `Alt+↓` / `Alt+↑` / `F4` table
+that shows and hides a drop-down. `ComboBox`, `DateEdit` and `PopoverWidget`
+each hand-rolled it, and disagreed about `F4`: it is a drop-down *field's*
+chord, and `PopoverWidget` — which also backs toolbar chevrons and menu buttons
+— deliberately leaves that variant unmatched.
 
 ## Step sizes
 
@@ -88,6 +113,12 @@ own, exactly as `NavMove::Page` is measured from the row-offset table.
 `Slider`'s default lands on 10 % of the range, which is simultaneously
 `QAbstractSlider::pageStep`, `GtkScale`'s page increment and what WebKit and
 Blink give `<input type=range>`.
+
+The page keys name a direction in the **content**, not on screen: `PageUp` is
+one viewport back and `PageDown` one forward on either axis. Unlike the arrows
+they therefore do not follow a scroll bar's orientation — reading them
+geometrically made a horizontal bar's `PageUp` scroll *forward*, the opposite of
+the vertical bar beside it.
 
 ## Why this carries no platform branch
 
@@ -162,13 +193,26 @@ these moved its paint, its pointer mapping and its arrows together.
 | `SplitterHandle` | **yes** | Its pane order and drag math had been mirrored since it shipped; only the keyboard was left behind, so `→` pulled the divider left. |
 | `DockResizeHandle` | **yes** | Its pointer path already inverted per side (`side_main`); the keyboard did not. |
 | `Slider` | **yes** | The minimum sits at the leading edge, so the fill grows leftward from a thumb that travels the other way. Read from `PaintContext::layout_direction` at paint time and `EventContext::is_rtl` at event time, so a locale flip needs no rebuild. A custom `SliderStyle` must do the same — the widget cannot enforce it, and the trait says so. |
-| `ScrollBar` (horizontal) | **yes** | `ScrollArea` had *already* mirrored: it anchors content to the right and grows `scroll_x` leftward. The thumb did not, so at `scroll_x = 0` the content showed its beginning while the thumb sat at the far end of the track. The thumb, the drag delta and the track-click direction now key off one predicate. |
+| `ScrollBar` (horizontal) | **yes** | `ScrollArea` had *already* mirrored: it anchors content to the right and grows `scroll_x` leftward. The thumb did not, so at `scroll_x = 0` the content showed its beginning while the thumb sat at the far end of the track. The hit-test, the drag delta and the track-click direction key off one predicate — and so does the **painted** thumb, which was mirrored last: a `ScrollBarStyle` that offsets from `bounds.x` unconditionally draws the thumb at one end of the track while the grab region sits at the other, so it jumps the moment it is touched. The trait says so, the way `SliderStyle`'s does. |
 | `HueStrip`, `AlphaStrip` | **n/a** | Only ever built vertical (their `orientation` builder is `pub(crate)` and the colour picker passes `Vertical`), and the vertical axis has no leading/trailing to mirror. Nothing to do until a horizontal strip exists. |
 
-One thing that deliberately did **not** change: a vertical `Slider` puts its
-minimum at the *top*, where Qt puts it at the bottom. That is a pre-existing
-polarity choice, self-consistent across its paint, pointer and keys, and
-independent of the layout direction — flipping it is a separate decision.
+## The vertical axis puts the maximum at the top
+
+Independent of the layout direction, and now uniform across every vertical
+bounded scalar in the framework: `Slider`, `HueStrip` and `AlphaStrip` all place
+their minimum at the **bottom**. Qt's `QSlider`, GTK4's `GtkScale`, the Win32
+trackbar and `<input type=range>` agree, and it is what makes `ArrowUp` — which
+this table reports as an *increase* — raise the thumb.
+
+All three grew their value downward before, so `ArrowUp` increased the value and
+moved the thumb **down**: the keys and the pointer drove the control in opposite
+directions on screen. The geometry moved rather than the chord table, because
+the chord table is the part every other toolkit agrees on. For the hue strip
+that also reverses the rainbow texture, so hue 0 is at the bottom.
+
+A vertical `ScrollBar` is not an exception to this and never was: a scroll
+*offset* grows downward by definition, which is why `range_nav::towards_trailing`
+exists to convert an increase in the value into a direction on screen.
 
 ## Chords Teksilo deliberately does not bind
 
@@ -188,6 +232,24 @@ Every one of these publishes `numeric_value`, `min_numeric_value`,
 `max_numeric_value` and `numeric_value_step`; the ones with a coarse step also
 publish `numeric_value_jump`, so an assistive technology can announce both
 distances.
+
+An assistive technology's write lands on the **same grid the arrows walk**: the
+advertised `numeric_value_step`, an arrow press and `Increment` all move by the
+control's effective step, so a write that snapped to something else produced a
+value no other path could reach — and one a screen reader would then announce.
+A `Slider` that configures no step gets the 1 %-of-range grid its arrows already
+use, a hundred positions, which is what `<input type=range>` gives a stepless
+range too.
+
+A write the widget **refuses** reports the action unhandled. `SetValue` on a
+text-projected composite used to answer `Handled` whatever the host's parse
+said, so `"twelve"` in Orca's value entry and in macOS's
+`setAccessibilityValue:` both read back as success while the field quietly
+reverted. A read-only field refuses the two writing actions outright — on the
+*inner text node* as well as on the composite root, because not advertising an
+action is not the same as refusing it: an adapter dispatches what the technology
+asks for, and AT-SPI publishes `EditableText` off the interface set rather than
+off the action list.
 
 `Slider` and `SpinBox` service `Action::SetValue` in **both** payload shapes,
 because both are sent in the field: a number (macOS `setAccessibilityValue:`

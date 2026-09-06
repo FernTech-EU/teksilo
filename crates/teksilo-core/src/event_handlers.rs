@@ -88,8 +88,14 @@ pub(crate) struct EventHandlers {
     /// `ActionRequest` payload (`target_node` and `data`). Used by
     /// widgets that care about `SetTextSelection` / `SetValue` /
     /// `SetScrollOffset` — the bare `on_access_action` handler
-    /// drops the payload. When this slot is set, it is called
-    /// INSTEAD of `on_access_action` for the same event.
+    /// drops the payload.
+    ///
+    /// The two slots are **layered, not alternatives**: both fire for the same
+    /// dispatched action, and the action counts as handled if either says so.
+    /// They have different owners — this one is what a widget reaches for when
+    /// it needs the payload, while `on_access_action` is also where an
+    /// application's `.on_access_action(..)` lands, so preferring one silently
+    /// disabled the other's handler.
     #[allow(clippy::type_complexity)]
     pub on_access_action_request: Option<
         Box<

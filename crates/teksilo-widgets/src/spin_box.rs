@@ -1071,9 +1071,7 @@ impl<T: SpinValue> Widget for SpinBox<T> {
             // reading `text_signal`, which this edit has not synced yet.
             .on_access_set_value({
                 let commit_text = commit_text.clone();
-                move |text: &str, ctx: &mut EventContext| {
-                    let _ = commit_text(text, ctx);
-                }
+                move |text: &str, ctx: &mut EventContext| commit_text(text, ctx)
             })
             .read_only(read_only)
             .placeholder(self.placeholder.clone())
@@ -1364,7 +1362,12 @@ impl<T: SpinValue> Widget for SpinBox<T> {
             .on_scroll({
                 let focused = self.focused.clone();
                 move |event, ctx| {
-                    if !enabled || read_only || wheel_mode == WheelMode::Disabled {
+                    // `enabled` is deliberately absent, for the reason the key
+                    // handler above states: the dispatcher gates on
+                    // `arena.is_enabled` before any handler runs, and the local
+                    // is a *build-time* snapshot — a `Signal`-bound spin box
+                    // enabled after it was built would keep a dead wheel.
+                    if read_only || wheel_mode == WheelMode::Disabled {
                         return EventResponse::Ignored;
                     }
                     // `Focused` wheel mode only fires when the
@@ -1398,11 +1401,10 @@ impl<T: SpinValue> Widget for SpinBox<T> {
                 }
             })
             // Full-payload AccessKit handler. `SetValue` carries its value in
-            // `ActionData`, which `on_access_action` cannot see — and the
-            // dispatcher calls the request slot *instead of* the plain one when
-            // both are set, so the whole action set moves here or Increment and
-            // Decrement go quiet. Both payload shapes are serviced, because
-            // both are sent in the field:
+            // `ActionData`, which `on_access_action` cannot see, so Increment
+            // and Decrement sit beside it here: the whole action set reads as
+            // one match rather than being split across two slots. Both payload
+            // shapes are serviced, because both are sent in the field:
             //   * `NumericValue(f64)` — macOS `setAccessibilityValue:` with an
             //     `NSNumber` (a `Role::SpinButton` publishes a numeric
             //     `AXValue`), and AT-SPI's `Value.SetCurrentValue`, which is how

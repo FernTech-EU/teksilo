@@ -127,11 +127,15 @@ impl Widget for AlphaStrip {
                 // `x` / `y` arrive widget-local (origin at the strip's own
                 // top-left), so no `bounds.x` / `bounds.y` subtraction.
                 let t = match orientation {
+                    // `y` grows downward and the maximum is at the top, so the
+                    // pointer's ratio is the value's complement — the same
+                    // mirror `Slider` applies on its vertical axis, and what
+                    // keeps `ArrowUp` and a drag upward moving the same way.
                     Orientation::Vertical => {
                         if bounds.height <= 0.0 {
                             return;
                         }
-                        (y / bounds.height).clamp(0.0, 1.0)
+                        1.0 - (y / bounds.height).clamp(0.0, 1.0)
                     }
                     Orientation::Horizontal => {
                         if bounds.width <= 0.0 {
@@ -140,7 +144,8 @@ impl Widget for AlphaStrip {
                         (x / bounds.width).clamp(0.0, 1.0)
                     }
                 };
-                // Visual: top/leading = transparent (alpha 0), bottom/trailing = opaque (alpha 1).
+                // Visual: bottom/leading = transparent (alpha 0),
+                // top/trailing = opaque (alpha 1).
                 (set_alpha)(t.clamp(0.0, 1.0));
             })
         };
@@ -286,7 +291,10 @@ impl Widget for AlphaStrip {
         let opaque = self.current_color.get().with_alpha(1.0);
         let transparent = opaque.with_alpha(0.0);
         let (start, end) = match self.orientation {
-            Orientation::Vertical => (Point::new(0.0, 0.0), Point::new(0.0, bounds.height)),
+            // Bottom is transparent and top opaque: a vertical bounded scalar's
+            // maximum is at the top, so the fully opaque end has to be the one
+            // `ArrowUp` and an upward drag travel towards.
+            Orientation::Vertical => (Point::new(0.0, bounds.height), Point::new(0.0, 0.0)),
             Orientation::Horizontal => (Point::new(0.0, 0.0), Point::new(bounds.width, 0.0)),
         };
         canvas.fill_rounded_rect(
@@ -317,9 +325,10 @@ impl Widget for AlphaStrip {
         let thumb_h = cp::STRIP_THUMB_HEIGHT;
         let thumb_radius = CornerRadius::uniform(cp::STRIP_THUMB_CORNER_RADIUS);
         let thumb_rect = match self.orientation {
+            // Maximum at the top, so the thumb travels up as the alpha grows.
             Orientation::Vertical => Rect::new(
                 bounds.x - 2.0,
-                bounds.y + bounds.height * t - thumb_h * 0.5,
+                bounds.bottom() - bounds.height * t - thumb_h * 0.5,
                 bounds.width + 4.0,
                 thumb_h,
             ),

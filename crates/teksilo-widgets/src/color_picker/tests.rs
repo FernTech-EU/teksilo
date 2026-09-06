@@ -215,6 +215,97 @@ fn alpha_strip_keyboard_steps() {
 }
 
 #[test]
+fn a_vertical_strip_puts_its_maximum_at_the_top() {
+    // Both strips default to vertical inside the picker, and both grew their
+    // value downward: `ArrowUp` raised the hue and lowered the thumb. A
+    // vertical bounded scalar's maximum is at the top everywhere else in
+    // Teksilo — and in Qt, GTK4, the Win32 trackbar and `<input type=range>` —
+    // so the geometry moved rather than the chord table.
+    use teksilo_canvas::Point;
+    use teksilo_core::event::{PointerButton, WidgetEvent};
+
+    let hue = Signal::new(180.0_f32);
+    let setter: Rc<dyn Fn(f32)> = {
+        let hue = hue.clone();
+        Rc::new(move |h| hue.set(h))
+    };
+    let dragging = Rc::new(std::cell::Cell::new(false));
+    let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+    let id = tree.add(HueStrip::new(hue.clone(), setter, dragging));
+    tree.layout(SizeProposal::exact(20.0, 200.0));
+    tree.render();
+
+    // A press near the top reaches the top of the range.
+    let top = Point::new(10.0, 4.0);
+    tree.pointer_move(top);
+    tree.dispatch_event(WidgetEvent::PointerDown {
+        position: top,
+        button: PointerButton::Primary,
+        modifiers: Modifiers::NONE,
+    });
+    tree.dispatch_event(WidgetEvent::PointerUp {
+        position: top,
+        button: PointerButton::Primary,
+        modifiers: Modifiers::NONE,
+    });
+    assert!(
+        hue.get() > 340.0,
+        "a press near the top is near the maximum hue, got {}",
+        hue.get()
+    );
+
+    // …the same direction `ArrowUp` travels.
+    hue.set(180.0);
+    tree.focus(id);
+    tree.press_key(Key::ArrowUp, Modifiers::NONE);
+    assert!(
+        hue.get() > 180.0,
+        "ArrowUp increases the hue, got {}",
+        hue.get()
+    );
+}
+
+#[test]
+fn a_vertical_alpha_strip_is_opaque_at_the_top() {
+    use teksilo_canvas::Point;
+    use teksilo_core::event::{PointerButton, WidgetEvent};
+
+    let alpha = Signal::new(0.5_f32);
+    let setter: Rc<dyn Fn(f32)> = {
+        let alpha = alpha.clone();
+        Rc::new(move |a| alpha.set(a))
+    };
+    let dragging = Rc::new(std::cell::Cell::new(false));
+    let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+    tree.add(AlphaStrip::new(
+        Signal::new(Color::RED),
+        alpha.clone(),
+        setter,
+        dragging,
+    ));
+    tree.layout(SizeProposal::exact(20.0, 200.0));
+    tree.render();
+
+    let bottom = Point::new(10.0, 196.0);
+    tree.pointer_move(bottom);
+    tree.dispatch_event(WidgetEvent::PointerDown {
+        position: bottom,
+        button: PointerButton::Primary,
+        modifiers: Modifiers::NONE,
+    });
+    tree.dispatch_event(WidgetEvent::PointerUp {
+        position: bottom,
+        button: PointerButton::Primary,
+        modifiers: Modifiers::NONE,
+    });
+    assert!(
+        alpha.get() < 0.05,
+        "a press near the bottom is near transparent, got {}",
+        alpha.get()
+    );
+}
+
+#[test]
 fn the_strips_ignore_accelerator_chords() {
     // Behaviour change: modifiers used to be ignored outright, so `Ctrl+Home`
     // drove a strip to its minimum and swallowed the chord.
