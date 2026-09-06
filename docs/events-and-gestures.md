@@ -309,6 +309,65 @@ Two consequences worth knowing:
   marquee, click selects it" work (see
   [teksilo-scene.md](teksilo-scene.md) "Drag mode").
 
+### 4.3 Touch action and pan claims
+
+Two node properties declare what a **direct pointer** (touch, pen) may do to a
+subtree, independently of whether the widget has attached any handler at all.
+Both are pure vocabulary today — the types, the builders, and the two path
+folds that read them are declared in
+[`crates/teksilo-core/src/pointer/touch_action.rs`](../crates/teksilo-core/src/pointer/touch_action.rs),
+but **nothing in the dispatch path consults them yet**; the arbitration
+package that wires them into real gesture recognition is a later step in the
+touch-gesture programme.
+
+**`TouchAction`** — the CSS `touch-action` model. A node declares one; the
+effective value for a target is the *intersection* of its own declaration
+with every ancestor's, root to target (`WidgetTree::effective_touch_action`,
+in `widget_tree/pointer_state.rs`) — an ancestor can only narrow what a
+descendant permits, never widen it.
+
+| Constant | Permits |
+| --- | --- |
+| `TouchAction::AUTO` (default) | Everything — pan on both axes, pinch-zoom, and any other default touch behavior. |
+| `TouchAction::NONE` | Nothing — the subtree reserves every contact for its own gesture handling. |
+| `TouchAction::PAN_X` | Horizontal panning only. |
+| `TouchAction::PAN_Y` | Vertical panning only. |
+| `TouchAction::PAN` | Panning on either axis (`PAN_X \| PAN_Y`). |
+| `TouchAction::PINCH_ZOOM` | Pinch-to-zoom only. |
+| `TouchAction::MANIPULATION` | Panning and pinch-zoom, no other default gesture (`PAN \| PINCH_ZOOM`). |
+
+Set it with `.touch_action(TouchAction::…)`, available on `WidgetBuilder`,
+`HandlerSet`, and `WidgetWithHandlers` — the same three surfaces every other
+node-level property (`gesture_dead_zone`, `event_pass_through`, …) is set
+through.
+
+**`PanClaim`** — a node's declaration that it is a **pan surface**: it wants
+to consume a direct pointer's drag as content panning. Declared
+*independently* of `TouchAction` — a scrollable states "I pan" via
+`PanClaim` regardless of what its own `touch_action` permits; `TouchAction`
+is what the eventual arbitration consults to decide whether a claim further
+down the chain is still reachable. `WidgetTree::pan_candidates` collects
+every claim from a target up to the root, **innermost first** — the order a
+boundary pan will chain along once nested scrollables hand off at their
+edges.
+
+A scroll container **declares itself** — `.scroll_container(PanAxes::…)` —
+rather than being inferred from the presence of an `on_scroll` handler.
+That inference would be wrong more often than not: `SpinBox` increments its
+value on wheel, `TabBar` remaps wheel to horizontal tab scroll, and
+`SceneView` zooms on Ctrl-wheel — every one of those has an `on_scroll`
+handler and none of them is a pan. `.scroll_container(axes)` is sugar for a
+`PanClaim` with `devices: PointerKindMask::DIRECT` and `kinetic: true`; reach
+for the `.pan_claim(PanClaim { .. })` escape hatch directly for a claim that
+isn't kinetic, or that widens/narrows the device mask.
+
+**A mouse ignores `TouchAction` entirely.** It has no contact patch to
+restrict, and it already scrolls with the wheel rather than by dragging
+content — there is nothing for a mouse to read here. This is also why
+`PanClaim::devices` defaults to `PointerKindMask::DIRECT` (touch + pen) and
+never `PointerKindMask::MOUSE`: however a widget declares its pan claim, a
+mouse drag is never read as a pan.
+
 ## 5. `EventContext` — the deferred-operations pattern
 
 Handlers don't mutate the tree directly. They request mutations on their `EventContext` and the framework applies them after the dispatch finishes:
@@ -503,6 +562,8 @@ No Xvfb, no GPU, no display server required.
 - [crates/teksilo-core/src/event_handlers.rs](../crates/teksilo-core/src/event_handlers.rs) — `EventHandlers` struct.
 - [crates/teksilo-core/src/widget_builder.rs](../crates/teksilo-core/src/widget_builder.rs) — blanket-impl builder methods.
 - [crates/teksilo-core/src/gesture.rs](../crates/teksilo-core/src/gesture.rs) — recognizer state machines.
+- [crates/teksilo-core/src/pointer/touch_action.rs](../crates/teksilo-core/src/pointer/touch_action.rs) — `TouchAction` / `PanAxes` / `PanClaim` (§4.3).
+- [crates/teksilo-core/src/widget_tree/pointer_state.rs](../crates/teksilo-core/src/widget_tree/pointer_state.rs) — `effective_touch_action` / `pan_candidates`, the two path folds (§4.3).
 - [crates/teksilo-core/src/widget_tree/event_dispatch_impl.rs](../crates/teksilo-core/src/widget_tree/event_dispatch_impl.rs) — dispatch walk.
 - [crates/teksilo-core/src/widget.rs](../crates/teksilo-core/src/widget.rs) — `EventContext`.
 - [crates/teksilo-widgets/src/focus_scope.rs](../crates/teksilo-widgets/src/focus_scope.rs) — the `FocusScope` traversal-scope wrapper (§6.1).

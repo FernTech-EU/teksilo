@@ -6,6 +6,7 @@ use slotmap::SlotMap;
 use crate::environment::ThemeOverride;
 use crate::event_handlers::EventHandlers;
 use crate::event_source::{SubscriptionHandle, SubscriptionId};
+use crate::pointer::touch_action::{PanClaim, TouchAction};
 use crate::signal::{ObserverHandle, Prop, Signal};
 use crate::widget::{CursorIcon, Widget};
 use crate::widget_id::WidgetId;
@@ -180,6 +181,21 @@ pub struct WidgetNode {
     /// `-webkit-app-region: no-drag`. Default `false`. See the `DeadZone`
     /// wrapper widget.
     pub gesture_dead_zone: bool,
+    /// What a direct pointer (touch, pen) is permitted to do to this node's
+    /// subtree. Intersected with every ancestor's on the way down by
+    /// `WidgetTree::effective_touch_action` — an ancestor can only narrow
+    /// what a descendant permits, never widen it. Default
+    /// [`TouchAction::AUTO`] (everything permitted). Set via
+    /// `.touch_action(..)`. A mouse never consults this field. **Not yet
+    /// read at dispatch time** — see [`crate::pointer::touch_action`].
+    pub touch_action: TouchAction,
+    /// This node's declaration that it is a **pan surface** — it wants to
+    /// consume a direct pointer's drag as content panning. `None` (the
+    /// default) means the node makes no such claim. `WidgetTree::
+    /// pan_candidates` collects every claim from a target up to the root.
+    /// Set via `.pan_claim(..)` or the `.scroll_container(..)` sugar. **Not
+    /// yet read at dispatch time** — see [`crate::pointer::touch_action`].
+    pub pan_claim: Option<PanClaim>,
     /// When `true` and this widget holds keyboard focus, a `KeyDown` is
     /// delivered straight to it **without** first running shortcut →
     /// intent → action resolution. The node is a *keyboard capture*
@@ -405,6 +421,8 @@ impl WidgetNode {
             ime: None,
             event_pass_through: false,
             gesture_dead_zone: false,
+            touch_action: TouchAction::AUTO,
+            pan_claim: None,
             keyboard_capture: false,
             hit_transparent: false,
             opacity_prop: None,
@@ -1400,6 +1418,12 @@ impl WidgetArena {
             }
             if let Some(dead_zone) = handler_set.gesture_dead_zone {
                 node.gesture_dead_zone = dead_zone;
+            }
+            if let Some(action) = handler_set.touch_action {
+                node.touch_action = action;
+            }
+            if let Some(claim) = handler_set.pan_claim {
+                node.pan_claim = Some(claim);
             }
             if let Some(keyboard_capture) = handler_set.keyboard_capture {
                 node.keyboard_capture = keyboard_capture;

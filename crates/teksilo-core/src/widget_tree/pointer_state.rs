@@ -6,6 +6,7 @@
 //! gesture-recognizer tick that drives them.
 
 use super::*;
+use crate::pointer::touch_action::{Axis, PanClaim, TouchAction};
 
 impl WidgetTree {
     /// This tree's input clock — the one source of
@@ -329,6 +330,70 @@ impl WidgetTree {
             .filter_map(|arena| arena.next_deadline())
             .min()
     }
+
+    /// The [`TouchAction`] permitted for `target`: every node's own
+    /// declaration from the root down to `target` (inclusive), intersected.
+    /// An ancestor's `NONE` wins no matter what a descendant declares —
+    /// intersection is absorbing at `NONE` (see
+    /// `crate::pointer::touch_action`), so this needs no early exit to get
+    /// that right; it just folds the whole chain.
+    ///
+    /// One of the two path folds the arbitration package consumes. **Not
+    /// called from any dispatch path yet.**
+    #[allow(dead_code)] // plumbing for the P08 arbitration package; exercised by tests today
+    pub(crate) fn effective_touch_action(&self, target: WidgetId) -> TouchAction {
+        let mut chain = Vec::new();
+        let mut current = Some(target);
+        while let Some(id) = current {
+            chain.push(id);
+            current = self.arena.parent(id);
+        }
+        // `chain` is target..=root (innermost first); fold root-to-target so
+        // the read matches the CSS `touch-action` model this mirrors — an
+        // ancestor's declaration is applied before a descendant's narrows it
+        // further. `intersect` is commutative and associative, so the fold
+        // order can never change the *answer*, only which step "loses" reads
+        // as the natural one.
+        chain
+            .iter()
+            .rev()
+            .map(|&id| {
+                self.arena
+                    .get(id)
+                    .map(|n| n.touch_action)
+                    .unwrap_or(TouchAction::AUTO)
+            })
+            .fold(TouchAction::AUTO, TouchAction::intersect)
+    }
+
+    /// Every [`PanClaim`] from `target` up to the root, **innermost first**
+    /// — the order a boundary pan chains along (a nested scrollable hits its
+    /// edge and hands off to its container), so it is normative. A claimant
+    /// is excluded entirely — never narrowed — when `allowed` forbids any
+    /// axis it declares.
+    ///
+    /// The second of the two path folds the arbitration package consumes.
+    /// **Not called from any dispatch path yet.**
+    #[allow(dead_code)] // plumbing for the P08 arbitration package; exercised by tests today
+    pub(crate) fn pan_candidates(
+        &self,
+        target: WidgetId,
+        allowed: TouchAction,
+    ) -> Vec<(WidgetId, PanClaim)> {
+        let mut result = Vec::new();
+        let mut current = Some(target);
+        while let Some(id) = current {
+            if let Some(claim) = self.arena.get(id).and_then(|n| n.pan_claim) {
+                let x_ok = !claim.axes.contains(Axis::X) || allowed.allows_pan_x();
+                let y_ok = !claim.axes.contains(Axis::Y) || allowed.allows_pan_y();
+                if x_ok && y_ok {
+                    result.push((id, claim));
+                }
+            }
+            current = self.arena.parent(id);
+        }
+        result
+    }
 }
 
 #[cfg(test)]
@@ -371,6 +436,100 @@ mod tests {
         assert_eq!(
             tree.pointer_captured_by, None,
             "destroy_subtree must clear a capture anchored at a destroyed widget"
+        );
+    }
+}
+
+/// The two path folds `effective_touch_action` / `pan_candidates` declare
+/// for the arbitration package (P08) — pure plumbing, exercised here in
+/// isolation since nothing dispatches through them yet.
+#[cfg(test)]
+mod touch_action_tests {
+    use super::*;
+    use crate::pointer::touch_action::PanAxes;
+    use crate::test_widgets::FillWidget;
+    use crate::widget_builder::WidgetBuilder;
+
+    /// A 20-deep chain, root to target, where one mid-level node declares
+    /// `PAN_Y` and another declares `PINCH_ZOOM`. Neither permission is
+    /// shared by the other, so the intersection collapses to `NONE` — the
+    /// clearest possible demonstration that the fold really intersects the
+    /// *whole* chain rather than reading only the nearest declaration.
+    #[test]
+    fn effective_touch_action_intersects_the_whole_root_to_target_chain() {
+        let mut tree = WidgetTree::new();
+        let mut chain = vec![tree.add(FillWidget::new())]; // depth 0: the root
+        for depth in 1..20usize {
+            let parent = *chain.last().expect("root was pushed");
+            let id = if depth == 5 {
+                tree.add_child(parent, FillWidget::new().touch_action(TouchAction::PAN_Y))
+            } else if depth == 12 {
+                tree.add_child(
+                    parent,
+                    FillWidget::new().touch_action(TouchAction::PINCH_ZOOM),
+                )
+            } else {
+                tree.add_child(parent, FillWidget::new())
+            };
+            chain.push(id);
+        }
+        assert_eq!(chain.len(), 20, "the path must be 20 nodes deep");
+        let target = *chain.last().expect("chain is non-empty");
+        tree.layout(SizeProposal::exact(50.0, 50.0));
+
+        assert_eq!(
+            tree.effective_touch_action(target),
+            TouchAction::NONE,
+            "PAN_Y at depth 5 and PINCH_ZOOM at depth 12 share no permission"
+        );
+
+        // Every node above depth 5 (inclusive) is untouched: the plain
+        // `AUTO` prefix intersects down to exactly `PAN_Y`.
+        assert_eq!(tree.effective_touch_action(chain[5]), TouchAction::PAN_Y);
+    }
+
+    /// `pan_candidates` walks target-to-root (innermost first) and drops a
+    /// claimant whose declared axes the allowed action forbids, rather than
+    /// narrowing it.
+    #[test]
+    fn pan_candidates_orders_innermost_first_and_filters_by_allowed_axes() {
+        let mut tree = WidgetTree::new();
+        // root claims X; an unclaimed node in between; target (innermost)
+        // claims Y.
+        let root = tree.add(FillWidget::new().scroll_container(PanAxes::X));
+        let mid = tree.add_child(root, FillWidget::new());
+        let target = tree.add_child(mid, FillWidget::new().scroll_container(PanAxes::Y));
+        tree.layout(SizeProposal::exact(50.0, 50.0));
+
+        let x_claim = PanClaim {
+            axes: PanAxes::X,
+            devices: teksilo_tokens::PointerKindMask::DIRECT,
+            kinetic: true,
+        };
+        let y_claim = PanClaim {
+            axes: PanAxes::Y,
+            devices: teksilo_tokens::PointerKindMask::DIRECT,
+            kinetic: true,
+        };
+
+        // Both axes allowed: both claims survive, innermost (target) first.
+        assert_eq!(
+            tree.pan_candidates(target, TouchAction::PAN),
+            vec![(target, y_claim), (root, x_claim)]
+        );
+
+        // Only PAN_X allowed: target's Y-axis claim is forbidden and
+        // excluded outright; root's X-axis claim still survives.
+        assert_eq!(
+            tree.pan_candidates(target, TouchAction::PAN_X),
+            vec![(root, x_claim)]
+        );
+
+        // Only PAN_Y allowed: the reverse — root's claim is excluded,
+        // target's survives.
+        assert_eq!(
+            tree.pan_candidates(target, TouchAction::PAN_Y),
+            vec![(target, y_claim)]
         );
     }
 }

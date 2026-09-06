@@ -3126,6 +3126,12 @@ impl WidgetTree {
                         if let Some(dead_zone) = handler_set.gesture_dead_zone {
                             node.gesture_dead_zone = dead_zone;
                         }
+                        if let Some(action) = handler_set.touch_action {
+                            node.touch_action = action;
+                        }
+                        if let Some(claim) = handler_set.pan_claim {
+                            node.pan_claim = Some(claim);
+                        }
                         if let Some(keyboard_capture) = handler_set.keyboard_capture {
                             node.keyboard_capture = keyboard_capture;
                         }
@@ -3282,6 +3288,12 @@ impl WidgetTree {
                         }
                         if let Some(dead_zone) = handler_set.gesture_dead_zone {
                             node.gesture_dead_zone = dead_zone;
+                        }
+                        if let Some(action) = handler_set.touch_action {
+                            node.touch_action = action;
+                        }
+                        if let Some(claim) = handler_set.pan_claim {
+                            node.pan_claim = Some(claim);
                         }
                         if let Some(keyboard_capture) = handler_set.keyboard_capture {
                             node.keyboard_capture = keyboard_capture;

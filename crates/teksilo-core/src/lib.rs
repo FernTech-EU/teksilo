@@ -99,6 +99,7 @@ pub use overlay::{
 pub use overscroll::{OverscrollBehavior, SCROLL_MOVE_EPSILON};
 pub use paint_prop::{GradientStopProp, PaintProp, angle_to_endpoints};
 pub use pointer::clock::{InputClock, ManualClock, MonotonicClock};
+pub use pointer::touch_action::{Axis, PanAxes, PanClaim, TouchAction};
 pub use pointer::{
     BackendDeviceKey, CancelReason, EventTime, PointerAxes, PointerId, PointerIdAllocator,
     PointerInfo, PointerPhase, PointerSample, ScrollPhase, ScrollSample, ScrollSource,

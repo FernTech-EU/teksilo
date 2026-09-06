@@ -22,6 +22,7 @@ use teksilo_canvas::Point;
 use crate::event::{ButtonMask, EventResponse, WidgetEvent};
 use crate::event_handlers::EventHandlers;
 use crate::gesture::{DragPhase, PinchPhase, SwipeDirection, TapEvent};
+use crate::pointer::touch_action::{PanAxes, PanClaim, TouchAction};
 use crate::signal::Prop;
 use crate::widget::{CursorIcon, EventContext, Widget};
 use crate::widget_id::WidgetId;
@@ -310,6 +311,12 @@ pub struct HandlerSet {
     /// drag/swipe on any ancestor above it (a *gesture dead zone*). See
     /// [`super::arena::WidgetNode::gesture_dead_zone`].
     pub(crate) gesture_dead_zone: Option<bool>,
+    /// When `Some(..)`, overrides what a direct pointer may do to this
+    /// node's subtree. See [`super::arena::WidgetNode::touch_action`].
+    pub(crate) touch_action: Option<TouchAction>,
+    /// When `Some(..)`, declares this node a pan surface. See
+    /// [`super::arena::WidgetNode::pan_claim`].
+    pub(crate) pan_claim: Option<PanClaim>,
     /// When `Some(true)` and this node holds keyboard focus, a `KeyDown`
     /// bypasses shortcut resolution and is delivered straight to it (a
     /// *keyboard capture* surface — terminals, game viewports). See
@@ -358,6 +365,8 @@ impl HandlerSet {
             ime: None,
             event_pass_through: None,
             gesture_dead_zone: None,
+            touch_action: None,
+            pan_claim: None,
             keyboard_capture: None,
             hit_transparent: None,
             context_menu_factory: None,
@@ -612,6 +621,38 @@ impl HandlerSet {
     /// `arm_drag_observers`; see the `DeadZone` wrapper widget.
     pub fn gesture_dead_zone(mut self, dead_zone: bool) -> Self {
         self.gesture_dead_zone = Some(dead_zone);
+        self
+    }
+
+    /// Override what a direct pointer (touch, pen) is permitted to do to
+    /// this widget's subtree — the CSS `touch-action` model. Intersected
+    /// with every ancestor's declaration on the way down; a mouse never
+    /// consults this. See [`super::arena::WidgetNode::touch_action`].
+    pub fn touch_action(mut self, action: TouchAction) -> Self {
+        self.touch_action = Some(action);
+        self
+    }
+
+    /// Declare this widget a **pan surface** on `axes` for direct pointers,
+    /// with kinetic (fling/settle) hand-off on release. Sugar for
+    /// `.pan_claim(PanClaim { axes, devices: PointerKindMask::DIRECT, kinetic: true })`
+    /// — the shape every scrollable declares. See
+    /// [`super::arena::WidgetNode::pan_claim`].
+    pub fn scroll_container(mut self, axes: PanAxes) -> Self {
+        self.pan_claim = Some(PanClaim {
+            axes,
+            devices: teksilo_tokens::PointerKindMask::DIRECT,
+            kinetic: true,
+        });
+        self
+    }
+
+    /// Declare this widget a pan surface with an explicit [`PanClaim`] —
+    /// the escape hatch behind [`scroll_container`](Self::scroll_container)
+    /// for a claim that isn't kinetic, or that widens/narrows the device
+    /// mask. See [`super::arena::WidgetNode::pan_claim`].
+    pub fn pan_claim(mut self, claim: PanClaim) -> Self {
+        self.pan_claim = Some(claim);
         self
     }
 
@@ -985,6 +1026,31 @@ impl<W: Widget> WidgetWithHandlers<W> {
     /// [`HandlerSet::gesture_dead_zone`].
     pub fn gesture_dead_zone(mut self, dead_zone: bool) -> Self {
         self.handler_set.gesture_dead_zone = Some(dead_zone);
+        self
+    }
+
+    /// Override what a direct pointer may do to this widget's subtree. See
+    /// [`HandlerSet::touch_action`].
+    pub fn touch_action(mut self, action: TouchAction) -> Self {
+        self.handler_set.touch_action = Some(action);
+        self
+    }
+
+    /// Declare this widget a pan surface on `axes`, kinetic, direct pointers
+    /// only. See [`HandlerSet::scroll_container`].
+    pub fn scroll_container(mut self, axes: PanAxes) -> Self {
+        self.handler_set.pan_claim = Some(PanClaim {
+            axes,
+            devices: teksilo_tokens::PointerKindMask::DIRECT,
+            kinetic: true,
+        });
+        self
+    }
+
+    /// Declare this widget a pan surface with an explicit [`PanClaim`]. See
+    /// [`HandlerSet::pan_claim`].
+    pub fn pan_claim(mut self, claim: PanClaim) -> Self {
+        self.handler_set.pan_claim = Some(claim);
         self
     }
 
@@ -1638,6 +1704,24 @@ pub trait WidgetBuilder: Widget + Sized + 'static {
         WidgetWithHandlers::new(self).gesture_dead_zone(dead_zone)
     }
 
+    /// Override what a direct pointer may do to this widget's subtree. See
+    /// [`HandlerSet::touch_action`].
+    fn touch_action(self, action: TouchAction) -> WidgetWithHandlers<Self> {
+        WidgetWithHandlers::new(self).touch_action(action)
+    }
+
+    /// Declare this widget a pan surface on `axes`, kinetic, direct pointers
+    /// only. See [`HandlerSet::scroll_container`].
+    fn scroll_container(self, axes: PanAxes) -> WidgetWithHandlers<Self> {
+        WidgetWithHandlers::new(self).scroll_container(axes)
+    }
+
+    /// Declare this widget a pan surface with an explicit [`PanClaim`]. See
+    /// [`HandlerSet::pan_claim`].
+    fn pan_claim(self, claim: PanClaim) -> WidgetWithHandlers<Self> {
+        WidgetWithHandlers::new(self).pan_claim(claim)
+    }
+
     /// Mark this widget a keyboard capture surface (terminals, game
     /// viewports): while focused, `KeyDown`s bypass shortcut resolution.
     /// See [`HandlerSet::keyboard_capture`].
@@ -2038,6 +2122,70 @@ mod tests {
             seen_mut,
             Some(7),
             "as_any_mut must forward through the wrapper too"
+        );
+    }
+
+    // --- touch-action / pan-claim builder surfaces ---------------------
+
+    /// Surface 1: `HandlerSet`'s own builder methods set its fields
+    /// directly — no arena involved.
+    #[test]
+    fn handler_set_surface_sets_touch_action_and_pan_claim() {
+        let hs = HandlerSet::new()
+            .touch_action(TouchAction::PAN_Y)
+            .scroll_container(PanAxes::BOTH);
+        assert_eq!(hs.touch_action, Some(TouchAction::PAN_Y));
+        assert_eq!(
+            hs.pan_claim,
+            Some(PanClaim {
+                axes: PanAxes::BOTH,
+                devices: teksilo_tokens::PointerKindMask::DIRECT,
+                kinetic: true,
+            })
+        );
+    }
+
+    /// Surface 2: `WidgetWithHandlers<W>`'s inherent methods — reached by
+    /// chaining a second builder call onto an already-wrapped widget, which
+    /// resolves to the inherent impl rather than the blanket trait default.
+    #[test]
+    fn widget_with_handlers_surface_sets_touch_action_and_pan_claim() {
+        let wrapped = crate::test_widgets::FillWidget::new()
+            .gesture_dead_zone(false) // promotes to WidgetWithHandlers via the trait
+            .touch_action(TouchAction::NONE) // now resolves to the inherent method
+            .pan_claim(PanClaim::horizontal());
+        assert_eq!(wrapped.handler_set.touch_action, Some(TouchAction::NONE));
+        assert_eq!(wrapped.handler_set.pan_claim, Some(PanClaim::horizontal()));
+    }
+
+    /// Surface 3: the blanket `WidgetBuilder` trait default method, called
+    /// directly on a bare `Widget` and verified end-to-end through the tree
+    /// (the widget-authoring call shape apps actually use). Read back
+    /// through the two path folds themselves: for a root with no ancestors,
+    /// `effective_touch_action` / `pan_candidates` reduce to exactly the
+    /// node's own declaration, so this doubles as a sanity check on those
+    /// folds' base case.
+    #[test]
+    fn widget_builder_surface_sets_the_node_fields() {
+        let mut tree = WidgetTree::new();
+        let id = tree.add(
+            crate::test_widgets::FillWidget::new()
+                .touch_action(TouchAction::PAN_X)
+                .scroll_container(PanAxes::Y),
+        );
+        tree.layout(teksilo_canvas::SizeProposal::exact(100.0, 100.0));
+
+        assert_eq!(tree.effective_touch_action(id), TouchAction::PAN_X);
+        assert_eq!(
+            tree.pan_candidates(id, TouchAction::AUTO),
+            vec![(
+                id,
+                PanClaim {
+                    axes: PanAxes::Y,
+                    devices: teksilo_tokens::PointerKindMask::DIRECT,
+                    kinetic: true,
+                }
+            )]
         );
     }
 }

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
+use crate::pointer::touch_action::TouchAction;
 use crate::widget_id::WidgetId;
 
 use super::CursorIcon;
@@ -297,6 +298,12 @@ pub struct EventContext<'ops> {
     /// and for handlers run outside a pointer dispatch (a timer, an
     /// accessibility action).
     pub(crate) input: crate::pointer::InputSnapshot,
+    /// The frozen [`TouchAction`] for the gesture being handled. Defaults to
+    /// [`TouchAction::AUTO`] for a hand-constructed context and for every
+    /// handler today, since no dispatch path populates this yet — see
+    /// [`touch_action`](EventContext::touch_action) and
+    /// `crate::pointer::touch_action`.
+    pub(crate) touch_action: TouchAction,
     /// Debug-only WCAG 3.2.1 guard: `Some(flag)` where `flag` is set while a
     /// focus-change dispatch is running. `open_window` / `focus_window` warn if
     /// invoked while it reads `true` (a focus handler changing context). `None`
@@ -428,6 +435,7 @@ impl<'ops> EventContext<'ops> {
             focused_widget: None,
             layout_direction: crate::environment::LayoutDirection::LeftToRight,
             input: crate::pointer::InputSnapshot::default(),
+            touch_action: TouchAction::AUTO,
             in_focus_dispatch: None,
         }
     }
@@ -485,6 +493,21 @@ impl<'ops> EventContext<'ops> {
     /// trackpad, a synthesised touch pan, or the app itself.
     pub fn scroll_source(&self) -> crate::pointer::ScrollSource {
         self.input.scroll_source
+    }
+
+    /// The [`TouchAction`] governing the gesture being handled.
+    ///
+    /// This is meant to be the value **frozen at press** for the whole
+    /// gesture's lifetime — the arbitration package (P08) computes it once,
+    /// from `WidgetTree::effective_touch_action` of the pressed target, and
+    /// writes it onto the context's private `touch_action` field (`pub(crate)`,
+    /// like `input`) so a recognizer never re-reads a subtree that may have
+    /// rebuilt mid-gesture. **No dispatch path populates it yet**: every
+    /// context today reports [`TouchAction::AUTO`], the neutral value a
+    /// mouse (which never consults this at all) already behaves as. See
+    /// `crate::pointer::touch_action`.
+    pub fn touch_action(&self) -> TouchAction {
+        self.touch_action
     }
 
     /// Snapshot the hosting tree's layout direction. Called by
