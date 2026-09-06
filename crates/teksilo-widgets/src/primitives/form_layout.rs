@@ -226,6 +226,25 @@ impl Widget for FormLayout {
         self.all_child_ids()
     }
 
+    /// Reconcile: the rows are re-attached by id, not re-derived.
+    ///
+    /// A form's children are handed in once — `line(..)` takes a
+    /// `Box<dyn Widget>` that can be added to the arena exactly once, and
+    /// `line_ids(..)` names widgets the caller registered itself — so there
+    /// is no recipe to replay on a rebuild. Under the default
+    /// tear-down-and-reconstruct semantics `build()` found `pending_rows`
+    /// already drained, re-attached the previous generation's ids, and got a
+    /// form of destroyed children: every row vanished and the widget measured
+    /// zero by zero.
+    ///
+    /// Reconciling is also what a form wants for its own sake. A rebuild
+    /// triggered by something else on the screen — a locale switch, a
+    /// `Rebuild`-level signal on an ancestor — must not empty the fields the
+    /// user has been typing into, move focus, or reset a scrolled field.
+    fn preserves_children_on_rebuild(&self) -> bool {
+        true
+    }
+
     fn layout_response(
         &self,
         proposal: SizeProposal,
@@ -724,16 +743,41 @@ mod tests {
     }
 
     #[test]
-    fn a_line_names_its_field_exactly_once() {
-        // `build()` registers the label relation, and anything that registers
-        // it again — a rebuild, an app that also calls `access_labelled_by` on
-        // the same pair — must not add a second target: the consumer builds the
-        // name by concatenating every target's value, so a duplicate makes a
-        // screen reader read "Name Name, edit text".
+    fn a_rebuilt_form_keeps_its_rows() {
+        // A form's children are handed in once and cannot be reconstructed, so
+        // a rebuild has to re-attach them rather than re-derive them. It used
+        // to re-derive: `build()` found `pending_rows` already drained,
+        // re-attached ids the framework had just destroyed, and the form came
+        // back empty at zero by zero.
         let mut tree = WidgetTree::new();
         let label = tree.add(FixedLeaf(80.0, 20.0));
         let field = tree.add(FixedLeaf(100.0, 20.0));
-        let _form = tree.add(FormLayout::new().line_ids(label, field));
+        let form = tree.add(FormLayout::new().label_gap(10.0).line_ids(label, field));
+        tree.layout(SizeProposal::exact(400.0, 200.0));
+        let before = tree.bounds(field);
+        assert!(before.width > 0.0, "the row is laid out to begin with");
+
+        tree.arena_mark_needs_rebuild_for_testing(form);
+        tree.layout(SizeProposal::exact(400.0, 200.0));
+
+        assert_eq!(
+            tree.bounds(field),
+            before,
+            "the field must survive its form's rebuild, in the same place"
+        );
+        assert!(tree.is_active(label) && tree.is_active(field));
+    }
+
+    #[test]
+    fn a_rebuilt_line_names_its_field_once() {
+        // `build()` registers the label relation, and it runs again on every
+        // rebuild. Appending blindly would add a second target, and the
+        // consumer builds a node's name by concatenating every target's value
+        // — so a screen reader would read "Name Name, edit text".
+        let mut tree = WidgetTree::new();
+        let label = tree.add(FixedLeaf(80.0, 20.0));
+        let field = tree.add(FixedLeaf(100.0, 20.0));
+        let form = tree.add(FormLayout::new().line_ids(label, field));
         tree.layout(SizeProposal::exact(400.0, 200.0));
 
         let relations = |tree: &mut WidgetTree| {
@@ -748,32 +792,12 @@ mod tests {
         };
         assert_eq!(relations(&mut tree), 1, "one visible label, one relation");
 
-        // Register the same pair again through the same public door
-        // `FormLayout::build` uses.
-        #[derive(Debug)]
-        struct Relabeller(WidgetId, WidgetId);
-        impl Widget for Relabeller {
-            fn build(
-                &mut self,
-                ctx: &mut teksilo_core::build_context::BuildContext,
-            ) -> Vec<WidgetId> {
-                ctx.access_labelled_by(self.0, self.1);
-                vec![]
-            }
-            fn layout_response(
-                &self,
-                _proposal: SizeProposal,
-                _ctx: &LayoutContext,
-            ) -> teksilo_core::widget::LayoutResponse {
-                Size::ZERO.into()
-            }
-        }
-        tree.add(Relabeller(field, label));
+        tree.arena_mark_needs_rebuild_for_testing(form);
         tree.layout(SizeProposal::exact(400.0, 200.0));
         assert_eq!(
             relations(&mut tree),
             1,
-            "re-registering the same pair leaves one relation"
+            "however many rebuilds, still one relation"
         );
     }
 

@@ -391,6 +391,13 @@ See [docs/range-keyboard.md](docs/range-keyboard.md) for the full chord table.
   runs sat under `Role::Paragraph` nodes, and a run's update routes to its
   filtered parent, which supports no text ranges.
 
+#### Layout
+
+- `FormLayout` survives a rebuild. Its rows are handed in once and cannot be
+  reconstructed, so it now re-attaches them rather than re-deriving them —
+  before, any rebuild (a locale switch, a signal on an ancestor) left an empty
+  form measuring zero by zero, and took whatever the user had typed with it.
+
 ## [0.9.4] - 2026-09-05
 
 One fix, to the fallback the automation bridge takes when `$TMPDIR` is too deep
