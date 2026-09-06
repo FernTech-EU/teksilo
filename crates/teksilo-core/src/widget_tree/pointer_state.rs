@@ -626,7 +626,26 @@ impl WidgetTree {
 
     /// Declare `winner` the owner of the current sequence and cancel every
     /// competitor it knocked out — each exactly once.
+    ///
+    /// "Exactly once" is structural rather than bookkept:
+    /// [`PointerSequence::decide`](crate::gesture::PointerSequence::decide)
+    /// reports only the members that were still live and flips them to
+    /// `Rejected` as it goes, and a decided sequence returns early above — so a
+    /// loser knocked out in an earlier sample cannot be knocked out again.
     pub(super) fn decide_sequence(&mut self, winner: WidgetId) {
+        let mut noop = crate::window::NoopWindowOps;
+        self.decide_sequence_with_ops(winner, &mut noop);
+    }
+
+    /// [`decide_sequence`](Self::decide_sequence) with the caller's
+    /// [`WindowOps`](crate::window::WindowOps), so a loser's
+    /// `on_pointer_cancel` can reach the multi-window API like any other
+    /// handler.
+    pub(super) fn decide_sequence_with_ops(
+        &mut self,
+        winner: WidgetId,
+        ops: &mut dyn crate::window::WindowOps,
+    ) {
         let Some(losers) = self.with_sequence(|_, sequence| {
             if sequence.is_decided() {
                 return Vec::new();
@@ -643,13 +662,20 @@ impl WidgetTree {
         };
         let pointer = self.current_pointer_id();
         for id in losers {
-            self.cancel_member_arena(id, pointer);
+            // Member-level, not pointer-level: the pointer is very much alive
+            // and its winner is about to go on using it.
+            self.revoke_sequence_member(
+                pointer,
+                id,
+                crate::pointer::CancelReason::PeerClaimed,
+                &mut *ops,
+            );
         }
     }
 
     /// Take a member out of the running and revoke whatever its recognizers had
     /// accumulated for this contact.
-    fn cancel_member_arena(&mut self, id: WidgetId, pointer: crate::pointer::PointerId) {
+    pub(super) fn cancel_member_arena(&mut self, id: WidgetId, pointer: crate::pointer::PointerId) {
         if let Some(node) = self.arena.get_mut(id)
             && let Some(set) = node.handlers.gesture_arena.as_mut()
         {
@@ -669,19 +695,47 @@ impl WidgetTree {
         let Some((dead, lost_owner)) = self.with_sequence(|tree, sequence| {
             sequence.set_capture(capture);
             let dead = sequence.revalidate(&tree.arena);
-            (dead, sequence.lost_owner(&tree.arena))
+            // Which owner died decides how the cancel reads: a winner that went
+            // away had won the press outright, a captor that went away leaves
+            // the capture with nobody holding it.
+            let lost_owner = sequence
+                .lost_owner(&tree.arena)
+                .then(|| match sequence.winner() {
+                    Some(winner) if !tree.arena.is_active(winner) => {
+                        crate::pointer::CancelReason::WidgetDestroyed
+                    }
+                    _ => crate::pointer::CancelReason::CaptureOrphaned,
+                });
+            if lost_owner.is_some() {
+                // The cancel that finishes the teardown is queued behind this
+                // sample, so the sequence outlives this line by one dispatch.
+                // Nothing may win a press whose owner is already gone in the
+                // meantime — withdraw every competitor now, which also silences
+                // their recognizers for the rest of the sample
+                // (`sequence_blocks_arena`).
+                let live: Vec<WidgetId> = sequence.members().iter().map(|m| m.id).collect();
+                for id in live {
+                    sequence.reject(id);
+                }
+            }
+            (dead, lost_owner)
         }) else {
             return;
         };
         for id in dead {
-            self.cancel_member_arena(id, pointer);
+            self.revoke_sequence_member(
+                pointer,
+                id,
+                crate::pointer::CancelReason::WidgetDestroyed,
+                &mut *ops,
+            );
         }
-        if lost_owner {
+        if let Some(reason) = lost_owner {
             crate::trace_input!(
                 Gestures,
-                "sequence for {pointer:?} cancelled: its owner is gone"
+                "sequence for {pointer:?} cancelled: its owner is gone ({reason:?})"
             );
-            self.end_sequence_state(pointer, ops);
+            self.cancel_pointer(pointer, reason, &mut *ops);
         }
     }
 
@@ -723,24 +777,31 @@ impl WidgetTree {
         }
     }
 
-    /// Tear the sequence down without a release: every member is cancelled and
-    /// the capture is given back.
-    fn end_sequence_state(
-        &mut self,
-        pointer: crate::pointer::PointerId,
-        _ops: &mut dyn crate::window::WindowOps,
-    ) {
-        let Some(sequence) = self
-            .pointers
-            .get_mut(pointer)
-            .and_then(|e| e.sequence.take())
-        else {
-            return;
-        };
-        for member in sequence.members() {
-            self.cancel_member_arena(member.id, pointer);
+    /// Stop every gesture arena that is still following `pointer`.
+    ///
+    /// A press ends at exactly one node — the captor — and the release is
+    /// delivered only there, so any *other* arena that saw the `Down` is left
+    /// following a contact that no longer exists. It happens on the ordinary
+    /// path: an ancestor drag that wins a press a tapping descendant was
+    /// holding takes the capture with it, and the descendant's arena never
+    /// sees the `Up`.
+    ///
+    /// A stale entry is not inert. The next press reuses it instead of
+    /// instantiating fresh recognizers, so a contact starts mid-gesture on
+    /// state left over from the previous one. Ended rather than cancelled: the
+    /// press was completed, not revoked, and the node's
+    /// [`TapStreak`](crate::gesture::TapStreak) — which lives outside the live
+    /// set precisely so it can outlive a contact — must survive, or touch
+    /// double-tap would be impossible.
+    pub(super) fn release_arenas_following(&mut self, pointer: crate::pointer::PointerId) {
+        let owners: Vec<WidgetId> = self.gesture_owners.iter().copied().collect();
+        for id in owners {
+            if let Some(node) = self.arena.get_mut(id)
+                && let Some(set) = node.handlers.gesture_arena.as_mut()
+            {
+                set.end(pointer);
+            }
         }
-        self.set_pointer_capture(pointer, None);
     }
 
     /// Apply the arbitration acts a handler queued on its context.

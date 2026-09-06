@@ -795,6 +795,22 @@ impl HandlerSet {
         self
     }
 
+    /// Set the pointer-cancel handler. Fires when a pointer interaction on
+    /// this widget is taken away — the window lost focus, a modal opened, the
+    /// subtree was parked, a peer won the arbitration.
+    ///
+    /// **Terminal**: no `PointerUp` follows. Release anything the press
+    /// latched; the framework releases its own state but never widget-owned
+    /// state.
+    pub fn on_pointer_cancel(
+        mut self,
+        f: impl FnMut(&crate::pointer::PointerInfo, crate::pointer::CancelReason, &mut EventContext)
+        + 'static,
+    ) -> Self {
+        self.handlers.on_pointer_cancel = Some(Box::new(f));
+        self
+    }
+
     /// Set the per-frame drag-tick handler. Fires once per frame while a
     /// drag is active and this widget is the current drop target. The
     /// closure receives the current pointer position in widget-local
@@ -1165,6 +1181,17 @@ impl<W: Widget> WidgetWithHandlers<W> {
     /// Set the drag-leave handler. See [`HandlerSet::on_drag_leave`].
     pub fn on_drag_leave(mut self, f: impl FnMut(&mut EventContext) + 'static) -> Self {
         self.handler_set.handlers.on_drag_leave = Some(Box::new(f));
+        self
+    }
+
+    /// Set the pointer-cancel handler. See
+    /// [`HandlerSet::on_pointer_cancel`].
+    pub fn on_pointer_cancel(
+        mut self,
+        f: impl FnMut(&crate::pointer::PointerInfo, crate::pointer::CancelReason, &mut EventContext)
+        + 'static,
+    ) -> Self {
+        self.handler_set.handlers.on_pointer_cancel = Some(Box::new(f));
         self
     }
 
@@ -1849,6 +1876,16 @@ pub trait WidgetBuilder: Widget + Sized + 'static {
         f: impl FnMut(teksilo_canvas::Point, &mut EventContext) + 'static,
     ) -> WidgetWithHandlers<Self> {
         WidgetWithHandlers::new(self).on_drag_tick(f)
+    }
+
+    /// Attach a pointer-cancel handler. See
+    /// [`HandlerSet::on_pointer_cancel`].
+    fn on_pointer_cancel(
+        self,
+        f: impl FnMut(&crate::pointer::PointerInfo, crate::pointer::CancelReason, &mut EventContext)
+        + 'static,
+    ) -> WidgetWithHandlers<Self> {
+        WidgetWithHandlers::new(self).on_pointer_cancel(f)
     }
 
     fn on_drop(

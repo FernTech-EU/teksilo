@@ -254,14 +254,76 @@ impl WidgetTree {
         self.destroy_subtree(id);
     }
 
+    /// Panic unless every trace of a pointer interaction is gone.
+    ///
+    /// The one assertion a touch test ends with. A leak here is not a cosmetic
+    /// untidiness: a surviving capture redelivers every later move to a widget
+    /// nobody is pointing at, a surviving sequence lets a stale competitor win
+    /// the *next* press, and a live recognizer entry starts the next contact
+    /// mid-gesture. All three are silent until something much later
+    /// misbehaves, which is why this is checked rather than reasoned about.
+    ///
+    /// A **hovering** pointer resting in the table is not a leak: a mouse that
+    /// has been seen once keeps its entry for the life of the tree, and that
+    /// entry is what every singular accessor reads. What must not survive is a
+    /// pointer still *contacting* the surface, a capture, a sequence, or a
+    /// gesture arena still following a contact.
+    ///
+    /// Two things the design lists are absent because their subject does not
+    /// exist yet: the framework press signal (P11) and the fling driver
+    /// (P13/P21).
+    pub fn assert_no_leaked_pointer_state(&self) {
+        let mut leaks: Vec<String> = Vec::new();
+        for entry in self.pointers.iter() {
+            let id = entry.info.id;
+            if entry.is_contacting() {
+                leaks.push(format!(
+                    "{id:?} ({:?}) is still contacting the surface",
+                    entry.info.kind
+                ));
+            }
+            if let Some(captor) = entry.captured_by {
+                leaks.push(format!("{id:?} still captures {captor:?}"));
+            }
+            if let Some(sequence) = entry.sequence.as_ref() {
+                leaks.push(format!(
+                    "{id:?} still has a sequence ({} member(s), winner {:?})",
+                    sequence.members().len(),
+                    sequence.winner()
+                ));
+            }
+        }
+        for &owner in &self.gesture_owners {
+            if self
+                .arena
+                .get(owner)
+                .and_then(|node| node.handlers.gesture_arena.as_ref())
+                .is_some_and(|set| set.is_live())
+            {
+                leaks.push(format!(
+                    "{owner:?} has a gesture arena still following a contact"
+                ));
+            }
+        }
+        assert!(
+            leaks.is_empty(),
+            "pointer state leaked after the interaction:\n  - {}",
+            leaks.join("\n  - ")
+        );
+    }
+
     /// Mark a widget as needing repaint.
     pub fn mark_needs_paint(&mut self, id: WidgetId) {
         self.arena.mark_needs_paint(id);
     }
 
     /// Set a widget subtree as dormant.
+    ///
+    /// Goes through the tree's cancel-aware parking door, so a pointer working
+    /// inside the subtree is cancelled rather than stranded on a widget the
+    /// dispatcher will no longer reach.
     pub fn set_dormant(&mut self, id: WidgetId) {
-        self.arena.set_dormant(id);
+        self.park_subtree(id);
         self.arena.mark_ancestors_need_layout(id);
         self.cached_frame = None;
         self.a11y_dirty = true;

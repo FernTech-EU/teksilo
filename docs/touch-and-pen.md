@@ -304,10 +304,105 @@ the interaction away, as against `PointerUp`, which says the user finished it.
 Conflating the two is how a drag whose window lost focus ends up *dropped*
 wherever the pointer happened to be.
 
-[`CancelReason`] enumerates the taxonomy in full — `Platform`,
-`WindowDeactivated`, `ModalOpened`, `SubtreeParked`, `CaptureOrphaned`,
-`PalmRejected` and the rest — so that the set is fixed before the producers
-exist. **Nothing emits one yet.**
+#### The contract, for a widget author
+
+**`PointerCancel` is terminal.** No `PointerUp` follows it for that pointer;
+the framework swallows one that arrives anyway, because handing a release back
+to a widget that has already been told to let go would resurrect an interaction
+that no longer exists.
+
+**Release your own state.** The framework releases what it owns — the pointer
+capture, the arbitration, the drag session, the recognizers — and nothing else.
+Anything the *press* latched is yours to undo: a selection anchor, a grabbed
+divider's origin, a drop-target highlight, a `PendingTextDrag`, a preview
+overlay you mounted yourself. A widget that only clears such state on `Up`
+keeps it forever the first time an interaction is revoked.
+
+**Expect no `Up`, and do not treat the cancel as one.** A drag that ends in a
+cancel must not drop; a press that ends in a cancel must not activate. That is
+the whole reason the two events are distinct.
+
+Attach with `.on_pointer_cancel(|pointer, reason, ctx| …)`, on `WidgetBuilder`,
+`HandlerSet` and `WidgetWithHandlers`. It is a notification, not a route: it has
+no return value and cannot consume anything. A widget that drives the whole
+pointer stream from `on_pointer_event` sees the cancel there too.
+
+#### One funnel
+
+Every revocation goes through `WidgetTree::cancel_pointer(pointer, reason,
+ops)`, which is **always queued** behind the sample being dispatched and
+**no-ops if the interaction finished** in the meantime. It then tears down in
+one order: every competitor's recognizer state, the arbitration, the capture,
+the drag session, the table entry (for a contact — a hovering pointer keeps
+its entry, exactly as it does across an `Up`), and the `PointerCancel` last, to
+a tree that has already let go. `cancel_all_pointers` and
+`cancel_pointers_in_subtree` are the same act in bulk;
+`EventContext::cancel_pointer_sequence(reason)` is a widget's own door into it.
+
+**Two granularities, and they are not the same act.** Cancelling a *pointer*
+ends the interaction. Revoking a *sequence member* ends one competitor's claim
+while the pointer stays alive and its winner keeps going — that is what a peer
+claim does, and confusing the two would make a losing ancestor drag kill the tap
+that beat it.
+
+#### The taxonomy
+
+| `CancelReason` | Raised by | Delivered to | What the widget must do |
+| --- | --- | --- | --- |
+| `Platform` | A `PointerPhase::Cancel` sample from the backend — `wl_touch.cancel`, `WM_POINTERCAPTURECHANGED`, a compositor grab | The captor, else the last widget that accepted one of this pointer's events | Release everything the press latched. The contact is gone; nothing further will arrive. |
+| `WindowDeactivated` | `WidgetTree::set_window_active(false)` | The captor | Drop the grab. The user is releasing the button over another window and this one will never hear about it. |
+| `Occluded` | Reserved for the platform layer's occlusion path | The captor | As `WindowDeactivated`. |
+| `ModalOpened` | A `Centered` overlay opening (`show_overlay*`) | Every live pointer's captor | Abandon the press: the surface is behind a scrim and the `Up` will land on the modal. |
+| `SubtreeParked` | `WidgetTree::park_subtree` — an explicit `set_dormant`, a `visible_when` gate closing, an `EventContext::set_dormant` | Pointers whose captor is inside the parked subtree | Release the press. Dormancy is invisible to dispatch, so no further event can reach you. |
+| `WidgetDestroyed` | A sequence *member* destroyed mid-press (member-level), or the sequence *winner* destroyed (pointer-level) | The dead member, if it still exists; else nobody | Nothing, usually — the widget is going away. |
+| `CaptureOrphaned` | The captor destroyed mid-press | The last widget that accepted one of this pointer's events | Nothing, usually. The capture is given back so the window is not stranded. |
+| `OsDragStarted` | An in-app drag escalating past the window edge into a native OS drag | The drag's source widget | Stop tracking the pointer. The OS owns it; the drag's outcome arrives separately through `on_drag_ended`. |
+| `ExternalDndTakeover` | Reserved for the inbound external-DnD path | The captor | As `OsDragStarted`. |
+| `PeerClaimed` | Another member of the sequence won arbitration | That member alone — **member-level** | Undo whatever the press provisionally started. The pointer is alive and belongs to someone else now. |
+| `OverlayDismissed` | An overlay being torn down, for pointers anchored inside it | The captor inside the dismissed overlay | Release the press. **Exempt**: a pointer whose press has already finished — see below. |
+| `MultiContactIgnored` | Reserved for `MultiContact::First` (P13) | The extra contact's target | Ignore the second finger. |
+| `ContactCapExceeded` | Refused at `PointerTable::begin`, before any event exists | Nobody | — |
+| `PalmRejected` | Refused at `PointerTable::begin`, before any event exists | Nobody | — |
+| `Deactivated` | A catch-all for a revocation that fits nothing above | The captor | Release the press. |
+
+The reserved rows name variants whose producer belongs to a package that has
+not landed. They are in the enumeration because the taxonomy is meant to be
+fixed before the producers exist, not grown one boolean at a time.
+
+#### The exemption: a tap that closes what it was tapped in
+
+Tapping a menu item whose own handler closes its menu must complete the tap.
+The item asks for the overlay teardown, the teardown raises
+`cancel_pointers_in_subtree(menu, OverlayDismissed)`, and that pointer is
+sitting inside the menu — so without an exemption the item would cancel its own
+activation.
+
+It does not, because by the time an item's `on_tap` runs, that pointer has no
+press left to revoke: the release sweep closes the sequence *before* the `Up` is
+delivered. `cancel_pointer` no-ops for a pointer with no live sequence and no
+capture, and skips a sequence that is already inside its terminal dispatch
+(`PointerSequence::is_terminating`). Both conditions say the same thing — there
+is nothing left to take away.
+
+#### The `set_dormant` audit
+
+Parking is invisible to hit-testing and to dispatch, so a widget parked
+mid-interaction keeps whatever the press latched and never receives another
+event. `WidgetArena::set_dormant` therefore **returns the whole parked subtree**,
+and every caller that could park a live pointer goes through
+`WidgetTree::park_subtree`, which cancels first and parks second. The complete
+caller set in `teksilo-core`:
+
+| Site | Route |
+| --- | --- |
+| `widget_tree/layout_impl.rs` — the per-layout visibility pass (`visible_when` closing) | `park_subtree_with_ops` |
+| `widget_tree/test_api.rs` — `WidgetTree::set_dormant`, which `BuildContext::set_dormant` calls | `park_subtree` |
+| `widget_tree/pointer_router.rs` — `TreeMutation::SetDormant`, from `EventContext::set_dormant` | `park_subtree` |
+| `widget_tree/overlay_impl.rs` — `dormant_dismissed_content`, an overlay being torn down | `cancel_pointers_in_subtree(OverlayDismissed)` then `arena.set_dormant` — a more specific reason than `SubtreeParked`, and the one the exemption above is written against |
+| `widget_tree/overlay_impl.rs` — tooltip content parked at registration | Bare `arena.set_dormant`. **Cannot contain a pointer**: the content is created and parked in the same call, before it has ever been laid out or hit-tested. |
+
+A caller that discards the returned ids and does not appear above is a silent
+leak.
 
 ---
 
@@ -747,9 +842,14 @@ Teksilo's, not winit's.
 
 Deliberately, and in this order: wiring the app event loop to the multi-sample
 translator (nothing dispatches a touch or pen sample yet — the platform layer
-only *produces* them), gesture arbitration keyed by pointer, the kinetic
-scrolling core, the density sweep across the widget catalogue, and touch text
-editing. Each has its own package; this file grows with them.
+only *produces* them), the kinetic scrolling core, the density sweep across the
+widget catalogue, and touch text editing. Each has its own package; this file
+grows with them.
+
+Two steps of the cancel teardown are missing because their subject does not
+exist yet: the framework press signal clears there (P11), and a fling this
+pointer was driving stops there (P13/P21). Both insert at the point the funnel
+marks.
 
 See also: [Density & targets](density-and-targets.md), the
 [widget pointer inventory](widget-pointer-inventory.md), the

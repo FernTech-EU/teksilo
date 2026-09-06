@@ -1842,7 +1842,12 @@ impl WidgetTree {
     ) -> crate::overlay::OverlayId {
         let fade_duration = request.fade_duration;
         let content_id = request.content_id;
+        let is_modal = matches!(
+            request.placement,
+            crate::overlay::OverlayPlacement::Centered
+        );
         let id = self.overlay_manager.show(request);
+        self.cancel_pointers_for_modal(is_modal);
         // The overlay's content subtree just entered the active set;
         // the AT tree shape changed and the cached snapshot must be
         // rebuilt. The dismiss path already flips this; we must mirror
@@ -1873,8 +1878,13 @@ impl WidgetTree {
 
         let fade_duration = request.fade_duration;
         let content_id = request.content_id;
+        let is_modal = matches!(
+            request.placement,
+            crate::overlay::OverlayPlacement::Centered
+        );
         let current_focus = self.focused;
         let id = self.overlay_manager.show(request);
+        self.cancel_pointers_for_modal(is_modal);
         self.a11y_dirty = true;
         if let Some(focus_id) = current_focus {
             self.overlay_manager.set_top_focus_restore(focus_id);
@@ -1892,7 +1902,12 @@ impl WidgetTree {
     ) -> crate::overlay::OverlayId {
         let fade_duration = request.fade_duration;
         let content_id = request.content_id;
+        let is_modal = matches!(
+            request.placement,
+            crate::overlay::OverlayPlacement::Centered
+        );
         let id = self.overlay_manager.show_for(request, duration);
+        self.cancel_pointers_for_modal(is_modal);
         self.overlay_manager.set_shown_at_sim(id, self.sim_clock);
         self.a11y_dirty = true;
         if let Some(fade) = fade_duration {
@@ -1959,6 +1974,24 @@ impl WidgetTree {
         self.dormant_dismissed_content(&dismissed, &mut *ops);
     }
 
+    /// A modal just opened. Every live pointer loses its interaction: the
+    /// surface it was working on is now behind a scrim it cannot reach, and
+    /// the `Up` that would have completed the press lands on the modal
+    /// instead.
+    ///
+    /// A modal is a `Centered` overlay — the same discriminator
+    /// [`modal_overlay_for_widget`](Self::modal_overlay_for_widget) uses, so
+    /// the two cannot drift. Every other placement (a menu, a popover, a
+    /// tooltip, a drag preview) opens *over* an interaction that legitimately
+    /// continues, and must not cancel anything.
+    fn cancel_pointers_for_modal(&mut self, is_modal: bool) {
+        if !is_modal {
+            return;
+        }
+        let mut noop = crate::window::NoopWindowOps;
+        self.cancel_all_pointers(crate::pointer::CancelReason::ModalOpened, &mut noop);
+    }
+
     pub(super) fn dormant_dismissed_content(
         &mut self,
         content_ids: &[WidgetId],
@@ -2021,7 +2054,17 @@ impl WidgetTree {
                 }
             }
 
-            self.arena.set_dormant(id);
+            // A pointer anchored inside the overlay about to be parked would
+            // be stranded on a widget that no longer takes events. Cancel it —
+            // but only if there is still a press to revoke, which is what lets
+            // a tap on a menu item whose own handler closes that menu complete
+            // instead of cancelling itself. See `press_is_revocable`.
+            self.cancel_pointers_in_subtree(
+                id,
+                crate::pointer::CancelReason::OverlayDismissed,
+                &mut *ops,
+            );
+            let _parked = self.arena.set_dormant(id);
 
             if hovered_in_subtree.is_some() {
                 let old = self.hovered_id();

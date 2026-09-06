@@ -115,6 +115,10 @@ pub struct EventContext<'ops> {
     /// pointer it is serving, in the order it performed them. Applied by
     /// `WidgetTree::collect_from_ctx` against that sequence.
     pub(crate) gesture_acts: Vec<GestureAct>,
+    /// The handler asked for its pointer's whole interaction to be revoked.
+    /// Queued by `WidgetTree::collect_from_ctx` onto the cancel funnel, so it
+    /// runs after this dispatch rather than under it. Last reason wins.
+    pub(crate) cancel_pointer_request: Option<crate::pointer::CancelReason>,
     /// The node whose handler is running, when the dispatcher knows it.
     /// `None` for a context made outside per-node dispatch (a gesture timer, a
     /// key-capture callback, an async completion).
@@ -489,6 +493,7 @@ impl<'ops> EventContext<'ops> {
             explicit_capture: false,
             recognized_owning_gesture: false,
             gesture_acts: Vec::new(),
+            cancel_pointer_request: None,
         }
     }
 
@@ -1795,6 +1800,24 @@ impl<'ops> EventContext<'ops> {
     /// End this widget's hold, putting it back in the running.
     pub fn release_gesture(&mut self) {
         self.gesture_acts.push(GestureAct::Release);
+    }
+
+    /// Revoke the whole interaction of the pointer this handler is serving,
+    /// for `reason`.
+    ///
+    /// The widget's own way into the cancel funnel, for a widget that knows
+    /// the interaction can no longer mean anything — the document under a text
+    /// drag was reloaded, the row being reordered was deleted by a peer. Every
+    /// competitor is cancelled, the capture is given back, and a
+    /// [`PointerCancel`](crate::event::WidgetEvent::PointerCancel) is
+    /// delivered, all **after** this handler returns: a cancel taken inline
+    /// would unwind the very sample the handler is standing on.
+    ///
+    /// Distinct from [`reject_gesture`](Self::reject_gesture), which withdraws
+    /// only *this* widget and lets its peers carry on with a pointer that is
+    /// still perfectly alive.
+    pub fn cancel_pointer_sequence(&mut self, reason: crate::pointer::CancelReason) {
+        self.cancel_pointer_request = Some(reason);
     }
 
     /// Release the capture of the pointer this handler is serving. Its events

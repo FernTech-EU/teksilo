@@ -632,8 +632,12 @@ pub enum WidgetEvent {
     /// interaction is being taken away, so state must be unwound and nothing
     /// may activate.
     ///
-    /// **Nothing emits this yet.** The variant lands with the pointer
-    /// vocabulary so the taxonomy is fixed before the producers are wired.
+    /// **Terminal**: no `PointerUp` follows for that pointer, and one that
+    /// arrives anyway is swallowed. Delivered by the cancel funnel,
+    /// [`WidgetTree::cancel_pointer`](crate::WidgetTree::cancel_pointer), to
+    /// the widget holding the pointer — or, failing that, to the last one that
+    /// accepted an event from it. A widget receives it through
+    /// `.on_pointer_cancel(..)` or through its raw `on_pointer_event` hook.
     PointerCancel {
         /// Where the pointer was last seen, when the revoking path knows. A
         /// platform cancel usually carries no position at all.

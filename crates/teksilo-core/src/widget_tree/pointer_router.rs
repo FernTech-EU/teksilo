@@ -39,9 +39,35 @@ fn fire_event_handler_both(
 /// snapshot that says which pointer produced it. `ops` is not carried — the
 /// drain runs inside the same top-level call, so the caller's sink is still in
 /// hand.
-pub(super) struct QueuedDispatch {
-    pub(super) event: WidgetEvent,
-    pub(super) snapshot: crate::pointer::InputSnapshot,
+pub(super) enum QueuedDispatch {
+    /// A nested `dispatch_*` call, replayed verbatim — event *and* input
+    /// snapshot — once the outer sample completes.
+    Event {
+        event: WidgetEvent,
+        snapshot: crate::pointer::InputSnapshot,
+    },
+    /// A revocation raised through
+    /// [`WidgetTree::cancel_pointer`](crate::WidgetTree::cancel_pointer).
+    ///
+    /// It rides this queue rather than one of its own so that a cancel and the
+    /// dispatch that provoked it cannot be reordered relative to each other:
+    /// one queue is one order. It carries the reason rather than a
+    /// pre-built `PointerCancel`, because the event's position and
+    /// `PointerInfo` must be read from the table at *drain* time — by then the
+    /// pointer may have moved, or ceased to exist, and a snapshot taken at
+    /// queue time would describe a state the widget is no longer in.
+    Cancel {
+        pointer: crate::pointer::PointerId,
+        reason: crate::pointer::CancelReason,
+        /// Who to tell, when the producer knows better than the table does.
+        ///
+        /// The funnel normally addresses the cancel to whoever holds the
+        /// capture. A producer that has *already* taken the capture back as
+        /// part of its own teardown — the OS-drag escalation hands the pointer
+        /// to the platform before it raises the cancel — would leave the
+        /// funnel with nobody to tell, so it names the widget itself.
+        recipient: Option<WidgetId>,
+    },
 }
 
 /// The window-logical position a pointer event happened at, if it carries one.
@@ -54,7 +80,9 @@ fn pointer_event_position(event: &WidgetEvent) -> Option<Point> {
         WidgetEvent::PointerDown { position, .. }
         | WidgetEvent::PointerUp { position, .. }
         | WidgetEvent::PointerMove { position } => Some(*position),
-        WidgetEvent::PointerCancel { position, .. } => *position,
+        // Deliberately not `PointerCancel`. A revocation must never *create*
+        // a pointer: admitting one here would resurrect a contact the funnel
+        // is in the middle of forgetting, and leave its entry behind for good.
         _ => None,
     }
 }
@@ -238,11 +266,19 @@ impl WidgetTree {
                 button,
                 modifiers: sample.modifiers,
             },
-            PointerPhase::Cancel => WidgetEvent::PointerCancel {
-                position: Some(sample.position),
-                reason: crate::pointer::CancelReason::Platform,
-                pointer: sample.pointer,
-            },
+            // The platform revoked the contact (a `wl_touch.cancel`, a
+            // `WM_POINTERCAPTURECHANGED`, a compositor grab). It takes the
+            // cancel funnel directly rather than being lowered onto an event:
+            // the funnel owns the teardown order, and lowering would first
+            // *admit* the pointer the sample is revoking.
+            PointerPhase::Cancel => {
+                self.cancel_pointer(
+                    sample.pointer.id,
+                    crate::pointer::CancelReason::Platform,
+                    ops,
+                );
+                return;
+            }
         };
 
         // Admit the pointer before anything is dispatched. A palm, or an
@@ -328,16 +364,33 @@ impl WidgetTree {
         // state it started with and the nested one replays immediately
         // afterwards, so from a caller's side nothing changed — the queue is
         // empty again before the top-level call returns.
+        self.pending_dispatch
+            .push_back(QueuedDispatch::Event { event, snapshot });
         if self.dispatch_depth > 0 {
-            self.pending_dispatch
-                .push_back(QueuedDispatch { event, snapshot });
             return;
         }
-        self.run_one_dispatch(event, snapshot, &mut *ops);
-        // `pop_front` in a loop rather than `drain`: a replayed dispatch may
-        // queue another of its own, and each must in turn run at depth zero.
-        while let Some(QueuedDispatch { event, snapshot }) = self.pending_dispatch.pop_front() {
-            self.run_one_dispatch(event, snapshot, &mut *ops);
+        self.drain_pending_dispatch(&mut *ops);
+    }
+
+    /// Run everything the queue holds, in order, each at depth zero.
+    ///
+    /// `pop_front` in a loop rather than `drain`: a replayed dispatch — or a
+    /// cancel's own `PointerCancel` handler — may queue another entry, and
+    /// each must in turn run at depth zero.
+    pub(super) fn drain_pending_dispatch(&mut self, ops: &mut dyn crate::window::WindowOps) {
+        while let Some(queued) = self.pending_dispatch.pop_front() {
+            match queued {
+                QueuedDispatch::Event { event, snapshot } => {
+                    self.run_one_dispatch(event, snapshot, &mut *ops);
+                }
+                QueuedDispatch::Cancel {
+                    pointer,
+                    reason,
+                    recipient,
+                } => {
+                    self.run_one_cancel(pointer, reason, recipient, &mut *ops);
+                }
+            }
         }
     }
 
@@ -733,6 +786,10 @@ impl WidgetTree {
             WidgetEvent::PointerDown {
                 position, button, ..
             } => {
+                // A new press is a new interaction: whatever took the previous
+                // one away has nothing to say about this one.
+                let pressed = self.current_pointer_id();
+                self.cancelled_pointers.retain(|p| *p != pressed);
                 // The user has acted — a tooltip that has not yet appeared is
                 // now answering a question nobody is asking any more, and one
                 // already up is covering the thing being clicked. Cancel the
@@ -770,6 +827,20 @@ impl WidgetTree {
                 }
             }
             WidgetEvent::PointerUp { position, .. } => {
+                // A `PointerCancel` is terminal. If this pointer's press was
+                // revoked, the `Up` that follows completes nothing — the widget
+                // has already been told to let go, and delivering the release
+                // would hand it back an interaction the system took away. Drop
+                // it, and forget the cancel: the pointer is free again.
+                let released = self.current_pointer_id();
+                if let Some(index) = self.cancelled_pointers.iter().position(|p| *p == released) {
+                    self.cancelled_pointers.swap_remove(index);
+                    crate::trace_input!(
+                        Samples,
+                        "swallowing the Up for {released:?}: its press was cancelled"
+                    );
+                    return;
+                }
                 // The pointer sequence ends here — the release sweep feeds the
                 // `Up` to every member still following the press so its
                 // recognizer clears the press origin it recorded. Without this,
@@ -786,25 +857,20 @@ impl WidgetTree {
                 } else if let Some(target) = self.hit_test(*position) {
                     self.dispatch_to_widget(target, &event, &mut *ops);
                 }
+                // The press is over. Any arena still following this contact saw
+                // its `Down` but not its `Up` — see `release_arenas_following`.
+                let released = self.current_pointer_id();
+                self.release_arenas_following(released);
             }
-            WidgetEvent::PointerCancel { position, .. } => {
-                // A revoked interaction goes to whoever held the pointer, and
-                // failing that to whatever is under the last known position.
-                // Deliberately does NOT run the drag / tap / hover unwinding a
-                // real cancel needs — that is the cancel funnel's job, and
-                // nothing produces a `PointerCancel` until it lands. See
-                // `CancelReason`.
-                let target = self
-                    .current_pointer_capture()
-                    .or_else(|| position.and_then(|p| self.hit_test(p)));
-                // Arbitration is over either way: nobody won this press.
-                let pointer = self.current_pointer_id();
-                if let Some(entry) = self.pointers.get_mut(pointer) {
-                    entry.sequence = None;
-                }
-                if let Some(target) = target {
-                    self.dispatch_to_widget(target, &event, &mut *ops);
-                }
+            WidgetEvent::PointerCancel {
+                reason, pointer, ..
+            } => {
+                // A hand-built `PointerCancel` — a caller reaching the legacy
+                // door with one, a test — means the same thing a producer does,
+                // so it takes the same funnel rather than a second teardown of
+                // its own. Queued behind this dispatch, like every cancel.
+                let (reason, pointer) = (*reason, pointer.id);
+                self.cancel_pointer(pointer, reason, &mut *ops);
             }
             WidgetEvent::Scroll { position, .. } => {
                 // A positioned scroll routes by hit test; a positionless one
@@ -1410,6 +1476,7 @@ impl WidgetTree {
                 } else {
                     self.arena.mark_needs_paint(id);
                 }
+                self.note_pointer_acceptance(id, event);
                 // **Hover transitions are notifications, and every ancestor is
                 // entitled to one.** Stopping the bubble here left a container
                 // stuck hovered whenever the pointer left it *through* an
@@ -1475,6 +1542,30 @@ impl WidgetTree {
 
         if response == EventResponse::Handled {
             self.arena.mark_needs_paint(target);
+            self.note_pointer_acceptance(target, event);
+        }
+    }
+
+    /// Remember that `target` answered `Handled` to one of the current
+    /// pointer's positional events.
+    ///
+    /// Read only by the cancel funnel, as the recipient of last resort when a
+    /// revoked pointer holds no capture. Restricted to the three positional
+    /// phases: a key, an accessibility action or a focus change is not "an
+    /// event from this pointer", and letting one of those set the anchor would
+    /// address the cancel to a widget the pointer never touched.
+    pub(super) fn note_pointer_acceptance(&mut self, target: WidgetId, event: &WidgetEvent) {
+        if !matches!(
+            event,
+            WidgetEvent::PointerDown { .. }
+                | WidgetEvent::PointerMove { .. }
+                | WidgetEvent::PointerUp { .. }
+        ) {
+            return;
+        }
+        let pointer = self.current_pointer_id();
+        if let Some(entry) = self.pointers.get_mut(pointer) {
+            entry.last_accepted = Some(target);
         }
     }
 
@@ -1905,12 +1996,24 @@ impl WidgetTree {
                 }
                 None
             }
-            WidgetEvent::PointerCancel { .. } => {
-                // The raw hook is the only thing a widget can unwind from
-                // today: the gesture arena has no cancel input yet, and giving
-                // it one is the recognizer rework's job, not this one's.
-                // Nothing emits a `PointerCancel` at this stage, so this arm is
-                // reachable only by a caller that builds one by hand.
+            WidgetEvent::PointerCancel {
+                reason, pointer, ..
+            } => {
+                // Two hooks, and the dedicated one always runs. `on_pointer_cancel`
+                // is a notification, not a route: a widget releasing what its
+                // press latched has nothing to consume, and letting it report
+                // `Handled` would make releasing state look like claiming the
+                // event. The raw `on_pointer_event` hook keeps its ordinary
+                // consuming semantics for widgets that drive the whole pointer
+                // stream themselves.
+                for slot in [
+                    &mut node.external_handlers.on_pointer_cancel,
+                    &mut node.handlers.on_pointer_cancel,
+                ] {
+                    if let Some(handler) = slot.as_mut() {
+                        handler(pointer, *reason, ctx);
+                    }
+                }
                 if fire_on_pointer_event {
                     let r = fire_event_handler_both(
                         &mut node.external_handlers.on_pointer_event,
@@ -2172,6 +2275,10 @@ impl WidgetTree {
             let acts = std::mem::take(&mut ctx.gesture_acts);
             self.apply_gesture_acts(&acts, source_widget);
         }
+        if let Some(reason) = ctx.cancel_pointer_request {
+            let pointer = self.current_pointer_id();
+            self.cancel_pointer(pointer, reason, &mut *ops);
+        }
         for (mut request, delay, focus_target, replace_siblings) in ctx.delayed_overlay_requests {
             if request.parent_overlay.is_none() {
                 request.parent_overlay = self.overlay_ancestor_for_widget(source_widget);
@@ -2389,7 +2496,9 @@ impl WidgetTree {
 
         for mutation in mutations {
             match mutation {
-                TreeMutation::SetDormant(id) => self.arena.set_dormant(id),
+                TreeMutation::SetDormant(id) => {
+                    self.park_subtree(id);
+                }
                 TreeMutation::Activate(id) => self.arena.activate(id),
                 TreeMutation::Destroy(id) => {
                     // Route through `destroy_subtree`, NOT the bare

@@ -460,6 +460,19 @@ impl WidgetTree {
         if let Some(prev) = prev_target {
             self.fire_on_drag_leave(prev, &mut *ops);
         }
+        // The OS owns the pointer from here: this window will see no further
+        // move and no `Up` for it, because the release happens over whatever
+        // the drag was dropped on. The source is told through
+        // `on_drag_ended(OsCopy | OsMove | Cancelled)` when the OS reports back,
+        // but anything *else* this press had going — a recognizer mid-drag, an
+        // ancestor still competing — has to be revoked now.
+        let pointer = self.current_pointer_id();
+        self.cancel_pointer_to(
+            pointer,
+            crate::pointer::CancelReason::OsDragStarted,
+            self.outbound_drag_source,
+            &mut *ops,
+        );
         true
     }
 

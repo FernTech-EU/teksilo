@@ -590,10 +590,13 @@ impl ScrollSample {
 /// Why a pointer interaction was revoked.
 ///
 /// Declared in full here so the taxonomy is one enumeration rather than a
-/// growing set of booleans, and so a consumer can `match` on it exhaustively
-/// from the first package that emits one. **Nothing emits a `CancelReason`
-/// yet**: the producers land with the cancel funnel, and the variants below
-/// name the sites that will raise them.
+/// growing set of booleans, and so a consumer can `match` on it exhaustively.
+/// Every variant reaches a widget through the one funnel,
+/// [`WidgetTree::cancel_pointer`](crate::WidgetTree::cancel_pointer), and is
+/// delivered as a [`WidgetEvent::PointerCancel`](crate::event::WidgetEvent::PointerCancel).
+/// A handful name a producer whose own package has not landed and are marked
+/// as such below; `docs/touch-and-pen.md` §3.3 carries the full table of who
+/// raises each, who receives it, and what the widget must do about it.
 ///
 /// `#[non_exhaustive]`: the taxonomy is expected to grow as backends reveal
 /// revocation paths Teksilo has not met.
@@ -605,7 +608,8 @@ pub enum CancelReason {
     Platform,
     /// The window lost focus mid-interaction.
     WindowDeactivated,
-    /// The window became fully occluded mid-interaction.
+    /// The window became fully occluded mid-interaction. Reserved for the
+    /// platform layer's occlusion path.
     Occluded,
     /// A modal surface opened over the interaction.
     ModalOpened,
@@ -619,7 +623,8 @@ pub enum CancelReason {
     CaptureOrphaned,
     /// A native OS drag started from this press, so the in-app interaction ends.
     OsDragStarted,
-    /// An external (OS) drag-and-drop session took the pointer over.
+    /// An external (OS) drag-and-drop session took the pointer over. Reserved
+    /// for the inbound external-DnD path.
     ExternalDndTakeover,
     /// Another member of the gesture sequence won arbitration, so this one is
     /// revoked.
@@ -627,11 +632,16 @@ pub enum CancelReason {
     /// The overlay the interaction lived in was dismissed under it.
     OverlayDismissed,
     /// A second contact arrived on a surface that handles only one, so the
-    /// interaction is abandoned rather than misread.
+    /// interaction is abandoned rather than misread. Reserved for
+    /// `MultiContact::First`.
     MultiContactIgnored,
     /// More simultaneous contacts arrived than the pointer table holds.
+    /// Refused at [`PointerTable::begin`](crate::pointer::table::PointerTable::begin),
+    /// before any event exists, so no widget is told.
     ContactCapExceeded,
     /// The contact was classified as a palm rather than a deliberate touch.
+    /// Refused at [`PointerTable::begin`](crate::pointer::table::PointerTable::begin),
+    /// before any event exists, so no widget is told.
     PalmRejected,
     /// A catch-all for a deactivation that fits none of the above. Prefer a
     /// specific variant; this one exists so a caller is never forced to lie.

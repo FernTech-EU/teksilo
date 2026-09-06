@@ -1086,17 +1086,27 @@ impl WidgetArena {
     /// dormancy belongs to this ancestor rather than to them. That distinction
     /// is what lets [`activate`](Self::activate) put the subtree back exactly as
     /// it found it instead of waking content that was already closed.
-    pub fn set_dormant(&mut self, id: WidgetId) {
-        self.park(id, true);
+    ///
+    /// **Returns the whole parked subtree**, `id` first, because a caller that
+    /// cannot see which nodes went to sleep cannot cancel the pointers holding
+    /// them. Dormancy is invisible to hit-testing and to dispatch, so a widget
+    /// parked mid-interaction keeps whatever the press latched and never
+    /// receives another event: the ids are how the tree finds it and tells it
+    /// to let go. Every caller is audited in `docs/touch-and-pen.md` §3.3.
+    pub fn set_dormant(&mut self, id: WidgetId) -> Vec<WidgetId> {
+        let mut parked = Vec::new();
+        self.park(id, true, &mut parked);
+        parked
     }
 
     /// [`set_dormant`](Self::set_dormant)'s body, plus whether `id` is being
-    /// parked on its own account or dragged along by an ancestor.
+    /// parked on its own account or dragged along by an ancestor, and the
+    /// accumulator the parked ids land in.
     ///
     /// A node already self-parked stays that way when an ancestor sweeps over
     /// it — the flag is only ever set here, never cleared, so nesting two
     /// dormancy cycles cannot lose the inner one.
-    fn park(&mut self, id: WidgetId, on_its_own_account: bool) {
+    fn park(&mut self, id: WidgetId, on_its_own_account: bool, parked: &mut Vec<WidgetId>) {
         if let Some(node) = self.nodes.get_mut(id) {
             let was_active = node.activation == ActivationState::Active;
             node.activation = ActivationState::Dormant;
@@ -1110,10 +1120,11 @@ impl WidgetArena {
             if was_active && node.activation_signal.is_some() {
                 self.pending_activation_changes.push((id, false));
             }
+            parked.push(id);
         }
         let children: Vec<WidgetId> = self.children(id).to_vec();
         for child in children {
-            self.park(child, false);
+            self.park(child, false, parked);
         }
     }
 

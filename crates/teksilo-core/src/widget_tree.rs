@@ -19,6 +19,7 @@ mod focus_impl;
 mod gesture_dispatch_impl;
 mod layout_impl;
 mod overlay_impl;
+mod pointer_cancel;
 mod pointer_router;
 mod pointer_state;
 mod query_impl;
@@ -351,6 +352,17 @@ pub struct WidgetTree {
     /// How many dispatches are on the stack. Non-zero means "queue, do not
     /// re-enter"; see [`Self::pending_dispatch`].
     dispatch_depth: u32,
+    /// Pointers whose current press was cancelled and which have not pressed
+    /// again since.
+    ///
+    /// `PointerCancel` is terminal: the interaction was taken away, so an `Up`
+    /// arriving for the same press afterwards must not complete it. A platform
+    /// can genuinely send both (Windows delivers a `WM_POINTERUP` after a
+    /// capture loss), so the `Up` is swallowed rather than asserted against.
+    /// An entry is dropped by that swallowed `Up`, or by the pointer's next
+    /// press — a fresh press is a fresh interaction. Bounded by the contact
+    /// cap plus the mouse.
+    cancelled_pointers: Vec<crate::pointer::PointerId>,
     /// Current cursor selected by hover/interaction routing.
     current_cursor: crate::widget::CursorIcon,
     /// Delayed overlay requests (e.g., submenu hover-open delay).
@@ -754,6 +766,7 @@ impl WidgetTree {
             a11y_walk_generation: 0,
             cached_frame: None,
             pending_dispatch: std::collections::VecDeque::new(),
+            cancelled_pointers: Vec::new(),
             dispatch_depth: 0,
             current_cursor: crate::widget::CursorIcon::Default,
             pending_delayed_overlays: Vec::new(),
@@ -1791,6 +1804,19 @@ impl WidgetTree {
 
     /// strictly lighter than `set_theme`'s `mark_all_dirty` (layout + paint).
     pub fn set_window_active(&mut self, active: bool) {
+        let mut noop = crate::window::NoopWindowOps;
+        self.set_window_active_with_ops(active, &mut noop);
+    }
+
+    /// [`set_window_active`](Self::set_window_active) with the caller's
+    /// app-level [`WindowOps`](crate::window::WindowOps) sink, so the
+    /// `on_pointer_cancel` handlers a deactivation fires can reach the
+    /// multi-window API like any other handler.
+    pub fn set_window_active_with_ops(
+        &mut self,
+        active: bool,
+        ops: &mut dyn crate::window::WindowOps,
+    ) {
         let now = std::time::Instant::now();
         self.animation_scheduler.set_window_active(active, now);
         self.animated_quads.set_window_active(active, now);
@@ -1798,6 +1824,20 @@ impl WidgetTree {
             self.window_active_signal.set(active);
             self.arena.mark_all_needs_paint_only();
             if !active {
+                // A held pointer first, before any other state is cleared: a
+                // widget that captured the pointer for a drag (a column-resize
+                // grip, a splitter divider, a scrollbar thumb, a slider) will
+                // never see the matching `PointerUp` — the user releases the
+                // button over the window that took focus, and this window is
+                // told nothing. Releasing the capture silently, which is what
+                // this used to do, strands the widget instead: it keeps the
+                // half of the interaction it owns, with no event left that
+                // could clear it. The cancel funnel releases the capture *and*
+                // tells it, so it can let go.
+                self.cancel_all_pointers(
+                    crate::pointer::CancelReason::WindowDeactivated,
+                    &mut *ops,
+                );
                 // The pointer has left for another window; the OS sends no
                 // leave event we can rely on, so a tooltip shown at the moment
                 // of the switch would float over the newly-focused window's
@@ -1805,19 +1845,6 @@ impl WidgetTree {
                 // cancel pending dwells — but leave *sticky* ones, which the
                 // user pinned deliberately and expects to find on return.
                 self.tooltip_window_deactivated();
-                // Same reasoning for a held pointer: a widget that captured
-                // the pointer for a drag (a column-resize grip, a splitter
-                // divider, a scrollbar thumb, a slider) will never see the
-                // matching PointerUp — the user releases the button over the
-                // window that took focus, and this window is told nothing.
-                // Capture is otherwise cleared only by that Up or by the
-                // widget going inactive, so leaving it set strands the whole
-                // window: every subsequent PointerMove is redelivered to the
-                // abandoned widget instead of hit-testing (killing hover,
-                // cursor shapes and tooltips everywhere else), and the next
-                // click's Up is swallowed by it, so the first press on any
-                // release-activated control silently does nothing.
-                self.pointers.release_all_captures();
             }
         }
     }

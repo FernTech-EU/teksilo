@@ -105,7 +105,11 @@ impl WidgetTree {
             self.a11y_dirty = true;
         }
         for id in to_dormant {
-            self.arena.set_dormant(id);
+            // Through the tree-level door, so a pointer working inside a
+            // `visible_when` branch that just flipped false is told its
+            // interaction is over rather than left holding a widget the
+            // dispatcher will no longer reach.
+            self.park_subtree_with_ops(id, &mut *ops);
         }
         for id in to_activate {
             self.arena.activate(id);

@@ -82,6 +82,16 @@ pub struct PointerEntry {
     /// entry but no sequence. See
     /// [`PointerSequence`](crate::gesture::PointerSequence).
     pub sequence: Option<crate::gesture::PointerSequence>,
+    /// The last widget that answered `Handled` to one of this pointer's
+    /// positional events.
+    ///
+    /// The fallback recipient of a
+    /// [`PointerCancel`](crate::event::WidgetEvent::PointerCancel) when the
+    /// pointer holds no capture: something was interacting with this pointer,
+    /// and it is the only thing the tree can name. Kept per pointer rather
+    /// than per tree, because two contacts on two widgets each have their own
+    /// answer.
+    pub last_accepted: Option<WidgetId>,
 }
 
 impl PointerEntry {
@@ -95,6 +105,7 @@ impl PointerEntry {
             captured_by: None,
             hover_within: Vec::new(),
             sequence: None,
+            last_accepted: None,
         }
     }
 
@@ -361,19 +372,9 @@ impl PointerTable {
                 entry.captured_by = None;
             }
             entry.hover_within.retain(|id| arena.is_active(*id));
-        }
-    }
-
-    /// Release every capture in the table.
-    ///
-    /// The window went away under the interaction — it lost focus, or was
-    /// occluded — so no pointer will ever see the Up that would have released
-    /// it. A capture left standing in that state strands the whole window:
-    /// every later move is redelivered to the abandoned widget instead of
-    /// hit-testing.
-    pub fn release_all_captures(&mut self) {
-        for entry in &mut self.entries {
-            entry.captured_by = None;
+            if entry.last_accepted.is_some_and(|id| !arena.is_active(id)) {
+                entry.last_accepted = None;
+            }
         }
     }
 
