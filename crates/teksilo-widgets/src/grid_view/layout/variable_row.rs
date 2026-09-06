@@ -101,7 +101,10 @@ impl VariableRowGrid {
             for i in (r * cols)..((r + 1) * cols).min(n) {
                 h = h.max(ef(i));
             }
-            off.set_row_height(r, h);
+            // Exact, not the measurement setter: `item_height` is the
+            // authority here, and the noise epsilon would keep the placeholder
+            // estimate for any declared height within 0.01 px of it.
+            off.set_row_height_exact(r, h);
         }
     }
 

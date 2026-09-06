@@ -261,6 +261,18 @@ See [docs/range-keyboard.md](docs/range-keyboard.md) for the full chord table.
   was dead for type-ahead while the unshifted ones kept working. `Ctrl` alone
   and `Alt` alone stay refused. **Behaviour change.**
 
+#### Data views
+
+- **A row height a view *declares* is laid out at the height it declares.**
+  `ListView::item_height_fn`, `TableView::row_height_fn` and `GridView`'s exact
+  `item_height` fed the offset table through the same setter a measurement pass
+  uses, whose sub-pixel epsilon exists to stop a re-measure from oscillating the
+  scroll anchor. So a declared height within `0.01` px of the table's internal
+  placeholder was discarded as jitter and the row kept the placeholder — a list
+  of 1.005 px rows laid every row out at 1.0 px, and the arithmetic uniform-height
+  mode describing the same geometry then disagreed with it. Declared heights and
+  measured ones now take different doors.
+
 #### Core
 
 - **An assistive-technology `Action::Focus` on a composite lands on the node

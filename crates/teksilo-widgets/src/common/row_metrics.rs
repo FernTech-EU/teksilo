@@ -223,7 +223,11 @@ impl RowMetrics {
                 && let RowMode::Exact(f) = &self.mode
             {
                 for i in old..count {
-                    off.set_row_height(i, f(i));
+                    // Exact, not the measurement setter: the callback is the
+                    // authority on this row's height, and the noise epsilon
+                    // there would keep the placeholder estimate for any height
+                    // within 0.01 px of it.
+                    off.set_row_height_exact(i, f(i));
                 }
             }
         }
@@ -237,7 +241,7 @@ impl RowMetrics {
             off.reset(count);
             if let RowMode::Exact(f) = &self.mode {
                 for i in 0..count {
-                    off.set_row_height(i, f(i));
+                    off.set_row_height_exact(i, f(i));
                 }
             }
         }
@@ -251,7 +255,7 @@ impl RowMetrics {
         match (&self.mode, &mut self.offsets) {
             (RowMode::Exact(f), Some(off)) => {
                 for i in start..count {
-                    off.set_row_height(i, f(i));
+                    off.set_row_height_exact(i, f(i));
                 }
             }
             (RowMode::AutoMeasure { .. }, Some(off)) => {
@@ -530,6 +534,43 @@ mod tests {
         assert_eq!(m.total_height(3), 170.0);
         assert_eq!(m.row_at(119.0), 1);
         assert_eq!(m.row_at(120.0), 2);
+    }
+
+    #[test]
+    fn exact_honours_a_callback_height_near_the_placeholder_seed() {
+        // `RowMetrics::exact` seeds its offset table at a placeholder estimate
+        // of 1.0 and then installs the callback's answer per row. That went
+        // through `set_row_height`, whose sub-pixel epsilon is a
+        // measurement-noise filter, so any declared height within 0.01 px of
+        // the placeholder was discarded as jitter and the row kept 1.0 — and
+        // the arithmetic `Uniform` mode describing the same geometry then
+        // disagreed with it.
+        let mut m = RowMetrics::exact(heights_fn(&[1.005, 1.005, 1.005]), 0.0);
+        m.resize(3);
+        assert!(
+            (m.total_height(3) - 3.015).abs() < 1e-4,
+            "total={}",
+            m.total_height(3)
+        );
+        assert!((m.row_top(1) - 1.005).abs() < 1e-5, "top={}", m.row_top(1));
+    }
+
+    #[test]
+    fn a_constant_exact_callback_agrees_with_uniform() {
+        // The two modes are two descriptions of one geometry. Pinned by
+        // example beside the proptest that swept it, because this is the shape
+        // a reader can check by eye.
+        let h = 1.0048779_f32;
+        let mut u = RowMetrics::uniform(h, 0.0);
+        let mut e = RowMetrics::exact(Rc::new(move |_| h), 0.0);
+        u.resize(11);
+        e.resize(11);
+        assert!(
+            (u.total_height(11) - e.total_height(11)).abs() < 0.05,
+            "uniform={} exact={}",
+            u.total_height(11),
+            e.total_height(11)
+        );
     }
 
     #[test]
@@ -847,28 +888,37 @@ mod proptests {
 
     // ── 3. Uniform and Exact-with-constant-height agree on every query ──
     proptest! {
-        // UNRESOLVED — parked, not silently dropped. This property FAILS,
-        // and the failure looks like a real bug rather than an over-strict
-        // property: `RowMetrics::uniform` and `RowMetrics::exact` are meant to
-        // be interchangeable descriptions of the same geometry, and they
-        // disagree whenever `item_height == 0.0 && spacing == 0.0`.
+        // `RowMetrics::uniform` and `RowMetrics::exact` are two descriptions of
+        // one geometry when the callback is constant, so every query has to
+        // agree across them: a click or a drop at the same y must not resolve
+        // to a different row for no reason but which mode the view happens to
+        // use. This property found two ways they did not, and both were real.
         //
-        //   count = 5, all heights 0.0, gap 0.0
-        //     Uniform::row_at(0.0)          == 0    (explicit `step <= 0.0` early return)
-        //     Exact::row_at(0.0)            == 4    (partition_point resolves the
-        //                                            all-equal offsets to the LAST tie)
-        //     Uniform::insertion_index(0.0) == 1  vs Exact == 5
+        // 1. **All-zero, zero gap.** With `count = 5` and every height 0,
+        //    `Uniform::row_at(0.0)` answered 0 (its `step <= 0.0` early return)
+        //    while the offset table answered 4 — `partition_point` over an
+        //    all-equal slice resolves to the LAST tie — and the two
+        //    `insertion_index` answers were 1 and 5. Reachable: every row
+        //    measuring zero is what a fully collapsed or fully filtered list
+        //    looks like. Fixed in `PrefixSumOffsets::row_at`, and deliberately
+        //    narrower than "resolve ties to the first index": a *partially*
+        //    degenerate table must keep the last-tie answer, which
+        //    `row_at_at_a_boundary_lands_on_real_content_not_a_zero_height_row`
+        //    pins.
         //
-        // Reachable: every row measuring zero is what a fully collapsed or
-        // fully filtered list looks like. Consequence is a click or a drop at
-        // the same y resolving to a different row depending only on which
-        // RowMetrics mode the view happens to use.
-        //
-        // Fixing it means choosing which tie-break is correct (row 0 reads as
-        // the more defensible answer) and applying it to BOTH paths — a change
-        // to `PrefixSumOffsets::row_at`'s tie handling affects every consumer,
-        // so it is the author's call, not a mechanical fix. Do NOT weaken this
-        // assertion to make it pass.
+        // 2. **A declared height within 0.01 px of the placeholder estimate.**
+        //    `item_height = 1.0048779`, 11 rows: uniform totalled 11.0537 and
+        //    exact totalled exactly 11. `RowMetrics::exact` seeded the offset
+        //    table at a placeholder `estimated` of 1.0 and then pushed the
+        //    callback's height through `set_row_height`, whose sub-pixel
+        //    epsilon is a *measurement-noise* filter — so it discarded an
+        //    authoritative height as jitter and every row kept the placeholder.
+        //    Fixed by `PrefixSumOffsets::set_row_height_exact`, which the three
+        //    Exact-mode seeding paths and `GridView`'s `reseed_exact` now use;
+        //    the epsilon stays on the measure-feedback path, where it belongs.
+        //    This module's own `build` helper had already had to route around
+        //    the same epsilon to keep its oracle honest, which was the standing
+        //    hint that the filter sat on the wrong side of the seam.
         #[test]
         fn uniform_and_exact_constant_height_modes_agree_on_every_query(
             item_height in arb_height(),
@@ -907,7 +957,7 @@ mod proptests {
                 prop_assert_eq!(
                     row_u, row_e,
                     "row_at({}) disagrees: uniform={} exact={} (item_height={}, spacing={}, \
-                     count={}) — expected to diverge when item_height==0.0 && spacing==0.0: \
+                     count={}) — the all-zero, zero-gap case is the one that used to: \
                      Uniform's `step <= 0.0 => return 0` fallback vs the offset table's \
                      tie-break-to-the-last-tied-row",
                     y, row_u, row_e, item_height, spacing, count,

@@ -83,9 +83,18 @@ impl PrefixSumOffsets {
         self.dirty_from = Some(self.dirty_from.map_or(from, |d| d.min(from)));
     }
 
-    /// Set row `r`'s height; returns the delta (`new - old`) when it
-    /// changed beyond a sub-pixel epsilon (else `0.0`, with no dirtying so
-    /// re-measures don't oscillate). Marks the row measured.
+    /// Record a **measured** height for row `r`; returns the delta
+    /// (`new - old`) when it changed beyond a sub-pixel epsilon (else `0.0`,
+    /// with no dirtying so re-measures don't oscillate). Marks the row
+    /// measured.
+    ///
+    /// The epsilon is a *measurement-noise* filter, and only that: a
+    /// height-for-width pass re-run at a slightly different width can return a
+    /// height a fraction of a pixel away from the last one, and letting that
+    /// through would dirty the table and shift the scroll anchor for a change
+    /// nobody can see. A height the caller **declares** rather than measures
+    /// carries no noise, and must not be filtered — use
+    /// [`set_row_height_exact`](Self::set_row_height_exact) for that.
     pub(crate) fn set_row_height(&mut self, r: usize, h: f32) -> f32 {
         if r >= self.heights.len() {
             return 0.0;
@@ -100,6 +109,33 @@ impl PrefixSumOffsets {
         } else {
             0.0
         }
+    }
+
+    /// Install row `r`'s height verbatim; returns the delta. Marks the row
+    /// measured.
+    ///
+    /// The setter for a height that comes from a caller's own callback —
+    /// `ListView::item_height_fn`, `TableView::row_height_fn`,
+    /// `GridView::item_height` — rather than from a measure pass. Such a height
+    /// is the authority on the row's geometry, so
+    /// [`set_row_height`](Self::set_row_height)'s noise epsilon is exactly
+    /// wrong for it: routing an exact height through that filter silently kept
+    /// the placeholder `estimated` seed whenever the declared height landed
+    /// within `0.01` of it, and `RowMetrics::exact` seeds at a placeholder of
+    /// `1.0` — so a table declaring, say, `1.005` px rows laid every row out at
+    /// `1.0` and disagreed with the arithmetic `Uniform` mode describing the
+    /// same geometry.
+    pub(crate) fn set_row_height_exact(&mut self, r: usize, h: f32) -> f32 {
+        if r >= self.heights.len() {
+            return 0.0;
+        }
+        let delta = h - self.heights[r];
+        self.measured[r] = true;
+        if delta != 0.0 {
+            self.heights[r] = h;
+            self.mark_dirty(r);
+        }
+        delta
     }
 
     /// Invalidate rows in `[start, end)` (clamped) back to the estimate.
@@ -261,6 +297,42 @@ mod tests {
     }
 
     #[test]
+    fn an_exact_height_within_the_noise_epsilon_is_still_installed() {
+        // `set_row_height`'s epsilon is a measurement-noise filter: a
+        // height-for-width pass re-run at a slightly different width may return
+        // a fraction of a pixel less, and letting that dirty the table would
+        // shift the scroll anchor for a change nobody can see. A height the
+        // caller *declares* carries no noise, and discarding it kept the
+        // placeholder `estimated` seed — which is how `RowMetrics::exact`, whose
+        // placeholder is 1.0, laid out a table of 1.005 px rows at 1.0 px each.
+        let mut p = PrefixSumOffsets::new(2, 1.0, 0.0, 0.0, 0.0);
+
+        assert_eq!(
+            p.set_row_height(0, 1.005),
+            0.0,
+            "the measure path absorbs it as jitter"
+        );
+        assert_eq!(p.row_height(0), 1.0, "…and keeps the estimate");
+
+        let delta = p.set_row_height_exact(1, 1.005);
+        assert!((delta - 0.005).abs() < 1e-6, "delta={delta}");
+        assert_eq!(p.row_height(1), 1.005, "a declared height is installed");
+        // …and the table rebuilt around it, rather than staying stale.
+        assert!((p.total() - 2.005).abs() < 1e-5, "total={}", p.total());
+    }
+
+    #[test]
+    fn an_exact_height_that_did_not_change_costs_no_rebuild() {
+        // No epsilon does not mean no guard: re-declaring the same height is
+        // still a no-op, so a full `invalidate_from` re-sweep over unchanged
+        // rows does not dirty the table.
+        let mut p = PrefixSumOffsets::new(2, 50.0, 0.0, 0.0, 0.0);
+        p.set_row_height_exact(0, 90.0);
+        assert_eq!(p.set_row_height_exact(0, 90.0), 0.0);
+        assert_eq!(p.row_top(1), 90.0);
+    }
+
+    #[test]
     fn resize_preserves_measured_heights() {
         let mut p = PrefixSumOffsets::new(2, 50.0, 8.0, 0.0, 0.0);
         p.set_row_height(0, 90.0);
@@ -302,12 +374,14 @@ mod tests {
 /// `PrefixSumOffsets` is `pub(crate)`, so a `tests/` integration file can't
 /// reach it at all; this module lives inline (after the existing `mod
 /// tests`, so the example-based coverage stays the first thing a reader
-/// hits) and reaches straight into the struct's private fields to seed
-/// heights directly — deliberately bypassing [`set_row_height`]'s
-/// jitter-absorption (it silently no-ops when the new height is within
-/// `0.01` of the seeded `estimated`), which would otherwise make an
+/// hits) and seeds heights through [`set_row_height_exact`], which installs
+/// what it is given. [`set_row_height`] would not: its sub-pixel epsilon is a
+/// measurement-noise filter, so it silently no-ops when the new height lands
+/// within `0.01` of the seeded `estimated` — which would make an
 /// oracle-driven test's own setup lie about what heights are actually
-/// installed.
+/// installed. (This helper used to reach into the private fields to dodge
+/// that; the epsilon has since been moved off the declared-height path, where
+/// it was also mis-seeding `RowMetrics::exact` in production.)
 ///
 /// This table is a binary search over a monotone cumulative-sum array —
 /// classic proptest territory: `row_at`'s `partition_point` call assumes
@@ -417,18 +491,17 @@ mod proptests {
         top_inset + sum_heights + (rows as f32 - 1.0) * gap + bottom_inset
     }
 
-    /// Builds a table with EXACTLY the given heights. Goes straight at the
-    /// private fields (this module is a descendant of `row_offsets`, so
-    /// that's ordinary Rust privacy, not a visibility change) instead of
-    /// looping `set_row_height`, which would silently no-op — and thus
-    /// desync the oracle from what's actually installed — whenever a
-    /// generated height lands within `0.01` of the placeholder `estimated`
-    /// seed.
+    /// Builds a table with EXACTLY the given heights, through
+    /// [`PrefixSumOffsets::set_row_height_exact`] — the setter for a height
+    /// the caller declares rather than measures. `set_row_height` would
+    /// silently no-op, and thus desync the oracle from what is actually
+    /// installed, whenever a generated height landed within `0.01` of the
+    /// placeholder `estimated` seed.
     fn build(heights: &[f32], gap: f32, top_inset: f32, bottom_inset: f32) -> PrefixSumOffsets {
         let mut p = PrefixSumOffsets::new(heights.len(), 0.0, gap, top_inset, bottom_inset);
-        p.heights = heights.to_vec();
-        p.measured = vec![true; heights.len()];
-        p.dirty_from = Some(0);
+        for (r, &h) in heights.iter().enumerate() {
+            p.set_row_height_exact(r, h);
+        }
         p
     }
 
