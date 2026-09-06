@@ -561,14 +561,27 @@ impl WidgetTree {
                 // action rather than redirecting it.
                 if let Some(id) = target.filter(|id| self.arena.is_active(*id)) {
                     if *action == accesskit::Action::Focus {
+                        // Land where the keys go. A composite publishes one AT
+                        // node on a root that is not itself focusable — a
+                        // `SpinBox`, `TextInput` or `DateEdit` keeps focus on an
+                        // inner leaf — and `ctx.request_focus` has always walked
+                        // into the subtree for exactly that reason. The AT path
+                        // must too: focusing the root parks `self.focused` on a
+                        // node that takes no keystrokes, and because
+                        // `on_key_preview` fires only on *strict* ancestors of
+                        // the focused node, it also disarms the composite's own
+                        // stepping keys. `first_focusable_descendant` returns the
+                        // node itself when it is focusable, so every leaf control
+                        // is unchanged.
+                        let target = self.first_focusable_descendant(id).unwrap_or(id);
                         self.focus_with_origin_ops(
-                            id,
+                            target,
                             crate::focus::FocusOrigin::Programmatic,
                             &mut *ops,
                         );
                         // Focus is serviced here rather than by the widget, so
                         // "handled" means the focus actually landed.
-                        self.access_action_handled = self.focused == Some(id);
+                        self.access_action_handled = self.focused == Some(target);
                     } else if *action == accesskit::Action::ShowContextMenu {
                         // A "show context menu" AT action — a screen reader's
                         // menu key, or an automation `right_click` /

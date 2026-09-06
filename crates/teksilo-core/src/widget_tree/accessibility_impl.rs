@@ -1603,6 +1603,55 @@ mod tests {
         assert_eq!(tree.focused(), Some(id));
     }
 
+    /// An assistive-tech `Focus` on a composite lands on the node that takes
+    /// the keys, not on the root that publishes the AT node.
+    ///
+    /// `ctx.request_focus` has always walked to the first focusable descendant,
+    /// precisely because a composite like `TextInput` or `SpinBox` keeps its
+    /// focus on an inner leaf. The AT path did not, so a screen reader — or the
+    /// automation `focus_node` tool — parked `self.focused` on a root that
+    /// accepts no keystrokes. The second assertion is the one that bites:
+    /// `on_key_preview` fires only on *strict* ancestors of the focused node, so
+    /// a composite focused on its own root also loses its own stepping keys.
+    #[test]
+    fn an_at_focus_on_a_non_focusable_composite_lands_on_its_focusable_leaf() {
+        let mut tree = WidgetTree::new();
+        let leaf = tree.add(ClickableWidget.focusable(true));
+        let root = tree.add(StackWidget::new().add_child(leaf));
+        tree.layout(SizeProposal::exact(100.0, 100.0));
+
+        let mut ops = crate::window::NoopWindowOps;
+        assert!(tree.dispatch_access_action(
+            crate::accessibility::widget_id_to_node_id(root),
+            accesskit::Action::Focus,
+            None,
+            &mut ops,
+        ));
+        assert_eq!(
+            tree.focused(),
+            Some(leaf),
+            "focus must reach the focusable leaf, not the composite root"
+        );
+    }
+
+    /// The walk is a fallback, not a redirect: a focusable node still focuses
+    /// itself, so every leaf control is untouched by the composite fix.
+    #[test]
+    fn an_at_focus_on_a_focusable_node_still_lands_on_that_node() {
+        let mut tree = WidgetTree::new();
+        let outer = tree.add(ClickableWidget.focusable(true));
+        tree.layout(SizeProposal::exact(100.0, 100.0));
+
+        let mut ops = crate::window::NoopWindowOps;
+        assert!(tree.dispatch_access_action(
+            crate::accessibility::widget_id_to_node_id(outer),
+            accesskit::Action::Focus,
+            None,
+            &mut ops,
+        ));
+        assert_eq!(tree.focused(), Some(outer));
+    }
+
     /// The derivation is a default, not a decree: `access_remove_action` still
     /// takes it away, because it is applied before the overrides.
     #[test]

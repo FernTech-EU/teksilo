@@ -55,6 +55,17 @@ by crate for clarity, not because crates version independently.
 
 ### Fixed
 
+#### Core
+
+- **An assistive-technology `Action::Focus` on a composite lands on the node
+  that takes the keys.** The dispatcher services `Focus` itself and focused the
+  targeted node directly, while `ctx.request_focus` has always walked to the
+  first focusable descendant. So an assistive technology — or the automation
+  `focus_node` tool — aimed at a `SpinBox`, `DateEdit` or `TextInput` parked
+  focus on a composite root that accepts no keystrokes, and, because
+  `on_key_preview` fires only on *strict* ancestors of the focused node,
+  disarmed the composite's own stepping keys in the process.
+
 #### Menus
 
 - **Menu item labels line up on one leading inset again under the Fluent and
