@@ -967,3 +967,327 @@ fn the_translator_clock_never_runs_backwards() {
     state.set_now(EventTime::from_millis(50));
     assert_eq!(state.now(), EventTime::from_millis(100));
 }
+
+// ---------------------------------------------------------------------------
+// Pen (P16). The digitizer shims are exercised in `crate::pen`; these drive the
+// translator's proximity state machine over synthetic packets, so they need no
+// tablet, no compositor and no Windows.
+// ---------------------------------------------------------------------------
+
+use crate::pen::{PenButtons, PenCaps, PenPacket, PenSource};
+use teksilo_canvas::Size;
+use teksilo_tokens::{PenKind, PointerKind};
+
+/// A pen source that hands over a scripted list of packets.
+#[derive(Debug, Default)]
+struct ScriptedPen {
+    packets: Vec<PenPacket>,
+    contact: Option<Size>,
+    caps: PenCaps,
+}
+
+impl ScriptedPen {
+    fn with(packets: Vec<PenPacket>) -> Self {
+        Self {
+            packets,
+            contact: None,
+            caps: PenCaps::FULL_PEN,
+        }
+    }
+}
+
+impl PenSource for ScriptedPen {
+    fn poll(&mut self, out: &mut Vec<PenPacket>) {
+        out.append(&mut self.packets);
+    }
+
+    fn capabilities(&self) -> PenCaps {
+        self.caps
+    }
+
+    fn touch_contact(&self, _os_contact_id: u64) -> Option<Size> {
+        self.contact
+    }
+}
+
+/// A pen hovering at `(x, y)`.
+fn hover(x: f32, y: f32) -> PenPacket {
+    PenPacket::hovering(PenKind::Pen, Point::new(x, y))
+}
+
+/// Every pointer sample in `samples`.
+fn pointers(samples: &[InputSample]) -> Vec<&PointerSample> {
+    samples.iter().filter_map(InputSample::as_pointer).collect()
+}
+
+fn state_with_pen(packets: Vec<PenPacket>) -> TranslationState {
+    let mut state = TranslationState::new();
+    state.set_pen_source(Box::new(ScriptedPen::with(packets)));
+    state
+}
+
+#[test]
+fn a_hovering_pen_moves_with_no_buttons_down() {
+    let mut state = state_with_pen(vec![hover(10.0, 20.0), hover(11.0, 21.0)]);
+    let samples = state.poll_pen(EventTime::from_millis(5));
+    let pointers = pointers(&samples);
+
+    assert_eq!(pointers.len(), 2, "an enter and a move");
+    for sample in &pointers {
+        assert_eq!(sample.phase, PointerPhase::Move);
+        assert!(
+            sample.pointer.buttons.is_empty(),
+            "a hovering pen holds nothing"
+        );
+        assert!(matches!(
+            sample.pointer.kind,
+            PointerKind::Pen(PenKind::Pen)
+        ));
+        assert!(
+            sample.pointer.kind.hovers(),
+            "a pen is the one direct pointer that hovers"
+        );
+        assert_eq!(sample.button, None);
+    }
+    assert_eq!(pointers[0].position, Point::new(10.0, 20.0));
+    assert_eq!(pointers[1].position, Point::new(11.0, 21.0));
+    assert!(state.pen_in_proximity());
+}
+
+#[test]
+fn leaving_proximity_ends_the_pointer() {
+    let mut state = state_with_pen(vec![
+        hover(10.0, 20.0),
+        PenPacket::out_of_proximity(PenKind::Pen, Point::new(10.0, 20.0)),
+    ]);
+    let samples = state.poll_pen(EventTime::from_millis(5));
+    let pointers = pointers(&samples);
+
+    assert_eq!(pointers.len(), 2);
+    assert_eq!(pointers[0].phase, PointerPhase::Move);
+    assert_eq!(
+        pointers[1].phase,
+        PointerPhase::Cancel,
+        "a tool going out of range completes nothing"
+    );
+    assert!(pointers[1].pointer.buttons.is_empty());
+    assert!(!state.pen_in_proximity());
+
+    // Both samples belong to one pointer.
+    assert_eq!(pointers[0].pointer.id, pointers[1].pointer.id);
+}
+
+#[test]
+fn a_packet_out_of_range_for_a_session_that_never_started_says_nothing() {
+    let mut state = state_with_pen(vec![PenPacket::out_of_proximity(
+        PenKind::Pen,
+        Point::new(1.0, 1.0),
+    )]);
+    assert!(state.poll_pen(EventTime::from_millis(1)).is_empty());
+}
+
+#[test]
+fn the_tip_is_the_primary_button() {
+    let mut state = state_with_pen(vec![
+        hover(10.0, 10.0),
+        hover(10.0, 10.0).down_at(0.75),
+        hover(20.0, 20.0).down_at(1.0),
+        hover(20.0, 20.0),
+    ]);
+    let samples = state.poll_pen(EventTime::from_millis(7));
+    let pointers = pointers(&samples);
+    let phases: Vec<_> = pointers.iter().map(|s| s.phase).collect();
+    assert_eq!(
+        phases,
+        vec![
+            PointerPhase::Move, // proximity enter
+            PointerPhase::Down, // tip contact
+            PointerPhase::Move, // drawing
+            PointerPhase::Up,   // tip lift
+        ]
+    );
+
+    let down = pointers[1];
+    assert_eq!(down.button, Some(PointerButton::Primary));
+    assert!(
+        down.pointer.buttons.contains(PointerButton::Primary),
+        "every accept_buttons() recognizer gates on PRIMARY"
+    );
+    assert_eq!(down.pointer.axes.pressure, Some(0.75));
+
+    // The move while drawing keeps the tip held and carries the new pressure.
+    assert!(pointers[2].pointer.buttons.contains(PointerButton::Primary));
+    assert_eq!(pointers[2].pointer.axes.pressure, Some(1.0));
+
+    // The lift releases it.
+    assert_eq!(pointers[3].button, Some(PointerButton::Primary));
+    assert!(pointers[3].pointer.buttons.is_empty());
+}
+
+#[test]
+fn the_barrel_button_is_secondary() {
+    let mut barrel = hover(5.0, 5.0);
+    barrel.buttons = PenButtons::BARREL;
+    let mut both = barrel;
+    both.buttons = PenButtons::BARREL.union(PenButtons::SECONDARY_BARREL);
+
+    let mut state = state_with_pen(vec![hover(5.0, 5.0), barrel, both, hover(5.0, 5.0)]);
+    let samples = state.poll_pen(EventTime::from_millis(9));
+    let pointers = pointers(&samples);
+
+    // enter, barrel down, second barrel down, then both released.
+    assert_eq!(pointers[1].phase, PointerPhase::Down);
+    assert_eq!(pointers[1].button, Some(PointerButton::Secondary));
+    assert_eq!(pointers[2].button, Some(PointerButton::Middle));
+    assert!(
+        pointers[2]
+            .pointer
+            .buttons
+            .contains(PointerButton::Secondary)
+    );
+
+    let releases: Vec<_> = pointers
+        .iter()
+        .filter(|s| s.phase == PointerPhase::Up)
+        .filter_map(|s| s.button)
+        .collect();
+    assert_eq!(
+        releases,
+        vec![PointerButton::Secondary, PointerButton::Middle]
+    );
+    assert!(pointers.last().unwrap().pointer.buttons.is_empty());
+}
+
+#[test]
+fn the_eraser_end_is_a_new_pointer_not_a_button() {
+    let mut state = state_with_pen(vec![
+        hover(1.0, 1.0),
+        PenPacket::hovering(PenKind::Eraser, Point::new(1.0, 1.0)),
+    ]);
+    let samples = state.poll_pen(EventTime::from_millis(3));
+    let pointers = pointers(&samples);
+
+    assert_eq!(
+        pointers.len(),
+        3,
+        "enter, the old tool's end, the new enter"
+    );
+    assert!(matches!(
+        pointers[0].pointer.kind,
+        PointerKind::Pen(PenKind::Pen)
+    ));
+    assert_eq!(pointers[1].phase, PointerPhase::Cancel);
+    assert!(matches!(
+        pointers[2].pointer.kind,
+        PointerKind::Pen(PenKind::Eraser)
+    ));
+    assert_ne!(
+        pointers[0].pointer.id, pointers[2].pointer.id,
+        "flipping the stylus is a different pointer, not a mutated one"
+    );
+    assert!(
+        pointers.iter().all(|s| s.button.is_none()),
+        "the eraser is never announced as a button"
+    );
+}
+
+#[test]
+fn a_press_is_preceded_by_the_move_that_positions_it() {
+    // Position and tip change in the same packet: the consumer must see the
+    // new position before the press lands on it.
+    let mut state = state_with_pen(vec![hover(0.0, 0.0), hover(30.0, 40.0).down_at(0.5)]);
+    let samples = state.poll_pen(EventTime::from_millis(2));
+    let pointers = pointers(&samples);
+    assert_eq!(pointers.len(), 3);
+    assert_eq!(pointers[1].phase, PointerPhase::Move);
+    assert_eq!(pointers[1].position, Point::new(30.0, 40.0));
+    assert_eq!(pointers[2].phase, PointerPhase::Down);
+    assert_eq!(pointers[2].position, Point::new(30.0, 40.0));
+}
+
+#[test]
+fn tilt_and_twist_ride_every_sample() {
+    let mut packet = hover(1.0, 2.0);
+    packet.tilt = Some((-30.0, 45.0));
+    packet.twist = Some(120.0);
+    let mut state = state_with_pen(vec![packet]);
+    let samples = state.poll_pen(EventTime::from_millis(1));
+    let sample = pointers(&samples)[0];
+    assert_eq!(sample.pointer.axes.tilt, Some((-30.0, 45.0)));
+    assert_eq!(sample.pointer.axes.twist, Some(120.0));
+}
+
+#[test]
+fn a_pen_stamps_the_polls_clock_when_the_device_has_none() {
+    let mut state = state_with_pen(vec![hover(1.0, 1.0)]);
+    let now = EventTime::from_millis(1234);
+    let samples = state.poll_pen(now);
+    assert_eq!(pointers(&samples)[0].pointer.time, now);
+    assert_eq!(state.now(), now);
+}
+
+#[test]
+fn a_pen_shim_raises_the_windows_capability_row() {
+    let mut bare = TranslationState::new();
+    bare.set_window_system(WindowSystem::Wayland);
+    let before = bare.capabilities();
+    assert!(!before.reports_tilt && !before.reports_pen_kind);
+
+    let mut with_pen = TranslationState::new();
+    with_pen.set_window_system(WindowSystem::Wayland);
+    with_pen.set_pen_source(Box::new(ScriptedPen::with(Vec::new())));
+    let after = with_pen.capabilities();
+    assert!(after.reports_tilt && after.reports_twist && after.reports_pen_kind);
+    assert!(after.reports_pressure);
+    // Everything that is not a pen capability is untouched.
+    assert_eq!(after.reports_cancel, before.reports_cancel);
+    assert_eq!(after.osk, before.osk);
+}
+
+#[test]
+fn cancel_all_ends_a_hovering_pen() {
+    let mut state = state_with_pen(vec![hover(3.0, 4.0).down_at(1.0)]);
+    let _ = state.poll_pen(EventTime::from_millis(1));
+    assert!(state.pen_in_proximity());
+
+    let samples = state.cancel_all(EventTime::from_millis(2));
+    let pointers = pointers(&samples);
+    assert_eq!(pointers.len(), 1);
+    assert_eq!(pointers[0].phase, PointerPhase::Cancel);
+    assert_eq!(pointers[0].position, Point::new(3.0, 4.0));
+    assert!(!state.pen_in_proximity());
+
+    // And a second cancel has nothing left to end.
+    assert!(state.cancel_all(EventTime::from_millis(3)).is_empty());
+}
+
+#[test]
+fn a_touch_contact_patch_reaches_the_axes() {
+    let source = ScriptedPen {
+        contact: Some(Size::new(24.0, 18.0)),
+        ..Default::default()
+    };
+    let mut state = TranslationState::new();
+    state.set_pen_source(Box::new(source));
+
+    let event = touch(winit::event::TouchPhase::Started, 7, 100.0, 100.0);
+    let samples = feed(&mut state, &event, 1);
+    let sample = pointers(&samples)[0];
+    assert_eq!(
+        sample.pointer.axes.contact,
+        Some(Size::new(24.0, 18.0)),
+        "WM_TOUCH carries no contact area; the WM_POINTER shim does"
+    );
+}
+
+#[test]
+fn a_window_with_no_pen_source_produces_no_pen_samples() {
+    let mut state = TranslationState::new();
+    assert!(!state.has_pen_source());
+    assert!(state.poll_pen(EventTime::from_millis(1)).is_empty());
+    assert!(!state.pen_in_proximity());
+    // …and taking the source back is how a caller uninstalls one.
+    state.set_pen_source(Box::new(ScriptedPen::with(vec![hover(1.0, 1.0)])));
+    assert!(state.take_pen_source().is_some());
+    assert!(state.poll_pen(EventTime::from_millis(2)).is_empty());
+}

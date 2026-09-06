@@ -14,6 +14,7 @@ pub(crate) mod linux_helpers;
 #[cfg(feature = "native-menu")]
 pub mod native_menu;
 pub mod os_theme;
+pub mod pen;
 pub mod pointer_backend;
 pub mod title_bar_host;
 pub mod window;
@@ -36,6 +37,7 @@ pub use file_dialog::{
     EventContextFileDialogExt, FileDialogBackend, FileDialogEventPayload, FileDialogHandle,
     FileDialogRequest, FileDialogResult, FileFilter, MemoryFileDialog, RequestId,
 };
+pub use pen::{PenButtons, PenCaps, PenPacket, PenSource, create_pen_source};
 pub use pointer_backend::{
     BackendCaps, BackendEvent, InputSample, PlatformKind, PointerBackend, SoftKeyboardSupport,
 };

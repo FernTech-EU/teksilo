@@ -43,6 +43,7 @@
 use std::collections::HashMap;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use teksilo_canvas::Point;
@@ -53,8 +54,9 @@ use teksilo_core::pointer::{
     PointerSample, ScrollPhase, ScrollSample, ScrollSource,
 };
 use teksilo_core::trace_input;
-use teksilo_tokens::InputTokens;
+use teksilo_tokens::{InputTokens, PenKind, PointerKind};
 
+use crate::pen::{PenButtons, PenPacket, PenSource};
 use crate::pointer_backend::{
     BackendCaps, BackendEvent, InputSample, PlatformKind, PointerBackend,
 };
@@ -95,6 +97,19 @@ const PROMOTED_CLICK_WINDOW: Duration = Duration::from_millis(500);
 /// as two gestures and P12 would add a Teksilo fling on top of the OS's.
 const MOMENTUM_HANDOFF_WINDOW: Duration = Duration::from_millis(100);
 
+/// The device key every pen session is minted under.
+///
+/// A pen does not arrive through winit, so there is no `DeviceId` to hash. One
+/// fixed key plus a process-global session counter is enough: the counter is
+/// what makes two windows' sessions distinct, and the allocator only ever sees
+/// `(PEN_DEVICE, session)` pairs that no window has used before.
+const PEN_DEVICE: BackendDeviceKey = BackendDeviceKey::new(0x7065_6E5F_0000_0001);
+
+/// The next pen proximity session id. Process-global, because
+/// [`PointerIdAllocator`] is, and two windows with a stylus each must not mint
+/// the same key.
+static NEXT_PEN_SESSION: AtomicU64 = AtomicU64::new(1);
+
 // ---------------------------------------------------------------------------
 // Per-window state
 // ---------------------------------------------------------------------------
@@ -109,6 +124,33 @@ struct Contact {
     /// Whether it is the primary contact of its sequence — the first one down
     /// while no other was live. W3C `isPrimary`: once it lifts, no other
     /// contact is promoted; the next sequence elects a new one.
+    primary: bool,
+}
+
+/// One pen proximity session.
+///
+/// A session begins when the tool comes into range and ends when it leaves;
+/// the tip touching and lifting inside that span are *button* transitions on
+/// one pointer, not two pointers. That is the W3C model, and it is what makes
+/// a hovering stylus drive tooltips and hover visuals the way a mouse does.
+#[derive(Copy, Clone, Debug)]
+struct PenContact {
+    /// The identity minted for this proximity session.
+    id: PointerId,
+    /// The allocator key this session was minted under.
+    session: u64,
+    /// The tool in use. A tool change is a new session, not a mutation: a pen
+    /// flipped to its eraser is a different pointer as far as a drawing
+    /// surface is concerned.
+    tool: PenKind,
+    /// Last reported position, in window-logical coordinates.
+    position: Point,
+    /// Whether the tip is in contact.
+    down: bool,
+    /// The stylus buttons held.
+    buttons: PenButtons,
+    /// Whether this pointer is the primary one — see
+    /// [`TranslationState::begin_pen_session`].
     primary: bool,
 }
 
@@ -166,6 +208,14 @@ pub struct TranslationState {
     /// traced. Once per window is enough to diagnose it; per packet would be a
     /// flood.
     warned_press_without_cursor: bool,
+
+    /// The window's pen shim, if it has one. `None` on a platform with no pen
+    /// path, and on a window nobody has attached one to.
+    pen: Option<Box<dyn PenSource>>,
+    /// The live pen proximity session.
+    pen_contact: Option<PenContact>,
+    /// Reused packet buffer, so polling a pen allocates nothing per turn.
+    pen_scratch: Vec<PenPacket>,
 }
 
 impl TranslationState {
@@ -185,6 +235,9 @@ impl TranslationState {
             scroll_state: ScrollStreamState::default(),
             scroll_ended_at: None,
             warned_press_without_cursor: false,
+            pen: None,
+            pen_contact: None,
+            pen_scratch: Vec::new(),
         }
     }
 
@@ -415,6 +468,14 @@ impl TranslationState {
             PointerPhase::Up | PointerPhase::Cancel => ButtonMask::NONE,
         };
         pointer.axes.pressure = touch.force.and_then(pressure_from_force);
+        // The contact patch, where a shim can supply one winit cannot. Windows
+        // is the only platform that reports it today: `POINTER_TOUCH_INFO`
+        // carries `rcContact` and `WM_TOUCH` — the path winit 0.30 takes —
+        // does not.
+        pointer.axes.contact = self
+            .pen
+            .as_ref()
+            .and_then(|source| source.touch_contact(touch.id));
 
         // A direct pointer reports the button that changed on the two phases
         // that change one. A move never does, and a cancel has no meaningful
@@ -437,6 +498,275 @@ impl TranslationState {
             pointer,
             phase,
             position,
+            button,
+            modifiers: self.current_modifiers,
+            coalesced: Vec::new(),
+        })
+    }
+
+    // -----------------------------------------------------------------
+    // Pen
+    // -----------------------------------------------------------------
+
+    /// Install this window's pen shim.
+    ///
+    /// Build one with [`create_pen_source`](crate::pen::create_pen_source),
+    /// which answers [`NullPenSource`](crate::pen::null::NullPenSource) where
+    /// the platform has no pen path. A window with no source simply never
+    /// produces a pen sample — which is also the pen's rollback switch, since
+    /// `InputTokens::touch_enabled` deliberately does **not** gate it: a
+    /// stylus is not a finger, and rolling touch back must not take the pen
+    /// with it.
+    pub fn set_pen_source(&mut self, source: Box<dyn PenSource>) {
+        self.pen = Some(source);
+    }
+
+    /// Remove and return this window's pen shim.
+    ///
+    /// Any live proximity session is *not* terminated here — call
+    /// [`cancel_all`](PointerBackend::cancel_all) first if the pointer has to
+    /// be ended cleanly.
+    pub fn take_pen_source(&mut self) -> Option<Box<dyn PenSource>> {
+        self.pen.take()
+    }
+
+    /// Whether a pen shim is installed.
+    pub fn has_pen_source(&self) -> bool {
+        self.pen.is_some()
+    }
+
+    /// Whether a tool is currently in proximity — i.e. whether a pen is
+    /// hovering or drawing right now.
+    pub fn pen_in_proximity(&self) -> bool {
+        self.pen_contact.is_some()
+    }
+
+    /// Drain the pen shim and translate everything it buffered.
+    ///
+    /// Call once per event-loop turn, alongside the winit events. Cheap and
+    /// allocation-free when no stylus is in use: the shim returns nothing and
+    /// the packet buffer is reused.
+    pub fn poll_pen(&mut self, now: EventTime) -> Vec<InputSample> {
+        self.set_now(now);
+        // Take the source out so the translation below can borrow `self`
+        // mutably; it goes straight back.
+        let Some(mut source) = self.pen.take() else {
+            return Vec::new();
+        };
+        let mut packets = std::mem::take(&mut self.pen_scratch);
+        packets.clear();
+        source.poll(&mut packets);
+        self.pen = Some(source);
+
+        let mut samples = Vec::new();
+        for packet in &packets {
+            samples.append(&mut self.translate_pen_packet(packet));
+        }
+        packets.clear();
+        self.pen_scratch = packets;
+        samples
+    }
+
+    /// Turn one digitizer packet into the samples its transitions imply.
+    ///
+    /// Public so a replay backend, or a platform shim Teksilo has not met, can
+    /// feed the same state machine without reimplementing it.
+    ///
+    /// # The state machine
+    ///
+    /// A packet is a *level*; the transitions are derived by comparing it with
+    /// the session's previous state.
+    ///
+    /// | transition | sample |
+    /// | --- | --- |
+    /// | out of range → in range | `Move` (a hover: no buttons, `down` false) |
+    /// | position changed | `Move` |
+    /// | tip touched down | `Down` with [`PointerButton::Primary`] |
+    /// | tip lifted | `Up` with `Primary` |
+    /// | barrel pressed / released | `Down` / `Up` with `Secondary` |
+    /// | second barrel | `Down` / `Up` with `Middle` |
+    /// | in range → out of range | `Cancel` |
+    /// | tool changed mid-session | `Cancel`, then a fresh session |
+    ///
+    /// Within one packet the `Move` is emitted **first**, so a press always
+    /// lands at a position the consumer has already seen.
+    ///
+    /// # Why leaving proximity is a `Cancel`
+    ///
+    /// [`PointerPhase`] has no *leave*, and a tool going out of range
+    /// completes nothing: the completion, if there was one, was the tip's
+    /// `Up`, which has already been delivered. `Cancel` is the phase that says
+    /// "this pointer's life ended without completing an interaction", which is
+    /// exactly what happened — and it is the right thing for the down case
+    /// too, where a stylus yanked off the tablet mid-stroke must not read as a
+    /// deliberate lift.
+    pub fn translate_pen_packet(&mut self, packet: &PenPacket) -> Vec<InputSample> {
+        let time = if packet.time == EventTime::ZERO {
+            self.now
+        } else {
+            packet.time
+        };
+        let mut samples = Vec::new();
+
+        // End the session first when the tool left range, or when the tool
+        // itself changed under us (pen → eraser is a different pointer).
+        if let Some(contact) = self.pen_contact
+            && (!packet.in_proximity || contact.tool != packet.tool)
+        {
+            samples.push(self.end_pen_session(contact, packet.position, time));
+        }
+        if !packet.in_proximity {
+            return samples;
+        }
+
+        let (mut state, just_entered) = match self.pen_contact {
+            Some(contact) => (contact, false),
+            None => {
+                let contact = self.begin_pen_session(packet);
+                // The hover enter: a `Move` with nothing held, at the position
+                // the tool came into range at.
+                samples.push(self.pen_sample(&contact, PointerPhase::Move, None, packet, time));
+                (contact, true)
+            }
+        };
+
+        // Which buttons changed, in a fixed order: the tip first, then the
+        // barrel, so a press-while-moving reads the same way every time.
+        let mut transitions: Vec<(PointerPhase, PointerButton)> = Vec::new();
+        if state.down != packet.down {
+            transitions.push((
+                if packet.down {
+                    PointerPhase::Down
+                } else {
+                    PointerPhase::Up
+                },
+                PointerButton::Primary,
+            ));
+        }
+        for (bit, button) in [
+            (PenButtons::BARREL, PointerButton::Secondary),
+            (PenButtons::SECONDARY_BARREL, PointerButton::Middle),
+        ] {
+            let was = state.buttons.contains(bit);
+            let held = packet.buttons.contains(bit);
+            if was != held {
+                transitions.push((
+                    if held {
+                        PointerPhase::Down
+                    } else {
+                        PointerPhase::Up
+                    },
+                    button,
+                ));
+            }
+        }
+
+        let moved = state.position != packet.position;
+        state.position = packet.position;
+        // A packet with no transition still says something — a pressure ramp,
+        // a tilt change — so it becomes a `Move` even when the position stood
+        // still. The entering packet is the exception: its `Move` has already
+        // been emitted above, and repeating it would double every hover.
+        if !just_entered && (moved || transitions.is_empty()) {
+            samples.push(self.pen_sample(&state, PointerPhase::Move, None, packet, time));
+        }
+        for (phase, button) in transitions {
+            let pressed = phase == PointerPhase::Down;
+            match button {
+                PointerButton::Primary => state.down = pressed,
+                PointerButton::Secondary => {
+                    state.buttons = state.buttons.with(PenButtons::BARREL, pressed);
+                }
+                _ => {
+                    state.buttons = state.buttons.with(PenButtons::SECONDARY_BARREL, pressed);
+                }
+            }
+            samples.push(self.pen_sample(&state, phase, Some(button), packet, time));
+        }
+
+        // Carry the packet's raw flags (the eraser bit among them) forward, so
+        // the next comparison is against what the device actually said.
+        state.buttons = packet.buttons;
+        state.down = packet.down;
+        self.pen_contact = Some(state);
+        samples
+    }
+
+    /// Mint an identity for a tool that just came into range.
+    ///
+    /// Primacy: a pen with no finger on the glass is the primary direct
+    /// pointer. A pen that arrives while contacts are live is not — the
+    /// cross-kind arbitration (pen versus mouse) belongs to the tree's pointer
+    /// table, which can see every live pointer; this only avoids claiming
+    /// primacy the platform layer can already tell is taken.
+    fn begin_pen_session(&mut self, packet: &PenPacket) -> PenContact {
+        let session = NEXT_PEN_SESSION.fetch_add(1, Ordering::Relaxed);
+        let id = PointerIdAllocator::global().begin(PEN_DEVICE, session);
+        let contact = PenContact {
+            id,
+            session,
+            tool: packet.tool,
+            position: packet.position,
+            down: false,
+            buttons: PenButtons::NONE,
+            primary: self.contacts.is_empty(),
+        };
+        trace_input!(
+            Samples,
+            "pen {:?} in proximity ({:?}) at {:?}",
+            id,
+            packet.tool,
+            packet.position
+        );
+        self.pen_contact = Some(contact);
+        contact
+    }
+
+    /// End a proximity session and release its identity.
+    fn end_pen_session(
+        &mut self,
+        contact: PenContact,
+        position: Point,
+        time: EventTime,
+    ) -> InputSample {
+        PointerIdAllocator::global().end(PEN_DEVICE, contact.session);
+        self.pen_contact = None;
+        trace_input!(Samples, "pen {:?} left proximity", contact.id);
+
+        let mut pointer = PointerInfo::touch(contact.id, time);
+        pointer.kind = PointerKind::Pen(contact.tool);
+        pointer.primary = contact.primary;
+        pointer.buttons = ButtonMask::NONE;
+        InputSample::Pointer(PointerSample {
+            pointer,
+            phase: PointerPhase::Cancel,
+            position,
+            button: None,
+            modifiers: self.current_modifiers,
+            coalesced: Vec::new(),
+        })
+    }
+
+    /// One sample for the session's current state.
+    fn pen_sample(
+        &self,
+        contact: &PenContact,
+        phase: PointerPhase,
+        button: Option<PointerButton>,
+        packet: &PenPacket,
+        time: EventTime,
+    ) -> InputSample {
+        let mut pointer = PointerInfo::touch(contact.id, time);
+        pointer.kind = PointerKind::Pen(contact.tool);
+        pointer.primary = contact.primary;
+        pointer.buttons = pen_button_mask(contact.down, contact.buttons);
+        pointer.axes.pressure = Some(packet.pressure.clamp(0.0, 1.0));
+        pointer.axes.tilt = packet.tilt;
+        pointer.axes.twist = packet.twist;
+        InputSample::Pointer(PointerSample {
+            pointer,
+            phase,
+            position: contact.position,
             button,
             modifiers: self.current_modifiers,
             coalesced: Vec::new(),
@@ -656,7 +986,14 @@ impl PointerBackend for TranslationState {
     }
 
     fn capabilities(&self) -> BackendCaps {
-        BackendCaps::for_platform(PlatformKind::HOST, self.window_system)
+        let mut caps = BackendCaps::for_platform(PlatformKind::HOST, self.window_system);
+        // A pen shim adds what winit cannot report; it never takes anything
+        // away. On a window with no shim this is a no-op and the row is
+        // exactly the platform's.
+        if let Some(pen) = &self.pen {
+            pen.capabilities().apply_to(&mut caps);
+        }
+        caps
     }
 
     fn cancel_all(&mut self, now: EventTime) -> Vec<InputSample> {
@@ -682,6 +1019,13 @@ impl PointerBackend for TranslationState {
                 modifiers: self.current_modifiers,
                 coalesced: Vec::new(),
             }));
+        }
+
+        // A pen in proximity is a live pointer too, held or not: the window
+        // that is losing the stream is the one that was hovering.
+        if let Some(contact) = self.pen_contact {
+            let position = contact.position;
+            samples.push(self.end_pen_session(contact, position, self.now));
         }
 
         // A held mouse button is a live pointer too: a window that loses the
@@ -732,6 +1076,27 @@ fn device_key(device_id: winit::event::DeviceId) -> BackendDeviceKey {
     let mut hasher = DefaultHasher::new();
     device_id.hash(&mut hasher);
     BackendDeviceKey::new(hasher.finish())
+}
+
+/// The button mask a pen holds: the tip is `Primary`, the barrel `Secondary`,
+/// a second barrel `Middle`.
+///
+/// The tip mapping is normative rather than cosmetic — every
+/// `accept_buttons()` recognizer in the framework gates on
+/// `ButtonMask::PRIMARY`, so a stylus that reported anything else would be
+/// invisible to tap, drag and long-press alike.
+fn pen_button_mask(down: bool, buttons: PenButtons) -> ButtonMask {
+    let mut mask = ButtonMask::NONE;
+    if down {
+        mask = mask.union(PointerButton::Primary.into());
+    }
+    if buttons.contains(PenButtons::BARREL) {
+        mask = mask.union(PointerButton::Secondary.into());
+    }
+    if buttons.contains(PenButtons::SECONDARY_BARREL) {
+        mask = mask.union(PointerButton::Middle.into());
+    }
+    mask
 }
 
 /// Whether two points are within `slop` logical pixels of each other.

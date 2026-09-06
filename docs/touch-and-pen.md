@@ -13,10 +13,9 @@ here now is what exists now: the pointer model, the clock, the trace switch, and
 the platform translator that turns an OS touch packet into pointer samples.
 
 > **Status.** A mouse behaves exactly as it always has. The platform layer can
-> now *produce* touch samples, but nothing dispatches them yet: the app event
-> loop still feeds the tree the single-`WidgetEvent` mouse path, and the gesture
-> recognizers still see the same stream they always did. Pen is not translated
-> at all.
+> now *produce* touch and pen samples, but nothing dispatches them yet: the app
+> event loop still feeds the tree the single-`WidgetEvent` mouse path, and the
+> gesture recognizers still see the same stream they always did.
 
 ---
 
@@ -484,13 +483,273 @@ its trust by passing the same six.
 
 ---
 
-## 6. What is not here yet
+## 6. Pen and stylus
+
+winit 0.30 exposes **no pen API at all**. On Windows its `WM_POINTER` arm
+already decodes pen packets and hands the app nothing; on Wayland
+`zwp_tablet_v2` is never bound. A stylus therefore reaches a winit 0.30 client
+either as a mouse without axes (Windows, via the OS's own promotion) or as
+nothing whatsoever (Wayland).
+
+Waiting for winit 0.31 would make pen this programme's one genuine deferral, so
+Teksilo ships two shims now, behind a seam that is deleted at the upgrade:
+`teksilo-platform/src/pen.rs`, with `pen/{wayland, windows, null}.rs` beside it.
+
+### 6.1 The seam
+
+```text
+  OS                     PenSource::poll        TranslationState::poll_pen
+  zwp_tablet_tool_v2 ─┐
+  WM_POINTER* ────────┼─▶  Vec<PenPacket>  ─▶  Vec<PointerSample>
+  (nothing) ──────────┘                         PointerKind::Pen(tool)
+```
+
+A `PenSource` is **pulled**, not pushed: both backends buffer packets off the
+event path — a Wayland dispatch thread, a Win32 subclass procedure — and the
+caller drains them once per event-loop turn. That keeps the OS callbacks free of
+Teksilo state, and it hands the translator the caller's clock rather than a
+device one, which is what the one-clock rule (§2) demands.
+
+A `PenPacket` is a **level, not an edge**: it describes the tool's whole state
+at one instant, and the translator derives the transitions by comparing
+consecutive packets. Both backends produce that shape naturally (Wayland
+accumulates axes and commits them on `frame`; Win32 fills one `POINTER_PEN_INFO`
+per message), and it means a dropped packet costs a sample rather than leaving a
+button stuck down.
+
+`InputTokens::touch_enabled` deliberately does **not** gate the pen: a stylus is
+not a finger, and rolling touch back must not take pen input with it. The pen's
+off switch is not installing a source.
+
+### 6.2 The support matrix
+
+| | pen at all | tool kind | pressure | tilt | twist | contact patch |
+| --- | --- | --- | --- | --- | --- | --- |
+| Wayland | `zwp_tablet_v2` | yes | yes | yes | yes | — |
+| Windows | `WM_POINTER*` subclass | yes | yes | yes | yes | **yes** (touch) |
+| X11 | — | no | no | no | no | no |
+| macOS | — | no | no | no | no | no |
+
+A source folds its capabilities into the window's `BackendCaps`, raising
+`reports_pen_kind` / `reports_pressure` / `reports_tilt` / `reports_twist`. It
+only ever *raises* them: a shim adds what winit lacks, it never takes a
+capability away. X11 and macOS get `NullPenSource`, whose `PenCaps::NONE` leaves
+every row `false` — the absence is **declared**, not faked, so a consumer asking
+"does this window report tilt?" reads `false` instead of a zero that might have
+been a measurement.
+
+Both could grow a shim — X11 has XInput2 valuators, macOS has `NSEvent`'s
+`tabletPoint` / `tabletProximity` subtypes. Neither is written, for the same
+reason: winit 0.31 supplies both, and a shim written now would be deleted before
+it earned its maintenance. The two that *are* written cover the platforms where
+a stylus is common and the data is already flowing past the app unread.
+
+### 6.3 Proximity is a first-class state
+
+A pen in proximity with **no contact** is a hovering pointer. It moves, it
+drives hover visuals, tooltips and the cursor exactly as a mouse does, and it
+does so with `down: false`. That is why `PointerKind::hovers()` is true for
+`Pen` and false for `Touch`, and it is the single biggest behavioural difference
+between a stylus and a finger.
+
+The translator's machine, per packet, comparing against the session's previous
+state:
+
+| transition | sample |
+| --- | --- |
+| out of range → in range | `Move` (a hover: no buttons, `down` false) |
+| position changed | `Move` |
+| tip touched down | `Down` with `Primary` |
+| tip lifted | `Up` with `Primary` |
+| barrel pressed / released | `Down` / `Up` with `Secondary` |
+| second barrel | `Down` / `Up` with `Middle` |
+| in range → out of range | `Cancel` |
+| tool changed mid-session | `Cancel`, then a fresh session |
+
+Within one packet the `Move` is emitted **first**, so a press always lands at a
+position the consumer has already seen.
+
+One `PointerId` is minted per **proximity session**, not per tip contact: the
+tip touching and lifting inside that span are button transitions on one pointer.
+That is the W3C model, and it is what lets a hovering stylus keep a tooltip open
+across a tap. A tool change inside a session — the stylus flipped to its eraser
+— ends the session and starts a new one, because a drawing surface is entitled
+to treat the eraser as a different pointer.
+
+**Why leaving proximity is a `Cancel`.** `PointerPhase` has no *leave*, and a
+tool going out of range completes nothing: the completion, if there was one, was
+the tip's `Up`, already delivered. `Cancel` is the phase that says "this
+pointer's life ended without completing an interaction" — and it is right for
+the down case too, where a stylus yanked off the tablet mid-stroke must not read
+as a deliberate lift.
+
+Two consequences for the conformance suite (§5.7), both owed by the package that
+routes pen samples into the tree rather than by the platform layer:
+
+- Invariant 4 says *"a direct pointer never hovers, so a buttonless move is
+  impossible"*. That is touch-shaped, and `PointerKind::hovers()` already
+  contradicts it for `Pen`. It needs to read "a **coarse** pointer never
+  hovers".
+- Invariant 2 counts one terminator per `Down`. A pen session that draws and
+  then leaves emits `Down → Up → Cancel` for one id, which is correct for a
+  hovering-capable pointer and two terminators by that counting.
+
+Neither bites today: pen samples arrive through `TranslationState::poll_pen`,
+not through `PointerBackend::translate`, and the suite drives only the latter.
+
+### 6.4 Buttons and the eraser, normatively
+
+- Pen **contact** is `PointerButton::Primary`. This is not cosmetic: every
+  `accept_buttons()` recognizer in the framework gates on `ButtonMask::PRIMARY`,
+  so a stylus reporting anything else would be invisible to tap, drag and
+  long-press alike.
+- The **barrel** button is `Secondary`, matching W3C Pointer Events (pen barrel
+  → `button` 2).
+- A second barrel button, where the hardware has one (`BTN_STYLUS2`), is
+  `Middle`.
+- The **eraser is a tool kind** (`PenKind::Eraser`), never a button. Windows
+  reports it as `PEN_FLAG_INVERTED` (stylus flipped) or `PEN_FLAG_ERASER`
+  (eraser button on a stylus that has one); both fold to the tool before the
+  packet leaves the source. `PenButtons::ERASER` exists only so a backend can
+  carry the raw bit faithfully, and it never becomes a dispatched button.
+
+### 6.5 Wayland: `zwp_tablet_v2`
+
+The connection model is the one `external_dnd/wayland.rs` proved: wrap winit's
+live `wl_display` with `Backend::from_foreign_display`, run `registry_queue_init`
+on it, bind `zwp_tablet_manager_v2`, ask for the tablet seat, and drain **our**
+queue from a dedicated thread.
+
+The rule that comes with it, restated because breaking it aborts the process:
+**never read the socket**. winit's event loop is its sole reader; a second
+reader (`blocking_dispatch` → `prepare_read` / `read_events`) is fatal in
+libwayland. The multi-queue model buffers events for our objects whenever
+*anyone* reads, so `dispatch_pending` on a short interval is both correct and
+sufficient. The pen thread polls every **4 ms** where the drag backend polls
+every 8: a stylus is a continuous input a user watches ink follow, and 4 ms is a
+quarter of a 60 Hz frame.
+
+Motion arrives in **surface-local** coordinates, which on Wayland are already
+logical — the compositor has divided by the buffer scale. So this arm passes
+positions straight through, where the Windows arm reads screen *physical* pixels
+and divides. winit does the same conversion in the other direction (it
+*multiplies* surface-local by the scale factor to report physical), which is why
+the two arms look inconsistent and are not.
+
+**Tools that are not pens.** `zwp_tablet_tool_v2::Type` names eight tools; two
+are not styluses, and Teksilo drops both rather than mislabel them:
+
+- `Finger` is a finger on the tablet surface. It is a touch contact, it already
+  arrives as one through `wl_touch`, and calling it `PointerKind::Pen` would
+  give a fingertip a stylus's tuning — tight slop, no hit outset,
+  precise-pointer affordances — which is exactly backwards.
+- `Mouse` is a puck-style tablet mouse: an indirect device with no tip pressure,
+  whose events do not reach `wl_pointer`. `PenKind` has no variant for it, and
+  forcing one would report an indirect pointer as a direct one. **This is a
+  known gap**: a tablet mouse produces no Teksilo input at all under the shim.
+
+`Lens` — the other puck — *is* mapped, to `PenKind::Lens`: it is an
+absolute-positioning tool on the tablet surface, which is what "direct" means
+here. `wheel`, `ring`, `strip` and `slider` are out of scope; the pad half of
+the protocol is bound only far enough that a tablet with a button pad does not
+take the app down (an unhandled `new_id` event is a runtime panic in
+wayland-client, not a silent drop).
+
+### 6.6 Windows: a `WM_POINTER*` subclass
+
+winit 0.30 already receives `WM_POINTERDOWN` / `WM_POINTERUPDATE` /
+`WM_POINTERUP`, calls `GetPointerType`, and turns the result into a `Touch` or a
+mouse event. What it never does is call `GetPointerPenInfo` — so the pressure,
+tilt, rotation and eraser bits the digitizer is already sending arrive at the
+window and are dropped. The shim reads them off the same messages, one subclass
+earlier.
+
+**It is a tap, never a filter.** Every message is passed on with
+`DefSubclassProc`, unconditionally, including the ones we read. Nothing changes
+what winit sees, so the mouse and touch streams are byte-for-byte what they were
+and the shim can be removed with no behavioural diff. `EnableMouseInPointer` is
+deliberately *not* called: it would route the mouse through the pointer family
+too and change winit's own input path.
+
+**Coexisting with the two other subclasses.** An HWND in a Teksilo app can carry
+three at once — AccessKit's (`WM_GETOBJECT`), the custom title bar's (`WM_NC*`,
+`WM_DPICHANGED`) and this one (`WM_POINTER*`). They coexist because each obeys
+the same two rules:
+
+1. **A unique subclass id**, from a process-wide counter in a private range
+   (the title bar's starts at `0xFE_111_000`, the pen's at `0xFE_112_000`).
+   Win32 keys the chain on `(proc, id)`, and a collision silently replaces
+   another subclass's entry.
+2. **Always chain.** Every path ends in `DefSubclassProc`, so the rest of the
+   chain and finally winit's own window procedure run exactly as before.
+
+Message disjointness makes that safe rather than merely polite: the three sets
+do not overlap. A subclass that will not install is logged once and degrades to
+the null source — a missing pen is a missing capability, never a broken window.
+
+**Touch contact geometry comes along for free.** `WM_TOUCH` — the path winit
+0.30 takes for fingers — carries no contact area. `POINTER_TOUCH_INFO::rcContact`
+does, and both the palm heuristic and finger-avoiding overlay placement want it.
+The same subclass records the patch per contact id, and the translator folds it
+into `PointerAxes::contact` for the matching winit `Touch`. This is the one
+place a *pen* source answers a question about a finger, and it is worth the
+oddity: nothing else in winit 0.30 can answer it.
+
+**Normalisations.** `POINTER_PEN_INFO::pressure` is `0..=1024` (`0 → 0.0`,
+`512 → 0.5`, `1024 → 1.0`); `tiltX` / `tiltY` are `-90..=90` degrees;
+`rotation` is `0..=359` degrees and becomes `twist`. An axis whose `PEN_MASK`
+bit is clear is `None`, never a zero pretending to be a measurement — except
+pressure, which becomes `1.0` while the tip is down, because a tip in contact
+has *some* pressure and `0.0` would make a pressure-driven brush paint nothing
+on hardware with no sensor. Tilt is both-or-neither: half a pair is worse than
+none, since a brush angle computed from a real `tilt_x` and a zeroed `tilt_y` is
+confidently wrong.
+
+### 6.7 Testing a shim on a machine that cannot run it
+
+Neither shim can be exercised on a Linux CI runner with no tablet, so the
+acceptance for the platform arms is that they compile for their target and that
+the *decoding* is tested target-independently:
+
+- `pen/windows/decode.rs` is compiled on **every** target and parses a
+  `&[u8]`, so recorded layouts decode on a host with no Windows. The live path
+  hands it the bytes the OS just wrote, so tested code and shipped code are one.
+  The offsets are Microsoft's field order laid out by the Windows x64 C ABI —
+  *derived*, not captured — and they are not taken on trust: compiled **for**
+  Windows, the module asserts every offset against `windows-rs`'s own
+  `POINTER_PEN_INFO` with `offset_of!`, so a wrong constant is a build failure
+  on the platform that matters.
+- `pen/wayland.rs` keeps all its logic in `ToolState`, which knows nothing about
+  wayland-client and is driven by recorded `zwp_tablet_tool_v2` sequences. The
+  `Dispatch` impls do one thing: translate a protocol event into a `ToolEvent`
+  and hand it over.
+- The translator's proximity machine is tested through a scripted `PenSource`,
+  so hover, contact, buttons, tool change and `cancel_all` are all covered with
+  no device at all.
+
+What none of that covers is the OS boundary itself: that the subclass installs
+alongside AccessKit's, that a real compositor's tablet seat behaves as the
+protocol says, that a Wacom's `dwTime` and frame cadence are what the
+documentation claims. Those belong on a hardware checklist, not in CI.
+
+### 6.8 Both shims have an expiry date
+
+winit 0.31 supersedes them with its own `TabletTool*` events and
+`PointerSource::Tablet`. At that upgrade `pen/wayland.rs` and `pen/windows.rs`
+are **deleted**, `create_pen_source` answers `NullPenSource` everywhere, and the
+translator reads the pen off winit like every other device. Nothing above the
+seam changes: `PenPacket`, the proximity machine and the button semantics are
+Teksilo's, not winit's.
+
+---
+
+## 7. What is not here yet
 
 Deliberately, and in this order: wiring the app event loop to the multi-sample
-translator (nothing dispatches a touch sample yet — the platform layer only
-*produces* them), pen translation, gesture arbitration keyed by pointer, the
-kinetic scrolling core, the density sweep across the widget catalogue, and touch
-text editing. Each has its own package; this file grows with them.
+translator (nothing dispatches a touch or pen sample yet — the platform layer
+only *produces* them), gesture arbitration keyed by pointer, the kinetic
+scrolling core, the density sweep across the widget catalogue, and touch text
+editing. Each has its own package; this file grows with them.
 
 See also: [Density & targets](density-and-targets.md), the
 [widget pointer inventory](widget-pointer-inventory.md), the

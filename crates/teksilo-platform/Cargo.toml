@@ -117,6 +117,10 @@ objc2-foundation = { version = "0.3", features = [
 windows = { workspace = true, features = [
     "Win32_UI_WindowsAndMessaging",
     "Win32_UI_Accessibility",
+    # Pen / stylus shim (`pen/windows.rs`): GetPointerType / GetPointerPenInfo /
+    # GetPointerTouchInfo and the POINTER_* structs they fill. winit 0.30
+    # already receives the WM_POINTER* messages and reads none of this.
+    "Win32_UI_Input_Pointer",
     "UI_ViewManagement",
     # Custom title bar (M4/M5): DwmExtendFrameIntoClientArea, the
     # subclass chain (SetWindowSubclass / DefSubclassProc), per-monitor
