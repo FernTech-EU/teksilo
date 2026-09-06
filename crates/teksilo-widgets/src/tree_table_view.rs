@@ -1802,7 +1802,9 @@ impl<T: 'static> Widget for TreeTableView<T> {
             .on_scroll({
                 let overscroll_behavior = self.overscroll_behavior;
                 move |event, _ctx| match event {
-                    teksilo_core::event::WidgetEvent::Scroll { delta, modifiers } => {
+                    teksilo_core::event::WidgetEvent::Scroll {
+                        delta, modifiers, ..
+                    } => {
                         let (raw_dx, raw_dy) = match delta {
                             teksilo_core::event::ScrollDelta::Lines { x, y } => {
                                 (x * line_height, y * line_height)
@@ -5724,10 +5726,10 @@ mod tests {
         use teksilo_core::event::{Modifiers, ScrollDelta, WidgetEvent};
         let (mut tree, inner_y, outer_y) = nested_tree_table_fixture(OverscrollBehavior::Chain);
         tree.pointer_move(Point::new(50.0, 40.0));
-        tree.dispatch_event(WidgetEvent::Scroll {
-            delta: ScrollDelta::Pixels { x: 0.0, y: 9999.0 },
-            modifiers: Modifiers::NONE,
-        });
+        tree.dispatch_event(WidgetEvent::scroll(
+            ScrollDelta::Pixels { x: 0.0, y: 9999.0 },
+            Modifiers::NONE,
+        ));
         tree.layout(SizeProposal {
             width: Some(220.0),
             height: Some(150.0),
@@ -5739,10 +5741,10 @@ mod tests {
         );
         // A second wheel at the boundary must chain to the outer area.
         tree.pointer_move(Point::new(50.0, 40.0));
-        tree.dispatch_event(WidgetEvent::Scroll {
-            delta: ScrollDelta::Pixels { x: 0.0, y: 100.0 },
-            modifiers: Modifiers::NONE,
-        });
+        tree.dispatch_event(WidgetEvent::scroll(
+            ScrollDelta::Pixels { x: 0.0, y: 100.0 },
+            Modifiers::NONE,
+        ));
         tree.layout(SizeProposal {
             width: Some(220.0),
             height: Some(150.0),
@@ -5763,19 +5765,19 @@ mod tests {
         use teksilo_core::event::{Modifiers, ScrollDelta, WidgetEvent};
         let (mut tree, _inner_y, outer_y) = nested_tree_table_fixture(OverscrollBehavior::Contain);
         tree.pointer_move(Point::new(50.0, 40.0));
-        tree.dispatch_event(WidgetEvent::Scroll {
-            delta: ScrollDelta::Pixels { x: 0.0, y: 9999.0 },
-            modifiers: Modifiers::NONE,
-        });
+        tree.dispatch_event(WidgetEvent::scroll(
+            ScrollDelta::Pixels { x: 0.0, y: 9999.0 },
+            Modifiers::NONE,
+        ));
         tree.layout(SizeProposal {
             width: Some(220.0),
             height: Some(150.0),
         });
         tree.pointer_move(Point::new(50.0, 40.0));
-        tree.dispatch_event(WidgetEvent::Scroll {
-            delta: ScrollDelta::Pixels { x: 0.0, y: 100.0 },
-            modifiers: Modifiers::NONE,
-        });
+        tree.dispatch_event(WidgetEvent::scroll(
+            ScrollDelta::Pixels { x: 0.0, y: 100.0 },
+            Modifiers::NONE,
+        ));
         tree.layout(SizeProposal {
             width: Some(220.0),
             height: Some(150.0),
@@ -6372,10 +6374,10 @@ mod tests {
         use teksilo_core::event::{Modifiers, ScrollDelta, WidgetEvent};
         let (mut tree, id) = build_tt_wide_unpinned_table(200.0, 4, 300.0);
         tree.pointer_move(Point::new(50.0, 60.0));
-        tree.dispatch_event(WidgetEvent::Scroll {
-            delta: ScrollDelta::Lines { x: 0.0, y: 3.0 },
-            modifiers: Modifiers::SHIFT,
-        });
+        tree.dispatch_event(WidgetEvent::scroll(
+            ScrollDelta::Lines { x: 0.0, y: 3.0 },
+            Modifiers::SHIFT,
+        ));
         tree.layout(SizeProposal {
             width: Some(300.0),
             height: Some(200.0),

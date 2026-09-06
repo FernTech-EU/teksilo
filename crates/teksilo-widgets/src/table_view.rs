@@ -1913,7 +1913,9 @@ impl<T: 'static> Widget for TableView<T> {
 
         let mut handlers = HandlerSet::new()
             .on_scroll(move |event, _ctx| match event {
-                teksilo_core::event::WidgetEvent::Scroll { delta, modifiers } => {
+                teksilo_core::event::WidgetEvent::Scroll {
+                    delta, modifiers, ..
+                } => {
                     let (raw_dx, raw_dy) = match delta {
                         teksilo_core::event::ScrollDelta::Lines { x, y } => {
                             (x * line_height, y * line_height)

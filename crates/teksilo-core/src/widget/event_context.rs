@@ -290,6 +290,13 @@ pub struct EventContext<'ops> {
     /// must be read here rather than captured at `build()` time.
     /// Defaults to `LeftToRight` for hand-constructed (test) contexts.
     pub(crate) layout_direction: crate::environment::LayoutDirection,
+    /// What the tree knows about the sample being dispatched: which pointer
+    /// produced it, where it was, and — for a scroll — its phase and source.
+    /// Snapshotted by `make_event_context` from the tree's in-flight sample.
+    /// Holds its default (a mouse at the epoch) for hand-constructed contexts
+    /// and for handlers run outside a pointer dispatch (a timer, an
+    /// accessibility action).
+    pub(crate) input: crate::pointer::InputSnapshot,
     /// Debug-only WCAG 3.2.1 guard: `Some(flag)` where `flag` is set while a
     /// focus-change dispatch is running. `open_window` / `focus_window` warn if
     /// invoked while it reads `true` (a focus handler changing context). `None`
@@ -420,8 +427,64 @@ impl<'ops> EventContext<'ops> {
             overlay_bounds_snapshot: Vec::new(),
             focused_widget: None,
             layout_direction: crate::environment::LayoutDirection::LeftToRight,
+            input: crate::pointer::InputSnapshot::default(),
             in_focus_dispatch: None,
         }
+    }
+
+    /// Record what the tree knows about the sample being dispatched. Called by
+    /// `make_event_context` once per event batch.
+    pub(crate) fn with_input_snapshot(mut self, input: crate::pointer::InputSnapshot) -> Self {
+        self.input = input;
+        self
+    }
+
+    /// The pointer that produced the event being handled.
+    ///
+    /// Outside a pointer or scroll dispatch — a gesture timer, an assistive
+    /// technology action, a hand-constructed test context — this is the mouse
+    /// at the tree epoch, which is the same answer every such handler got
+    /// before pointers were distinguishable.
+    pub fn pointer(&self) -> crate::pointer::PointerInfo {
+        self.input.pointer
+    }
+
+    /// What kind of device is pointing: mouse, finger, stylus.
+    ///
+    /// The one question most handlers actually need — it is what decides
+    /// whether a hover affordance is reachable, whether a target needs slop,
+    /// and which gesture profile governs.
+    pub fn pointer_kind(&self) -> teksilo_tokens::PointerKind {
+        self.input.pointer.kind
+    }
+
+    /// Where the pointer was, in window-logical coordinates, when the event
+    /// being handled was produced.
+    ///
+    /// `None` for an event that carries no position — a keyboard-driven
+    /// scroll, a wheel notch (which routes by hover rather than by position),
+    /// anything dispatched outside a pointer sample. Distinct from
+    /// [`tree_pointer_position`](Self::tree_pointer_position), which reports
+    /// where the pointer is *at this instant* regardless of what is being
+    /// dispatched.
+    pub fn pointer_position(&self) -> Option<teksilo_canvas::Point> {
+        self.input.position
+    }
+
+    /// Where in a continuous scroll gesture the event being handled sits.
+    ///
+    /// [`ScrollPhase::Discrete`](crate::pointer::ScrollPhase::Discrete) — a
+    /// self-contained wheel notch — for everything that is not a phased
+    /// gesture, which is every scroll Teksilo produced before the touch
+    /// programme.
+    pub fn scroll_phase(&self) -> crate::pointer::ScrollPhase {
+        self.input.scroll_phase
+    }
+
+    /// What produced the scroll being handled: a notched wheel, a precision
+    /// trackpad, a synthesised touch pan, or the app itself.
+    pub fn scroll_source(&self) -> crate::pointer::ScrollSource {
+        self.input.scroll_source
     }
 
     /// Snapshot the hosting tree's layout direction. Called by

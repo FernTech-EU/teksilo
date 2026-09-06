@@ -1666,10 +1666,10 @@ fn nested_tree_chains_to_outer_at_boundary() {
     use teksilo_core::event::{Modifiers, ScrollDelta, WidgetEvent};
     let (mut tree, outer_y) = nested_tree_fixture(OverscrollBehavior::Chain);
     tree.pointer_move(Point::new(50.0, 40.0));
-    tree.dispatch_event(WidgetEvent::Scroll {
-        delta: ScrollDelta::Pixels { x: 0.0, y: 9999.0 },
-        modifiers: Modifiers::NONE,
-    });
+    tree.dispatch_event(WidgetEvent::scroll(
+        ScrollDelta::Pixels { x: 0.0, y: 9999.0 },
+        Modifiers::NONE,
+    ));
     tree.layout(SizeProposal::exact(200.0, 150.0));
     // The inner tree absorbed the big scroll (didn't chain) → outer at 0.
     assert!(
@@ -1678,10 +1678,10 @@ fn nested_tree_chains_to_outer_at_boundary() {
     );
 
     tree.pointer_move(Point::new(50.0, 40.0));
-    tree.dispatch_event(WidgetEvent::Scroll {
-        delta: ScrollDelta::Pixels { x: 0.0, y: 100.0 },
-        modifiers: Modifiers::NONE,
-    });
+    tree.dispatch_event(WidgetEvent::scroll(
+        ScrollDelta::Pixels { x: 0.0, y: 100.0 },
+        Modifiers::NONE,
+    ));
     tree.layout(SizeProposal::exact(200.0, 150.0));
     assert!(
         outer_y.get() > 0.01,
@@ -1694,16 +1694,16 @@ fn nested_tree_contain_blocks_chaining() {
     use teksilo_core::event::{Modifiers, ScrollDelta, WidgetEvent};
     let (mut tree, outer_y) = nested_tree_fixture(OverscrollBehavior::Contain);
     tree.pointer_move(Point::new(50.0, 40.0));
-    tree.dispatch_event(WidgetEvent::Scroll {
-        delta: ScrollDelta::Pixels { x: 0.0, y: 9999.0 },
-        modifiers: Modifiers::NONE,
-    });
+    tree.dispatch_event(WidgetEvent::scroll(
+        ScrollDelta::Pixels { x: 0.0, y: 9999.0 },
+        Modifiers::NONE,
+    ));
     tree.layout(SizeProposal::exact(200.0, 150.0));
     tree.pointer_move(Point::new(50.0, 40.0));
-    tree.dispatch_event(WidgetEvent::Scroll {
-        delta: ScrollDelta::Pixels { x: 0.0, y: 100.0 },
-        modifiers: Modifiers::NONE,
-    });
+    tree.dispatch_event(WidgetEvent::scroll(
+        ScrollDelta::Pixels { x: 0.0, y: 100.0 },
+        Modifiers::NONE,
+    ));
     tree.layout(SizeProposal::exact(200.0, 150.0));
     assert!(
         outer_y.get() < 0.01,

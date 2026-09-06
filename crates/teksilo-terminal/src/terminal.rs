@@ -1304,7 +1304,10 @@ fn scroll_handler(
     event: &WidgetEvent,
     ctx: &mut EventContext,
 ) -> EventResponse {
-    let WidgetEvent::Scroll { delta, modifiers } = event else {
+    let WidgetEvent::Scroll {
+        delta, modifiers, ..
+    } = event
+    else {
         return EventResponse::Ignored;
     };
     let lines = match delta {

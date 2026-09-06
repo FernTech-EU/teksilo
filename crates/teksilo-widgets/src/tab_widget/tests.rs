@@ -1689,10 +1689,10 @@ fn an_unrelated_rebuild_does_not_yank_the_strip_back() {
     // Scroll back to the head by hand. The bar remaps a vertical wheel
     // onto its horizontal axis, so a negative delta walks left.
     tree.pointer_move(Point::new(240.0, 20.0));
-    tree.dispatch_event(WidgetEvent::Scroll {
-        delta: ScrollDelta::Pixels { x: 0.0, y: -5000.0 },
-        modifiers: Modifiers::default(),
-    });
+    tree.dispatch_event(WidgetEvent::scroll(
+        ScrollDelta::Pixels { x: 0.0, y: -5000.0 },
+        Modifiers::default(),
+    ));
     tree.layout(SizeProposal::exact(480.0, 60.0));
     let by_hand = strip_offset(&tree, bar_id, TabBarOrientation::Horizontal);
     assert!(

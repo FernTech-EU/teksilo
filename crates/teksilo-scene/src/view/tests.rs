@@ -306,10 +306,10 @@ fn on_scroll_pixels_animates_pan() {
 
     // Move pointer into the viewport so Scroll has a target.
     tree.pointer_move(Point::new(400.0, 300.0));
-    tree.dispatch_event(WidgetEvent::Scroll {
-        delta: ScrollDelta::Pixels { x: 50.0, y: 30.0 },
-        modifiers: Default::default(),
-    });
+    tree.dispatch_event(WidgetEvent::scroll(
+        ScrollDelta::Pixels { x: 50.0, y: 30.0 },
+        Default::default(),
+    ));
 
     // The animation has started but not finished — `animation_target`
     // should already reflect the requested (negated) delta.
@@ -345,10 +345,10 @@ fn wheel_scroll_moves_content_like_scrollarea() {
     let before = view_handle(&tree, view_id).map_from_scene(probe);
 
     tree.pointer_move(Point::new(400.0, 300.0));
-    tree.dispatch_event(WidgetEvent::Scroll {
-        delta: ScrollDelta::Pixels { x: 40.0, y: 60.0 },
-        modifiers: Default::default(),
-    });
+    tree.dispatch_event(WidgetEvent::scroll(
+        ScrollDelta::Pixels { x: 40.0, y: 60.0 },
+        Default::default(),
+    ));
     // Settle the pan tween.
     tree.tick_animations(Duration::from_millis(300));
     tree.tick_animations(Duration::from_millis(0));
@@ -413,10 +413,10 @@ fn on_scroll_lines_uses_line_height_multiplier() {
     tree.layout(SizeProposal::exact(800.0, 600.0));
 
     tree.pointer_move(Point::new(400.0, 300.0));
-    tree.dispatch_event(WidgetEvent::Scroll {
-        delta: ScrollDelta::Lines { x: 0.0, y: 1.0 },
-        modifiers: Default::default(),
-    });
+    tree.dispatch_event(WidgetEvent::scroll(
+        ScrollDelta::Lines { x: 0.0, y: 1.0 },
+        Default::default(),
+    ));
 
     // Negated into a pan (see the sign convention in `gestures_impl`).
     let view = view_handle(&tree, view_id);
@@ -450,10 +450,10 @@ fn ctrl_wheel_zooms_about_cursor_keeping_scene_anchor_fixed() {
         .apply_point(cursor);
 
     // Ctrl+wheel scroll up by 1 line → zoom in.
-    tree.dispatch_event(Ev::Scroll {
-        delta: ScrollDelta::Lines { x: 0.0, y: 1.0 },
-        modifiers: Modifiers::CTRL,
-    });
+    tree.dispatch_event(Ev::scroll(
+        ScrollDelta::Lines { x: 0.0, y: 1.0 },
+        Modifiers::CTRL,
+    ));
 
     // Verify zoom changed and the scene point originally under
     // the cursor still projects to the cursor position.
@@ -542,10 +542,10 @@ fn reduced_motion_snaps_pan_instead_of_animating() {
     tree.layout(SizeProposal::exact(800.0, 600.0));
 
     tree.pointer_move(Point::new(400.0, 300.0));
-    tree.dispatch_event(WidgetEvent::Scroll {
-        delta: ScrollDelta::Pixels { x: 50.0, y: 30.0 },
-        modifiers: Default::default(),
-    });
+    tree.dispatch_event(WidgetEvent::scroll(
+        ScrollDelta::Pixels { x: 50.0, y: 30.0 },
+        Default::default(),
+    ));
 
     let view = view_handle(&tree, view_id);
     // The signal landed at the target immediately, no tween. (The delta is
@@ -1389,10 +1389,10 @@ fn zoom_about_cursor_keeps_anchor_in_an_offset_scene_view() {
     let scene_under_cursor = view_handle(&tree, scene_id).map_to_scene(cursor);
 
     // Ctrl+wheel → zoom about the cursor.
-    tree.dispatch_event(Ev::Scroll {
-        delta: ScrollDelta::Lines { x: 0.0, y: 1.0 },
-        modifiers: Modifiers::CTRL,
-    });
+    tree.dispatch_event(Ev::scroll(
+        ScrollDelta::Lines { x: 0.0, y: 1.0 },
+        Modifiers::CTRL,
+    ));
     tree.layout(SizeProposal::exact(400.0, 420.0));
 
     let view = view_handle(&tree, scene_id);
@@ -2266,10 +2266,10 @@ fn non_interactive_ignores_scroll() {
     // on_scroll handler registered, the event is unhandled
     // here and pan stays put.
     tree.pointer_move(Point::new(100.0, 100.0));
-    tree.dispatch_event(WidgetEvent::Scroll {
-        delta: ScrollDelta::Pixels { x: 50.0, y: 50.0 },
-        modifiers: Default::default(),
-    });
+    tree.dispatch_event(WidgetEvent::scroll(
+        ScrollDelta::Pixels { x: 50.0, y: 50.0 },
+        Default::default(),
+    ));
 
     let view = view_handle(&tree, view_id);
     assert_eq!(
@@ -2293,10 +2293,10 @@ fn interactive_does_pan_on_scroll() {
     tree.layout(SizeProposal::exact(400.0, 300.0));
 
     tree.pointer_move(Point::new(100.0, 100.0));
-    tree.dispatch_event(WidgetEvent::Scroll {
-        delta: ScrollDelta::Pixels { x: 50.0, y: 0.0 },
-        modifiers: Default::default(),
-    });
+    tree.dispatch_event(WidgetEvent::scroll(
+        ScrollDelta::Pixels { x: 50.0, y: 0.0 },
+        Default::default(),
+    ));
 
     let view = view_handle(&tree, view_id);
     let target = view
@@ -4836,10 +4836,10 @@ fn ctrl_wheel_zoom_snaps_without_animation_target() {
     // pointer anchor has a defined position.
     tree.pointer_move(teksilo_canvas::Point::new(200.0, 150.0));
 
-    tree.dispatch_event(WidgetEvent::Scroll {
-        delta: teksilo_core::event::ScrollDelta::Lines { x: 0.0, y: 1.0 },
-        modifiers: teksilo_core::event::Modifiers::CTRL,
-    });
+    tree.dispatch_event(WidgetEvent::scroll(
+        teksilo_core::event::ScrollDelta::Lines { x: 0.0, y: 1.0 },
+        teksilo_core::event::Modifiers::CTRL,
+    ));
 
     let view = view_handle(&tree, view_id);
     assert!(

@@ -643,10 +643,10 @@ fn wheel(tree: &mut WidgetTree, spin_id: teksilo_core::widget_id::WidgetId, line
     tree.dispatch_event(WidgetEvent::PointerMove {
         position: Point::new(b.x + b.width * 0.5, b.y + b.height * 0.5),
     });
-    tree.dispatch_event(WidgetEvent::Scroll {
-        delta: ScrollDelta::Lines { x: 0.0, y: lines },
-        modifiers: Modifiers::NONE,
-    });
+    tree.dispatch_event(WidgetEvent::scroll(
+        ScrollDelta::Lines { x: 0.0, y: lines },
+        Modifiers::NONE,
+    ));
     tick(tree);
 }
 

@@ -180,10 +180,10 @@ fn scene_pan_at_bound_chains_to_outer_scrollarea() {
     // content and cannot absorb the delta → the default `Chain` declines → the
     // event bubbles to the outer ScrollArea, which scrolls down.
     tree.pointer_move(Point::new(50.0, 40.0));
-    tree.dispatch_event(WidgetEvent::Scroll {
-        delta: ScrollDelta::Pixels { x: 100.0, y: 100.0 },
-        modifiers: Default::default(),
-    });
+    tree.dispatch_event(WidgetEvent::scroll(
+        ScrollDelta::Pixels { x: 100.0, y: 100.0 },
+        Default::default(),
+    ));
     tree.layout(SizeProposal::exact(200.0, 150.0));
 
     assert!(
@@ -239,10 +239,10 @@ fn scene_overscroll_contain_does_not_chain_to_outer_scrollarea() {
     tree.layout(SizeProposal::exact(200.0, 150.0));
 
     tree.pointer_move(Point::new(50.0, 40.0));
-    tree.dispatch_event(WidgetEvent::Scroll {
-        delta: ScrollDelta::Pixels { x: 100.0, y: 100.0 },
-        modifiers: Default::default(),
-    });
+    tree.dispatch_event(WidgetEvent::scroll(
+        ScrollDelta::Pixels { x: 100.0, y: 100.0 },
+        Default::default(),
+    ));
     tree.layout(SizeProposal::exact(200.0, 150.0));
 
     assert!(

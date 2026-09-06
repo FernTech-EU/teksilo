@@ -47,6 +47,7 @@
 
 # Touch & pen migration
 
+- [Touch & pen](touch-and-pen.md)
 - [Density inventory](density-inventory.md)
 - [Widget pointer inventory](widget-pointer-inventory.md)
 - [Hover-affordance census](hover-affordance-census.md)

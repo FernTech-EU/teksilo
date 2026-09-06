@@ -1006,13 +1006,13 @@ fn virtualized_combo_reveals_new_rows_on_scroll() {
         panel_bounds.y + panel_bounds.height * 0.5,
     );
     tree.pointer_move(panel_center);
-    tree.dispatch_event(WidgetEvent::Scroll {
-        delta: teksilo_core::event::ScrollDelta::Pixels {
+    tree.dispatch_event(WidgetEvent::scroll(
+        teksilo_core::event::ScrollDelta::Pixels {
             x: 0.0,
             y: 15_000.0,
         },
-        modifiers: Default::default(),
-    });
+        Default::default(),
+    ));
     // Wheel scrolling is animated; advance past the animation so the
     // offset reaches its target before the visible range is asserted.
     tree.tick_animations(std::time::Duration::from_millis(200));
@@ -1182,10 +1182,10 @@ fn wheel_keeps_targeting_list_after_scroll_driven_rebuild() {
     // buffer boundary and the ListView rebuilds. On a 24-px-row
     // ListView with an 8-row viewport, ~16 rows is the buffer; scroll
     // past that.
-    tree.dispatch_event(WidgetEvent::Scroll {
-        delta: teksilo_core::event::ScrollDelta::Pixels { x: 0.0, y: 1_000.0 },
-        modifiers: Default::default(),
-    });
+    tree.dispatch_event(WidgetEvent::scroll(
+        teksilo_core::event::ScrollDelta::Pixels { x: 0.0, y: 1_000.0 },
+        Default::default(),
+    ));
     // Wheel scrolling is animated; complete the animation before reading
     // the materialized range.
     tree.tick_animations(std::time::Duration::from_millis(200));
@@ -1200,10 +1200,10 @@ fn wheel_keeps_targeting_list_after_scroll_driven_rebuild() {
     // the first wheel but WOULD be after the second (scroll total
     // 3 000 px → row ~125 visible).
     let before = materialized_range(&tree, 100..200);
-    tree.dispatch_event(WidgetEvent::Scroll {
-        delta: teksilo_core::event::ScrollDelta::Pixels { x: 0.0, y: 2_000.0 },
-        modifiers: Default::default(),
-    });
+    tree.dispatch_event(WidgetEvent::scroll(
+        teksilo_core::event::ScrollDelta::Pixels { x: 0.0, y: 2_000.0 },
+        Default::default(),
+    ));
     tree.tick_animations(std::time::Duration::from_millis(200));
     tree.layout(SizeProposal::exact(300.0, 600.0));
     let after = materialized_range(&tree, 100..200);

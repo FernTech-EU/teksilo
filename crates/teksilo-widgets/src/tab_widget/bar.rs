@@ -1830,7 +1830,10 @@ impl<T: 'static> Widget for TabBar<T> {
                 if orientation_for_wheel == TabBarOrientation::Vertical {
                     return EventResponse::Ignored;
                 }
-                let WidgetEvent::Scroll { delta, modifiers } = event else {
+                let WidgetEvent::Scroll {
+                    delta, modifiers, ..
+                } = event
+                else {
                     return EventResponse::Ignored;
                 };
                 let (dx, dy) = match delta {

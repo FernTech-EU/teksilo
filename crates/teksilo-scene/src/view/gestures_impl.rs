@@ -403,7 +403,10 @@ impl SceneView {
             let adopt_scene_size = self.adopt_scene_size;
             handlers = handlers.on_scroll(move |event, _ctx| {
                 use crate::scene::PanAxes;
-                let WidgetEvent::Scroll { delta, modifiers } = event else {
+                let WidgetEvent::Scroll {
+                    delta, modifiers, ..
+                } = event
+                else {
                     return EventResponse::Ignored;
                 };
                 let (mut dx, mut dy) = match delta {

@@ -3048,10 +3048,10 @@ mod tests {
         );
 
         // Scroll down by 1500px (50 items * 30px)
-        tree.dispatch_event(teksilo_core::event::WidgetEvent::Scroll {
-            delta: teksilo_core::event::ScrollDelta::Pixels { x: 0.0, y: 1500.0 },
-            modifiers: Default::default(),
-        });
+        tree.dispatch_event(teksilo_core::event::WidgetEvent::scroll(
+            teksilo_core::event::ScrollDelta::Pixels { x: 0.0, y: 1500.0 },
+            Default::default(),
+        ));
         tree.layout(SizeProposal::exact(400.0, 300.0));
 
         // After scroll: the first item's Y should be near 0 (scroll offset applied),
@@ -3829,10 +3829,10 @@ mod tests {
         // The Scroll event only dispatches to the hovered or focused widget.
         // Move the pointer over the ListView so it becomes hovered.
         tree.pointer_move(Point::new(50.0, 50.0));
-        tree.dispatch_event(teksilo_core::event::WidgetEvent::Scroll {
-            delta: teksilo_core::event::ScrollDelta::Pixels { x: 0.0, y: 60.0 },
-            modifiers: Default::default(),
-        });
+        tree.dispatch_event(teksilo_core::event::WidgetEvent::scroll(
+            teksilo_core::event::ScrollDelta::Pixels { x: 0.0, y: 60.0 },
+            Default::default(),
+        ));
         // Wheel scrolling animates; complete it so the offset is the full
         // 60px before the drag math runs.
         tree.tick_animations(std::time::Duration::from_millis(200));
@@ -4209,10 +4209,10 @@ mod tests {
         use teksilo_core::event::{Modifiers, ScrollDelta, WidgetEvent};
         let (mut tree, inner_y, outer_y) = nested_list_fixture(OverscrollBehavior::Chain);
         tree.pointer_move(Point::new(50.0, 40.0));
-        tree.dispatch_event(WidgetEvent::Scroll {
-            delta: ScrollDelta::Pixels { x: 0.0, y: 9999.0 },
-            modifiers: Modifiers::NONE,
-        });
+        tree.dispatch_event(WidgetEvent::scroll(
+            ScrollDelta::Pixels { x: 0.0, y: 9999.0 },
+            Modifiers::NONE,
+        ));
         tree.layout(SizeProposal::exact(200.0, 150.0));
         let inner_bottom = inner_y.get();
         assert!(
@@ -4225,10 +4225,10 @@ mod tests {
         );
 
         tree.pointer_move(Point::new(50.0, 40.0));
-        tree.dispatch_event(WidgetEvent::Scroll {
-            delta: ScrollDelta::Pixels { x: 0.0, y: 100.0 },
-            modifiers: Modifiers::NONE,
-        });
+        tree.dispatch_event(WidgetEvent::scroll(
+            ScrollDelta::Pixels { x: 0.0, y: 100.0 },
+            Modifiers::NONE,
+        ));
         tree.layout(SizeProposal::exact(200.0, 150.0));
         assert!(
             (inner_y.get() - inner_bottom).abs() < 0.01,
@@ -4245,16 +4245,16 @@ mod tests {
         use teksilo_core::event::{Modifiers, ScrollDelta, WidgetEvent};
         let (mut tree, _inner_y, outer_y) = nested_list_fixture(OverscrollBehavior::Contain);
         tree.pointer_move(Point::new(50.0, 40.0));
-        tree.dispatch_event(WidgetEvent::Scroll {
-            delta: ScrollDelta::Pixels { x: 0.0, y: 9999.0 },
-            modifiers: Modifiers::NONE,
-        });
+        tree.dispatch_event(WidgetEvent::scroll(
+            ScrollDelta::Pixels { x: 0.0, y: 9999.0 },
+            Modifiers::NONE,
+        ));
         tree.layout(SizeProposal::exact(200.0, 150.0));
         tree.pointer_move(Point::new(50.0, 40.0));
-        tree.dispatch_event(WidgetEvent::Scroll {
-            delta: ScrollDelta::Pixels { x: 0.0, y: 100.0 },
-            modifiers: Modifiers::NONE,
-        });
+        tree.dispatch_event(WidgetEvent::scroll(
+            ScrollDelta::Pixels { x: 0.0, y: 100.0 },
+            Modifiers::NONE,
+        ));
         tree.layout(SizeProposal::exact(200.0, 150.0));
         assert!(
             outer_y.get() < 0.01,

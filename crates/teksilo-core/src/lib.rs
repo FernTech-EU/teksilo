@@ -34,6 +34,7 @@ pub mod motion_visibility;
 pub mod overlay;
 pub mod overscroll;
 pub mod paint_prop;
+pub mod pointer;
 pub mod presets;
 pub mod raw_handle;
 pub mod shortcut;
@@ -97,6 +98,11 @@ pub use overlay::{
 };
 pub use overscroll::{OverscrollBehavior, SCROLL_MOVE_EPSILON};
 pub use paint_prop::{GradientStopProp, PaintProp, angle_to_endpoints};
+pub use pointer::clock::{InputClock, ManualClock, MonotonicClock};
+pub use pointer::{
+    BackendDeviceKey, CancelReason, EventTime, PointerAxes, PointerId, PointerIdAllocator,
+    PointerInfo, PointerPhase, PointerSample, ScrollPhase, ScrollSample, ScrollSource,
+};
 pub use raw_handle::ParentHandle;
 pub use shortcut::{
     CaptureHandle, EffectiveShortcut, KeyCaptureCallback, KeyStroke, KeyStrokeOverride, Shortcut,

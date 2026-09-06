@@ -198,7 +198,24 @@ pub struct WidgetTree {
     binding_registry: crate::binding::BindingRegistry,
     idle_queue: crate::idle::IdleQueue,
     /// Simulated clock for deterministic time-dependent testing.
+    ///
+    /// Its initial value is the tree's **epoch**, and [`Self::input_clock`] is
+    /// seeded from the very same `Instant` — so `EventTime::ZERO` and this
+    /// field's starting value name one moment, and the input timeline and the
+    /// animation timeline are one axis. See
+    /// [`crate::pointer::clock`] for why that matters.
     sim_clock: std::time::Instant,
+    /// The one source of [`EventTime`](crate::pointer::EventTime)s for this
+    /// tree. A [`MonotonicClock`](crate::pointer::clock::MonotonicClock)
+    /// anchored at the tree epoch by default; a test swaps in a
+    /// [`ManualClock`](crate::pointer::clock::ManualClock) via
+    /// [`set_input_clock`](Self::set_input_clock).
+    input_clock: std::rc::Rc<dyn crate::pointer::clock::InputClock>,
+    /// What is known about the sample currently being dispatched, snapshotted
+    /// onto every [`EventContext`](crate::widget::EventContext) built while it
+    /// runs. Holds its default — a mouse at the epoch — outside a pointer or
+    /// scroll dispatch.
+    current_input: crate::pointer::InputSnapshot,
     /// Whether [`tick_animations`](Self::tick_animations) has ever driven this
     /// tree — i.e. whether [`Self::sim_clock`], rather than the wall clock, is
     /// the one animations are measured against. See [`Self::animation_clock`].
@@ -661,6 +678,10 @@ impl WidgetTree {
         // application reads must be the same one, or a host mirroring "is the
         // caret in a text widget" would never see focus move.
         let focused_signal = crate::signal::Signal::new(None);
+        // ONE epoch. `sim_clock` starts here and the input clock is anchored
+        // here, so a single `advance_time` moves gesture deadlines, tooltips,
+        // overlays and animations against the same origin.
+        let epoch = std::time::Instant::now();
         Self {
             arena: WidgetArena::new(),
             theme: initial_theme.clone(),
@@ -694,7 +715,9 @@ impl WidgetTree {
             key_capture: None,
             binding_registry: crate::binding::BindingRegistry::new(),
             idle_queue: crate::idle::IdleQueue::new(),
-            sim_clock: std::time::Instant::now(),
+            sim_clock: epoch,
+            input_clock: std::rc::Rc::new(crate::pointer::clock::MonotonicClock::new(epoch)),
+            current_input: crate::pointer::InputSnapshot::default(),
             sim_driven: false,
             focus_origin: None,
             overlay_manager: crate::overlay::OverlayManager::new(),
@@ -798,6 +821,7 @@ impl WidgetTree {
             .with_query_snapshot(self.last_pointer_position, overlay_snapshot, self.focused())
             .with_layout_direction(self.layout_direction)
             .with_window_active(self.is_window_active())
+            .with_input_snapshot(self.current_input.clone())
             .with_focus_dispatch_flag(self.in_focus_dispatch.clone())
     }
 

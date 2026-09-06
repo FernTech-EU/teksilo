@@ -243,7 +243,10 @@ impl Widget for Probe {
                 EventResponse::Ignored
             })
             .on_scroll(move |event, _ctx| {
-                if let WidgetEvent::Scroll { delta, modifiers } = event {
+                if let WidgetEvent::Scroll {
+                    delta, modifiers, ..
+                } = event
+                {
                     let (dx, dy) = match delta {
                         teksilo_core::event::ScrollDelta::Pixels { x, y }
                         | teksilo_core::event::ScrollDelta::Lines { x, y } => (*x, *y),

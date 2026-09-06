@@ -1317,10 +1317,10 @@ mod tests {
         tree.pointer_move(Point::new(50.0, 40.0));
 
         // Scroll down 100px
-        tree.dispatch_event(WidgetEvent::Scroll {
-            delta: ScrollDelta::Pixels { x: 0.0, y: 100.0 },
-            modifiers: Default::default(),
-        });
+        tree.dispatch_event(WidgetEvent::scroll(
+            ScrollDelta::Pixels { x: 0.0, y: 100.0 },
+            Default::default(),
+        ));
         tree.layout(SizeProposal::exact(200.0, 80.0));
 
         // After scrolling, item a should be above viewport (negative y)
@@ -1353,10 +1353,10 @@ mod tests {
         tree.pointer_move(Point::new(50.0, 50.0));
 
         // Scroll way past the end
-        tree.dispatch_event(WidgetEvent::Scroll {
-            delta: ScrollDelta::Pixels { x: 0.0, y: 9999.0 },
-            modifiers: Default::default(),
-        });
+        tree.dispatch_event(WidgetEvent::scroll(
+            ScrollDelta::Pixels { x: 0.0, y: 9999.0 },
+            Default::default(),
+        ));
         tree.layout(SizeProposal::exact(200.0, 100.0));
 
         // Content should not be scrolled past max (200 - 100 = 100)
@@ -1400,10 +1400,10 @@ mod tests {
 
         // Scroll via mouse wheel
         tree.pointer_move(Point::new(50.0, 50.0));
-        tree.dispatch_event(WidgetEvent::Scroll {
-            delta: ScrollDelta::Pixels { x: 0.0, y: 50.0 },
-            modifiers: Default::default(),
-        });
+        tree.dispatch_event(WidgetEvent::scroll(
+            ScrollDelta::Pixels { x: 0.0, y: 50.0 },
+            Default::default(),
+        ));
         tree.layout(SizeProposal::exact(200.0, 100.0));
 
         // The content child should have moved up
@@ -1609,10 +1609,10 @@ mod tests {
         tree.pointer_move(Point::new(50.0, 50.0));
 
         // Scroll right via horizontal wheel
-        tree.dispatch_event(WidgetEvent::Scroll {
-            delta: ScrollDelta::Pixels { x: 80.0, y: 0.0 },
-            modifiers: Default::default(),
-        });
+        tree.dispatch_event(WidgetEvent::scroll(
+            ScrollDelta::Pixels { x: 80.0, y: 0.0 },
+            Default::default(),
+        ));
         tree.layout(SizeProposal::exact(200.0, 100.0));
 
         // Content should have shifted left
@@ -1789,10 +1789,10 @@ mod tests {
         tree.pointer_move(Point::new(50.0, 50.0));
 
         // Scroll via line-based wheel (should animate)
-        tree.dispatch_event(WidgetEvent::Scroll {
-            delta: ScrollDelta::Lines { x: 0.0, y: 5.0 },
-            modifiers: Default::default(),
-        });
+        tree.dispatch_event(WidgetEvent::scroll(
+            ScrollDelta::Lines { x: 0.0, y: 5.0 },
+            Default::default(),
+        ));
 
         // The animation target was set but not yet ticked — the state
         // should have a pending animation (animate_to marks dirty).
@@ -1831,10 +1831,10 @@ mod tests {
 
         tree.pointer_move(Point::new(50.0, 50.0));
 
-        tree.dispatch_event(WidgetEvent::Scroll {
-            delta: ScrollDelta::Lines { x: 0.0, y: 5.0 },
-            modifiers: Default::default(),
-        });
+        tree.dispatch_event(WidgetEvent::scroll(
+            ScrollDelta::Lines { x: 0.0, y: 5.0 },
+            Default::default(),
+        ));
         tree.layout(SizeProposal::exact(200.0, 100.0));
 
         let children = tree.children(scroll);
@@ -1904,10 +1904,10 @@ mod tests {
 
         // Scroll partway down
         tree.pointer_move(Point::new(50.0, 50.0));
-        tree.dispatch_event(WidgetEvent::Scroll {
-            delta: ScrollDelta::Pixels { x: 0.0, y: 150.0 },
-            modifiers: Default::default(),
-        });
+        tree.dispatch_event(WidgetEvent::scroll(
+            ScrollDelta::Pixels { x: 0.0, y: 150.0 },
+            Default::default(),
+        ));
         tree.layout(SizeProposal::exact(200.0, 100.0));
 
         let content = tree.children(scroll)[0];
@@ -1985,10 +1985,10 @@ mod tests {
         tree.layout(SizeProposal::exact(200.0, 100.0));
 
         tree.pointer_move(Point::new(50.0, 50.0));
-        tree.dispatch_event(WidgetEvent::Scroll {
-            delta: ScrollDelta::Pixels { x: 0.0, y: 150.0 },
-            modifiers: Default::default(),
-        });
+        tree.dispatch_event(WidgetEvent::scroll(
+            ScrollDelta::Pixels { x: 0.0, y: 150.0 },
+            Default::default(),
+        ));
         tree.layout(SizeProposal::exact(200.0, 100.0));
 
         let scroll_before = tree.children(parent)[0];
@@ -2052,10 +2052,10 @@ mod tests {
 
         // Scroll down so the target is well above the viewport top.
         tree.pointer_move(Point::new(100.0, 100.0));
-        tree.dispatch_event(WidgetEvent::Scroll {
-            delta: ScrollDelta::Pixels { x: 0.0, y: 150.0 },
-            modifiers: Default::default(),
-        });
+        tree.dispatch_event(WidgetEvent::scroll(
+            ScrollDelta::Pixels { x: 0.0, y: 150.0 },
+            Default::default(),
+        ));
         tree.layout(SizeProposal::exact(200.0, 250.0));
 
         let target_before = tree.bounds(target);
@@ -2412,10 +2412,10 @@ mod tests {
 
         // Pointer over the inner viewport, then scroll the inner to its bottom.
         tree.pointer_move(Point::new(50.0, 40.0));
-        tree.dispatch_event(WidgetEvent::Scroll {
-            delta: ScrollDelta::Pixels { x: 0.0, y: 9999.0 },
-            modifiers: Default::default(),
-        });
+        tree.dispatch_event(WidgetEvent::scroll(
+            ScrollDelta::Pixels { x: 0.0, y: 9999.0 },
+            Default::default(),
+        ));
         tree.layout(SizeProposal::exact(200.0, 150.0));
 
         let inner_bottom = inner_y.get();
@@ -2427,10 +2427,10 @@ mod tests {
 
         // Another downward scroll: inner is clamped → the event chains to outer.
         tree.pointer_move(Point::new(50.0, 40.0));
-        tree.dispatch_event(WidgetEvent::Scroll {
-            delta: ScrollDelta::Pixels { x: 0.0, y: 100.0 },
-            modifiers: Default::default(),
-        });
+        tree.dispatch_event(WidgetEvent::scroll(
+            ScrollDelta::Pixels { x: 0.0, y: 100.0 },
+            Default::default(),
+        ));
         tree.layout(SizeProposal::exact(200.0, 150.0));
 
         assert!(
@@ -2448,18 +2448,18 @@ mod tests {
         let (mut tree, _inner_y, outer_y) = nested_scroll_fixture(OverscrollBehavior::Contain);
 
         tree.pointer_move(Point::new(50.0, 40.0));
-        tree.dispatch_event(WidgetEvent::Scroll {
-            delta: ScrollDelta::Pixels { x: 0.0, y: 9999.0 },
-            modifiers: Default::default(),
-        });
+        tree.dispatch_event(WidgetEvent::scroll(
+            ScrollDelta::Pixels { x: 0.0, y: 9999.0 },
+            Default::default(),
+        ));
         tree.layout(SizeProposal::exact(200.0, 150.0));
 
         // Inner at bottom + Contain → a further scroll is absorbed, not chained.
         tree.pointer_move(Point::new(50.0, 40.0));
-        tree.dispatch_event(WidgetEvent::Scroll {
-            delta: ScrollDelta::Pixels { x: 0.0, y: 100.0 },
-            modifiers: Default::default(),
-        });
+        tree.dispatch_event(WidgetEvent::scroll(
+            ScrollDelta::Pixels { x: 0.0, y: 100.0 },
+            Default::default(),
+        ));
         tree.layout(SizeProposal::exact(200.0, 150.0));
 
         assert!(
@@ -2619,10 +2619,10 @@ mod tests {
 
         // Scroll right far enough to bring the last cell fully into view.
         tree.pointer_move(Point::new(300.0, 40.0));
-        tree.dispatch_event(WidgetEvent::Scroll {
-            delta: ScrollDelta::Pixels { x: 300.0, y: 0.0 },
-            modifiers: Default::default(),
-        });
+        tree.dispatch_event(WidgetEvent::scroll(
+            ScrollDelta::Pixels { x: 300.0, y: 0.0 },
+            Default::default(),
+        ));
         tree.layout(SizeProposal::exact(600.0, 400.0));
 
         let b = tree.bounds(last);
@@ -2872,10 +2872,10 @@ mod tests {
         assert_eq!(scroll_y.get(), 400.0, "precondition: still pending");
 
         tree.pointer_move(Point::new(50.0, 40.0));
-        tree.dispatch_event(WidgetEvent::Scroll {
-            delta: ScrollDelta::Pixels { x: 0.0, y: 100.0 },
-            modifiers: Default::default(),
-        });
+        tree.dispatch_event(WidgetEvent::scroll(
+            ScrollDelta::Pixels { x: 0.0, y: 100.0 },
+            Default::default(),
+        ));
         let after_reader = scroll_y.get();
 
         height.set(12000.0);

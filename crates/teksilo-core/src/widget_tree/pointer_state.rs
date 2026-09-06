@@ -8,6 +8,33 @@
 use super::*;
 
 impl WidgetTree {
+    /// This tree's input clock — the one source of
+    /// [`EventTime`](crate::pointer::EventTime)s for everything the pointer
+    /// path does.
+    ///
+    /// A [`MonotonicClock`](crate::pointer::clock::MonotonicClock) anchored at
+    /// the tree epoch by default. The epoch is the same `Instant`
+    /// [`simulated_now`](Self::simulated_now) starts at, so the input timeline
+    /// and the simulated animation timeline are one axis rather than two.
+    pub fn input_clock(&self) -> std::rc::Rc<dyn crate::pointer::clock::InputClock> {
+        self.input_clock.clone()
+    }
+
+    /// Replace the input clock.
+    ///
+    /// A headless test installs a
+    /// [`ManualClock`](crate::pointer::clock::ManualClock) here so gesture
+    /// deadlines fire exactly when it says, with no sleeping and no dependence
+    /// on how long the test itself took.
+    pub fn set_input_clock(&mut self, clock: std::rc::Rc<dyn crate::pointer::clock::InputClock>) {
+        self.input_clock = clock;
+    }
+
+    /// The current time on this tree's input timeline.
+    pub fn input_now(&self) -> crate::pointer::EventTime {
+        self.input_clock.now()
+    }
+
     /// Whether `id` carries a drag or swipe handler (hence gets a drag/swipe
     /// recognizer once its arena is built).
     fn widget_has_drag(&self, id: WidgetId) -> bool {
@@ -345,5 +372,78 @@ mod tests {
             tree.pointer_captured_by, None,
             "destroy_subtree must clear a capture anchored at a destroyed widget"
         );
+    }
+}
+
+/// The one-clock rule: the input timeline and the tree's simulated clock are
+/// one axis, seeded from one epoch.
+#[cfg(test)]
+mod clock_tests {
+    use super::*;
+    use crate::pointer::EventTime;
+    use crate::pointer::clock::ManualClock;
+
+    /// The whole point of taking the epoch as a parameter rather than
+    /// capturing it: `EventTime::ZERO` and the tree's simulated clock name the
+    /// *same* instant, so one `advance_time` moves gesture deadlines and
+    /// animations against the same origin.
+    ///
+    /// If this ever fails, the two timelines have drifted apart and a test that
+    /// advances one has silently stopped advancing the other.
+    #[test]
+    fn the_input_clock_shares_the_trees_epoch() {
+        let tree = WidgetTree::new();
+        assert_eq!(
+            tree.input_clock().epoch(),
+            Some(tree.simulated_now()),
+            "the input clock must be anchored at the instant sim_clock starts from"
+        );
+    }
+
+    /// …and stays one axis as simulated time moves: the offset between the
+    /// simulated clock and the epoch is exactly what was advanced.
+    #[test]
+    fn advancing_simulated_time_moves_along_the_input_axis() {
+        let mut tree = WidgetTree::new();
+        let epoch = tree
+            .input_clock()
+            .epoch()
+            .expect("the default input clock is monotonic");
+
+        tree.advance_time(std::time::Duration::from_millis(400));
+        assert_eq!(
+            tree.simulated_now().duration_since(epoch),
+            std::time::Duration::from_millis(400)
+        );
+
+        tree.advance_time(std::time::Duration::from_millis(100));
+        assert_eq!(
+            tree.simulated_now().duration_since(epoch),
+            std::time::Duration::from_millis(500)
+        );
+    }
+
+    /// A test can take the input timeline over entirely.
+    #[test]
+    fn a_manual_clock_replaces_the_default() {
+        let mut tree = WidgetTree::new();
+        let manual = std::rc::Rc::new(ManualClock::new(EventTime::from_millis(30)));
+        tree.set_input_clock(manual.clone());
+
+        assert_eq!(tree.input_now(), EventTime::from_millis(30));
+        manual.advance(std::time::Duration::from_millis(70));
+        assert_eq!(tree.input_now(), EventTime::from_millis(100));
+        // Reading does not move it — a manual clock is only moved by its owner.
+        assert_eq!(tree.input_now(), EventTime::from_millis(100));
+    }
+
+    /// The default clock actually reads the wall clock, so a real window's
+    /// gestures advance without anyone ticking anything.
+    #[test]
+    fn the_default_clock_is_monotonic() {
+        let tree = WidgetTree::new();
+        let a = tree.input_now();
+        let b = tree.input_now();
+        assert!(b >= a);
     }
 }

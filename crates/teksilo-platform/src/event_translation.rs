@@ -249,10 +249,7 @@ pub fn translate_mouse_wheel(
             y: -(pos.y / state.scale_factor) as f32,
         },
     };
-    Some(WidgetEvent::Scroll {
-        delta: scroll_delta,
-        modifiers: state.current_modifiers,
-    })
+    Some(WidgetEvent::scroll(scroll_delta, state.current_modifiers))
 }
 
 // --- Desktop trackpad gesture passthrough ---

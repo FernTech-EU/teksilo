@@ -4,12 +4,18 @@
 use teksilo_canvas::{Point, Rect};
 
 use crate::gesture::GestureEvent;
+use crate::pointer::{CancelReason, EventTime, PointerInfo, ScrollPhase};
 
 /// Pointer button identifiers.
 ///
 /// `Forward` and `Back` correspond to the auxiliary mouse buttons (mouse
 /// 4 / mouse 5) typically labelled "browser back / forward". Platforms
 /// that don't have those buttons simply never emit them.
+///
+/// `#[non_exhaustive]`: a stylus barrel button and an eraser-end press are
+/// buttons this enum will have to name, and neither exists yet. A downstream
+/// `match` therefore needs a `_` arm.
+#[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PointerButton {
     /// Left-click (or main-action button on left-handed mice).
@@ -598,6 +604,44 @@ pub enum WidgetEvent {
         /// modifier state — apps detect Ctrl-wheel-to-zoom by
         /// inspecting `modifiers.ctrl()`.
         modifiers: Modifiers,
+        /// Where the pointer was when the scroll happened, in window-logical
+        /// coordinates, or `None` when the producer has no position for it.
+        ///
+        /// This is what the scroll is **routed** by: `Some` hit-tests, `None`
+        /// falls back to the hovered (else focused) widget. A mouse wheel has
+        /// always been positionless and stays so — hover is under the cursor,
+        /// so hit-testing would find the same widget anyway. A pan synthesised
+        /// from a direct pointer *must* carry one, because a contact never
+        /// writes hover and a positionless pan would route nowhere.
+        position: Option<Point>,
+        /// Where in a continuous scroll gesture this sample sits.
+        /// [`ScrollPhase::Discrete`] — a self-contained wheel notch — for
+        /// everything Teksilo produced before the touch programme.
+        phase: ScrollPhase,
+        /// Who scrolled. Defaults to
+        /// [`PointerInfo::mouse`](crate::pointer::PointerInfo::mouse) at the
+        /// epoch for every legacy construction site; a real sample carries the
+        /// pointer's identity, kind and timestamp.
+        pointer: PointerInfo,
+    },
+    /// A pointer interaction was revoked by the system rather than completed by
+    /// the user — see [`CancelReason`].
+    ///
+    /// Distinct from [`PointerUp`](Self::PointerUp) on purpose: an Up means the
+    /// user finished, so a drag drops and a tap fires; a cancel means the
+    /// interaction is being taken away, so state must be unwound and nothing
+    /// may activate.
+    ///
+    /// **Nothing emits this yet.** The variant lands with the pointer
+    /// vocabulary so the taxonomy is fixed before the producers are wired.
+    PointerCancel {
+        /// Where the pointer was last seen, when the revoking path knows. A
+        /// platform cancel usually carries no position at all.
+        position: Option<Point>,
+        /// Why the interaction was revoked.
+        reason: CancelReason,
+        /// Which pointer was revoked.
+        pointer: PointerInfo,
     },
     KeyDown {
         key: Key,
@@ -676,6 +720,75 @@ pub enum WidgetEvent {
     Gesture {
         gesture: GestureEvent,
     },
+}
+
+impl WidgetEvent {
+    /// A wheel notch with no position — routed by the hovered (else focused)
+    /// widget, exactly as every scroll in Teksilo was before the touch
+    /// programme.
+    ///
+    /// It exists so that the three fields [`Scroll`](Self::Scroll) gained cost
+    /// each of its construction sites one line rather than five. The pointer
+    /// defaults to
+    /// [`PointerInfo::mouse`] at [`EventTime::ZERO`]: a free constructor has no
+    /// tree and therefore no clock, and nothing reads the timestamp of a
+    /// legacy-constructed event. A sample that has a real time enters through
+    /// [`WidgetTree::dispatch_scroll`](crate::WidgetTree::dispatch_scroll)
+    /// instead.
+    pub fn scroll(delta: ScrollDelta, modifiers: Modifiers) -> Self {
+        Self::Scroll {
+            delta,
+            modifiers,
+            position: None,
+            phase: ScrollPhase::Discrete,
+            pointer: PointerInfo::mouse(EventTime::ZERO),
+        }
+    }
+
+    /// A wheel notch routed by hit test at `position` rather than by hover.
+    ///
+    /// Use this where the producer genuinely knows where the pointer was; a
+    /// mouse-wheel translator should keep using [`scroll`](Self::scroll), whose
+    /// hover routing is what it has always had.
+    pub fn scroll_at(delta: ScrollDelta, modifiers: Modifiers, position: Point) -> Self {
+        Self::Scroll {
+            delta,
+            modifiers,
+            position: Some(position),
+            phase: ScrollPhase::Discrete,
+            pointer: PointerInfo::mouse(EventTime::ZERO),
+        }
+    }
+
+    /// A mouse press.
+    ///
+    /// Identical to writing the variant out today. It exists **now**, before
+    /// [`PointerDown`](Self::PointerDown) carries a pointer, precisely so that
+    /// the package which adds that field is a mechanical one-line-per-site
+    /// sweep rather than a 583-site rewrite.
+    pub fn pointer_down(position: Point, button: PointerButton, modifiers: Modifiers) -> Self {
+        Self::PointerDown {
+            position,
+            button,
+            modifiers,
+        }
+    }
+
+    /// A mouse release. See [`pointer_down`](Self::pointer_down) for why this
+    /// exists before it does anything.
+    pub fn pointer_up(position: Point, button: PointerButton, modifiers: Modifiers) -> Self {
+        Self::PointerUp {
+            position,
+            button,
+            modifiers,
+        }
+    }
+
+    /// A mouse move. See [`pointer_down`](Self::pointer_down) for why this
+    /// exists before it does anything.
+    pub fn pointer_move(position: Point) -> Self {
+        Self::PointerMove { position }
+    }
 }
 
 /// The result of handling an event.

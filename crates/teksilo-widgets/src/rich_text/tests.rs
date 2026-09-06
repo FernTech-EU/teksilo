@@ -5551,10 +5551,10 @@ mod affinity_tests {
         // Pointer over the editor (top of the outer content), scroll it to the
         // bottom of its own content.
         tree.pointer_move(Point::new(50.0, 12.0));
-        tree.dispatch_event(WidgetEvent::Scroll {
-            delta: ScrollDelta::Pixels { x: 0.0, y: 9999.0 },
-            modifiers: Modifiers::NONE,
-        });
+        tree.dispatch_event(WidgetEvent::scroll(
+            ScrollDelta::Pixels { x: 0.0, y: 9999.0 },
+            Modifiers::NONE,
+        ));
         tree.layout(SizeProposal::exact(220.0, 150.0));
 
         let editor_bottom = editor_y.get();
@@ -5569,10 +5569,10 @@ mod affinity_tests {
 
         // A second downward wheel at the editor's boundary chains to the outer.
         tree.pointer_move(Point::new(50.0, 12.0));
-        tree.dispatch_event(WidgetEvent::Scroll {
-            delta: ScrollDelta::Pixels { x: 0.0, y: 120.0 },
-            modifiers: Modifiers::NONE,
-        });
+        tree.dispatch_event(WidgetEvent::scroll(
+            ScrollDelta::Pixels { x: 0.0, y: 120.0 },
+            Modifiers::NONE,
+        ));
         tree.layout(SizeProposal::exact(220.0, 150.0));
 
         assert!(
@@ -5595,10 +5595,10 @@ mod affinity_tests {
         // the boundary wheel so the outer never moves.
         for _ in 0..2 {
             tree.pointer_move(Point::new(50.0, 12.0));
-            tree.dispatch_event(WidgetEvent::Scroll {
-                delta: ScrollDelta::Pixels { x: 0.0, y: 9999.0 },
-                modifiers: Modifiers::NONE,
-            });
+            tree.dispatch_event(WidgetEvent::scroll(
+                ScrollDelta::Pixels { x: 0.0, y: 9999.0 },
+                Modifiers::NONE,
+            ));
             tree.layout(SizeProposal::exact(220.0, 150.0));
         }
         assert!(
@@ -5794,10 +5794,10 @@ mod affinity_tests {
 
         // Wheel down, away from the caret.
         tree.pointer_move(Point::new(50.0, 40.0));
-        tree.dispatch_event(WidgetEvent::Scroll {
-            delta: ScrollDelta::Pixels { x: 0.0, y: 200.0 },
-            modifiers: Modifiers::NONE,
-        });
+        tree.dispatch_event(WidgetEvent::scroll(
+            ScrollDelta::Pixels { x: 0.0, y: 200.0 },
+            Modifiers::NONE,
+        ));
         tree.layout(SizeProposal::exact(220.0, 100.0));
         let after_scroll = editor_y.get();
         assert!(
@@ -5865,10 +5865,10 @@ mod affinity_tests {
         // Wheel the page DOWN. Caret is at the top (position 0) and does NOT
         // move, so nothing should ever pull the page back up to it.
         tree.pointer_move(Point::new(50.0, 40.0));
-        tree.dispatch_event(WidgetEvent::Scroll {
-            delta: ScrollDelta::Pixels { x: 0.0, y: 300.0 },
-            modifiers: Modifiers::NONE,
-        });
+        tree.dispatch_event(WidgetEvent::scroll(
+            ScrollDelta::Pixels { x: 0.0, y: 300.0 },
+            Modifiers::NONE,
+        ));
         // Drive the smooth animation to completion.
         for _ in 0..40 {
             tree.request_frame();

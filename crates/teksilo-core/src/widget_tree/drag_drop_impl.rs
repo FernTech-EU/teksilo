@@ -2063,10 +2063,10 @@ mod tests {
 
         // A wheel event during drag should reach the drop target (not the
         // stale hover from before the drag started).
-        tree.dispatch_event(WidgetEvent::Scroll {
-            delta: crate::event::ScrollDelta::Pixels { x: 0.0, y: 40.0 },
-            modifiers: Default::default(),
-        });
+        tree.dispatch_event(WidgetEvent::scroll(
+            crate::event::ScrollDelta::Pixels { x: 0.0, y: 40.0 },
+            Default::default(),
+        ));
         assert_eq!(
             scroll_count.get(),
             1,

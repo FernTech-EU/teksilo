@@ -146,15 +146,15 @@ pub fn execute(
             // Route the wheel: hover the target first (scroll dispatches to
             // the hovered/focused widget), then deliver the delta.
             pointer_move(tree, ops, c);
+            // Modifiers are carried, not hardcoded to `NONE`: a modifier-held
+            // wheel is a distinct gesture (Ctrl-wheel-to-zoom is why
+            // `WidgetEvent::Scroll` has this field at all), and a probe that
+            // could only send a bare wheel could not reach it.
             tree.dispatch_event_with_ops(
-                WidgetEvent::Scroll {
-                    delta: ScrollDelta::Pixels { x: *dx, y: *dy },
-                    // Carried, not hardcoded to `NONE`: a modifier-held wheel is
-                    // a distinct gesture (Ctrl-wheel-to-zoom is why
-                    // `WidgetEvent::Scroll` has this field at all), and a probe
-                    // that could only send a bare wheel could not reach it.
-                    modifiers: modifiers(*ctrl, *shift, *alt, *meta, *command),
-                },
+                WidgetEvent::scroll(
+                    ScrollDelta::Pixels { x: *dx, y: *dy },
+                    modifiers(*ctrl, *shift, *alt, *meta, *command),
+                ),
                 ops,
             );
             finish_settle(tree, ops, settle)

@@ -105,7 +105,10 @@ impl WidgetTree {
         event: WidgetEvent,
         ops: &mut dyn crate::window::WindowOps,
     ) {
-        self.dispatch_event_impl(event, ops)
+        // A legacy event names no pointer, so it is the mouse at the epoch —
+        // which is exactly what it has always meant.
+        let snapshot = crate::pointer::InputSnapshot::from_event(&event);
+        self.dispatch_with_input_snapshot(event, snapshot, ops)
     }
 
     /// Dispatch an event on a standalone tree (tests, headless
@@ -115,7 +118,137 @@ impl WidgetTree {
     /// for the app-facing variant.
     pub fn dispatch_event(&mut self, event: WidgetEvent) {
         let mut noop = crate::window::NoopWindowOps;
-        self.dispatch_event_impl(event, &mut noop);
+        self.dispatch_event_with_ops(event, &mut noop);
+    }
+
+    // -----------------------------------------------------------------
+    // The two ingress doors
+    // -----------------------------------------------------------------
+
+    /// Deliver one pointer sample.
+    ///
+    /// This and [`dispatch_scroll`](Self::dispatch_scroll) are the real input
+    /// doors: a backend produces [`PointerSample`](crate::pointer::PointerSample)s
+    /// and [`ScrollSample`](crate::pointer::ScrollSample)s, and everything
+    /// Teksilo knows about *who* is pointing — identity, kind, pressure,
+    /// timestamp, coalesced history — reaches the tree through them.
+    ///
+    /// For now a sample is **lowered** onto the legacy `WidgetEvent` it
+    /// describes and takes the existing route, so a mouse behaves bit for bit
+    /// as it did before the doors existed. What changes here is only that the
+    /// door exists and that the sample's
+    /// [`PointerInfo`](crate::pointer::PointerInfo) is visible to handlers
+    /// through [`EventContext::pointer`](crate::widget::EventContext::pointer).
+    pub fn dispatch_pointer(&mut self, sample: crate::pointer::PointerSample) {
+        let mut noop = crate::window::NoopWindowOps;
+        self.dispatch_pointer_with_ops(sample, &mut noop);
+    }
+
+    /// [`dispatch_pointer`](Self::dispatch_pointer) with the caller's
+    /// app-level [`WindowOps`](crate::window::WindowOps) sink, so handlers can
+    /// reach the multi-window API synchronously.
+    pub fn dispatch_pointer_with_ops(
+        &mut self,
+        sample: crate::pointer::PointerSample,
+        ops: &mut dyn crate::window::WindowOps,
+    ) {
+        use crate::pointer::PointerPhase;
+
+        crate::trace_input!(
+            Samples,
+            "{:?} {:?} at {:?} buttons={:?} t={:?}",
+            sample.phase,
+            sample.pointer.id,
+            sample.position,
+            sample.pointer.buttons,
+            sample.pointer.time
+        );
+
+        // The button a Down/Up is *about*. A direct-pointer contact reports no
+        // button at all, and the widget layer has always been told
+        // `Primary` for a press — that is what a tap is.
+        let button = sample
+            .button
+            .unwrap_or(crate::event::PointerButton::Primary);
+        let event = match sample.phase {
+            PointerPhase::Down => WidgetEvent::PointerDown {
+                position: sample.position,
+                button,
+                modifiers: sample.modifiers,
+            },
+            PointerPhase::Move => WidgetEvent::PointerMove {
+                position: sample.position,
+            },
+            PointerPhase::Up => WidgetEvent::PointerUp {
+                position: sample.position,
+                button,
+                modifiers: sample.modifiers,
+            },
+            PointerPhase::Cancel => WidgetEvent::PointerCancel {
+                position: Some(sample.position),
+                reason: crate::pointer::CancelReason::Platform,
+                pointer: sample.pointer,
+            },
+        };
+
+        let snapshot = crate::pointer::InputSnapshot::from_pointer_sample(&sample);
+        self.dispatch_with_input_snapshot(event, snapshot, ops);
+    }
+
+    /// Deliver one scroll sample.
+    ///
+    /// Routing follows [`ScrollSample::position`](crate::pointer::ScrollSample::position):
+    /// `Some` hit-tests it, `None` falls back to the hovered (else focused)
+    /// widget, which is what every scroll did before. A mouse wheel carries no
+    /// position, so this is a no-op for a mouse; a pan synthesised from a
+    /// direct pointer must carry one, because a contact never writes hover.
+    pub fn dispatch_scroll(&mut self, sample: crate::pointer::ScrollSample) {
+        let mut noop = crate::window::NoopWindowOps;
+        self.dispatch_scroll_with_ops(sample, &mut noop);
+    }
+
+    /// [`dispatch_scroll`](Self::dispatch_scroll) with the caller's app-level
+    /// [`WindowOps`](crate::window::WindowOps) sink.
+    pub fn dispatch_scroll_with_ops(
+        &mut self,
+        sample: crate::pointer::ScrollSample,
+        ops: &mut dyn crate::window::WindowOps,
+    ) {
+        crate::trace_input!(
+            Samples,
+            "scroll {:?} {:?}/{:?} at {:?}",
+            sample.delta,
+            sample.phase,
+            sample.source,
+            sample.position
+        );
+
+        let event = WidgetEvent::Scroll {
+            delta: sample.delta,
+            modifiers: sample.modifiers,
+            position: sample.position,
+            phase: sample.phase,
+            pointer: sample.pointer,
+        };
+        let snapshot = crate::pointer::InputSnapshot::from_scroll_sample(&sample);
+        self.dispatch_with_input_snapshot(event, snapshot, ops);
+    }
+
+    /// Run one dispatch with `snapshot` installed as the tree's view of the
+    /// in-flight sample, restoring the previous value afterwards.
+    ///
+    /// Save-and-restore rather than reset-to-default so a nested dispatch (a
+    /// synthetic click queued by a handler, a scroll-into-view walk) leaves the
+    /// outer sample's snapshot intact for the rest of the outer dispatch.
+    fn dispatch_with_input_snapshot(
+        &mut self,
+        event: WidgetEvent,
+        snapshot: crate::pointer::InputSnapshot,
+        ops: &mut dyn crate::window::WindowOps,
+    ) {
+        let previous = std::mem::replace(&mut self.current_input, snapshot);
+        self.dispatch_event_impl(event, ops);
+        self.current_input = previous;
     }
 
     fn dispatch_event_impl(&mut self, event: WidgetEvent, ops: &mut dyn crate::window::WindowOps) {
@@ -499,8 +632,31 @@ impl WidgetTree {
                     self.dispatch_to_widget(target, &event, &mut *ops);
                 }
             }
-            WidgetEvent::Scroll { .. } => {
-                if let Some(target) = self.hovered.or(self.focused) {
+            WidgetEvent::PointerCancel { position, .. } => {
+                // A revoked interaction goes to whoever held the pointer, and
+                // failing that to whatever is under the last known position.
+                // Deliberately does NOT run the drag / tap / hover unwinding a
+                // real cancel needs — that is the cancel funnel's job, and
+                // nothing produces a `PointerCancel` until it lands. See
+                // `CancelReason`.
+                let target = self
+                    .pointer_captured_by
+                    .or_else(|| position.and_then(|p| self.hit_test(p)));
+                if let Some(target) = target {
+                    self.dispatch_to_widget(target, &event, &mut *ops);
+                }
+            }
+            WidgetEvent::Scroll { position, .. } => {
+                // A positioned scroll routes by hit test; a positionless one
+                // keeps the historical hover-then-focus fallback. A mouse wheel
+                // is positionless, so this is a no-op for it — the change
+                // exists for a pan synthesised from a direct pointer, which
+                // never writes hover and would otherwise route nowhere.
+                let target = match position {
+                    Some(p) => self.hit_test(*p),
+                    None => self.hovered.or(self.focused),
+                };
+                if let Some(target) = target {
                     self.dispatch_to_widget(target, &event, &mut *ops);
                 }
             }
@@ -1480,6 +1636,25 @@ impl WidgetTree {
                         return Some(EventResponse::Handled);
                     }
                     return Some(EventResponse::Ignored);
+                }
+                None
+            }
+            WidgetEvent::PointerCancel { .. } => {
+                // The raw hook is the only thing a widget can unwind from
+                // today: the gesture arena has no cancel input yet, and giving
+                // it one is the recognizer rework's job, not this one's.
+                // Nothing emits a `PointerCancel` at this stage, so this arm is
+                // reachable only by a caller that builds one by hand.
+                if fire_on_pointer_event {
+                    let r = fire_event_handler_both(
+                        &mut node.external_handlers.on_pointer_event,
+                        &mut node.handlers.on_pointer_event,
+                        event,
+                        ctx,
+                    );
+                    if r == EventResponse::Handled {
+                        return Some(EventResponse::Handled);
+                    }
                 }
                 None
             }
@@ -5133,5 +5308,313 @@ mod tests {
             2,
             "the context menu should now be open on top of the surviving modal"
         );
+    }
+}
+
+/// The stage-1 input ingress: the two sample doors, the scroll routing rule,
+/// and the guarantee that a mouse still behaves exactly as it did.
+#[cfg(test)]
+mod input_ingress_tests {
+    use super::*;
+    use crate::event::{EventResponse, Modifiers, PointerButton, ScrollDelta};
+    use crate::pointer::{
+        EventTime, PointerId, PointerInfo, PointerPhase, PointerSample, ScrollPhase, ScrollSample,
+        ScrollSource,
+    };
+    use crate::test_widgets::FillWidget;
+    use crate::widget::{LayoutContext, WidgetPlacement};
+    use crate::widget_builder::WidgetBuilder;
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    /// A container that lays children out side by side across its bounds, so a
+    /// hit test at a given x picks a specific child.
+    ///
+    /// Local rather than shared: the common `StackWidget` deliberately stacks
+    /// its children at one origin, which is the opposite of what a routing test
+    /// needs.
+    #[derive(Debug)]
+    struct RowWidget {
+        children: Vec<WidgetId>,
+    }
+
+    impl crate::widget::Widget for RowWidget {
+        fn layout_response(
+            &self,
+            proposal: SizeProposal,
+            _ctx: &LayoutContext,
+        ) -> crate::widget::LayoutResponse {
+            proposal.resolve(0.0, 0.0).into()
+        }
+
+        fn place_children(
+            &self,
+            bounds: Rect,
+            _proposal: SizeProposal,
+            children: &mut [WidgetPlacement],
+            _ctx: &LayoutContext,
+        ) {
+            let n = children.len().max(1) as f32;
+            let w = bounds.width / n;
+            for (i, child) in children.iter_mut().enumerate() {
+                child.origin = Point::new(bounds.x + w * i as f32, bounds.y);
+                child.size = teksilo_canvas::Size::new(w, bounds.height);
+            }
+        }
+
+        fn children(&self) -> Vec<WidgetId> {
+            self.children.clone()
+        }
+    }
+
+    /// Everything a widget observes of a pointer interaction, as text, so two
+    /// runs can be compared for exact equality rather than field by field.
+    fn record(drive: impl FnOnce(&mut WidgetTree)) -> Vec<String> {
+        let log: Rc<RefCell<Vec<String>>> = Rc::new(RefCell::new(Vec::new()));
+
+        let mut tree = WidgetTree::new();
+        let pointer_log = log.clone();
+        let hover_log = log.clone();
+        tree.add(
+            FillWidget::new()
+                .on_pointer_event(move |event, _ctx| {
+                    pointer_log.borrow_mut().push(format!("{event:?}"));
+                    EventResponse::Ignored
+                })
+                .on_hover(move |entered, _ctx| {
+                    hover_log.borrow_mut().push(format!("hover({entered})"));
+                }),
+        );
+        tree.layout(SizeProposal::exact(100.0, 100.0));
+
+        drive(&mut tree);
+        log.borrow().clone()
+    }
+
+    /// The load-bearing compatibility claim of this package: lowering a mouse
+    /// `PointerSample` produces the *same* `WidgetEvent` stream, in the same
+    /// order, as writing the events out by hand. If this ever diverges, the
+    /// door has started meaning something different from the events it lowers
+    /// to.
+    #[test]
+    fn a_mouse_sample_reproduces_todays_event_stream() {
+        let inside = Point::new(40.0, 40.0);
+        let moved = Point::new(60.0, 55.0);
+        let outside = Point::new(400.0, 400.0);
+
+        let legacy = record(|tree| {
+            tree.dispatch_event(WidgetEvent::pointer_move(inside));
+            tree.dispatch_event(WidgetEvent::pointer_down(
+                inside,
+                PointerButton::Primary,
+                Modifiers::NONE,
+            ));
+            tree.dispatch_event(WidgetEvent::pointer_move(moved));
+            tree.dispatch_event(WidgetEvent::pointer_up(
+                moved,
+                PointerButton::Primary,
+                Modifiers::NONE,
+            ));
+            tree.dispatch_event(WidgetEvent::pointer_move(outside));
+        });
+
+        let sampled = record(|tree| {
+            let t = EventTime::ZERO;
+            tree.dispatch_pointer(PointerSample::mouse(PointerPhase::Move, inside, t));
+            tree.dispatch_pointer(
+                PointerSample::mouse(PointerPhase::Down, inside, t)
+                    .with_button(PointerButton::Primary),
+            );
+            tree.dispatch_pointer(PointerSample::mouse(PointerPhase::Move, moved, t));
+            tree.dispatch_pointer(
+                PointerSample::mouse(PointerPhase::Up, moved, t)
+                    .with_button(PointerButton::Primary),
+            );
+            tree.dispatch_pointer(PointerSample::mouse(PointerPhase::Move, outside, t));
+        });
+
+        assert_eq!(legacy, sampled);
+        assert!(
+            legacy.contains(&"hover(true)".to_string())
+                && legacy.contains(&"hover(false)".to_string()),
+            "the fixture must actually exercise enter and leave: {legacy:?}"
+        );
+    }
+
+    /// A press with no button — what a bare direct-pointer contact reports —
+    /// still reads as the primary press, because that is what a tap has always
+    /// been.
+    #[test]
+    fn a_buttonless_press_lowers_to_primary() {
+        let events = record(|tree| {
+            tree.dispatch_pointer(PointerSample::mouse(
+                PointerPhase::Down,
+                Point::new(20.0, 20.0),
+                EventTime::ZERO,
+            ));
+        });
+        assert!(
+            events.iter().any(|e| e.contains("button: Primary")),
+            "{events:?}"
+        );
+    }
+
+    // --- scroll routing --------------------------------------------------
+
+    /// Two leaves side by side across a 200-wide tree: `top` owns x < 100,
+    /// `bottom` owns x >= 100.
+    fn scroll_fixture() -> (WidgetTree, Rc<RefCell<Vec<&'static str>>>) {
+        let hits: Rc<RefCell<Vec<&'static str>>> = Rc::new(RefCell::new(Vec::new()));
+        let mut tree = WidgetTree::new();
+
+        let leading_hits = hits.clone();
+        let trailing_hits = hits.clone();
+        let leading = tree.add(FillWidget::new().on_scroll(move |_event, _ctx| {
+            leading_hits.borrow_mut().push("leading");
+            EventResponse::Handled
+        }));
+        let trailing = tree.add(FillWidget::new().on_scroll(move |_event, _ctx| {
+            trailing_hits.borrow_mut().push("trailing");
+            EventResponse::Handled
+        }));
+        tree.add(RowWidget {
+            children: vec![leading, trailing],
+        });
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+        (tree, hits)
+    }
+
+    fn notch() -> ScrollDelta {
+        ScrollDelta::Lines { x: 0.0, y: -1.0 }
+    }
+
+    /// The mouse path: a wheel notch carries no position, so it routes by
+    /// hover exactly as it always has. This is the no-op claim.
+    #[test]
+    fn a_positionless_scroll_routes_by_hover() {
+        let (mut tree, hits) = scroll_fixture();
+
+        tree.pointer_move(Point::new(150.0, 50.0)); // hover the trailing leaf
+        tree.dispatch_event(WidgetEvent::scroll(notch(), Modifiers::NONE));
+        assert_eq!(*hits.borrow(), vec!["trailing"]);
+
+        tree.pointer_move(Point::new(50.0, 50.0)); // hover the leading leaf
+        tree.dispatch_scroll(ScrollSample::wheel(
+            notch(),
+            Modifiers::NONE,
+            EventTime::ZERO,
+        ));
+        assert_eq!(*hits.borrow(), vec!["trailing", "leading"]);
+    }
+
+    /// A positioned scroll routes by hit test, *against* the hover. This is
+    /// the only thing that makes a synthesised touch pan routable at all: a
+    /// contact never writes hover, so hover would send the pan to whatever the
+    /// mouse last touched — or nowhere.
+    #[test]
+    fn a_positioned_scroll_routes_by_hit_test() {
+        let (mut tree, hits) = scroll_fixture();
+        tree.pointer_move(Point::new(150.0, 50.0)); // hover the TRAILING leaf
+
+        tree.dispatch_event(WidgetEvent::scroll_at(
+            notch(),
+            Modifiers::NONE,
+            Point::new(50.0, 50.0), // …but scroll over the LEADING one
+        ));
+        assert_eq!(*hits.borrow(), vec!["leading"]);
+
+        tree.dispatch_scroll(
+            ScrollSample::wheel(notch(), Modifiers::NONE, EventTime::ZERO)
+                .at(Point::new(150.0, 50.0)),
+        );
+        assert_eq!(*hits.borrow(), vec!["leading", "trailing"]);
+    }
+
+    /// With nothing hovered and nothing focused a positionless scroll goes
+    /// nowhere — the pre-existing behaviour, pinned rather than left
+    /// incidental.
+    #[test]
+    fn a_positionless_scroll_with_no_hover_goes_nowhere() {
+        let (mut tree, hits) = scroll_fixture();
+        tree.dispatch_event(WidgetEvent::scroll(notch(), Modifiers::NONE));
+        assert!(hits.borrow().is_empty());
+    }
+
+    // --- the per-dispatch snapshot ---------------------------------------
+
+    /// A handler can ask which pointer it is serving, and what phase and
+    /// source a scroll had.
+    #[test]
+    fn a_handler_sees_the_sample_it_is_serving() {
+        let seen: Rc<RefCell<Vec<(ScrollPhase, ScrollSource, Option<Point>)>>> =
+            Rc::new(RefCell::new(Vec::new()));
+        let sink = seen.clone();
+
+        let mut tree = WidgetTree::new();
+        tree.add(FillWidget::new().on_scroll(move |_event, ctx| {
+            sink.borrow_mut().push((
+                ctx.scroll_phase(),
+                ctx.scroll_source(),
+                ctx.pointer_position(),
+            ));
+            EventResponse::Handled
+        }));
+        tree.layout(SizeProposal::exact(100.0, 100.0));
+
+        tree.dispatch_scroll(ScrollSample {
+            delta: notch(),
+            position: Some(Point::new(50.0, 50.0)),
+            phase: ScrollPhase::Momentum,
+            source: ScrollSource::TouchPan,
+            pointer: PointerInfo::mouse(EventTime::from_millis(12)),
+            modifiers: Modifiers::NONE,
+        });
+
+        assert_eq!(
+            *seen.borrow(),
+            vec![(
+                ScrollPhase::Momentum,
+                ScrollSource::TouchPan,
+                Some(Point::new(50.0, 50.0))
+            )]
+        );
+    }
+
+    /// Outside a pointer dispatch a handler sees the default mouse — the same
+    /// answer every such handler got before pointers were distinguishable.
+    #[test]
+    fn a_legacy_event_reports_the_mouse_at_the_epoch() {
+        let seen: Rc<RefCell<Option<(PointerId, ScrollPhase)>>> = Rc::new(RefCell::new(None));
+        let sink = seen.clone();
+
+        let mut tree = WidgetTree::new();
+        tree.add(FillWidget::new().on_pointer_event(move |_event, ctx| {
+            *sink.borrow_mut() = Some((ctx.pointer().id, ctx.scroll_phase()));
+            EventResponse::Ignored
+        }));
+        tree.layout(SizeProposal::exact(100.0, 100.0));
+        tree.dispatch_event(WidgetEvent::pointer_move(Point::new(50.0, 50.0)));
+
+        assert_eq!(
+            *seen.borrow(),
+            Some((PointerId::MOUSE, ScrollPhase::Discrete))
+        );
+    }
+
+    /// The snapshot is saved and restored around a dispatch, so a nested one
+    /// (a synthetic click, a scroll-into-view walk) does not strand the outer
+    /// sample's view of the world.
+    #[test]
+    fn the_snapshot_is_restored_after_a_dispatch() {
+        let mut tree = WidgetTree::new();
+        tree.add(FillWidget::new());
+        tree.layout(SizeProposal::exact(100.0, 100.0));
+
+        let before = tree.current_input.clone();
+        tree.dispatch_scroll(
+            ScrollSample::wheel(notch(), Modifiers::NONE, EventTime::ZERO)
+                .at(Point::new(10.0, 10.0)),
+        );
+        assert_eq!(tree.current_input, before);
     }
 }
