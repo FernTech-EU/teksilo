@@ -198,12 +198,24 @@ impl WidgetTree {
             return;
         }
         let captured_ancestors: Option<Vec<WidgetId>> = if self.active_drag.is_none() {
-            self.pointer_captured_by.map(|cap| {
-                let mut ids = vec![cap];
-                let mut cur = self.arena.parent(cap);
-                while let Some(id) = cur {
-                    ids.push(id);
-                    cur = self.arena.parent(id);
+            // Every captured widget, not just the primary pointer's: two
+            // contacts can hold two captures, and rebuilding either one's
+            // ancestors mid-gesture is what this guard exists to prevent.
+            let captors: Vec<WidgetId> = self
+                .pointers
+                .iter()
+                .filter_map(|entry| entry.captured_by)
+                .collect();
+            (!captors.is_empty()).then(|| {
+                let mut ids = Vec::new();
+                for cap in captors {
+                    let mut cur = Some(cap);
+                    while let Some(id) = cur {
+                        if !ids.contains(&id) {
+                            ids.push(id);
+                        }
+                        cur = self.arena.parent(id);
+                    }
                 }
                 ids
             })
@@ -610,8 +622,11 @@ impl WidgetTree {
         // virtualized list that materializes new rows under a
         // stationary cursor would see the next `Scroll` fall through
         // to `focused` and bubble to an ancestor scrollable.
-        if self.hovered.is_none()
-            && let Some(pos) = self.last_pointer_position
+        // Hover recovery is the **hover owner**'s business: re-deriving hover
+        // from the primary would invent one on a touch-only device, where the
+        // primary is a finger and nothing hovers at all.
+        if self.hovered_id().is_none()
+            && let Some(pos) = self.hover_owner_position()
         {
             let new_target = self.hit_test(pos);
             if new_target.is_some() {

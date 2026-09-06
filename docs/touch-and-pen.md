@@ -92,14 +92,79 @@ synthesized mouse event uses. A mouse is singular by construction, so it needs
 no per-press identity, and the legacy `dispatch_event` path stays
 allocation-free.
 
-### 1.3 Primary
+### 1.3 Primary, and the two other things it is not
 
-`primary` is the W3C Pointer Events compatibility concept: exactly one live
-pointer is primary, and it is the one that drives the singular legacy signals a
-widget written before multi-touch will read. A mouse always wins the role.
+Three notions used to be one field. They are not interchangeable, and the
+framework keeps them apart on purpose.
+
+| | What it is | Who decides | How many at once |
+| --- | --- | --- | --- |
+| `PointerInfo::primary` | The **W3C Pointer Events Level 3 per-kind flag**: every mouse event is primary, and so is the first touch of a sequence | the backend that produced the sample | one *per kind* — on a hybrid machine a mouse and a first touch are both primary |
+| `PointerTable::primary()` | **Teksilo's** single pointer: the one backing `WidgetTree::hovered()` and `last_pointer_position()` | the table, by election | exactly one, mouse preferred, else the oldest live pointer |
+| `PointerTable::hover_owner()` | The most recent **hovering-capable** pointer — a mouse, or a pen in proximity | the table, on each hovering sample | at most one; often none (a touch-only device has none at all) |
+
 `PointerInfo::touch(..)` deliberately constructs a **non**-primary pointer:
-primacy is a fact about the whole set of live pointers, so only the pointer
-table can decide it, never a constructor.
+primacy is a fact about the whole set of live pointers, so only the table can
+decide it, never a constructor.
+
+### 1.3.1 A contact never produces hover
+
+**`on_hover` and every hover signal are hover-owner-only.** Enter/leave, the
+cursor shape, tooltip dwell and `hover_within` all follow the hover owner and
+nothing else; a touch contact is never the hover owner, and a finger arriving
+beside a hovering mouse leaves every one of them exactly where it was.
+
+This is a rule, not an omission. A finger has no hover state to report: were a
+contact to write hover, every hover affordance would fire on tap and then stay
+lit after the lift, because there is no "moved away" event to turn it off. The
+affordances that today depend on hover get their **own** touch routes; they do
+not get them by pretending a finger hovers.
+
+When two hovering-capable pointers move in the same frame — a mouse and a pen —
+the **later sample wins** the role, and the displaced owner is sent a
+`PointerLeave` for the widget it was over, so nothing stays lit for a pointer
+that is no longer pointing at it.
+
+### 1.3.2 Capture is per pointer
+
+`EventContext::capture_pointer()` captures **the pointer whose sample the
+handler is serving**, and that capture is released only by *that* pointer's Up
+or Cancel. Two contacts pressing two widgets therefore hold two independent
+captures, and one lifting can no longer steal the other's stream — which is
+exactly what a single `pointer_captured_by` used to do. `capture_pointer_id(id)`
+names a different pointer explicitly; `owns_pointer()` answers whether the
+handler's own widget already holds the capture of the pointer it is serving.
+
+Nothing changes for a mouse: there is one mouse, and `capture_pointer()`
+captures it.
+
+**Localisation follows the captor's *current* bounds.** A captured widget is
+re-localised against its live arena rectangle on every event, not against the
+rectangle it had when the capture began — so a slider inside a container that
+slides keeps reporting sensible widget-local coordinates instead of coordinates
+relative to where it used to be.
+
+### 1.3.3 The contact cap
+
+The table holds **ten** pointers: the maximum simultaneous contacts a Windows
+digitiser and a Wayland `wl_touch` seat both report. An eleventh arrival is
+refused at the door and produces no event at all, rather than evicting one of
+the ten — evicting a live contact mid-gesture is how a pinch turns into a
+fling. So is any sample the backend flagged as a palm
+(`PointerInfo::palm`). Both refusals are traced (§4), because a dropped sample
+that leaves no evidence is the hardest input bug there is.
+
+### 1.3.4 A nested dispatch waits its turn
+
+A handler that dispatches while a dispatch is in flight — a synthetic click, an
+assistive-technology action re-entering the door — is **queued**, not run
+inline. Run inline it would unwind the pointer state the outer sample is still
+standing on, and the outer handler would return to a tree whose hover, capture
+and table entries had all moved under it.
+
+The queue is drained, faithfully (event *and* input snapshot), the moment the
+outer dispatch completes, so from a caller's side nothing changed: the queue is
+empty again before the top-level `dispatch_*` call returns.
 
 ### 1.4 Pressure
 

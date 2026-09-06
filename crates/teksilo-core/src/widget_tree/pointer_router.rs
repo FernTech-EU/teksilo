@@ -33,6 +33,32 @@ fn fire_event_handler_both(
     }
 }
 
+/// A dispatch deferred because another was in flight.
+///
+/// Carries everything needed to replay it faithfully: the event, and the input
+/// snapshot that says which pointer produced it. `ops` is not carried — the
+/// drain runs inside the same top-level call, so the caller's sink is still in
+/// hand.
+pub(super) struct QueuedDispatch {
+    pub(super) event: WidgetEvent,
+    pub(super) snapshot: crate::pointer::InputSnapshot,
+}
+
+/// The window-logical position a pointer event happened at, if it carries one.
+///
+/// The pointer table is fed from here: every event with a position refreshes
+/// its pointer's entry, and everything else (keys, IME, focus, AT actions)
+/// leaves the table alone.
+fn pointer_event_position(event: &WidgetEvent) -> Option<Point> {
+    match event {
+        WidgetEvent::PointerDown { position, .. }
+        | WidgetEvent::PointerUp { position, .. }
+        | WidgetEvent::PointerMove { position } => Some(*position),
+        WidgetEvent::PointerCancel { position, .. } => *position,
+        _ => None,
+    }
+}
+
 impl WidgetTree {
     /// Hops from `focus` up to `scope_id` (0 when equal), or `None` when
     /// `scope_id` is not an ancestor-or-self of `focus`. Fewer hops means
@@ -191,8 +217,27 @@ impl WidgetTree {
             },
         };
 
+        // Admit the pointer before anything is dispatched. A palm, or an
+        // eleventh simultaneous contact, is refused here and produces no event
+        // at all — the alternative (evicting a live contact to make room) turns
+        // a pinch into a fling, and letting a resting palm through turns a hand
+        // on a tablet into a stream of taps.
+        if !self.pointers.would_admit(&sample.pointer) {
+            return;
+        }
+        // A contact ceases to exist when it lifts; a hovering-capable pointer
+        // does not — a mouse that releases a button is still there, still
+        // hovering, and its entry is what every legacy singular accessor reads.
+        let ends_pointer = matches!(sample.phase, PointerPhase::Up | PointerPhase::Cancel)
+            && !sample.pointer.kind.hovers();
+        let pointer_id = sample.pointer.id;
+
         let snapshot = crate::pointer::InputSnapshot::from_pointer_sample(&sample);
         self.dispatch_with_input_snapshot(event, snapshot, ops);
+
+        if ends_pointer {
+            self.pointers.end(pointer_id);
+        }
     }
 
     /// Deliver one scroll sample.
@@ -246,12 +291,67 @@ impl WidgetTree {
         snapshot: crate::pointer::InputSnapshot,
         ops: &mut dyn crate::window::WindowOps,
     ) {
+        // A dispatch reached from inside a dispatch — a handler's synthetic
+        // click, an assistive-technology action re-entering the door — is
+        // **queued**, not run inline. Running it inline would let it unwind the
+        // pointer state the outer sample is still standing on: the outer
+        // handler would return to a tree whose hover, capture and table entries
+        // had all moved under it. Queued, the outer dispatch finishes on the
+        // state it started with and the nested one replays immediately
+        // afterwards, so from a caller's side nothing changed — the queue is
+        // empty again before the top-level call returns.
+        if self.dispatch_depth > 0 {
+            self.pending_dispatch
+                .push_back(QueuedDispatch { event, snapshot });
+            return;
+        }
+        self.run_one_dispatch(event, snapshot, &mut *ops);
+        // `pop_front` in a loop rather than `drain`: a replayed dispatch may
+        // queue another of its own, and each must in turn run at depth zero.
+        while let Some(QueuedDispatch { event, snapshot }) = self.pending_dispatch.pop_front() {
+            self.run_one_dispatch(event, snapshot, &mut *ops);
+        }
+    }
+
+    /// One dispatch at depth zero, with `snapshot` installed as the tree's view
+    /// of the in-flight sample and the previous value restored afterwards.
+    ///
+    /// Save-and-restore rather than reset-to-default: the restore matters for
+    /// the paths that still call `dispatch_event_impl` directly (a drag move,
+    /// a scroll-into-view walk), which must not clear an outer snapshot.
+    fn run_one_dispatch(
+        &mut self,
+        event: WidgetEvent,
+        snapshot: crate::pointer::InputSnapshot,
+        ops: &mut dyn crate::window::WindowOps,
+    ) {
         let previous = std::mem::replace(&mut self.current_input, snapshot);
+        self.dispatch_depth += 1;
         self.dispatch_event_impl(event, ops);
+        self.dispatch_depth -= 1;
         self.current_input = previous;
     }
 
     fn dispatch_event_impl(&mut self, event: WidgetEvent, ops: &mut dyn crate::window::WindowOps) {
+        // Admit the pointer this event belongs to into the table before
+        // anything routes. A legacy `WidgetEvent` names no pointer, so
+        // `current_input` reports the mouse and this creates (or refreshes) the
+        // one mouse entry — which is what every singular accessor then reads,
+        // so a mouse-only tree behaves exactly as it did before the table.
+        if let Some(position) = pointer_event_position(&event) {
+            let is_down = matches!(event, WidgetEvent::PointerDown { .. });
+            let is_move = matches!(event, WidgetEvent::PointerMove { .. });
+            if !self.admit_current_pointer(position, is_down, is_move) {
+                return;
+            }
+            // A hovering-capable pointer takes the hover-owner role by pointing:
+            // the later sample wins, and whoever held it is sent a leave. A
+            // contact is refused the role outright — it has no hover to give.
+            if self.current_input.pointer.kind.hovers() {
+                self.claim_hover_owner_for_current(&mut *ops);
+            }
+        }
+
         // Track input modality for `:focus-visible`: keyboard input reveals
         // focus rings, pointer input hides them. Updated at the dispatch root so
         // every handler (and the next paint) observes the current modality.
@@ -557,7 +657,7 @@ impl WidgetTree {
 
         match &event {
             WidgetEvent::PointerMove { position } => {
-                if let Some(captured) = self.pointer_captured_by {
+                if let Some(captured) = self.current_pointer_capture() {
                     self.dispatch_to_widget(
                         captured,
                         &WidgetEvent::PointerMove {
@@ -611,7 +711,7 @@ impl WidgetTree {
                     // drag can still begin on move (tap-vs-drag across the
                     // hit-path).
                     if self.active_drag.is_none()
-                        && let Some(captured) = self.pointer_captured_by
+                        && let Some(captured) = self.current_pointer_capture()
                     {
                         self.arm_drag_observers(captured, &event, &mut *ops);
                     }
@@ -625,9 +725,11 @@ impl WidgetTree {
                 // button) leaves the ancestor's DragRecognizer armed, and the
                 // next hover move starts a phantom drag. Also discards the list.
                 self.release_drag_observers(&event, &mut *ops);
-                if let Some(captured) = self.pointer_captured_by {
+                if let Some(captured) = self.current_pointer_capture() {
                     self.dispatch_to_widget(captured, &event, &mut *ops);
-                    self.pointer_captured_by = None;
+                    // Per pointer: this Up releases *this* pointer's capture and
+                    // leaves every other contact's alone.
+                    self.set_current_pointer_capture(None);
                 } else if let Some(target) = self.hit_test(*position) {
                     self.dispatch_to_widget(target, &event, &mut *ops);
                 }
@@ -640,7 +742,7 @@ impl WidgetTree {
                 // nothing produces a `PointerCancel` until it lands. See
                 // `CancelReason`.
                 let target = self
-                    .pointer_captured_by
+                    .current_pointer_capture()
                     .or_else(|| position.and_then(|p| self.hit_test(p)));
                 if let Some(target) = target {
                     self.dispatch_to_widget(target, &event, &mut *ops);
@@ -654,7 +756,7 @@ impl WidgetTree {
                 // never writes hover and would otherwise route nowhere.
                 let target = match position {
                     Some(p) => self.hit_test(*p),
-                    None => self.hovered.or(self.focused),
+                    None => self.hovered_id().or(self.focused),
                 };
                 if let Some(target) = target {
                     self.dispatch_to_widget(target, &event, &mut *ops);
@@ -787,7 +889,7 @@ impl WidgetTree {
                 }
             }
             WidgetEvent::Gesture { .. } => {
-                if let Some(target) = self.hovered.or(self.focused) {
+                if let Some(target) = self.hovered_id().or(self.focused) {
                     self.dispatch_to_widget(target, &event, &mut *ops);
                 }
             }
@@ -955,13 +1057,21 @@ impl WidgetTree {
     }
 
     fn handle_pointer_move(&mut self, position: Point, ops: &mut dyn crate::window::WindowOps) {
-        self.previous_pointer_position = self.last_pointer_position;
-        self.last_pointer_position = Some(position);
+        // A contact routes its move by hit test but writes **no hover**: a
+        // finger has no hover state, so a second finger arriving beside a
+        // hovering mouse must leave enter/leave, the cursor, tooltip dwell and
+        // every `on_hover` handler exactly where they were.
+        if self.pointers.hover_owner_id() != Some(self.current_pointer_id()) {
+            if let Some(target) = self.hit_test(position) {
+                self.dispatch_to_widget(target, &WidgetEvent::PointerMove { position }, &mut *ops);
+            }
+            return;
+        }
         let target = self.hit_test(position);
 
-        if target != self.hovered {
-            let previously_hovered = self.hovered;
-            if let Some(old) = self.hovered {
+        if target != self.hovered_id() {
+            let previously_hovered = self.hovered_id();
+            if let Some(old) = previously_hovered {
                 self.dispatch_to_widget(old, &WidgetEvent::PointerLeave, &mut *ops);
                 self.tooltip_pointer_leave(old, &mut *ops);
             }
@@ -1141,7 +1251,7 @@ impl WidgetTree {
         };
 
         for &id in &ancestors {
-            let mut ctx = self.make_event_context(&mut *ops);
+            let mut ctx = self.make_event_context(&mut *ops).with_dispatch_node(id);
             ctx.press_claimed_by_interactive_child =
                 tap_owner.is_some_and(|owner| owner != id && self.is_descendant_of(owner, id));
             // Convert any pointer position into this node's widget-local
@@ -1167,7 +1277,7 @@ impl WidgetTree {
         let mut current = Some(target);
         let mut is_target = true;
         while let Some(id) = current {
-            let mut ctx = self.make_event_context(&mut *ops);
+            let mut ctx = self.make_event_context(&mut *ops).with_dispatch_node(id);
             ctx.press_claimed_by_interactive_child =
                 tap_owner.is_some_and(|owner| owner != id && self.is_descendant_of(owner, id));
             // Convert any pointer position into this node's widget-local
@@ -1226,7 +1336,9 @@ impl WidgetTree {
             return;
         }
 
-        let mut ctx = self.make_event_context(&mut *ops);
+        let mut ctx = self
+            .make_event_context(&mut *ops)
+            .with_dispatch_node(target);
         let WidgetTree {
             arena,
             gesture_owners,
@@ -1883,12 +1995,12 @@ impl WidgetTree {
             self.overlay_manager
                 .attach_fade(overlay_id, progress, duration);
         }
-        if let Some(capture) = ctx.pointer_capture {
-            if capture {
-                self.pointer_captured_by = Some(source_widget);
-            } else {
-                self.pointer_captured_by = None;
-            }
+        if let Some((pointer, capture)) = ctx.pointer_capture {
+            // Per pointer, and by default the pointer whose sample the handler
+            // was serving — so a mouse call site means exactly what it meant
+            // before, and two contacts on two widgets hold two captures.
+            let pointer = pointer.unwrap_or_else(|| self.current_pointer_id());
+            self.set_pointer_capture(pointer, capture.then_some(source_widget));
         }
         for (mut request, delay, focus_target, replace_siblings) in ctx.delayed_overlay_requests {
             if request.parent_overlay.is_none() {
@@ -1927,7 +2039,7 @@ impl WidgetTree {
         for content_id in ctx.safe_region_arm_requests {
             if let Some(apex) = self
                 .previous_pointer_position
-                .or(self.last_pointer_position)
+                .or_else(|| self.hover_owner_position())
             {
                 self.overlay_manager.arm_safe_region(
                     content_id,
@@ -2060,7 +2172,7 @@ impl WidgetTree {
                 preview_content_id,
                 preview_overlay_id,
             });
-            self.pointer_captured_by = Some(source_widget);
+            self.set_current_pointer_capture(Some(source_widget));
             // Grabbing-hand cursor while the drag is in flight. Reset on
             // drop / cancel / source-destroyed below.
             self.current_cursor = crate::widget::CursorIcon::Grabbing;
@@ -2253,9 +2365,9 @@ mod tests {
         let widget = tree.add(FillWidget::new());
         tree.layout(SizeProposal::exact(100.0, 50.0));
         tree.pointer_move(Point::new(50.0, 25.0));
-        assert_eq!(tree.hovered, Some(widget));
+        assert_eq!(tree.hovered(), Some(widget));
         tree.pointer_move(Point::new(200.0, 200.0));
-        assert_eq!(tree.hovered, None);
+        assert_eq!(tree.hovered(), None);
     }
 
     #[test]
@@ -2571,12 +2683,12 @@ mod tests {
         tree.layout(SizeProposal::exact(100.0, 50.0));
 
         tree.pointer_move(Point::new(50.0, 25.0));
-        assert_eq!(tree.hovered, Some(widget));
+        assert_eq!(tree.hovered(), Some(widget));
 
         tree.set_dormant(widget);
         tree.pointer_move(Point::new(200.0, 200.0));
         tree.pointer_move(Point::new(50.0, 25.0));
-        assert_eq!(tree.hovered, None);
+        assert_eq!(tree.hovered(), None);
     }
 
     #[test]

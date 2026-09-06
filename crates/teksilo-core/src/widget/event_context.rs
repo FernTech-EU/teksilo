@@ -87,8 +87,18 @@ pub struct EventContext<'ops> {
     /// last setter wins. `None` falls through to draining the
     /// per-id `overlay_dismissals` vec instead.
     pub(crate) dismiss_scope: Option<DismissScope>,
-    /// Request to capture or release the pointer.
-    pub(crate) pointer_capture: Option<bool>,
+    /// Request to capture (`true`) or release (`false`) a pointer, and which
+    /// one. `None` for the pointer means the one whose sample this handler is
+    /// serving — the default, and what every pre-multi-touch call site means.
+    pub(crate) pointer_capture: Option<(Option<crate::pointer::PointerId>, bool)>,
+    /// The widget currently holding the capture of the pointer being
+    /// dispatched, as the tree knew it when this context was made. Read by
+    /// [`owns_pointer`](EventContext::owns_pointer).
+    pub(crate) pointer_captor: Option<WidgetId>,
+    /// The node whose handler is running, when the dispatcher knows it.
+    /// `None` for a context made outside per-node dispatch (a gesture timer, a
+    /// key-capture callback, an async completion).
+    pub(crate) dispatch_node: Option<WidgetId>,
     /// Delayed overlay requests (request, delay, optional focus target,
     /// whether to dismiss sibling overlays when it finally shows).
     pub(crate) delayed_overlay_requests: Vec<(
@@ -395,6 +405,8 @@ impl<'ops> EventContext<'ops> {
             overlay_pause_requests: Vec::new(),
             dismiss_scope: None,
             pointer_capture: None,
+            pointer_captor: None,
+            dispatch_node: None,
             delayed_overlay_requests: Vec::new(),
             timed_overlay_requests: Vec::new(),
             reveal_overlay_requests: Vec::new(),
@@ -444,6 +456,19 @@ impl<'ops> EventContext<'ops> {
     /// `make_event_context` once per event batch.
     pub(crate) fn with_input_snapshot(mut self, input: crate::pointer::InputSnapshot) -> Self {
         self.input = input;
+        self
+    }
+
+    /// Record who holds the capture of the pointer being dispatched, so
+    /// [`owns_pointer`](Self::owns_pointer) can answer without a tree lookup.
+    pub(crate) fn with_pointer_captor(mut self, captor: Option<WidgetId>) -> Self {
+        self.pointer_captor = captor;
+        self
+    }
+
+    /// Record which node's handler is about to run.
+    pub(crate) fn with_dispatch_node(mut self, node: WidgetId) -> Self {
+        self.dispatch_node = Some(node);
         self
     }
 
@@ -1649,17 +1674,43 @@ impl<'ops> EventContext<'ops> {
         self.safe_region_arm_requests.push(content_id);
     }
 
-    /// Capture the pointer: all subsequent `PointerMove` and `PointerUp`
-    /// events will be routed to the capturing widget until the capture is
-    /// released. Use this when starting a drag operation.
+    /// Capture **the pointer this handler is serving**: its subsequent
+    /// `PointerMove` and `PointerUp` are routed to this widget regardless of
+    /// hit test, until the capture is released.
+    ///
+    /// Capture is per pointer. Two fingers pressing two widgets hold two
+    /// independent captures, and each is released only by its own Up or
+    /// Cancel — so a second contact lifting can no longer steal the first
+    /// one's stream. A mouse call site is unaffected: there is one mouse, and
+    /// this captures it.
     pub fn capture_pointer(&mut self) {
-        self.pointer_capture = Some(true);
+        self.pointer_capture = Some((None, true));
     }
 
-    /// Release a previously captured pointer. Pointer events resume normal
-    /// hit-test dispatch.
+    /// Capture a *named* pointer, for a handler driving a pointer other than
+    /// the one whose sample it is serving.
+    pub fn capture_pointer_id(&mut self, pointer: crate::pointer::PointerId) {
+        self.pointer_capture = Some((Some(pointer), true));
+    }
+
+    /// Release the capture of the pointer this handler is serving. Its events
+    /// resume normal hit-test dispatch.
     pub fn release_pointer(&mut self) {
-        self.pointer_capture = Some(false);
+        self.pointer_capture = Some((None, false));
+    }
+
+    /// Whether the widget whose handler is running already holds the capture
+    /// of the pointer it is serving.
+    ///
+    /// `true` also immediately after a [`capture_pointer`](Self::capture_pointer)
+    /// in the same handler, even though the tree does not apply the request
+    /// until the handler returns — asking "do I own this pointer?" after
+    /// claiming it must not answer no.
+    pub fn owns_pointer(&self) -> bool {
+        match self.pointer_capture {
+            Some((None, capture)) => capture,
+            _ => self.dispatch_node.is_some() && self.dispatch_node == self.pointer_captor,
+        }
     }
 
     /// Start a drag-and-drop operation from the given source widget.

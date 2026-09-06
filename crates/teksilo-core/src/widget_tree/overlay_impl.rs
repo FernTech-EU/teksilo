@@ -1449,7 +1449,7 @@ impl WidgetTree {
         }
         self.tooltips[index].hover_start = Some(self.sim_clock);
         self.tooltips[index].real_hover_start = Some(std::time::Instant::now());
-        self.tooltips[index].hover_origin = self.last_pointer_position;
+        self.tooltips[index].hover_origin = self.hover_owner_position();
         self.tooltips[index].armed_by_focus = false;
         self.arena.mark_needs_paint(self.tooltips[index].anchor_id);
     }
@@ -2004,7 +2004,7 @@ impl WidgetTree {
                 .focused
                 .filter(|focused| self.is_descendant_of(*focused, id));
             let hovered_in_subtree = self
-                .hovered
+                .hovered_id()
                 .filter(|hovered| self.is_descendant_of(*hovered, id));
 
             if let Some(focused) = focused_in_subtree {
@@ -2024,7 +2024,7 @@ impl WidgetTree {
             self.arena.set_dormant(id);
 
             if hovered_in_subtree.is_some() {
-                let old = self.hovered;
+                let old = self.hovered_id();
                 self.set_hovered(None);
                 self.update_hover_within_signals(old, None);
             }

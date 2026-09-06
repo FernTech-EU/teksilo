@@ -119,19 +119,26 @@ pub struct WidgetTree {
     /// — kept in sync via `set_focused`. Drives the inspector's Focus
     /// tab without polling.
     focused_signal: crate::signal::Signal<Option<WidgetId>>,
-    hovered: Option<WidgetId>,
-    /// Reactive mirror of `hovered`. Set whenever `hovered` changes
-    /// during dispatch / hit-test recovery so external observers
+    /// Every pointer the tree currently knows about, plus the primary and
+    /// hover-owner elections.
+    ///
+    /// Replaces the singular `hovered` / `last_pointer_position` /
+    /// `pointer_captured_by` this tree used to carry. Hover lives on the
+    /// **hover owner**'s entry (a contact never hovers), position and the
+    /// legacy singular accessors read the **primary**, and capture is per
+    /// pointer — two contacts hold independent captures, each released only by
+    /// its own Up or Cancel. See [`crate::pointer::table`].
+    pointers: crate::pointer::table::PointerTable,
+    /// Reactive mirror of the hover owner's hovered widget. Set whenever it
+    /// changes during dispatch / hit-test recovery so external observers
     /// (notably the debug inspector's hover tooltip) can react without
     /// polling. Held by handle so the field is a cheap clone.
     hovered_signal: crate::signal::Signal<Option<WidgetId>>,
-    /// Last known pointer position from `PointerMove`. Used by
-    /// `revalidate_interaction_state` to re-hit-test the hover after
-    /// a rebuild shifts content under a stationary cursor — without
-    /// this, the next `Scroll` event routes to `focused` (or falls
-    /// through to an ancestor scrollable) instead of the item the
-    /// user is actually pointing at.
-    last_pointer_position: Option<teksilo_canvas::Point>,
+    /// Reactive mirror of the kind of the pointer that most recently produced
+    /// a sample. Lets a widget switch an affordance between the mouse and the
+    /// touch form without a rebuild, and without every widget having to
+    /// remember an `on_pointer_event` of its own just to learn the modality.
+    last_pointer_kind_signal: crate::signal::Signal<teksilo_tokens::PointerKind>,
     /// The pointer position *before* the move currently being
     /// dispatched — i.e. the last sample that was still over the
     /// previously-hovered widget. Read when arming an overlay's safe
@@ -330,9 +337,20 @@ pub struct WidgetTree {
     /// common case — the caller usually drops the previous frame
     /// before calling render() again).
     cached_frame: Option<std::rc::Rc<RenderFrame>>,
-    /// Widget that has captured the pointer (receives all PointerMove/PointerUp
-    /// regardless of hit-test). Set via `EventContext::capture_pointer()`.
-    pointer_captured_by: Option<WidgetId>,
+    /// Dispatches that arrived while another dispatch was in flight, replayed
+    /// once the outer one completes.
+    ///
+    /// A handler that dispatches (a synthetic click, an AT action re-entering
+    /// the door) must not observe half-updated pointer state, and must not be
+    /// able to unwind the sample the outer dispatch is still standing on. So a
+    /// nested dispatch is queued here rather than run inline, and drained —
+    /// faithfully, event *and* input snapshot — after the outer sample
+    /// completes. From the caller's side nothing changes: the queue is empty
+    /// again before the top-level `dispatch_*` call returns.
+    pending_dispatch: std::collections::VecDeque<pointer_router::QueuedDispatch>,
+    /// How many dispatches are on the stack. Non-zero means "queue, do not
+    /// re-enter"; see [`Self::pending_dispatch`].
+    dispatch_depth: u32,
     /// Strict ancestors of the captured widget that carry a drag/swipe
     /// recognizer, armed on `PointerDown` so an ancestor drag can still start
     /// while a descendant tap holds the capture (tap-vs-drag disambiguation
@@ -698,11 +716,13 @@ impl WidgetTree {
             text_backend: None,
             focused: None,
             focused_signal: focused_signal.clone(),
-            hovered: None,
+            pointers: crate::pointer::table::PointerTable::new(),
             hovered_signal: crate::signal::Signal::new(None),
+            last_pointer_kind_signal: crate::signal::Signal::new(
+                teksilo_tokens::PointerKind::Mouse,
+            ),
             focus_visible: crate::signal::Signal::new(false),
             view_focus_stack: Vec::new(),
-            last_pointer_position: None,
             previous_pointer_position: None,
             pending_focus_restore: None,
             last_proposal: SizeProposal::exact(800.0, 600.0),
@@ -739,7 +759,8 @@ impl WidgetTree {
             synthetic_local_bounds: std::collections::HashMap::new(),
             a11y_walk_generation: 0,
             cached_frame: None,
-            pointer_captured_by: None,
+            pending_dispatch: std::collections::VecDeque::new(),
+            dispatch_depth: 0,
             drag_observers: Vec::new(),
             current_cursor: crate::widget::CursorIcon::Default,
             pending_delayed_overlays: Vec::new(),
@@ -818,7 +839,12 @@ impl WidgetTree {
             .with_app_context(self.app_context.clone())
             .with_window_context(ops, self.window_state.clone())
             .with_drag_external(drag_is_external)
-            .with_query_snapshot(self.last_pointer_position, overlay_snapshot, self.focused())
+            .with_query_snapshot(
+                self.last_pointer_position(),
+                overlay_snapshot,
+                self.focused(),
+            )
+            .with_pointer_captor(self.current_pointer_capture())
             .with_layout_direction(self.layout_direction)
             .with_window_active(self.is_window_active())
             .with_input_snapshot(self.current_input.clone())
@@ -1797,7 +1823,7 @@ impl WidgetTree {
                 // cursor shapes and tooltips everywhere else), and the next
                 // click's Up is swallowed by it, so the first press on any
                 // release-activated control silently does nothing.
-                self.pointer_captured_by = None;
+                self.pointers.release_all_captures();
             }
         }
     }
@@ -2070,10 +2096,10 @@ impl WidgetTree {
         if self.focused.is_none() {
             self.focus_origin = None;
         }
-        if let Some(id) = self.hovered
+        if let Some(id) = self.hovered_id()
             && !self.arena.is_active(id)
         {
-            let old = self.hovered;
+            let old = self.hovered_id();
             self.set_hovered(None);
             self.update_hover_within_signals(old, None);
         }
@@ -2082,11 +2108,7 @@ impl WidgetTree {
         // inactive targets. Drop the capture so events resume normal
         // hit-test dispatch. Same for any in-flight drag session whose
         // source was torn down: the user sees the drag "stick".
-        if let Some(id) = self.pointer_captured_by
-            && !self.arena.is_active(id)
-        {
-            self.pointer_captured_by = None;
-        }
+        self.pointers.retain_active(&self.arena);
         // External (OS) drags have no in-app source widget, so they are never
         // torn down by source destruction — only internal drags are salvaged.
         let source_gone = self
@@ -2469,8 +2491,8 @@ impl WidgetTree {
             self.update_focus_within_signals(old, None);
             self.update_view_focus_signals(old, None);
         }
-        if self.hovered == Some(widget_id) {
-            let old = self.hovered;
+        if self.hovered_id() == Some(widget_id) {
+            let old = self.hovered_id();
             self.set_hovered(None);
             self.update_hover_within_signals(old, None);
         }
@@ -2479,9 +2501,7 @@ impl WidgetTree {
         // Move/Up (dispatch rejects inactive targets) until the next layout
         // pass runs `revalidate_interaction_state`. Drop it eagerly so capture
         // never outlives its owner, even when a destroy happens mid-gesture.
-        if self.pointer_captured_by == Some(widget_id) {
-            self.pointer_captured_by = None;
-        }
+        self.pointers.release_captures_of(widget_id);
         // Single-node removal: this function already recursed into the
         // children above (honouring re-parenting when `reparent_aware`).
         // `arena.destroy` would re-recurse the now-stale `children` list and

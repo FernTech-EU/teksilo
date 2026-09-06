@@ -36,6 +36,152 @@ impl WidgetTree {
         self.input_clock.now()
     }
 
+    // -----------------------------------------------------------------
+    // The pointer table
+    // -----------------------------------------------------------------
+
+    /// The pointer this dispatch is serving.
+    ///
+    /// Outside a pointer dispatch the input snapshot holds its default — the
+    /// mouse — which is exactly what every legacy `WidgetEvent` has always
+    /// meant, so a caller that names no pointer keeps naming the mouse.
+    pub(crate) fn current_pointer_id(&self) -> crate::pointer::PointerId {
+        self.current_input.pointer.id
+    }
+
+    /// The widget holding the capture of the pointer this dispatch is serving.
+    ///
+    /// Capture is **per pointer**: two contacts hold independent captures and
+    /// each is released only by its own Up or Cancel. For the mouse — the only
+    /// pointer that existed before the touch programme — this is the old
+    /// singular `pointer_captured_by`, unchanged.
+    pub(crate) fn current_pointer_capture(&self) -> Option<WidgetId> {
+        self.pointers
+            .get(self.current_pointer_id())
+            .and_then(|e| e.captured_by)
+    }
+
+    /// Set (or clear) the capture of the pointer this dispatch is serving.
+    pub(crate) fn set_current_pointer_capture(&mut self, captor: Option<WidgetId>) {
+        let id = self.current_pointer_id();
+        if let Some(entry) = self.pointers.get_mut(id) {
+            entry.captured_by = captor;
+        }
+    }
+
+    /// Set (or clear) the capture of a *named* pointer — the door
+    /// [`EventContext::capture_pointer_id`](crate::widget::EventContext::capture_pointer_id)
+    /// opens for a handler driving a pointer other than the one it is serving.
+    ///
+    /// A capture asked for on a pointer that is not live is dropped, not
+    /// invented: no sample will ever be delivered to it, so an entry conjured
+    /// to hold it would be a capture nothing can release. Reaching this means
+    /// the handler ran outside a pointer dispatch entirely (an assistive
+    /// technology action, a timer), where there is no pointer to capture.
+    pub(crate) fn set_pointer_capture(
+        &mut self,
+        pointer: crate::pointer::PointerId,
+        captor: Option<WidgetId>,
+    ) {
+        if let Some(entry) = self.pointers.get_mut(pointer) {
+            entry.captured_by = captor;
+        }
+    }
+
+    /// Release the capture a drag session was holding.
+    ///
+    /// A drag owns one pointer, but which one is not recorded on the session
+    /// yet (arbitration lands with the gesture package), so this releases both
+    /// the pointer being dispatched and anything the drag's source widget
+    /// still holds. For the mouse those are the same capture, which is why
+    /// this is a faithful stand-in for the old blanket clear.
+    pub(super) fn release_drag_capture(&mut self, source: Option<WidgetId>) {
+        self.set_current_pointer_capture(None);
+        if let Some(src) = source {
+            self.pointers.release_captures_of(src);
+        }
+    }
+
+    /// The widget the **hover owner** is over.
+    ///
+    /// Hover belongs to the hover owner and to nobody else: a contact never
+    /// produces hover, so a finger arriving beside a hovering mouse leaves
+    /// this — and every `on_hover` handler, tooltip dwell and cursor shape —
+    /// exactly where it was.
+    pub(crate) fn hovered_id(&self) -> Option<WidgetId> {
+        self.pointers.hover_owner().and_then(|e| e.hovered)
+    }
+
+    /// Where the hover owner is, if one is live.
+    ///
+    /// The position hover recovery must re-hit-test at. Distinct from
+    /// [`last_pointer_position`](Self::last_pointer_position), which reports
+    /// the *primary* pointer and so answers for a touch-only device too —
+    /// where re-deriving hover from it would invent a hover no finger ever
+    /// produced.
+    pub(crate) fn hover_owner_position(&self) -> Option<teksilo_canvas::Point> {
+        self.pointers.hover_owner().map(|e| e.position)
+    }
+
+    /// Admit the sample being dispatched into the pointer table, refreshing
+    /// its position and its [`PointerInfo`](crate::pointer::PointerInfo), and
+    /// publish the modality.
+    ///
+    /// Returns `false` when the table refused the pointer (a palm, or the
+    /// contact cap), in which case the sample must not be dispatched at all.
+    pub(super) fn admit_current_pointer(
+        &mut self,
+        position: teksilo_canvas::Point,
+        is_down: bool,
+        is_move: bool,
+    ) -> bool {
+        let info = self.current_input.pointer;
+        // Where this pointer was *before* this sample. Only a move of the
+        // hover owner updates `previous_pointer_position`, because the one
+        // reader — the overlay safe triangle — wants the last sample that was
+        // still over the anchor the pointer is leaving, and a press or a
+        // second contact is not that.
+        let was_hover_owner = self.pointers.hover_owner_id() == Some(info.id);
+        let before = self.pointers.get(info.id).map(|e| e.position);
+        if self.pointers.admit(info, position, is_down).is_none() {
+            return false;
+        }
+        if is_move && was_hover_owner {
+            self.previous_pointer_position = before;
+        }
+        if self.last_pointer_kind_signal.get() != info.kind {
+            self.last_pointer_kind_signal.set(info.kind);
+        }
+        true
+    }
+
+    /// Hand the hover-owner role to the pointer being dispatched, and take
+    /// hover away from whoever held it.
+    ///
+    /// The later sample wins: on a machine with both a mouse and a pen, the
+    /// device the user just moved owns hover, and the one that lost it is sent
+    /// a [`PointerLeave`](crate::event::WidgetEvent::PointerLeave) for the
+    /// widget it was over — otherwise that widget stays lit for a pointer that
+    /// is no longer pointing at it. A contact is refused outright.
+    pub(super) fn claim_hover_owner_for_current(&mut self, ops: &mut dyn crate::window::WindowOps) {
+        let id = self.current_pointer_id();
+        let Some(displaced) = self.pointers.claim_hover_owner(id) else {
+            return;
+        };
+        let stale = self
+            .pointers
+            .get_mut(displaced)
+            .and_then(|entry| entry.hovered.take());
+        if let Some(old) = stale {
+            self.dispatch_to_widget(old, &WidgetEvent::PointerLeave, &mut *ops);
+            self.tooltip_pointer_leave(old, &mut *ops);
+        }
+        // The new owner starts with no hover of its own; the move that gave it
+        // the role establishes one immediately afterwards.
+        self.update_hover_within_signals(stale, None);
+        self.set_hovered(None);
+    }
+
     /// Whether `id` carries a drag or swipe handler (hence gets a drag/swipe
     /// recognizer once its arena is built).
     fn widget_has_drag(&self, id: WidgetId) -> bool {
@@ -424,7 +570,7 @@ mod tests {
             modifiers: Modifiers::NONE,
         });
         assert_eq!(
-            tree.pointer_captured_by,
+            tree.pointer_captured_by(),
             Some(child),
             "PointerDown handler should have captured the pointer"
         );
@@ -434,7 +580,8 @@ mod tests {
         // swallows every later Move/Up until the next layout pass heals it.
         tree.destroy_subtree(parent);
         assert_eq!(
-            tree.pointer_captured_by, None,
+            tree.pointer_captured_by(),
+            None,
             "destroy_subtree must clear a capture anchored at a destroyed widget"
         );
     }
@@ -604,5 +751,440 @@ mod clock_tests {
         let a = tree.input_now();
         let b = tree.input_now();
         assert!(b >= a);
+    }
+}
+
+/// The per-pointer table replacing the tree's singular pointer state: two
+/// contacts hold two captures, hover belongs to the hover owner alone, the
+/// contact cap is enforced at the door, and a nested dispatch waits its turn.
+#[cfg(test)]
+mod pointer_table_tests {
+    use super::*;
+    use crate::event::{EventResponse, Modifiers, PointerButton};
+    use crate::pointer::{
+        BackendDeviceKey, EventTime, PointerId, PointerIdAllocator, PointerInfo, PointerPhase,
+        PointerSample,
+    };
+    use crate::test_widgets::FillWidget;
+    use crate::widget_builder::WidgetBuilder;
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    /// A fresh contact identity. Minted through the real allocator so it is
+    /// monotonic and distinct from [`PointerId::MOUSE`].
+    fn contact_id(raw: u64) -> PointerId {
+        let alloc = PointerIdAllocator::global();
+        let device = BackendDeviceKey::new(0xC0FFEE);
+        let id = alloc.begin(device, raw);
+        alloc.end(device, raw);
+        id
+    }
+
+    fn contact(id: PointerId, phase: PointerPhase, at: Point) -> PointerSample {
+        PointerSample {
+            pointer: PointerInfo::touch(id, EventTime::ZERO),
+            phase,
+            position: at,
+            button: None,
+            modifiers: Modifiers::NONE,
+            coalesced: Vec::new(),
+        }
+    }
+
+    /// A widget that captures the pointer on press and holds it. The shape of
+    /// every real drag handle (a slider knob, a splitter divider).
+    fn capturing() -> impl crate::widget::Widget + 'static {
+        FillWidget::new().on_pointer_event(|event, ctx| {
+            if matches!(event, WidgetEvent::PointerDown { .. }) {
+                ctx.capture_pointer();
+            }
+            EventResponse::Ignored
+        })
+    }
+
+    /// Two contacts on two widgets hold **independent** captures, and one
+    /// lifting leaves the other's alone. With a single `pointer_captured_by`
+    /// the second press overwrote the first, and the first finger's stream
+    /// silently moved to the second widget.
+    #[test]
+    fn two_contacts_hold_independent_captures() {
+        let mut tree = WidgetTree::new();
+        let a = tree.add(capturing());
+        let b = tree.add(capturing());
+        let _root = tree.add(SideBySide { a, b });
+        tree.layout(SizeProposal::exact(100.0, 100.0));
+
+        let first = contact_id(1);
+        let second = contact_id(2);
+        tree.dispatch_pointer(contact(first, PointerPhase::Down, Point::new(25.0, 50.0)));
+        tree.dispatch_pointer(contact(second, PointerPhase::Down, Point::new(75.0, 50.0)));
+
+        assert_eq!(tree.captured_by(first), Some(a));
+        assert_eq!(tree.captured_by(second), Some(b));
+
+        tree.dispatch_pointer(contact(first, PointerPhase::Up, Point::new(25.0, 50.0)));
+        assert_eq!(tree.captured_by(first), None, "the lifted contact is gone");
+        assert_eq!(
+            tree.captured_by(second),
+            Some(b),
+            "one contact lifting must not release the other's capture"
+        );
+    }
+
+    /// A finger arriving while the mouse hovers must not touch hover at all —
+    /// not the id, not the signal, not the `on_hover` handlers behind it.
+    #[test]
+    fn a_second_contact_never_churns_the_hover_signal() {
+        let mut tree = WidgetTree::new();
+        let a = tree.add(FillWidget::new());
+        let b = tree.add(FillWidget::new());
+        let _root = tree.add(SideBySide { a, b });
+        tree.layout(SizeProposal::exact(100.0, 100.0));
+
+        tree.dispatch_event(WidgetEvent::PointerMove {
+            position: Point::new(25.0, 50.0),
+        });
+        assert_eq!(tree.hovered(), Some(a));
+
+        let churn = Rc::new(std::cell::Cell::new(0usize));
+        let observer = {
+            let churn = churn.clone();
+            tree.hovered_signal()
+                .observe(move |_| churn.set(churn.get() + 1))
+        };
+
+        let finger = contact_id(3);
+        tree.dispatch_pointer(contact(finger, PointerPhase::Down, Point::new(75.0, 50.0)));
+        tree.dispatch_pointer(contact(finger, PointerPhase::Move, Point::new(80.0, 50.0)));
+        tree.dispatch_pointer(contact(finger, PointerPhase::Up, Point::new(80.0, 50.0)));
+
+        assert_eq!(
+            tree.hovered(),
+            Some(a),
+            "the mouse is still hovering where it was"
+        );
+        assert_eq!(churn.get(), 0, "a contact must not write the hover signal");
+        drop(observer);
+    }
+
+    /// …and the contact is never the hover owner, so it has no hover of its
+    /// own to report either.
+    #[test]
+    fn a_contact_is_never_the_hover_owner() {
+        let mut tree = WidgetTree::new();
+        let target = tree.add(FillWidget::new());
+        tree.layout(SizeProposal::exact(100.0, 100.0));
+
+        let finger = contact_id(4);
+        tree.dispatch_pointer(contact(finger, PointerPhase::Down, Point::new(50.0, 50.0)));
+        tree.dispatch_pointer(contact(finger, PointerPhase::Move, Point::new(52.0, 50.0)));
+
+        assert_eq!(tree.hover_owner(), None, "a finger cannot own hover");
+        assert_eq!(tree.hovered(), None);
+        assert_eq!(tree.hovered_for(finger), None);
+        assert_eq!(
+            tree.primary_pointer().map(|p| p.id),
+            Some(finger),
+            "it is still the primary pointer — primary and hover owner are not the same role"
+        );
+        assert_eq!(
+            tree.pointer_position(finger),
+            Some(Point::new(52.0, 50.0)),
+            "and its position is tracked all the same"
+        );
+        let _ = target;
+    }
+
+    /// A synthetic pen, since nothing produces a real one until the pen
+    /// package lands: a hovering-capable pointer *does* take the role, and the
+    /// mouse it displaces is told its widget is no longer hovered.
+    #[test]
+    fn a_pen_takes_the_hover_owner_role_from_the_mouse() {
+        let mut tree = WidgetTree::new();
+        let a = tree.add(FillWidget::new());
+        let b = tree.add(FillWidget::new());
+        let _root = tree.add(SideBySide { a, b });
+        tree.layout(SizeProposal::exact(100.0, 100.0));
+
+        tree.dispatch_event(WidgetEvent::PointerMove {
+            position: Point::new(25.0, 50.0),
+        });
+        assert_eq!(tree.hovered(), Some(a));
+
+        let stylus = contact_id(5);
+        let mut pen = PointerInfo::touch(stylus, EventTime::ZERO);
+        pen.kind = teksilo_tokens::PointerKind::Pen(teksilo_tokens::PenKind::Pen);
+        let mut sample = contact(stylus, PointerPhase::Move, Point::new(75.0, 50.0));
+        sample.pointer = pen;
+        tree.dispatch_pointer(sample);
+
+        assert_eq!(
+            tree.hover_owner().map(|p| p.id),
+            Some(stylus),
+            "the later hovering sample wins the role"
+        );
+        assert_eq!(tree.hovered(), Some(b));
+        assert_eq!(
+            tree.hovered_for(PointerId::MOUSE),
+            None,
+            "the displaced owner was told to let go"
+        );
+    }
+
+    /// The tenth simultaneous contact is admitted; the eleventh is refused at
+    /// the door and produces no event at all.
+    #[test]
+    fn the_eleventh_contact_is_dropped_at_the_door() {
+        use crate::pointer::table::PointerTable;
+
+        let presses = Rc::new(std::cell::Cell::new(0usize));
+        let mut tree = WidgetTree::new();
+        let counted = {
+            let presses = presses.clone();
+            tree.add(FillWidget::new().on_pointer_event(move |event, _ctx| {
+                if matches!(event, WidgetEvent::PointerDown { .. }) {
+                    presses.set(presses.get() + 1);
+                }
+                EventResponse::Ignored
+            }))
+        };
+        tree.layout(SizeProposal::exact(100.0, 100.0));
+
+        let ids: Vec<_> = (0..PointerTable::DEFAULT_CAP)
+            .map(|n| contact_id(100 + n as u64))
+            .collect();
+        for &id in &ids {
+            tree.dispatch_pointer(contact(id, PointerPhase::Down, Point::new(50.0, 50.0)));
+        }
+        assert_eq!(presses.get(), PointerTable::DEFAULT_CAP);
+        assert_eq!(tree.live_pointers().count(), PointerTable::DEFAULT_CAP);
+
+        let overflow = contact_id(200);
+        tree.dispatch_pointer(contact(
+            overflow,
+            PointerPhase::Down,
+            Point::new(50.0, 50.0),
+        ));
+        assert_eq!(
+            presses.get(),
+            PointerTable::DEFAULT_CAP,
+            "the eleventh contact must not reach a widget"
+        );
+        assert_eq!(tree.captured_by(overflow), None);
+        assert_eq!(tree.live_pointers().count(), PointerTable::DEFAULT_CAP);
+        let _ = counted;
+    }
+
+    /// A palm the digitizer flagged never reaches a widget either.
+    #[test]
+    fn a_palm_never_reaches_a_widget() {
+        let presses = Rc::new(std::cell::Cell::new(0usize));
+        let mut tree = WidgetTree::new();
+        {
+            let presses = presses.clone();
+            tree.add(FillWidget::new().on_pointer_event(move |event, _ctx| {
+                if matches!(event, WidgetEvent::PointerDown { .. }) {
+                    presses.set(presses.get() + 1);
+                }
+                EventResponse::Ignored
+            }));
+        }
+        tree.layout(SizeProposal::exact(100.0, 100.0));
+
+        let id = contact_id(300);
+        let mut sample = contact(id, PointerPhase::Down, Point::new(50.0, 50.0));
+        sample.pointer.palm = true;
+        tree.dispatch_pointer(sample);
+        assert_eq!(presses.get(), 0);
+        assert_eq!(tree.live_pointers().count(), 0);
+    }
+
+    /// A dispatch reached from inside a dispatch is queued, not run inline:
+    /// the rest of the outer bubble runs on the state it started with, and the
+    /// nested dispatch replays afterwards — still before the top-level call
+    /// returns.
+    #[test]
+    fn a_nested_dispatch_is_queued_and_drained_after() {
+        let log: Rc<RefCell<Vec<&'static str>>> = Rc::new(RefCell::new(Vec::new()));
+
+        let mut tree = WidgetTree::new();
+        let other = {
+            let log = log.clone();
+            tree.add(FillWidget::new().on_tap(move |_e, _ctx| {
+                log.borrow_mut().push("nested");
+            }))
+        };
+        // Two handlers on the child, in the order the bubble runs them:
+        // `on_pointer_event` (the pre-gesture intercept) queues the nested
+        // dispatch, `on_tap` is the outer work still to come after it. That
+        // pair is what makes the ordering below evidence rather than
+        // coincidence.
+        let child = {
+            let log_pointer = log.clone();
+            let log_tap = log.clone();
+            tree.add(
+                FillWidget::new()
+                    .on_pointer_event(move |event, ctx| {
+                        if matches!(event, WidgetEvent::PointerUp { .. }) {
+                            log_pointer.borrow_mut().push("child-press");
+                            // Re-enters the dispatch door from inside a handler.
+                            ctx.synthetic_click(other);
+                        }
+                        EventResponse::Ignored
+                    })
+                    .on_tap(move |_e, _ctx| {
+                        log_tap.borrow_mut().push("child-tap");
+                    }),
+            )
+        };
+        // Keep the two halves disjoint, so the synthetic click lands on
+        // `other` and not back on `child` (which would re-enter for ever).
+        let _root = tree.add(SideBySide { a: child, b: other });
+        tree.layout(SizeProposal::exact(100.0, 100.0));
+
+        let at = tree.bounds(child).center();
+        tree.dispatch_event(WidgetEvent::PointerDown {
+            position: at,
+            button: PointerButton::Primary,
+            modifiers: Modifiers::NONE,
+        });
+        tree.dispatch_event(WidgetEvent::PointerUp {
+            position: at,
+            button: PointerButton::Primary,
+            modifiers: Modifiers::NONE,
+        });
+
+        assert_eq!(
+            *log.borrow(),
+            vec!["child-press", "child-tap", "nested"],
+            "the outer dispatch must finish on the state it started with, and the \
+             nested dispatch replay only once it has — run inline it would read \
+             child-press, nested, child-tap"
+        );
+        assert!(
+            !tree.has_pending_dispatch(),
+            "the queue must be empty again before the top-level call returns"
+        );
+    }
+
+    /// Localisation reads the captor's **current** bounds on every event, so a
+    /// captured control inside a container that moves keeps reporting sensible
+    /// widget-local coordinates rather than coordinates relative to where it
+    /// used to be.
+    #[test]
+    fn a_captured_widget_localises_against_its_moving_bounds() {
+        let seen: Rc<RefCell<Vec<Point>>> = Rc::new(RefCell::new(Vec::new()));
+        let mut tree = WidgetTree::new();
+        let knob = {
+            let seen = seen.clone();
+            tree.add(FillWidget::new().on_pointer_event(move |event, ctx| {
+                match event {
+                    WidgetEvent::PointerDown { .. } => ctx.capture_pointer(),
+                    WidgetEvent::PointerMove { position } => seen.borrow_mut().push(*position),
+                    _ => {}
+                }
+                EventResponse::Ignored
+            }))
+        };
+        let offset = crate::signal::Signal::new(0.0f32);
+        let _root = tree.add(ShiftedSlot {
+            child: knob,
+            offset: offset.clone(),
+        });
+        tree.layout(SizeProposal::exact(100.0, 100.0));
+
+        tree.dispatch_event(WidgetEvent::PointerDown {
+            position: Point::new(30.0, 40.0),
+            button: PointerButton::Primary,
+            modifiers: Modifiers::NONE,
+        });
+        assert_eq!(tree.pointer_captured_by(), Some(knob));
+        tree.dispatch_event(WidgetEvent::PointerMove {
+            position: Point::new(30.0, 40.0),
+        });
+
+        // The container slides its child 20 dp to the trailing side.
+        offset.set(20.0);
+        tree.arena.mark_all_dirty();
+        tree.layout(SizeProposal::exact(100.0, 100.0));
+
+        tree.dispatch_event(WidgetEvent::PointerMove {
+            position: Point::new(30.0, 40.0),
+        });
+
+        assert_eq!(
+            *seen.borrow(),
+            vec![Point::new(30.0, 40.0), Point::new(10.0, 40.0)],
+            "the same window position must localise against the captor's new origin"
+        );
+    }
+
+    // --- fixtures --------------------------------------------------------
+
+    /// Splits its bounds down the middle: `a` on the leading half, `b` on the
+    /// trailing one, so two pointers can land on two different widgets.
+    #[derive(Debug)]
+    struct SideBySide {
+        a: WidgetId,
+        b: WidgetId,
+    }
+
+    impl crate::widget::Widget for SideBySide {
+        fn layout_response(
+            &self,
+            proposal: SizeProposal,
+            _ctx: &crate::widget::LayoutContext,
+        ) -> crate::widget::LayoutResponse {
+            proposal.resolve(0.0, 0.0).into()
+        }
+        fn place_children(
+            &self,
+            bounds: Rect,
+            _proposal: SizeProposal,
+            children: &mut [crate::widget::WidgetPlacement],
+            _ctx: &crate::widget::LayoutContext,
+        ) {
+            let half = bounds.width / 2.0;
+            for (index, c) in children.iter_mut().enumerate() {
+                c.origin = Point::new(bounds.x + half * index as f32, bounds.y);
+                c.size = teksilo_canvas::Size::new(half, bounds.height);
+            }
+        }
+        fn children(&self) -> Vec<WidgetId> {
+            vec![self.a, self.b]
+        }
+    }
+
+    /// Places its single child at a signal-driven horizontal offset, so a test
+    /// can move a captured widget between two pointer samples.
+    #[derive(Debug)]
+    struct ShiftedSlot {
+        child: WidgetId,
+        offset: crate::signal::Signal<f32>,
+    }
+
+    impl crate::widget::Widget for ShiftedSlot {
+        fn layout_response(
+            &self,
+            proposal: SizeProposal,
+            _ctx: &crate::widget::LayoutContext,
+        ) -> crate::widget::LayoutResponse {
+            proposal.resolve(0.0, 0.0).into()
+        }
+        fn place_children(
+            &self,
+            bounds: Rect,
+            _proposal: SizeProposal,
+            children: &mut [crate::widget::WidgetPlacement],
+            _ctx: &crate::widget::LayoutContext,
+        ) {
+            for c in children.iter_mut() {
+                c.origin = Point::new(bounds.x + self.offset.get(), bounds.y);
+                c.size = bounds.size();
+            }
+        }
+        fn children(&self) -> Vec<WidgetId> {
+            vec![self.child]
+        }
     }
 }

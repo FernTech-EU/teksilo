@@ -676,14 +676,23 @@ impl WidgetTree {
         self.view_focus_stack.last().cloned()
     }
 
-    /// Single point of mutation for `self.hovered`. Updates both the
-    /// internal field and the externally-observable Signal so debug
-    /// tooling (the inspector's hover tooltip) doesn't have to poll.
-    /// Does **not** call `update_hover_within_signals` — call sites
-    /// remain in charge of dispatching enter/leave because some sites
-    /// (e.g. post-layout hover recovery) intentionally skip it.
+    /// Single point of mutation for the hovered widget. Writes it onto the
+    /// **hover owner**'s entry in the pointer table and updates the
+    /// externally-observable Signal so debug tooling (the inspector's hover
+    /// tooltip) doesn't have to poll.
+    ///
+    /// Hover is hover-owner-only, so this is a no-op on the table side when no
+    /// hovering-capable pointer is live — a touch-only device has nothing that
+    /// hovers, and writing a contact's target here would make every hover
+    /// affordance fire on tap. The signal is still kept honest.
+    ///
+    /// Does **not** call `update_hover_within_signals` — call sites remain in
+    /// charge of dispatching enter/leave because some sites (e.g. post-layout
+    /// hover recovery) intentionally skip it.
     pub(crate) fn set_hovered(&mut self, value: Option<WidgetId>) {
-        self.hovered = value;
+        if let Some(entry) = self.pointers.hover_owner_mut() {
+            entry.hovered = value;
+        }
         if self.hovered_signal.get() != value {
             self.hovered_signal.set(value);
         }
@@ -711,6 +720,12 @@ impl WidgetTree {
     ) {
         let old_chain = self.strict_ancestors_of(old);
         let new_chain = self.strict_ancestors_of(new);
+        // Record the chain on the hover owner's entry: it is the pointer that
+        // put those signals to `true`, so it is the one whose teardown (and
+        // whose post-rebuild scrub) has to know about them.
+        if let Some(entry) = self.pointers.hover_owner_mut() {
+            entry.hover_within = new_chain.clone();
+        }
         for &id in &old_chain {
             if !new_chain.contains(&id)
                 && let Some(node) = self.arena.get(id)

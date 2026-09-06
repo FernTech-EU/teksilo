@@ -20,7 +20,61 @@ impl WidgetTree {
     /// requiring the gate's evaluation site to receive a fresh
     /// `PointerMove` itself.
     pub fn last_pointer_position(&self) -> Option<teksilo_canvas::Point> {
-        self.last_pointer_position
+        self.pointers.primary().map(|e| e.position)
+    }
+
+    /// Where a *named* pointer is, in window-logical coordinates.
+    ///
+    /// `None` if that pointer is not live. The per-pointer companion to
+    /// [`last_pointer_position`](Self::last_pointer_position), which reports
+    /// the primary.
+    pub fn pointer_position(
+        &self,
+        pointer: crate::pointer::PointerId,
+    ) -> Option<teksilo_canvas::Point> {
+        self.pointers.get(pointer).map(|e| e.position)
+    }
+
+    /// The widget holding `pointer`'s capture.
+    ///
+    /// Capture is per pointer: two contacts hold independent captures, and
+    /// each is released only by its own Up or Cancel.
+    pub fn captured_by(&self, pointer: crate::pointer::PointerId) -> Option<WidgetId> {
+        self.pointers.get(pointer).and_then(|e| e.captured_by)
+    }
+
+    /// The widget holding the **primary** pointer's capture — the singular
+    /// view of capture, and for a mouse-only machine the whole story.
+    pub fn pointer_captured_by(&self) -> Option<WidgetId> {
+        self.pointers.primary().and_then(|e| e.captured_by)
+    }
+
+    /// Every live pointer.
+    ///
+    /// A mouse appears once it has produced a sample and stays for the life of
+    /// the tree (it never lifts); a contact appears at its press and is gone
+    /// after its Up or Cancel.
+    pub fn live_pointers(&self) -> impl Iterator<Item = crate::pointer::PointerInfo> + '_ {
+        self.pointers.iter().map(|e| e.info)
+    }
+
+    /// Teksilo's single pointer — the one backing
+    /// [`hovered`](Self::hovered) and
+    /// [`last_pointer_position`](Self::last_pointer_position). A mouse wins
+    /// the role whenever one is live; failing that, the oldest pointer does.
+    ///
+    /// Not the same thing as
+    /// [`PointerInfo::primary`](crate::pointer::PointerInfo::primary), which
+    /// is the W3C per-kind flag and can be true for two pointers at once.
+    pub fn primary_pointer(&self) -> Option<crate::pointer::PointerInfo> {
+        self.pointers.primary().map(|e| e.info)
+    }
+
+    /// The most recent hovering-capable pointer — a mouse, or a pen in
+    /// proximity. Hover, the cursor and tooltip dwell all follow it, and a
+    /// touch contact is never it.
+    pub fn hover_owner(&self) -> Option<crate::pointer::PointerInfo> {
+        self.pointers.hover_owner().map(|e| e.info)
     }
 
     /// Borrow the widget at `id` as `&dyn Any` for concrete-type
@@ -162,7 +216,34 @@ impl WidgetTree {
     /// affect what shows up here. Mirrors the private `hovered` field
     /// for read-only consumers (debug inspector, layout introspection).
     pub fn hovered(&self) -> Option<WidgetId> {
-        self.hovered
+        self.hovered_id()
+    }
+
+    /// The widget a *named* pointer is over.
+    ///
+    /// Only ever `Some` for the hover owner: a contact produces no hover, so
+    /// asking a finger what it is hovering always answers `None`.
+    pub fn hovered_for(&self, pointer: crate::pointer::PointerId) -> Option<WidgetId> {
+        self.pointers.get(pointer).and_then(|e| e.hovered)
+    }
+
+    /// Whether any dispatch is waiting to be replayed.
+    ///
+    /// Always `false` outside a dispatch — the queue is drained before a
+    /// top-level `dispatch_*` returns. A test asserts that; nothing else
+    /// should need to ask.
+    pub fn has_pending_dispatch(&self) -> bool {
+        !self.pending_dispatch.is_empty()
+    }
+
+    /// Reactive handle to the kind of the pointer that most recently produced
+    /// a sample — mouse, finger, stylus.
+    ///
+    /// The one question an adaptive affordance actually needs: whether the
+    /// user is currently working by hover or by contact. Bind it rather than
+    /// remembering an `on_pointer_event` purely to learn the modality.
+    pub fn last_pointer_kind_signal(&self) -> crate::signal::Signal<teksilo_tokens::PointerKind> {
+        self.last_pointer_kind_signal.clone()
     }
 
     /// Reactive handle to the hovered widget id. Cheap clone — the

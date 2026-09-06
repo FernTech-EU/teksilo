@@ -107,7 +107,7 @@ impl WidgetTree {
         let source = self.active_drag.as_ref().and_then(|d| d.source_widget);
         self.cleanup_drag_preview();
         self.active_drag = None;
-        self.pointer_captured_by = None;
+        self.release_drag_capture(source);
         self.current_cursor = crate::widget::CursorIcon::Default;
         if let Some(prev) = prev_target {
             self.fire_on_drag_leave(prev, &mut *ops);
@@ -453,7 +453,7 @@ impl WidgetTree {
             .active_drag
             .take()
             .expect("active_drag present (matched above)");
-        self.pointer_captured_by = None;
+        self.release_drag_capture(drag.source_widget);
         self.current_cursor = crate::widget::CursorIcon::Default;
         self.outbound_drag_source = drag.source_widget;
         outbound_begin(drag.payload);
@@ -469,11 +469,12 @@ impl WidgetTree {
     fn reexit_outbound(&mut self, ops: &mut dyn crate::window::WindowOps) {
         let prev_target = self.active_drag.as_ref().and_then(|d| d.current_target);
         self.cleanup_drag_preview();
+        let source = self.active_drag.as_ref().and_then(|d| d.source_widget);
         if let Some(drag) = self.active_drag.take() {
             outbound_restash(drag.payload);
         }
         self.os_drag_reentered = false;
-        self.pointer_captured_by = None;
+        self.release_drag_capture(source);
         self.current_cursor = crate::widget::CursorIcon::Default;
         if let Some(prev) = prev_target {
             self.fire_on_drag_leave(prev, &mut *ops);
@@ -734,7 +735,7 @@ impl WidgetTree {
             Some(d) => d,
             None => return,
         };
-        self.pointer_captured_by = None;
+        self.release_drag_capture(drag.source_widget);
         self.current_cursor = crate::widget::CursorIcon::Default;
         // Source widget so an in-app drop notifies its originator via
         // `on_drag_ended`. External drags carry no source.

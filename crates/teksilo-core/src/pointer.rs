@@ -31,6 +31,7 @@
 //! Reference: `docs/touch-and-pen.md`.
 
 pub mod clock;
+pub mod table;
 pub mod touch_action;
 pub mod trace;
 
@@ -295,6 +296,17 @@ pub struct PointerInfo {
     pub axes: PointerAxes,
     /// When the backend says this sample happened, on the tree's timeline.
     pub time: EventTime,
+    /// The digitizer classified this contact as a palm rather than a
+    /// deliberate touch.
+    ///
+    /// Only a backend that advertises `reports_palm` ever sets it; everything
+    /// else leaves it `false`, which is why no existing call site changes
+    /// meaning. A flagged sample is refused by
+    /// [`PointerTable::begin`](table::PointerTable::begin) and never reaches a
+    /// widget: rejecting it at the table is what keeps a hand resting on a
+    /// tablet from opening menus, and it is one decision rather than one per
+    /// recognizer.
+    pub palm: bool,
 }
 
 impl PointerInfo {
@@ -318,6 +330,7 @@ impl PointerInfo {
                 contact: None,
             },
             time,
+            palm: false,
         }
     }
 
@@ -337,6 +350,7 @@ impl PointerInfo {
                 contact: None,
             },
             time,
+            palm: false,
         }
     }
 

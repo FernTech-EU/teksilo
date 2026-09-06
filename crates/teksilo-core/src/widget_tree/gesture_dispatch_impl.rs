@@ -439,7 +439,8 @@ mod tests {
         });
         assert!(ended.get(), "DragEnded must fire on the original widget");
         assert_eq!(
-            tree.pointer_captured_by, None,
+            tree.pointer_captured_by(),
+            None,
             "pointer capture must be released after DragEnded"
         );
 
