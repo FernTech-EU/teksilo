@@ -510,7 +510,7 @@ impl Widget for ScrollBar {
                 let horizontal = matches!(orientation, ScrollBarOrientation::Horizontal);
                 match mv {
                     RangeMove::Step { increase } => {
-                        let d = if range_nav::towards_screen_positive(increase, horizontal) {
+                        let d = if range_nav::towards_trailing(increase, horizontal) {
                             step
                         } else {
                             -step
@@ -527,7 +527,7 @@ impl Widget for ScrollBar {
                     // what `RangeMove::Page` leaves to the caller.
                     RangeMove::Page { increase } => {
                         let p = page_step(&ratio, max, step);
-                        let d = if range_nav::towards_screen_positive(increase, horizontal) {
+                        let d = if range_nav::towards_trailing(increase, horizontal) {
                             p
                         } else {
                             -p

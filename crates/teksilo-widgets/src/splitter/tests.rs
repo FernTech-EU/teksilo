@@ -833,3 +833,78 @@ fn export_import_round_trips_through_widget() {
     assert_eq!(restored.stored_size(0), 111.0);
     assert!(restored.is_collapsed(2));
 }
+
+#[test]
+fn vertical_arrows_move_the_divider_the_way_they_point() {
+    // Regression: routing the handle through `range_nav` inverted this pair.
+    // `increase` is axis-relative — `Up` increases a value, `Down` decreases
+    // it — so reading it as a direction made `Down` shrink the pane above the
+    // divider, where it had always grown it. Only the horizontal pair was
+    // covered, so the whole vertical axis went the wrong way unnoticed.
+    let model = SplitterModel::from_panes(
+        vec![
+            PaneDescriptor::new().size(100.0).min_size(0.0).stretch(0.0),
+            PaneDescriptor::new().size(100.0).min_size(0.0).stretch(0.0),
+        ],
+        Orientation::Vertical,
+    );
+    let mut tree = theme_tree();
+    let root = tree.add(
+        Splitter::new(model.clone())
+            .pane(FixedLeaf(80.0, 100.0))
+            .pane(FixedLeaf(80.0, 100.0)),
+    );
+    tree.layout(SizeProposal::exact(
+        200.0,
+        200.0 + SPLITTER_GUTTER_THICKNESS,
+    ));
+
+    let handle = tree.child_widget(root, 1);
+    tree.focus(handle);
+    let before = model.stored_size(0);
+
+    tree.press_key(Key::ArrowDown, Modifiers::NONE);
+    assert!(
+        model.stored_size(0) > before,
+        "ArrowDown moves the divider down, which grows the pane above it"
+    );
+
+    let mid = model.stored_size(0);
+    tree.press_key(Key::ArrowUp, Modifiers::NONE);
+    assert!(model.stored_size(0) < mid, "and ArrowUp moves it back up");
+}
+
+#[test]
+fn a_vertical_splitter_ignores_the_layout_direction() {
+    // `Home`/`End` and the vertical arrows name points in value space, so a
+    // right-to-left window must not touch them — only the horizontal pair
+    // mirrors.
+    let model = SplitterModel::from_panes(
+        vec![
+            PaneDescriptor::new().size(100.0).min_size(0.0).stretch(0.0),
+            PaneDescriptor::new().size(100.0).min_size(0.0).stretch(0.0),
+        ],
+        Orientation::Vertical,
+    );
+    let mut tree = theme_tree();
+    tree.set_layout_direction(teksilo_core::environment::LayoutDirection::RightToLeft);
+    let root = tree.add(
+        Splitter::new(model.clone())
+            .pane(FixedLeaf(80.0, 100.0))
+            .pane(FixedLeaf(80.0, 100.0)),
+    );
+    tree.layout(SizeProposal::exact(
+        200.0,
+        200.0 + SPLITTER_GUTTER_THICKNESS,
+    ));
+
+    let handle = tree.child_widget(root, 1);
+    tree.focus(handle);
+    let before = model.stored_size(0);
+
+    tree.press_key(Key::ArrowDown, Modifiers::NONE);
+    assert!(
+        model.stored_size(0) > before,
+        "ArrowDown still grows the pane above, whatever the layout direction"
+    );
+}

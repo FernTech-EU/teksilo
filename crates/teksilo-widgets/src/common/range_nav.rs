@@ -128,23 +128,30 @@ pub(crate) enum RangeMove {
     ToMax,
 }
 
-/// Does this move go towards larger screen coordinates — right, or **down**?
+/// Does this move go towards the **trailing** edge — or, on the vertical
+/// axis, **down**?
 ///
 /// [`RangeMove::Step`] and [`RangeMove::Page`] report `increase` in the
 /// *value's* terms, and on the vertical axis a value grows **upward**: a
-/// slider's `Up` means more. Two kinds of control need the screen direction
-/// instead, and deriving it inline is how the vertical pair comes out
-/// backwards — it did, in both of them, before this helper existed:
+/// slider's `Up` means more. Three kinds of control need the *geometric*
+/// direction instead, and deriving it inline is how the vertical pair comes
+/// out backwards — it did, in every one of them, before this helper existed:
 ///
-/// - a value that grows *downward*, like a scroll offset, where `ArrowDown`
-///   must add rather than subtract;
+/// - a value that grows towards the trailing edge, like a scroll offset,
+///   where `ArrowDown` must add rather than subtract;
 /// - geometry anchored to an edge, like a dock side, where which arrow
-///   enlarges the side depends on which edge its handle sits on.
+///   enlarges the side depends on which edge its handle sits on;
+/// - a boundary between two panes, like a splitter divider, where the leading
+///   pane grows as the divider moves away from it.
 ///
-/// `horizontal` is the control's own axis, not the key's. The layout
-/// direction is already folded into `increase` by [`range_move`], so this is
-/// direction-agnostic.
-pub(crate) fn towards_screen_positive(increase: bool, horizontal: bool) -> bool {
+/// "Trailing" and not "right", because [`range_move`] has already folded the
+/// layout direction into `increase`: in a right-to-left window `ArrowLeft`
+/// arrives as an increase, and the leading-anchored thing it enlarges is the
+/// one on the *right*. So this answers "does the leading side get bigger",
+/// which is what all three callers actually ask — not "is x growing".
+///
+/// `horizontal` is the control's own axis, not the key's.
+pub(crate) fn towards_trailing(increase: bool, horizontal: bool) -> bool {
     if horizontal { increase } else { !increase }
 }
 
@@ -398,21 +405,32 @@ mod tests {
     }
 
     #[test]
-    fn the_screen_direction_inverts_only_on_the_vertical_axis() {
+    fn the_geometric_direction_inverts_only_on_the_vertical_axis() {
         // `Right` and `Up` both "increase", because a slider's value grows
-        // upward. A scroll offset and a dock side do not, and reading
-        // `increase` as a screen direction is how both of them ended up moving
-        // the wrong way on their vertical arrows.
-        assert!(towards_screen_positive(true, true), "Right is +x");
-        assert!(!towards_screen_positive(false, true), "Left is -x");
+        // upward. A scroll offset, a dock side and a splitter divider do not,
+        // and reading `increase` as a geometric direction is how all three
+        // ended up moving the wrong way on their vertical arrows.
+        assert!(towards_trailing(true, true), "an increase is trailing-ward");
+        assert!(!towards_trailing(false, true), "a decrease is leading-ward");
         assert!(
-            towards_screen_positive(false, false),
-            "Down increases y even though it decreases the value"
+            towards_trailing(false, false),
+            "Down is trailing-ward even though it decreases the value"
         );
         assert!(
-            !towards_screen_positive(true, false),
-            "Up decreases y even though it increases the value"
+            !towards_trailing(true, false),
+            "Up is leading-ward even though it increases the value"
         );
+    }
+
+    #[test]
+    fn trailing_is_not_a_synonym_for_rightward() {
+        // The layout direction is folded into `increase` upstream, so under
+        // RTL the trailing-ward arrow is the one pointing *left*. Callers ask
+        // "does the leading side get bigger", not "is x growing" — which is
+        // why the helper is not named for the screen axis.
+        let rtl_increase = range_move(Key::ArrowLeft, NONE, Divider, Horizontal, true);
+        assert_eq!(rtl_increase, Some(RangeMove::Step { increase: true }));
+        assert!(towards_trailing(true, true));
     }
 
     #[test]

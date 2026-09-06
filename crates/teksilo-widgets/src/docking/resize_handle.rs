@@ -327,7 +327,7 @@ impl Widget for DockResizeHandle {
                         // different facts. The first — that `increase` is
                         // axis-relative, so `Up` increases the value while
                         // decreasing y — belongs to every edge-anchored
-                        // control and lives in `towards_screen_positive`.
+                        // control and lives in `towards_trailing`.
                         //
                         // The second is this widget's own: a side grows when
                         // its handle moves *away* from the side — outward for
@@ -337,11 +337,10 @@ impl Widget for DockResizeHandle {
                         // moved a trailing handle the way it does not point.
                         // The layout direction is already folded into
                         // `increase` by `range_move`.
-                        let screen_positive =
-                            range_nav::towards_screen_positive(increase, side.is_horizontal_axis());
-                        let grows_screen_positive =
-                            matches!(side, DockSide::Leading | DockSide::Top);
-                        let delta = if screen_positive == grows_screen_positive {
+                        let trailing_ward =
+                            range_nav::towards_trailing(increase, side.is_horizontal_axis());
+                        let grows_trailing_ward = matches!(side, DockSide::Leading | DockSide::Top);
+                        let delta = if trailing_ward == grows_trailing_ward {
                             KEYBOARD_STEP
                         } else {
                             -KEYBOARD_STEP

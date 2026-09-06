@@ -540,14 +540,18 @@ impl Widget for SplitterHandle {
                 ) else {
                     return EventResponse::Ignored;
                 };
-                // `grow` = pane i takes space from pane i+1.
+                // `grow` = pane i takes space from pane i+1, which happens
+                // when the divider moves *away* from pane i — trailing-ward.
+                // Not `increase` directly: that is axis-relative, so on a
+                // vertical splitter `Up` increases and `Down` decreases, and
+                // reading it as a direction inverts the vertical pair.
                 let new_i = match mv {
                     RangeMove::Step { increase } => {
-                        let target = if increase {
-                            size_i + step
-                        } else {
-                            size_i - step
-                        };
+                        let grow = range_nav::towards_trailing(
+                            increase,
+                            matches!(orientation, Orientation::Horizontal),
+                        );
+                        let target = if grow { size_i + step } else { size_i - step };
                         if lo > hi {
                             pair * 0.5
                         } else {

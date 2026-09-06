@@ -107,11 +107,18 @@ See [docs/range-keyboard.md](docs/range-keyboard.md) for the full chord table.
   untouched: it is not a distinct chord on any of these controls, and the
   single-line field binds nothing to `Shift+Up`, so rejecting it would only
   leave the chord dead. **Behaviour change.**
-- **A right-to-left `Splitter`'s resize arrows worked backwards.** The pane
+- **A `Splitter`'s resize arrows move the divider the way they point**, on
+  both axes and in both layout directions. Two separate inversions: the pane
   order and the drag math have been mirrored since the widget shipped — the
   direction is written into a cell the drag path reads — but the keyboard was
-  not, so `ArrowRight` pulled the divider left. Read at event time, so a locale
-  flip needs no rebuild. **Behaviour change.**
+  not, so `ArrowRight` pulled the divider left in a right-to-left window; and
+  `increase` is axis-relative, so reading it as a geometric direction made
+  `ArrowDown` shrink the pane above a *vertical* divider where it had always
+  grown it. Both now resolve through `towards_trailing`, which is named for
+  what it answers — "does the leading side get bigger" — rather than for a
+  screen axis it does not track once the layout direction is folded in.
+  Direction is read at event time, so a locale flip needs no rebuild.
+  **Behaviour change.**
 - **A `Trailing` or `Bottom` dock side resized in the wrong direction from the
   keyboard.** Its handle sits on the side's inner edge, so growing the side
   moves the handle *towards* the centre; the pointer path already inverted per
