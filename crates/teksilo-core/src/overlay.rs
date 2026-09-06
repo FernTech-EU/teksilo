@@ -18,6 +18,22 @@ use crate::environment::LayoutDirection;
 use crate::signal::Signal;
 use crate::widget_id::WidgetId;
 
+mod safe_triangle;
+
+pub(crate) use safe_triangle::point_in_safe_triangle;
+
+/// How long a submenu's safe region stays armed after the pointer
+/// leaves the trigger row.
+///
+/// The region suppresses both dismissal paths (the sibling
+/// hover-switch and the overlay's own pointer-leave grace), so it
+/// needs a ceiling: a pointer that stops inside the cone is no longer
+/// travelling, and the menu must go back to behaving normally. 600 ms
+/// is long enough for a deliberate, slow diagonal across a tall
+/// submenu and short enough that a parked pointer resolves before the
+/// user notices anything is stuck.
+pub(crate) const SAFE_REGION_BUDGET: Duration = Duration::from_millis(600);
+
 /// Callback invoked by the framework when an overlay is dismissed —
 /// regardless of the dismiss path (Escape, click outside, pointer
 /// leave, explicit API call, cascade). The anchor widget uses this
@@ -219,6 +235,18 @@ pub(crate) struct ActiveOverlay {
     pub pointer_leave_started_real: Option<std::time::Instant>,
     /// When pointer-leave dismissal started (simulated time).
     pub pointer_leave_started_sim: Option<std::time::Instant>,
+    /// Apex of the "safe triangle" — the point at which the pointer
+    /// left the anchor, armed by [`OverlayManager::arm_safe_region`].
+    /// While it is set and unexpired, a pointer inside the triangle
+    /// spanned by it and this overlay's near edge counts as still
+    /// inside the overlay's region, so the pointer-leave grace does
+    /// not run. See [`safe_triangle`].
+    pub safe_apex: Option<Point>,
+    /// When the safe region was armed (real time). Bounds it by
+    /// [`SAFE_REGION_BUDGET`].
+    pub safe_apex_started_real: Option<std::time::Instant>,
+    /// When the safe region was armed (simulated time).
+    pub safe_apex_started_sim: Option<std::time::Instant>,
     /// Dismiss automatically after this duration, if set.
     pub auto_dismiss_after: Option<Duration>,
     /// While the auto-dismiss timer is paused (via
@@ -283,6 +311,7 @@ impl std::fmt::Debug for ActiveOverlay {
                 &self.pointer_leave_started_real,
             )
             .field("pointer_leave_started_sim", &self.pointer_leave_started_sim)
+            .field("safe_apex", &self.safe_apex)
             .field("auto_dismiss_after", &self.auto_dismiss_after)
             .field("shown_at_real", &self.shown_at_real)
             .field("shown_at_sim", &self.shown_at_sim)
@@ -417,6 +446,9 @@ impl OverlayManager {
             focus_restore: None,
             pointer_leave_started_real: None,
             pointer_leave_started_sim: None,
+            safe_apex: None,
+            safe_apex_started_real: None,
+            safe_apex_started_sim: None,
             auto_dismiss_after,
             paused_remaining: None,
             shown_at_real: now,
@@ -1388,6 +1420,69 @@ impl OverlayManager {
             .iter()
             .find(|o| o.content_id == content_id)
             .map(|o| o.bounds)
+    }
+
+    // -------------------- Safe region (submenu traversal) --------------------
+
+    /// Arm the safe triangle for the overlay whose root content widget
+    /// is `content_id`, with its apex at `apex` — the point the pointer
+    /// left the anchor at.
+    ///
+    /// While armed and unexpired, a pointer inside the triangle
+    /// spanned by the apex and this overlay's near vertical edge is
+    /// treated as still inside the overlay's region, so neither the
+    /// pointer-leave grace nor a sibling's hover-switch dismisses it.
+    /// Re-arming an already-armed region restarts its budget.
+    /// No-ops when no such overlay is open.
+    pub(crate) fn arm_safe_region(
+        &mut self,
+        content_id: WidgetId,
+        apex: Point,
+        real_now: Instant,
+        sim_now: Instant,
+    ) {
+        if let Some(overlay) = self
+            .stack
+            .iter_mut()
+            .find(|o| o.content_id == content_id && !o.is_dismissing())
+        {
+            overlay.safe_apex = Some(apex);
+            overlay.safe_apex_started_real = Some(real_now);
+            overlay.safe_apex_started_sim = Some(sim_now);
+        }
+    }
+
+    /// Disarm the safe triangle on the overlay with the given id. Called
+    /// when the pointer arrives (or returns), when it strays out of the
+    /// cone, and when the budget is spent — after which the overlay
+    /// dismisses on the ordinary schedule.
+    pub(crate) fn clear_safe_region(&mut self, id: OverlayId) {
+        if let Some(overlay) = self.stack.iter_mut().find(|o| o.id == id) {
+            overlay.safe_apex = None;
+            overlay.safe_apex_started_real = None;
+            overlay.safe_apex_started_sim = None;
+        }
+    }
+
+    /// The armed apex of the overlay rooted at `content_id`, if any.
+    /// Read into the per-dispatch `EventContext` snapshot so a widget
+    /// handler can run the same test the dismissal path runs.
+    pub(crate) fn safe_apex_for_content(&self, content_id: WidgetId) -> Option<Point> {
+        self.stack
+            .iter()
+            .find(|o| o.content_id == content_id)
+            .and_then(|o| o.safe_apex)
+    }
+
+    /// Whether `point` currently sits inside the armed safe triangle of
+    /// the overlay with the given id. `false` when the region is not
+    /// armed or the overlay has no bounds yet.
+    pub(crate) fn point_in_safe_region(&self, id: OverlayId, point: Point) -> bool {
+        self.stack
+            .iter()
+            .find(|o| o.id == id)
+            .and_then(|o| o.safe_apex.map(|apex| (apex, o.bounds)))
+            .is_some_and(|(apex, bounds)| point_in_safe_triangle(point, apex, bounds))
     }
 
     /// Change the dismiss behavior of an active overlay in place.

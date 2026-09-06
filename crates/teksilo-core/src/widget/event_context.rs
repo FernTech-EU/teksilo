@@ -88,11 +88,13 @@ pub struct EventContext<'ops> {
     pub(crate) dismiss_scope: Option<DismissScope>,
     /// Request to capture or release the pointer.
     pub(crate) pointer_capture: Option<bool>,
-    /// Delayed overlay requests (request, delay, optional focus target).
+    /// Delayed overlay requests (request, delay, optional focus target,
+    /// whether to dismiss sibling overlays when it finally shows).
     pub(crate) delayed_overlay_requests: Vec<(
         crate::overlay::OverlayRequest,
         std::time::Duration,
         Option<crate::widget_id::WidgetId>,
+        bool,
     )>,
     /// Timed overlay requests (request, auto-dismiss delay).
     pub(crate) timed_overlay_requests: Vec<(crate::overlay::OverlayRequest, std::time::Duration)>,
@@ -113,6 +115,10 @@ pub struct EventContext<'ops> {
     pub(crate) dismiss_descendant_overlays: Vec<Option<crate::widget_id::WidgetId>>,
     /// Cancel pending delayed overlays by content widget ID.
     pub(crate) cancel_delayed_overlays: Vec<crate::widget_id::WidgetId>,
+    /// Overlays whose safe triangle should be armed at the current
+    /// pointer position once this handler returns. See
+    /// [`EventContext::arm_overlay_safe_region`].
+    pub(crate) safe_region_arm_requests: Vec<crate::widget_id::WidgetId>,
     /// Widget IDs that need repainting (cross-widget signal propagation).
     pub(crate) repaint_requests: Vec<crate::widget_id::WidgetId>,
     /// Synthetic clicks to dispatch on target widgets after event processing.
@@ -217,11 +223,16 @@ pub struct EventContext<'ops> {
     /// button). Set per-node by the dispatcher for `PointerDown`/`PointerUp`.
     /// Read via [`press_claimed_by_interactive_child`](Self::press_claimed_by_interactive_child).
     pub(crate) press_claimed_by_interactive_child: bool,
-    /// Per-content-widget overlay bounds snapshotted at handler
-    /// invocation. A flat vec is fine — open overlays are typically
-    /// 0–3 per tree. Read by the safe-triangle submenu hover gate
-    /// via [`EventContext::overlay_bounds_for_content`].
-    pub(crate) overlay_bounds_snapshot: Vec<(WidgetId, teksilo_canvas::Rect)>,
+    /// Per-content-widget overlay bounds — and armed safe-triangle apex,
+    /// when the overlay has one — snapshotted at handler invocation. A
+    /// flat vec is fine: open overlays are typically 0–3 per tree. Read
+    /// by [`EventContext::overlay_bounds_for_content`] and
+    /// [`EventContext::pointer_in_overlay_safe_region`].
+    pub(crate) overlay_bounds_snapshot: Vec<(
+        WidgetId,
+        teksilo_canvas::Rect,
+        Option<teksilo_canvas::Point>,
+    )>,
     /// The widget holding focus when this batch began. Part of the same
     /// per-dispatch snapshot as the two above, and read by
     /// [`focused`](EventContext::focused).
@@ -375,6 +386,7 @@ impl<'ops> EventContext<'ops> {
             reveal_overlay_requests: Vec::new(),
             dismiss_descendant_overlays: Vec::new(),
             cancel_delayed_overlays: Vec::new(),
+            safe_region_arm_requests: Vec::new(),
             repaint_requests: Vec::new(),
             synthetic_clicks: Vec::new(),
             focus_requests: Vec::new(),
@@ -467,7 +479,11 @@ impl<'ops> EventContext<'ops> {
     pub(crate) fn with_query_snapshot(
         mut self,
         pointer: Option<teksilo_canvas::Point>,
-        overlays: Vec<(WidgetId, teksilo_canvas::Rect)>,
+        overlays: Vec<(
+            WidgetId,
+            teksilo_canvas::Rect,
+            Option<teksilo_canvas::Point>,
+        )>,
         focused: Option<WidgetId>,
     ) -> Self {
         self.tree_pointer_position = pointer;
@@ -760,8 +776,34 @@ impl<'ops> EventContext<'ops> {
     pub fn overlay_bounds_for_content(&self, content_id: WidgetId) -> Option<teksilo_canvas::Rect> {
         self.overlay_bounds_snapshot
             .iter()
-            .find(|(cid, _)| *cid == content_id)
-            .map(|(_, r)| *r)
+            .find(|(cid, _, _)| *cid == content_id)
+            .map(|(_, r, _)| *r)
+    }
+
+    /// Whether the pointer currently sits inside the armed safe triangle
+    /// of the overlay rooted at `content_id` — i.e. whether the user is
+    /// still travelling toward that submenu.
+    ///
+    /// A widget whose hover would otherwise tear the overlay down (a
+    /// sibling menu row switching the selection) asks this first and
+    /// stands aside while it is `true`. The framework applies the same
+    /// test to the overlay's own pointer-leave grace, so the two agree.
+    /// `false` when no region is armed, when the region's budget is
+    /// spent, or when the context carries no pointer snapshot.
+    ///
+    /// Arm the region with
+    /// [`arm_overlay_safe_region`](Self::arm_overlay_safe_region).
+    pub fn pointer_in_overlay_safe_region(&self, content_id: WidgetId) -> bool {
+        let Some(pointer) = self.tree_pointer_position else {
+            return false;
+        };
+        self.overlay_bounds_snapshot
+            .iter()
+            .find(|(cid, _, _)| *cid == content_id)
+            .and_then(|(_, bounds, apex)| {
+                apex.map(|apex| crate::overlay::point_in_safe_triangle(pointer, apex, *bounds))
+            })
+            .unwrap_or(false)
     }
 
     pub fn window(&self) -> Option<&crate::window::WindowState> {
@@ -1242,7 +1284,8 @@ impl<'ops> EventContext<'ops> {
         request: crate::overlay::OverlayRequest,
         delay: std::time::Duration,
     ) {
-        self.delayed_overlay_requests.push((request, delay, None));
+        self.delayed_overlay_requests
+            .push((request, delay, None, false));
     }
 
     /// Show an overlay after a delay and move focus when it opens.
@@ -1253,7 +1296,28 @@ impl<'ops> EventContext<'ops> {
         focus_target: crate::widget_id::WidgetId,
     ) {
         self.delayed_overlay_requests
-            .push((request, delay, Some(focus_target)));
+            .push((request, delay, Some(focus_target), false));
+    }
+
+    /// Show an overlay after a delay, move focus when it opens, and
+    /// dismiss the anchor's sibling overlays **at that moment** rather
+    /// than when the request was made.
+    ///
+    /// This is the hover-switch between two submenu triggers in the same
+    /// menu. Dismissing eagerly at hover-enter closes the submenu the
+    /// user is still walking toward as soon as the pointer crosses a
+    /// neighbouring trigger; deferring the dismissal to the moment the
+    /// new submenu actually opens means a pointer merely passing through
+    /// costs nothing, and one that settles gets the swap on the same
+    /// frame — no window with two submenus on screen.
+    pub fn show_overlay_after_replacing_siblings(
+        &mut self,
+        request: crate::overlay::OverlayRequest,
+        delay: std::time::Duration,
+        focus_target: crate::widget_id::WidgetId,
+    ) {
+        self.delayed_overlay_requests
+            .push((request, delay, Some(focus_target), true));
     }
 
     /// Request a repaint on a specific widget. Use this when an event handler
@@ -1468,6 +1532,24 @@ impl<'ops> EventContext<'ops> {
     /// Call this when the hover ends before the delay elapses.
     pub fn cancel_delayed_overlay(&mut self, content_id: crate::widget_id::WidgetId) {
         self.cancel_delayed_overlays.push(content_id);
+    }
+
+    /// Arm the "safe triangle" of the open overlay rooted at
+    /// `content_id`, with its apex at the current pointer position.
+    ///
+    /// Call this from the anchor's hover-leave handler: the pointer is
+    /// then exactly at the point the diagonal toward the overlay
+    /// starts. Until the pointer leaves the triangle spanned by that
+    /// apex and the overlay's near edge — or the framework's budget
+    /// runs out — the overlay's pointer-leave grace is held off, and
+    /// [`pointer_in_overlay_safe_region`](Self::pointer_in_overlay_safe_region)
+    /// reports `true` so sibling widgets can stand aside too.
+    ///
+    /// No-ops when the overlay is not open (a submenu whose hover-open
+    /// delay was cancelled before it ever showed) or when no pointer
+    /// position is known.
+    pub fn arm_overlay_safe_region(&mut self, content_id: crate::widget_id::WidgetId) {
+        self.safe_region_arm_requests.push(content_id);
     }
 
     /// Capture the pointer: all subsequent `PointerMove` and `PointerUp`

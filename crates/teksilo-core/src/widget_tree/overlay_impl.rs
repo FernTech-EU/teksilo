@@ -616,6 +616,16 @@ impl WidgetTree {
         let any_shown = !ready.is_empty();
         for pending in ready {
             let content_id = pending.request.content_id;
+            // Deferred hover-switch: the sibling submenu that was open
+            // while this one was merely pending goes now, not when the
+            // pointer first touched the trigger. `preserve` finds
+            // nothing yet (this overlay is not on the stack), which is
+            // exactly right — everything below the anchor's own overlay
+            // goes, and this one is pushed immediately after.
+            if pending.replace_siblings {
+                let anchor = pending.request.anchor;
+                self.dismiss_child_overlays_for_source(anchor, Some(content_id), &mut *ops);
+            }
             self.arena.activate(content_id);
             let current_focus = self.focused;
             self.overlay_manager.show(pending.request);

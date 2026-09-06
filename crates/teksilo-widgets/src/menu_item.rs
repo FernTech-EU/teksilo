@@ -86,10 +86,8 @@ use teksilo_i18n::LocalizedString;
 
 mod menu_label;
 mod mnemonic;
-mod safe_triangle;
 pub(crate) use menu_label::MenuLabel;
 pub(crate) use mnemonic::{ParsedMnemonic, parse_mnemonic};
-pub(crate) use safe_triangle::point_in_safe_triangle;
 
 /// Type-erased command factory. Stored as `Rc` (not `Box`) so the closure
 /// can be cloned and shared — in particular with SplitButton, which reads
@@ -1006,10 +1004,19 @@ impl Widget for MenuItem {
         // MenuItem doesn't track focus/highlight separately today —
         // hovered already covers the keyboard-arrow case in the
         // existing dispatcher. Wire is_focused to a constant false
-        // signal; is_highlighted reads the same as is_hovered for
-        // the IntUI default (the recipe `or`s them anyway).
+        // signal.
         let is_focused = ctx.signal(false);
-        let is_highlighted = is_hovered.clone();
+        // A submenu trigger stays highlighted for as long as its
+        // submenu is on screen, not just while the pointer is on the
+        // row — the pointer spends that whole time somewhere else (the
+        // diagonal, then the submenu itself), and every desktop menu
+        // keeps the parent row lit to show where the open panel came
+        // from. Plain rows have no submenu, so this is `is_hovered`.
+        let is_highlighted = if submenu_content_id.is_some() {
+            is_hovered.or(&self.submenu_open)
+        } else {
+            is_hovered.clone()
+        };
 
         let cfg = MenuItemStyleConfig {
             label,
@@ -1119,11 +1126,10 @@ impl Widget for MenuItem {
         // `set_expanded` without needing to track the overlay state
         // from inside the MenuItem's own handlers.
         //
-        // Also clears the safe-triangle anchor when the overlay
-        // actually closes — keeping the anchor alive across
-        // hover-leave (so sibling hovers heading toward the
-        // submenu are properly gated) means we MUST clear it here
-        // once the submenu is finally gone.
+        // Also retracts the safe-triangle publication when the overlay
+        // actually closes — it is deliberately kept alive across
+        // hover-leave (that is when the diagonal starts), so it MUST
+        // be cleared here once the submenu is finally gone.
         let submenu_open_signal = self.submenu_open.clone();
         let submenu_needed_signal = self.submenu_needed.clone();
         let submenu_content_id_for_dismiss = submenu_content_id;
@@ -1139,7 +1145,6 @@ impl Widget for MenuItem {
                     let mut state = state_rc.borrow_mut();
                     if state.submenu_content_id == Some(sub_id) {
                         state.submenu_content_id = None;
-                        state.anchor = None;
                     }
                 }
             })
@@ -1209,10 +1214,10 @@ impl Widget for MenuItem {
             let open_for_hover = submenu_open_signal.clone();
             let needed_for_hover = submenu_needed_signal.clone();
             let dismiss_for_hover = submenu_dismiss_callback.clone();
-            // Capture the safe-triangle shared state so we can stamp
-            // / clear the anchor on submenu open / close.
-            let safe_triangle_open = self.safe_triangle.clone();
-            let safe_triangle_close = self.safe_triangle.clone();
+            // Capture the safe-triangle shared state so the hover
+            // handler can publish / retract "this is the submenu the
+            // pointer is travelling to" for its siblings.
+            let safe_triangle_hover = self.safe_triangle.clone();
             // Framework gates events on `arena.is_enabled(self_id)`.
             handler_set = handler_set
                 .on_tap({
@@ -1245,25 +1250,18 @@ impl Widget for MenuItem {
                     move |entered: bool, ctx: &mut EventContext| {
                         if entered {
                             int_hover.set(MenuItemState::Hovered);
-                            ctx.dismiss_child_overlays_except(sub_id);
                             open_for_hover.set(true);
-                            // Stamp the safe-triangle anchor so sibling
-                            // hover-switches can suppress themselves
-                            // while the cursor is travelling toward
-                            // the open submenu. We use the current
-                            // cursor position; if unavailable, the
-                            // gate falls back to "no apex" (always
-                            // false → no suppression).
-                            if let Some(state_rc) = safe_triangle_open.as_ref() {
-                                let mut state = state_rc.borrow_mut();
-                                state.submenu_content_id = Some(sub_id);
-                                state.anchor = ctx.tree_pointer_position();
-                            }
                             // Build the submenu if this is the first time it is wanted, before
                             // the overlay below is measured against it.
                             needed_for_hover.set(true);
                             ctx.materialize_now(sub_id);
-                            ctx.show_overlay_after_with_focus(
+                            // Sibling submenus are dismissed when this
+                            // one *opens*, not now: a pointer merely
+                            // crossing this row on its way to the
+                            // submenu already open two rows up must not
+                            // take that submenu down with it. See
+                            // `show_overlay_after_replacing_siblings`.
+                            ctx.show_overlay_after_replacing_siblings(
                                 OverlayRequest {
                                     content_id: sub_id,
                                     anchor: self_id,
@@ -1282,36 +1280,34 @@ impl Widget for MenuItem {
                         } else {
                             int_hover.set(MenuItemState::Idle);
                             ctx.cancel_delayed_overlay(sub_id);
-                            // If the overlay was still pending (delay
-                            // not yet elapsed), its dismiss callback
-                            // will never fire — we must reset the
-                            // open flag ourselves. Idempotent if the
-                            // overlay already showed: the framework
-                            // dismiss callback will also set it false
-                            // when the PointerLeave behavior tears
-                            // the overlay down shortly afterward.
-                            open_for_hover.set(false);
-                            // Clear the safe-triangle anchor ONLY when
-                            // the submenu never actually opened (the
-                            // 400 ms delay was cancelled while still
-                            // pending). When the overlay IS open, we
-                            // leave the anchor in place — sibling
-                            // hover handlers consult it during the
-                            // user's diagonal travel toward the
-                            // submenu, and the dismiss callback
-                            // installed above clears it the moment
-                            // the overlay actually closes. Clearing
-                            // on every hover-leave would defeat the
-                            // entire safe-triangle gate, because the
-                            // trigger's hover-leave fires *before* a
-                            // sibling's hover-enter.
-                            if let Some(state_rc) = safe_triangle_close.as_ref()
-                                && ctx.overlay_bounds_for_content(sub_id).is_none()
-                            {
-                                let mut state = state_rc.borrow_mut();
-                                if state.submenu_content_id == Some(sub_id) {
-                                    state.submenu_content_id = None;
-                                    state.anchor = None;
+                            if ctx.overlay_bounds_for_content(sub_id).is_some() {
+                                // The submenu is up and the pointer has
+                                // just left this row — which is exactly
+                                // where the diagonal toward it begins.
+                                // Arm the safe triangle from here: the
+                                // framework holds off the overlay's
+                                // pointer-leave grace, and siblings
+                                // consult the same region before they
+                                // switch. `submenu_open` deliberately
+                                // stays `true` — the panel is still on
+                                // screen, so the row stays highlighted
+                                // and `set_expanded` stays honest until
+                                // the dismiss callback fires.
+                                ctx.arm_overlay_safe_region(sub_id);
+                                if let Some(state_rc) = safe_triangle_hover.as_ref() {
+                                    state_rc.borrow_mut().submenu_content_id = Some(sub_id);
+                                }
+                            } else {
+                                // Never opened — the hover-open delay was
+                                // cancelled while still pending, so the
+                                // dismiss callback that would reset the
+                                // flag will never fire. Do it here.
+                                open_for_hover.set(false);
+                                if let Some(state_rc) = safe_triangle_hover.as_ref() {
+                                    let mut state = state_rc.borrow_mut();
+                                    if state.submenu_content_id == Some(sub_id) {
+                                        state.submenu_content_id = None;
+                                    }
                                 }
                             }
                         }
@@ -1359,26 +1355,19 @@ impl Widget for MenuItem {
                     let safe_triangle_sibling = self.safe_triangle.clone();
                     move |entered: bool, ctx: &mut EventContext| {
                         if entered {
-                            // Safe-triangle gate: if another submenu is
-                            // currently open AND the cursor is inside
-                            // the triangle anchored at the
-                            // submenu-open pointer position with its
-                            // base on the open submenu's near edge,
-                            // skip the dismiss — the user is en route
-                            // to the submenu and we don't want to
-                            // close it out from under them.
-                            let suppress = safe_triangle_sibling
+                            // Safe-triangle gate: while the pointer is
+                            // inside the region armed by an open
+                            // submenu in this list, skip the dismiss —
+                            // the user is crossing this row on the way
+                            // there, not choosing it. The framework
+                            // holds the overlay's own pointer-leave
+                            // grace off over the same region, so the
+                            // two halves of the gate agree.
+                            let travelling = safe_triangle_sibling
                                 .as_ref()
-                                .and_then(|state_rc| {
-                                    let state = state_rc.borrow();
-                                    let sub_content_id = state.submenu_content_id?;
-                                    let anchor = state.anchor?;
-                                    let pointer = ctx.tree_pointer_position()?;
-                                    let bounds = ctx.overlay_bounds_for_content(sub_content_id)?;
-                                    Some(point_in_safe_triangle(pointer, anchor, bounds))
-                                })
-                                .unwrap_or(false);
-                            if !suppress {
+                                .and_then(|state_rc| state_rc.borrow().submenu_content_id)
+                                .is_some_and(|sub| ctx.pointer_in_overlay_safe_region(sub));
+                            if !travelling {
                                 ctx.dismiss_child_overlays();
                             }
                             int_hover.set(MenuItemState::Hovered);

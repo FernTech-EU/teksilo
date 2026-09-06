@@ -9,16 +9,29 @@
 //! wrong. The "safe triangle" approach instead defines a triangle
 //! with:
 //!
-//! - **apex** = pointer position at the moment the submenu opened
+//! - **apex** = the point at which the pointer left the trigger row
 //! - **base** = the submenu's **near** vertical edge (the edge facing
 //!   the parent menu, irrespective of LTR / RTL — we read it off the
 //!   submenu's actual screen rect)
 //!
-//! As long as the pointer stays inside this triangle, sibling
-//! hover-opens are suppressed: the user is "still heading there".
-//! The moment the pointer leaves the triangle (or stays out for the
-//! existing PointerLeave grace period), the timer-based close
-//! fallback runs as before.
+//! As long as the pointer stays inside this triangle the submenu is
+//! held open: the user is "still heading there". Two dismissal paths
+//! consult it, and both have to, or the gate is only half a gate:
+//!
+//! 1. A sibling row's hover-switch, which would otherwise close the
+//!    submenu the instant the pointer crosses the next row down.
+//! 2. The overlay's own `DismissBehavior::PointerLeave` grace, which
+//!    starts counting the moment the pointer is neither over the
+//!    trigger row nor inside the submenu — i.e. for the whole
+//!    diagonal. A traversal slower than that delay (150 ms for
+//!    submenus) used to lose the submenu mid-flight even though the
+//!    hover-switch had been suppressed.
+//!
+//! The apex is stamped when the pointer *leaves* the trigger row
+//! (`OverlayManager::arm_safe_region`), which is where the diagonal
+//! actually starts, and the region is armed for at most
+//! [`SAFE_REGION_BUDGET`](super::SAFE_REGION_BUDGET) — a pointer that
+//! parks inside the cone must not pin the submenu open forever.
 //!
 //! The algorithm is RTL-symmetric **automatically** because the
 //! "near edge" is inferred from `anchor.x` vs `submenu.x`, not from
@@ -33,8 +46,8 @@
 use teksilo_canvas::{Point, Rect};
 
 /// Inclusive point-in-triangle test using the standard 3-sign
-/// cross-product check. `apex` is the pointer-at-submenu-open
-/// anchor; `submenu` is the open submenu's screen rect.
+/// cross-product check. `apex` is the point the pointer left the
+/// trigger row at; `submenu` is the open submenu's screen rect.
 ///
 /// Returns `false` for degenerate inputs (zero-area submenu, or the
 /// apex sits exactly on the near-edge line — defensive choice; the

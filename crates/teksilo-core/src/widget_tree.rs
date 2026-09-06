@@ -126,6 +126,15 @@ pub struct WidgetTree {
     /// through to an ancestor scrollable) instead of the item the
     /// user is actually pointing at.
     last_pointer_position: Option<teksilo_canvas::Point>,
+    /// The pointer position *before* the move currently being
+    /// dispatched — i.e. the last sample that was still over the
+    /// previously-hovered widget. Read when arming an overlay's safe
+    /// triangle: the apex belongs at the point the pointer left the
+    /// anchor, not at the first sample past it (they coincide for a
+    /// real mouse, but the distinction is what keeps the cone from
+    /// degenerating to "the apex is wherever I am, so I am always
+    /// inside it").
+    previous_pointer_position: Option<teksilo_canvas::Point>,
     /// A rebuild destroyed the focused widget: the subtree that owned focus,
     /// remembered so the end of the layout pass can land focus back inside it.
     ///
@@ -617,6 +626,10 @@ struct PendingDelayedOverlay {
     request: crate::overlay::OverlayRequest,
     delay: std::time::Duration,
     focus_target: Option<WidgetId>,
+    /// Dismiss the anchor's sibling overlays when this one finally
+    /// shows, instead of when it was requested. See
+    /// [`EventContext::show_overlay_after_replacing_siblings`](crate::widget::EventContext::show_overlay_after_replacing_siblings).
+    replace_siblings: bool,
     /// When the request was made (real time, for windowed apps).
     real_requested_at: std::time::Instant,
     /// When the request was made (simulated time, for tests).
@@ -650,6 +663,7 @@ impl WidgetTree {
             focus_visible: crate::signal::Signal::new(false),
             view_focus_stack: Vec::new(),
             last_pointer_position: None,
+            previous_pointer_position: None,
             pending_focus_restore: None,
             last_proposal: SizeProposal::exact(800.0, 600.0),
             pending_modal_requests: Vec::new(),
@@ -742,14 +756,18 @@ impl WidgetTree {
         // safe-triangle submenu hover gate, and the focused widget, read
         // by a container deciding whether a shortcut of its own should
         // yield to the widget the user is standing on.
-        let overlay_snapshot: Vec<(crate::widget_id::WidgetId, teksilo_canvas::Rect)> = self
+        let overlay_snapshot: Vec<(
+            crate::widget_id::WidgetId,
+            teksilo_canvas::Rect,
+            Option<teksilo_canvas::Point>,
+        )> = self
             .overlay_manager
             .active_content_ids()
             .into_iter()
             .filter_map(|cid| {
                 self.overlay_manager
                     .bounds_for_content(cid)
-                    .map(|r| (cid, r))
+                    .map(|r| (cid, r, self.overlay_manager.safe_apex_for_content(cid)))
             })
             .collect();
         crate::widget::EventContext::new()
@@ -1131,6 +1149,40 @@ impl WidgetTree {
         })
     }
 
+    /// Whether the overlay's safe region is armed and still within
+    /// [`SAFE_REGION_BUDGET`](crate::overlay::SAFE_REGION_BUDGET).
+    ///
+    /// Both clocks are consulted and either expiring is enough: the real
+    /// one drives a running app, the simulated one drives headless tests
+    /// (`advance_time`), and an overlay armed in one and aged in the
+    /// other must still expire.
+    fn safe_region_unexpired(
+        &self,
+        overlay_id: crate::overlay::OverlayId,
+        real_now: std::time::Instant,
+        sim_now: std::time::Instant,
+    ) -> bool {
+        let Some(overlay) = self
+            .overlay_manager
+            .stack
+            .iter()
+            .find(|overlay| overlay.id == overlay_id)
+        else {
+            return false;
+        };
+        if overlay.safe_apex.is_none() {
+            return false;
+        }
+        let budget = crate::overlay::SAFE_REGION_BUDGET;
+        let real_ok = overlay
+            .safe_apex_started_real
+            .is_none_or(|started| real_now.saturating_duration_since(started) < budget);
+        let sim_ok = overlay
+            .safe_apex_started_sim
+            .is_none_or(|started| sim_now.saturating_duration_since(started) < budget);
+        real_ok && sim_ok
+    }
+
     fn update_pointer_leave_overlays(
         &mut self,
         position: Point,
@@ -1154,13 +1206,32 @@ impl WidgetTree {
 
         for overlay_id in overlay_ids {
             let inside = self.pointer_inside_overlay_region(overlay_id, position);
+            // A pointer travelling the safe triangle toward this overlay
+            // is still "inside" as far as dismissal is concerned — that
+            // is the whole point of the triangle. Without this the
+            // grace period runs for the entire diagonal and closes the
+            // submenu mid-flight, no matter what the hover handlers do.
+            // See `overlay::safe_triangle`.
+            let armed = self.safe_region_unexpired(overlay_id, real_now, sim_now);
+            let travelling = !inside
+                && armed
+                && self
+                    .overlay_manager
+                    .point_in_safe_region(overlay_id, position);
+            if armed && !travelling {
+                // Arrived, returned, or strayed out of the cone — either
+                // way the traversal is over. (A region whose budget is
+                // spent is retired by the frame pass, which also has to
+                // handle the pointer that stopped moving entirely.)
+                self.overlay_manager.clear_safe_region(overlay_id);
+            }
             if let Some(overlay) = self
                 .overlay_manager
                 .stack
                 .iter_mut()
                 .find(|overlay| overlay.id == overlay_id)
             {
-                if inside {
+                if inside || travelling {
                     overlay.pointer_leave_started_real = None;
                     overlay.pointer_leave_started_sim = None;
                 } else if overlay.pointer_leave_started_real.is_none() {
@@ -1307,6 +1378,50 @@ impl WidgetTree {
         elapsed_fn: impl Fn(&crate::overlay::ActiveOverlay) -> Option<std::time::Duration>,
         ops: &mut dyn crate::window::WindowOps,
     ) {
+        // Retire safe regions whose budget is spent. `update_pointer_leave_overlays`
+        // does this too, but only when the pointer moves — and a pointer parked
+        // inside the cone generates no moves at all, so without this pass the
+        // submenu would stay open indefinitely. Expiring here also starts the
+        // ordinary grace, so the overlay closes `delay` later exactly as if the
+        // triangle had never been armed.
+        let real_now = std::time::Instant::now();
+        let sim_now = self.sim_clock;
+        let expired: Vec<crate::overlay::OverlayId> = self
+            .overlay_manager
+            .stack
+            .iter()
+            .filter(|overlay| overlay.safe_apex.is_some())
+            .map(|overlay| overlay.id)
+            .filter(|id| !self.safe_region_unexpired(*id, real_now, sim_now))
+            .collect();
+        let budget = crate::overlay::SAFE_REGION_BUDGET;
+        for id in expired {
+            if let Some(overlay) = self
+                .overlay_manager
+                .stack
+                .iter_mut()
+                .find(|overlay| overlay.id == id)
+                && overlay.pointer_leave_started_real.is_none()
+            {
+                // Backdate to the instant the budget ran out: the
+                // pointer stopped counting as "inside" then, not when a
+                // frame got around to noticing. Otherwise the grace
+                // silently restarts from zero and the total wait
+                // depends on the frame rate.
+                let backdate = |started: Option<std::time::Instant>, now: std::time::Instant| {
+                    started
+                        .and_then(|s| s.checked_add(budget))
+                        .map(|deadline| deadline.min(now))
+                        .unwrap_or(now)
+                };
+                overlay.pointer_leave_started_real =
+                    Some(backdate(overlay.safe_apex_started_real, real_now));
+                overlay.pointer_leave_started_sim =
+                    Some(backdate(overlay.safe_apex_started_sim, sim_now));
+            }
+            self.overlay_manager.clear_safe_region(id);
+        }
+
         let mut to_dismiss = Vec::new();
 
         for overlay in self.overlay_manager.stack.iter().rev() {

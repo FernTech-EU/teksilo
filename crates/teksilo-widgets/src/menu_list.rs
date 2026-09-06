@@ -273,28 +273,22 @@ pub struct MenuList {
     type_ahead_timeout: Duration,
 }
 
-/// Per-MenuList shared state for the safe-triangle submenu hover gate.
-/// Set by a submenu-trigger MenuItem when its submenu opens, cleared
-/// when the submenu closes. Consulted by sibling MenuItems before
-/// they fire `dismiss_child_overlays` / `show_overlay_after_with_focus`
-/// — if the cursor is currently inside the triangle apex'd at
-/// `anchor` and based at the open submenu's near edge, the sibling's
-/// hover-switch is skipped so the user can travel diagonally to the
-/// submenu without losing focus on the way.
+/// Per-MenuList shared state for the safe-triangle submenu hover gate:
+/// which submenu in this list is currently open, so a sibling row can
+/// ask the framework whether the pointer is inside *that* overlay's
+/// armed safe region before it fires `dismiss_child_overlays`.
 ///
-/// `pub` for cross-crate access (MenuItem reads & writes it through a
-/// shared `Rc`-handle) but in practice only `MenuList`'s scope wires
-/// it up.
+/// The geometry — the apex, the cone, its budget — lives in
+/// `teksilo_core::overlay`, because the overlay's own pointer-leave
+/// grace has to honour the same region; the two would drift if the
+/// widget kept a private copy. All this side has to carry is the
+/// identity of the overlay to ask about.
 #[derive(Debug, Default)]
 pub(crate) struct SafeTriangleState {
-    /// The currently-open submenu's root content widget id, or
-    /// `None` when no submenu is open. Looked up against the
-    /// per-dispatch overlay-bounds snapshot to recover the screen
-    /// rect.
+    /// The currently-open submenu's root content widget id, or `None`
+    /// when no submenu in this list is open. Published by the trigger
+    /// when the pointer leaves its row with the submenu up.
     pub submenu_content_id: Option<WidgetId>,
-    /// Pointer position at the moment the submenu opened — the
-    /// triangle apex. `None` when no submenu is open.
-    pub anchor: Option<teksilo_canvas::Point>,
 }
 
 /// Shared handle installed on every MenuItem that participates in

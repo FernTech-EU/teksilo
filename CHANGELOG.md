@@ -22,6 +22,19 @@ by crate for clarity, not because crates version independently.
   (Qt's `stretchLastSection`). Positional — it follows a reorder — and the
   stretched column has no grip of its own.
 
+#### Core
+
+- `EventContext::arm_overlay_safe_region` / `pointer_in_overlay_safe_region`:
+  an open overlay can claim a "safe triangle" from the point the pointer left
+  its anchor to its own near edge. While the pointer is inside it, the
+  overlay's pointer-leave grace is held off, and any widget whose hover would
+  tear the overlay down can ask the same question and stand aside. Bounded to
+  600 ms so it stays a travel allowance. Used by cascading submenus.
+- `EventContext::show_overlay_after_replacing_siblings`: like
+  `show_overlay_after_with_focus`, but the anchor's sibling overlays are
+  dismissed when the overlay actually shows rather than when it was requested
+  — the hover-switch that must not fire for a pointer merely passing through.
+
 #### Automation
 
 - `teksilo_automation::client`: the binary name, the matching version and the
@@ -56,6 +69,23 @@ by crate for clarity, not because crates version independently.
   style needs no change) instead of the IntUI module constants. macOS menus
   get their 14 dp check column and 11 dp separator, Fluent its 11 dp trailing
   column and 3 dp `MenuFlyoutSeparatorThemePadding`.
+- **A submenu survives the diagonal to reach it.** The safe triangle now
+  holds off the submenu overlay's own pointer-leave grace, not just a sibling
+  row's hover-switch: the grace used to start the moment the pointer left the
+  trigger row and closed the submenu 150 ms later, mid-flight, however slowly
+  the user was travelling. It is armed where the diagonal starts — the point
+  the pointer leaves the trigger — so a submenu opened by click, Enter or
+  ArrowRight is covered too, and it expires after 600 ms so a parked pointer
+  releases the menu instead of pinning it.
+- **Crossing a neighbouring submenu trigger no longer closes the submenu you
+  are walking to.** The hover-switch between two submenu triggers now dismisses
+  the open submenu when the new one *opens*, not when the pointer first touches
+  the row — so passing through costs nothing and settling still swaps on the
+  same frame.
+- **A submenu trigger stays highlighted while its submenu is on screen.** It
+  used to un-highlight as soon as the pointer left the row, which is the whole
+  time the submenu is up, leaving the open panel with no visible parent. Its
+  `set_expanded` was reporting collapsed over the same window.
 
 ## [0.9.4] - 2026-09-05
 

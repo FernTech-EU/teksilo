@@ -767,6 +767,7 @@ impl WidgetTree {
     }
 
     fn handle_pointer_move(&mut self, position: Point, ops: &mut dyn crate::window::WindowOps) {
+        self.previous_pointer_position = self.last_pointer_position;
         self.last_pointer_position = Some(position);
         let target = self.hit_test(position);
 
@@ -1885,7 +1886,7 @@ impl WidgetTree {
                 self.pointer_captured_by = None;
             }
         }
-        for (mut request, delay, focus_target) in ctx.delayed_overlay_requests {
+        for (mut request, delay, focus_target, replace_siblings) in ctx.delayed_overlay_requests {
             if request.parent_overlay.is_none() {
                 request.parent_overlay = self.overlay_ancestor_for_widget(source_widget);
             }
@@ -1903,6 +1904,7 @@ impl WidgetTree {
                 request,
                 delay,
                 focus_target,
+                replace_siblings,
                 real_requested_at: std::time::Instant::now(),
                 sim_requested_at: self.sim_clock,
             });
@@ -1911,6 +1913,25 @@ impl WidgetTree {
         for content_id in ctx.cancel_delayed_overlays {
             self.pending_delayed_overlays
                 .retain(|pending| pending.request.content_id != content_id);
+        }
+        // Apex = the last sample that was still over the anchor, which
+        // for the intended caller (the anchor's own hover-leave) is the
+        // point the diagonal starts from. Ops are applied per node as
+        // its handler returns, so this lands before the next widget's
+        // hover-enter and before the move's own pointer-leave
+        // bookkeeping.
+        for content_id in ctx.safe_region_arm_requests {
+            if let Some(apex) = self
+                .previous_pointer_position
+                .or(self.last_pointer_position)
+            {
+                self.overlay_manager.arm_safe_region(
+                    content_id,
+                    apex,
+                    std::time::Instant::now(),
+                    self.sim_clock,
+                );
+            }
         }
         for id in ctx.repaint_requests {
             self.arena.mark_needs_paint(id);
