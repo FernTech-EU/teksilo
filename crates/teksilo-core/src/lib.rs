@@ -70,7 +70,7 @@ pub use drag_payload::{
     OutboundDragData,
 };
 pub use drag_state::DropFeedback;
-pub use environment::{Environment, LayoutDirection};
+pub use environment::{Environment, ExploreByTouch, LayoutDirection, ScreenReaderState};
 pub use event::{
     ButtonMask, EventResponse, Key, Modifiers, PointerButton, ScrollDelta, WidgetEvent,
 };

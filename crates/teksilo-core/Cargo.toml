@@ -34,6 +34,9 @@ raw-window-handle = "0.6"
 # Test-only: property-based testing (see the `proptest` entry in the
 # workspace manifest for why proptest rather than cargo-fuzz).
 proptest = { workspace = true }
+# Test-only: `Theme` derives Serialize/Deserialize and the density work asserts
+# that a theme serialized before `input` existed still loads.
+serde_json = { workspace = true }
 
 [package.metadata.docs.rs]
 all-features = true

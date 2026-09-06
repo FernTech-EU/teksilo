@@ -76,6 +76,10 @@ pub struct WidgetTree {
     /// rebuilding the widget tree, so interaction state (focus, scroll, expanded
     /// panels, …) survives theme switches.
     theme_signal: crate::signal::Signal<Theme>,
+    /// How the active [`TargetDensity`] is chosen. `Fixed(Compact)` by default,
+    /// so nothing switches density unless the app asks. `FollowLastPointer` is
+    /// read by the pointer ingress (P15) — this tree only stores it.
+    density_policy: teksilo_tokens::DensityPolicy,
     /// User-controlled global text-scale factor (`1.0` = 100 %). Layered on top
     /// of the OS `text_scale_factor`: the two multiply. Set via
     /// `set_user_text_scale`; persisted by the application through
@@ -661,6 +665,7 @@ impl WidgetTree {
             arena: WidgetArena::new(),
             theme: initial_theme.clone(),
             theme_signal: crate::signal::Signal::new(initial_theme.clone()),
+            density_policy: teksilo_tokens::DensityPolicy::default(),
             user_text_scale: 1.0,
             effective_theme: initial_theme,
             effective_text_scale: 1.0,
@@ -1857,6 +1862,83 @@ impl WidgetTree {
         // label's lines, and therefore its text runs, can be a different
         // set at the same size.
         self.a11y_dirty = true;
+    }
+
+    /// The [`TargetDensity`] the active theme was projected onto.
+    ///
+    /// [`TargetDensity`]: teksilo_tokens::TargetDensity
+    pub fn input_density(&self) -> teksilo_tokens::TargetDensity {
+        self.theme.input.density
+    }
+
+    /// Project the active theme onto another density and **rebuild** the tree.
+    ///
+    /// A rebuild, not [`Self::set_theme`]'s `mark_all_dirty()`: a target size is
+    /// baked in `build()` (a `MinSize` wrapper, a recipe's `Rc<dyn FooStyle>`,
+    /// the number of `Toolbar` items that fit), and marking layout + paint
+    /// cannot re-bake it. This reuses the exact path a
+    /// `BindingLevel::Rebuild` binding takes — `mark_needs_rebuild` on each
+    /// root plus `mark_ancestors_need_layout` — so the next layout pass drains
+    /// it through `process_rebuilds`, which already handles focus restoration,
+    /// the a11y re-walk and interaction-state revalidation.
+    ///
+    /// A no-op when the density is already the requested one: a density switch
+    /// throws away every widget id in the tree, so it must not fire on a
+    /// repeated set.
+    ///
+    /// [`TargetDensity`]: teksilo_tokens::TargetDensity
+    pub fn set_input_density(&mut self, density: teksilo_tokens::TargetDensity) {
+        if self.theme.input.density == density {
+            return;
+        }
+        self.set_theme(self.theme.with_density(density));
+        // The `BindingLevel::Rebuild` arm of `apply_binding_dirty`
+        // (`widget_tree/layout_impl.rs`), applied at every root.
+        for root in self.arena.roots() {
+            self.arena.mark_needs_rebuild(root);
+            self.arena.mark_ancestors_need_layout(root);
+        }
+    }
+
+    /// How the active density is chosen. See [`DensityPolicy`].
+    ///
+    /// [`DensityPolicy`]: teksilo_tokens::DensityPolicy
+    pub fn density_policy(&self) -> teksilo_tokens::DensityPolicy {
+        self.density_policy
+    }
+
+    /// Set the density-selection policy.
+    ///
+    /// Storing a `Fixed(d)` policy does **not** by itself switch the density —
+    /// call [`Self::set_input_density`] for that. `FollowLastPointer` is acted
+    /// on by the pointer ingress once P15 lands; until then this is state and
+    /// an accessor.
+    pub fn set_density_policy(&mut self, policy: teksilo_tokens::DensityPolicy) {
+        self.density_policy = policy;
+    }
+
+    /// Whether touch input is accepted. See
+    /// [`InputTokens::touch_enabled`](teksilo_tokens::InputTokens::touch_enabled).
+    pub fn touch_enabled(&self) -> bool {
+        self.theme.input.touch_enabled
+    }
+
+    /// The runtime touch kill switch. With `false`, the platform translator
+    /// drops touch input and the router installs no touch-only recognizers,
+    /// so an app can fall back to mouse-only behaviour at runtime.
+    ///
+    /// Repaint-level only: turning touch off changes which events are accepted,
+    /// never a dimension, so nothing is rebuilt or relaid out here. (The
+    /// translator and router honour it from P08 / P15; this is the state.)
+    pub fn set_touch_enabled(&mut self, enabled: bool) {
+        if self.theme.input.touch_enabled == enabled {
+            return;
+        }
+        let mut theme = self.theme.clone();
+        theme.input.touch_enabled = enabled;
+        self.theme = theme.clone();
+        self.theme_signal.set(theme);
+        self.recompute_effective_theme();
     }
 
     /// Recompute [`Self::effective_theme`] from the current `theme` and the
@@ -4425,5 +4507,108 @@ mod effective_enabled_signal_tests {
             Signal::same(&a, &b),
             "must hand back the same signal handle"
         );
+    }
+}
+
+#[cfg(test)]
+mod density_tests {
+    use super::*;
+    use teksilo_tokens::{DensityPolicy, TargetDensity};
+
+    /// A fresh tree is Compact — today's behaviour — and reports it.
+    #[test]
+    fn a_fresh_tree_is_compact() {
+        let tree = WidgetTree::new();
+        assert_eq!(tree.input_density(), TargetDensity::Compact);
+        assert_eq!(tree.theme().input, teksilo_tokens::InputTokens::default());
+        assert!(tree.touch_enabled());
+        assert_eq!(
+            tree.density_policy(),
+            DensityPolicy::Fixed(TargetDensity::Compact)
+        );
+    }
+
+    /// A density switch changes what the tree reports **and** dirties it at the
+    /// rebuild level — a target size is baked in `build()`, so layout+paint
+    /// alone cannot re-bake it.
+    #[test]
+    fn switching_density_reports_and_dirties_at_rebuild_level() {
+        let mut tree = WidgetTree::new();
+        let root = tree.add(crate::test_widgets::FillWidget::new());
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        assert!(
+            tree.arena.collect_needs_rebuild().is_empty(),
+            "a laid-out tree starts clean"
+        );
+
+        tree.set_input_density(TargetDensity::Touch);
+
+        assert_eq!(tree.input_density(), TargetDensity::Touch);
+        assert_eq!(tree.theme().input.target_size, 44.0);
+        assert_eq!(tree.theme().input.grab_size, 16.0);
+        assert!(
+            tree.arena.collect_needs_rebuild().contains(&root),
+            "the root must be marked for rebuild, not merely relayout"
+        );
+    }
+
+    /// Re-setting the same density must not throw away every widget id in the
+    /// tree for nothing.
+    #[test]
+    fn re_setting_the_same_density_is_a_no_op() {
+        let mut tree = WidgetTree::new();
+        let _root = tree.add(crate::test_widgets::FillWidget::new());
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+
+        tree.set_input_density(TargetDensity::Compact);
+
+        assert!(tree.arena.collect_needs_rebuild().is_empty());
+    }
+
+    /// The theme signal follows a density switch, so a `theme_signal`-bound
+    /// widget re-resolves without its own wiring.
+    #[test]
+    fn the_theme_signal_follows_a_density_switch() {
+        let mut tree = WidgetTree::new();
+        tree.set_input_density(TargetDensity::Comfortable);
+        assert_eq!(
+            tree.theme_signal().get().input.density,
+            TargetDensity::Comfortable
+        );
+        assert_eq!(tree.theme_signal().get().input.target_size, 32.0);
+    }
+
+    /// The kill switch is state on the theme, reachable both ways, and does
+    /// not rebuild — it changes which events are accepted, not a dimension.
+    #[test]
+    fn the_touch_kill_switch_round_trips_without_a_rebuild() {
+        let mut tree = WidgetTree::new();
+        let _root = tree.add(crate::test_widgets::FillWidget::new());
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+
+        tree.set_touch_enabled(false);
+
+        assert!(!tree.touch_enabled());
+        assert!(!tree.theme().input.touch_enabled);
+        assert!(!tree.theme_signal().get().input.touch_enabled);
+        assert!(tree.arena.collect_needs_rebuild().is_empty());
+
+        tree.set_touch_enabled(true);
+        assert!(tree.touch_enabled());
+    }
+
+    /// The policy is stored verbatim and does not itself move the density.
+    #[test]
+    fn setting_a_policy_does_not_switch_the_density() {
+        let mut tree = WidgetTree::new();
+        let policy = DensityPolicy::FollowLastPointer {
+            coarse: TargetDensity::Touch,
+            fine: TargetDensity::Compact,
+            hysteresis: std::time::Duration::from_secs(1),
+        };
+        tree.set_density_policy(policy);
+
+        assert_eq!(tree.density_policy(), policy);
+        assert_eq!(tree.input_density(), TargetDensity::Compact);
     }
 }

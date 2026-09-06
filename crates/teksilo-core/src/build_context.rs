@@ -421,6 +421,19 @@ impl<'a> BuildContext<'a> {
         self.tree.theme()
     }
 
+    /// The active [`TargetDensity`] — the ladder `ctx.theme().input` was
+    /// projected onto.
+    ///
+    /// Read it in `build()` when a dimension must be chosen once per build
+    /// (a `MinSize` wrapper, a recipe's metrics). For the values themselves
+    /// prefer `ctx.theme().input` plus the
+    /// [`density`](crate::styles::density) helpers, which encode the floors.
+    ///
+    /// [`TargetDensity`]: teksilo_tokens::TargetDensity
+    pub fn density(&self) -> teksilo_tokens::TargetDensity {
+        self.tree.input_density()
+    }
+
     /// Reactive handle on the current theme. Fires observers when
     /// `tree.set_theme(...)` is called. Build implementations that want
     /// theme-driven values to update without a rebuild should use this

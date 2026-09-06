@@ -31,6 +31,8 @@ mod combo_box_style;
 mod component_style_slots;
 #[path = "styles/date_edit_style.rs"]
 mod date_edit_style;
+#[path = "styles/density.rs"]
+pub mod density;
 #[path = "styles/dialog_style.rs"]
 mod dialog_style;
 #[path = "styles/drop_target_style.rs"]
@@ -126,6 +128,7 @@ pub use combo_box_style::{
 };
 pub use component_style_slots::ComponentStyleSlots;
 pub use date_edit_style::{DateEditStyle, DateEditStyleConfig, SharedDateEditStyle};
+pub use density::{density_min_size, dp, spacing};
 pub use dialog_style::{DialogStyle, DialogStyleConfig, SharedDialogStyle};
 pub use drop_target_style::{
     DropRegion, DropRegionSet, DropTargetDragState, DropTargetStyle, DropTargetStyleConfig,

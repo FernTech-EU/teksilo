@@ -51,6 +51,30 @@ use std::rc::Rc;
 
 use teksilo_core::presets::intui;
 use teksilo_core::styles::{Theme, ThemeAppearance};
+use teksilo_tokens::{InputTokens, TargetDensity};
+
+/// Material 3's input tokens for one density ladder.
+///
+/// Identical to [`InputTokens::for_density`] except at
+/// [`TargetDensity::Touch`], where `target_size` is raised from the generic
+/// 44 dp to Material 3's own **48 dp** touch-target minimum (M3 *Accessibility
+/// — Touch targets*). 44 dp is Apple HIG / WCAG 2.2 SC 2.5.5 (level AAA); the
+/// 24 dp AA floor in `min_target_conformance` is untouched.
+///
+/// At `Compact` — the default — this is the generic ladder unchanged, so a
+/// Material 3 theme is byte-for-byte today's behaviour.
+///
+/// Note that [`Theme::with_density`] is a generic projection and resets
+/// `input` to the generic ladder; a Material 3 app that switches density
+/// should re-apply these tokens (`theme.input = material3::input_tokens(d)`)
+/// until the density sweep wires per-preset projection.
+pub fn input_tokens(density: TargetDensity) -> InputTokens {
+    let mut tokens = InputTokens::for_density(density);
+    if density == TargetDensity::Touch {
+        tokens.target_size = 48.0;
+    }
+    tokens
+}
 
 /// Material 3 light theme (baseline scheme, seed `#6750A4`).
 pub fn light() -> Theme {
@@ -80,6 +104,9 @@ fn apply_material3_overrides(theme: &mut Theme, appearance: ThemeAppearance) {
         shape::m3_dark_shape()
     };
     theme.typography = typography::m3_typography();
+    // M3's touch targets are 48 dp, not the generic ladder's 44 — a no-op at
+    // the default Compact density. See `input_tokens`.
+    theme.input = input_tokens(theme.input.density);
     theme.extensions.insert(if light {
         Material3Palette::light()
     } else {

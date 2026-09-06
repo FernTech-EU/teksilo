@@ -11001,6 +11001,7 @@ dependencies = [
  "proptest",
  "raw-window-handle",
  "serde",
+ "serde_json",
  "slotmap",
  "teksilo-canvas",
  "teksilo-tokens",

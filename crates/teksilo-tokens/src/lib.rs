@@ -3,6 +3,7 @@
 
 pub mod alignment;
 pub mod color;
+pub mod input;
 pub mod layout;
 pub mod motion;
 pub mod orientation;
@@ -15,6 +16,11 @@ pub mod typography;
 
 pub use alignment::{Alignment, Corner, HAlignment, VAlignment};
 pub use color::Color;
+pub use input::{
+    DensityPolicy, DimensionRole, DragActivation, GestureProfile, GestureTokens, InputTokens,
+    OverscrollStyle, PenKind, PointerKind, PointerKindMask, RevealPolicy, ScrollPhysics,
+    ScrollPhysicsTokens, TargetAxes, TargetDensity, TargetRole,
+};
 pub use layout::LayoutTokens;
 pub use motion::{Easing, MotionTokens, lerp};
 pub use orientation::Orientation;

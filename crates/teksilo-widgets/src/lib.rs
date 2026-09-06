@@ -165,6 +165,10 @@ pub use teksilo_core::styles::{
     DropTargetVariant, RadioTileStyle, RadioTileStyleConfig, RadioTileVariant,
     SharedDropTargetStyle, SharedRadioTileStyle, TabIndicatorPosition,
 };
+// Density helpers live in teksilo-core (so teksilo-terminal / teksilo-webview /
+// teksilo-scene reach them without a widgets dep); re-exported here because
+// widget authors are their main caller. See `docs/density-and-targets.md`.
+pub use teksilo_core::styles::density::{self, density_min_size, dp, spacing};
 pub use teksilo_data::CheckState;
 // Re-export the policy enum alongside the widget so consumers need a single
 // `use teksilo::widgets::{FocusScope, TraversalScopePolicy}`.

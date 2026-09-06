@@ -15,7 +15,9 @@
 //! (group-4 composites). Theme-wide style installs go through
 //! `style_slots: ComponentStyleSlots`.
 
-use teksilo_tokens::{ColorTokens, LayoutTokens, MotionTokens, ShapeTokens, TypographyTokens};
+use teksilo_tokens::{
+    ColorTokens, InputTokens, LayoutTokens, MotionTokens, ShapeTokens, TypographyTokens,
+};
 
 use crate::styles::{ComponentStyleSlots, Theme, ThemeAppearance, ThemeExtensions, ThemeId};
 
@@ -29,6 +31,7 @@ pub fn light() -> Theme {
         typography: TypographyTokens::default(),
         shape: ShapeTokens::light_default(),
         motion: MotionTokens::default(),
+        input: InputTokens::default(),
         style_slots: ComponentStyleSlots::default(),
         extensions: ThemeExtensions::new(),
     }
@@ -45,6 +48,7 @@ pub fn dark() -> Theme {
         typography: TypographyTokens::default(),
         shape: ShapeTokens::dark_default(),
         motion: MotionTokens::default(),
+        input: InputTokens::default(),
         style_slots: ComponentStyleSlots::default(),
         extensions: ThemeExtensions::new(),
     }
