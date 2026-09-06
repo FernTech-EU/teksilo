@@ -28,6 +28,7 @@ pub mod gesture;
 pub mod idle;
 pub mod ime;
 pub mod intent;
+pub mod kinetic;
 pub mod menu_item_id;
 pub mod modal;
 pub mod motion_visibility;
@@ -88,6 +89,10 @@ pub use gesture::{
 pub use idle::IdleDeadline;
 pub use ime::{ImeContext, ImePurpose};
 pub use intent::{Intent, IntentKind, IntentResponse};
+pub use kinetic::{
+    BouncingSimulation, ClampingSimulation, FlingDriver, KineticScroller, ScrollSimulation,
+    ScrollStep, VelocityEstimate, VelocityTracker, rubber_band,
+};
 pub use menu_item_id::MenuItemId;
 pub use modal::{
     ModalBuilder, ModalCloseBehavior, ModalContent, ModalPresentation, ModalRequest,

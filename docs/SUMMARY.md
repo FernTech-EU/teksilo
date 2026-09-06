@@ -52,6 +52,7 @@
 - [Widget pointer inventory](widget-pointer-inventory.md)
 - [Hover-affordance census](hover-affordance-census.md)
 - [Drag-operation census](drag-operation-census.md)
+- [Kinetic scrolling](kinetic-scrolling.md)
 
 # Data, persistence, telemetry
 
