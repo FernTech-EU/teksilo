@@ -45,6 +45,13 @@
 - [Multi-window](multi-window.md)
 - [Title bar](title-bar.md)
 
+# Touch & pen migration
+
+- [Density inventory](density-inventory.md)
+- [Widget pointer inventory](widget-pointer-inventory.md)
+- [Hover-affordance census](hover-affordance-census.md)
+- [Drag-operation census](drag-operation-census.md)
+
 # Data, persistence, telemetry
 
 - [Data models](data-models.md)
