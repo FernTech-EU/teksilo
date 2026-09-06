@@ -378,7 +378,7 @@ impl Widget for Slider {
         let set_value_from_position = {
             let set_value_snapped = set_value_snapped.clone();
             let cached_bounds = cached_bounds.clone();
-            move |x: f32, y: f32| {
+            move |x: f32, y: f32, rtl: bool| {
                 let bounds = cached_bounds.get();
                 let pos = match orientation {
                     Orientation::Horizontal => x,
@@ -394,7 +394,14 @@ impl Widget for Slider {
                 // `pos` arrives widget-local (origin at the slider's own
                 // top-left), so the track starts at `thumb_radius`, not at
                 // `bounds.x` / `bounds.y`.
-                let t = ((pos - thumb_radius) / usable).clamp(0.0, 1.0);
+                let mut t = ((pos - thumb_radius) / usable).clamp(0.0, 1.0);
+                // The minimum sits at the leading edge, which is the right one
+                // in a right-to-left window, so a horizontal slider reads its
+                // pointer position from the other end. The vertical axis has
+                // no leading/trailing to mirror.
+                if rtl && matches!(orientation, Orientation::Horizontal) {
+                    t = 1.0 - t;
+                }
                 set_value_snapped(min + t * (max - min));
             }
         };
@@ -409,16 +416,16 @@ impl Widget for Slider {
         {
             let dragging = dragging.clone();
             let set_value = set_value_from_position.clone();
-            handlers = handlers.on_drag(move |phase, _ctx| match phase {
+            handlers = handlers.on_drag(move |phase, ctx| match phase {
                 DragPhase::Started {
                     position,
                     button: PointerButton::Primary,
                 } => {
                     dragging.set(true);
-                    set_value(position.x, position.y);
+                    set_value(position.x, position.y, ctx.is_rtl());
                 }
                 DragPhase::Moved { position, .. } if dragging.get() => {
-                    set_value(position.x, position.y);
+                    set_value(position.x, position.y, ctx.is_rtl());
                 }
                 DragPhase::Ended { .. } => {
                     dragging.set(false);
@@ -430,8 +437,8 @@ impl Widget for Slider {
         // Track click — jump the value to the click position.
         {
             let set_value = set_value_from_position.clone();
-            handlers = handlers.on_tap(move |event, _ctx| {
-                set_value(event.position.x, event.position.y);
+            handlers = handlers.on_tap(move |event, ctx| {
+                set_value(event.position.x, event.position.y, ctx.is_rtl());
             });
         }
 
@@ -448,21 +455,21 @@ impl Widget for Slider {
         {
             let adjust = adjust_by_step.clone();
             let value = value.clone();
-            handlers = handlers.on_key(move |event, _ctx| {
+            handlers = handlers.on_key(move |event, ctx| {
                 let WidgetEvent::KeyDown { key, modifiers, .. } = event else {
                     return EventResponse::Ignored;
                 };
-                // `rtl` is false: this widget's fill and its click-to-jump both
-                // map leading-to-trailing unconditionally, so mirroring the
-                // arrows alone would leave the `<-` key and a leftward drag
-                // moving the thumb in opposite directions. All three mirror
-                // together or none do.
+                // The paint, the pointer mapping and the arrows all mirror
+                // against this same answer, read at event time so a locale
+                // flip needs no rebuild. Mirroring any one of the three alone
+                // would leave the `Left` key and a leftward drag moving the
+                // thumb in opposite directions.
                 let Some(mv) = range_nav::range_move(
                     *key,
                     *modifiers,
                     RangeKind::Scalar,
                     RangeAxis::Both,
-                    false,
+                    ctx.is_rtl(),
                 ) else {
                     return EventResponse::Ignored;
                 };
@@ -893,6 +900,71 @@ mod tests {
         assert!((value.get() - 60.0).abs() < 0.01, "value={}", value.get());
         assert!(access(&mut tree, s, Action::Decrement, None));
         assert!((value.get() - 50.0).abs() < 0.01, "value={}", value.get());
+    }
+
+    #[test]
+    fn rtl_mirrors_the_arrows_the_pointer_and_the_fill_together() {
+        // A horizontal slider's minimum sits at the *leading* edge, which is
+        // the right one in a right-to-left window. All three readings of that
+        // — the arrows, the click-to-jump and the painted fill — mirror off
+        // the same answer; mirroring any one alone would leave the `Left` key
+        // and a leftward drag moving the thumb in opposite directions.
+        let value = Signal::new(50.0_f32);
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        tree.set_layout_direction(teksilo_core::environment::LayoutDirection::RightToLeft);
+        let s = tree.add(Slider::new(value.clone(), 0.0, 100.0).step(10.0));
+        tree.layout(SizeProposal::exact(200.0, 60.0));
+        tree.render();
+        tree.focus(s);
+
+        tree.press_key(Key::ArrowLeft, Modifiers::NONE);
+        assert!(
+            (value.get() - 60.0).abs() < 0.01,
+            "under RTL the leftward arrow increases, got {}",
+            value.get()
+        );
+        tree.press_key(Key::ArrowRight, Modifiers::NONE);
+        assert!((value.get() - 50.0).abs() < 0.01);
+
+        // The pointer reads from the other end too: a click near the *right*
+        // edge is near the minimum under RTL, where it would be the maximum
+        // left-to-right.
+        let p = Point::new(190.0, 30.0);
+        tree.pointer_move(p);
+        tree.dispatch_event(WidgetEvent::PointerDown {
+            position: p,
+            button: PointerButton::Primary,
+            modifiers: Modifiers::NONE,
+        });
+        tree.dispatch_event(WidgetEvent::PointerUp {
+            position: p,
+            button: PointerButton::Primary,
+            modifiers: Modifiers::NONE,
+        });
+        assert!(
+            value.get() < 20.0,
+            "a click near the right edge is near the minimum under RTL, got {}",
+            value.get()
+        );
+    }
+
+    #[test]
+    fn a_vertical_slider_ignores_the_layout_direction() {
+        // `Up`/`Down` name points in value space; only the horizontal pair
+        // mirrors.
+        let value = Signal::new(50.0_f32);
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        tree.set_layout_direction(teksilo_core::environment::LayoutDirection::RightToLeft);
+        let s = tree.add(
+            Slider::new(value.clone(), 0.0, 100.0)
+                .step(10.0)
+                .orientation(Orientation::Vertical),
+        );
+        tree.layout(SizeProposal::exact(60.0, 200.0));
+        tree.focus(s);
+
+        tree.press_key(Key::ArrowUp, Modifiers::NONE);
+        assert!((value.get() - 60.0).abs() < 0.01, "value={}", value.get());
     }
 
     #[test]

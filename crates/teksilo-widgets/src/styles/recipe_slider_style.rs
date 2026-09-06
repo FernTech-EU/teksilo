@@ -18,6 +18,7 @@ use teksilo_canvas::{Canvas, Rect, Size, SizeProposal};
 use teksilo_core::accessibility::AccessNodeBuilder;
 use teksilo_core::binding::BindingLevel;
 use teksilo_core::build_context::BuildContext;
+use teksilo_core::environment::LayoutDirection;
 use teksilo_core::focus::FocusOrigin;
 use teksilo_core::signal::Signal;
 use teksilo_core::styles::{SliderOrientation, SliderStyle, SliderStyleConfig, SliderVariant};
@@ -182,9 +183,25 @@ impl Widget for SliderBody {
                     track_height,
                 );
                 let usable = track.width;
-                let thumb_pos = track.x + usable * t;
-                let fill_w = (thumb_pos - track.x).max(0.0);
-                let fill = Rect::new(track.x, ty, fill_w, track_height);
+                // The minimum sits at the *leading* edge, which is the right
+                // one in a right-to-left window — so the thumb travels the
+                // other way and the fill grows leftward from it. Read at paint
+                // time, so a locale flip needs no rebuild. `Slider`'s pointer
+                // mapping and arrow keys mirror against the same value, which
+                // is the only way the three can agree.
+                let rtl = ctx.layout_direction == LayoutDirection::RightToLeft;
+                let t_geometric = if rtl { 1.0 - t } else { t };
+                let thumb_pos = track.x + usable * t_geometric;
+                let fill = if rtl {
+                    Rect::new(
+                        thumb_pos,
+                        ty,
+                        (track.x + usable - thumb_pos).max(0.0),
+                        track_height,
+                    )
+                } else {
+                    Rect::new(track.x, ty, (thumb_pos - track.x).max(0.0), track_height)
+                };
                 (track, fill, thumb_pos, bounds.y + bounds.height * 0.5)
             }
             SliderOrientation::Vertical => {

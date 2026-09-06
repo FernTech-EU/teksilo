@@ -132,6 +132,21 @@ See [docs/range-keyboard.md](docs/range-keyboard.md) for the full chord table.
   moves the handle *towards* the centre; the pointer path already inverted per
   side (`side_main`) and the arrows did not, so they moved the handle the way
   they did not point. **Behaviour change.**
+- **A right-to-left `Slider` read every one of its three surfaces
+  left-to-right.** A horizontal slider's minimum sits at the *leading* edge,
+  which is the right one there, so the fill now grows leftward from a thumb
+  that travels the other way, the click-to-jump reads from the other end, and
+  the arrows follow. All three key off one answer, read at paint and at event
+  time: mirroring any of them alone would leave the `Left` key and a leftward
+  drag moving the thumb in opposite directions. A custom `SliderStyle` carries
+  the same obligation, which its trait now states. **Behaviour change.**
+- **A right-to-left horizontal `ScrollBar` disagreed with its own
+  `ScrollArea`.** The area had already mirrored — it anchors content to the
+  right and grows `scroll_x` leftward — while the bar placed its thumb at
+  `bounds.x + offset`, so at `scroll_x = 0` the content showed its beginning
+  and the thumb sat at the far end of the track, and a track click paged the
+  wrong way. The thumb, the drag delta, the track-click direction and the
+  arrows now key off one predicate. **Behaviour change.**
 - `ScrollBar` no longer claims `Action::SetValue`. Its node is `set_hidden()`
   and it never advertised the action, so the arm was unreachable except to
   answer `Handled` to a `SetValue` bubbling up from a descendant and drop it.

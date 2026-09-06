@@ -152,13 +152,23 @@ keys do **not**: they name points in *value* space rather than on screen, so the
 minimum is the minimum in either direction. Qt flips on `isRightToLeft()`, and
 only the horizontal pair.
 
-Who mirrors today, and why the rest do not:
+A control mirrors in **all** of its readings or in none of them. Mirroring the
+keys alone would leave the `←` key and a leftward drag moving the thumb in
+opposite directions, which is worse than not mirroring at all — so each of
+these moved its paint, its pointer mapping and its arrows together.
 
-| Widget | Arrows mirror? | Why |
+| Widget | Mirrors? | What that meant |
 |---|---|---|
-| `SplitterHandle` | **yes** | Its pane order and drag math have been mirrored since it shipped; only the keyboard was left behind, so `→` pulled the divider left. |
-| `DockResizeHandle` | **yes** | Its pointer path already inverts per side (`side_main`); the keyboard did not. |
-| `Slider`, `HueStrip`, `AlphaStrip`, `ScrollBar` | **no** | Their paint *and* their pointer mapping run leading-to-trailing unconditionally. Mirroring the keys alone would leave the `←` key and a leftward drag moving the thumb in opposite directions — worse than today's uniform non-mirroring. Paint, drag and keys mirror together or not at all, and that is one change per widget rather than this one. |
+| `SplitterHandle` | **yes** | Its pane order and drag math had been mirrored since it shipped; only the keyboard was left behind, so `→` pulled the divider left. |
+| `DockResizeHandle` | **yes** | Its pointer path already inverted per side (`side_main`); the keyboard did not. |
+| `Slider` | **yes** | The minimum sits at the leading edge, so the fill grows leftward from a thumb that travels the other way. Read from `PaintContext::layout_direction` at paint time and `EventContext::is_rtl` at event time, so a locale flip needs no rebuild. A custom `SliderStyle` must do the same — the widget cannot enforce it, and the trait says so. |
+| `ScrollBar` (horizontal) | **yes** | `ScrollArea` had *already* mirrored: it anchors content to the right and grows `scroll_x` leftward. The thumb did not, so at `scroll_x = 0` the content showed its beginning while the thumb sat at the far end of the track. The thumb, the drag delta and the track-click direction now key off one predicate. |
+| `HueStrip`, `AlphaStrip` | **n/a** | Only ever built vertical (their `orientation` builder is `pub(crate)` and the colour picker passes `Vertical`), and the vertical axis has no leading/trailing to mirror. Nothing to do until a horizontal strip exists. |
+
+One thing that deliberately did **not** change: a vertical `Slider` puts its
+minimum at the *top*, where Qt puts it at the bottom. That is a pre-existing
+polarity choice, self-consistent across its paint, pointer and keys, and
+independent of the layout direction — flipping it is a separate decision.
 
 ## Chords Teksilo deliberately does not bind
 
@@ -189,6 +199,18 @@ whether or not the action is advertised; macOS instead *gates* AXValue
 settability on the advertisement, which is why both widgets advertise it — and
 why a read-only `SpinBox` advertises none of the three mutating actions rather
 than claiming a settability it does not have.
+
+A composite publishes **two** nodes — the `Role::SpinButton` root and the
+`Role::TextInput` beneath it — and an assistive technology may resolve either.
+Setting the root goes through the widget's own handler; setting the *field*
+used to replace the displayed string and stop there, leaving the typed value
+stale until the next blur and never firing `on_value_changed`. The field now
+commits through its host when the host asks it to
+(`TextInputField::on_access_set_value`, which `SpinBox` and the date and time
+editors install), so both nodes land the same value by the same parse. The host
+is handed the string rather than left to re-read the bound signal, which the
+field syncs only on the next frame tick. A plain `TextInput` installs nothing:
+its bound `Signal<String>` *is* the value, so the write has already landed.
 
 `ScrollBar` is the exception: its node is `set_hidden()` and it is
 `focusable(false)`, because assistive technology scrolls through the parent

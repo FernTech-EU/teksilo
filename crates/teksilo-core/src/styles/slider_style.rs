@@ -55,6 +55,20 @@ pub struct SliderStyleConfig {
 }
 
 pub trait SliderStyle: 'static {
+    /// Build the slider's chrome — track, fill and thumb.
+    ///
+    /// A horizontal slider's minimum sits at the **leading** edge, which is the
+    /// right one in a right-to-left window. The host widget mirrors its pointer
+    /// mapping and its arrow keys there, so a style that paints the fill from
+    /// the left unconditionally will disagree with both. Read
+    /// `PaintContext::layout_direction` at paint time — not at build time,
+    /// because a locale change repaints without rebuilding — and mirror the
+    /// thumb position and the fill's anchor edge. The vertical orientation has
+    /// no leading/trailing to mirror.
+    ///
+    /// This carries the same obligation as [`thumb_diameter`](Self::thumb_diameter)
+    /// below: the widget cannot enforce it, and getting it wrong is only
+    /// visible in an RTL locale.
     fn make_body(&self, cfg: &SliderStyleConfig, ctx: &mut BuildContext) -> WidgetId;
 
     /// Diameter, in logical pixels, of the draggable thumb produced by

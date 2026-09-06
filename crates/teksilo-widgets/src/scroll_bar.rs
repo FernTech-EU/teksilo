@@ -87,6 +87,11 @@ pub struct ScrollBar {
     drag_start_scroll: Rc<Cell<f32>>,
     /// Current bounds, cached from last layout for event handling.
     cached_bounds: Rc<Cell<Rect>>,
+    /// Layout direction captured at `place_children`, so the thumb geometry —
+    /// computed in `build()`'s pointer closures and in `thumb_rect`, neither of
+    /// which has a `PaintContext` — can mirror a horizontal bar without every
+    /// caller threading it.
+    cached_rtl: Rc<Cell<bool>>,
     /// Body subtree id returned by the active style — kept in
     /// `children()` so layout traverses through it.
     body_id: Option<WidgetId>,
@@ -144,6 +149,7 @@ impl ScrollBar {
             drag_start_pointer: Rc::new(Cell::new(0.0)),
             drag_start_scroll: Rc::new(Cell::new(0.0)),
             cached_bounds: Rc::new(Cell::new(Rect::ZERO)),
+            cached_rtl: Rc::new(Cell::new(false)),
             body_id: None,
             thickness: 8.0,
             min_thumb_length: 24.0,
@@ -246,7 +252,18 @@ impl ScrollBar {
                 Rect::new(bounds.x, bounds.y + offset, bounds.width, thumb_len)
             }
             ScrollBarOrientation::Horizontal => {
-                Rect::new(bounds.x + offset, bounds.y, thumb_len, bounds.height)
+                // A horizontal bar's zero is the *start* of the content, which
+                // is the right-hand edge in a right-to-left window —
+                // `ScrollArea` already places its content that way
+                // (`bounds.right() - width + scroll_x`), so a thumb pinned to
+                // the geometric left showed the far end of the track while the
+                // content showed its beginning.
+                let x = if self.cached_rtl.get() {
+                    bounds.right() - offset - thumb_len
+                } else {
+                    bounds.x + offset
+                };
+                Rect::new(x, bounds.y, thumb_len, bounds.height)
             }
         }
     }
@@ -303,6 +320,18 @@ impl Widget for ScrollBar {
         let step_size = self.step_size;
         let min_thumb_length = self.min_thumb_length;
 
+        // A horizontal bar mirrors in a right-to-left window, because
+        // `ScrollArea` already anchors its content to the right and grows
+        // `scroll_x` leftward. The thumb rect, the drag delta and the
+        // track-click direction all key off this one answer, so they cannot
+        // disagree. Vertical bars never mirror.
+        let mirrored = {
+            let cached_rtl = self.cached_rtl.clone();
+            move || -> bool {
+                matches!(orientation, ScrollBarOrientation::Horizontal) && cached_rtl.get()
+            }
+        };
+
         let axis_value = move |point: Point| -> f32 {
             match orientation {
                 ScrollBarOrientation::Vertical => point.y,
@@ -346,6 +375,7 @@ impl Widget for ScrollBar {
             let max_scroll = max_scroll.clone();
             let track_length = track_length.clone();
             let thumb_length = thumb_length.clone();
+            let mirrored = mirrored.clone();
             move || -> Rect {
                 let bounds = cached_bounds.get();
                 let max = max_scroll.get();
@@ -363,7 +393,14 @@ impl Widget for ScrollBar {
                 // cross-axis origin is 0, not `bounds.x` / `bounds.y`.
                 match orientation {
                     ScrollBarOrientation::Vertical => Rect::new(0.0, offset, bounds.width, tl),
-                    ScrollBarOrientation::Horizontal => Rect::new(offset, 0.0, tl, bounds.height),
+                    ScrollBarOrientation::Horizontal => {
+                        let x = if mirrored() {
+                            bounds.width - offset - tl
+                        } else {
+                            offset
+                        };
+                        Rect::new(x, 0.0, tl, bounds.height)
+                    }
                 }
             }
         };
@@ -392,6 +429,7 @@ impl Widget for ScrollBar {
             let thumb_rect = thumb_rect.clone();
             let track_length = track_length.clone();
             let thumb_length = thumb_length.clone();
+            let mirrored = mirrored.clone();
             handlers = handlers.on_drag(move |phase, _ctx| {
                 let max = max_scroll.get();
                 if max <= 0.0 {
@@ -408,7 +446,10 @@ impl Widget for ScrollBar {
                     }
                     DragPhase::Moved { position, .. } if dragging.get() => {
                         let current = axis_value(position);
-                        let delta_pixels = current - drag_start_pointer.get();
+                        // Mirrored: dragging right walks *back* towards the
+                        // start of the content.
+                        let sign = if mirrored() { -1.0 } else { 1.0 };
+                        let delta_pixels = (current - drag_start_pointer.get()) * sign;
                         let available = track_length() - thumb_length();
                         if available > 0.0 {
                             let scroll_delta = delta_pixels * max / available;
@@ -434,6 +475,7 @@ impl Widget for ScrollBar {
             let viewport_ratio = viewport_ratio.clone();
             let set_scroll = set_scroll.clone();
             let thumb_rect = thumb_rect.clone();
+            let mirrored = mirrored.clone();
             handlers = handlers.on_tap(move |event, _ctx| {
                 let max = max_scroll.get();
                 if max <= 0.0 {
@@ -452,7 +494,10 @@ impl Widget for ScrollBar {
                 let ratio = viewport_ratio.get().clamp(0.001, 0.999);
                 let viewport_scroll = max * ratio / (1.0 - ratio);
                 let current = scroll_position.get();
-                if click_axis < thumb_center {
+                // Mirrored: the side of the thumb a click lands on means the
+                // opposite page, because the track runs the other way.
+                let backwards = (click_axis < thumb_center) != mirrored();
+                if backwards {
                     set_scroll(current - viewport_scroll);
                 } else {
                     set_scroll(current + viewport_scroll);
@@ -476,6 +521,7 @@ impl Widget for ScrollBar {
             let max_scroll = max_scroll.clone();
             let set_scroll = set_scroll.clone();
             let ratio = self.viewport_ratio.clone();
+            let mirrored = mirrored.clone();
             handlers = handlers.on_key(move |event, _ctx| {
                 let max = max_scroll.get();
                 if max <= 0.0 {
@@ -486,10 +532,10 @@ impl Widget for ScrollBar {
                 };
                 let step = step_size;
                 // One axis only: a vertical bar must leave the horizontal
-                // arrows to the horizontal bar beside it. `rtl` is false —
-                // `thumb_rect` places the horizontal thumb at
-                // `bounds.x + offset` unmirrored, so the arrows must not
-                // mirror on their own.
+                // arrows to the horizontal bar beside it. The direction comes
+                // from the same `mirrored` predicate the thumb, the drag and
+                // the track click use, so all four agree in a right-to-left
+                // window.
                 //
                 // Reachability, stated plainly: this node is `focusable(false)`
                 // and `set_hidden()`, and nothing in the framework focuses it,
@@ -500,7 +546,7 @@ impl Widget for ScrollBar {
                     ScrollBarOrientation::Horizontal => RangeAxis::Horizontal,
                 };
                 let Some(mv) =
-                    range_nav::range_move(*key, *modifiers, RangeKind::Scalar, arrows, false)
+                    range_nav::range_move(*key, *modifiers, RangeKind::Scalar, arrows, mirrored())
                 else {
                     return EventResponse::Ignored;
                 };
@@ -569,11 +615,14 @@ impl Widget for ScrollBar {
         bounds: Rect,
         _proposal: SizeProposal,
         children: &mut [WidgetPlacement],
-        _ctx: &LayoutContext,
+        ctx: &LayoutContext,
     ) {
-        // Cache bounds for event handling (drag/tap hit-tests against
-        // `self.thumb_rect()`, which reads `cached_bounds`).
+        // Cache bounds and direction for event handling: the drag/tap
+        // hit-tests recompute the thumb from these in `build()`, with no
+        // context of their own, and must mirror a horizontal bar the same way
+        // paint does.
         self.cached_bounds.set(bounds);
+        self.cached_rtl.set(ctx.is_rtl());
         for child in children.iter_mut() {
             child.origin = bounds.origin();
             child.size = bounds.size();
@@ -929,6 +978,97 @@ mod tests {
 
         let info = tree.accessibility_node(id);
         assert!(info.is_hidden(), "ScrollBar must be hidden from AT");
+    }
+
+    #[test]
+    fn a_horizontal_bar_mirrors_its_track_in_rtl() {
+        // `ScrollArea` already anchors its content to the right in a
+        // right-to-left window and grows `scroll_x` leftward, so the start of
+        // the content is at the *right*. A thumb pinned to the geometric left
+        // therefore sat at the far end of the track while the content showed
+        // its beginning, and a track click paged the wrong way.
+        use teksilo_core::event::Modifiers;
+
+        let position = Signal::new(0.0_f32);
+        let mut tree = WidgetTree::new();
+        tree.set_layout_direction(teksilo_core::environment::LayoutDirection::RightToLeft);
+        let _id = tree.add(ScrollBar::new(
+            ScrollBarOrientation::Horizontal,
+            position.clone(),
+            Signal::new(500.0),
+            Signal::new(0.5),
+        ));
+        tree.layout(SizeProposal::exact(400.0, 12.0));
+        tree.render();
+
+        // At scroll 0 the thumb is flush *right*, so the empty track is on the
+        // left — clicking there pages forward, the mirror of the LTR case.
+        let p = Point::new(40.0, 6.0);
+        tree.pointer_move(p);
+        tree.dispatch_event(WidgetEvent::PointerDown {
+            position: p,
+            button: PointerButton::Primary,
+            modifiers: Modifiers::NONE,
+        });
+        tree.dispatch_event(WidgetEvent::PointerUp {
+            position: p,
+            button: PointerButton::Primary,
+            modifiers: Modifiers::NONE,
+        });
+
+        assert!(
+            position.get() > 0.0,
+            "a click left of a right-anchored thumb pages forward, got {}",
+            position.get()
+        );
+    }
+
+    #[test]
+    fn a_horizontal_bar_mirrors_its_arrows_in_rtl() {
+        // The arrows key off the same predicate as the thumb and the track
+        // click, so all four agree rather than each deciding for itself.
+        use teksilo_core::event::{Key, Modifiers};
+
+        let position = Signal::new(200.0_f32);
+        let mut tree = WidgetTree::new();
+        tree.set_layout_direction(teksilo_core::environment::LayoutDirection::RightToLeft);
+        let id = tree.add(ScrollBar::new(
+            ScrollBarOrientation::Horizontal,
+            position.clone(),
+            Signal::new(500.0),
+            Signal::new(0.5),
+        ));
+        tree.layout(SizeProposal::exact(400.0, 12.0));
+        tree.focus(id);
+
+        tree.press_key(Key::ArrowLeft, Modifiers::NONE);
+        assert!(
+            position.get() > 200.0,
+            "under RTL the leftward arrow travels forward through the content"
+        );
+    }
+
+    #[test]
+    fn a_vertical_bar_ignores_the_layout_direction() {
+        use teksilo_core::event::{Key, Modifiers};
+
+        let position = Signal::new(200.0_f32);
+        let mut tree = WidgetTree::new();
+        tree.set_layout_direction(teksilo_core::environment::LayoutDirection::RightToLeft);
+        let id = tree.add(ScrollBar::new(
+            ScrollBarOrientation::Vertical,
+            position.clone(),
+            Signal::new(500.0),
+            Signal::new(0.5),
+        ));
+        tree.layout(SizeProposal::exact(12.0, 400.0));
+        tree.focus(id);
+
+        tree.press_key(Key::ArrowDown, Modifiers::NONE);
+        assert!(
+            position.get() > 200.0,
+            "there is no leading/trailing on the vertical axis to mirror"
+        );
     }
 
     #[test]
