@@ -13,7 +13,26 @@
 //! - [`ComboBox::from_source`] — external [`ListDataSource<Item = T>`].
 //!
 //! The dropdown panel is pre-created during `build()` and kept dormant until
-//! opened via click, Enter, Space, or ArrowDown/ArrowUp.
+//! it is opened.
+//!
+//! # Keyboard
+//!
+//! - `Enter` / `Space` — toggle the list.
+//! - `ArrowDown` / `ArrowUp` — open the list *and* move the selection one
+//!   item, stopping at the ends. Win32's combo box, `QComboBox`, GTK and the
+//!   W3C ARIA listbox pattern all stop rather than wrap; a combo box is a
+//!   value, and wrapping is the menu convention.
+//! - `Alt+ArrowDown` — open the list **without** moving the selection, and
+//!   `Alt+ArrowUp` — close it. The Win32 / WinForms / WPF chord and the ARIA
+//!   combobox pattern.
+//! - `F4` — toggle the list (Win32 / Qt / WPF).
+//! - `Home` / `End` — first / last item.
+//! - `PageUp` / `PageDown` — one page, where a page is
+//!   [`max_visible_items`](ComboBox::max_visible_items) rows.
+//! - Printable characters — type-ahead, within
+//!   [`type_ahead_timeout`](ComboBox::type_ahead_timeout).
+//! - A chord holding `Ctrl`, `Alt` or `Super` is not the combo box's and falls
+//!   through to the application; `Shift` is, so a capital letter still types.
 //!
 //! The widget is split across four internal modules:
 //! - `state` holds the interaction-state enum, the `ItemSource` accessor,
@@ -31,7 +50,7 @@ use teksilo_i18n::lit;
 use teksilo_canvas::{Rect, Size, SizeProposal};
 use teksilo_core::accessibility::{AccessNodeBuilder, widget_id_to_node_id};
 use teksilo_core::build_context::BuildContext;
-use teksilo_core::event::{EventResponse, Key, WidgetEvent};
+use teksilo_core::event::{EventResponse, Key, Modifiers, WidgetEvent};
 use teksilo_core::overlay::{
     DismissBehavior, OverlayDismissCallback, OverlayLayer, OverlayPlacement, OverlayRequest,
 };
@@ -878,6 +897,74 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
                     })
                 };
                 move |event: &WidgetEvent, ctx: &mut EventContext| -> EventResponse {
+                    let WidgetEvent::KeyDown { key, modifiers, .. } = event else {
+                        return EventResponse::Ignored;
+                    };
+
+                    // `Alt+ArrowDown` opens the list **without moving the
+                    // selection**, `Alt+ArrowUp` closes it — the Win32 /
+                    // WinForms / WPF combo chord and the W3C ARIA combobox
+                    // pattern ("if the popup is available but not displayed,
+                    // displays the popup without moving focus"). Bare
+                    // `ArrowDown` both opens and advances, which is the whole
+                    // reason the modified form exists. Claimed above the
+                    // rejection below, which turns every other Alt chord away.
+                    if modifiers.alt() && !modifiers.ctrl() && !modifiers.super_key() {
+                        match key {
+                            Key::ArrowDown => {
+                                if !is_open.get() {
+                                    open_overlay(ctx);
+                                }
+                                return EventResponse::Handled;
+                            }
+                            Key::ArrowUp => {
+                                if is_open.get() {
+                                    is_open.set(false);
+                                    ctx.dismiss_all_except_hosts();
+                                    return EventResponse::Handled;
+                                }
+                                return EventResponse::Ignored;
+                            }
+                            _ => {}
+                        }
+                    }
+
+                    // `F4` toggles the list: the Win32 / Qt / WPF combo-box
+                    // chord. Below the Alt branch, so `Alt+F4` still reaches
+                    // the window, and below the shortcut pipeline, so an app
+                    // that binds F4 itself keeps it.
+                    if *key == Key::F4 && *modifiers == Modifiers::NONE {
+                        if is_open.get() {
+                            is_open.set(false);
+                            ctx.dismiss_all_except_hosts();
+                        } else {
+                            open_overlay(ctx);
+                        }
+                        return EventResponse::Handled;
+                    }
+
+                    // Everything below is a bare or `Shift`-only chord.
+                    //
+                    // Reject the union of `Ctrl` / `Alt` / `Super` rather than
+                    // `Modifiers::command()`: this is a *refusal*, and
+                    // `command()` is Ctrl off macOS and Cmd on it, so matching
+                    // on it would let a real macOS `Ctrl+letter` through into
+                    // type-ahead and let `Super+letter` through everywhere.
+                    // `Shift` is deliberately accepted: a capital letter is how
+                    // people type, and on a Latin layout the shifted character
+                    // arrives with SHIFT still set. Same rule, and the same
+                    // reason, as `MenuList` and `list_nav::tree_chord`.
+                    //
+                    // Without this, `Ctrl+C` over a focused combo appended 'c'
+                    // to the type-ahead prefix and jumped the selection to the
+                    // first "C..." item — mutating the user's value — then
+                    // returned `Handled`, so no ancestor ever saw the chord.
+                    // Registered `Shortcut`s resolve before any of this, so an
+                    // app-bound chord was never at risk; an *unbound* one was.
+                    if modifiers.ctrl() || modifiers.alt() || modifiers.super_key() {
+                        return EventResponse::Ignored;
+                    }
+
                     match event {
                         WidgetEvent::KeyDown {
                             key: Key::Enter | Key::Space,
@@ -931,7 +1018,17 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
                                 .as_ref()
                                 .and_then(|v| resolve_index(&source, v, &hint))
                                 .unwrap_or(0);
-                            let target = (current_idx + 1) % n;
+                            // Stop at the last item; do not wrap. The page
+                            // keys below already clamped, so the widget
+                            // disagreed with itself inside one handler — and a
+                            // combo box is a *value*: one keypress too many
+                            // must not teleport a setting from "Never" to
+                            // "Always". Win32's combo box, `QComboBox`, GTK,
+                            // the ARIA listbox pattern and Teksilo's own
+                            // `ListView` all stop at the ends; menus wrap
+                            // because a menu is a list of commands, not a
+                            // value.
+                            let target = (current_idx + 1).min(n - 1);
                             pick_at(target, ctx);
                             EventResponse::Handled
                         }
@@ -950,11 +1047,7 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
                                 .as_ref()
                                 .and_then(|v| resolve_index(&source, v, &hint))
                                 .unwrap_or(0);
-                            let target = if current_idx == 0 {
-                                n - 1
-                            } else {
-                                current_idx - 1
-                            };
+                            let target = current_idx.saturating_sub(1);
                             pick_at(target, ctx);
                             EventResponse::Handled
                         }

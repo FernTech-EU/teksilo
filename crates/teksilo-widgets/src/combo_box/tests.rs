@@ -97,7 +97,13 @@ fn accessibility_expanded_resets_on_framework_dismiss() {
 // ─── Keyboard ─────────────────────────────────────────────────────
 
 #[test]
-fn arrow_keys_cycle_selection() {
+fn arrow_keys_walk_the_list_and_stop_at_the_ends() {
+    // Clamp, not wrap. **Behaviour change**: the page keys already clamped, so
+    // the widget disagreed with itself inside one handler — and a combo box is
+    // a *value*, where one keypress too many must not send a setting from
+    // "Never" back to "Always". Win32's combo box, `QComboBox`, GTK, the W3C
+    // ARIA listbox pattern and Teksilo's own `ListView` all stop at the ends;
+    // menus wrap because a menu is a list of commands, not a value.
     let mut tree = light_tree();
     let selected = Signal::new(None::<String>);
     let cb = tree.add(ComboBox::new(fruits(), selected.clone()));
@@ -111,7 +117,111 @@ fn arrow_keys_cycle_selection() {
     assert_eq!(selected.get().as_deref(), Some("Cherry"));
 
     tree.press_key(Key::ArrowDown, teksilo_core::event::Modifiers::NONE);
+    assert_eq!(
+        selected.get().as_deref(),
+        Some("Cherry"),
+        "the last item is the last item"
+    );
+
+    tree.press_key(Key::ArrowUp, teksilo_core::event::Modifiers::NONE);
+    assert_eq!(selected.get().as_deref(), Some("Banana"));
+    tree.press_key(Key::ArrowUp, teksilo_core::event::Modifiers::NONE);
+    tree.press_key(Key::ArrowUp, teksilo_core::event::Modifiers::NONE);
+    assert_eq!(
+        selected.get().as_deref(),
+        Some("Apple"),
+        "the first item is the first item"
+    );
+}
+
+#[test]
+fn a_modified_letter_chord_falls_through_instead_of_running_type_ahead() {
+    // Regression: with a combo focused, `Ctrl+C` appended 'c' to the type-ahead
+    // prefix, jumped the selection to the first "C..." item and returned
+    // `Handled` — so it both mutated the user's value and blocked every
+    // ancestor `on_key`. Registered shortcuts resolve before widget dispatch,
+    // so it was the *unbound* chords that were being eaten.
+    let mut tree = light_tree();
+    let selected = Signal::new(Some("Apple".to_string()));
+    let cb = tree.add(ComboBox::new(fruits(), selected.clone()));
+    tree.layout(SizeProposal::exact(300.0, 50.0));
+    tree.focus(cb);
+
+    tree.press_key(Key::C, teksilo_core::event::Modifiers::CTRL);
+    assert_eq!(
+        selected.get().as_deref(),
+        Some("Apple"),
+        "Ctrl+C must not move the selection"
+    );
+
+    // `Shift` is deliberately still type-ahead: a capital letter is how people
+    // type, and the shifted character arrives with SHIFT still set.
+    tree.press_key(Key::C, teksilo_core::event::Modifiers::SHIFT);
+    assert_eq!(selected.get().as_deref(), Some("Cherry"));
+}
+
+#[test]
+fn a_modified_nav_key_falls_through_too() {
+    // `Ctrl+Home` used to pick item 0 and eat the chord. A combo box's cursor
+    // *is* its value, so there is nothing for the accelerator to scope — unlike
+    // a data view, where it separates the cursor from the selection.
+    let mut tree = light_tree();
+    let selected = Signal::new(Some("Cherry".to_string()));
+    let cb = tree.add(ComboBox::new(fruits(), selected.clone()));
+    tree.layout(SizeProposal::exact(300.0, 50.0));
+    tree.focus(cb);
+
+    tree.press_key(Key::Home, teksilo_core::event::Modifiers::CTRL);
+    assert_eq!(selected.get().as_deref(), Some("Cherry"));
+}
+
+#[test]
+fn alt_arrow_down_opens_the_list_without_moving_the_selection() {
+    // The W3C ARIA combobox chord — "displays the popup without moving focus" —
+    // and Win32 / WinForms / WPF's. Bare `ArrowDown` both opens *and* advances,
+    // which is the whole reason the modified form exists.
+    let mut tree = light_tree();
+    let selected = Signal::new(Some("Apple".to_string()));
+    let cb = tree.add(ComboBox::new(fruits(), selected.clone()));
+    tree.layout(SizeProposal::exact(300.0, 200.0));
+    tree.focus(cb);
+
+    tree.press_key(Key::ArrowDown, teksilo_core::event::Modifiers::ALT);
+    tree.layout(SizeProposal::exact(300.0, 200.0));
+    assert!(tree.accessibility_node(cb).is_expanded(), "the list opens");
+    assert_eq!(
+        selected.get().as_deref(),
+        Some("Apple"),
+        "the selection must not move"
+    );
+
+    tree.press_key(Key::ArrowUp, teksilo_core::event::Modifiers::ALT);
+    tree.layout(SizeProposal::exact(300.0, 200.0));
+    assert!(
+        !tree.accessibility_node(cb).is_expanded(),
+        "the list closes"
+    );
     assert_eq!(selected.get().as_deref(), Some("Apple"));
+}
+
+#[test]
+fn f4_toggles_the_list() {
+    // The Win32 / Qt / WPF combo-box chord. An app that registers F4 as a
+    // `Shortcut` still wins: shortcuts resolve before the focused widget sees
+    // the key.
+    let mut tree = light_tree();
+    let selected = Signal::new(Some("Apple".to_string()));
+    let cb = tree.add(ComboBox::new(fruits(), selected.clone()));
+    tree.layout(SizeProposal::exact(300.0, 200.0));
+    tree.focus(cb);
+
+    tree.press_key(Key::F4, teksilo_core::event::Modifiers::NONE);
+    tree.layout(SizeProposal::exact(300.0, 200.0));
+    assert!(tree.accessibility_node(cb).is_expanded());
+
+    tree.press_key(Key::F4, teksilo_core::event::Modifiers::NONE);
+    tree.layout(SizeProposal::exact(300.0, 200.0));
+    assert!(!tree.accessibility_node(cb).is_expanded());
 }
 
 #[test]

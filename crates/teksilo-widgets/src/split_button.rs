@@ -792,11 +792,16 @@ impl Widget for SplitButton {
                             EventResponse::Handled
                         }
                         // ArrowDown alone, or Alt+ArrowDown (the native
-                        // "open dropdown" shortcut) both open the menu.
+                        // "open dropdown" shortcut) both open the menu. The
+                        // guard is what makes the comment true: the arm used to
+                        // accept every modifier, so `Ctrl+ArrowDown`,
+                        // `Cmd+ArrowDown` and `Super+ArrowDown` opened it too
+                        // and were swallowed on the way.
                         WidgetEvent::KeyDown {
                             key: Key::ArrowDown,
+                            modifiers,
                             ..
-                        } => {
+                        } if !modifiers.ctrl() && !modifiers.super_key() => {
                             // Build the popup if this is its first open, before the overlay
                             // below is measured against it and focus moves into it.
                             ctx.materialize_now(menu_id);

@@ -332,3 +332,121 @@ fn date_edit_explicit_pattern_survives_a_locale_switch() {
         "an explicit pattern is not locale-derived"
     );
 }
+
+// ── Keyboard: segment stepping and the popover chords ─────────────
+
+fn focus_field(tree: &mut WidgetTree, id: WidgetId) {
+    let field = tree
+        .first_focusable_descendant(id)
+        .expect("DateEdit has a focusable inner field");
+    tree.focus(field);
+}
+
+fn laid_out(tree: &mut WidgetTree) {
+    tree.layout(SizeProposal {
+        width: Some(300.0),
+        height: None,
+    });
+}
+
+#[test]
+fn arrow_keys_step_the_segment_under_the_caret() {
+    // The module doc used to promise "±1 day; Shift+ → ±7 days" and
+    // "PageUp/PageDown → ±1 month". The code has always been
+    // *segment*-relative — `QAbstractSpinBox::stepBy` on the focused section,
+    // ten times that on a page key — which is what `QDateTimeEdit` does. The
+    // doc is what was wrong, and this pins the behaviour it now describes.
+    let mut tree = light_tree();
+    let value = Signal::new(Some(Date::constant(2026, 5, 15)));
+    let id = tree.add(DateEdit::new(value.clone()));
+    laid_out(&mut tree);
+    focus_field(&mut tree, id);
+
+    let before = value.get().expect("a date");
+    tree.press_key(Key::ArrowUp, Modifiers::NONE);
+    laid_out(&mut tree);
+    assert_ne!(
+        value.get(),
+        Some(before),
+        "an arrow steps the caret's segment"
+    );
+}
+
+#[test]
+fn alt_arrow_down_opens_the_calendar_instead_of_stepping_the_date() {
+    // The chord this module's documentation has promised since it was written,
+    // and which was implemented nowhere. Worse, the segment stepper reads only
+    // `Shift`, so `Alt+ArrowDown` silently moved the date instead.
+    let mut tree = light_tree();
+    let value = Signal::new(Some(Date::constant(2026, 5, 2)));
+    let id = tree.add(DateEdit::new(value.clone()));
+    laid_out(&mut tree);
+    focus_field(&mut tree, id);
+
+    tree.press_key(Key::ArrowDown, Modifiers::ALT);
+    laid_out(&mut tree);
+    assert_eq!(
+        value.get(),
+        Some(Date::constant(2026, 5, 2)),
+        "the date must not step"
+    );
+    assert!(
+        tree.accessibility_node(id).is_expanded(),
+        "the calendar must open"
+    );
+}
+
+#[test]
+fn f4_toggles_the_calendar() {
+    // The Win32 `DateTimePicker` chord.
+    let mut tree = light_tree();
+    let value = Signal::new(Some(Date::constant(2026, 5, 2)));
+    let id = tree.add(DateEdit::new(value.clone()));
+    laid_out(&mut tree);
+    focus_field(&mut tree, id);
+
+    tree.press_key(Key::F4, Modifiers::NONE);
+    laid_out(&mut tree);
+    assert!(tree.accessibility_node(id).is_expanded());
+    assert_eq!(value.get(), Some(Date::constant(2026, 5, 2)));
+}
+
+#[test]
+fn alt_arrow_down_is_inert_without_a_calendar_button() {
+    // `show_calendar_button(false)` builds no calendar, so the chord falls
+    // through rather than pretending — and must not step the date either.
+    let mut tree = light_tree();
+    let value = Signal::new(Some(Date::constant(2026, 5, 2)));
+    let id = tree.add(DateEdit::new(value.clone()).show_calendar_button(false));
+    laid_out(&mut tree);
+    focus_field(&mut tree, id);
+
+    tree.press_key(Key::ArrowDown, Modifiers::ALT);
+    laid_out(&mut tree);
+    assert_eq!(value.get(), Some(Date::constant(2026, 5, 2)));
+    assert!(!tree.accessibility_node(id).is_expanded());
+}
+
+#[test]
+fn an_accelerator_chord_does_not_step_the_date() {
+    // Behaviour change: the segment stepper read `Shift` alone, so
+    // `Ctrl+ArrowUp` stepped the date and swallowed the chord.
+    let mut tree = light_tree();
+    let value = Signal::new(Some(Date::constant(2026, 5, 15)));
+    let id = tree.add(DateEdit::new(value.clone()));
+    laid_out(&mut tree);
+    focus_field(&mut tree, id);
+
+    for (key, mods) in [
+        (Key::ArrowUp, Modifiers::CTRL),
+        (Key::PageDown, Modifiers::SUPER),
+    ] {
+        tree.press_key(key, mods);
+        laid_out(&mut tree);
+        assert_eq!(
+            value.get(),
+            Some(Date::constant(2026, 5, 15)),
+            "{key:?} with {mods:?} must fall through"
+        );
+    }
+}

@@ -16,11 +16,15 @@
 //!   External writes re-format the text. `None` shows the placeholder.
 //! - **Pattern**: locale-derived strftime-subset (`%Y-%m-%d`,
 //!   `%m/%d/%Y`, …); override via `format_pattern`.
-//! - **Step keys** (preview-pass on the field):
-//!   - Arrow Up / Down → ±1 day; Shift+ → ±7 days.
-//!   - Page Up / Page Down → ±1 month; Shift+ → ±1 year.
-//!   - `Alt+ArrowDown` (or click the calendar icon) → opens calendar
-//!     popover.
+//! - **Step keys** (preview-pass on the field): the step is
+//!   *segment-relative* — it moves the field under the caret (year,
+//!   month or day), which is what `QDateTimeEdit` does.
+//!   - Arrow Up / Down → ±1 unit of that segment; Shift+ → ±10.
+//!   - Page Up / Page Down → ±10 units; Shift+ → ±100.
+//!   - `Alt+ArrowDown` (or click the calendar icon) → opens the calendar
+//!     popover; `Alt+ArrowUp` closes it and `F4` toggles it.
+//!   - A chord holding `Ctrl` or `Super` is not the field's and falls
+//!     through to the application.
 //! - **Calendar popover**: dismisses on click-outside or Escape,
 //!   commits on cell click, animates with `motion.duration_fast` fade.
 //! - **Min / Max**: clamps on commit and on step. Out-of-range values
@@ -62,7 +66,7 @@ use teksilo_canvas::{Path, Point, Rect, SizeProposal};
 use teksilo_core::accessibility::{AccessNodeBuilder, widget_id_to_node_id};
 use teksilo_core::accesskit::{Action, HasPopup, Role};
 use teksilo_core::build_context::BuildContext;
-use teksilo_core::event::{EventResponse, Key, WidgetEvent};
+use teksilo_core::event::{EventResponse, Key, Modifiers, WidgetEvent};
 use teksilo_core::overlay::{
     DismissBehavior, OverlayDismissCallback, OverlayLayer, OverlayPlacement, OverlayRequest,
 };
@@ -677,6 +681,14 @@ impl Widget for DateEdit {
         // datetime widgets (DateRangeEdit, DateTimeEdit) use, so the
         // visual treatment — hover/pressed background, icon size,
         // focus halo — stays consistent across the family.
+        //
+        // `toggle_calendar` is the one definition of "open or close the
+        // calendar", shared by the trailing icon button below and by the
+        // `Alt+ArrowDown` / `F4` chords in the key handler. `None` when
+        // `show_calendar_button(false)` built no calendar at all — the chords
+        // then fall through rather than pretending.
+        let mut toggle_calendar: Option<Rc<dyn Fn(&mut EventContext)>> = None;
+
         let trigger_widget_opt: Option<IconButton> = if self.show_calendar_button {
             let popover_open = self.popover_open.clone();
             let calendar_id = calendar_id_opt.expect("calendar built when button enabled");
@@ -688,6 +700,38 @@ impl Widget for DateEdit {
                     popover_open.set(false);
                 })
             };
+            let toggle: Rc<dyn Fn(&mut EventContext)> = Rc::new({
+                let popover_open = popover_open.clone();
+                move |ctx_evt: &mut EventContext| {
+                    if popover_open.get() {
+                        popover_open.set(false);
+                        ctx_evt.dismiss_all_except_hosts();
+                    } else {
+                        popover_open.set(true);
+                        // Build the popup if this is its first open, before the overlay
+                        // below is measured against it and focus moves into it.
+                        ctx_evt.materialize_now(calendar_id);
+                        ctx_evt.activate(calendar_id);
+                        ctx_evt.show_overlay(OverlayRequest {
+                            content_id: calendar_id,
+                            anchor: self_ref,
+                            placement: placement.clone(),
+                            dismiss: DismissBehavior::EscapeOrClickOutside,
+                            layer: OverlayLayer::InTree,
+                            parent_overlay: None,
+                            on_dismiss: Some(dismiss_cb.clone()),
+                            fade_duration: None,
+                        });
+                        // Move focus into the calendar so arrow keys
+                        // navigate cells immediately — standard date-
+                        // picker UX (macOS Calendar, JetBrains, etc.).
+                        // Without this the user must Tab through
+                        // unrelated widgets first.
+                        ctx_evt.request_focus(calendar_id);
+                    }
+                }
+            });
+            toggle_calendar = Some(toggle.clone());
             Some(
                 IconButton::new(calendar_glyph_icon(de::CALENDAR_ICON_SIZE))
                     .embedded()
@@ -696,34 +740,7 @@ impl Widget for DateEdit {
                     .tooltip(localized(move || {
                         resolve_message_widget("date-edit-trigger-tooltip", &[])
                     }))
-                    .on_activate_fn(move |ctx_evt: &mut EventContext| {
-                        if popover_open.get() {
-                            popover_open.set(false);
-                            ctx_evt.dismiss_all_except_hosts();
-                        } else {
-                            popover_open.set(true);
-                            // Build the popup if this is its first open, before the overlay
-                            // below is measured against it and focus moves into it.
-                            ctx_evt.materialize_now(calendar_id);
-                            ctx_evt.activate(calendar_id);
-                            ctx_evt.show_overlay(OverlayRequest {
-                                content_id: calendar_id,
-                                anchor: self_ref,
-                                placement: placement.clone(),
-                                dismiss: DismissBehavior::EscapeOrClickOutside,
-                                layer: OverlayLayer::InTree,
-                                parent_overlay: None,
-                                on_dismiss: Some(dismiss_cb.clone()),
-                                fade_duration: None,
-                            });
-                            // Move focus into the calendar so arrow keys
-                            // navigate cells immediately — standard date-
-                            // picker UX (macOS Calendar, JetBrains, etc.).
-                            // Without this the user must Tab through
-                            // unrelated widgets first.
-                            ctx_evt.request_focus(calendar_id);
-                        }
-                    }),
+                    .on_activate_fn(move |ctx_evt: &mut EventContext| toggle(ctx_evt)),
             )
         } else {
             None
@@ -884,6 +901,8 @@ impl Widget for DateEdit {
         // power users can sweep faster (e.g. ±10 years on the year
         // segment).
         let step_for_key = segment_step.clone();
+        let toggle_for_key = toggle_calendar.clone();
+        let popover_open_for_key = self.popover_open.clone();
         let handlers = HandlerSet::new()
             .focus_within(self.focused.clone())
             .on_key_preview(move |event, ctx_evt| {
@@ -893,6 +912,46 @@ impl Widget for DateEdit {
                 let WidgetEvent::KeyDown { key, modifiers, .. } = event else {
                     return EventResponse::Ignored;
                 };
+
+                // `Alt+ArrowDown` opens the calendar, `Alt+ArrowUp` closes it
+                // and `F4` toggles — the Win32 `DateTimePicker` chords, and
+                // what this module's documentation has promised since it was
+                // written. They must be claimed *before* the segment-step match
+                // below, which reads only `Shift`, so `Alt+ArrowDown` used to
+                // step the date back one day instead of opening anything.
+                //
+                // `Alt+ArrowUp` only reaches here while focus is still in the
+                // field: the calendar is added detached, so it is not an arena
+                // child of this widget and a key pressed inside it never
+                // previews through. Escape remains the close from in there.
+                if let Some(toggle) = toggle_for_key.as_ref() {
+                    let bare_alt = modifiers.alt() && !modifiers.ctrl() && !modifiers.super_key();
+                    if bare_alt && matches!(key, Key::ArrowDown) {
+                        if !popover_open_for_key.get() {
+                            toggle(ctx_evt);
+                        }
+                        return EventResponse::Handled;
+                    }
+                    if bare_alt && matches!(key, Key::ArrowUp) {
+                        if popover_open_for_key.get() {
+                            toggle(ctx_evt);
+                            return EventResponse::Handled;
+                        }
+                        return EventResponse::Ignored;
+                    }
+                    if matches!(key, Key::F4) && *modifiers == Modifiers::NONE {
+                        toggle(ctx_evt);
+                        return EventResponse::Handled;
+                    }
+                }
+
+                // Any other accelerator-modified chord is not ours. The segment
+                // stepper reads `Shift` alone, so `Ctrl+ArrowUp` used to step
+                // the date and swallow the chord on the way.
+                if modifiers.ctrl() || modifiers.alt() || modifiers.super_key() {
+                    return EventResponse::Ignored;
+                }
+
                 let mult = if modifiers.shift() { 10 } else { 1 };
                 let delta = match key {
                     Key::ArrowUp => mult,

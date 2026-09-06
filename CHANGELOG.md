@@ -41,6 +41,21 @@ See [docs/range-keyboard.md](docs/range-keyboard.md) for the full chord table.
   widget and was dropped; macOS gates `setAccessibilityValue:` settability on
   the advertisement, which the node now carries.
 
+#### Widgets
+
+- **`Alt+ArrowDown` opens the popup and `Alt+ArrowUp` closes it** on
+  `ComboBox`, `DateEdit` and every `PopoverButton` / `PopoverIconButton` — so
+  `ColorEdit`, whose documentation has promised the chord since it was written.
+  The Win32 / WinForms / WPF drop-down chord, the Win32 `DateTimePicker` chord,
+  and the W3C ARIA combobox pattern: "displays the popup without moving focus",
+  which is why the modified form exists beside a bare `ArrowDown` that both
+  opens and advances.
+- **`F4` toggles the popup** on the drop-down *fields* — `ComboBox` and
+  `DateEdit` — the Win32 / Qt / WPF chord. Deliberately not on `PopoverWidget`,
+  which also backs toolbar chevrons and menu buttons and carries no such
+  convention. An app that registers `F4` as a `Shortcut` keeps it: shortcuts
+  resolve before the focused widget sees the key, and `Alt+F4` is unaffected.
+
 #### Data views
 
 - `TableView::stretch_last_column` / `TreeTableView::stretch_last_column`:
@@ -121,6 +136,32 @@ See [docs/range-keyboard.md](docs/range-keyboard.md) for the full chord table.
   separator are honoured and an unparseable one is *reported* unhandled rather
   than failing quietly. A read-only spin box advertises and services none of
   `Increment` / `Decrement` / `SetValue`.
+- **A modified letter chord over a focused `ComboBox` no longer changes the
+  selection.** Type-ahead matched any key carrying a character and returned
+  `Handled`, so an unregistered `Ctrl+C` appended `c` to the prefix, jumped the
+  value to the first item starting with it, and blocked every ancestor
+  `on_key`. `Ctrl` / `Alt` / `Super` now fall through — `Shift` still types, as
+  in `MenuList` — and the same rule covers the arrow, `Home`/`End` and page
+  keys, so `Ctrl+Home` no longer picks item 0.
+- **`ComboBox` arrows stop at the ends instead of wrapping.** Its page keys
+  already clamped, so the widget disagreed with itself inside one handler, and
+  wrapping means one keypress too many sends a setting from "Never" to
+  "Always". Win32, `QComboBox`, GTK, the ARIA listbox pattern and Teksilo's own
+  `ListView` all stop at the ends; menus still wrap, because a menu is a list
+  of commands rather than a value. **Behaviour change.**
+- **`Alt+ArrowDown` on a `DateEdit` no longer steps the date.** The segment
+  stepper reads only `Shift`, so the chord two module docs promised as "opens
+  the calendar popover" quietly moved the value back one day. Other `Ctrl` /
+  `Super`-modified arrows now fall through instead of stepping.
+- **`DateEdit` and `TimeEdit` documented step sizes they have never applied.**
+  Both describe *segment*-relative stepping now — one unit of the field under
+  the caret, ten with `Shift`, ten on a page key and a hundred on
+  `Shift`+page — which is what the code does and what `QDateTimeEdit` does.
+  `TimeEdit::step_minutes` is documented as the inert builder it has been since
+  segment stepping replaced whole-value stepping.
+- `SplitButton`'s `ArrowDown` accepts a bare or `Alt`-modified chord, as its
+  comment always claimed; `Ctrl+ArrowDown` and `Cmd+ArrowDown` no longer open
+  the menu.
 - `SpinBox::read_only` documented that keyboard and button stepping still
   worked. It never did — the keys, the wheel and the buttons are all gated,
   which is what `QAbstractSpinBox::readOnly` does too.

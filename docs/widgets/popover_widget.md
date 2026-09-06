@@ -15,6 +15,17 @@ dormant subtree, and shows / hides it via `OverlayRequest`. The
 dismiss-callback shape match `DateEdit`
 so behavior across the disclosure family stays consistent.
 
+# Keyboard
+
+Beyond whatever activates the trigger itself, `Alt+ArrowDown` opens the
+popover and `Alt+ArrowUp` closes it — the platform disclosure chord
+(Win32 / WinForms / WPF drop-downs, and the W3C ARIA combobox pattern).
+Every consumer inherits it, so `PopoverButton`, `PopoverIconButton`
+and `ColorEdit` share one
+implementation. `F4` is deliberately *not* bound here: this generic also
+backs toolbar chevrons and menu buttons, which carry no such
+convention, so the drop-down fields bind it themselves.
+
 ```rust
 # use teksilo_widgets::{Button, ButtonVariant, IconButton, MenuList, MenuItem, PopoverButton, PopoverIconButton};
 # use teksilo_widgets::primitives::TextWidget;

@@ -17,7 +17,26 @@ of the backing model. Items come from one of four input paths:
 - `ComboBox::from_source` — external `ListDataSource<Item = T>`.
 
 The dropdown panel is pre-created during `build()` and kept dormant until
-opened via click, Enter, Space, or ArrowDown/ArrowUp.
+it is opened.
+
+# Keyboard
+
+- `Enter` / `Space` — toggle the list.
+- `ArrowDown` / `ArrowUp` — open the list *and* move the selection one
+  item, stopping at the ends. Win32's combo box, `QComboBox`, GTK and the
+  W3C ARIA listbox pattern all stop rather than wrap; a combo box is a
+  value, and wrapping is the menu convention.
+- `Alt+ArrowDown` — open the list **without** moving the selection, and
+  `Alt+ArrowUp` — close it. The Win32 / WinForms / WPF chord and the ARIA
+  combobox pattern.
+- `F4` — toggle the list (Win32 / Qt / WPF).
+- `Home` / `End` — first / last item.
+- `PageUp` / `PageDown` — one page, where a page is
+  `max_visible_items` rows.
+- Printable characters — type-ahead, within
+  `type_ahead_timeout`.
+- A chord holding `Ctrl`, `Alt` or `Super` is not the combo box's and falls
+  through to the application; `Shift` is, so a capital letter still types.
 
 The widget is split across four internal modules:
 - `state` holds the interaction-state enum, the `ItemSource` accessor,

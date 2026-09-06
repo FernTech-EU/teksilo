@@ -13,6 +13,17 @@
 //! dismiss-callback shape match [`DateEdit`](crate::date_edit::DateEdit)
 //! so behavior across the disclosure family stays consistent.
 //!
+//! # Keyboard
+//!
+//! Beyond whatever activates the trigger itself, `Alt+ArrowDown` opens the
+//! popover and `Alt+ArrowUp` closes it — the platform disclosure chord
+//! (Win32 / WinForms / WPF drop-downs, and the W3C ARIA combobox pattern).
+//! Every consumer inherits it, so [`PopoverButton`], [`PopoverIconButton`]
+//! and [`ColorEdit`](crate::color_edit::ColorEdit) share one
+//! implementation. `F4` is deliberately *not* bound here: this generic also
+//! backs toolbar chevrons and menu buttons, which carry no such
+//! convention, so the drop-down fields bind it themselves.
+//!
 //! ```rust
 //! # use teksilo_widgets::{Button, ButtonVariant, IconButton, MenuList, MenuItem, PopoverButton, PopoverIconButton};
 //! # use teksilo_widgets::primitives::TextWidget;
@@ -50,12 +61,14 @@ use teksilo_canvas::{Point, Rect, Size, SizeProposal};
 use teksilo_core::accessibility::AccessNodeBuilder;
 use teksilo_core::accesskit::HasPopup;
 use teksilo_core::build_context::BuildContext;
+use teksilo_core::event::{EventResponse, Key, WidgetEvent};
 use teksilo_core::overlay::{
     DismissBehavior, OverlayDismissCallback, OverlayLayer, OverlayPlacement, OverlayRequest,
 };
 use teksilo_core::signal::Signal;
 use teksilo_core::styles::{PopoverStyle, PopoverStyleConfig, PopoverVariant, SharedPopoverStyle};
 use teksilo_core::widget::{EventContext, LayoutContext, LayoutResponse, Widget, WidgetPlacement};
+use teksilo_core::widget_builder::HandlerSet;
 use teksilo_core::widget_id::WidgetId;
 use teksilo_tokens::TextRole;
 
@@ -774,6 +787,47 @@ impl<T: PopoverTrigger> Widget for PopoverWidget<T> {
                     .on_invoke(move |_intent, ctx_evt| act(ctx_evt)),
             );
         }
+
+        // `Alt+ArrowDown` opens the popover and `Alt+ArrowUp` closes it — the
+        // platform disclosure chord (Win32 / WinForms / WPF drop-downs, and the
+        // W3C ARIA combobox pattern). It lives on the generic rather than in
+        // each consumer, so `PopoverButton`, `PopoverIconButton` and
+        // `ColorEdit` — whose module doc has always promised it — inherit one
+        // implementation and cannot drift from each other.
+        //
+        // Bubble phase, not preview: the panel's own content (a `MenuList`, a
+        // `ColorPicker`) must keep first refusal on every key, and the trigger
+        // is a child of this node, so an unclaimed chord still arrives here.
+        //
+        // No `F4`: this generic also backs toolbar chevrons and menu buttons,
+        // which carry no such convention. The drop-down *fields* bind it
+        // themselves.
+        ctx.apply_self_handlers(HandlerSet::new().on_key({
+            let popover_open = popover_open.clone();
+            let activate = activate.clone();
+            move |event: &WidgetEvent, ctx_evt: &mut EventContext| {
+                let WidgetEvent::KeyDown { key, modifiers, .. } = event else {
+                    return EventResponse::Ignored;
+                };
+                if !modifiers.alt() || modifiers.ctrl() || modifiers.super_key() {
+                    return EventResponse::Ignored;
+                }
+                match key {
+                    Key::ArrowDown if !popover_open.get() => {
+                        activate(ctx_evt);
+                        EventResponse::Handled
+                    }
+                    // Already open: the chord is ours, so swallow it rather
+                    // than letting a second `Alt+ArrowDown` reach an ancestor.
+                    Key::ArrowDown => EventResponse::Handled,
+                    Key::ArrowUp if popover_open.get() => {
+                        activate(ctx_evt);
+                        EventResponse::Handled
+                    }
+                    _ => EventResponse::Ignored,
+                }
+            }
+        }));
 
         // With a caret, allocate the interaction signal up-front and
         // share it with the trigger so the caret's color tracks the

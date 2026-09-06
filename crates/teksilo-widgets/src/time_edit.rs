@@ -16,10 +16,13 @@
 //! - **Pattern**: 24h default `%H:%M`; 12h is `%I:%M %p`. Override
 //!   via `format_pattern`. Add seconds with
 //!   `seconds(SecondsMode::Editable)`.
-//! - **Keyboard** (preview-pass on the wrapper):
-//!   - Arrow Up / Down → ±`step_minutes`
-//!   - PageUp / PageDown → ±60 minutes
-//!   - Shift+ on either → ×10 multiplier (×600 max so values stay sane)
+//! - **Keyboard** (preview-pass on the wrapper): the step is
+//!   *segment-relative* — it moves the field under the caret (hour,
+//!   minute, second or AM/PM), which is what `QDateTimeEdit` does.
+//!   - Arrow Up / Down → ±1 unit of that segment; Shift+ → ±10.
+//!   - PageUp / PageDown → ±10 units; Shift+ → ±100.
+//!   - Hours wrap within the day and minutes and seconds within the
+//!     hour and minute, so a sweep never rolls the value over.
 //!
 //! # Accessibility
 //!
@@ -219,6 +222,13 @@ impl TimeEdit {
     }
 
     /// Set the ArrowUp / ArrowDown step in minutes. Default: 1. Must be ≥ 1.
+    ///
+    /// **Currently inert.** Segment-aware stepping replaced the older
+    /// whole-value step, and it moves the field under the caret by one of
+    /// *that segment's* units rather than by a fixed number of minutes. The
+    /// builder is kept on the public surface so callers that already
+    /// configured it still compile, and as the hook a future per-segment
+    /// custom step would use; it has no effect today.
     pub fn step_minutes(mut self, n: u32) -> Self {
         self.step_minutes = n.max(1);
         self

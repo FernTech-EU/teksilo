@@ -20,11 +20,15 @@ popover anchored below the field for graphical date selection.
   External writes re-format the text. `None` shows the placeholder.
 - **Pattern**: locale-derived strftime-subset (`%Y-%m-%d`,
   `%m/%d/%Y`, …); override via `format_pattern`.
-- **Step keys** (preview-pass on the field):
-  - Arrow Up / Down → ±1 day; Shift+ → ±7 days.
-  - Page Up / Page Down → ±1 month; Shift+ → ±1 year.
-  - `Alt+ArrowDown` (or click the calendar icon) → opens calendar
-    popover.
+- **Step keys** (preview-pass on the field): the step is
+  *segment-relative* — it moves the field under the caret (year,
+  month or day), which is what `QDateTimeEdit` does.
+  - Arrow Up / Down → ±1 unit of that segment; Shift+ → ±10.
+  - Page Up / Page Down → ±10 units; Shift+ → ±100.
+  - `Alt+ArrowDown` (or click the calendar icon) → opens the calendar
+    popover; `Alt+ArrowUp` closes it and `F4` toggles it.
+  - A chord holding `Ctrl` or `Super` is not the field's and falls
+    through to the application.
 - **Calendar popover**: dismisses on click-outside or Escape,
   commits on cell click, animates with `motion.duration_fast` fade.
 - **Min / Max**: clamps on commit and on step. Out-of-range values
