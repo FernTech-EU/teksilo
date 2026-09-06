@@ -571,8 +571,12 @@ impl WidgetTree {
         // of actual drop targets.
         let exclude_overlay = self.active_drag.as_ref().and_then(|d| d.preview_overlay_id);
         let exclude_widget = self.active_drag.as_ref().and_then(|d| d.preview_content_id);
+        // Routed for the pointer dragging: a finger reaches a small drop target
+        // through the same widening its press would have used, so hover and
+        // drop agree with each other and with a plain tap.
+        let dragging = self.current_input.pointer;
         let target =
-            self.hit_test_excluding_overlay_and_widget(position, exclude_overlay, exclude_widget);
+            self.hit_test_for_excluding(position, &dragging, exclude_overlay, exclude_widget);
 
         // Drop-target bubbling: walk up from the hit target through successive
         // drop targets, firing each one's `on_drag_hover`, and stop at the first
@@ -726,7 +730,8 @@ impl WidgetTree {
             .and_then(|d| d.current_target)
             .filter(|&t| self.arena.is_active(t));
         if drop_target.is_none() {
-            let hit = self.hit_test(position);
+            let dropping = self.current_input.pointer;
+            let hit = self.hit_test_for(position, &dropping);
             let mut candidate = hit.and_then(|t| self.find_drop_target_at_or_above(t));
             while let Some(cand) = candidate {
                 if self

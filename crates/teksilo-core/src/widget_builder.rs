@@ -334,6 +334,13 @@ pub struct HandlerSet {
     /// to pointer hit-testing (decorative overlays — count badges,
     /// watermarks). See [`super::arena::WidgetNode::hit_transparent`].
     pub(crate) hit_transparent: Option<bool>,
+    /// Per-node override of the *miss-only* slop this node may earn. Second
+    /// link of the precedence chain. See [`HandlerSet::hit_slop`].
+    pub(crate) hit_slop: Option<crate::pointer::hit_slop::HitSlop>,
+    /// When `Some(true)`, this node is excluded from BOTH hit-widening
+    /// mechanisms. Head of the precedence chain. See
+    /// [`HandlerSet::no_hit_slop`].
+    pub(crate) no_hit_slop: Option<bool>,
     pub(crate) context_menu_factory: Option<ContextMenuFactory>,
     /// User-bound signal that the framework writes whenever the
     /// focused widget is a strict descendant of this node. See
@@ -379,6 +386,8 @@ impl HandlerSet {
             multi_contact: None,
             keyboard_capture: None,
             hit_transparent: None,
+            hit_slop: None,
+            no_hit_slop: None,
             context_menu_factory: None,
             focus_within: None,
             hover_within: None,
@@ -723,6 +732,38 @@ impl HandlerSet {
     /// the click meant for the control underneath.
     pub fn hit_transparent(mut self, transparent: bool) -> Self {
         self.hit_transparent = Some(transparent);
+        self
+    }
+
+    /// Override how far a *missed* press may be re-attributed to this node, and
+    /// up to what size it is topped up.
+    ///
+    /// Second link of the precedence chain: `no_hit_slop` beats this, this
+    /// beats the widget's own `Widget::hit_slop`, and that beats the density
+    /// default. Use it for a control the framework cannot recognise as small —
+    /// a hand-drawn handle, a custom mark in a chart — or to raise `up_to`
+    /// beyond the density's `target_size` for one especially fiddly target.
+    ///
+    /// Hit-only: no layout moves and nothing repaints differently.
+    pub fn hit_slop(mut self, slop: crate::pointer::hit_slop::HitSlop) -> Self {
+        self.hit_slop = Some(slop);
+        self
+    }
+
+    /// Take this node out of **both** hit-widening mechanisms: it earns no slop
+    /// outset, and its `Widget::hit_outset` is ignored.
+    ///
+    /// Head of the precedence chain, and the right switch for a node whose
+    /// exact rectangle is the contract — a surface hosting foreign content
+    /// (a `WebView`, an embedded engine) that must receive precisely the
+    /// presses that land on it and no others, or a modal scrim, which must
+    /// never re-attribute a press to something under it.
+    ///
+    /// Per-node, not per-subtree: descendants may still widen. To take a whole
+    /// subtree out of hit-testing use
+    /// [`hit_transparent`](Self::hit_transparent).
+    pub fn no_hit_slop(mut self) -> Self {
+        self.no_hit_slop = Some(true);
         self
     }
 
@@ -1131,6 +1172,20 @@ impl<W: Widget> WidgetWithHandlers<W> {
     /// hit-testing. See [`HandlerSet::hit_transparent`].
     pub fn hit_transparent(mut self, transparent: bool) -> Self {
         self.handler_set.hit_transparent = Some(transparent);
+        self
+    }
+
+    /// Override the miss-only hit slop for this node. See
+    /// [`HandlerSet::hit_slop`].
+    pub fn hit_slop(mut self, slop: crate::pointer::hit_slop::HitSlop) -> Self {
+        self.handler_set.hit_slop = Some(slop);
+        self
+    }
+
+    /// Take this node out of both hit-widening mechanisms. See
+    /// [`HandlerSet::no_hit_slop`].
+    pub fn no_hit_slop(mut self) -> Self {
+        self.handler_set.no_hit_slop = Some(true);
         self
     }
 
@@ -1589,6 +1644,50 @@ impl<W: Widget + 'static> Widget for WidgetWithHandlers<W> {
             .unwrap_or_else(|| self.widget.clips_children())
     }
 
+    /// The hit-shape family, forwarded for the same reason `as_any` is: a
+    /// widget must not stop being itself to the hit test because a builder
+    /// method wrapped it.
+    ///
+    /// A round control that answers `hit_shape` and `hit_distance` loses both
+    /// the moment someone writes `.on_tap(..)` on it if these are not
+    /// forwarded — and loses them silently, which is the worst way to lose a
+    /// hit test. The node-level `.hit_slop(..)` / `.no_hit_slop()` overrides
+    /// need no forwarding: they ride the `HandlerSet` onto the node.
+    fn hit_shape(&self, local_point: teksilo_canvas::Point, bounds: teksilo_canvas::Rect) -> bool {
+        self.widget.hit_shape(local_point, bounds)
+    }
+
+    fn hit_outset(
+        &self,
+        kind: teksilo_tokens::PointerKind,
+        tokens: &teksilo_tokens::InputTokens,
+    ) -> teksilo_canvas::EdgeInsets {
+        self.widget.hit_outset(kind, tokens)
+    }
+
+    fn hit_slop(
+        &self,
+        kind: teksilo_tokens::PointerKind,
+        tokens: &teksilo_tokens::InputTokens,
+    ) -> Option<crate::pointer::hit_slop::HitSlop> {
+        // Disambiguated: `WidgetBuilder::hit_slop(self, HitSlop)` — the
+        // consuming builder method — shares this name, exactly as
+        // `clips_children` does on both traits.
+        Widget::hit_slop(&self.widget, kind, tokens)
+    }
+
+    fn hit_distance(
+        &self,
+        local_point: teksilo_canvas::Point,
+        bounds: teksilo_canvas::Rect,
+    ) -> Option<f32> {
+        self.widget.hit_distance(local_point, bounds)
+    }
+
+    fn target_regions(&self, bounds: teksilo_canvas::Rect) -> Vec<crate::partition::TargetRegion> {
+        self.widget.target_regions(bounds)
+    }
+
     fn take_handler_set(&mut self) -> Option<HandlerSet> {
         Some(self.take_handler_set())
     }
@@ -1825,6 +1924,18 @@ pub trait WidgetBuilder: Widget + Sized + 'static {
     /// [`HandlerSet::hit_transparent`].
     fn hit_transparent(self, transparent: bool) -> WidgetWithHandlers<Self> {
         WidgetWithHandlers::new(self).hit_transparent(transparent)
+    }
+
+    /// Override the miss-only hit slop for this node. See
+    /// [`HandlerSet::hit_slop`].
+    fn hit_slop(self, slop: crate::pointer::hit_slop::HitSlop) -> WidgetWithHandlers<Self> {
+        WidgetWithHandlers::new(self).hit_slop(slop)
+    }
+
+    /// Take this node out of both hit-widening mechanisms — no slop outset and
+    /// no `Widget::hit_outset`. See [`HandlerSet::no_hit_slop`].
+    fn no_hit_slop(self) -> WidgetWithHandlers<Self> {
+        WidgetWithHandlers::new(self).no_hit_slop()
     }
 
     /// Set a context-menu factory. See

@@ -550,6 +550,114 @@ pub trait Widget: std::fmt::Debug + std::any::Any {
         true
     }
 
+    /// How far **outside** its own bounds this widget still absorbs a press,
+    /// per edge, for the pointer that is asking.
+    ///
+    /// Consulted **inside** the exact hit test: within one parent, children
+    /// that declare an outset are tested against their outset bounds *before*
+    /// the ordinary reverse-sibling walk, so a 6 dp splitter gutter wins over
+    /// the panes it overlaps instead of losing to whichever pane is painted on
+    /// top. This is the mechanism for a thin **grip**, and the only one of the
+    /// three that can beat a competing target.
+    ///
+    /// Three rules make it safe to add to a widget that already works:
+    ///
+    /// * **Hit-only.** No layout moves, nothing repaints differently, and a
+    ///   Compact build renders byte for byte as it did. The outset exists
+    ///   between the pointer and the arena and nowhere else.
+    /// * **It never escapes the parent.** The recursion has already tested the
+    ///   parent's own bounds before it looks at any child, so an outset can
+    ///   only ever claim space the parent already owns — including through a
+    ///   `clips_children` ancestor, whose rectangle gated the descent.
+    /// * **Zero for a precise pointer** unless the widget deliberately says
+    ///   otherwise. A mouse cursor's hot-spot is exact and occludes nothing, so
+    ///   widening its targets steals clicks. Check
+    ///   `kind.is_direct()` (or accept every kind explicitly, as a control with
+    ///   a genuinely undersized mouse grip may) before returning anything
+    ///   non-zero.
+    ///
+    /// The insets are **reading-order**: `leading` is the left edge in an LTR
+    /// UI and the right edge in an RTL one. The default returns
+    /// [`EdgeInsets::ZERO`](teksilo_canvas::EdgeInsets::ZERO), so every existing
+    /// widget is unaffected.
+    ///
+    /// A grip's conventional value is `9 dp` for a direct pointer and `0 dp`
+    /// for a precise one — enough to lift a 6 dp gutter to a 24 dp target.
+    fn hit_outset(
+        &self,
+        _kind: teksilo_tokens::PointerKind,
+        _tokens: &teksilo_tokens::InputTokens,
+    ) -> teksilo_canvas::EdgeInsets {
+        teksilo_canvas::EdgeInsets::ZERO
+    }
+
+    /// This widget's own say in the *miss-only* slop pass, overriding the
+    /// density default for its node.
+    ///
+    /// Third link of the precedence chain — `no_hit_slop` beats a node-level
+    /// `.hit_slop(..)`, which beats this, which beats
+    /// [`HitSlop::for_pointer`]. Return [`HitSlop::NONE`] to opt a widget out
+    /// of re-attribution entirely, or a larger `up_to` to say that a control
+    /// deserves topping up further than the density asks.
+    ///
+    /// `None` (the default) means "no opinion — use the density default".
+    ///
+    /// [`HitSlop::for_pointer`]: crate::pointer::hit_slop::HitSlop::for_pointer
+    /// [`HitSlop::NONE`]: crate::pointer::hit_slop::HitSlop::NONE
+    fn hit_slop(
+        &self,
+        _kind: teksilo_tokens::PointerKind,
+        _tokens: &teksilo_tokens::InputTokens,
+    ) -> Option<crate::pointer::hit_slop::HitSlop> {
+        None
+    }
+
+    /// How far a *missed* press is from this widget's actual silhouette, in the
+    /// widget's own bounds space.
+    ///
+    /// The key to the miss-only slop pass: once the exact pass has found
+    /// nothing eligible, the framework asks every nearby node how far away it
+    /// really is and re-attributes the press to the closest one still inside
+    /// its earned outset.
+    ///
+    /// The default measures to the bounding rectangle, which is right for the
+    /// rectangular majority. A **round or wedge** control overrides it beside
+    /// its existing [`hit_shape`](Self::hit_shape) so the slop follows the
+    /// shape the user aimed at rather than the box it was laid out in — a
+    /// press past the corner of a radio dot's box is further from the dot than
+    /// a press past its edge, and should lose to a neighbour that is nearer.
+    ///
+    /// Returning `None` withdraws the widget from the pass altogether, which is
+    /// the shape-level equivalent of `no_hit_slop`.
+    ///
+    /// This is **never** consulted by the exact pass, so overriding it cannot
+    /// change where an ordinary click lands.
+    fn hit_distance(&self, local_point: Point, bounds: Rect) -> Option<f32> {
+        Some(crate::pointer::hit_slop::rect_distance(bounds, local_point))
+    }
+
+    /// The interactive sub-regions this widget **paints inside its own single
+    /// node** — a scroll bar's thumb, a slider's knob, a header cell's filter
+    /// affordance.
+    ///
+    /// Reporting only: implementing it changes no layout and no hit test by
+    /// itself. It exists because a control that draws several targets on one
+    /// canvas is otherwise opaque — the router cannot route a coarse press to
+    /// the nearest one, and the target-conformance audit cannot see that any of
+    /// them exists, let alone that it clears the floor.
+    ///
+    /// `bounds` is this widget's current rectangle, and the returned rects are
+    /// in the same space. Build them with
+    /// [`partition_targets`](crate::partition::partition_targets) where the
+    /// split is a horizontal division, so the geometry the widget paints and
+    /// the geometry it reports cannot drift apart.
+    ///
+    /// The default returns an empty list: a widget whose node *is* its target
+    /// has nothing to add.
+    fn target_regions(&self, _bounds: Rect) -> Vec<crate::partition::TargetRegion> {
+        Vec::new()
+    }
+
     /// How `rebuild_single_widget` treats this widget's existing children
     /// when re-running its `build()`.
     ///

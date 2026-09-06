@@ -143,6 +143,21 @@ impl TextSurfaces {
         self.focused().is_some()
     }
 
+    /// Does the widget registered under `owner` refuse edits?
+    ///
+    /// `false` for a widget that edits nothing — the question is only asked of
+    /// text surfaces, and a node that is not one is not read-only, it is simply
+    /// not text. Read by the hit-test slop pass, which must never re-attribute
+    /// a press to a surface that would ignore it.
+    pub fn is_read_only(&self, owner: WidgetId) -> bool {
+        self.entries
+            .borrow()
+            .iter()
+            .find(|(id, _)| *id == owner)
+            .map(|(_, s)| s.is_read_only())
+            .unwrap_or(false)
+    }
+
     /// The signal to react to. A host mirroring "can undo" into a menu row
     /// re-reads when focus moves.
     pub fn focus_signal(&self) -> Signal<Option<WidgetId>> {

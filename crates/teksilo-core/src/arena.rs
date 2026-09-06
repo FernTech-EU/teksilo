@@ -7,6 +7,7 @@ use crate::environment::ThemeOverride;
 use crate::event_handlers::EventHandlers;
 use crate::event_source::{SubscriptionHandle, SubscriptionId};
 use crate::gesture::MultiContact;
+use crate::pointer::hit_slop::{HitCandidate, HitContext};
 use crate::pointer::touch_action::{PanClaim, TouchAction};
 use crate::signal::{ObserverHandle, Prop, Signal};
 use crate::widget::{CursorIcon, Widget};
@@ -57,6 +58,28 @@ pub struct DirtyFlags {
     /// When true, the widget's `build()` should be re-run to regenerate children.
     /// Set by `BindingLevel::Rebuild` bindings (data-driven widgets).
     pub needs_rebuild: bool,
+}
+
+/// One node's resolved hit-test geometry: which point tests its own bounds,
+/// which point its children receive, its bounds, and how much its own transform
+/// scales a local distance.
+///
+/// Shared by the exact pass, the outset pre-pass and the slop candidate walk so
+/// the three cannot disagree about where a transformed node actually is.
+struct HitSpace {
+    bounds_point: teksilo_canvas::Point,
+    child_point: teksilo_canvas::Point,
+    bounds: teksilo_canvas::Rect,
+    /// The minimum singular value of this node's own transform (`1.0` when it
+    /// has none) — the factor that turns a distance in its local space into one
+    /// in its parent's.
+    scale: f32,
+}
+
+/// `0.0` for a non-finite or negative inset, so a widget that computes an
+/// outset from a `NaN` measurement cannot inflate a rectangle into nonsense.
+fn finite(v: f32) -> f32 {
+    if v.is_finite() && v > 0.0 { v } else { 0.0 }
 }
 
 /// A node in the widget arena storing a widget and its metadata.
@@ -240,6 +263,23 @@ pub struct WidgetNode {
     /// watermark, a status dot — so they never steal clicks meant for
     /// the control underneath. Default `false`.
     pub hit_transparent: bool,
+    /// Per-node override of the *miss-only* slop this node may earn, set via
+    /// `.hit_slop(..)`. Second link of the precedence chain — it beats the
+    /// widget's own `Widget::hit_slop` and the density default, and loses only
+    /// to [`no_hit_slop`](Self::no_hit_slop). `None` (the default) defers to
+    /// the widget, then to the density.
+    pub hit_slop: Option<crate::pointer::hit_slop::HitSlop>,
+    /// When `true`, this node is excluded from **both** hit-widening
+    /// mechanisms: it earns no slop outset in the miss-only pass, and its
+    /// `Widget::hit_outset` is ignored inside the exact pass. The head of the
+    /// precedence chain, set via `.no_hit_slop()`.
+    ///
+    /// Per-node, not per-subtree: a descendant may still widen. Excluding a
+    /// whole subtree from hit-testing is
+    /// [`hit_transparent`](Self::hit_transparent)'s job, and excluding a region
+    /// that hosts foreign content (a `WebView` surface) is exactly this flag on
+    /// that one node. Default `false`.
+    pub no_hit_slop: bool,
     /// Optional opacity multiplier (0..1) applied to this widget's
     /// entire subtree during paint. The render walker emits
     /// `SetOpacity(value)` before walking the widget's own paint and
@@ -444,6 +484,8 @@ impl WidgetNode {
             multi_contact: MultiContact::First,
             keyboard_capture: false,
             hit_transparent: false,
+            hit_slop: None,
+            no_hit_slop: false,
             opacity_prop: None,
             transform_prop: None,
             content_transform: false,
@@ -918,12 +960,73 @@ impl WidgetArena {
         point: teksilo_canvas::Point,
         exclude: Option<WidgetId>,
     ) -> Option<WidgetId> {
-        for &root in self.roots().iter().rev() {
-            if let Some(hit) = self.hit_test_recursive(root, point, exclude) {
-                return Some(hit);
+        self.hit_test_at_with(point, exclude, &HitContext::mouse())
+    }
+
+    /// [`hit_test_at`](Self::hit_test_at) on behalf of a named pointer.
+    ///
+    /// The **exact** pass only: `Widget::hit_outset` is consulted (so a grip
+    /// wins over what it overlaps for the kind that asked), but no slop
+    /// re-attribution happens. Callers that want re-attribution too use
+    /// [`hit_test_at_with_slop`](Self::hit_test_at_with_slop).
+    pub fn hit_test_at_with(
+        &self,
+        point: teksilo_canvas::Point,
+        exclude: Option<WidgetId>,
+        hit: &HitContext<'_>,
+    ) -> Option<WidgetId> {
+        let roots = self.roots();
+        // Roots take the outset pre-pass too, so a grip that happens to be a
+        // top-level node behaves like one nested anywhere else. The window is
+        // its "parent", and the window does not clip.
+        if let Some(grip) = self.outset_hit(&roots, point, exclude, hit) {
+            return Some(grip);
+        }
+        for &root in roots.iter().rev() {
+            if let Some(found) = self.hit_test_recursive(root, point, exclude, hit) {
+                return Some(found);
             }
         }
         None
+    }
+
+    /// The full two-stage hit test: the exact pass, then — **only when it found
+    /// nothing eligible** — the nearest-candidate slop pass.
+    ///
+    /// Returns whatever the exact pass returned unless a slop candidate is
+    /// strictly closer than the bubble owner's uninflated shape. See
+    /// [`hit_candidates`](Self::hit_candidates) for the eligibility rules and
+    /// `docs/density-and-targets.md` for the prose.
+    ///
+    /// For a mouse this is [`hit_test_at`](Self::hit_test_at): the mouse slop
+    /// radius is `0.0` at every density, so the second stage short-circuits
+    /// before it walks anything.
+    pub fn hit_test_at_with_slop(
+        &self,
+        point: teksilo_canvas::Point,
+        exclude: Option<WidgetId>,
+        hit: &HitContext<'_>,
+    ) -> Option<WidgetId> {
+        let exact = self.hit_test_at_with(point, exclude, hit);
+        self.apply_slop(self.roots(), point, exclude, hit, exact)
+    }
+
+    /// [`hit_test_in_subtree`](Self::hit_test_in_subtree) with the slop pass,
+    /// scoped so candidates never leave `start`'s subtree.
+    ///
+    /// This is what restricts the pass to the topmost overlay layer the exact
+    /// pass entered: the tree calls it with the overlay's content root, so a
+    /// press inside a menu can never be re-attributed to a control on the page
+    /// behind it.
+    pub fn hit_test_in_subtree_with_slop(
+        &self,
+        start: WidgetId,
+        point: teksilo_canvas::Point,
+        exclude: Option<WidgetId>,
+        hit: &HitContext<'_>,
+    ) -> Option<WidgetId> {
+        let exact = self.hit_test_recursive(start, point, exclude, hit);
+        self.apply_slop(vec![start], point, exclude, hit, exact)
     }
 
     /// Hit-test starting from a specific subtree root rather than the
@@ -937,7 +1040,7 @@ impl WidgetArena {
         start: WidgetId,
         point: teksilo_canvas::Point,
     ) -> Option<WidgetId> {
-        self.hit_test_recursive(start, point, None)
+        self.hit_test_recursive(start, point, None, &HitContext::mouse())
     }
 
     /// Like [`hit_test_in_subtree`](Self::hit_test_in_subtree) but also
@@ -950,7 +1053,19 @@ impl WidgetArena {
         point: teksilo_canvas::Point,
         exclude: Option<WidgetId>,
     ) -> Option<WidgetId> {
-        self.hit_test_recursive(start, point, exclude)
+        self.hit_test_recursive(start, point, exclude, &HitContext::mouse())
+    }
+
+    /// [`hit_test_in_subtree_excluding`](Self::hit_test_in_subtree_excluding)
+    /// on behalf of a named pointer. Exact pass only.
+    pub fn hit_test_in_subtree_with(
+        &self,
+        start: WidgetId,
+        point: teksilo_canvas::Point,
+        exclude: Option<WidgetId>,
+        hit: &HitContext<'_>,
+    ) -> Option<WidgetId> {
+        self.hit_test_recursive(start, point, exclude, hit)
     }
 
     fn hit_test_recursive(
@@ -958,6 +1073,7 @@ impl WidgetArena {
         id: WidgetId,
         point: teksilo_canvas::Point,
         exclude: Option<WidgetId>,
+        hit: &HitContext<'_>,
     ) -> Option<WidgetId> {
         if !self.is_active(id) || Some(id) == exclude {
             return None;
@@ -970,52 +1086,13 @@ impl WidgetArena {
         if self.get(id).map(|n| n.hit_transparent).unwrap_or(false) {
             return None;
         }
-        // The input point arrives in this node's parent-effective space. A
-        // `set_transform` scope is composed by the render walker around this
-        // node's subtree, so hit-testing mirrors it by inverse-applying the
-        // transform once. *Which* rectangle the transform applies to depends
-        // on whether it's a **content** transform or a **self** transform
-        // (see `WidgetNode::content_transform`):
-        //
-        // * A **content** transform (`content_transform`, e.g. `SceneView`) is
-        //   a fixed viewport: its bounds are a rectangle in PARENT space and
-        //   the transform pans / zooms only its CONTENT. Test the bounds
-        //   against the parent-space point; inverse-transform only for
-        //   descending into children, so the whole visible viewport stays
-        //   interactive regardless of pan / zoom. (Without this, panning the
-        //   content shifts the hittable region off the viewport — clicks /
-        //   wheel over the visible scene fall through to whatever is behind.)
-        // * A **self** transform (`Scale` / `Rotate`, whose own bounds move
-        //   with the transform) inverse-transforms first, then tests its
-        //   bounds in the resulting local space (a click lands where the
-        //   scaled / rotated visual actually is).
-        //
-        // Identity / missing transforms collapse both paths to the scalar
-        // case, so the hot path stays cheap. `content_transform` is
-        // `SceneView`-only today, so this only changes SceneView hit-testing;
-        // `Scale` / `Rotate` (also `clips_children`) keep the self-transform
-        // path.
-        let transform = self
-            .get(id)
-            .and_then(|n| n.transform_prop.as_ref())
-            .map(|p| p.get())
-            .filter(|t| !t.is_identity());
-        let content_transform = self.get(id).map(|n| n.content_transform).unwrap_or(false);
-        // A degenerate transform (collapsed axis) hides the entire subtree
-        // visually; `inverse()` returning None mirrors that for hit-testing.
-        let child_point = match transform {
-            Some(t) => t.inverse()?.apply_point(point),
-            None => point,
-        };
-        // Content-transform nodes test their (parent-space) viewport against
-        // the incoming point; everything else tests in the inverse-transformed
-        // local space.
-        let bounds_point = if content_transform {
-            point
-        } else {
-            child_point
-        };
-        let bounds = self.bounds(id);
+        let space = self.hit_space(id, point)?;
+        let HitSpace {
+            bounds_point,
+            child_point,
+            bounds,
+            ..
+        } = space;
         if !bounds.contains(bounds_point) {
             return None;
         }
@@ -1035,15 +1112,450 @@ impl WidgetArena {
         }
         let pass_through = self.get(id).map(|n| n.event_pass_through).unwrap_or(false);
         let children: Vec<WidgetId> = self.children(id).to_vec();
+        // A child that declares a `Widget::hit_outset` is offered the point
+        // BEFORE the ordinary reverse-sibling walk, so a thin grip wins over
+        // whatever it overlaps rather than losing to whichever neighbour is
+        // painted on top of it. Only the ring OUTSIDE a child's own bounds is
+        // resolved here — a point genuinely inside a child falls through to the
+        // normal walk below, which resolves descendants and honours
+        // `hit_shape`, so declaring an outset never changes where an in-bounds
+        // press lands.
+        if let Some(grip) = self.outset_hit(&children, child_point, exclude, hit) {
+            return Some(grip);
+        }
         for &child in children.iter().rev() {
-            if let Some(hit) = self.hit_test_recursive(child, child_point, exclude) {
-                return Some(hit);
+            if let Some(found) = self.hit_test_recursive(child, child_point, exclude, hit) {
+                return Some(found);
             }
         }
         if pass_through {
             return None;
         }
         Some(id)
+    }
+
+    /// The outset pre-pass over one parent's children.
+    ///
+    /// A child that declares an outset is offered the point against its
+    /// **inflated** bounds, ahead of the ordinary reverse-sibling walk, so a
+    /// thin grip wins over whatever is painted on top of it — both in its ring
+    /// and in its own body, which is the whole point of a splitter gutter lying
+    /// under two panes.
+    ///
+    /// Ordering is by distance to the child's own uninflated rectangle, so two
+    /// adjacent grips whose rings overlap split the difference at the midpoint
+    /// rather than letting sibling order decide; ties go to the later sibling,
+    /// which is the one painted on top.
+    ///
+    /// A candidate is resolved through the ordinary recursion first, so a
+    /// descendant inside the grip still wins and `hit_shape` is still honoured;
+    /// only a point genuinely in the ring — outside the child's real bounds —
+    /// resolves to the child itself. A candidate that resolves to nothing hands
+    /// over to the next-nearest, and finally to the normal walk.
+    fn outset_hit(
+        &self,
+        children: &[WidgetId],
+        point: teksilo_canvas::Point,
+        exclude: Option<WidgetId>,
+        hit: &HitContext<'_>,
+    ) -> Option<WidgetId> {
+        // Almost every parent has no outset-declaring child at all, so the
+        // common case allocates nothing and returns on the first loop.
+        let mut candidates: Vec<(WidgetId, f32, bool)> = Vec::new();
+        // Walked topmost-first so that, after a STABLE ascending sort, two
+        // grips at exactly the same distance are resolved in paint order.
+        for &child in children.iter().rev() {
+            if !self.is_active(child) || Some(child) == exclude {
+                continue;
+            }
+            let Some(node) = self.get(child) else {
+                continue;
+            };
+            // A decorative or pass-through node never absorbs a press, so
+            // widening it would only punch a hole in whatever is behind it.
+            // `no_hit_slop` is the head of the precedence chain and turns off
+            // BOTH widening mechanisms.
+            if node.hit_transparent || node.event_pass_through || node.no_hit_slop {
+                continue;
+            }
+            let outset = node.widget.hit_outset(hit.kind(), hit.tokens());
+            let (top, bottom) = (finite(outset.top), finite(outset.bottom));
+            let (leading, trailing) = (finite(outset.leading), finite(outset.trailing));
+            if top <= 0.0 && bottom <= 0.0 && leading <= 0.0 && trailing <= 0.0 {
+                continue;
+            }
+            let Some(space) = self.hit_space(child, point) else {
+                continue;
+            };
+            // Reading order → screen edges.
+            let (left, right) = match hit.layout_direction() {
+                crate::environment::LayoutDirection::LeftToRight => (leading, trailing),
+                crate::environment::LayoutDirection::RightToLeft => (trailing, leading),
+            };
+            let inflated = teksilo_canvas::Rect::new(
+                space.bounds.x - left,
+                space.bounds.y - top,
+                space.bounds.width + left + right,
+                space.bounds.height + top + bottom,
+            );
+            if !inflated.contains(space.bounds_point) {
+                continue;
+            }
+            let inside = space.bounds.contains(space.bounds_point);
+            let distance =
+                crate::pointer::hit_slop::rect_distance(space.bounds, space.bounds_point);
+            candidates.push((child, distance, inside));
+        }
+        if candidates.is_empty() {
+            return None;
+        }
+        candidates.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+        for (child, _, inside) in candidates {
+            if let Some(found) = self.hit_test_recursive(child, point, exclude, hit) {
+                return Some(found);
+            }
+            // The ring: the point is outside the child's real bounds, so the
+            // ordinary recursion could never have found it, and the outset is
+            // the whole reason it is being offered.
+            if !inside {
+                return Some(child);
+            }
+            // Inside the bounds but the recursion declined (a `hit_shape`
+            // rejection, an empty pass-through): the outset has nothing to add,
+            // so hand back to the normal walk.
+        }
+        None
+    }
+
+    /// Resolve one node's transform for hit-testing: the point to test its own
+    /// bounds against, the point to hand its children, and its bounds.
+    ///
+    /// The input point arrives in this node's parent-effective space. A
+    /// `set_transform` scope is composed by the render walker around this
+    /// node's subtree, so hit-testing mirrors it by inverse-applying the
+    /// transform once. *Which* rectangle the transform applies to depends
+    /// on whether it's a **content** transform or a **self** transform
+    /// (see `WidgetNode::content_transform`):
+    ///
+    /// * A **content** transform (`content_transform`, e.g. `SceneView`) is
+    ///   a fixed viewport: its bounds are a rectangle in PARENT space and
+    ///   the transform pans / zooms only its CONTENT. Test the bounds
+    ///   against the parent-space point; inverse-transform only for
+    ///   descending into children, so the whole visible viewport stays
+    ///   interactive regardless of pan / zoom. (Without this, panning the
+    ///   content shifts the hittable region off the viewport — clicks /
+    ///   wheel over the visible scene fall through to whatever is behind.)
+    /// * A **self** transform (`Scale` / `Rotate`, whose own bounds move
+    ///   with the transform) inverse-transforms first, then tests its
+    ///   bounds in the resulting local space (a click lands where the
+    ///   scaled / rotated visual actually is).
+    ///
+    /// Identity / missing transforms collapse both paths to the scalar
+    /// case, so the hot path stays cheap. `content_transform` is
+    /// `SceneView`-only today, so this only changes SceneView hit-testing;
+    /// `Scale` / `Rotate` (also `clips_children`) keep the self-transform
+    /// path.
+    ///
+    /// `None` when the transform is singular (a collapsed axis) — that hides
+    /// the entire subtree visually, and hit-testing mirrors it.
+    fn hit_space(&self, id: WidgetId, point: teksilo_canvas::Point) -> Option<HitSpace> {
+        let transform = self
+            .get(id)
+            .and_then(|n| n.transform_prop.as_ref())
+            .map(|p| p.get())
+            .filter(|t| !t.is_identity());
+        let content_transform = self.get(id).map(|n| n.content_transform).unwrap_or(false);
+        let child_point = match transform {
+            Some(t) => t.inverse()?.apply_point(point),
+            None => point,
+        };
+        let bounds_point = if content_transform {
+            point
+        } else {
+            child_point
+        };
+        Some(HitSpace {
+            bounds_point,
+            child_point,
+            bounds: self.bounds(id),
+            scale: transform
+                .as_ref()
+                .map(crate::pointer::hit_slop::min_singular_value)
+                .unwrap_or(1.0),
+        })
+    }
+
+    /// Every node the *miss-only* slop pass would consider for `point`, nearest
+    /// first, scoped to `start`'s subtree.
+    ///
+    /// Public so a test — and the target-conformance audit — can inspect the
+    /// pass's reasoning rather than only its verdict. Returning candidates does
+    /// **not** mean one of them wins: see
+    /// [`hit_test_at_with_slop`](Self::hit_test_at_with_slop) for the
+    /// bubble-path rule that decides.
+    ///
+    /// # Eligibility
+    ///
+    /// A node is a candidate only if all of the following hold. Each is pinned
+    /// by its own test in this module.
+    ///
+    /// * It earns a non-zero outset from its resolved [`HitSlop`] — which, by
+    ///   the size formula, excludes anything already at least `up_to` on its
+    ///   smaller axis. A scrim, a page, a list row are excluded by arithmetic.
+    /// * It would actually *do* something with the press:
+    ///   [`takes_a_press`](Self::takes_a_press). Re-attributing to a node that
+    ///   ignores presses would silently swallow one.
+    /// * It is **enabled** — its own `enabled_state` and every ancestor's.
+    /// * It is not **read-only**, as reported by the context's probe.
+    /// * It does not carry `no_hit_slop`, and it is not `event_pass_through`
+    ///   (which absorbs nothing; its **children** stay eligible).
+    /// * It is not inside a `hit_transparent` subtree — those are pruned whole.
+    /// * No `clips_children` ancestor's **uninflated** rectangle excludes the
+    ///   point: slop never reaches out of a scroller.
+    /// * Its [`Widget::hit_distance`] answers `Some(d)` with `0 < d ≤ outset`.
+    ///   `d = 0` means the point is inside the shape, which is the exact pass's
+    ///   business — the slop pass only ever re-attributes a genuine miss.
+    ///
+    /// Distances are measured in each node's own space and converted to screen
+    /// dp through the accumulated
+    /// [`min_singular_value`](crate::pointer::hit_slop::min_singular_value) of
+    /// the transforms above it. For a chain of transforms the product of the
+    /// per-node minima is a lower bound on the true composed minimum, so the
+    /// reach under a stack of transforms errs towards being generous rather
+    /// than short.
+    ///
+    /// [`HitSlop`]: crate::pointer::hit_slop::HitSlop
+    /// [`Widget::hit_distance`]: crate::widget::Widget::hit_distance
+    pub fn hit_candidates(
+        &self,
+        start: WidgetId,
+        point: teksilo_canvas::Point,
+        exclude: Option<WidgetId>,
+        hit: &HitContext<'_>,
+    ) -> Vec<HitCandidate> {
+        let mut out = Vec::new();
+        if hit.slop_enabled() {
+            self.collect_candidates(start, point, 1.0, true, exclude, hit, &mut out);
+            out.sort_by(|a, b| {
+                a.distance
+                    .partial_cmp(&b.distance)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
+        }
+        out
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn collect_candidates(
+        &self,
+        id: WidgetId,
+        point: teksilo_canvas::Point,
+        scale: f32,
+        enabled: bool,
+        exclude: Option<WidgetId>,
+        hit: &HitContext<'_>,
+        out: &mut Vec<HitCandidate>,
+    ) {
+        if !self.is_active(id) || Some(id) == exclude {
+            return;
+        }
+        let Some(node) = self.get(id) else { return };
+        // Decorative subtree: pruned whole, exactly as in the exact pass.
+        if node.hit_transparent {
+            return;
+        }
+        let Some(space) = self.hit_space(id, point) else {
+            return;
+        };
+        // Slop never escapes a clipping ancestor's UNINFLATED rectangle: a
+        // control scrolled out of a `ScrollArea` must not catch a press landing
+        // on the scroller's border.
+        if node.clips_children && !space.bounds.contains(space.bounds_point) {
+            return;
+        }
+        let enabled = enabled
+            && node
+                .enabled_state
+                .as_ref()
+                .map(|state| state.get())
+                .unwrap_or(true);
+        let scale_children = scale * space.scale;
+        // A content transform leaves the node's own bounds in parent space; a
+        // self transform moves them with it.
+        let scale_self = if node.content_transform {
+            scale
+        } else {
+            scale_children
+        };
+        if enabled
+            && !node.no_hit_slop
+            && !node.event_pass_through
+            && !hit.is_read_only(id)
+            && self.takes_a_press(id)
+        {
+            let slop = node
+                .hit_slop
+                .or_else(|| node.widget.hit_slop(hit.kind(), hit.tokens()))
+                .unwrap_or_else(|| hit.default_slop());
+            let outset = slop.outset_for(space.bounds.size());
+            if outset > 0.0
+                && let Some(local) = node.widget.hit_distance(space.bounds_point, space.bounds)
+            {
+                let distance = local * scale_self;
+                if distance > 0.0 && distance <= outset && distance.is_finite() {
+                    out.push(HitCandidate {
+                        id,
+                        distance,
+                        outset,
+                    });
+                }
+            }
+        }
+        for &child in self.children(id) {
+            self.collect_candidates(
+                child,
+                space.child_point,
+                scale_children,
+                enabled,
+                exclude,
+                hit,
+                out,
+            );
+        }
+    }
+
+    /// Whether a press landing on this node would do anything at all — the
+    /// definition of an "eligible handler" for the slop pass's bubble-path
+    /// rule.
+    ///
+    /// A node qualifies if it carries any pointer-facing handler (tap, multi
+    /// tap, long press, drag, swipe, pinch, the raw pointer stream, scroll) or
+    /// is focusable, and is enabled. Accessibility actions and key handlers do
+    /// not count: neither is reachable from a pointer.
+    pub fn takes_a_press(&self, id: WidgetId) -> bool {
+        let Some(node) = self.get(id) else {
+            return false;
+        };
+        if !self.is_enabled(id) {
+            return false;
+        }
+        let pointer_facing = |h: &crate::event_handlers::EventHandlers| {
+            h.on_tap.is_some()
+                || h.on_double_tap.is_some()
+                || h.on_triple_tap.is_some()
+                || h.on_long_press.is_some()
+                || h.on_drag.is_some()
+                || h.on_swipe.is_some()
+                || h.on_pinch.is_some()
+                || h.on_pointer_event.is_some()
+                || h.on_scroll.is_some()
+        };
+        pointer_facing(&node.handlers)
+            || pointer_facing(&node.external_handlers)
+            || node.node_focusable.unwrap_or(false)
+    }
+
+    /// Run the miss-only pass over `roots` and decide between it and `exact`.
+    ///
+    /// The rule, in one place: the exact hit's **entire bubble path** is
+    /// examined, and a slop candidate wins only when that path carries no
+    /// eligible handler at all, or when the candidate is strictly closer than
+    /// the bubble owner's *uninflated* shape. That is what keeps a press on a
+    /// row label 5 dp from an inline checkbox on the row — the row owns the
+    /// press at distance zero, and nothing beats zero.
+    fn apply_slop(
+        &self,
+        roots: Vec<WidgetId>,
+        point: teksilo_canvas::Point,
+        exclude: Option<WidgetId>,
+        hit: &HitContext<'_>,
+        exact: Option<WidgetId>,
+    ) -> Option<WidgetId> {
+        if !hit.slop_enabled() {
+            return exact;
+        }
+        let owner_distance = match exact.and_then(|target| self.bubble_owner(target, &roots)) {
+            Some(owner) => self.distance_to(owner, point, &roots).unwrap_or(0.0),
+            // Either nothing was hit, or what was hit ignores presses all the
+            // way up: there is nothing to beat.
+            None => f32::INFINITY,
+        };
+        if owner_distance <= 0.0 {
+            return exact;
+        }
+        let mut best: Option<HitCandidate> = None;
+        for &root in roots.iter().rev() {
+            for candidate in self.hit_candidates(root, point, exclude, hit) {
+                if candidate.distance < owner_distance
+                    && best.is_none_or(|b| candidate.distance < b.distance)
+                {
+                    best = Some(candidate);
+                }
+            }
+        }
+        best.map(|c| c.id).or(exact)
+    }
+
+    /// The deepest node on `target`'s own path (itself, then ancestors, up to
+    /// and including whichever of `roots` contains it) that would act on a
+    /// press.
+    fn bubble_owner(&self, target: WidgetId, roots: &[WidgetId]) -> Option<WidgetId> {
+        let mut current = Some(target);
+        while let Some(id) = current {
+            if self.takes_a_press(id) {
+                return Some(id);
+            }
+            if roots.contains(&id) {
+                return None;
+            }
+            current = self.get(id).and_then(|n| n.parent);
+        }
+        None
+    }
+
+    /// Distance from a root-space `point` to `id`'s own shape, in screen dp.
+    ///
+    /// Walks down from whichever of `roots` owns `id` so the transforms are
+    /// applied in the same order the hit test applies them, and converts the
+    /// local distance through the accumulated minimum singular value.
+    fn distance_to(
+        &self,
+        id: WidgetId,
+        point: teksilo_canvas::Point,
+        roots: &[WidgetId],
+    ) -> Option<f32> {
+        let mut chain = vec![id];
+        let mut current = id;
+        while !roots.contains(&current) {
+            match self.get(current).and_then(|n| n.parent) {
+                Some(parent) => {
+                    chain.push(parent);
+                    current = parent;
+                }
+                None => break,
+            }
+        }
+        chain.reverse();
+        let mut p = point;
+        let mut scale = 1.0_f32;
+        for (index, &node_id) in chain.iter().enumerate() {
+            let space = self.hit_space(node_id, p)?;
+            if index + 1 == chain.len() {
+                let scale_self = if self.get(node_id).map(|n| n.content_transform)? {
+                    scale
+                } else {
+                    scale * space.scale
+                };
+                let local = self
+                    .get(node_id)?
+                    .widget
+                    .hit_distance(space.bounds_point, space.bounds)?;
+                return Some(local * scale_self);
+            }
+            scale *= space.scale;
+            p = space.child_point;
+        }
+        None
     }
 
     /// Iterate over all active widget IDs.
@@ -1466,6 +1978,12 @@ impl WidgetArena {
             }
             if let Some(hit_transparent) = handler_set.hit_transparent {
                 node.hit_transparent = hit_transparent;
+            }
+            if let Some(slop) = handler_set.hit_slop {
+                node.hit_slop = Some(slop);
+            }
+            if let Some(no_slop) = handler_set.no_hit_slop {
+                node.no_hit_slop = no_slop;
             }
             if handler_set.context_menu_factory.is_some() {
                 node.context_menu_factory = handler_set.context_menu_factory;

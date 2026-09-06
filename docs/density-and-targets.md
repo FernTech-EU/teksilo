@@ -110,6 +110,178 @@ default, and `FollowLastPointer { coarse, fine, hysteresis }` tracks the most
 recent pointer kind with a settling delay so a stray event cannot thrash a full
 tree rebuild.
 
+## Hit targeting: three mechanisms, three domains
+
+A target that is too small is not one problem, it is three, and they want three
+different answers. Teksilo has one mechanism for each, and they do not overlap.
+
+| | what it is | when it runs | what it costs |
+| --- | --- | --- | --- |
+| **`Widget::target_regions`** | a widget *reports* the sub-targets it paints inside one node | never — reporting only | nothing |
+| **`Widget::hit_outset`** | a node absorbs presses past its own edges | **inside** the exact pass | nothing; hit-only |
+| **The miss-only slop pass** | a press that hit nothing is re-attributed to the nearest small target | **only after** the exact pass found nothing eligible | nothing; hit-only |
+| `TouchTarget` | the slot around a control actually grows | layout, at `Touch` density only | siblings reflow |
+
+Which one do you need?
+
+- Is your control **painted inside another widget's node** — a scroll bar's
+  thumb, a slider's knob, a header cell's filter affordance? Then nothing can
+  see it, and you owe the framework a `target_regions` report before either of
+  the other two can help.
+- Does it need to **beat a neighbour**? A splitter gutter lies across the panes
+  it divides, and the panes are painted on top of it. Only `hit_outset` can win
+  that, because it runs inside the exact pass.
+- Is it **alone**, with nothing nearby to steal from — a radio dot, a checkbox,
+  a chart mark? The slop pass. Widening its rectangle would take presses from
+  the row it sits in; catching a *miss* takes them from nobody.
+- Does it sit in a **tight row of other targets**, with no space to borrow? Then
+  no amount of hit trickery will do, and `TouchTarget` is the honest answer.
+
+### `Widget::target_regions` — reporting
+
+```rust
+fn target_regions(&self, bounds: Rect) -> Vec<TargetRegion> {
+    let [label, filter] = partition_targets(bounds, &[0.8, 0.2], 24.0, dir)[..] else { … };
+    vec![TargetRegion::target(label, 0), TargetRegion::target(filter, 1)]
+}
+```
+
+`TargetRegion { rect, role, part }`. `part` is the widget's own discriminator;
+`role` decides the floor an audit measures it against. Build the rectangles with
+[`partition_targets`] rather than by hand, so the geometry the widget *paints*
+and the geometry it *reports* cannot drift apart.
+
+`partition_targets(bounds, fractions, min, direction)` splits one node's
+rectangle **horizontally** into a zone per fraction. Weights normalise by their
+own sum; every zone gets at least `min` dp by clamp-and-redistribute; the result
+is indexed in **reading order**, so `zones[0]` is the leading zone and no caller
+re-orders for RTL; the tiling is exact. When `min × zones` exceeds the width
+there is no conforming partition, and it splits the width **evenly** — every
+zone stays reachable and visibly sub-floor, which is what the target audit is
+for, rather than a zone silently vanishing at a narrow width.
+
+A vertical split (a `TreeView` row's before / into / after thirds, a drop
+target's edge bands) is [`DropRegion`]'s job; it has to answer in two dimensions
+anyway.
+
+### `Widget::hit_outset` — inside the exact pass
+
+```rust
+fn hit_outset(&self, kind: PointerKind, tokens: &InputTokens) -> EdgeInsets {
+    if kind.is_direct() { EdgeInsets::uniform(9.0) } else { EdgeInsets::ZERO }
+}
+```
+
+Within one parent, children that declare an outset are offered the point
+**before** the ordinary reverse-sibling walk, nearest first. That is why a 6 dp
+splitter gutter wins over the panes lying on top of it, and why two adjacent
+grips split the difference at the midpoint instead of letting sibling order
+decide.
+
+Four rules, each pinned by a test:
+
+- **Hit-only.** No layout moves, nothing repaints differently, and a Compact
+  build renders byte for byte as it did.
+- **It never escapes the parent.** The recursion tests the parent's own bounds
+  before it looks at a child, so an outset can only claim space the parent
+  already owns — through a `clips_children` ancestor included.
+- **Zero for a precise pointer**, unless the widget opts every kind in
+  deliberately. A mouse hot-spot is exact and occludes nothing, so widening its
+  targets steals clicks. The rich-text image grip is the one control that opts
+  in, because its mouse target is genuinely undersized.
+- **Resolved through the child.** A point inside the child still resolves
+  normally — descendants win, `hit_shape` is honoured — and only a point in the
+  ring resolves to the child itself.
+
+The conventional grip value is **9 dp direct / 0 dp precise**, which lifts a
+6 dp gutter to a 24 dp target.
+
+### The miss-only slop pass
+
+Runs **only** when the exact pass found nothing that would act on the press.
+Every node near the point is asked how far away it really is
+(`Widget::hit_distance`, defaulting to the distance to its rectangle; a round
+control overrides it beside its existing `hit_shape`), and the nearest one still
+inside its earned outset takes the press.
+
+A node's outset is
+
+```text
+((up_to − min(width, height)) / 2).clamp(0, radius)
+```
+
+with `radius` from the pointer's profile — **0 dp mouse / 8 dp touch / 2 dp
+pen** — capped for a *coarse* pointer by `slop_budget` (12 / 12 / 16 dp), and
+`up_to` the density's `target_size`. A node already at least `up_to` on its
+smaller axis therefore earns **nothing**: a scrim, a page, a list row are
+excluded by arithmetic rather than by a rule. And because the mouse radius is
+`0.0` at every density, **every mouse hit test is exactly the one Teksilo has
+always run** — the pass short-circuits before it walks anything.
+
+#### The bubble-path rule
+
+The exact hit's **entire bubble path** is examined. A slop candidate wins only
+if that path carries no eligible handler at all, **or** the candidate is
+strictly closer than the bubble owner's *uninflated* shape.
+
+This is what keeps the obvious counter-example correct: a press on a row label
+5 dp from an inline checkbox stays on the row. The row owns the press at
+distance zero, and nothing beats zero. Turn the row inert and the same press
+does reach the checkbox — which is the case the mechanism exists for.
+
+#### Eligibility
+
+| rule | why |
+| --- | --- |
+| earns a non-zero outset | the formula excludes anything already at `up_to` |
+| would act on a press (a pointer handler, or focusable) | re-attributing to an inert node swallows a press silently |
+| **enabled** — its own state and every ancestor's | a disabled control ignores presses |
+| not **read-only** | likewise; answered by the `TextSurface` registry, via a probe the tree hands the arena |
+| no `no_hit_slop` | the explicit opt-out |
+| not `event_pass_through` — **but its children are** | it absorbs nothing, so widening it punches a hole in what is behind |
+| not inside a `hit_transparent` subtree | those are pruned whole, as in the exact pass |
+| no `clips_children` ancestor's **uninflated** rect excludes the point | slop never reaches out of a scroller |
+| inside the **topmost overlay layer the exact pass entered** | a press in an open menu can never reach the page behind it |
+| `hit_distance` answers `Some(d)` with `0 < d ≤ outset` | `d = 0` is the exact pass's business; `None` withdraws the widget |
+
+A `ModalScrim` never participates. The size formula already excludes a
+full-viewport node, but the scrim says `no_hit_slop` outright so the guarantee
+does not depend on how large it happens to be.
+
+Under a transform the point is inverse-mapped and the local distance is
+converted to screen dp through the transform's **minimum singular value** —
+the axis along which a local unit buys the fewest screen pixels, so the reach
+never comes out shorter than the token promised on any axis. For a chain of
+transforms the product of the per-node minima is a lower bound on the composed
+minimum, so a deep stack errs towards being generous rather than short.
+
+### Precedence — one chain
+
+```text
+no_hit_slop  >  node .hit_slop(..)  >  Widget::hit_outset / Widget::hit_slop  >  density default
+```
+
+`.hit_slop(HitSlop { radius, up_to })` and `.no_hit_slop()` are `WidgetBuilder`
+methods, available on any widget and on `HandlerSet`. `no_hit_slop` is the head
+of **one** chain covering both widening mechanisms: it silences the widget's
+`hit_outset` as well as its slop. It is per-node, not per-subtree — to take a
+whole subtree out of hit-testing use `hit_transparent`.
+
+### `TouchTarget` — the residue
+
+```rust
+TouchTarget::new().child(close_button)          // 44 dp slot at Touch, child centred
+TouchTarget::new().reserve_space(false).child(w) // nothing moves; hit area widens instead
+```
+
+Inert at `Compact` and `Comfortable`: it forwards its child's full layout
+response — grow weight, shrink weight and compression floor — unchanged.
+`Compact` is the density every existing layout was designed at, and
+`Comfortable` is served by the recipes' own density projection, which raises a
+control's *own* dimensions rather than padding around it. `Touch` is the ladder
+where a 24 dp control still falls 20 dp short and no recipe can close the gap
+from inside.
+
 ## Gesture profiles
 
 `theme.input.gestures` holds one `GestureProfile` per pointer-kind family;
@@ -233,3 +405,5 @@ re-export because `AccessibilityPreferences` lives in `teksilo-platform`, and
 `teksilo-core` cannot name it.
 
 [`InputTokens`]: https://github.com/ferntech-eu/teksilo/blob/main/crates/teksilo-tokens/src/input.rs
+[`partition_targets`]: https://github.com/ferntech-eu/teksilo/blob/main/crates/teksilo-core/src/partition.rs
+[`DropRegion`]: https://github.com/ferntech-eu/teksilo/blob/main/crates/teksilo-core/src/styles/drop_target_style.rs

@@ -35,6 +35,7 @@ pub mod motion_visibility;
 pub mod overlay;
 pub mod overscroll;
 pub mod paint_prop;
+pub mod partition;
 pub mod pointer;
 pub mod presets;
 pub mod raw_handle;
@@ -104,7 +105,9 @@ pub use overlay::{
 };
 pub use overscroll::{OverscrollBehavior, SCROLL_MOVE_EPSILON};
 pub use paint_prop::{GradientStopProp, PaintProp, angle_to_endpoints};
+pub use partition::{TargetRegion, partition_targets};
 pub use pointer::clock::{InputClock, ManualClock, MonotonicClock};
+pub use pointer::hit_slop::{HitCandidate, HitContext, HitSlop};
 pub use pointer::touch_action::{Axis, PanAxes, PanClaim, TouchAction};
 pub use pointer::{
     BackendDeviceKey, CancelReason, EventTime, PointerAxes, PointerId, PointerIdAllocator,

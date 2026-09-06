@@ -797,7 +797,11 @@ impl WidgetTree {
                 // Windows and GTK both do. Runs before hit-testing so it fires
                 // even for a press that lands on nothing.
                 self.tooltip_pointer_press(Some(*position));
-                if let Some(target) = self.hit_test(*position) {
+                // Routed for the pointer that is actually pressing: a finger
+                // gets its grip outsets and its miss-only slop, a mouse gets the
+                // exact test it has always had.
+                let pressing = self.current_input.pointer;
+                if let Some(target) = self.hit_test_for(*position, &pressing) {
                     if *button == PointerButton::Secondary
                         && self.show_context_menu_for(target, *position, &mut *ops)
                     {
@@ -854,8 +858,11 @@ impl WidgetTree {
                     // Per pointer: this Up releases *this* pointer's capture and
                     // leaves every other contact's alone.
                     self.set_current_pointer_capture(None);
-                } else if let Some(target) = self.hit_test(*position) {
-                    self.dispatch_to_widget(target, &event, &mut *ops);
+                } else {
+                    let releasing = self.current_input.pointer;
+                    if let Some(target) = self.hit_test_for(*position, &releasing) {
+                        self.dispatch_to_widget(target, &event, &mut *ops);
+                    }
                 }
                 // The press is over. Any arena still following this contact saw
                 // its `Down` but not its `Up` — see `release_arenas_following`.
@@ -878,8 +885,9 @@ impl WidgetTree {
                 // is positionless, so this is a no-op for it — the change
                 // exists for a pan synthesised from a direct pointer, which
                 // never writes hover and would otherwise route nowhere.
+                let scrolling = self.current_input.pointer;
                 let target = match position {
-                    Some(p) => self.hit_test(*p),
+                    Some(p) => self.hit_test_for(*p, &scrolling),
                     None => self.hovered_id().or(self.focused),
                 };
                 if let Some(target) = target {
@@ -1185,13 +1193,14 @@ impl WidgetTree {
         // finger has no hover state, so a second finger arriving beside a
         // hovering mouse must leave enter/leave, the cursor, tooltip dwell and
         // every `on_hover` handler exactly where they were.
+        let moving = self.current_input.pointer;
         if self.pointers.hover_owner_id() != Some(self.current_pointer_id()) {
-            if let Some(target) = self.hit_test(position) {
+            if let Some(target) = self.hit_test_for(position, &moving) {
                 self.dispatch_to_widget(target, &WidgetEvent::PointerMove { position }, &mut *ops);
             }
             return;
         }
-        let target = self.hit_test(position);
+        let target = self.hit_test_for(position, &moving);
 
         if target != self.hovered_id() {
             let previously_hovered = self.hovered_id();
@@ -2569,27 +2578,95 @@ impl WidgetTree {
         }
     }
 
+    /// Hit-test at a point for the **mouse, exactly** — the meaning this door
+    /// has always had, and keeps.
+    ///
+    /// A mouse cursor's hot-spot is exact, so neither hit-targeting mechanism
+    /// applies to it: the outset pre-pass sees zero insets and the miss-only
+    /// slop pass short-circuits on a zero radius. A caller that holds a pointer
+    /// should use [`hit_test_for`](Self::hit_test_for) instead, which is the
+    /// same test for a mouse and the widened one for a finger or a stylus.
     pub fn hit_test(&self, point: Point) -> Option<WidgetId> {
         self.hit_test_excluding_overlay_and_widget(point, None, None)
+    }
+
+    /// Hit-test at a point on behalf of a named pointer.
+    ///
+    /// Runs the exact pass with that pointer's `Widget::hit_outset`, then — only
+    /// if the exact pass found nothing eligible — the miss-only slop pass. For
+    /// [`PointerKind::Mouse`](teksilo_tokens::PointerKind::Mouse) this is
+    /// exactly [`hit_test`](Self::hit_test).
+    ///
+    /// Candidates are restricted to the **topmost overlay layer the exact pass
+    /// entered**: a press inside an open menu can be re-attributed to a menu
+    /// row, never to a control on the page behind it.
+    pub fn hit_test_for(
+        &self,
+        point: Point,
+        pointer: &crate::pointer::PointerInfo,
+    ) -> Option<WidgetId> {
+        self.hit_test_for_excluding(point, pointer, None, None)
+    }
+
+    /// [`hit_test_for`](Self::hit_test_for) with the drag-and-drop exclusions of
+    /// [`hit_test_excluding_overlay_and_widget`](Self::hit_test_excluding_overlay_and_widget).
+    pub fn hit_test_for_excluding(
+        &self,
+        point: Point,
+        pointer: &crate::pointer::PointerInfo,
+        exclude_overlay: Option<crate::overlay::OverlayId>,
+        exclude_widget: Option<WidgetId>,
+    ) -> Option<WidgetId> {
+        let surfaces = self.text_surfaces();
+        let read_only = |id: WidgetId| surfaces.is_read_only(id);
+        let hit =
+            crate::pointer::hit_slop::HitContext::new(pointer.kind, &self.effective_theme.input)
+                .direction(self.layout_direction)
+                .read_only_probe(&read_only);
+        self.hit_test_with(point, exclude_overlay, exclude_widget, &hit)
     }
 
     /// Hit-test at a point, excluding a specific overlay and widget from consideration.
     /// Used during drag-and-drop to exclude the preview overlay and its content widget,
     /// so they don't block hit-testing of the actual drop targets underneath.
+    ///
+    /// **Mouse, exact** — the pointer-aware twin is
+    /// [`hit_test_for_excluding`](Self::hit_test_for_excluding).
     pub fn hit_test_excluding_overlay_and_widget(
         &self,
         point: Point,
         exclude_overlay: Option<crate::overlay::OverlayId>,
         exclude_widget: Option<WidgetId>,
     ) -> Option<WidgetId> {
+        self.hit_test_with(
+            point,
+            exclude_overlay,
+            exclude_widget,
+            &crate::pointer::hit_slop::HitContext::mouse(),
+        )
+    }
+
+    /// The one hit-test body: overlay first, then the arena, under whichever
+    /// [`HitContext`](crate::pointer::hit_slop::HitContext) the caller built.
+    fn hit_test_with(
+        &self,
+        point: Point,
+        exclude_overlay: Option<crate::overlay::OverlayId>,
+        exclude_widget: Option<WidgetId>,
+        hit: &crate::pointer::hit_slop::HitContext<'_>,
+    ) -> Option<WidgetId> {
         if let Some(overlay_id) = self.overlay_manager.hit_test(point) {
             if Some(overlay_id) == exclude_overlay {
                 // Skip this excluded overlay, fall through to widget tree
             } else if let Some(overlay) = self.overlay_manager.overlay(overlay_id) {
-                return self.arena.hit_test_in_subtree_excluding(
+                // Scoped to the overlay's content: this is what restricts the
+                // slop pass's candidates to the topmost layer the exact pass
+                // entered.
+                return self.arena.hit_test_in_subtree_with_slop(
                     overlay.content_id,
                     point,
                     exclude_widget,
+                    hit,
                 );
             }
         }
@@ -2598,9 +2675,9 @@ impl WidgetTree {
             return None;
         }
 
-        // Delegates to WidgetArena::hit_test_at, which honors
+        // Delegates to WidgetArena::hit_test_at_with_slop, which honors
         // event_pass_through and clips_children correctly.
-        self.arena.hit_test_at(point, exclude_widget)
+        self.arena.hit_test_at_with_slop(point, exclude_widget, hit)
     }
 }
 

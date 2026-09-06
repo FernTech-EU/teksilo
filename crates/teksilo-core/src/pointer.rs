@@ -31,6 +31,7 @@
 //! Reference: `docs/touch-and-pen.md`.
 
 pub mod clock;
+pub mod hit_slop;
 pub mod table;
 pub mod touch_action;
 pub mod trace;

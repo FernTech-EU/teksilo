@@ -394,6 +394,39 @@ impl Widget for RadioButton {
         }
     }
 
+    /// The first implementer of the hit-targeting **shape** hook: a labelled
+    /// radio is its whole row, but a bare one is a disc inside a square box.
+    ///
+    /// A `RadioButton` with a label is tappable across the label too — the row
+    /// *is* the target — so the default rectangular distance is exactly right
+    /// and this returns it unchanged. A **bare** radio (a cell in a table, a
+    /// tight option grid) is a 19 dp disc centred in a 24 dp box, and measuring
+    /// a near miss to the box would offer the same reach diagonally past its
+    /// corner as straight out from its edge — where the corner is 3 dp further
+    /// from the thing the user aimed at. Measuring to the disc makes the slop
+    /// follow the silhouette, so a miss past the corner loses to a neighbour
+    /// that is genuinely nearer.
+    ///
+    /// This is consulted **only** by the miss-only slop pass, never by the
+    /// exact one, so a click inside the box's corner still selects the radio
+    /// exactly as it always has — `hit_shape` is deliberately left alone.
+    fn hit_distance(&self, local_point: teksilo_canvas::Point, bounds: Rect) -> Option<f32> {
+        if self.label.is_some() {
+            return Some(teksilo_core::pointer::hit_slop::rect_distance(
+                bounds,
+                local_point,
+            ));
+        }
+        let diameter = crate::styles::recipe_radio_style::RADIO_VISUAL_SIZE
+            .min(bounds.width)
+            .min(bounds.height);
+        Some(teksilo_core::pointer::hit_slop::circle_distance(
+            bounds.center(),
+            diameter / 2.0,
+            local_point,
+        ))
+    }
+
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         builder.set_role(teksilo_core::accesskit::Role::RadioButton);
         if let Some(ref label) = self.label {
@@ -510,5 +543,87 @@ mod tests {
             info.actions()
                 .contains(&teksilo_core::accesskit::Action::Click)
         );
+    }
+}
+
+#[cfg(test)]
+mod hit_distance_tests {
+    use super::*;
+    use teksilo_canvas::Point;
+    use teksilo_core::pointer::{EventTime, PointerId, PointerInfo};
+    use teksilo_core::widget_tree::WidgetTree;
+    use teksilo_i18n::lit;
+    use teksilo_tokens::TargetDensity;
+
+    fn finger() -> PointerInfo {
+        PointerInfo::touch(PointerId::MOUSE, EventTime::ZERO)
+    }
+
+    /// A **bare** radio measures a near miss to its disc, so a press past its
+    /// box's corner is further away than one past its edge — and past the
+    /// reach the density affords.
+    #[test]
+    fn a_bare_radio_measures_a_near_miss_to_its_disc() {
+        use crate::primitives::Center;
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        tree.set_input_density(TargetDensity::Touch);
+        let radio = tree.add(RadioButton::new(0, Signal::new(0_usize)));
+        // Centred in a large inert area so nothing else is in reach.
+        tree.add(Center::new().child_id(radio));
+        tree.layout(SizeProposal::exact(200.0, 200.0));
+
+        let b = tree.bounds(radio);
+        assert!(b.width <= 24.5, "a bare radio is its 24 dp box, got {b:?}");
+        // Straight out from the edge, within the disc's own reach.
+        let side = Point::new(b.right() + 2.0, b.center().y);
+        assert_eq!(tree.hit_test_for(side, &finger()), Some(radio));
+        // Diagonally past the corner at the same axis distance: much further
+        // from the disc, and out of reach.
+        let corner = Point::new(b.right() + 6.0, b.bottom() + 6.0);
+        assert_ne!(tree.hit_test_for(corner, &finger()), Some(radio));
+    }
+
+    /// A **labelled** radio is its whole row, so it keeps the rectangular
+    /// measure — the corner of a row is not further from the target than its
+    /// edge, because the row IS the target.
+    #[test]
+    fn a_labelled_radio_keeps_the_rectangular_measure() {
+        use teksilo_canvas::Rect;
+        use teksilo_core::widget::Widget;
+        let radio = RadioButton::new(0, Signal::new(0_usize)).label(lit!("Option"));
+        let bounds = Rect::new(0.0, 0.0, 200.0, 24.0);
+        let corner = Point::new(203.0, 28.0);
+        assert_eq!(
+            radio.hit_distance(corner, bounds),
+            Some(teksilo_core::pointer::hit_slop::rect_distance(
+                bounds, corner
+            ))
+        );
+    }
+
+    /// The exact pass is untouched: a click inside the box's corner still
+    /// selects the radio, exactly as it always has.
+    #[test]
+    fn the_exact_pass_still_accepts_the_corner_of_the_box() {
+        use crate::primitives::Center;
+        let selected = Signal::new(1_usize);
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let radio = tree.add(RadioButton::new(0, selected.clone()));
+        tree.add(Center::new().child_id(radio));
+        tree.layout(SizeProposal::exact(200.0, 200.0));
+        let b = tree.bounds(radio);
+        let corner = Point::new(b.x + 1.0, b.y + 1.0);
+        // The exact pass resolves to the deepest node, which is inside the
+        // radio's own subtree — what matters is that the corner is still hit at
+        // all, and that clicking it still selects.
+        let hit = tree.hit_test(corner);
+        assert!(
+            hit.is_some_and(
+                |id| std::iter::successors(Some(id), |id| tree.parent(*id)).any(|id| id == radio)
+            ),
+            "the corner of a bare radio's box resolved to {hit:?}"
+        );
+        tree.click(radio);
+        assert_eq!(selected.get(), 0);
     }
 }

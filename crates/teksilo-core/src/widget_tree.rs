@@ -17,6 +17,8 @@ mod accessibility_impl;
 mod drag_drop_impl;
 mod focus_impl;
 mod gesture_dispatch_impl;
+#[cfg(test)]
+mod hit_targeting_tests;
 mod layout_impl;
 mod overlay_impl;
 mod pointer_cancel;
@@ -3185,6 +3187,12 @@ impl WidgetTree {
                         if let Some(hit_transparent) = handler_set.hit_transparent {
                             node.hit_transparent = hit_transparent;
                         }
+                        if let Some(slop) = handler_set.hit_slop {
+                            node.hit_slop = Some(slop);
+                        }
+                        if let Some(no_slop) = handler_set.no_hit_slop {
+                            node.no_hit_slop = no_slop;
+                        }
                         if handler_set.context_menu_factory.is_some() {
                             node.context_menu_factory = handler_set.context_menu_factory;
                         }
@@ -3353,6 +3361,12 @@ impl WidgetTree {
                         }
                         if let Some(hit_transparent) = handler_set.hit_transparent {
                             node.hit_transparent = hit_transparent;
+                        }
+                        if let Some(slop) = handler_set.hit_slop {
+                            node.hit_slop = Some(slop);
+                        }
+                        if let Some(no_slop) = handler_set.no_hit_slop {
+                            node.no_hit_slop = no_slop;
                         }
                         if handler_set.context_menu_factory.is_some() {
                             node.context_menu_factory = handler_set.context_menu_factory;
