@@ -598,8 +598,13 @@ impl Widget for DateRangeEdit {
             .corner_radius(CornerRadius::uniform(field_dims::TEXT_FIELD_CORNER_RADIUS));
         let bg_id = ctx.add(bg);
         let framed_id = ctx.add(ZStack::new().add_child(bg_id).add_child(row_id));
-        let sized_id =
-            ctx.add(MinSize::new(0.0, field_dims::TEXT_FIELD_HEIGHT).child_id(framed_id));
+        let sized_id = ctx.add(
+            MinSize::new(
+                0.0,
+                crate::styles::TextInputRecipe::for_tokens(&ctx.theme().input).height,
+            )
+            .child_id(framed_id),
+        );
 
         // ── Inline validation strip below the frame ───────────
         let strip_id = ctx.add(crate::primitives::ValidationStrip::new(

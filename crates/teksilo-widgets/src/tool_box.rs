@@ -46,12 +46,13 @@ use teksilo_core::widget::{
 use teksilo_core::widget_builder::HandlerSet;
 use teksilo_core::widget_id::WidgetId;
 use teksilo_i18n::LocalizedString;
-use teksilo_tokens::{BorderRole, SurfaceRole, TextRole, TextStyleRole};
+use teksilo_tokens::{BorderRole, InputTokens, SurfaceRole, TargetRole, TextRole, TextStyleRole};
 
 use crate::primitives::{
     Divider, FixedSize, HStack, IconWidget, MinSize, RectWidget, Spacer, TextWidget, VStack, ZStack,
 };
 use crate::tooltip::{RichTooltipSource, TooltipContent, attach_rich_tooltip_source};
+use teksilo_core::styles::density::{dp, spacing};
 
 /// Orientation of a [`ToolBox`]: how its collapsible sections are arranged.
 ///
@@ -238,8 +239,26 @@ impl ToolBoxItem {
 
 /// ToolBox design tokens.
 pub const TOOL_BOX_HEADER_MIN_HEIGHT: f32 = 28.0;
+
+/// [`TOOL_BOX_HEADER_MIN_HEIGHT`] raised to the density's `target_size`
+/// (24 / 32 / 44 dp). The identity at Compact.
+pub fn tool_box_header_min_height(tokens: &InputTokens) -> f32 {
+    dp(TOOL_BOX_HEADER_MIN_HEIGHT, TargetRole::Target, tokens)
+}
 pub const TOOL_BOX_HEADER_PADDING_HORIZONTAL: f32 = 12.0;
+
+/// [`TOOL_BOX_HEADER_PADDING_HORIZONTAL`] scaled by the density's `spacing_factor`
+/// (1.00 / 1.15 / 1.30).
+pub fn tool_box_header_padding_horizontal(tokens: &InputTokens) -> f32 {
+    spacing(TOOL_BOX_HEADER_PADDING_HORIZONTAL, tokens)
+}
 pub const TOOL_BOX_ICON_TEXT_SPACING: f32 = 8.0;
+
+/// [`TOOL_BOX_ICON_TEXT_SPACING`] scaled by the density's `spacing_factor`
+/// (1.00 / 1.15 / 1.30).
+pub fn tool_box_icon_text_spacing(tokens: &InputTokens) -> f32 {
+    spacing(TOOL_BOX_ICON_TEXT_SPACING, tokens)
+}
 pub const TOOL_BOX_CHEVRON_SIZE: f32 = 12.0;
 pub const TOOL_BOX_INDICATOR_THICKNESS: f32 = 1.0;
 
@@ -640,7 +659,7 @@ impl Widget for ToolBoxHeader {
             ctx.visible_when(chevron_right_id, is_selected.map(|v| !*v));
             let label_id = ctx.add(RotatedLabel::new(self.label.clone(), text_role));
 
-            let mut col = VStack::new().spacing(TOOL_BOX_ICON_TEXT_SPACING);
+            let mut col = VStack::new().spacing(tool_box_icon_text_spacing(&ctx.theme().input));
             col = col.add_child(indicator_id);
             if let Some(id) = leading_id {
                 col = col.add_child(id);
@@ -655,8 +674,11 @@ impl Widget for ToolBoxHeader {
             col = col.add_child(spacer_id);
             let col_id = ctx.add(col);
             ctx.add(
-                crate::primitives::Padding::symmetric(TOOL_BOX_HEADER_PADDING_HORIZONTAL, 0.0)
-                    .child_id(col_id),
+                crate::primitives::Padding::symmetric(
+                    tool_box_header_padding_horizontal(&ctx.theme().input),
+                    0.0,
+                )
+                .child_id(col_id),
             )
         } else {
             // Horizontal row:
@@ -675,7 +697,7 @@ impl Widget for ToolBoxHeader {
             ctx.visible_when(chevron_down_id, is_selected.clone());
             ctx.visible_when(chevron_right_id, is_selected.map(|v| !*v));
 
-            let mut row = HStack::new().spacing(TOOL_BOX_ICON_TEXT_SPACING);
+            let mut row = HStack::new().spacing(tool_box_icon_text_spacing(&ctx.theme().input));
             row = row.add_child(indicator_id);
             if let Some(id) = leading_id {
                 row = row.add_child(id);
@@ -689,8 +711,11 @@ impl Widget for ToolBoxHeader {
             // The indicator sits inset by the container's padding (IntelliJ
             // Settings convention).
             ctx.add(
-                crate::primitives::Padding::symmetric(0.0, TOOL_BOX_HEADER_PADDING_HORIZONTAL)
-                    .child_id(row_id),
+                crate::primitives::Padding::symmetric(
+                    0.0,
+                    tool_box_header_padding_horizontal(&ctx.theme().input),
+                )
+                .child_id(row_id),
             )
         };
 
@@ -718,10 +743,11 @@ impl Widget for ToolBoxHeader {
 
         // Enforce the Int UI 28 dp extent on the cross axis: min height
         // for a horizontal header row, min width for a vertical strip.
+        let header_extent = tool_box_header_min_height(&ctx.theme().input);
         let root_id = if is_horizontal {
-            ctx.add(MinSize::new(TOOL_BOX_HEADER_MIN_HEIGHT, 0.0).child_id(zstack_id))
+            ctx.add(MinSize::new(header_extent, 0.0).child_id(zstack_id))
         } else {
-            ctx.add(MinSize::new(0.0, TOOL_BOX_HEADER_MIN_HEIGHT).child_id(zstack_id))
+            ctx.add(MinSize::new(0.0, header_extent).child_id(zstack_id))
         };
         self.root_child_id = Some(root_id);
 

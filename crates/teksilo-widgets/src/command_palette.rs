@@ -79,7 +79,7 @@ use teksilo_core::widget_builder::WidgetBuilder;
 use teksilo_core::widget_id::WidgetId;
 use teksilo_data::{ListModel, SelectionMode, SelectionModel};
 use teksilo_i18n::{LocalizedString, lit, tr_widget};
-use teksilo_tokens::{BorderRole, SurfaceRole, TextRole, TextStyleRole};
+use teksilo_tokens::{BorderRole, InputTokens, SurfaceRole, TargetRole, TextRole, TextStyleRole};
 
 use crate::dialog::ModalContainer;
 use crate::keystroke_format::format_keystroke;
@@ -88,6 +88,7 @@ use crate::primitives::{
     Expand, FixedSize, HStack, Padding, RectWidget, Spacer, TextWidget, VStack, ZStack,
 };
 use crate::search_field::SearchField;
+use teksilo_core::styles::density::dp;
 
 /// Presented size. Wide enough for a command name plus its chord without either
 /// having to ellipsize in the common case.
@@ -95,6 +96,12 @@ const PALETTE_WIDTH: u32 = 560;
 const PALETTE_HEIGHT: u32 = 420;
 /// Row height fed to the list's own metrics; two lines of text plus padding.
 const ROW_HEIGHT: f32 = 44.0;
+
+/// [`ROW_HEIGHT`] raised to the density's `target_size`
+/// (24 / 32 / 44 dp). The identity at Compact.
+fn row_height(tokens: &InputTokens) -> f32 {
+    dp(ROW_HEIGHT, TargetRole::Target, tokens)
+}
 /// Width of the leading bar marking the highlighted row — the non-colour half
 /// of the highlight. 3 dp matches the selection edge `StandardListItem` draws.
 const SELECTION_MARKER_WIDTH: f32 = 3.0;
@@ -500,7 +507,7 @@ impl Widget for CommandPalette {
                     Box::new(command_row(cmd, index == selected_index))
                 },
             )
-            .item_height(ROW_HEIGHT)
+            .item_height(row_height(&ctx.theme().input))
             // Makes each row's `Role::ListBoxOption` report `selected` truthfully.
             .selection(self.state.selection.clone());
             // Take the realized-row map before the view moves into the tree.

@@ -430,7 +430,11 @@ impl Widget for DropZone {
             .style_override
             .clone()
             .or_else(|| ctx.theme().style_slots.drop_zone.clone())
-            .unwrap_or_else(|| Rc::new(crate::styles::RecipeDropZoneStyle::default()));
+            .unwrap_or_else(|| {
+                Rc::new(crate::styles::RecipeDropZoneStyle::for_tokens(
+                    &ctx.theme().input,
+                ))
+            });
         let body = style.make_body(
             &DropZoneStyleConfig {
                 state: state.clone(),

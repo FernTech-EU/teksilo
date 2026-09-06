@@ -28,8 +28,10 @@
 
 use teksilo_core::build_context::BuildContext;
 use teksilo_core::signal::Prop;
+use teksilo_core::styles::density::{dp, spacing};
 use teksilo_core::styles::{CardStyle, CardStyleConfig};
 use teksilo_core::widget_id::WidgetId;
+use teksilo_tokens::{InputTokens, TargetRole};
 use teksilo_widgets::styles::{
     AvatarRecipe, BadgeRecipe, BannerRecipe, CalendarRecipe, ComboBoxRecipe, DialogRecipe,
     IconButtonRecipe, LinkRecipe, PanelRecipe, PopoverRecipe, ProgressBarRecipe, RecipeAvatarStyle,
@@ -78,11 +80,11 @@ impl CardStyle for MacOsCardStyle {
 
 /// `Panel` — a grouped in-page surface. macOS settings boxes and grouped
 /// table sections round at the same radius a sheet does.
-pub fn macos_panel_style() -> RecipePanelStyle {
+pub fn macos_panel_style_for(tokens: &InputTokens) -> RecipePanelStyle {
     RecipePanelStyle::new(PanelRecipe {
         corner_radius: R_OVERLAY,
         border_width: 1.0,
-        ..PanelRecipe::default()
+        ..PanelRecipe::for_tokens(tokens)
     })
 }
 
@@ -92,9 +94,9 @@ pub fn macos_panel_style() -> RecipePanelStyle {
 /// the measured 9 dp menu radius rather than being rounded off to the
 /// overlay one. macOS shadows a floating surface much harder than IntUI
 /// does, hence the raised density.
-pub fn macos_popover_style() -> RecipePopoverStyle {
+pub fn macos_popover_style_for(tokens: &InputTokens) -> RecipePopoverStyle {
     RecipePopoverStyle::new(PopoverRecipe {
-        padding: 14.0,
+        padding: spacing(14.0, tokens),
         corner_radius: R_OVERLAY,
         border_width: 1.0,
         menu_popup_corner_radius: R_MENU,
@@ -105,10 +107,10 @@ pub fn macos_popover_style() -> RecipePopoverStyle {
 /// `Tooltip` — the macOS *help tag*: a small, tightly-rounded chip with a
 /// modest shadow. Narrower than Fluent's 320 dp, because AppKit wraps help
 /// text sooner.
-pub fn macos_tooltip_style() -> RecipeTooltipStyle {
+pub fn macos_tooltip_style_for(tokens: &InputTokens) -> RecipeTooltipStyle {
     RecipeTooltipStyle::new(TooltipRecipe {
-        padding_horizontal: 8.0,
-        padding_vertical: 5.0,
+        padding_horizontal: spacing(8.0, tokens),
+        padding_vertical: spacing(5.0, tokens),
         corner_radius: MACOS_HELP_TAG_CORNER_RADIUS,
         max_width: 300.0,
         shadow_density: 0.6,
@@ -117,38 +119,38 @@ pub fn macos_tooltip_style() -> RecipeTooltipStyle {
 
 /// `Dialog` — an `NSAlert` sheet: narrow, generously padded, and rounded
 /// at the sheet radius.
-pub fn macos_dialog_style() -> RecipeDialogStyle {
+pub fn macos_dialog_style_for(tokens: &InputTokens) -> RecipeDialogStyle {
     RecipeDialogStyle::new(DialogRecipe {
-        content_padding: 20.0,
-        min_width: 260.0,
+        content_padding: spacing(20.0, tokens),
+        min_width: dp(260.0, TargetRole::Target, tokens),
         corner_radius: R_OVERLAY,
     })
 }
 
 /// `Snackbar` — a floating notification, so the overlay radius.
-pub fn macos_snackbar_style() -> RecipeSnackbarStyle {
+pub fn macos_snackbar_style_for(tokens: &InputTokens) -> RecipeSnackbarStyle {
     RecipeSnackbarStyle::new(SnackbarRecipe {
         corner_radius: R_OVERLAY,
-        ..SnackbarRecipe::default()
+        ..SnackbarRecipe::for_tokens(tokens)
     })
 }
 
 /// `Toast` — the Notification Centre banner shape: floating, so the
 /// overlay radius.
-pub fn macos_toast_style() -> RecipeToastStyle {
+pub fn macos_toast_style_for(tokens: &InputTokens) -> RecipeToastStyle {
     RecipeToastStyle::new(ToastRecipe {
         corner_radius: R_OVERLAY,
         glyph_size: 16.0,
-        ..ToastRecipe::default()
+        ..ToastRecipe::for_tokens(tokens)
     })
 }
 
 /// `Banner` — an in-page notice, so the control radius.
-pub fn macos_banner_style() -> RecipeBannerStyle {
+pub fn macos_banner_style_for(tokens: &InputTokens) -> RecipeBannerStyle {
     RecipeBannerStyle::new(BannerRecipe {
         corner_radius: R_CONTROL,
         glyph_size: 14.0,
-        ..BannerRecipe::default()
+        ..BannerRecipe::for_tokens(tokens)
     })
 }
 
@@ -156,10 +158,14 @@ pub fn macos_banner_style() -> RecipeBannerStyle {
 
 /// `ComboBox` — `NSPopUpButton`: the same 22 dp bezel a push button wears,
 /// with a chevron column on the trailing edge.
-pub fn macos_combo_box_style() -> RecipeComboBoxStyle {
+pub fn macos_combo_box_style_for(tokens: &InputTokens) -> RecipeComboBoxStyle {
     RecipeComboBoxStyle::new(ComboBoxRecipe {
+        // `[measured]` 22 dp, below the 24 dp WCAG floor and deliberately left
+        // there: raising it would falsify a preset whose purpose is Apple's
+        // own metrics, and it would move Compact. The coarse hit comes from
+        // `hit_outset` over an unchanged visual.
         height: H_CONTROL,
-        padding_horizontal: 8.0,
+        padding_horizontal: spacing(8.0, tokens),
         arrow_column_width: 20.0,
         corner_radius: R_CONTROL,
     })
@@ -167,13 +173,16 @@ pub fn macos_combo_box_style() -> RecipeComboBoxStyle {
 
 /// `IconButton` — the toolbar button family. Borderless until hovered, and
 /// noticeably smaller than Fluent's 32 dp square at every rung.
-pub fn macos_icon_button_style() -> RecipeIconButtonStyle {
+pub fn macos_icon_button_style_for(tokens: &InputTokens) -> RecipeIconButtonStyle {
     RecipeIconButtonStyle::new(IconButtonRecipe {
+        // `[measured]` AppKit sizes. `size_compact` (18 dp) and the regular
+        // 22 dp control are below the 24 dp WCAG floor and stay there — see
+        // `macos_menu_item_recipe_for`; the larger rungs rise with the density.
         size_compact: 18.0,
         size_default: H_CONTROL,
-        size_toolbar: 28.0,
-        size_large: 36.0,
-        size_hero: 44.0,
+        size_toolbar: dp(28.0, TargetRole::Target, tokens),
+        size_large: dp(36.0, TargetRole::Target, tokens),
+        size_hero: dp(44.0, TargetRole::Target, tokens),
         icon_size: 14.0,
         icon_size_toolbar: 16.0,
         icon_size_large: 20.0,
@@ -184,7 +193,7 @@ pub fn macos_icon_button_style() -> RecipeIconButtonStyle {
 
 /// `Link` — AppKit underlines a link at a hairline and gives its hit area
 /// a small radius.
-pub fn macos_link_style() -> RecipeLinkStyle {
+pub fn macos_link_style_for(_tokens: &InputTokens) -> RecipeLinkStyle {
     RecipeLinkStyle::new(LinkRecipe {
         corner_radius: 4.0,
         underline_thickness: 1.0,
@@ -193,11 +202,15 @@ pub fn macos_link_style() -> RecipeLinkStyle {
 
 /// `SegmentedControl` — `NSSegmentedControl`: the push button's height and
 /// radius, with each segment carrying the same gutter.
-pub fn macos_segmented_control_style() -> RecipeSegmentedControlStyle {
+pub fn macos_segmented_control_style_for(tokens: &InputTokens) -> RecipeSegmentedControlStyle {
     RecipeSegmentedControlStyle::new(SegmentedControlRecipe {
+        // `[measured]` 22 dp, below the 24 dp WCAG floor and deliberately left
+        // there: raising it would falsify a preset whose purpose is Apple's
+        // own metrics, and it would move Compact. The coarse hit comes from
+        // `hit_outset` over an unchanged visual.
         height: H_CONTROL,
-        padding_horizontal: 10.0,
-        padding_vertical: 3.0,
+        padding_horizontal: spacing(10.0, tokens),
+        padding_vertical: spacing(3.0, tokens),
         corner_radius: R_CONTROL,
         border_width: 1.0,
     })
@@ -205,18 +218,18 @@ pub fn macos_segmented_control_style() -> RecipeSegmentedControlStyle {
 
 /// `Badge` — a pill, so the radius stays at the baseline's fully-rounded
 /// value; only the padding tightens to macOS's denser chip.
-pub fn macos_badge_style() -> RecipeBadgeStyle {
+pub fn macos_badge_style_for(tokens: &InputTokens) -> RecipeBadgeStyle {
     RecipeBadgeStyle::new(BadgeRecipe {
         padding_horizontal: 6.0,
         padding_vertical: 1.0,
-        ..BadgeRecipe::default()
+        ..BadgeRecipe::for_tokens(tokens)
     })
 }
 
 /// `ProgressBar` — a thin capsule. The renderer clamps a radius to half
 /// the shorter side, so a slim bar reads as fully rounded (which is what
 /// AppKit draws) and a thick one as a 3 dp rounded rect.
-pub fn macos_progress_bar_style() -> RecipeProgressBarStyle {
+pub fn macos_progress_bar_style_for(_tokens: &InputTokens) -> RecipeProgressBarStyle {
     RecipeProgressBarStyle::new(ProgressBarRecipe { corner_radius: 3.0 })
 }
 
@@ -226,11 +239,13 @@ pub fn macos_progress_bar_style() -> RecipeProgressBarStyle {
 /// translucent thumb that fades in on scroll and widens under the pointer.
 /// The colour half of that behaviour lives in the crate's colour
 /// projection (`scrollbar_*`); this is the geometry.
-pub fn macos_scroll_bar_style() -> RecipeScrollBarStyle {
+pub fn macos_scroll_bar_style_for(tokens: &InputTokens) -> RecipeScrollBarStyle {
     RecipeScrollBarStyle::new(ScrollBarRecipe {
+        // The lane's thickness is fixed at every density; the coarse grab
+        // comes from `hit_outset` over an unchanged visual.
         thickness_idle: 6.0,
         thickness_hover: 9.0,
-        min_thumb_length: 28.0,
+        min_thumb_length: dp(28.0, TargetRole::Target, tokens),
         // Half the hover thickness, so the thumb is a capsule at its
         // widest and stays one as it narrows.
         corner_radius: 4.5,
@@ -241,11 +256,11 @@ pub fn macos_scroll_bar_style() -> RecipeScrollBarStyle {
 /// filling it rather than underlining it, which the shipped recipe cannot
 /// express, so the underline is kept thin: it reads as a selection rule
 /// rather than a Material-style indicator.
-pub fn macos_tab_style() -> RecipeTabStyle {
+pub fn macos_tab_style_for(tokens: &InputTokens) -> RecipeTabStyle {
     RecipeTabStyle::new(TabRecipe {
-        editor_height: 26.0,
+        editor_height: dp(26.0, TargetRole::Target, tokens),
         tool_window_height: H_CONTROL,
-        padding_horizontal: 12.0,
+        padding_horizontal: spacing(12.0, tokens),
         underline_active: 2.0,
         underline_hover: 2.0,
         close_button_size: 14.0,
@@ -254,7 +269,7 @@ pub fn macos_tab_style() -> RecipeTabStyle {
 
 /// `TableView` / `TreeTableView` — rows and header on the 24 dp
 /// `NSTableView` rhythm, with the same 8 dp cell gutter the row styles use.
-pub fn macos_table_style() -> RecipeTableStyle {
+pub fn macos_table_style_for(tokens: &InputTokens) -> RecipeTableStyle {
     RecipeTableStyle::new(TableRecipe {
         row_height: MACOS_ROW_HEIGHT,
         header_height: MACOS_ROW_HEIGHT,
@@ -262,13 +277,13 @@ pub fn macos_table_style() -> RecipeTableStyle {
         corner_radius: R_CONTROL,
         tree_indent_per_level: 16.0,
         tree_twist_size: 10.0,
-        ..TableRecipe::default()
+        ..TableRecipe::for_tokens(tokens)
     })
 }
 
 /// `Calendar` — `NSDatePicker`'s graphical style: a compact grid of
 /// lightly-rounded day cells.
-pub fn macos_calendar_style() -> RecipeCalendarStyle {
+pub fn macos_calendar_style_for(tokens: &InputTokens) -> RecipeCalendarStyle {
     RecipeCalendarStyle::new(CalendarRecipe {
         outer_padding: 8.0,
         header_height: 26.0,
@@ -278,13 +293,13 @@ pub fn macos_calendar_style() -> RecipeCalendarStyle {
         nav_arrow_size: 20.0,
         nav_arrow_radius: MACOS_HELP_TAG_CORNER_RADIUS,
         nav_icon_size: 11.0,
-        ..CalendarRecipe::default()
+        ..CalendarRecipe::for_tokens(tokens)
     })
 }
 
 /// `SearchField` — `NSSearchField`: a 22 dp field with a small magnifier
 /// glyph, and a results panel rounded like a popover.
-pub fn macos_search_field_style() -> RecipeSearchFieldStyle {
+pub fn macos_search_field_style_for(tokens: &InputTokens) -> RecipeSearchFieldStyle {
     RecipeSearchFieldStyle::new(SearchFieldRecipe {
         glyph_size: 13.0,
         row_height: H_CONTROL,
@@ -292,19 +307,95 @@ pub fn macos_search_field_style() -> RecipeSearchFieldStyle {
         row_padding_vertical: 3.0,
         row_corner_radius: 4.0,
         panel_corner_radius: R_CONTROL,
-        ..SearchFieldRecipe::default()
+        ..SearchFieldRecipe::for_tokens(tokens)
     })
 }
 
 /// `Avatar` — macOS shows people as circles (Contacts, Messages, the
 /// login window), so the rounded variant is pushed most of the way there
 /// and the ring is kept to a hairline-and-a-half.
-pub fn macos_avatar_style() -> RecipeAvatarStyle {
+pub fn macos_avatar_style_for(tokens: &InputTokens) -> RecipeAvatarStyle {
     RecipeAvatarStyle::new(AvatarRecipe {
         border_default: 1.5,
         rounded_radius_ratio: 0.35,
-        ..AvatarRecipe::default()
+        ..AvatarRecipe::for_tokens(tokens)
     })
+}
+/// [`macos_panel_style_for`] at the default Compact density.
+pub fn macos_panel_style() -> RecipePanelStyle {
+    macos_panel_style_for(&InputTokens::default())
+}
+/// [`macos_popover_style_for`] at the default Compact density.
+pub fn macos_popover_style() -> RecipePopoverStyle {
+    macos_popover_style_for(&InputTokens::default())
+}
+/// [`macos_tooltip_style_for`] at the default Compact density.
+pub fn macos_tooltip_style() -> RecipeTooltipStyle {
+    macos_tooltip_style_for(&InputTokens::default())
+}
+/// [`macos_dialog_style_for`] at the default Compact density.
+pub fn macos_dialog_style() -> RecipeDialogStyle {
+    macos_dialog_style_for(&InputTokens::default())
+}
+/// [`macos_snackbar_style_for`] at the default Compact density.
+pub fn macos_snackbar_style() -> RecipeSnackbarStyle {
+    macos_snackbar_style_for(&InputTokens::default())
+}
+/// [`macos_toast_style_for`] at the default Compact density.
+pub fn macos_toast_style() -> RecipeToastStyle {
+    macos_toast_style_for(&InputTokens::default())
+}
+/// [`macos_banner_style_for`] at the default Compact density.
+pub fn macos_banner_style() -> RecipeBannerStyle {
+    macos_banner_style_for(&InputTokens::default())
+}
+/// [`macos_combo_box_style_for`] at the default Compact density.
+pub fn macos_combo_box_style() -> RecipeComboBoxStyle {
+    macos_combo_box_style_for(&InputTokens::default())
+}
+/// [`macos_icon_button_style_for`] at the default Compact density.
+pub fn macos_icon_button_style() -> RecipeIconButtonStyle {
+    macos_icon_button_style_for(&InputTokens::default())
+}
+/// [`macos_link_style_for`] at the default Compact density.
+pub fn macos_link_style() -> RecipeLinkStyle {
+    macos_link_style_for(&InputTokens::default())
+}
+/// [`macos_segmented_control_style_for`] at the default Compact density.
+pub fn macos_segmented_control_style() -> RecipeSegmentedControlStyle {
+    macos_segmented_control_style_for(&InputTokens::default())
+}
+/// [`macos_badge_style_for`] at the default Compact density.
+pub fn macos_badge_style() -> RecipeBadgeStyle {
+    macos_badge_style_for(&InputTokens::default())
+}
+/// [`macos_progress_bar_style_for`] at the default Compact density.
+pub fn macos_progress_bar_style() -> RecipeProgressBarStyle {
+    macos_progress_bar_style_for(&InputTokens::default())
+}
+/// [`macos_scroll_bar_style_for`] at the default Compact density.
+pub fn macos_scroll_bar_style() -> RecipeScrollBarStyle {
+    macos_scroll_bar_style_for(&InputTokens::default())
+}
+/// [`macos_tab_style_for`] at the default Compact density.
+pub fn macos_tab_style() -> RecipeTabStyle {
+    macos_tab_style_for(&InputTokens::default())
+}
+/// [`macos_table_style_for`] at the default Compact density.
+pub fn macos_table_style() -> RecipeTableStyle {
+    macos_table_style_for(&InputTokens::default())
+}
+/// [`macos_calendar_style_for`] at the default Compact density.
+pub fn macos_calendar_style() -> RecipeCalendarStyle {
+    macos_calendar_style_for(&InputTokens::default())
+}
+/// [`macos_search_field_style_for`] at the default Compact density.
+pub fn macos_search_field_style() -> RecipeSearchFieldStyle {
+    macos_search_field_style_for(&InputTokens::default())
+}
+/// [`macos_avatar_style_for`] at the default Compact density.
+pub fn macos_avatar_style() -> RecipeAvatarStyle {
+    macos_avatar_style_for(&InputTokens::default())
 }
 
 #[cfg(test)]

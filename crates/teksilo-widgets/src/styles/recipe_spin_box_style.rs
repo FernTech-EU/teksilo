@@ -19,17 +19,35 @@ use teksilo_core::build_context::BuildContext;
 use teksilo_core::color_prop::ColorProp;
 use teksilo_core::styles::{ButtonLayout, SharedSpinBoxStyle, SpinBoxStyle, SpinBoxStyleConfig};
 use teksilo_core::widget_id::WidgetId;
-use teksilo_tokens::{BorderRole, CornerRadius, SurfaceRole};
+use teksilo_tokens::{BorderRole, CornerRadius, InputTokens, SurfaceRole};
 
 use crate::primitives::{Divider, Expand, HStack, Padding, RectWidget, VStack, ZStack};
-use crate::styles::recipe_text_input_style as field_dims;
+use crate::styles::TextInputRecipe;
 
 /// Default `SpinBoxStyle` shipped with Teksilo.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct RecipeSpinBoxStyle;
 
+impl RecipeSpinBoxStyle {
+    /// This style resolved against a density's [`InputTokens`], as
+    /// `RecipeSpinBoxStyle::for_tokens(&ctx.theme().input)` at the widget's own
+    /// build site.
+    ///
+    /// The style is a unit struct: it borrows the text-field dimensions
+    /// wholesale, and resolves them per density inside
+    /// [`make_body`](SpinBoxStyle::make_body) from `ctx.theme().input`, so
+    /// there is nothing to bake here.
+    pub fn for_tokens(_tokens: &InputTokens) -> Self {
+        Self
+    }
+}
+
 impl SpinBoxStyle for RecipeSpinBoxStyle {
     fn make_body(&self, cfg: &SpinBoxStyleConfig, ctx: &mut BuildContext) -> WidgetId {
+        // The field metrics come from the same recipe `TextInput` uses,
+        // resolved against the active density so the two stay on one baseline.
+        let field = TextInputRecipe::for_tokens(&ctx.theme().input);
+
         // ── Step button column (when not Hidden) ─────────────────
         let buttons_id_opt: Option<WidgetId> = match cfg.layout {
             ButtonLayout::Hidden => None,
@@ -66,13 +84,8 @@ impl SpinBoxStyle for RecipeSpinBoxStyle {
         // (`padding_horizontal * 2.0`) so SpinBox and TextInput line
         // up on forms.
         let padded_row_id = ctx.add(
-            Padding::new(
-                0.0,
-                field_dims::TEXT_FIELD_PADDING_HORIZONTAL,
-                0.0,
-                field_dims::TEXT_FIELD_PADDING_HORIZONTAL,
-            )
-            .child_id(row_id),
+            Padding::new(0.0, field.padding_horizontal, 0.0, field.padding_horizontal)
+                .child_id(row_id),
         );
 
         // ── Frame: focus-aware border + background ───────────────
@@ -81,7 +94,7 @@ impl SpinBoxStyle for RecipeSpinBoxStyle {
         // color + `border_width` otherwise.
         let theme = ctx.theme_signal().get();
         let focus_ring_width = theme.shape.focus_ring_width;
-        let field_border_width = field_dims::TEXT_FIELD_BORDER_WIDTH;
+        let field_border_width = field.border_width;
         // `Field` is `Content`'s twin for *interactive* surfaces: the same
         // colour while enabled, dimming to `SurfaceRole::Disabled` inside
         // `ColorProp::resolve` at paint. Resolving there — off the live arena
@@ -113,7 +126,7 @@ impl SpinBoxStyle for RecipeSpinBoxStyle {
             .background(SurfaceRole::Field)
             .border_color(ColorProp::DynamicBorderRole(border_role))
             .border_width(border_width_signal)
-            .corner_radius(CornerRadius::uniform(field_dims::TEXT_FIELD_CORNER_RADIUS));
+            .corner_radius(CornerRadius::uniform(field.corner_radius));
         let bg_id = ctx.add(bg);
 
         ctx.add(ZStack::new().add_child(bg_id).add_child(padded_row_id))

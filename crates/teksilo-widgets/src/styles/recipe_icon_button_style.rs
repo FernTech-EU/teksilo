@@ -20,9 +20,10 @@ use teksilo_core::signal::Signal;
 use teksilo_core::styles::{IconButtonSize, IconButtonStyle, IconButtonStyleConfig};
 use teksilo_core::widget_id::WidgetId;
 use teksilo_tokens::CornerRadius;
-use teksilo_tokens::{BorderRole, SurfaceRole};
+use teksilo_tokens::{BorderRole, InputTokens, SurfaceRole, TargetRole};
 
 use crate::primitives::{Center, FixedSize, RectWidget, ZStack};
+use teksilo_core::styles::density::dp;
 
 // IntUI design tokens for IconButton. The recipe owns its own dimensions.
 // Sizes follow the IntelliJ IntUI scale (Compact < Default < Toolbar
@@ -57,20 +58,31 @@ pub struct IconButtonRecipe {
     pub corner_radius: f32,
 }
 
-impl Default for IconButtonRecipe {
-    fn default() -> Self {
+impl IconButtonRecipe {
+    /// This recipe's dimensions resolved against a density's [`InputTokens`].
+    ///
+    /// [`Default`] is `for_tokens(&InputTokens::default())` — the Compact
+    /// ladder — so the shipped values below are the Compact column by
+    /// construction and cannot drift from it.
+    pub fn for_tokens(tokens: &InputTokens) -> Self {
         Self {
-            size_compact: ICON_BUTTON_SIZE_COMPACT,
-            size_default: ICON_BUTTON_SIZE_DEFAULT,
-            size_toolbar: ICON_BUTTON_SIZE_TOOLBAR,
-            size_large: ICON_BUTTON_SIZE_LARGE,
-            size_hero: ICON_BUTTON_SIZE_HERO,
+            size_compact: dp(ICON_BUTTON_SIZE_COMPACT, TargetRole::Target, tokens),
+            size_default: dp(ICON_BUTTON_SIZE_DEFAULT, TargetRole::Target, tokens),
+            size_toolbar: dp(ICON_BUTTON_SIZE_TOOLBAR, TargetRole::Target, tokens),
+            size_large: dp(ICON_BUTTON_SIZE_LARGE, TargetRole::Target, tokens),
+            size_hero: dp(ICON_BUTTON_SIZE_HERO, TargetRole::Target, tokens),
             icon_size: ICON_BUTTON_ICON_SIZE,
             icon_size_toolbar: ICON_BUTTON_ICON_SIZE_TOOLBAR,
             icon_size_large: ICON_BUTTON_ICON_SIZE_LARGE,
             icon_size_hero: ICON_BUTTON_ICON_SIZE_HERO,
             corner_radius: ICON_BUTTON_CORNER_RADIUS,
         }
+    }
+}
+
+impl Default for IconButtonRecipe {
+    fn default() -> Self {
+        Self::for_tokens(&InputTokens::default())
     }
 }
 
@@ -85,6 +97,18 @@ pub struct RecipeIconButtonStyle {
 impl RecipeIconButtonStyle {
     pub fn new(recipe: IconButtonRecipe) -> Self {
         Self { recipe }
+    }
+
+    /// This style with every dimension resolved against a density's
+    /// [`InputTokens`], as `RecipeIconButtonStyle::for_tokens(&ctx.theme().input)` at
+    /// the widget's own build site.
+    ///
+    /// [`Default`] is the `TargetDensity::Compact` projection, so a Compact
+    /// tree gets exactly the values this module documents.
+    pub fn for_tokens(tokens: &InputTokens) -> Self {
+        Self {
+            recipe: IconButtonRecipe::for_tokens(tokens),
+        }
     }
 }
 

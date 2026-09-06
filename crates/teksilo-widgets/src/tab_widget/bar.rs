@@ -80,12 +80,19 @@ use crate::{
     PopoverIconButton,
 };
 use teksilo_core::accesskit::HasPopup;
-use teksilo_tokens::{BorderRole, SurfaceRole, TextRole};
+use teksilo_tokens::{BorderRole, InputTokens, SurfaceRole, TargetRole, TextRole};
 
 use std::collections::HashMap;
+use teksilo_core::styles::density::{dp, spacing};
 
 /// Default min width for an unpinned tab.
 pub const DEFAULT_MIN_TAB_WIDTH: f32 = 96.0;
+
+/// [`DEFAULT_MIN_TAB_WIDTH`] raised to the density's `target_size`
+/// (24 / 32 / 44 dp). The identity at Compact.
+pub fn default_min_tab_width(tokens: &InputTokens) -> f32 {
+    dp(DEFAULT_MIN_TAB_WIDTH, TargetRole::Target, tokens)
+}
 /// Default max width for an unpinned tab.
 pub const DEFAULT_MAX_TAB_WIDTH: f32 = 240.0;
 /// Default spacing between tab headers in the row. `0.0` so tabs sit
@@ -93,11 +100,29 @@ pub const DEFAULT_MAX_TAB_WIDTH: f32 = 240.0;
 /// tab boundaries are visually separated by the per-tab borders, not
 /// by an empty gap.
 pub const DEFAULT_TAB_SPACING: f32 = 0.0;
+
+/// [`DEFAULT_TAB_SPACING`] scaled by the density's `spacing_factor`
+/// (1.00 / 1.15 / 1.30).
+pub fn default_tab_spacing(tokens: &InputTokens) -> f32 {
+    spacing(DEFAULT_TAB_SPACING, tokens)
+}
 /// Default spacing between the bar's leading slot, scroll area, and
 /// trailing slot.
 pub const DEFAULT_BAR_SLOT_SPACING: f32 = 8.0;
+
+/// [`DEFAULT_BAR_SLOT_SPACING`] scaled by the density's `spacing_factor`
+/// (1.00 / 1.15 / 1.30).
+pub fn default_bar_slot_spacing(tokens: &InputTokens) -> f32 {
+    spacing(DEFAULT_BAR_SLOT_SPACING, tokens)
+}
 /// Default width (in dp) of a pinned tab — icon-only squares.
 pub const DEFAULT_PINNED_TAB_WIDTH: f32 = 32.0;
+
+/// [`DEFAULT_PINNED_TAB_WIDTH`] raised to the density's `target_size`
+/// (24 / 32 / 44 dp). The identity at Compact.
+pub fn default_pinned_tab_width(tokens: &InputTokens) -> f32 {
+    dp(DEFAULT_PINNED_TAB_WIDTH, TargetRole::Target, tokens)
+}
 /// Distance (in dp) one click of a scroll arrow advances the
 /// horizontal scroll position. Roughly one tab's worth.
 const SCROLL_ARROW_STEP: f32 = 120.0;
@@ -107,11 +132,12 @@ const SCROLL_ARROW_STEP: f32 = 120.0;
 /// scrolls one full tab into view.
 const WHEEL_LINE_PIXELS: f32 = 64.0;
 /// Edge-zone width inside which `on_drag_tick` ramps the auto-scroll
-/// velocity up to [`DRAG_MAX_VELOCITY`].
-const DRAG_EDGE_ZONE: f32 = 32.0;
+/// velocity up to [`DRAG_MAX_VELOCITY`]. The precise-pointer band shared with
+/// the data views — see [`crate::common::drag_autoscroll`].
+const DRAG_EDGE_ZONE: f32 = crate::common::drag_autoscroll::EDGE_BAND_PRECISE;
 /// Cap on per-frame auto-scroll velocity during a drag at the bar
 /// edges.
-const DRAG_MAX_VELOCITY: f32 = 12.0;
+const DRAG_MAX_VELOCITY: f32 = crate::common::drag_autoscroll::MAX_VELOCITY;
 
 /// Drag payload published by a tab header when the user starts
 /// dragging it.
@@ -1795,7 +1821,11 @@ impl<T: 'static> Widget for TabBar<T> {
             .style_override
             .clone()
             .or_else(|| ctx.theme().style_slots.tab.clone())
-            .unwrap_or_else(|| Rc::new(crate::styles::RecipeTabStyle::default()));
+            .unwrap_or_else(|| {
+                Rc::new(crate::styles::RecipeTabStyle::for_tokens(
+                    &ctx.theme().input,
+                ))
+            });
         let chrome_cfg = teksilo_core::styles::TabBarChromeConfig {
             content: root_id,
             orientation: self.orientation.into(),
@@ -2069,7 +2099,7 @@ impl<T: 'static> Widget for TabBar<T> {
                     let scroll_main = scroll_main.clone();
                     let max_scroll_main = max_scroll_main.clone();
                     let bar_bounds = self.paint_state.last_bar_bounds.clone();
-                    move |position: Point, _ctx: &mut EventContext| {
+                    move |position: Point, ctx: &mut EventContext| {
                         let bar = bar_bounds.get();
                         let (pointer_main, bar_extent) = match axis {
                             TabBarOrientation::Horizontal => (position.x, bar.width),
@@ -2077,15 +2107,9 @@ impl<T: 'static> Widget for TabBar<T> {
                         };
                         let max = max_scroll_main.get();
                         let cur = scroll_main.get();
-                        let leading_in = (DRAG_EDGE_ZONE - pointer_main).max(0.0);
-                        let trailing_in = (pointer_main - (bar_extent - DRAG_EDGE_ZONE)).max(0.0);
-                        let delta = if leading_in > 0.0 {
-                            -(leading_in / DRAG_EDGE_ZONE) * DRAG_MAX_VELOCITY
-                        } else if trailing_in > 0.0 {
-                            (trailing_in / DRAG_EDGE_ZONE) * DRAG_MAX_VELOCITY
-                        } else {
-                            0.0
-                        };
+                        let band = crate::common::drag_autoscroll::band_for(ctx.pointer_kind());
+                        let delta =
+                            crate::common::drag_autoscroll::step(pointer_main, bar_extent, band);
                         if delta.abs() > 0.001 {
                             scroll_main.set((cur + delta).clamp(0.0, max));
                         }
@@ -2770,8 +2794,20 @@ const DROPDOWN_MAX_HEIGHT: f32 = 320.0;
 /// Per-row height. Smaller than a tab header so the dropdown reads
 /// as a menu rather than a strip preview.
 const DROPDOWN_ROW_HEIGHT: f32 = 28.0;
+
+/// [`DROPDOWN_ROW_HEIGHT`] raised to the density's `target_size`
+/// (24 / 32 / 44 dp). The identity at Compact.
+fn dropdown_row_height(tokens: &InputTokens) -> f32 {
+    dp(DROPDOWN_ROW_HEIGHT, TargetRole::Target, tokens)
+}
 /// Padding inside the dropdown surface.
 const DROPDOWN_PADDING: f32 = 4.0;
+
+/// [`DROPDOWN_PADDING`] scaled by the density's `spacing_factor`
+/// (1.00 / 1.15 / 1.30).
+fn dropdown_padding(tokens: &InputTokens) -> f32 {
+    spacing(DROPDOWN_PADDING, tokens)
+}
 
 fn build_overflow_dropdown(
     ctx: &mut BuildContext,
@@ -2810,20 +2846,21 @@ fn build_overflow_dropdown(
                 }),
         ) as Box<dyn Widget>
     })
-    .item_height(DROPDOWN_ROW_HEIGHT);
+    .item_height(dropdown_row_height(&ctx.theme().input));
 
     // Compute a shrink-to-content height for short tab lists; cap
     // at `DROPDOWN_MAX_HEIGHT` for long ones (the ListView's
     // internal scroll bar takes over past the cap).
-    let natural_h = (row_count as f32 * DROPDOWN_ROW_HEIGHT) + (DROPDOWN_PADDING * 2.0);
+    let pad = dropdown_padding(&ctx.theme().input);
+    let natural_h = (row_count as f32 * dropdown_row_height(&ctx.theme().input)) + (pad * 2.0);
     let content_h = natural_h.min(DROPDOWN_MAX_HEIGHT);
 
     // Sized container. `FixedSize` forces both axes (content_h
     // shrinks on a short list; the constant width keeps the popover
     // from stretching to fit a long label).
     let sized = FixedSize::new()
-        .width(DROPDOWN_WIDTH - DROPDOWN_PADDING * 2.0)
-        .height(content_h - DROPDOWN_PADDING * 2.0)
+        .width(DROPDOWN_WIDTH - pad * 2.0)
+        .height(content_h - pad * 2.0)
         .child(list);
 
     // Raised surface — `SurfaceRole::Raised` is the popup-fill
@@ -2833,7 +2870,7 @@ fn build_overflow_dropdown(
         .background(SurfaceRole::Raised)
         .border_color(BorderRole::Default)
         .border_width(1.0)
-        .padding(DROPDOWN_PADDING)
+        .padding(pad)
         .child(sized);
 
     ctx.add(

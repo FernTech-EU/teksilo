@@ -205,7 +205,11 @@ impl Widget for Badge {
             .style_override
             .clone()
             .or_else(|| ctx.theme().style_slots.badge.clone())
-            .unwrap_or_else(|| Rc::new(crate::styles::RecipeBadgeStyle::default()));
+            .unwrap_or_else(|| {
+                Rc::new(crate::styles::RecipeBadgeStyle::for_tokens(
+                    &ctx.theme().input,
+                ))
+            });
         let root = style.make_body(
             &BadgeStyleConfig {
                 content,

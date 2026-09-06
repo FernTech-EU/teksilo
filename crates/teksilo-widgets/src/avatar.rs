@@ -796,7 +796,11 @@ impl Widget for Avatar {
             .style_override
             .clone()
             .or_else(|| ctx.theme().style_slots.avatar.clone())
-            .unwrap_or_else(|| Rc::new(crate::styles::RecipeAvatarStyle::default()));
+            .unwrap_or_else(|| {
+                Rc::new(crate::styles::RecipeAvatarStyle::for_tokens(
+                    &ctx.theme().input,
+                ))
+            });
         let root = style.make_body(
             &AvatarStyleConfig {
                 shape: self.shape,

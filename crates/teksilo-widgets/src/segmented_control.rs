@@ -982,7 +982,11 @@ impl Widget for SegmentedControl {
             .style_override
             .clone()
             .or_else(|| ctx.theme().style_slots.segmented_control.clone())
-            .unwrap_or_else(|| Rc::new(crate::styles::RecipeSegmentedControlStyle::default()));
+            .unwrap_or_else(|| {
+                Rc::new(crate::styles::RecipeSegmentedControlStyle::for_tokens(
+                    &ctx.theme().input,
+                ))
+            });
         let chrome_id = style.make_body(
             &SegmentedControlStyleConfig {
                 slots: self.slots.clone(),

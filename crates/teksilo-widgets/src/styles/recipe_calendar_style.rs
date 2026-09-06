@@ -29,9 +29,12 @@ use teksilo_core::styles::{
 };
 use teksilo_core::widget_id::WidgetId;
 use teksilo_i18n::lit;
-use teksilo_tokens::{BorderRole, CornerRadius, SurfaceRole, TextRole, TextStyleRole};
+use teksilo_tokens::{
+    BorderRole, CornerRadius, InputTokens, SurfaceRole, TargetRole, TextRole, TextStyleRole,
+};
 
 use crate::primitives::{Center, Expand, FixedSize, HStack, RectWidget, TextWidget, ZStack};
+use teksilo_core::styles::density::{dp, spacing};
 
 // ─── IntUI design tokens for Calendar ──────────────────────────────
 // `calendar.rs` reads these directly for sizing outside the per-cell
@@ -86,24 +89,35 @@ pub struct CalendarRecipe {
     pub zoom_cell_radius: f32,
 }
 
-impl Default for CalendarRecipe {
-    fn default() -> Self {
+impl CalendarRecipe {
+    /// This recipe's dimensions resolved against a density's [`InputTokens`].
+    ///
+    /// [`Default`] is `for_tokens(&InputTokens::default())` — the Compact
+    /// ladder — so the shipped values below are the Compact column by
+    /// construction and cannot drift from it.
+    pub fn for_tokens(tokens: &InputTokens) -> Self {
         Self {
-            outer_padding: CALENDAR_OUTER_PADDING,
-            section_gap: CALENDAR_SECTION_GAP,
-            header_height: CALENDAR_HEADER_HEIGHT,
+            outer_padding: spacing(CALENDAR_OUTER_PADDING, tokens),
+            section_gap: spacing(CALENDAR_SECTION_GAP, tokens),
+            header_height: dp(CALENDAR_HEADER_HEIGHT, TargetRole::Target, tokens),
             weekday_row_height: CALENDAR_WEEKDAY_ROW_HEIGHT,
-            cell_size: CALENDAR_CELL_SIZE,
+            cell_size: dp(CALENDAR_CELL_SIZE, TargetRole::Target, tokens),
             cell_radius: CALENDAR_CELL_RADIUS,
-            cell_gap: CALENDAR_CELL_GAP,
+            cell_gap: spacing(CALENDAR_CELL_GAP, tokens),
             today_ring_width: CALENDAR_TODAY_RING_WIDTH,
             nav_icon_size: CALENDAR_NAV_ICON_SIZE,
             week_number_column_width: CALENDAR_WEEK_NUMBER_COLUMN_WIDTH,
-            nav_arrow_size: CALENDAR_NAV_ARROW_SIZE,
+            nav_arrow_size: dp(CALENDAR_NAV_ARROW_SIZE, TargetRole::Target, tokens),
             nav_arrow_radius: CALENDAR_NAV_ARROW_RADIUS,
-            header_gap: CALENDAR_HEADER_GAP,
+            header_gap: spacing(CALENDAR_HEADER_GAP, tokens),
             zoom_cell_radius: CALENDAR_ZOOM_CELL_RADIUS,
         }
+    }
+}
+
+impl Default for CalendarRecipe {
+    fn default() -> Self {
+        Self::for_tokens(&InputTokens::default())
     }
 }
 
@@ -116,6 +130,18 @@ pub struct RecipeCalendarStyle {
 impl RecipeCalendarStyle {
     pub fn new(recipe: CalendarRecipe) -> Self {
         Self { recipe }
+    }
+
+    /// This style with every dimension resolved against a density's
+    /// [`InputTokens`], as `RecipeCalendarStyle::for_tokens(&ctx.theme().input)` at
+    /// the widget's own build site.
+    ///
+    /// [`Default`] is the `TargetDensity::Compact` projection, so a Compact
+    /// tree gets exactly the values this module documents.
+    pub fn for_tokens(tokens: &InputTokens) -> Self {
+        Self {
+            recipe: CalendarRecipe::for_tokens(tokens),
+        }
     }
 }
 

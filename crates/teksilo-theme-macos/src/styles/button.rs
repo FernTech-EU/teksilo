@@ -44,10 +44,12 @@
 //! layout rather than of the control, and applying it here would inflate
 //! every toolbar button in the app.
 
+use teksilo_canvas::Size;
 use teksilo_core::build_context::BuildContext;
+use teksilo_core::styles::density::{density_min_size, spacing};
 use teksilo_core::styles::{ButtonStyle, ButtonStyleConfig, ButtonVariant};
 use teksilo_core::widget_id::WidgetId;
-use teksilo_tokens::TextRole;
+use teksilo_tokens::{TargetAxes, TextRole};
 use teksilo_widgets::primitives::{MinSize, Padding, ZStack};
 
 use crate::shape::{MACOS_CONTROL_CORNER_RADIUS, MACOS_CONTROL_HEIGHT};
@@ -85,6 +87,8 @@ impl MacOsButtonStyle {
 impl ButtonStyle for MacOsButtonStyle {
     fn make_body(&self, cfg: &ButtonStyleConfig, ctx: &mut BuildContext) -> WidgetId {
         let kind = Self::surface_kind(cfg.variant);
+        let input = ctx.theme().input;
+        let tokens = &input;
         let state = MacOsState::derive(&cfg.is_disabled, &cfg.is_pressed, &cfg.is_hovered);
         // The Button surface exposes no `:focus-visible` signal, so the
         // ring follows plain focus — the same trade the IntUI recipe and
@@ -101,10 +105,26 @@ impl ButtonStyle for MacOsButtonStyle {
             show_ring,
         ));
 
-        let padded =
-            ctx.add(Padding::new(PADDING_V, PADDING_H, PADDING_V, PADDING_H).child_id(cfg.label));
+        let padded = ctx.add(
+            Padding::new(
+                spacing(PADDING_V, tokens),
+                spacing(PADDING_H, tokens),
+                spacing(PADDING_V, tokens),
+                spacing(PADDING_H, tokens),
+            )
+            .child_id(cfg.label),
+        );
         let stack = ctx.add(ZStack::new().add_child(chrome).add_child(padded));
-        ctx.add(MinSize::new(0.0, MACOS_CONTROL_HEIGHT).child_id(stack))
+        // `[measured]` 22 dp is below the 24 dp WCAG 2.2 SC 2.5.8 floor, and a
+        // *minimum hit box* is exactly what that floor governs — so this one
+        // site is raised while `MACOS_CONTROL_HEIGHT` itself, the painted
+        // bezel metric, stays at Apple's number.
+        let min = density_min_size(
+            Size::new(0.0, MACOS_CONTROL_HEIGHT),
+            TargetAxes::HEIGHT,
+            tokens,
+        );
+        ctx.add(MinSize::new(0.0, min.height).child_id(stack))
     }
 
     fn label_text_role(&self, variant: ButtonVariant) -> Option<TextRole> {

@@ -219,7 +219,11 @@ impl Widget for ScrollBar {
             .style_override
             .clone()
             .or_else(|| ctx.theme().style_slots.scroll_bar.clone())
-            .unwrap_or_else(|| Rc::new(crate::styles::RecipeScrollBarStyle::default()));
+            .unwrap_or_else(|| {
+                Rc::new(crate::styles::RecipeScrollBarStyle::for_tokens(
+                    &ctx.theme().input,
+                ))
+            });
 
         // Derived `scroll_ratio = scroll_position / max_scroll` (clamped
         // to 0..1). Re-renders the body on every scroll.

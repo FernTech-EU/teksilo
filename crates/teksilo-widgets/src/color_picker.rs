@@ -818,8 +818,11 @@ fn resolve_color_picker_style(
         .color_picker
         .clone()
         .unwrap_or_else(|| {
-            Rc::new(crate::styles::recipe_color_picker_style::RecipeColorPickerStyle::default())
-                as teksilo_core::styles::SharedColorPickerStyle
+            Rc::new(
+                crate::styles::recipe_color_picker_style::RecipeColorPickerStyle::for_tokens(
+                    &ctx.theme().input,
+                ),
+            ) as teksilo_core::styles::SharedColorPickerStyle
         })
 }
 

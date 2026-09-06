@@ -44,10 +44,24 @@ use teksilo_core::widget::{LayoutContext, PaintContext, Widget, WidgetPlacement}
 use teksilo_core::widget_id::WidgetId;
 
 use super::state::SharedState;
+use teksilo_core::styles::density::spacing;
+use teksilo_tokens::InputTokens;
 
 /// Padding either side of the numbers, in logical pixels before text scale.
 const GUTTER_PAD_LEADING: f32 = 8.0;
+
+/// [`GUTTER_PAD_LEADING`] scaled by the density's `spacing_factor`
+/// (1.00 / 1.15 / 1.30).
+fn gutter_pad_leading(tokens: &InputTokens) -> f32 {
+    spacing(GUTTER_PAD_LEADING, tokens)
+}
 const GUTTER_PAD_TRAILING: f32 = 12.0;
+
+/// [`GUTTER_PAD_TRAILING`] scaled by the density's `spacing_factor`
+/// (1.00 / 1.15 / 1.30).
+fn gutter_pad_trailing(tokens: &InputTokens) -> f32 {
+    spacing(GUTTER_PAD_TRAILING, tokens)
+}
 
 /// Digits needed to write `n`. `0` and `1` both need one.
 fn digits(n: usize) -> usize {
@@ -126,7 +140,8 @@ impl Widget for CodeGutter {
             // Headless: keep layout sane. A windowed app always has a backend.
             None => label.len() as f32 * 8.0,
         };
-        let w = GUTTER_PAD_LEADING + text_w + GUTTER_PAD_TRAILING;
+        let w =
+            gutter_pad_leading(&ctx.theme.input) + text_w + gutter_pad_trailing(&ctx.theme.input);
         let h = proposal.height.unwrap_or(0.0).max(0.0);
         Size::new(w, h).into()
     }
@@ -176,7 +191,7 @@ impl Widget for CodeGutter {
         // Worth the measure: numbers read as a column against the code's left
         // edge, and left-aligning would leave 9 and 100 at different distances
         // from the line each labels.
-        let right_edge = bounds.x + bounds.width - GUTTER_PAD_TRAILING;
+        let right_edge = bounds.x + bounds.width - gutter_pad_trailing(&ctx.theme.input);
 
         canvas.set_clip(bounds);
         for line in first..last {

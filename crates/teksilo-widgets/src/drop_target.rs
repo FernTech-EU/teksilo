@@ -571,7 +571,11 @@ impl Widget for DropTarget {
             .style_override
             .clone()
             .or_else(|| ctx.theme().style_slots.drop_target.clone())
-            .unwrap_or_else(|| Rc::new(crate::styles::RecipeDropTargetStyle::default()));
+            .unwrap_or_else(|| {
+                Rc::new(crate::styles::RecipeDropTargetStyle::for_tokens(
+                    &ctx.theme().input,
+                ))
+            });
 
         let cfg = DropTargetStyleConfig {
             content_id,

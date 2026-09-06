@@ -12,7 +12,7 @@ use teksilo_core::build_context::BuildContext;
 use teksilo_core::signal::Signal;
 use teksilo_core::styles::{LinkStyle, LinkStyleConfig};
 use teksilo_core::widget_id::WidgetId;
-use teksilo_tokens::{BorderRole, CornerRadius, TextRole, TextStyleRole};
+use teksilo_tokens::{BorderRole, CornerRadius, InputTokens, TextRole, TextStyleRole};
 
 use crate::primitives::{FixedSize, RectWidget, TextWidget, VStack, ZStack};
 
@@ -53,12 +53,28 @@ pub struct LinkRecipe {
     pub underline_thickness: f32,
 }
 
-impl Default for LinkRecipe {
-    fn default() -> Self {
+impl LinkRecipe {
+    /// This recipe's dimensions resolved against a density's [`InputTokens`].
+    ///
+    /// [`Default`] is `for_tokens(&InputTokens::default())` — the Compact
+    /// ladder — so the shipped values below are the Compact column by
+    /// construction and cannot drift from it.
+    ///
+    /// Every dimension this recipe carries is a decoration (a corner radius, a
+    /// hairline, a glyph metric), so the parameter is unused: the density
+    /// ladder never moves any of them. It is taken all the same, so every
+    /// recipe is constructed the same way at its widget's build site.
+    pub fn for_tokens(_tokens: &InputTokens) -> Self {
         Self {
             corner_radius: LINK_CORNER_RADIUS,
             underline_thickness: LINK_UNDERLINE_THICKNESS,
         }
+    }
+}
+
+impl Default for LinkRecipe {
+    fn default() -> Self {
+        Self::for_tokens(&InputTokens::default())
     }
 }
 
@@ -71,6 +87,18 @@ pub struct RecipeLinkStyle {
 impl RecipeLinkStyle {
     pub fn new(recipe: LinkRecipe) -> Self {
         Self { recipe }
+    }
+
+    /// This style with every dimension resolved against a density's
+    /// [`InputTokens`], as `RecipeLinkStyle::for_tokens(&ctx.theme().input)` at
+    /// the widget's own build site.
+    ///
+    /// [`Default`] is the `TargetDensity::Compact` projection, so a Compact
+    /// tree gets exactly the values this module documents.
+    pub fn for_tokens(tokens: &InputTokens) -> Self {
+        Self {
+            recipe: LinkRecipe::for_tokens(tokens),
+        }
     }
 }
 

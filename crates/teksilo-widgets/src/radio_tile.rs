@@ -53,17 +53,30 @@ use teksilo_core::styles::{
 use teksilo_core::widget::{CursorIcon, EventContext, LayoutContext, Widget, WidgetPlacement};
 use teksilo_core::widget_builder::HandlerSet;
 use teksilo_core::widget_id::WidgetId;
-use teksilo_tokens::{HAlignment, TextRole, TextStyleRole, VAlignment};
+use teksilo_tokens::{HAlignment, InputTokens, TextRole, TextStyleRole, VAlignment};
 
 use crate::button::InteractionState;
 use crate::primitives::{HStack, Spacer, TextWidget, VStack};
 use crate::styles::{RecipeRadioStyle, RecipeRadioTileStyle};
+use teksilo_core::styles::density::spacing;
 use teksilo_i18n::LocalizedString;
 
 /// Horizontal gap between the icon / title / indicator on a tile's top row.
 const TILE_ROW_GAP: f32 = 10.0;
+
+/// [`TILE_ROW_GAP`] scaled by the density's `spacing_factor`
+/// (1.00 / 1.15 / 1.30).
+fn tile_row_gap(tokens: &InputTokens) -> f32 {
+    spacing(TILE_ROW_GAP, tokens)
+}
 /// Vertical gap between the tile's title row and its description.
 const TILE_TITLE_DESC_GAP: f32 = 6.0;
+
+/// [`TILE_TITLE_DESC_GAP`] scaled by the density's `spacing_factor`
+/// (1.00 / 1.15 / 1.30).
+fn tile_title_desc_gap(tokens: &InputTokens) -> f32 {
+    spacing(TILE_TITLE_DESC_GAP, tokens)
+}
 
 /// Which side of the top row the radio indicator sits on. Defaults to
 /// `Trailing` (top-right in LTR), matching the reference design.
@@ -430,30 +443,29 @@ impl Widget for RadioTile {
         // --- Radio indicator: reuse the theme's RadioStyle so the glyph
         // matches a standalone RadioButton. The glyph never draws its own
         // focus ring (the tile owns the ring), so pass a constant `false`.
-        let indicator_id = if self.show_indicator {
-            let radio_style: SharedRadioStyle = ctx
-                .theme()
-                .style_slots
-                .radio
-                .clone()
-                .unwrap_or_else(|| Rc::new(RecipeRadioStyle::default()));
-            let radio_cfg = RadioStyleConfig {
-                is_selected: is_selected.clone(),
-                is_hovered: is_hovered.clone(),
-                is_pressed: is_pressed.clone(),
-                is_focused: Signal::new(false),
-                is_disabled: is_disabled.clone(),
-                variant: RadioVariant::Circle,
+        let indicator_id =
+            if self.show_indicator {
+                let radio_style: SharedRadioStyle =
+                    ctx.theme().style_slots.radio.clone().unwrap_or_else(|| {
+                        Rc::new(RecipeRadioStyle::for_tokens(&ctx.theme().input))
+                    });
+                let radio_cfg = RadioStyleConfig {
+                    is_selected: is_selected.clone(),
+                    is_hovered: is_hovered.clone(),
+                    is_pressed: is_pressed.clone(),
+                    is_focused: Signal::new(false),
+                    is_disabled: is_disabled.clone(),
+                    variant: RadioVariant::Circle,
+                };
+                Some(radio_style.make_body(&radio_cfg, ctx))
+            } else {
+                None
             };
-            Some(radio_style.make_body(&radio_cfg, ctx))
-        } else {
-            None
-        };
 
         // --- Top row: [icon?] [title] [Spacer] [indicator?] (indicator side
         // configurable; RTL handled by HStack + Spacer).
         let mut top_row = HStack::new()
-            .spacing(TILE_ROW_GAP)
+            .spacing(tile_row_gap(&ctx.theme().input))
             .alignment(VAlignment::Center);
 
         if self.indicator_side == RadioTileIndicatorSide::Leading
@@ -511,7 +523,7 @@ impl Widget for RadioTile {
 
         // --- Content column: top row + (description|body, unless compact).
         let mut content_col = VStack::new()
-            .spacing(TILE_TITLE_DESC_GAP)
+            .spacing(tile_title_desc_gap(&ctx.theme().input))
             .alignment(HAlignment::Leading)
             .add_child(top_row_id);
 
@@ -543,7 +555,7 @@ impl Widget for RadioTile {
             .style_override
             .clone()
             .or_else(|| ctx.theme().style_slots.radio_tile.clone())
-            .unwrap_or_else(|| Rc::new(RecipeRadioTileStyle::default()));
+            .unwrap_or_else(|| Rc::new(RecipeRadioTileStyle::for_tokens(&ctx.theme().input)));
         let cfg = RadioTileStyleConfig {
             content: content_id,
             is_selected: is_selected.clone(),

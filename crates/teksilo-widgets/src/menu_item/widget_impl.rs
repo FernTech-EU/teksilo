@@ -53,7 +53,11 @@ impl Widget for MenuItem {
             .style_override
             .clone()
             .or_else(|| ctx.theme().style_slots.menu_item.clone())
-            .unwrap_or_else(|| Rc::new(crate::styles::RecipeMenuItemStyle::default()));
+            .unwrap_or_else(|| {
+                Rc::new(crate::styles::RecipeMenuItemStyle::for_tokens(
+                    &ctx.theme().input,
+                ))
+            });
         let highlighted_role = style.highlighted_label_role();
         // The slot sizes the active style owns. `MenuItem` builds the leading
         // icon/check column and the trailing chevron column itself — they are

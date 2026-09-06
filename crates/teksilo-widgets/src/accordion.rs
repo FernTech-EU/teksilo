@@ -39,16 +39,32 @@ use teksilo_core::signal::Signal;
 use teksilo_core::widget::{CursorIcon, EventContext, LayoutContext, Widget, WidgetPlacement};
 use teksilo_core::widget_builder::HandlerSet;
 use teksilo_core::widget_id::WidgetId;
-use teksilo_tokens::{BorderRole, TextRole, TextStyleRole};
+use teksilo_tokens::{BorderRole, InputTokens, TargetRole, TextRole, TextStyleRole};
 
 use crate::animations::collapse::Collapse;
 use crate::primitives::{HStack, IconWidget, MinSize, Spacer, TextWidget, VStack};
 use crate::tool_box::RotatedLabel;
+use teksilo_core::styles::density::{dp, spacing};
 use teksilo_i18n::LocalizedString;
 
 /// Fixed header extent (px) along the main axis in [`Accordion::fill`] mode, so
 /// a collapsed dock pane is exactly the header with no content sliver.
 pub(crate) const ACCORDION_FILL_HEADER_EXTENT: f32 = 30.0;
+
+/// Gap between a fill-mode accordion's header and its body, in dp.
+pub(crate) const ACCORDION_FILL_GAP: f32 = 2.0;
+
+/// [`ACCORDION_FILL_GAP`] scaled by the density's `spacing_factor`
+/// (1.00 / 1.15 / 1.30).
+pub(crate) fn accordion_fill_gap(tokens: &InputTokens) -> f32 {
+    spacing(ACCORDION_FILL_GAP, tokens)
+}
+
+/// [`ACCORDION_FILL_HEADER_EXTENT`] raised to the density's `target_size`
+/// (24 / 32 / 44 dp). The identity at Compact.
+pub(crate) fn accordion_fill_header_extent(tokens: &InputTokens) -> f32 {
+    dp(ACCORDION_FILL_HEADER_EXTENT, TargetRole::Target, tokens)
+}
 /// The size a fill-mode accordion's enclosing Splitter pane collapses to —
 /// the header extent plus the header→body gap. See `place_fill`.
 pub(crate) const ACCORDION_FILL_COLLAPSED_EXTENT: f32 = ACCORDION_FILL_HEADER_EXTENT + 2.0;
@@ -116,12 +132,30 @@ impl Widget for AccordionRegion {
 
 /// Height of the accordion header row in pixels (vertical mode).
 pub const ACCORDION_HEADER_HEIGHT: f32 = 28.0;
+
+/// [`ACCORDION_HEADER_HEIGHT`] raised to the density's `target_size`
+/// (24 / 32 / 44 dp). The identity at Compact.
+pub fn accordion_header_height(tokens: &InputTokens) -> f32 {
+    dp(ACCORDION_HEADER_HEIGHT, TargetRole::Target, tokens)
+}
 /// Horizontal padding inside the accordion header on the leading and trailing edges.
 pub const ACCORDION_HEADER_PADDING_HORIZONTAL: f32 = 8.0;
+
+/// [`ACCORDION_HEADER_PADDING_HORIZONTAL`] scaled by the density's `spacing_factor`
+/// (1.00 / 1.15 / 1.30).
+pub fn accordion_header_padding_horizontal(tokens: &InputTokens) -> f32 {
+    spacing(ACCORDION_HEADER_PADDING_HORIZONTAL, tokens)
+}
 /// Size of the chevron disclosure indicator icon in pixels.
 pub const ACCORDION_INDICATOR_SIZE: f32 = 12.0;
 /// Gap between the disclosure indicator and the title label.
 pub const ACCORDION_INDICATOR_GAP: f32 = 6.0;
+
+/// [`ACCORDION_INDICATOR_GAP`] scaled by the density's `spacing_factor`
+/// (1.00 / 1.15 / 1.30).
+pub fn accordion_indicator_gap(tokens: &InputTokens) -> f32 {
+    spacing(ACCORDION_INDICATOR_GAP, tokens)
+}
 /// Corner radius of the keyboard-focus ring painted on the accordion header.
 pub const ACCORDION_CORNER_RADIUS: f32 = 4.0;
 
@@ -460,10 +494,11 @@ impl Widget for Accordion {
             // the Splitter pane resizing (driven externally by the `expanded`
             // signal) — not this widget. The header carries a fixed minimum
             // extent so a fully-collapsed pane is exactly the header.
+            let extent = accordion_fill_header_extent(&ctx.theme().input);
             let header = if horizontal {
-                ctx.add(MinSize::new(ACCORDION_FILL_HEADER_EXTENT, 0.0).child_id(header_with_ring))
+                ctx.add(MinSize::new(extent, 0.0).child_id(header_with_ring))
             } else {
-                ctx.add(MinSize::new(0.0, ACCORDION_FILL_HEADER_EXTENT).child_id(header_with_ring))
+                ctx.add(MinSize::new(0.0, extent).child_id(header_with_ring))
             };
             self.fill_header_id = Some(header);
             if let Some(content_id) = self.content_id {
@@ -658,7 +693,7 @@ impl Accordion {
     /// internal tween — the Splitter pane folding to the header *is* the
     /// collapse animation.
     fn place_fill(&self, bounds: Rect, children: &mut [WidgetPlacement], ctx: &LayoutContext) {
-        const GAP: f32 = 2.0;
+        let gap = accordion_fill_gap(&ctx.theme.input);
         let Some(header_id) = self.fill_header_id else {
             return;
         };
@@ -700,18 +735,18 @@ impl Accordion {
         // Leftover for the body, and the proposal that makes the `FillBody`
         // fill (and clip to) that leftover.
         let (body_origin, body_proposal) = if horizontal {
-            let leftover = (bounds.width - header_size.width - GAP).max(0.0);
+            let leftover = (bounds.width - header_size.width - gap).max(0.0);
             (
-                teksilo_canvas::Point::new(header_rect.right() + GAP, bounds.y),
+                teksilo_canvas::Point::new(header_rect.right() + gap, bounds.y),
                 SizeProposal {
                     width: Some(leftover),
                     height: Some(bounds.height),
                 },
             )
         } else {
-            let leftover = (bounds.height - header_size.height - GAP).max(0.0);
+            let leftover = (bounds.height - header_size.height - gap).max(0.0);
             (
-                teksilo_canvas::Point::new(bounds.x, header_rect.bottom() + GAP),
+                teksilo_canvas::Point::new(bounds.x, header_rect.bottom() + gap),
                 SizeProposal {
                     width: Some(bounds.width),
                     height: Some(leftover),

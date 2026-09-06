@@ -876,7 +876,7 @@ impl Widget for TextInputField {
         };
         st.engine.set_cursor(&cursor_display);
 
-        ensure_caret_visible_h(&mut st, text_viewport_width);
+        ensure_caret_visible_h(&mut st, text_viewport_width, &ctx.theme.input);
 
         let scroll_x = st.scroll_x;
 

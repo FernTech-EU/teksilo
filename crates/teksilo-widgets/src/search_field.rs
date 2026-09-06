@@ -930,12 +930,12 @@ impl Widget for SuggestionPanel {
         // so the placement suppresses the top-side shadow.
         let listbox_inner = ctx.add(column);
         let padded = ctx.add(Padding::uniform(sf::PANEL_PADDING).child_id(listbox_inner));
-        let popover_style: teksilo_core::styles::SharedPopoverStyle = ctx
-            .theme()
-            .style_slots
-            .popover
-            .clone()
-            .unwrap_or_else(|| Rc::new(crate::styles::RecipePopoverStyle::default()));
+        let popover_style: teksilo_core::styles::SharedPopoverStyle =
+            ctx.theme().style_slots.popover.clone().unwrap_or_else(|| {
+                Rc::new(crate::styles::RecipePopoverStyle::for_tokens(
+                    &ctx.theme().input,
+                ))
+            });
         let surface = popover_style.make_body(
             &PopoverStyleConfig {
                 content: padded,

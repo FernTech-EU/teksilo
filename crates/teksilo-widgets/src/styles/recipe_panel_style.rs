@@ -24,12 +24,13 @@ use teksilo_core::binding::BindingLevel;
 use teksilo_core::build_context::BuildContext;
 use teksilo_core::color_prop::ColorProp;
 use teksilo_core::signal::Prop;
+use teksilo_core::styles::density::spacing;
 use teksilo_core::styles::{PanelStyle, PanelStyleConfig, PanelVariant};
 use teksilo_core::widget::{
     LayoutContext, LayoutResponse, PaintContext, PendingChild, Widget, WidgetPlacement,
 };
 use teksilo_core::widget_id::WidgetId;
-use teksilo_tokens::CornerRadius;
+use teksilo_tokens::{CornerRadius, InputTokens};
 
 // IntUI design tokens for Panel. The recipe owns its own dimensions.
 pub const PANEL_PADDING: f32 = 12.0;
@@ -44,13 +45,24 @@ pub struct PanelRecipe {
     pub border_width: f32,
 }
 
-impl Default for PanelRecipe {
-    fn default() -> Self {
+impl PanelRecipe {
+    /// This recipe's dimensions resolved against a density's [`InputTokens`].
+    ///
+    /// [`Default`] is `for_tokens(&InputTokens::default())` — the Compact
+    /// ladder — so the shipped values below are the Compact column by
+    /// construction and cannot drift from it.
+    pub fn for_tokens(tokens: &InputTokens) -> Self {
         Self {
-            padding: PANEL_PADDING,
+            padding: spacing(PANEL_PADDING, tokens),
             corner_radius: PANEL_CORNER_RADIUS,
             border_width: PANEL_BORDER_WIDTH,
         }
+    }
+}
+
+impl Default for PanelRecipe {
+    fn default() -> Self {
+        Self::for_tokens(&InputTokens::default())
     }
 }
 
@@ -66,6 +78,18 @@ pub struct RecipePanelStyle {
 impl RecipePanelStyle {
     pub fn new(recipe: PanelRecipe) -> Self {
         Self { recipe }
+    }
+
+    /// This style with every dimension resolved against a density's
+    /// [`InputTokens`], as `RecipePanelStyle::for_tokens(&ctx.theme().input)` at
+    /// the widget's own build site.
+    ///
+    /// [`Default`] is the `TargetDensity::Compact` projection, so a Compact
+    /// tree gets exactly the values this module documents.
+    pub fn for_tokens(tokens: &InputTokens) -> Self {
+        Self {
+            recipe: PanelRecipe::for_tokens(tokens),
+        }
     }
 }
 

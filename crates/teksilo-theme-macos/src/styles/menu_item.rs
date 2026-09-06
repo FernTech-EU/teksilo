@@ -30,9 +30,10 @@
 
 use teksilo_core::build_context::BuildContext;
 use teksilo_core::signal::Signal;
+use teksilo_core::styles::density::spacing;
 use teksilo_core::styles::{MenuItemMetrics, MenuItemStyle, MenuItemStyleConfig};
 use teksilo_core::widget_id::WidgetId;
-use teksilo_tokens::{CornerRadius, SurfaceRole, TextRole};
+use teksilo_tokens::{CornerRadius, InputTokens, SurfaceRole, TextRole};
 use teksilo_widgets::primitives::{Padding, RectWidget, ZStack};
 use teksilo_widgets::styles::{MenuItemRecipe, RecipeMenuItemStyle};
 
@@ -62,14 +63,26 @@ const _: () = assert!(HIGHLIGHT_INSET < PADDING_H);
 /// The macOS [`MenuItemRecipe`] — public so an app can start from it and
 /// tune one dimension without rebuilding the whole style.
 pub fn macos_menu_item_recipe() -> MenuItemRecipe {
+    macos_menu_item_recipe_for(&InputTokens::default())
+}
+
+/// [`macos_menu_item_recipe`] resolved against a density's [`InputTokens`].
+///
+/// `[measured]` values throughout. [`ITEM_HEIGHT`] is deliberately **not**
+/// raised: 22 dp is AppKit's own menu row, below the 24 dp WCAG floor, and
+/// growing it would falsify a preset whose whole purpose is to reproduce
+/// Apple's metrics. The coarse hit area a finger needs comes from the hit
+/// mechanisms (`hit_outset`, the miss-only slop pass), which leave the paint
+/// alone. The gaps around it do follow the density.
+pub fn macos_menu_item_recipe_for(tokens: &InputTokens) -> MenuItemRecipe {
     MenuItemRecipe {
         item_height: ITEM_HEIGHT,
-        padding_horizontal: PADDING_H,
-        padding_leading: PADDING_H,
+        padding_horizontal: spacing(PADDING_H, tokens),
+        padding_leading: spacing(PADDING_H, tokens),
         icon_column_width: ICON_COLUMN,
-        icon_label_gap: ICON_LABEL_GAP,
-        shortcut_left_gap: SHORTCUT_GAP,
-        separator_height: SEPARATOR_HEIGHT,
+        icon_label_gap: spacing(ICON_LABEL_GAP, tokens),
+        shortcut_left_gap: spacing(SHORTCUT_GAP, tokens),
+        separator_height: spacing(SEPARATOR_HEIGHT, tokens),
         item_corner_radius: HIGHLIGHT_RADIUS,
     }
 }
@@ -80,6 +93,8 @@ pub struct MacOsMenuItemStyle;
 
 impl MenuItemStyle for MacOsMenuItemStyle {
     fn make_body(&self, cfg: &MenuItemStyleConfig, ctx: &mut BuildContext) -> WidgetId {
+        let tokens = ctx.theme().input;
+        let ctx_tokens = &tokens;
         let bg = row_surface(
             &cfg.is_pressed,
             &cfg.is_hovered,
@@ -93,8 +108,15 @@ impl MenuItemStyle for MacOsMenuItemStyle {
         );
         // Inset so the capsule floats inside the menu rather than running
         // edge to edge — the Big Sur menu shape.
-        let inset_backdrop =
-            ctx.add(Padding::new(0.0, HIGHLIGHT_INSET, 0.0, HIGHLIGHT_INSET).child_id(backdrop));
+        let inset_backdrop = ctx.add(
+            Padding::new(
+                0.0,
+                spacing(HIGHLIGHT_INSET, ctx_tokens),
+                0.0,
+                spacing(HIGHLIGHT_INSET, ctx_tokens),
+            )
+            .child_id(backdrop),
+        );
 
         // Delegate the row arithmetic, with the interaction signals held
         // low so the shipped recipe's own tint never paints under ours.
@@ -109,7 +131,8 @@ impl MenuItemStyle for MacOsMenuItemStyle {
             is_disabled: cfg.is_disabled.clone(),
             is_highlighted: quiet,
         };
-        let row = RecipeMenuItemStyle::new(macos_menu_item_recipe()).make_body(&inner_cfg, ctx);
+        let row = RecipeMenuItemStyle::new(macos_menu_item_recipe_for(&ctx.theme().input))
+            .make_body(&inner_cfg, ctx);
 
         ctx.add(ZStack::new().add_child(inset_backdrop).add_child(row))
     }

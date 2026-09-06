@@ -25,14 +25,23 @@ use teksilo_core::widget::{
 use teksilo_core::widget_builder::HandlerSet;
 use teksilo_core::widget_id::WidgetId;
 use teksilo_i18n::{LocalizedString, lit};
-use teksilo_tokens::{BorderRole, FontWeight, SurfaceRole, TextRole, TextStyle, TextStyleRole};
+use teksilo_tokens::{
+    BorderRole, FontWeight, InputTokens, SurfaceRole, TextRole, TextStyle, TextStyleRole,
+};
 
 use super::StepperOrientation;
 use super::step::StepStatus;
 use crate::primitives::{TextWidget, VStack};
+use teksilo_core::styles::density::spacing;
 
 pub(crate) const DEFAULT_CIRCLE_SIZE: f32 = 28.0;
 const MARKER_LABEL_GAP: f32 = 10.0;
+
+/// [`MARKER_LABEL_GAP`] scaled by the density's `spacing_factor`
+/// (1.00 / 1.15 / 1.30).
+fn marker_label_gap(tokens: &InputTokens) -> f32 {
+    spacing(MARKER_LABEL_GAP, tokens)
+}
 
 type ActivateFn = Rc<dyn Fn(&mut EventContext)>;
 
@@ -188,7 +197,7 @@ impl Widget for StepIndicator {
             .and_then(|id| ctx.child_size(id, proposal))
             .map(|r| Size::new(r.width, r.height))
             .unwrap_or(Size::new(0.0, 0.0));
-        let w = d + MARKER_LABEL_GAP + label.width;
+        let w = d + marker_label_gap(&ctx.theme.input) + label.width;
         let h = d.max(label.height);
         proposal.resolve(w, h).into()
     }
@@ -198,12 +207,13 @@ impl Widget for StepIndicator {
         bounds: Rect,
         _proposal: SizeProposal,
         children: &mut [WidgetPlacement],
-        _ctx: &LayoutContext,
+        ctx: &LayoutContext,
     ) {
         let d = self.circle_size;
+        let gap = marker_label_gap(&ctx.theme.input);
         for child in children.iter_mut() {
-            let x = bounds.x + d + MARKER_LABEL_GAP;
-            let w = (bounds.width - d - MARKER_LABEL_GAP).max(0.0);
+            let x = bounds.x + d + gap;
+            let w = (bounds.width - d - gap).max(0.0);
             child.origin = Point::new(x, bounds.y);
             child.size = Size::new(w, bounds.height);
         }

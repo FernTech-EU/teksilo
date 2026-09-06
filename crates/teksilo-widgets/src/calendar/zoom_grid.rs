@@ -35,10 +35,18 @@ use crate::primitives::{HStack, VStack};
 use crate::styles::recipe_calendar_style::RecipeCalendarStyle;
 
 use super::CalendarMode;
+use teksilo_core::styles::density::spacing;
+use teksilo_tokens::InputTokens;
 
 const COLUMNS: usize = 3;
 const ROWS: usize = 4;
 const CELL_SPACING: f32 = 4.0;
+
+/// [`CELL_SPACING`] scaled by the density's `spacing_factor`
+/// (1.00 / 1.15 / 1.30).
+fn cell_spacing(tokens: &InputTokens) -> f32 {
+    spacing(CELL_SPACING, tokens)
+}
 
 // ── MonthsGrid ───────────────────────────────────────────────────────
 
@@ -80,7 +88,7 @@ impl Widget for MonthsGrid {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let mut rows: Vec<WidgetId> = Vec::with_capacity(ROWS);
         for r in 0..ROWS {
-            let mut row = HStack::new().spacing(CELL_SPACING);
+            let mut row = HStack::new().spacing(cell_spacing(&ctx.theme().input));
             for c in 0..COLUMNS {
                 let month = (r * COLUMNS + c + 1) as i8;
                 let visible_month_for_cell = self.visible_month.clone();
@@ -104,7 +112,7 @@ impl Widget for MonthsGrid {
             }
             rows.push(ctx.add(row));
         }
-        let mut col = VStack::new().spacing(CELL_SPACING);
+        let mut col = VStack::new().spacing(cell_spacing(&ctx.theme().input));
         for id in rows {
             col = col.add_child(id);
         }
@@ -203,7 +211,7 @@ impl Widget for YearsGrid {
         // 12 cells: decade_start - 1 .. decade_start + 11
         let mut rows: Vec<WidgetId> = Vec::with_capacity(ROWS);
         for r in 0..ROWS {
-            let mut row = HStack::new().spacing(CELL_SPACING);
+            let mut row = HStack::new().spacing(cell_spacing(&ctx.theme().input));
             for c in 0..COLUMNS {
                 let cell_year = decade_start - 1 + (r * COLUMNS + c) as i16;
                 let visible_for_cell = self.visible_month.clone();
@@ -227,7 +235,7 @@ impl Widget for YearsGrid {
             }
             rows.push(ctx.add(row));
         }
-        let mut col = VStack::new().spacing(CELL_SPACING);
+        let mut col = VStack::new().spacing(cell_spacing(&ctx.theme().input));
         for id in rows {
             col = col.add_child(id);
         }
@@ -414,5 +422,7 @@ fn resolve_calendar_style(ctx: &BuildContext) -> SharedCalendarStyle {
         .style_slots
         .calendar
         .clone()
-        .unwrap_or_else(|| Rc::new(RecipeCalendarStyle::default()) as SharedCalendarStyle)
+        .unwrap_or_else(|| {
+            Rc::new(RecipeCalendarStyle::for_tokens(&ctx.theme().input)) as SharedCalendarStyle
+        })
 }

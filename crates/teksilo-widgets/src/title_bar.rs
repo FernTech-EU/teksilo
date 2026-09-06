@@ -53,7 +53,7 @@ mod window_menu;
 pub use controls::{ControlAction, ControlButton, WindowControls, WindowControlsLayout};
 pub use drag_region::DragRegion;
 pub use resize_strip::ResizeStrip;
-pub use window_frame::WindowFrame;
+pub use window_frame::{WINDOW_FRAME_RESIZE_THICKNESS, WindowFrame};
 
 /// Type alias for the user-supplied close action that overrides
 /// `host.close()` (which on Wayland is currently a no-op due to winit 0.30

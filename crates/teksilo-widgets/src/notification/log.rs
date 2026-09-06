@@ -53,7 +53,7 @@ use teksilo_core::build_context::BuildContext;
 use teksilo_core::widget::{EventContext, LayoutContext, Widget, WidgetPlacement};
 use teksilo_core::widget_builder::WidgetBuilder;
 use teksilo_core::widget_id::WidgetId;
-use teksilo_tokens::{TextRole, TextStyleRole};
+use teksilo_tokens::{InputTokens, TargetRole, TextRole, TextStyleRole};
 
 use crate::button::{Button, ButtonVariant};
 use crate::link::Link;
@@ -67,6 +67,7 @@ use crate::standard_item::StandardListItem;
 use crate::styles::recipe_standard_item_style as si;
 use crate::toast::{ToastAudience, ToastRoute};
 use crate::tooltip::TooltipContent;
+use teksilo_core::styles::density::dp;
 use teksilo_core::window::TeksiloWindowId;
 use teksilo_i18n::LocalizedString;
 
@@ -74,6 +75,12 @@ use teksilo_i18n::LocalizedString;
 /// Wide enough for a severity glyph, a two-line entry and a trailing
 /// action button without eliding the title to a stub.
 const DEFAULT_PREFERRED_WIDTH: f32 = 380.0;
+
+/// [`DEFAULT_PREFERRED_WIDTH`] raised to the density's `target_size`
+/// (24 / 32 / 44 dp). The identity at Compact.
+fn default_preferred_width(tokens: &InputTokens) -> f32 {
+    dp(DEFAULT_PREFERRED_WIDTH, TargetRole::Target, tokens)
+}
 
 /// Height of the scrolling list area when the host proposes an
 /// unbounded height (roughly seven two-line rows).

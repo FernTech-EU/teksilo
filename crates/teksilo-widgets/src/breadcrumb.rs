@@ -48,13 +48,14 @@ use teksilo_core::widget::{
 };
 use teksilo_core::widget_builder::HandlerSet;
 use teksilo_core::widget_id::WidgetId;
-use teksilo_tokens::{Color, CornerRadius};
+use teksilo_tokens::{Color, CornerRadius, InputTokens};
 
 use crate::button::{Button, ButtonVariant};
 use crate::menu_item::MenuItem;
 use crate::menu_list::MenuList;
 use crate::popover_widget::PopoverButton;
 use crate::primitives::{HStack, IconWidget, Spacer};
+use teksilo_core::styles::density::spacing;
 use teksilo_i18n::LocalizedString;
 
 const FALLBACK_CHAR_WIDTH: f32 = 8.0;
@@ -86,8 +87,20 @@ impl std::fmt::Debug for BreadcrumbEntry {
 pub const BREADCRUMB_ITEM_HEIGHT: f32 = 20.0;
 /// Horizontal inner padding of each segment pill in logical pixels.
 pub const BREADCRUMB_ITEM_PADDING_HORIZONTAL: f32 = 6.0;
+
+/// [`BREADCRUMB_ITEM_PADDING_HORIZONTAL`] scaled by the density's `spacing_factor`
+/// (1.00 / 1.15 / 1.30).
+pub fn breadcrumb_item_padding_horizontal(tokens: &InputTokens) -> f32 {
+    spacing(BREADCRUMB_ITEM_PADDING_HORIZONTAL, tokens)
+}
 /// Gap reserved for the chevron separator between adjacent segments.
 pub const BREADCRUMB_SEPARATOR_GAP: f32 = 4.0;
+
+/// [`BREADCRUMB_SEPARATOR_GAP`] scaled by the density's `spacing_factor`
+/// (1.00 / 1.15 / 1.30).
+pub fn breadcrumb_separator_gap(tokens: &InputTokens) -> f32 {
+    spacing(BREADCRUMB_SEPARATOR_GAP, tokens)
+}
 /// Corner radius of the interactive segment hover/focus rectangle.
 pub const BREADCRUMB_CORNER_RADIUS: f32 = 4.0;
 
@@ -247,7 +260,7 @@ impl BreadcrumbSegment {
     }
 
     fn estimate_width(&self, ctx: &LayoutContext) -> f32 {
-        let pad_h = BREADCRUMB_ITEM_PADDING_HORIZONTAL;
+        let pad_h = breadcrumb_item_padding_horizontal(&ctx.theme.input);
         let envelope = ctx.theme.shape.focus_ring_offset + ctx.theme.shape.focus_ring_width;
         let resolved = self.label.resolve_now();
         let text_width = if let Some(backend) = ctx.text_backend {
@@ -460,7 +473,7 @@ impl Widget for BreadcrumbSegment {
             colors.text_secondary
         };
 
-        let pad_h = BREADCRUMB_ITEM_PADDING_HORIZONTAL;
+        let pad_h = breadcrumb_item_padding_horizontal(&ctx.theme.input);
         let text_bounds = Rect::new(
             visual.x + pad_h,
             visual.y,
@@ -513,8 +526,11 @@ impl Widget for BreadcrumbSeparator {
         _proposal: SizeProposal,
         ctx: &LayoutContext,
     ) -> teksilo_core::widget::LayoutResponse {
-        let _ = ctx;
-        Size::new(BREADCRUMB_SEPARATOR_GAP * 3.0, BREADCRUMB_ITEM_HEIGHT).into()
+        Size::new(
+            breadcrumb_separator_gap(&ctx.theme.input) * 3.0,
+            BREADCRUMB_ITEM_HEIGHT,
+        )
+        .into()
     }
 
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {

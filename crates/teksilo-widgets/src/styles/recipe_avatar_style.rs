@@ -22,6 +22,7 @@ use teksilo_core::binding::BindingLevel;
 use teksilo_core::build_context::BuildContext;
 use teksilo_core::color_prop::ColorProp;
 use teksilo_core::signal::Signal;
+use teksilo_core::styles::density::{dp, spacing};
 use teksilo_core::styles::{
     AvatarCorner, AvatarPresence, AvatarShape, AvatarSize, AvatarStyle, AvatarStyleConfig,
 };
@@ -29,7 +30,7 @@ use teksilo_core::widget::{
     LayoutContext, LayoutResponse, PaintContext, PendingChild, Widget, WidgetPlacement,
 };
 use teksilo_core::widget_id::WidgetId;
-use teksilo_tokens::{Color, CornerRadius};
+use teksilo_tokens::{Color, CornerRadius, InputTokens, TargetRole};
 
 // ─── IntUI design tokens for Avatar ────────────────────────────────
 // The recipe owns its own dimensions. `Avatar` (and its `InitialsLeaf`
@@ -224,23 +225,34 @@ pub struct AvatarRecipe {
     pub rounded_radius_ratio: f32,
 }
 
-impl Default for AvatarRecipe {
-    fn default() -> Self {
+impl AvatarRecipe {
+    /// This recipe's dimensions resolved against a density's [`InputTokens`].
+    ///
+    /// [`Default`] is `for_tokens(&InputTokens::default())` — the Compact
+    /// ladder — so the shipped values below are the Compact column by
+    /// construction and cannot drift from it.
+    pub fn for_tokens(tokens: &InputTokens) -> Self {
         Self {
-            size_small: AVATAR_SIZE_SMALL,
-            size_medium: AVATAR_SIZE_MEDIUM,
-            size_large: AVATAR_SIZE_LARGE,
-            size_x_large: AVATAR_SIZE_X_LARGE,
+            size_small: dp(AVATAR_SIZE_SMALL, TargetRole::Target, tokens),
+            size_medium: dp(AVATAR_SIZE_MEDIUM, TargetRole::Target, tokens),
+            size_large: dp(AVATAR_SIZE_LARGE, TargetRole::Target, tokens),
+            size_x_large: dp(AVATAR_SIZE_X_LARGE, TargetRole::Target, tokens),
             border_default: AVATAR_BORDER_DEFAULT,
             presence_diameter_ratio: AVATAR_PRESENCE_DIAMETER_RATIO,
             presence_diameter_min: AVATAR_PRESENCE_DIAMETER_MIN,
             presence_diameter_max: AVATAR_PRESENCE_DIAMETER_MAX,
             presence_outline_width: AVATAR_PRESENCE_OUTLINE_WIDTH,
-            presence_inset: AVATAR_PRESENCE_INSET,
+            presence_inset: spacing(AVATAR_PRESENCE_INSET, tokens),
             font_ratio_1char: AVATAR_FONT_RATIO_1CHAR,
             font_ratio_2char: AVATAR_FONT_RATIO_2CHAR,
             rounded_radius_ratio: AVATAR_ROUNDED_RADIUS_RATIO,
         }
+    }
+}
+
+impl Default for AvatarRecipe {
+    fn default() -> Self {
+        Self::for_tokens(&InputTokens::default())
     }
 }
 
@@ -253,6 +265,18 @@ pub struct RecipeAvatarStyle {
 impl RecipeAvatarStyle {
     pub fn new(recipe: AvatarRecipe) -> Self {
         Self { recipe }
+    }
+
+    /// This style with every dimension resolved against a density's
+    /// [`InputTokens`], as `RecipeAvatarStyle::for_tokens(&ctx.theme().input)` at
+    /// the widget's own build site.
+    ///
+    /// [`Default`] is the `TargetDensity::Compact` projection, so a Compact
+    /// tree gets exactly the values this module documents.
+    pub fn for_tokens(tokens: &InputTokens) -> Self {
+        Self {
+            recipe: AvatarRecipe::for_tokens(tokens),
+        }
     }
 }
 

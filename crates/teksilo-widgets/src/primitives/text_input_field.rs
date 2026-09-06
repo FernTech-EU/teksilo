@@ -76,7 +76,7 @@ use teksilo_core::widget_builder::HandlerSet;
 use teksilo_core::widget_id::WidgetId;
 use teksilo_text::text_document::{SelectionType, TextDocument};
 use teksilo_text::{CursorAffinity, CursorDisplay, RichTextEngine, SharedTypesetter};
-use teksilo_tokens::TextStyle;
+use teksilo_tokens::{InputTokens, TextStyle};
 
 use crate::button::InteractionState;
 use crate::keystroke_format::format_keystroke;
@@ -96,10 +96,17 @@ pub use self::validator::{ValidationFeedback, ValidationOutcome, ValidatorFn};
 // which is exactly the kind of duplication that drifts silently: two carets
 // blinking at different rates is invisible to tests and obvious to users.
 use crate::common::editor_runtime::CaretPolicy;
+use teksilo_core::styles::density::spacing;
 
 /// Horizontal scroll margin in pixels. The caret stays at least this
 /// far from the left/right edge of the viewport.
 const SCROLL_MARGIN: f32 = 4.0;
+
+/// [`SCROLL_MARGIN`] scaled by the density's `spacing_factor`
+/// (1.00 / 1.15 / 1.30).
+fn scroll_margin(tokens: &InputTokens) -> f32 {
+    spacing(SCROLL_MARGIN, tokens)
+}
 
 /// Default text-area height when the caller does not override it
 /// via [`TextInputField::text_height`]. Picked to match the Int UI
@@ -756,7 +763,7 @@ fn base_text_direction(
 /// editable text, i.e. `viewport_width - suffix_width`. Callers pass
 /// the reduced width explicitly so the scroll never slides text
 /// behind the non-editable suffix.
-fn ensure_caret_visible_h(st: &mut TextInputState, text_viewport_width: f32) {
+fn ensure_caret_visible_h(st: &mut TextInputState, text_viewport_width: f32, tokens: &InputTokens) {
     if !st.engine.has_full_layout() || text_viewport_width <= 0.0 {
         return;
     }
@@ -767,10 +774,11 @@ fn ensure_caret_visible_h(st: &mut TextInputState, text_viewport_width: f32) {
     let caret_w = caret[2].max(1.0);
     let vw = text_viewport_width;
 
-    if caret_x - st.scroll_x < SCROLL_MARGIN {
-        st.scroll_x = (caret_x - SCROLL_MARGIN).max(0.0);
-    } else if caret_x + caret_w - st.scroll_x > vw - SCROLL_MARGIN {
-        st.scroll_x = caret_x + caret_w - vw + SCROLL_MARGIN;
+    let margin = scroll_margin(tokens);
+    if caret_x - st.scroll_x < margin {
+        st.scroll_x = (caret_x - margin).max(0.0);
+    } else if caret_x + caret_w - st.scroll_x > vw - margin {
+        st.scroll_x = caret_x + caret_w - vw + margin;
     }
 }
 

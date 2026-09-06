@@ -37,9 +37,10 @@
 //! shorter button than the field beside it.
 
 use teksilo_core::build_context::BuildContext;
+use teksilo_core::styles::density::{dp, spacing};
 use teksilo_core::styles::{ButtonStyle, ButtonStyleConfig, ButtonVariant};
 use teksilo_core::widget_id::WidgetId;
-use teksilo_tokens::TextRole;
+use teksilo_tokens::{TargetRole, TextRole};
 use teksilo_widgets::primitives::{MinSize, Padding, ZStack};
 
 use crate::shape::FLUENT_CONTROL_CORNER_RADIUS;
@@ -73,6 +74,8 @@ impl FluentButtonStyle {
 
 impl ButtonStyle for FluentButtonStyle {
     fn make_body(&self, cfg: &ButtonStyleConfig, ctx: &mut BuildContext) -> WidgetId {
+        let tokens = ctx.theme().input;
+        let tokens = &tokens;
         let kind = Self::surface_kind(cfg.variant);
         let state = FluentState::derive(&cfg.is_disabled, &cfg.is_pressed, &cfg.is_hovered);
         // The Button surface exposes no `:focus-visible` signal, so the ring
@@ -90,10 +93,16 @@ impl ButtonStyle for FluentButtonStyle {
         ));
 
         let padded = ctx.add(
-            Padding::new(PADDING_TOP, PADDING_H, PADDING_BOTTOM, PADDING_H).child_id(cfg.label),
+            Padding::new(
+                spacing(PADDING_TOP, tokens),
+                spacing(PADDING_H, tokens),
+                spacing(PADDING_BOTTOM, tokens),
+                spacing(PADDING_H, tokens),
+            )
+            .child_id(cfg.label),
         );
         let stack = ctx.add(ZStack::new().add_child(chrome).add_child(padded));
-        ctx.add(MinSize::new(0.0, MIN_HEIGHT).child_id(stack))
+        ctx.add(MinSize::new(0.0, dp(MIN_HEIGHT, TargetRole::Target, tokens)).child_id(stack))
     }
 
     fn label_text_role(&self, variant: ButtonVariant) -> Option<TextRole> {

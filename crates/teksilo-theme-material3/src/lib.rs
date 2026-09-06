@@ -83,6 +83,20 @@ pub fn light() -> Theme {
     theme
 }
 
+/// Re-derive a Material 3 theme for another density.
+///
+/// Registered as the theme's [`DensityProjection`], so
+/// `WidgetTree::set_input_density` (and `Theme::with_density`) rebuild the
+/// Tier-3 slots this preset installs instead of carrying their Compact
+/// dimensions across. Colours, id, the [`Material3Palette`] extension and any
+/// slot the app installed itself ride across untouched.
+fn reproject(base: &Theme, density: TargetDensity) -> Theme {
+    let mut theme = base.clone();
+    theme.input = input_tokens(density);
+    install_style_slots(&mut theme);
+    theme
+}
+
 /// Material 3 dark theme (baseline scheme, seed `#6750A4`).
 pub fn dark() -> Theme {
     let mut theme = intui::dark().with_id("material3.dark");
@@ -113,9 +127,17 @@ fn apply_material3_overrides(theme: &mut Theme, appearance: ThemeAppearance) {
         Material3Palette::dark()
     });
 
-    // Tier-3 widget chrome. These read M3-mapped roles, so a single
-    // install serves both appearances.
-    theme.style_slots.button = Some(Rc::new(styles::button::m3_button_style()));
+    install_style_slots(theme);
+    theme
+        .extensions
+        .insert(teksilo_core::styles::DensityProjection(reproject));
+}
+
+/// Tier-3 widget chrome. These read M3-mapped roles, so a single install
+/// serves both appearances; the dimensions come from `theme.input`, so
+/// [`reproject`] can re-run this alone for a new density.
+fn install_style_slots(theme: &mut Theme) {
+    theme.style_slots.button = Some(Rc::new(styles::button::m3_button_style(&theme.input)));
     theme.style_slots.toggle = Some(Rc::new(styles::toggle::M3ToggleStyle));
     theme.style_slots.card = Some(Rc::new(styles::card::M3CardStyle));
 }
@@ -206,7 +228,7 @@ mod tests {
     fn destructive_button_label_is_on_error() {
         use teksilo_core::styles::ButtonVariant;
         use teksilo_tokens::TextRole;
-        let style = styles::button::m3_button_style();
+        let style = styles::button::m3_button_style(&InputTokens::default());
         assert_eq!(
             style.label_roles.get(&ButtonVariant::Destructive),
             Some(&TextRole::OnError),
@@ -216,7 +238,7 @@ mod tests {
     #[test]
     fn filled_button_hover_is_a_state_layer() {
         use teksilo_core::styles::{ButtonVariant, FillRecipe};
-        let style = styles::button::m3_button_style();
+        let style = styles::button::m3_button_style(&InputTokens::default());
         let filled = &style.recipes[&ButtonVariant::Filled];
         assert!(matches!(
             filled.fill.hover,
@@ -277,5 +299,50 @@ mod tests {
             assert_eq!(t.motion.tooltip_delay_heavy, Duration::from_millis(700));
             assert_eq!(t.motion.tooltip_reshow_delay, Duration::from_millis(100));
         }
+    }
+    /// Material 3's own touch target is **48 dp**, not the generic ladder's 44,
+    /// and a density switch must carry that through to the installed button
+    /// slot rather than falling back to the generic numbers.
+    #[test]
+    fn a_density_switch_keeps_material3s_own_48_dp_target() {
+        let base = light();
+        let before = base
+            .style_slots
+            .button
+            .clone()
+            .expect("button slot installed");
+
+        let touch = base.with_density(TargetDensity::Touch);
+        let after = touch
+            .style_slots
+            .button
+            .clone()
+            .expect("button slot survives");
+
+        assert_eq!(touch.input.density, TargetDensity::Touch);
+        assert_eq!(
+            touch.input.target_size, 48.0,
+            "the projection must use Material 3's ladder, not `InputTokens::for_density`"
+        );
+        assert!(
+            !Rc::ptr_eq(&before, &after),
+            "the projection must rebuild the preset's own slots, not carry them across"
+        );
+
+        let compact =
+            styles::button::m3_button_style(&InputTokens::for_density(TargetDensity::Compact));
+        let touched = styles::button::m3_button_style(&input_tokens(TargetDensity::Touch));
+        let variant = teksilo_core::styles::ButtonVariant::Filled;
+        assert_eq!(
+            compact.recipes[&variant].min_size.height, 40.0,
+            "M3's own 40 dp button at Compact"
+        );
+        assert_eq!(
+            touched.recipes[&variant].min_size.height, 48.0,
+            "M3's 48 dp touch target, not the generic 44"
+        );
+
+        assert_eq!(touch.id, base.id);
+        assert!(touch.extension::<Material3Palette>().is_some());
     }
 }

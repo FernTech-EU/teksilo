@@ -285,7 +285,11 @@ impl Widget for Slider {
             .style_override
             .clone()
             .or_else(|| ctx.theme().style_slots.slider.clone())
-            .unwrap_or_else(|| Rc::new(crate::styles::RecipeSliderStyle::default()));
+            .unwrap_or_else(|| {
+                Rc::new(crate::styles::RecipeSliderStyle::for_tokens(
+                    &ctx.theme().input,
+                ))
+            });
 
         // Derived `value_normalized` signal — re-renders the body
         // whenever the user-visible value changes.
@@ -335,8 +339,11 @@ impl Widget for Slider {
         // `EventContext` and can't reach the theme at event time.
         // Query the *resolved* style so a custom `SliderStyle` with a
         // different thumb size keeps drag hit-testing aligned, instead of
-        // baking in the recipe's design constant.
-        let thumb_radius = style.thumb_diameter(&cfg) * 0.5;
+        // baking in the recipe's design constant. Through the density-aware
+        // overload, so a style that does size its knob by density is asked the
+        // question that lets it answer; the default forwards to the plain
+        // `thumb_diameter` and the painted 14 dp knob is unchanged.
+        let thumb_radius = style.thumb_diameter_for(&cfg, &ctx.theme().input) * 0.5;
 
         let value = self.value.clone();
         let single_step = self.effective_step();

@@ -11,6 +11,7 @@ use crate::build_context::BuildContext;
 use crate::focus::FocusOrigin;
 use crate::signal::Signal;
 use crate::widget_id::WidgetId;
+use teksilo_tokens::InputTokens;
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash, Default, Serialize, Deserialize)]
 pub enum SliderVariant {
@@ -79,6 +80,26 @@ pub trait SliderStyle: 'static {
     /// this too, or dragging will map to the wrong pixel boundary.
     fn thumb_diameter(&self, _cfg: &SliderStyleConfig) -> f32 {
         14.0
+    }
+
+    /// The same diameter, told which density is active.
+    ///
+    /// The thumb is *paint geometry inside one leaf node* — the track, the
+    /// fill and the knob are one canvas — so the host `Slider` reads this at
+    /// event time to size the grab region, and it is the only place a density
+    /// can reach it. Additive and defaulted to
+    /// [`thumb_diameter`](Self::thumb_diameter), so a style written before the
+    /// density layer existed keeps working and keeps its own number; a style
+    /// that wants a bigger knob under a coarse pointer overrides this one
+    /// instead.
+    ///
+    /// The **painted** knob is deliberately not grown here: A10 gives the
+    /// slider its coarse target through `target_regions` and `hit_outset` over
+    /// an unchanged 14 dp visual (the design's Constants table: "14 dp visual →
+    /// 24 dp hit, 44 at Touch"). This exists so a style *may* disagree, not so
+    /// the framework does.
+    fn thumb_diameter_for(&self, cfg: &SliderStyleConfig, _tokens: &InputTokens) -> f32 {
+        self.thumb_diameter(cfg)
     }
 }
 

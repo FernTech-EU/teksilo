@@ -18,9 +18,10 @@
 use teksilo_core::build_context::BuildContext;
 use teksilo_core::styles::{DropZoneStyle, DropZoneStyleConfig};
 use teksilo_core::widget_id::WidgetId;
-use teksilo_tokens::CornerRadius;
+use teksilo_tokens::{CornerRadius, InputTokens};
 
 use crate::primitives::{Center, Padding, RectWidget, ZStack};
+use teksilo_core::styles::density::spacing;
 
 /// Corner radius of the zone's rounded rectangle.
 pub const DROP_ZONE_CORNER_RADIUS: f32 = 12.0;
@@ -40,13 +41,24 @@ pub struct DropZoneRecipe {
     pub padding: f32,
 }
 
-impl Default for DropZoneRecipe {
-    fn default() -> Self {
+impl DropZoneRecipe {
+    /// This recipe's dimensions resolved against a density's [`InputTokens`].
+    ///
+    /// [`Default`] is `for_tokens(&InputTokens::default())` — the Compact
+    /// ladder — so the shipped values below are the Compact column by
+    /// construction and cannot drift from it.
+    pub fn for_tokens(tokens: &InputTokens) -> Self {
         Self {
             corner_radius: DROP_ZONE_CORNER_RADIUS,
             border_width: DROP_ZONE_BORDER_WIDTH,
-            padding: DROP_ZONE_PADDING,
+            padding: spacing(DROP_ZONE_PADDING, tokens),
         }
+    }
+}
+
+impl Default for DropZoneRecipe {
+    fn default() -> Self {
+        Self::for_tokens(&InputTokens::default())
     }
 }
 
@@ -61,6 +73,18 @@ impl RecipeDropZoneStyle {
     /// Create a style with a custom dimension recipe.
     pub fn new(recipe: DropZoneRecipe) -> Self {
         Self { recipe }
+    }
+
+    /// This style with every dimension resolved against a density's
+    /// [`InputTokens`], as `RecipeDropZoneStyle::for_tokens(&ctx.theme().input)` at
+    /// the widget's own build site.
+    ///
+    /// [`Default`] is the `TargetDensity::Compact` projection, so a Compact
+    /// tree gets exactly the values this module documents.
+    pub fn for_tokens(tokens: &InputTokens) -> Self {
+        Self {
+            recipe: DropZoneRecipe::for_tokens(tokens),
+        }
     }
 }
 

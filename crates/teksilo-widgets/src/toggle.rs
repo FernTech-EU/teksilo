@@ -212,7 +212,11 @@ impl Widget for Toggle {
             .style
             .clone()
             .or_else(|| ctx.theme().style_slots.toggle.clone())
-            .unwrap_or_else(|| Rc::new(crate::styles::RecipeToggleStyle::default()));
+            .unwrap_or_else(|| {
+                Rc::new(crate::styles::RecipeToggleStyle::for_tokens(
+                    &ctx.theme().input,
+                ))
+            });
 
         // Build the visual body via the active style. The body is a
         // child subtree we'll lay out to the bounds we get.

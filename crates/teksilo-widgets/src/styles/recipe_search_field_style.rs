@@ -11,8 +11,10 @@
 //! SearchField-specific.
 
 use teksilo_core::build_context::BuildContext;
+use teksilo_core::styles::density::{dp, spacing};
 use teksilo_core::styles::{SearchFieldStyle, SearchFieldStyleConfig, SharedSearchFieldStyle};
 use teksilo_core::widget_id::WidgetId;
+use teksilo_tokens::{InputTokens, TargetRole};
 
 // ─── IntUI design tokens for SearchField ───────────────────────────
 
@@ -53,19 +55,30 @@ pub struct SearchFieldRecipe {
     pub row_height: f32,
 }
 
-impl Default for SearchFieldRecipe {
-    fn default() -> Self {
+impl SearchFieldRecipe {
+    /// This recipe's dimensions resolved against a density's [`InputTokens`].
+    ///
+    /// [`Default`] is `for_tokens(&InputTokens::default())` — the Compact
+    /// ladder — so the shipped values below are the Compact column by
+    /// construction and cannot drift from it.
+    pub fn for_tokens(tokens: &InputTokens) -> Self {
         Self {
             glyph_size: GLYPH_SIZE,
             glyph_slot_width: GLYPH_SLOT_WIDTH,
-            input_panel_gap: INPUT_PANEL_GAP,
-            panel_padding: PANEL_PADDING,
+            input_panel_gap: spacing(INPUT_PANEL_GAP, tokens),
+            panel_padding: spacing(PANEL_PADDING, tokens),
             panel_corner_radius: PANEL_CORNER_RADIUS,
             row_corner_radius: ROW_CORNER_RADIUS,
-            row_padding_horizontal: ROW_PADDING_HORIZONTAL,
-            row_padding_vertical: ROW_PADDING_VERTICAL,
-            row_height: ROW_HEIGHT,
+            row_padding_horizontal: spacing(ROW_PADDING_HORIZONTAL, tokens),
+            row_padding_vertical: spacing(ROW_PADDING_VERTICAL, tokens),
+            row_height: dp(ROW_HEIGHT, TargetRole::Target, tokens),
         }
+    }
+}
+
+impl Default for SearchFieldRecipe {
+    fn default() -> Self {
+        Self::for_tokens(&InputTokens::default())
     }
 }
 
@@ -80,6 +93,18 @@ pub struct RecipeSearchFieldStyle {
 impl RecipeSearchFieldStyle {
     pub fn new(recipe: SearchFieldRecipe) -> Self {
         Self { recipe }
+    }
+
+    /// This style with every dimension resolved against a density's
+    /// [`InputTokens`], as `RecipeSearchFieldStyle::for_tokens(&ctx.theme().input)` at
+    /// the widget's own build site.
+    ///
+    /// [`Default`] is the `TargetDensity::Compact` projection, so a Compact
+    /// tree gets exactly the values this module documents.
+    pub fn for_tokens(tokens: &InputTokens) -> Self {
+        Self {
+            recipe: SearchFieldRecipe::for_tokens(tokens),
+        }
     }
 }
 
@@ -102,6 +127,7 @@ pub fn resolve_search_field_style(
         .search_field
         .clone()
         .unwrap_or_else(|| {
-            std::rc::Rc::new(RecipeSearchFieldStyle::default()) as SharedSearchFieldStyle
+            std::rc::Rc::new(RecipeSearchFieldStyle::for_tokens(&ctx.theme().input))
+                as SharedSearchFieldStyle
         })
 }

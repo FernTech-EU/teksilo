@@ -36,9 +36,10 @@ use teksilo_core::styles::{
 };
 use teksilo_core::widget::{LayoutContext, LayoutResponse, PaintContext, Widget, WidgetPlacement};
 use teksilo_core::widget_id::WidgetId;
-use teksilo_tokens::CornerRadius;
+use teksilo_tokens::{CornerRadius, InputTokens, TargetRole};
 
 use crate::primitives::{HStack, RectWidget, ZStack};
+use teksilo_core::styles::density::{dp, spacing};
 
 // IntUI design tokens for Tab. The recipe and parent TabHeader own
 // their own dimensions.
@@ -65,16 +66,27 @@ pub struct TabRecipe {
     pub close_button_size: f32,
 }
 
-impl Default for TabRecipe {
-    fn default() -> Self {
+impl TabRecipe {
+    /// This recipe's dimensions resolved against a density's [`InputTokens`].
+    ///
+    /// [`Default`] is `for_tokens(&InputTokens::default())` — the Compact
+    /// ladder — so the shipped values below are the Compact column by
+    /// construction and cannot drift from it.
+    pub fn for_tokens(tokens: &InputTokens) -> Self {
         Self {
-            editor_height: TAB_EDITOR_HEIGHT,
-            tool_window_height: TAB_TOOL_WINDOW_HEIGHT,
-            padding_horizontal: TAB_PADDING_HORIZONTAL,
+            editor_height: dp(TAB_EDITOR_HEIGHT, TargetRole::Target, tokens),
+            tool_window_height: dp(TAB_TOOL_WINDOW_HEIGHT, TargetRole::Target, tokens),
+            padding_horizontal: spacing(TAB_PADDING_HORIZONTAL, tokens),
             underline_active: TAB_UNDERLINE_ACTIVE,
             underline_hover: TAB_UNDERLINE_HOVER,
             close_button_size: TAB_CLOSE_BUTTON_SIZE,
         }
+    }
+}
+
+impl Default for TabRecipe {
+    fn default() -> Self {
+        Self::for_tokens(&InputTokens::default())
     }
 }
 
@@ -87,6 +99,18 @@ pub struct RecipeTabStyle {
 impl RecipeTabStyle {
     pub fn new(recipe: TabRecipe) -> Self {
         Self { recipe }
+    }
+
+    /// This style with every dimension resolved against a density's
+    /// [`InputTokens`], as `RecipeTabStyle::for_tokens(&ctx.theme().input)` at
+    /// the widget's own build site.
+    ///
+    /// [`Default`] is the `TargetDensity::Compact` projection, so a Compact
+    /// tree gets exactly the values this module documents.
+    pub fn for_tokens(tokens: &InputTokens) -> Self {
+        Self {
+            recipe: TabRecipe::for_tokens(tokens),
+        }
     }
 }
 

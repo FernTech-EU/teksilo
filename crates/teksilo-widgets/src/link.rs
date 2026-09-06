@@ -203,7 +203,11 @@ impl Widget for Link {
             .style_override
             .clone()
             .or_else(|| ctx.theme().style_slots.link.clone())
-            .unwrap_or_else(|| Rc::new(crate::styles::RecipeLinkStyle::default()));
+            .unwrap_or_else(|| {
+                Rc::new(crate::styles::RecipeLinkStyle::for_tokens(
+                    &ctx.theme().input,
+                ))
+            });
         let root_id = style.make_body(
             &LinkStyleConfig {
                 text: self.text.clone().into(),

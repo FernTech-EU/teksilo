@@ -105,6 +105,36 @@ pub struct Theme {
     pub extensions: ThemeExtensions,
 }
 
+/// How a theme re-derives itself for another [`TargetDensity`], registered as
+/// a [`ThemeExtensions`] entry.
+///
+/// Absent — the default, and what every raw-token theme gets — means
+/// [`Theme::with_density`] swaps [`Theme::input`] and changes nothing else.
+/// That is right for a theme whose `style_slots` are all `None`, because each
+/// widget then builds its own `Recipe*Style` from `ctx.theme().input` at its
+/// next build.
+///
+/// A **preset that installs Tier-3 slots of its own** (Fluent, macOS,
+/// Material 3) needs more: its slots are `Some(..)`, so they would ride across
+/// a density switch still carrying the dimensions they were built with, and a
+/// Fluent button would stay 32 dp tall under Touch. Such a preset registers
+/// this — a function taking the *current* theme, so it can recover the palette
+/// it was built from (`theme.extension::<FluentPalette>()`) and rebuild only
+/// the slots it owns, leaving colours, id, other extensions and any slot the
+/// app installed itself alone.
+///
+/// It lives in the extension registry rather than as a `Theme` field for the
+/// reason the registry exists: it is optional, typed, non-serializable state
+/// that only some themes carry.
+#[derive(Clone, Copy)]
+pub struct DensityProjection(pub fn(&Theme, TargetDensity) -> Theme);
+
+impl std::fmt::Debug for DensityProjection {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("DensityProjection(<fn>)")
+    }
+}
+
 impl Theme {
     /// Build a Theme from raw token data. Most apps go through a
     /// preset constructor (e.g. `teksilo_core::presets::intui::light`)
@@ -131,6 +161,12 @@ impl Theme {
             style_slots: ComponentStyleSlots::default(),
             extensions: ThemeExtensions::new(),
         }
+    }
+
+    /// Register how this theme re-derives itself for another density. Preset
+    /// constructors call this; see [`DensityProjection`].
+    pub fn with_density_projection(self, project: fn(&Theme, TargetDensity) -> Theme) -> Self {
+        self.with_extension(DensityProjection(project))
     }
 
     /// Set this theme's [`ThemeId`] and return self for chaining. Used by
@@ -189,9 +225,16 @@ impl Theme {
     /// but it means a custom style is not density-aware unless its author made
     /// it so.
     ///
+    /// A theme that carries a [`DensityProjection`] — every shipped preset that
+    /// installs slots — takes that function's answer instead, so its own chrome
+    /// does follow the density.
+    ///
     /// Use `WidgetTree::set_input_density` rather than calling this and
     /// `set_theme` by hand: a density change must rebuild, not merely relayout.
     pub fn with_density(&self, density: TargetDensity) -> Theme {
+        if let Some(DensityProjection(project)) = self.extension::<DensityProjection>().copied() {
+            return project(self, density);
+        }
         Theme {
             input: InputTokens::for_density(density),
             ..self.clone()

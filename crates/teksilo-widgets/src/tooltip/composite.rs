@@ -35,7 +35,7 @@ use teksilo_core::widget::{LayoutContext, PaintContext, Widget};
 use teksilo_core::widget_builder::HandlerSet;
 use teksilo_core::widget_id::WidgetId;
 use teksilo_i18n::LocalizedString;
-use teksilo_tokens::{CornerRadius, TextRole};
+use teksilo_tokens::{CornerRadius, InputTokens, TextRole};
 
 use crate::primitives::{Grid, Padding, Spacer, TrackSize};
 use crate::scroll_area::{ScrollArea, ScrollBarPolicy};
@@ -43,6 +43,7 @@ use crate::tooltip::dwell_indicator::DwellIndicator;
 // Step granularity is shared with `RichTooltipWidget`'s indicator (0..=4) —
 // imported, not restated, so the two tiers cannot drift apart.
 use crate::tooltip::rich::{DWELL_STEP_DURATION, DWELL_STEPS};
+use teksilo_core::styles::density::spacing;
 
 /// Composite tooltip surface — hosts an arbitrary widget body with the
 /// same dwell-to-sticky promotion as the rich tooltip.
@@ -208,6 +209,12 @@ impl CompositeTooltipWidget {
 /// `VStack` spacing used to supply before the column was placed by hand.
 const FOOTER_GAP: f32 = 6.0;
 
+/// [`FOOTER_GAP`] scaled by the density's `spacing_factor`
+/// (1.00 / 1.15 / 1.30).
+fn footer_gap(tokens: &InputTokens) -> f32 {
+    spacing(FOOTER_GAP, tokens)
+}
+
 impl Widget for CompositeTooltipWidget {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         use crate::styles::recipe_tooltip_style as tt;
@@ -351,7 +358,7 @@ impl Widget for CompositeTooltipWidget {
         };
         let natural = Size::new(
             padded_natural.width.max(footer_natural.width),
-            padded_natural.height + FOOTER_GAP + footer_natural.height,
+            padded_natural.height + footer_gap(&ctx.theme.input) + footer_natural.height,
         );
         let avail_w = proposal.width.unwrap_or(f32::INFINITY).min(max_w);
         let w = natural.width.min(avail_w);
@@ -366,7 +373,7 @@ impl Widget for CompositeTooltipWidget {
             .unwrap_or(footer_natural.height);
         let h = ctx
             .child_size(padded, at_w)
-            .map(|s| s.height + FOOTER_GAP + footer_h)
+            .map(|s| s.height + footer_gap(&ctx.theme.input) + footer_h)
             .unwrap_or(natural.height);
 
         // Height needs one more correction. A `ScrollArea` is a viewport: asked for its
@@ -460,13 +467,14 @@ impl Widget for CompositeTooltipWidget {
             .and_then(|id| ctx.child_size(id, at_w))
             .map(|s| s.height)
             .unwrap_or(0.0);
-        let body_h = (bounds.height - footer_h - FOOTER_GAP).max(0.0);
+        let gap = footer_gap(&ctx.theme.input);
+        let body_h = (bounds.height - footer_h - gap).max(0.0);
         for (i, child) in children.iter_mut().enumerate() {
             if i == 0 {
                 child.origin = teksilo_canvas::Point::new(bounds.x, bounds.y);
                 child.size = Size::new(bounds.width, body_h);
             } else {
-                child.origin = teksilo_canvas::Point::new(bounds.x, bounds.y + body_h + FOOTER_GAP);
+                child.origin = teksilo_canvas::Point::new(bounds.x, bounds.y + body_h + gap);
                 child.size = Size::new(bounds.width, footer_h);
             }
         }

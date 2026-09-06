@@ -485,12 +485,11 @@ impl Widget for HeaderCell {
         // a hover/resize background behind the label — apps install a
         // theme-wide `style_slots.table` or pass their own when wrapping
         // the table to swap the chrome wholesale.
-        let style: SharedTableStyle = ctx
-            .theme()
-            .style_slots
-            .table
-            .clone()
-            .unwrap_or_else(|| Rc::new(crate::styles::RecipeTableStyle::default()));
+        let style: SharedTableStyle = ctx.theme().style_slots.table.clone().unwrap_or_else(|| {
+            Rc::new(crate::styles::RecipeTableStyle::for_tokens(
+                &ctx.theme().input,
+            ))
+        });
         let cell_cfg = TableHeaderCellConfig {
             label: padded,
             sort: self.current_sort.map(style_sort),

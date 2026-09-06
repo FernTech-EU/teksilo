@@ -676,23 +676,14 @@ impl<T: 'static> Widget for TableView<T> {
                 .on_drag_leave(move |_ctx| {
                     feedback_for_leave.set(None);
                 })
-                .on_drag_tick(move |pos, _ctx| {
-                    // Auto-scroll when the pointer lingers within 32 px of the
+                .on_drag_tick(move |pos, ctx| {
+                    // Auto-scroll when the pointer lingers near the
                     // body band's top/bottom edge during a drag (body-relative
                     // so the header doesn't count as the top edge).
-                    const EDGE: f32 = 32.0;
-                    const MAX_VELOCITY: f32 = 12.0;
                     let body_h = (viewport_for_tick.get() - header_h_for_tick).max(0.0);
                     let y = pos.y - header_h_for_tick;
-                    let above = (EDGE - y).max(0.0);
-                    let below = (y - (body_h - EDGE)).max(0.0);
-                    let delta = if above > 0.0 {
-                        -(above / EDGE) * MAX_VELOCITY
-                    } else if below > 0.0 {
-                        (below / EDGE) * MAX_VELOCITY
-                    } else {
-                        0.0
-                    };
+                    let band = crate::common::drag_autoscroll::band_for(ctx.pointer_kind());
+                    let delta = crate::common::drag_autoscroll::step(y, body_h, band);
                     if delta.abs() > 0.01 {
                         let max = max_scroll_for_tick.get();
                         let new_y = (scroll_for_tick.get() + delta).clamp(0.0, max);

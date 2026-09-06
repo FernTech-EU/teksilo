@@ -34,9 +34,10 @@
 use teksilo_core::build_context::BuildContext;
 use teksilo_core::styles::{ComboBoxStyle, ComboBoxStyleConfig, ComboBoxVariant};
 use teksilo_core::widget_id::WidgetId;
-use teksilo_tokens::{BorderRole, CornerRadius, SurfaceRole};
+use teksilo_tokens::{BorderRole, CornerRadius, InputTokens, SurfaceRole, TargetRole};
 
 use crate::primitives::{FixedSize, HStack, IconWidget, Padding, RectWidget, Spacer, ZStack};
+use teksilo_core::styles::density::{dp, spacing};
 
 // IntUI design tokens for ComboBox. The recipe owns its own dimensions.
 pub const COMBO_BOX_HEIGHT: f32 = 28.0;
@@ -53,14 +54,25 @@ pub struct ComboBoxRecipe {
     pub corner_radius: f32,
 }
 
-impl Default for ComboBoxRecipe {
-    fn default() -> Self {
+impl ComboBoxRecipe {
+    /// This recipe's dimensions resolved against a density's [`InputTokens`].
+    ///
+    /// [`Default`] is `for_tokens(&InputTokens::default())` — the Compact
+    /// ladder — so the shipped values below are the Compact column by
+    /// construction and cannot drift from it.
+    pub fn for_tokens(tokens: &InputTokens) -> Self {
         Self {
-            height: COMBO_BOX_HEIGHT,
-            padding_horizontal: COMBO_BOX_PADDING_HORIZONTAL,
+            height: dp(COMBO_BOX_HEIGHT, TargetRole::Target, tokens),
+            padding_horizontal: spacing(COMBO_BOX_PADDING_HORIZONTAL, tokens),
             arrow_column_width: COMBO_BOX_ARROW_COLUMN_WIDTH,
             corner_radius: COMBO_BOX_CORNER_RADIUS,
         }
+    }
+}
+
+impl Default for ComboBoxRecipe {
+    fn default() -> Self {
+        Self::for_tokens(&InputTokens::default())
     }
 }
 
@@ -73,6 +85,18 @@ pub struct RecipeComboBoxStyle {
 impl RecipeComboBoxStyle {
     pub fn new(recipe: ComboBoxRecipe) -> Self {
         Self { recipe }
+    }
+
+    /// This style with every dimension resolved against a density's
+    /// [`InputTokens`], as `RecipeComboBoxStyle::for_tokens(&ctx.theme().input)` at
+    /// the widget's own build site.
+    ///
+    /// [`Default`] is the `TargetDensity::Compact` projection, so a Compact
+    /// tree gets exactly the values this module documents.
+    pub fn for_tokens(tokens: &InputTokens) -> Self {
+        Self {
+            recipe: ComboBoxRecipe::for_tokens(tokens),
+        }
     }
 }
 

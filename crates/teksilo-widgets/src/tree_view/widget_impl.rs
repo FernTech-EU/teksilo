@@ -944,20 +944,11 @@ impl<T: 'static> Widget for TreeView<T> {
             let hr_for_tick = hovered_row.clone();
             let source_for_tick = self.source.clone();
             const SPRING_DELAY_MS: u64 = 700;
-            handlers = handlers.on_drag_tick(move |pos, _ctx| {
+            handlers = handlers.on_drag_tick(move |pos, ctx| {
                 // --- 1. Edge auto-scroll ---
-                const EDGE: f32 = 32.0;
-                const MAX_VELOCITY: f32 = 12.0;
                 let h = viewport_for_tick.get();
-                let above = (EDGE - pos.y).max(0.0);
-                let below = (pos.y - (h - EDGE)).max(0.0);
-                let delta = if above > 0.0 {
-                    -(above / EDGE) * MAX_VELOCITY
-                } else if below > 0.0 {
-                    (below / EDGE) * MAX_VELOCITY
-                } else {
-                    0.0
-                };
+                let band = crate::common::drag_autoscroll::band_for(ctx.pointer_kind());
+                let delta = crate::common::drag_autoscroll::step(pos.y, h, band);
                 if delta.abs() > 0.01 {
                     let max = max_scroll_for_tick.get();
                     let new_y = (scroll_for_tick.get() + delta).clamp(0.0, max);

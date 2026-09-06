@@ -24,22 +24,54 @@ use teksilo_core::signal::{Prop, Signal};
 use teksilo_core::widget::{EventContext, LayoutContext, Widget, WidgetPlacement};
 use teksilo_core::widget_id::WidgetId;
 use teksilo_tokens::{
-    BorderRole, CornerRadius, HAlignment, SurfaceRole, TextRole, TextStyleRole, VAlignment,
+    BorderRole, CornerRadius, HAlignment, InputTokens, SurfaceRole, TargetRole, TextRole,
+    TextStyleRole, VAlignment,
 };
 
 use crate::button::InteractionState;
 use crate::primitives::icon_widget::IconWidget;
 use crate::primitives::{HStack, Padding, RectWidget, TextWidget, VStack, ZStack};
+use teksilo_core::styles::density::{dp, spacing};
 use teksilo_i18n::LocalizedString;
 
 /// CommandLinkButton design tokens. The widget is a group-4 composite
 /// with no dedicated recipe module.
 pub const COMMAND_LINK_BUTTON_ICON_SIZE: f32 = 28.0;
 pub const COMMAND_LINK_BUTTON_ICON_TEXT_GAP: f32 = 14.0;
+
+/// [`COMMAND_LINK_BUTTON_ICON_TEXT_GAP`] scaled by the density's `spacing_factor`
+/// (1.00 / 1.15 / 1.30).
+pub fn command_link_button_icon_text_gap(tokens: &InputTokens) -> f32 {
+    spacing(COMMAND_LINK_BUTTON_ICON_TEXT_GAP, tokens)
+}
 pub const COMMAND_LINK_BUTTON_TITLE_DESCRIPTION_GAP: f32 = 4.0;
+
+/// [`COMMAND_LINK_BUTTON_TITLE_DESCRIPTION_GAP`] scaled by the density's `spacing_factor`
+/// (1.00 / 1.15 / 1.30).
+pub fn command_link_button_title_description_gap(tokens: &InputTokens) -> f32 {
+    spacing(COMMAND_LINK_BUTTON_TITLE_DESCRIPTION_GAP, tokens)
+}
 pub const COMMAND_LINK_BUTTON_PADDING_HORIZONTAL: f32 = 16.0;
+
+/// [`COMMAND_LINK_BUTTON_PADDING_HORIZONTAL`] scaled by the density's `spacing_factor`
+/// (1.00 / 1.15 / 1.30).
+pub fn command_link_button_padding_horizontal(tokens: &InputTokens) -> f32 {
+    spacing(COMMAND_LINK_BUTTON_PADDING_HORIZONTAL, tokens)
+}
 pub const COMMAND_LINK_BUTTON_PADDING_VERTICAL: f32 = 14.0;
+
+/// [`COMMAND_LINK_BUTTON_PADDING_VERTICAL`] scaled by the density's `spacing_factor`
+/// (1.00 / 1.15 / 1.30).
+pub fn command_link_button_padding_vertical(tokens: &InputTokens) -> f32 {
+    spacing(COMMAND_LINK_BUTTON_PADDING_VERTICAL, tokens)
+}
 pub const COMMAND_LINK_BUTTON_MIN_HEIGHT: f32 = 64.0;
+
+/// [`COMMAND_LINK_BUTTON_MIN_HEIGHT`] raised to the density's `target_size`
+/// (24 / 32 / 44 dp). The identity at Compact.
+pub fn command_link_button_min_height(tokens: &InputTokens) -> f32 {
+    dp(COMMAND_LINK_BUTTON_MIN_HEIGHT, TargetRole::Target, tokens)
+}
 
 /// A large two-line CTA button: icon + title + subtitle.
 pub struct CommandLinkButton {
@@ -263,7 +295,9 @@ impl Widget for CommandLinkButton {
         let title_id = ctx.add(title_widget);
 
         let mut text_column = VStack::new()
-            .spacing(COMMAND_LINK_BUTTON_TITLE_DESCRIPTION_GAP)
+            .spacing(command_link_button_title_description_gap(
+                &ctx.theme().input,
+            ))
             .alignment(HAlignment::Leading)
             .add_child(title_id);
         if let Some(description) = &self.description {
@@ -287,7 +321,7 @@ impl Widget for CommandLinkButton {
 
         // Optional leading icon.
         let mut row = HStack::new()
-            .spacing(COMMAND_LINK_BUTTON_ICON_TEXT_GAP)
+            .spacing(command_link_button_icon_text_gap(&ctx.theme().input))
             .alignment(VAlignment::Center);
         if let Some(icon) = self.icon.take() {
             let icon_id = ctx.add(
@@ -302,8 +336,8 @@ impl Widget for CommandLinkButton {
         // Padding inside the surface.
         let padded = ctx.add(
             Padding::symmetric(
-                COMMAND_LINK_BUTTON_PADDING_VERTICAL,
-                COMMAND_LINK_BUTTON_PADDING_HORIZONTAL,
+                command_link_button_padding_vertical(&ctx.theme().input),
+                command_link_button_padding_horizontal(&ctx.theme().input),
             )
             .child_id(row_id),
         );
@@ -319,7 +353,11 @@ impl Widget for CommandLinkButton {
 
         let zstack = ctx.add(ZStack::new().add_child(rect).add_child(padded));
         let root = ctx.add(
-            crate::primitives::MinSize::new(0.0, COMMAND_LINK_BUTTON_MIN_HEIGHT).child_id(zstack),
+            crate::primitives::MinSize::new(
+                0.0,
+                command_link_button_min_height(&ctx.theme().input),
+            )
+            .child_id(zstack),
         );
 
         // Attached handlers via the shared button-family helper
@@ -358,10 +396,11 @@ impl Widget for CommandLinkButton {
         proposal: SizeProposal,
         ctx: &LayoutContext,
     ) -> teksilo_core::widget::LayoutResponse {
-        let _ = ctx;
         self.root_child_id
             .and_then(|id| ctx.child_size(id, proposal))
-            .unwrap_or_else(|| proposal.resolve(0.0, COMMAND_LINK_BUTTON_MIN_HEIGHT))
+            .unwrap_or_else(|| {
+                proposal.resolve(0.0, command_link_button_min_height(&ctx.theme.input))
+            })
             .into()
     }
 

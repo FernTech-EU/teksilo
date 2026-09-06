@@ -135,7 +135,12 @@ fn build_entry_row(
     let header_id = ctx.add(header_row);
 
     let stack = ZStack::new().add_child(bg_id).add_child(header_id);
-    let stack_w = MinSize::new(0.0, 28.0).child(stack);
+    let header_min = teksilo_core::styles::density::density_min_size(
+        teksilo_canvas::Size::new(0.0, 28.0),
+        teksilo_tokens::TargetAxes::HEIGHT,
+        &ctx.theme().input,
+    );
+    let stack_w = MinSize::new(0.0, header_min.height).child(stack);
     let stack_id = ctx.add(stack_w);
 
     // Click to select this widget.
@@ -189,7 +194,14 @@ fn build_variant_row(
     let label_id = ctx.add(row_padding);
 
     let stack = ZStack::new().add_child(bg_id).add_child(label_id);
-    let stack_widget = MinSize::new(0.0, 22.0).child(stack);
+    // 22 dp was below the 24 dp WCAG 2.2 SC 2.5.8 floor, and a `MinSize` is
+    // exactly the hit box that floor governs, so this row is raised to it.
+    let row_min = teksilo_core::styles::density::density_min_size(
+        teksilo_canvas::Size::new(0.0, 22.0),
+        teksilo_tokens::TargetAxes::HEIGHT,
+        &ctx.theme().input,
+    );
+    let stack_widget = MinSize::new(0.0, row_min.height).child(stack);
     let stack_id = ctx.add(stack_widget);
 
     let st = state.clone();

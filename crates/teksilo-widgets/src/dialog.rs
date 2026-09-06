@@ -198,7 +198,11 @@ impl Widget for ModalContainer {
             .style_override
             .clone()
             .or_else(|| ctx.theme().style_slots.dialog.clone())
-            .unwrap_or_else(|| Rc::new(crate::styles::RecipeDialogStyle::default()));
+            .unwrap_or_else(|| {
+                Rc::new(crate::styles::RecipeDialogStyle::for_tokens(
+                    &ctx.theme().input,
+                ))
+            });
         let cfg = DialogStyleConfig {
             content: content_id,
             has_scrim: true,
@@ -345,7 +349,11 @@ impl Widget for ModalScrim {
             .style_override
             .clone()
             .or_else(|| ctx.theme().style_slots.dialog.clone())
-            .unwrap_or_else(|| Rc::new(crate::styles::RecipeDialogStyle::default()));
+            .unwrap_or_else(|| {
+                Rc::new(crate::styles::RecipeDialogStyle::for_tokens(
+                    &ctx.theme().input,
+                ))
+            });
         let chrome_id = style.make_scrim(ctx);
 
         // A scrim is never re-attributed to and never widens. The size formula

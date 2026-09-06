@@ -172,6 +172,11 @@ pub(super) fn handle_pointer_event(
 /// Expressed per *second* rather than per frame so the rate does not depend on
 /// the display's refresh rate.
 fn auto_scroll_velocity(y: f32, viewport_height: f32) -> f32 {
+    /// The editor's own, tighter edge band: a caret drag inside text wants to
+    /// start scrolling later than a row drag over a list, so this is 20 dp
+    /// rather than [`crate::common::drag_autoscroll::EDGE_BAND_PRECISE`]'s 32.
+    /// Kind-widening is the coarse-pointer path P26 owns (a finger selecting
+    /// text uses selection handles, not this ramp).
     const MARGIN: f32 = 20.0;
     const MAX_PER_SEC: f32 = 60.0 * 60.0;
     if y < MARGIN {

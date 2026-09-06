@@ -30,7 +30,7 @@ impl teksilo_core::styles::MenuItemStyle for OnAccentHighlightStyle {
         cfg: &MenuItemStyleConfig,
         ctx: &mut teksilo_core::build_context::BuildContext,
     ) -> WidgetId {
-        crate::styles::RecipeMenuItemStyle::default().make_body(cfg, ctx)
+        crate::styles::RecipeMenuItemStyle::for_tokens(&ctx.theme().input).make_body(cfg, ctx)
     }
 
     fn highlighted_label_role(&self) -> Option<TextRole> {

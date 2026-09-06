@@ -579,12 +579,12 @@ impl<T: Clone + PartialEq + 'static> Widget for DropdownPanel<T> {
         // composition. Combo dropdowns always open below the trigger
         // (flipping above when there's no room), so `BelowPreferred`
         // makes `PopoverSurface` suppress the trigger-side shadow.
-        let popover_style: teksilo_core::styles::SharedPopoverStyle = ctx
-            .theme()
-            .style_slots
-            .popover
-            .clone()
-            .unwrap_or_else(|| Rc::new(crate::styles::RecipePopoverStyle::default()));
+        let popover_style: teksilo_core::styles::SharedPopoverStyle =
+            ctx.theme().style_slots.popover.clone().unwrap_or_else(|| {
+                Rc::new(crate::styles::RecipePopoverStyle::for_tokens(
+                    &ctx.theme().input,
+                ))
+            });
         let surface_cfg = PopoverStyleConfig {
             content: content_id,
             variant: PopoverVariant::Menu,

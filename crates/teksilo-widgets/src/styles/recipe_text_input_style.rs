@@ -35,9 +35,10 @@ use teksilo_core::styles::{
     TextInputStyle, TextInputStyleConfig, TextInputValidationLevel, TextInputVariant,
 };
 use teksilo_core::widget_id::WidgetId;
-use teksilo_tokens::{BorderRole, CornerRadius, SurfaceRole};
+use teksilo_tokens::{BorderRole, CornerRadius, InputTokens, SurfaceRole, TargetRole};
 
 use crate::primitives::{MinSize, Padding, RectWidget, ZStack};
+use teksilo_core::styles::density::{dp, spacing};
 
 // IntUI design tokens for TextInput / TextInputField (also used by
 // SpinBox, DateEdit, DateRangeEdit, DateTimeEdit since they share the
@@ -72,20 +73,31 @@ pub struct TextInputRecipe {
     pub mask_placeholder_char: char,
 }
 
-impl Default for TextInputRecipe {
-    fn default() -> Self {
+impl TextInputRecipe {
+    /// This recipe's dimensions resolved against a density's [`InputTokens`].
+    ///
+    /// [`Default`] is `for_tokens(&InputTokens::default())` — the Compact
+    /// ladder — so the shipped values below are the Compact column by
+    /// construction and cannot drift from it.
+    pub fn for_tokens(tokens: &InputTokens) -> Self {
         Self {
-            height: TEXT_FIELD_HEIGHT,
-            padding_horizontal: TEXT_FIELD_PADDING_HORIZONTAL,
-            padding_vertical: TEXT_FIELD_PADDING_VERTICAL,
+            height: dp(TEXT_FIELD_HEIGHT, TargetRole::Target, tokens),
+            padding_horizontal: spacing(TEXT_FIELD_PADDING_HORIZONTAL, tokens),
+            padding_vertical: spacing(TEXT_FIELD_PADDING_VERTICAL, tokens),
             border_width: TEXT_FIELD_BORDER_WIDTH,
             corner_radius: TEXT_FIELD_CORNER_RADIUS,
             caret_width: TEXT_FIELD_CARET_WIDTH,
-            validation_strip_gap: TEXT_FIELD_VALIDATION_STRIP_GAP,
+            validation_strip_gap: spacing(TEXT_FIELD_VALIDATION_STRIP_GAP, tokens),
             error_pulse_duration_ms: TEXT_FIELD_ERROR_PULSE_DURATION_MS,
             corrected_pulse_duration_ms: TEXT_FIELD_CORRECTED_PULSE_DURATION_MS,
             mask_placeholder_char: TEXT_FIELD_MASK_PLACEHOLDER_CHAR,
         }
+    }
+}
+
+impl Default for TextInputRecipe {
+    fn default() -> Self {
+        Self::for_tokens(&InputTokens::default())
     }
 }
 
@@ -98,6 +110,18 @@ pub struct RecipeTextInputStyle {
 impl RecipeTextInputStyle {
     pub fn new(recipe: TextInputRecipe) -> Self {
         Self { recipe }
+    }
+
+    /// This style with every dimension resolved against a density's
+    /// [`InputTokens`], as `RecipeTextInputStyle::for_tokens(&ctx.theme().input)` at
+    /// the widget's own build site.
+    ///
+    /// [`Default`] is the `TargetDensity::Compact` projection, so a Compact
+    /// tree gets exactly the values this module documents.
+    pub fn for_tokens(tokens: &InputTokens) -> Self {
+        Self {
+            recipe: TextInputRecipe::for_tokens(tokens),
+        }
     }
 }
 

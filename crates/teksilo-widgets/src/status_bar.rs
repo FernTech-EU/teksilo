@@ -31,12 +31,25 @@ use teksilo_core::widget_id::WidgetId;
 
 use crate::Panel;
 use crate::primitives::HStack;
-use teksilo_tokens::SurfaceRole;
+use teksilo_core::styles::density::spacing;
+use teksilo_tokens::{InputTokens, SurfaceRole};
 
 /// StatusBar design tokens.
 pub const STATUS_BAR_HEIGHT: f32 = 22.0;
 pub const STATUS_BAR_PADDING_HORIZONTAL: f32 = 8.0;
+
+/// [`STATUS_BAR_PADDING_HORIZONTAL`] scaled by the density's `spacing_factor`
+/// (1.00 / 1.15 / 1.30).
+pub fn status_bar_padding_horizontal(tokens: &InputTokens) -> f32 {
+    spacing(STATUS_BAR_PADDING_HORIZONTAL, tokens)
+}
 pub const STATUS_BAR_ITEM_GAP: f32 = 2.0;
+
+/// [`STATUS_BAR_ITEM_GAP`] scaled by the density's `spacing_factor`
+/// (1.00 / 1.15 / 1.30).
+pub fn status_bar_item_gap(tokens: &InputTokens) -> f32 {
+    spacing(STATUS_BAR_ITEM_GAP, tokens)
+}
 
 /// A status bar for displaying information at the bottom of a window.
 ///
@@ -162,7 +175,7 @@ impl std::fmt::Debug for StatusBar {
 impl Widget for StatusBar {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let _ = ctx.theme_signal();
-        let spacing = STATUS_BAR_ITEM_GAP;
+        let spacing = status_bar_item_gap(&ctx.theme().input);
 
         // Register a bound `name` prop on the StatusBar itself at
         // AccessibilityOnly so a change to the status text re-walks the AT tree

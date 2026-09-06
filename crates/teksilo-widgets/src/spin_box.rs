@@ -138,7 +138,7 @@ use teksilo_core::widget::{EventContext, LayoutContext, Widget, WidgetPlacement}
 use teksilo_core::widget_builder::HandlerSet;
 use teksilo_core::widget_id::WidgetId;
 use teksilo_text::SharedTypesetter;
-use teksilo_tokens::{CornerRadius, TextStyle};
+use teksilo_tokens::{CornerRadius, InputTokens, TargetRole, TextStyle};
 
 use crate::common::range_nav::{self, RangeAxis, RangeKind, RangeMove};
 use crate::primitives::icon_widget::IconWidget;
@@ -179,6 +179,7 @@ pub enum StepType {
 }
 
 pub use teksilo_core::styles::ButtonLayout;
+use teksilo_core::styles::density::dp;
 use teksilo_i18n::LocalizedString;
 
 /// When the mouse wheel is allowed to adjust the value.
@@ -229,14 +230,45 @@ type OnValueChangedFn<T> = Rc<dyn Fn(T, &mut EventContext)>;
 /// Minimum total width. Below this the stacked step buttons stop
 /// fitting next to the field. Widgets narrower than this are
 /// enforced to the minimum at layout time via `MinSize`.
+/// Painted width of one stacked step button, in dp.
+///
+/// Below the 24 dp WCAG floor by design: the two buttons are a partitioned
+/// in-node target inside the field's frame, and their coarse hit area comes
+/// from `Widget::hit_outset`, not from growing the paint (which would widen
+/// every numeric field on a form). Named here so the hit mechanisms and the
+/// `chrome` arithmetic below read the same number.
+pub const SPIN_BOX_STEP_BUTTON_WIDTH: f32 = 18.0;
+
+/// Painted height of one stacked step button, in dp. Only a fallback — the
+/// real height is half the field's inner height (see `build_step_buttons`).
+pub const SPIN_BOX_STEP_BUTTON_HEIGHT: f32 = 12.0;
+
 const MIN_WIDTH_WITH_BUTTONS: f32 = 72.0;
+
+/// [`MIN_WIDTH_WITH_BUTTONS`] raised to the density's `target_size`
+/// (24 / 32 / 44 dp). The identity at Compact.
+fn min_width_with_buttons(tokens: &InputTokens) -> f32 {
+    dp(MIN_WIDTH_WITH_BUTTONS, TargetRole::Target, tokens)
+}
 /// Minimum total width when buttons are hidden — the field alone
 /// plus padding still reads as a numeric control.
 const MIN_WIDTH_NO_BUTTONS: f32 = 48.0;
+
+/// [`MIN_WIDTH_NO_BUTTONS`] raised to the density's `target_size`
+/// (24 / 32 / 44 dp). The identity at Compact.
+fn min_width_no_buttons(tokens: &InputTokens) -> f32 {
+    dp(MIN_WIDTH_NO_BUTTONS, TargetRole::Target, tokens)
+}
 /// Default maximum width. Matches Qt's `QSpinBox` sizeHint for a
 /// 4-digit value + unit suffix and stays tight in Int UI-style
 /// dense forms.
 const DEFAULT_PREFERRED_WIDTH: f32 = 120.0;
+
+/// [`DEFAULT_PREFERRED_WIDTH`] raised to the density's `target_size`
+/// (24 / 32 / 44 dp). The identity at Compact.
+fn default_preferred_width(tokens: &InputTokens) -> f32 {
+    dp(DEFAULT_PREFERRED_WIDTH, TargetRole::Target, tokens)
+}
 
 // ── SpinBox ────────────────────────────────────────────────────────
 
@@ -1249,8 +1281,8 @@ impl<T: SpinValue> Widget for SpinBox<T> {
         // numerals; the suffix is measured separately because it
         // may have different glyph advances (e.g. `" %"`).
         let min_width = match self.button_layout {
-            ButtonLayout::Stacked => MIN_WIDTH_WITH_BUTTONS,
-            ButtonLayout::Hidden => MIN_WIDTH_NO_BUTTONS,
+            ButtonLayout::Stacked => min_width_with_buttons(&theme.input),
+            ButtonLayout::Hidden => min_width_no_buttons(&theme.input),
         };
         let pixel_cap: Option<f32> = match self.width_policy {
             WidthPolicy::Fill => None,
@@ -1265,8 +1297,8 @@ impl<T: SpinValue> Widget for SpinBox<T> {
                     measure_width_px(ctx, &suffix_str, style)
                 };
                 let button_chrome = match self.button_layout {
-                    // 18 dp button + 4 dp divider padding + 1 dp divider
-                    ButtonLayout::Stacked => 18.0 + 4.0 + 1.0,
+                    // step button + 4 dp divider padding + 1 dp divider
+                    ButtonLayout::Stacked => SPIN_BOX_STEP_BUTTON_WIDTH + 4.0 + 1.0,
                     ButtonLayout::Hidden => 0.0,
                 };
                 // 2 dp slack so the caret and a trailing zero never
@@ -1287,8 +1319,13 @@ impl<T: SpinValue> Widget for SpinBox<T> {
         //   half of the focus-state border stroke against the
         //   widget's own shape quad (visible as a ring clipped on
         //   all four sides).
-        let sized_id =
-            ctx.add(MinSize::new(min_width, field_dims::TEXT_FIELD_HEIGHT).child_id(zstack_id));
+        let sized_id = ctx.add(
+            MinSize::new(
+                min_width,
+                crate::styles::TextInputRecipe::for_tokens(&ctx.theme().input).height,
+            )
+            .child_id(zstack_id),
+        );
         // Stash the resolved cap + floor on `self` for
         // `size_that_fits` to read at layout time.
         self.pixel_cap = pixel_cap;
@@ -1623,7 +1660,7 @@ fn build_step_buttons<T: SpinValue>(
     // Each button is half of the field's inner height (minus the
     // borders and a 1 px gutter between the two).
     let button_height = ((frame_height - 2.0) * 0.5).max(8.0);
-    let button_width = 18.0;
+    let button_width = SPIN_BOX_STEP_BUTTON_WIDTH;
 
     let up_icon = chevron_up_icon(8.0);
     let down_icon = chevron_down_icon(8.0);

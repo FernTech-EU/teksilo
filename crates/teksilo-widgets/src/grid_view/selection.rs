@@ -59,12 +59,12 @@ impl MarqueeState {
 }
 
 /// Edge-zone width (in dp) inside which the marquee ramps its auto-scroll
-/// velocity up to [`MARQUEE_MAX_VELOCITY`]. Matches the edge-scroll ramp
-/// `TabBar`/`TreeView` use for their own drag-tick auto-scroll, for a
-/// consistent feel across the data views.
-const MARQUEE_EDGE_ZONE: f32 = 32.0;
+/// velocity up to [`MARQUEE_MAX_VELOCITY`]. The precise-pointer band shared
+/// with every other data view — see [`crate::common::drag_autoscroll`], which
+/// also widens it for a coarse pointer.
+const MARQUEE_EDGE_ZONE: f32 = crate::common::drag_autoscroll::EDGE_BAND_PRECISE;
 /// Cap on per-tick auto-scroll velocity at the marquee's viewport edges.
-const MARQUEE_MAX_VELOCITY: f32 = 12.0;
+const MARQUEE_MAX_VELOCITY: f32 = crate::common::drag_autoscroll::MAX_VELOCITY;
 
 /// Auto-scroll step (in content px, +down/-up) for a marquee whose
 /// trailing corner sits at local `pointer_y` within a viewport of
@@ -74,15 +74,17 @@ const MARQUEE_MAX_VELOCITY: f32 = 12.0;
 /// boundary once the pointer is captured). Pure so it can be unit
 /// tested without a widget tree.
 pub(crate) fn marquee_auto_scroll_step(pointer_y: f32, viewport_height: f32) -> f32 {
-    let above = (MARQUEE_EDGE_ZONE - pointer_y).max(0.0);
-    let below = (pointer_y - (viewport_height - MARQUEE_EDGE_ZONE)).max(0.0);
-    if above > 0.0 {
-        -(above / MARQUEE_EDGE_ZONE).min(1.0) * MARQUEE_MAX_VELOCITY
-    } else if below > 0.0 {
-        (below / MARQUEE_EDGE_ZONE).min(1.0) * MARQUEE_MAX_VELOCITY
-    } else {
-        0.0
-    }
+    crate::common::drag_autoscroll::step(pointer_y, viewport_height, MARQUEE_EDGE_ZONE)
+}
+
+/// The same ramp for a pointer of a known kind: a finger gets the wider band.
+pub(crate) fn marquee_auto_scroll_step_for(
+    pointer_y: f32,
+    viewport_height: f32,
+    kind: teksilo_tokens::PointerKind,
+) -> f32 {
+    let band = crate::common::drag_autoscroll::band_for(kind);
+    crate::common::drag_autoscroll::step(pointer_y, viewport_height, band)
 }
 
 /// Captured state for the marquee drag handler.

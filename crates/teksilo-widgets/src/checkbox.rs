@@ -356,7 +356,11 @@ impl Widget for Checkbox {
             .style_override
             .clone()
             .or_else(|| ctx.theme().style_slots.checkbox.clone())
-            .unwrap_or_else(|| Rc::new(crate::styles::RecipeCheckboxStyle::default()));
+            .unwrap_or_else(|| {
+                Rc::new(crate::styles::RecipeCheckboxStyle::for_tokens(
+                    &ctx.theme().input,
+                ))
+            });
         let cfg = CheckboxStyleConfig {
             state: style_state,
             is_hovered,
@@ -403,13 +407,12 @@ impl Widget for Checkbox {
             row = row.alignment(VAlignment::Top);
         }
 
+        // The hit box comes from the same recipe the chrome was built from, so
+        // a density switch moves both together.
+        let style_recipe = crate::styles::CheckboxRecipe::for_tokens(&ctx.theme().input);
         let row_id = ctx.add(row);
         let root_id = ctx.add(
-            MinSize::new(
-                cb_dims::CHECKBOX_BOX_HIT_AREA,
-                cb_dims::CHECKBOX_BOX_HIT_AREA,
-            )
-            .child_id(row_id),
+            MinSize::new(style_recipe.box_hit_area, style_recipe.box_hit_area).child_id(row_id),
         );
 
         if let Some(content) = self.composite_tooltip_content.take() {

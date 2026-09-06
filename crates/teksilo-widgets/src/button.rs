@@ -769,7 +769,11 @@ impl teksilo_core::widget::Widget for Button {
             .style_override
             .clone()
             .or_else(|| ctx.theme().style_slots.button.clone())
-            .unwrap_or_else(|| Rc::new(crate::styles::RecipeButtonStyle::default()));
+            .unwrap_or_else(|| {
+                Rc::new(crate::styles::RecipeButtonStyle::for_tokens(
+                    &ctx.theme().input,
+                ))
+            });
 
         // Label/icon color: a caller-supplied override wins over the
         // auto cascade. The override replaces ALL states (idle / hover /

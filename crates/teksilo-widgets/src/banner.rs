@@ -185,7 +185,11 @@ impl Widget for Banner {
             .style_override
             .clone()
             .or_else(|| ctx.theme().style_slots.banner.clone())
-            .unwrap_or_else(|| Rc::new(crate::styles::RecipeBannerStyle::default()));
+            .unwrap_or_else(|| {
+                Rc::new(crate::styles::RecipeBannerStyle::for_tokens(
+                    &ctx.theme().input,
+                ))
+            });
         let root = style.make_body(
             &BannerStyleConfig {
                 severity,

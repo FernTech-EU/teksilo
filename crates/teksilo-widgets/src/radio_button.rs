@@ -220,7 +220,11 @@ impl Widget for RadioButton {
             .style_override
             .clone()
             .or_else(|| ctx.theme().style_slots.radio.clone())
-            .unwrap_or_else(|| Rc::new(crate::styles::RecipeRadioStyle::default()));
+            .unwrap_or_else(|| {
+                Rc::new(crate::styles::RecipeRadioStyle::for_tokens(
+                    &ctx.theme().input,
+                ))
+            });
         let cfg = RadioStyleConfig {
             is_selected,
             is_hovered,
@@ -265,10 +269,11 @@ impl Widget for RadioButton {
             row = row.alignment(VAlignment::Top);
         }
 
+        // The hit box comes from the same recipe the chrome was built from, so
+        // a density switch moves both together.
+        let hit_area = crate::styles::RadioRecipe::for_tokens(&ctx.theme().input).hit_area;
         let row_id = ctx.add(row);
-        let root_id = ctx.add(
-            MinSize::new(radio_dims::RADIO_HIT_AREA, radio_dims::RADIO_HIT_AREA).child_id(row_id),
-        );
+        let root_id = ctx.add(MinSize::new(hit_area, hit_area).child_id(row_id));
 
         if let Some(content) = self.composite_tooltip_content.take() {
             let delay = ctx.theme().motion.tooltip_delay_heavy;
@@ -553,34 +558,54 @@ mod hit_distance_tests {
     use teksilo_core::pointer::{EventTime, PointerId, PointerInfo};
     use teksilo_core::widget_tree::WidgetTree;
     use teksilo_i18n::lit;
-    use teksilo_tokens::TargetDensity;
 
     fn finger() -> PointerInfo {
         PointerInfo::touch(PointerId::MOUSE, EventTime::ZERO)
     }
 
     /// A **bare** radio measures a near miss to its disc, so a press past its
-    /// box's corner is further away than one past its edge — and past the
-    /// reach the density affords.
+    /// box's corner is further away than one past its edge.
+    ///
+    /// Measured on the widget directly, the way its labelled twin below is.
+    /// The tree-level version this replaced placed its probe points *outside*
+    /// the radio's box but within the disc's reach, and that arrangement only
+    /// existed while the box was smaller than the density's `target_size`:
+    /// P20's density projection makes a radio's box exactly `target_size` at
+    /// every density, so the miss-only slop pass — whose per-node top-up is
+    /// `(target_size - min(w, h)) / 2` — now has nothing left to add for this
+    /// control, and no point outside the box is in reach of a disc that stayed
+    /// 19 dp. What the test is actually about is the *shape* of the measure,
+    /// which this asserts without depending on the reach at all.
     #[test]
     fn a_bare_radio_measures_a_near_miss_to_its_disc() {
-        use crate::primitives::Center;
-        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
-        tree.set_input_density(TargetDensity::Touch);
-        let radio = tree.add(RadioButton::new(0, Signal::new(0_usize)));
-        // Centred in a large inert area so nothing else is in reach.
-        tree.add(Center::new().child_id(radio));
-        tree.layout(SizeProposal::exact(200.0, 200.0));
+        use teksilo_canvas::Rect;
+        use teksilo_core::widget::Widget;
+        let radio = RadioButton::new(0, Signal::new(0_usize));
+        let bounds = Rect::new(0.0, 0.0, 24.0, 24.0);
 
-        let b = tree.bounds(radio);
-        assert!(b.width <= 24.5, "a bare radio is its 24 dp box, got {b:?}");
-        // Straight out from the edge, within the disc's own reach.
-        let side = Point::new(b.right() + 2.0, b.center().y);
-        assert_eq!(tree.hit_test_for(side, &finger()), Some(radio));
-        // Diagonally past the corner at the same axis distance: much further
-        // from the disc, and out of reach.
-        let corner = Point::new(b.right() + 6.0, b.bottom() + 6.0);
-        assert_ne!(tree.hit_test_for(corner, &finger()), Some(radio));
+        // Straight out from the edge, and diagonally past the corner at the
+        // same axis distance. A rectangle would call these equally far; a disc
+        // does not.
+        let side = Point::new(bounds.right() + 4.0, bounds.center().y);
+        let corner = Point::new(bounds.right() + 4.0, bounds.bottom() + 4.0);
+
+        let d_side = radio
+            .hit_distance(side, bounds)
+            .expect("a bare radio measures");
+        let d_corner = radio
+            .hit_distance(corner, bounds)
+            .expect("a bare radio measures");
+        assert!(
+            d_corner > d_side,
+            "the corner ({d_corner}) must be further from the disc than the edge ({d_side})"
+        );
+        // And it really is the disc, not the box: a point on the box's own edge
+        // is already a positive distance from the disc inside it.
+        let on_edge = Point::new(bounds.right(), bounds.center().y);
+        assert!(
+            radio.hit_distance(on_edge, bounds).expect("measures") > 0.0,
+            "a rectangular measure would call the box's edge zero"
+        );
     }
 
     /// A **labelled** radio is its whole row, so it keeps the rectangular

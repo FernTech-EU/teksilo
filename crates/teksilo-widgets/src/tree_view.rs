@@ -57,7 +57,7 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use teksilo_canvas::{Point, Rect, Size, SizeProposal};
-use teksilo_tokens::{BorderRole, Easing};
+use teksilo_tokens::{BorderRole, Easing, InputTokens, TargetRole};
 
 use teksilo_core::DropFeedback;
 use teksilo_core::accessibility::AccessNodeBuilder;
@@ -83,6 +83,12 @@ use crate::tree_source::{TreeRow, TreeRowMeta, TreeSource};
 
 const BUFFER_ITEMS: usize = 5;
 const DEFAULT_ITEM_HEIGHT: f32 = 28.0;
+
+/// [`DEFAULT_ITEM_HEIGHT`] raised to the density's `target_size`
+/// (24 / 32 / 44 dp). The identity at Compact.
+fn default_item_height(tokens: &InputTokens) -> f32 {
+    dp(DEFAULT_ITEM_HEIGHT, TargetRole::Target, tokens)
+}
 const SCROLLBAR_THICKNESS: f32 = 12.0;
 
 /// Per-row context passed to a 4-arg TreeView delegate. Carries a
@@ -152,6 +158,7 @@ type RowDelegate<T> = dyn Fn(usize, &T, &TreeRowMeta, bool) -> Box<dyn Widget>;
 /// .item_height(28.0);
 /// ```
 use crate::data_views::DropViz;
+use teksilo_core::styles::density::dp;
 
 pub struct TreeView<T: 'static> {
     /// Index-keyed erased backing — the built-in `TreeSlice` or an external

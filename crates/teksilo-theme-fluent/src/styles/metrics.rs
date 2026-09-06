@@ -28,8 +28,10 @@
 
 use teksilo_core::build_context::BuildContext;
 use teksilo_core::signal::Prop;
+use teksilo_core::styles::density::{dp, spacing};
 use teksilo_core::styles::{CardStyle, CardStyleConfig};
 use teksilo_core::widget_id::WidgetId;
+use teksilo_tokens::{InputTokens, TargetRole};
 use teksilo_widgets::styles::{
     BadgeRecipe, BannerRecipe, ComboBoxRecipe, DialogRecipe, IconButtonRecipe, LinkRecipe,
     PanelRecipe, PopoverRecipe, ProgressBarRecipe, RecipeBadgeStyle, RecipeBannerStyle,
@@ -71,11 +73,11 @@ impl CardStyle for FluentCardStyle {
 /// `Panel` — a grouped in-page surface, so `OverlayCornerRadius` as well;
 /// `SettingsExpander` and the WinUI Gallery's grouped cards both round at
 /// the larger radius.
-pub fn fluent_panel_style() -> RecipePanelStyle {
+pub fn fluent_panel_style_for(tokens: &InputTokens) -> RecipePanelStyle {
     RecipePanelStyle::new(PanelRecipe {
         corner_radius: R_OVERLAY,
         border_width: 1.0,
-        ..PanelRecipe::default()
+        ..PanelRecipe::for_tokens(tokens)
     })
 }
 
@@ -84,89 +86,89 @@ pub fn fluent_panel_style() -> RecipePanelStyle {
 /// `Popover` / flyout — `OverlayCornerRadius`, `FlyoutContentPadding`
 /// (16 dp), and a 1 dp `SurfaceStrokeColorFlyout` hairline. Menus reuse the
 /// same radius; their rows supply their own padding.
-pub fn fluent_popover_style() -> RecipePopoverStyle {
+pub fn fluent_popover_style_for(tokens: &InputTokens) -> RecipePopoverStyle {
     RecipePopoverStyle::new(PopoverRecipe {
         padding: 16.0,
         corner_radius: R_OVERLAY,
         border_width: 1.0,
         menu_popup_corner_radius: R_OVERLAY,
-        ..PopoverRecipe::default()
+        ..PopoverRecipe::for_tokens(tokens)
     })
 }
 
 /// `Tooltip` — the documented radius exception: an overlay that rounds at
 /// 4 dp "due to its small size". `ToolTipBorderPadding` is `9,6,9,8` and
 /// `ToolTipMaxWidth` is 320.
-pub fn fluent_tooltip_style() -> RecipeTooltipStyle {
+pub fn fluent_tooltip_style_for(tokens: &InputTokens) -> RecipeTooltipStyle {
     RecipeTooltipStyle::new(TooltipRecipe {
         padding_horizontal: 9.0,
         padding_vertical: 7.0,
         corner_radius: R_CONTROL,
         max_width: 320.0,
-        ..TooltipRecipe::default()
+        ..TooltipRecipe::for_tokens(tokens)
     })
 }
 
 /// `Dialog` — `ContentDialogPadding` 24, `ContentDialogMinWidth` 320,
 /// `OverlayCornerRadius`.
-pub fn fluent_dialog_style() -> RecipeDialogStyle {
+pub fn fluent_dialog_style_for(tokens: &InputTokens) -> RecipeDialogStyle {
     RecipeDialogStyle::new(DialogRecipe {
-        content_padding: 24.0,
-        min_width: 320.0,
+        content_padding: spacing(24.0, tokens),
+        min_width: dp(320.0, TargetRole::Target, tokens),
         corner_radius: R_OVERLAY,
     })
 }
 
 /// `Snackbar` — a floating notification, so the overlay radius.
-pub fn fluent_snackbar_style() -> RecipeSnackbarStyle {
+pub fn fluent_snackbar_style_for(tokens: &InputTokens) -> RecipeSnackbarStyle {
     RecipeSnackbarStyle::new(SnackbarRecipe {
         corner_radius: R_OVERLAY,
-        ..SnackbarRecipe::default()
+        ..SnackbarRecipe::for_tokens(tokens)
     })
 }
 
 /// `Toast` — likewise floating.
-pub fn fluent_toast_style() -> RecipeToastStyle {
+pub fn fluent_toast_style_for(tokens: &InputTokens) -> RecipeToastStyle {
     RecipeToastStyle::new(ToastRecipe {
         corner_radius: R_OVERLAY,
-        ..ToastRecipe::default()
+        ..ToastRecipe::for_tokens(tokens)
     })
 }
 
 /// `Banner` — the `InfoBar` analogue. In-page, so the control radius.
-pub fn fluent_banner_style() -> RecipeBannerStyle {
+pub fn fluent_banner_style_for(tokens: &InputTokens) -> RecipeBannerStyle {
     RecipeBannerStyle::new(BannerRecipe {
         corner_radius: R_CONTROL,
-        ..BannerRecipe::default()
+        ..BannerRecipe::for_tokens(tokens)
     })
 }
 
 // ── In-page controls ────────────────────────────────────────────────────
 
 /// `ComboBox` — 32 dp tall, `ButtonPadding`-style 11 dp gutters, 4 dp.
-pub fn fluent_combo_box_style() -> RecipeComboBoxStyle {
+pub fn fluent_combo_box_style_for(tokens: &InputTokens) -> RecipeComboBoxStyle {
     RecipeComboBoxStyle::new(ComboBoxRecipe {
         height: FLUENT_CONTROL_HEIGHT,
         padding_horizontal: 11.0,
         corner_radius: R_CONTROL,
-        ..ComboBoxRecipe::default()
+        ..ComboBoxRecipe::for_tokens(tokens)
     })
 }
 
 /// `IconButton` — the `AppBarButton` / subtle icon button: a 32 dp square
 /// with a 16 dp glyph at the control radius.
-pub fn fluent_icon_button_style() -> RecipeIconButtonStyle {
+pub fn fluent_icon_button_style_for(tokens: &InputTokens) -> RecipeIconButtonStyle {
     RecipeIconButtonStyle::new(IconButtonRecipe {
         size_default: FLUENT_CONTROL_HEIGHT,
         icon_size: 16.0,
         corner_radius: R_CONTROL,
-        ..IconButtonRecipe::default()
+        ..IconButtonRecipe::for_tokens(tokens)
     })
 }
 
 /// `Link` — `HyperlinkButton` rounds at the control radius and underlines
 /// at a hairline.
-pub fn fluent_link_style() -> RecipeLinkStyle {
+pub fn fluent_link_style_for(_tokens: &InputTokens) -> RecipeLinkStyle {
     RecipeLinkStyle::new(LinkRecipe {
         corner_radius: R_CONTROL,
         underline_thickness: 1.0,
@@ -174,23 +176,23 @@ pub fn fluent_link_style() -> RecipeLinkStyle {
 }
 
 /// `SegmentedControl` — the `SelectorBar` shape: 32 dp tall, 4 dp, hairline.
-pub fn fluent_segmented_control_style() -> RecipeSegmentedControlStyle {
+pub fn fluent_segmented_control_style_for(tokens: &InputTokens) -> RecipeSegmentedControlStyle {
     RecipeSegmentedControlStyle::new(SegmentedControlRecipe {
         height: FLUENT_CONTROL_HEIGHT,
         corner_radius: R_CONTROL,
         border_width: 1.0,
-        ..SegmentedControlRecipe::default()
+        ..SegmentedControlRecipe::for_tokens(tokens)
     })
 }
 
 /// `Badge` — the `InfoBadge` is a pill, so the radius is left at the
 /// baseline's fully-rounded value; only the padding is tightened to
 /// Fluent's denser chip.
-pub fn fluent_badge_style() -> RecipeBadgeStyle {
+pub fn fluent_badge_style_for(tokens: &InputTokens) -> RecipeBadgeStyle {
     RecipeBadgeStyle::new(BadgeRecipe {
         padding_horizontal: 8.0,
         padding_vertical: 2.0,
-        ..BadgeRecipe::default()
+        ..BadgeRecipe::for_tokens(tokens)
     })
 }
 
@@ -198,7 +200,7 @@ pub fn fluent_badge_style() -> RecipeBadgeStyle {
 /// clamps a radius to half the shorter side, so a thin bar reads as a
 /// capsule and a thick one as a 4 dp rounded rect, which is exactly the
 /// Fluent behaviour.
-pub fn fluent_progress_bar_style() -> RecipeProgressBarStyle {
+pub fn fluent_progress_bar_style_for(_tokens: &InputTokens) -> RecipeProgressBarStyle {
     RecipeProgressBarStyle::new(ProgressBarRecipe {
         corner_radius: R_CONTROL,
     })
@@ -212,11 +214,14 @@ pub fn fluent_progress_bar_style() -> RecipeProgressBarStyle {
 /// hover thumb. (WinUI expresses that as an 8 → 12 dp rectangle stroked
 /// with a 6 dp transparent border, which leaves the same 2 → 6 dp of
 /// visible fill.) `ScrollBarHorizontalThumbMinWidth` is 30.
-pub fn fluent_scroll_bar_style() -> RecipeScrollBarStyle {
+pub fn fluent_scroll_bar_style_for(tokens: &InputTokens) -> RecipeScrollBarStyle {
     RecipeScrollBarStyle::new(ScrollBarRecipe {
+        // The lane's thickness is fixed at every density: WinUI's own layout
+        // never reflows for it, and the coarse grab comes from `hit_outset`
+        // over an unchanged visual.
         thickness_idle: 2.0,
         thickness_hover: 6.0,
-        min_thumb_length: 30.0,
+        min_thumb_length: dp(30.0, TargetRole::Target, tokens),
         corner_radius: 3.0,
     })
 }
@@ -224,28 +229,92 @@ pub fn fluent_scroll_bar_style() -> RecipeScrollBarStyle {
 /// `TabBar` — `TabViewItemMinHeight` 32, `TabViewItemHeaderPadding` 8, and
 /// a 3 dp active indicator (the `NavigationViewSelectionIndicator`
 /// thickness Fluent uses wherever a selection underline appears).
-pub fn fluent_tab_style() -> RecipeTabStyle {
+pub fn fluent_tab_style_for(tokens: &InputTokens) -> RecipeTabStyle {
     RecipeTabStyle::new(TabRecipe {
         editor_height: FLUENT_CONTROL_HEIGHT,
         tool_window_height: FLUENT_CONTROL_HEIGHT,
         padding_horizontal: 8.0,
         underline_active: 3.0,
         close_button_size: 16.0,
-        ..TabRecipe::default()
+        ..TabRecipe::for_tokens(tokens)
     })
 }
 
 /// `TableView` / `TreeTableView` — rows and header on the `ListViewItem`
 /// 40 dp rhythm, 12 dp cell gutters, 4 dp corners.
-pub fn fluent_table_style() -> RecipeTableStyle {
+pub fn fluent_table_style_for(tokens: &InputTokens) -> RecipeTableStyle {
     RecipeTableStyle::new(TableRecipe {
         row_height: 40.0,
         header_height: 40.0,
         cell_padding_horizontal: 12.0,
         corner_radius: R_CONTROL,
         tree_indent_per_level: 16.0,
-        ..TableRecipe::default()
+        ..TableRecipe::for_tokens(tokens)
     })
+}
+/// [`fluent_panel_style_for`] at the default Compact density.
+pub fn fluent_panel_style() -> RecipePanelStyle {
+    fluent_panel_style_for(&InputTokens::default())
+}
+/// [`fluent_popover_style_for`] at the default Compact density.
+pub fn fluent_popover_style() -> RecipePopoverStyle {
+    fluent_popover_style_for(&InputTokens::default())
+}
+/// [`fluent_tooltip_style_for`] at the default Compact density.
+pub fn fluent_tooltip_style() -> RecipeTooltipStyle {
+    fluent_tooltip_style_for(&InputTokens::default())
+}
+/// [`fluent_dialog_style_for`] at the default Compact density.
+pub fn fluent_dialog_style() -> RecipeDialogStyle {
+    fluent_dialog_style_for(&InputTokens::default())
+}
+/// [`fluent_snackbar_style_for`] at the default Compact density.
+pub fn fluent_snackbar_style() -> RecipeSnackbarStyle {
+    fluent_snackbar_style_for(&InputTokens::default())
+}
+/// [`fluent_toast_style_for`] at the default Compact density.
+pub fn fluent_toast_style() -> RecipeToastStyle {
+    fluent_toast_style_for(&InputTokens::default())
+}
+/// [`fluent_banner_style_for`] at the default Compact density.
+pub fn fluent_banner_style() -> RecipeBannerStyle {
+    fluent_banner_style_for(&InputTokens::default())
+}
+/// [`fluent_combo_box_style_for`] at the default Compact density.
+pub fn fluent_combo_box_style() -> RecipeComboBoxStyle {
+    fluent_combo_box_style_for(&InputTokens::default())
+}
+/// [`fluent_icon_button_style_for`] at the default Compact density.
+pub fn fluent_icon_button_style() -> RecipeIconButtonStyle {
+    fluent_icon_button_style_for(&InputTokens::default())
+}
+/// [`fluent_link_style_for`] at the default Compact density.
+pub fn fluent_link_style() -> RecipeLinkStyle {
+    fluent_link_style_for(&InputTokens::default())
+}
+/// [`fluent_segmented_control_style_for`] at the default Compact density.
+pub fn fluent_segmented_control_style() -> RecipeSegmentedControlStyle {
+    fluent_segmented_control_style_for(&InputTokens::default())
+}
+/// [`fluent_badge_style_for`] at the default Compact density.
+pub fn fluent_badge_style() -> RecipeBadgeStyle {
+    fluent_badge_style_for(&InputTokens::default())
+}
+/// [`fluent_progress_bar_style_for`] at the default Compact density.
+pub fn fluent_progress_bar_style() -> RecipeProgressBarStyle {
+    fluent_progress_bar_style_for(&InputTokens::default())
+}
+/// [`fluent_scroll_bar_style_for`] at the default Compact density.
+pub fn fluent_scroll_bar_style() -> RecipeScrollBarStyle {
+    fluent_scroll_bar_style_for(&InputTokens::default())
+}
+/// [`fluent_tab_style_for`] at the default Compact density.
+pub fn fluent_tab_style() -> RecipeTabStyle {
+    fluent_tab_style_for(&InputTokens::default())
+}
+/// [`fluent_table_style_for`] at the default Compact density.
+pub fn fluent_table_style() -> RecipeTableStyle {
+    fluent_table_style_for(&InputTokens::default())
 }
 
 #[cfg(test)]

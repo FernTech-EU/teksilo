@@ -19,9 +19,10 @@ use teksilo_core::build_context::BuildContext;
 use teksilo_core::signal::Signal;
 use teksilo_core::styles::{StandardItemStyle, StandardItemStyleConfig};
 use teksilo_core::widget_id::WidgetId;
-use teksilo_tokens::{BorderRole, CornerRadius, SurfaceRole};
+use teksilo_tokens::{BorderRole, CornerRadius, InputTokens, SurfaceRole, TargetRole};
 
 use crate::primitives::{Expand, Padding, RectWidget, ZStack};
+use teksilo_core::styles::density::{dp, spacing};
 
 // IntUI design tokens for StandardListItem / StandardTreeItem.
 // The recipe owns its own dimensions.
@@ -76,25 +77,44 @@ pub struct StandardItemRecipe {
     pub selection_edge_width: f32,
 }
 
-impl Default for StandardItemRecipe {
-    fn default() -> Self {
+impl StandardItemRecipe {
+    /// This recipe's dimensions resolved against a density's [`InputTokens`].
+    ///
+    /// [`Default`] is `for_tokens(&InputTokens::default())` — the Compact
+    /// ladder — so the shipped values below are the Compact column by
+    /// construction and cannot drift from it.
+    pub fn for_tokens(tokens: &InputTokens) -> Self {
         Self {
             icon_size: STANDARD_ITEM_ICON_SIZE,
             subtitle_icon_size: STANDARD_ITEM_SUBTITLE_ICON_SIZE,
-            slot_gap: STANDARD_ITEM_SLOT_GAP,
-            subtitle_slot_gap: STANDARD_ITEM_SUBTITLE_SLOT_GAP,
-            label_subtitle_gap: STANDARD_ITEM_LABEL_SUBTITLE_GAP,
-            padding_horizontal: STANDARD_ITEM_PADDING_HORIZONTAL,
-            padding_vertical: STANDARD_ITEM_PADDING_VERTICAL,
-            min_height_single_line: STANDARD_ITEM_MIN_HEIGHT_SINGLE_LINE,
-            min_height_two_line: STANDARD_ITEM_MIN_HEIGHT_TWO_LINE,
+            slot_gap: spacing(STANDARD_ITEM_SLOT_GAP, tokens),
+            subtitle_slot_gap: spacing(STANDARD_ITEM_SUBTITLE_SLOT_GAP, tokens),
+            label_subtitle_gap: spacing(STANDARD_ITEM_LABEL_SUBTITLE_GAP, tokens),
+            padding_horizontal: spacing(STANDARD_ITEM_PADDING_HORIZONTAL, tokens),
+            padding_vertical: spacing(STANDARD_ITEM_PADDING_VERTICAL, tokens),
+            min_height_single_line: dp(
+                STANDARD_ITEM_MIN_HEIGHT_SINGLE_LINE,
+                TargetRole::Target,
+                tokens,
+            ),
+            min_height_two_line: dp(
+                STANDARD_ITEM_MIN_HEIGHT_TWO_LINE,
+                TargetRole::Target,
+                tokens,
+            ),
             chevron_column_width: STANDARD_ITEM_CHEVRON_COLUMN_WIDTH,
-            tree_indent_step: STANDARD_ITEM_TREE_INDENT_STEP,
+            tree_indent_step: spacing(STANDARD_ITEM_TREE_INDENT_STEP, tokens),
             item_corner_radius: STANDARD_ITEM_ITEM_CORNER_RADIUS,
-            bg_horizontal_inset: STANDARD_ITEM_BG_HORIZONTAL_INSET,
+            bg_horizontal_inset: spacing(STANDARD_ITEM_BG_HORIZONTAL_INSET, tokens),
             focus_ring_width: STANDARD_ITEM_FOCUS_RING_WIDTH,
             selection_edge_width: STANDARD_ITEM_SELECTION_EDGE_WIDTH,
         }
+    }
+}
+
+impl Default for StandardItemRecipe {
+    fn default() -> Self {
+        Self::for_tokens(&InputTokens::default())
     }
 }
 
@@ -107,6 +127,18 @@ pub struct RecipeStandardItemStyle {
 impl RecipeStandardItemStyle {
     pub fn new(recipe: StandardItemRecipe) -> Self {
         Self { recipe }
+    }
+
+    /// This style with every dimension resolved against a density's
+    /// [`InputTokens`], as `RecipeStandardItemStyle::for_tokens(&ctx.theme().input)` at
+    /// the widget's own build site.
+    ///
+    /// [`Default`] is the `TargetDensity::Compact` projection, so a Compact
+    /// tree gets exactly the values this module documents.
+    pub fn for_tokens(tokens: &InputTokens) -> Self {
+        Self {
+            recipe: StandardItemRecipe::for_tokens(tokens),
+        }
     }
 }
 

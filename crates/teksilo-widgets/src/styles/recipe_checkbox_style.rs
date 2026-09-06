@@ -21,10 +21,11 @@ use teksilo_core::binding::BindingLevel;
 use teksilo_core::build_context::BuildContext;
 use teksilo_core::focus::FocusOrigin;
 use teksilo_core::signal::Signal;
+use teksilo_core::styles::density::{dp, spacing};
 use teksilo_core::styles::{CheckboxState, CheckboxStyle, CheckboxStyleConfig, CheckboxVariant};
 use teksilo_core::widget::{LayoutContext, LayoutResponse, PaintContext, Widget, WidgetPlacement};
 use teksilo_core::widget_id::WidgetId;
-use teksilo_tokens::{Color, CornerRadius};
+use teksilo_tokens::{Color, CornerRadius, InputTokens, TargetRole};
 
 // IntUI design tokens for Checkbox. The recipe owns its own dimensions.
 pub const CHECKBOX_BOX_VISUAL_SIZE: f32 = 19.0;
@@ -44,14 +45,25 @@ pub struct CheckboxRecipe {
     pub corner_radius: f32,
 }
 
-impl Default for CheckboxRecipe {
-    fn default() -> Self {
+impl CheckboxRecipe {
+    /// This recipe's dimensions resolved against a density's [`InputTokens`].
+    ///
+    /// [`Default`] is `for_tokens(&InputTokens::default())` — the Compact
+    /// ladder — so the shipped values below are the Compact column by
+    /// construction and cannot drift from it.
+    pub fn for_tokens(tokens: &InputTokens) -> Self {
         Self {
             box_visual_size: CHECKBOX_BOX_VISUAL_SIZE,
-            box_hit_area: CHECKBOX_BOX_HIT_AREA,
-            label_gap: CHECKBOX_LABEL_GAP,
+            box_hit_area: dp(CHECKBOX_BOX_HIT_AREA, TargetRole::Target, tokens),
+            label_gap: spacing(CHECKBOX_LABEL_GAP, tokens),
             corner_radius: CHECKBOX_CORNER_RADIUS,
         }
+    }
+}
+
+impl Default for CheckboxRecipe {
+    fn default() -> Self {
+        Self::for_tokens(&InputTokens::default())
     }
 }
 
@@ -66,6 +78,18 @@ pub struct RecipeCheckboxStyle {
 impl RecipeCheckboxStyle {
     pub fn new(recipe: CheckboxRecipe) -> Self {
         Self { recipe }
+    }
+
+    /// This style with every dimension resolved against a density's
+    /// [`InputTokens`], as `RecipeCheckboxStyle::for_tokens(&ctx.theme().input)` at
+    /// the widget's own build site.
+    ///
+    /// [`Default`] is the `TargetDensity::Compact` projection, so a Compact
+    /// tree gets exactly the values this module documents.
+    pub fn for_tokens(tokens: &InputTokens) -> Self {
+        Self {
+            recipe: CheckboxRecipe::for_tokens(tokens),
+        }
     }
 }
 

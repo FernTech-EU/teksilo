@@ -45,15 +45,34 @@ use teksilo_core::widget_id::WidgetId;
 
 use crate::Checkbox;
 use crate::primitives::{HStack, Padding, RectWidget, TextWidget, VStack, ZStack};
+use teksilo_core::styles::density::spacing;
 use teksilo_i18n::LocalizedString;
-use teksilo_tokens::{TextRole, TextStyleRole};
+use teksilo_tokens::{InputTokens, TextRole, TextStyleRole};
 
 /// Horizontal indent of the content area below the title (dp).
 pub const GROUP_BOX_CONTENT_INDENT: f32 = 24.0;
+
+/// [`GROUP_BOX_CONTENT_INDENT`] scaled by the density's `spacing_factor`
+/// (1.00 / 1.15 / 1.30).
+pub fn group_box_content_indent(tokens: &InputTokens) -> f32 {
+    spacing(GROUP_BOX_CONTENT_INDENT, tokens)
+}
 /// Vertical gap between the title row and the content area (dp).
 pub const GROUP_BOX_TITLE_CONTENT_SPACING: f32 = 8.0;
+
+/// [`GROUP_BOX_TITLE_CONTENT_SPACING`] scaled by the density's `spacing_factor`
+/// (1.00 / 1.15 / 1.30).
+pub fn group_box_title_content_spacing(tokens: &InputTokens) -> f32 {
+    spacing(GROUP_BOX_TITLE_CONTENT_SPACING, tokens)
+}
 /// Gap between the checkbox and the adjacent title label in checkable mode (dp).
 pub const GROUP_BOX_CHECKBOX_GAP: f32 = 6.0;
+
+/// [`GROUP_BOX_CHECKBOX_GAP`] scaled by the density's `spacing_factor`
+/// (1.00 / 1.15 / 1.30).
+pub fn group_box_checkbox_gap(tokens: &InputTokens) -> f32 {
+    spacing(GROUP_BOX_CHECKBOX_GAP, tokens)
+}
 
 /// A titled cluster of controls with optional enable/disable toggle.
 ///
@@ -142,7 +161,7 @@ impl Widget for GroupBox {
             let checkbox = Checkbox::new(checked.clone()).label(self.title.clone());
             ctx.add(
                 HStack::new()
-                    .spacing(GROUP_BOX_CHECKBOX_GAP)
+                    .spacing(group_box_checkbox_gap(&ctx.theme().input))
                     .child(checkbox)
                     .child(title_label),
             )
@@ -151,9 +170,17 @@ impl Widget for GroupBox {
         };
 
         let padded_content_id = if let Some(content_id) = self.content_id {
-            ctx.add(Padding::new(0.0, 0.0, 0.0, GROUP_BOX_CONTENT_INDENT).child_id(content_id))
+            ctx.add(
+                Padding::new(0.0, 0.0, 0.0, group_box_content_indent(&ctx.theme().input))
+                    .child_id(content_id),
+            )
         } else {
-            ctx.add(Padding::new(0.0, 0.0, 0.0, GROUP_BOX_CONTENT_INDENT))
+            ctx.add(Padding::new(
+                0.0,
+                0.0,
+                0.0,
+                group_box_content_indent(&ctx.theme().input),
+            ))
         };
 
         // When checkable and unchecked, lay a translucent surface tint over
@@ -176,7 +203,7 @@ impl Widget for GroupBox {
 
         let root = ctx.add(
             VStack::new()
-                .spacing(GROUP_BOX_TITLE_CONTENT_SPACING)
+                .spacing(group_box_title_content_spacing(&ctx.theme().input))
                 .add_child(title_row_id)
                 .add_child(content_wrapper_id),
         );

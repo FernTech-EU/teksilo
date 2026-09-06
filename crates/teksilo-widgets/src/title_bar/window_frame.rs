@@ -63,13 +63,23 @@ impl std::fmt::Debug for WindowFrame {
     }
 }
 
+/// Logical-pixel thickness of each resize strip, and the frame's default.
+///
+/// The same 6 dp gutter the `Splitter` and the dock resize handle use. It is
+/// **fixed at every density**: the strip is a hit-test-only overlay drawn over
+/// the window's own edge, so widening it would eat into the content rather
+/// than into empty space. A coarse pointer reaches it through
+/// `Widget::hit_outset` (24 dp, 44 at Touch) over an unchanged 6 dp visual —
+/// see `docs/density-inventory.md` and the touch design's Constants table.
+pub const WINDOW_FRAME_RESIZE_THICKNESS: f32 = 6.0;
+
 impl WindowFrame {
     /// Create a frame bound to the given platform host. Use [`thickness`](WindowFrame::thickness)
     /// and [`content`](WindowFrame::content) to configure it before adding to the tree.
     pub fn new(host: Rc<dyn PlatformTitleBarHost>) -> Self {
         Self {
             host,
-            thickness: 6.0,
+            thickness: WINDOW_FRAME_RESIZE_THICKNESS,
             pending_content: None,
             content_id: None,
             strip_ids: [None; 4],
@@ -77,7 +87,8 @@ impl WindowFrame {
         }
     }
 
-    /// Logical-pixel thickness of each resize strip. Default: 6.
+    /// Logical-pixel thickness of each resize strip. Default:
+    /// [`WINDOW_FRAME_RESIZE_THICKNESS`].
     pub fn thickness(mut self, t: f32) -> Self {
         self.thickness = t;
         self

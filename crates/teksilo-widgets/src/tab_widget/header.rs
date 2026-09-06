@@ -41,17 +41,36 @@ use teksilo_core::widget::{
 use teksilo_core::widget_builder::HandlerSet;
 use teksilo_core::widget_id::WidgetId;
 use teksilo_i18n::LocalizedString;
-use teksilo_tokens::TextRole;
+use teksilo_tokens::{InputTokens, TargetRole, TextRole};
 
 use crate::primitives::{Expand, RectWidget, ZStack};
 use crate::{HStack, IconButton, IconButtonSize, IconWidget, TextWidget};
+use teksilo_core::styles::density::{dp, spacing};
 
 /// Minimum natural width when the label is empty / extremely short.
 const NATURAL_MIN_WIDTH: f32 = 72.0;
+
+/// [`NATURAL_MIN_WIDTH`] raised to the density's `target_size`
+/// (24 / 32 / 44 dp). The identity at Compact.
+fn natural_min_width(tokens: &InputTokens) -> f32 {
+    dp(NATURAL_MIN_WIDTH, TargetRole::Target, tokens)
+}
 /// Vertical padding around the label inside the tab.
 const HEADER_PADDING_V: f32 = 6.0;
+
+/// [`HEADER_PADDING_V`] scaled by the density's `spacing_factor`
+/// (1.00 / 1.15 / 1.30).
+fn header_padding_v(tokens: &InputTokens) -> f32 {
+    spacing(HEADER_PADDING_V, tokens)
+}
 /// Spacing inside the inner row between icon, slots, and label.
 const INNER_GAP: f32 = 6.0;
+
+/// [`INNER_GAP`] scaled by the density's `spacing_factor`
+/// (1.00 / 1.15 / 1.30).
+fn inner_gap(tokens: &InputTokens) -> f32 {
+    spacing(INNER_GAP, tokens)
+}
 /// Fallback char width for natural-size estimation when the text
 /// backend is unavailable (test contexts).
 const FALLBACK_CHAR_WIDTH: f32 = 8.0;
@@ -346,18 +365,19 @@ impl TabHeader {
         // `build()` has moved the icon / slots out, so reserve their width from
         // the construction-time snapshot (the real icon extent, not a constant —
         // an icon larger than `BUTTON_ICON_SIZE` was previously under-reserved).
+        let gap = inner_gap(&ctx.theme.input);
         let icon_size = if self.has_icon {
-            self.icon_extent + INNER_GAP
+            self.icon_extent + gap
         } else {
             0.0
         };
         let leading_size = if self.has_leading {
-            btn::BUTTON_ICON_SIZE + INNER_GAP
+            btn::BUTTON_ICON_SIZE + gap
         } else {
             0.0
         };
         let trailing_size = if self.has_trailing {
-            btn::BUTTON_ICON_SIZE + INNER_GAP
+            btn::BUTTON_ICON_SIZE + gap
         } else {
             0.0
         };
@@ -367,12 +387,12 @@ impl TabHeader {
         // places an `INNER_GAP` between the label and the spacer — so the
         // widest label needs `INNER_GAP` more than the text alone, or it
         // truncates by exactly that amount. Reserve it here.
-        let spacer_gap = if self.pinned { 0.0 } else { INNER_GAP };
+        let spacer_gap = if self.pinned { 0.0 } else { gap };
         // Bounds == visual rect now (no focus-ring envelope), so
         // natural width is purely content + horizontal padding.
         let content =
             text_width + icon_size + leading_size + trailing_size + spacer_gap + pad_h * 2.0;
-        content.max(NATURAL_MIN_WIDTH)
+        content.max(natural_min_width(&ctx.theme.input))
     }
 
     pub(crate) fn intrinsic_height(_ctx: &LayoutContext) -> f32 {
@@ -571,10 +591,12 @@ impl Widget for TabHeader {
         let pad_h = crate::styles::recipe_tab_style::TAB_PADDING_HORIZONTAL;
         let inner_id = if self.pinned {
             let centered = crate::primitives::Center::new().child(row);
-            let padded = crate::Padding::symmetric(HEADER_PADDING_V, 0.0).child(centered);
+            let padded = crate::Padding::symmetric(header_padding_v(&ctx.theme().input), 0.0)
+                .child(centered);
             ctx.add(padded)
         } else {
-            let padded = crate::Padding::symmetric(HEADER_PADDING_V, pad_h).child(row);
+            let padded =
+                crate::Padding::symmetric(header_padding_v(&ctx.theme().input), pad_h).child(row);
             ctx.add(padded)
         };
 
@@ -613,7 +635,11 @@ impl Widget for TabHeader {
             .style_override
             .clone()
             .or_else(|| ctx.theme().style_slots.tab.clone())
-            .unwrap_or_else(|| Rc::new(crate::styles::RecipeTabStyle::default()));
+            .unwrap_or_else(|| {
+                Rc::new(crate::styles::RecipeTabStyle::for_tokens(
+                    &ctx.theme().input,
+                ))
+            });
 
         let cfg = TabStyleConfig {
             label: inner_id,

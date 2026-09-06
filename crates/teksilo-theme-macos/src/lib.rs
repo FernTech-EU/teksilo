@@ -114,7 +114,7 @@ use std::rc::Rc;
 
 use teksilo_core::presets::intui;
 use teksilo_core::styles::{Theme, ThemeAppearance};
-use teksilo_tokens::Color;
+use teksilo_tokens::{Color, InputTokens, TargetDensity};
 
 /// macOS **Aqua** (light), on the stock `systemBlue` accent.
 pub fn light() -> Theme {
@@ -196,12 +196,37 @@ fn build(appearance: ThemeAppearance, palette: MacOsPalette) -> Theme {
 
     install_styles(&mut theme);
     theme
+        .extensions
+        .insert(teksilo_core::styles::DensityProjection(reproject));
+    theme
+}
+
+/// Re-derive a macOS theme for another density.
+///
+/// Registered as the theme's [`DensityProjection`], so
+/// `WidgetTree::set_input_density` (and `Theme::with_density`) rebuild the
+/// Tier-3 slots this preset installs instead of carrying their Compact
+/// dimensions across. Colours, id, the [`MacOsPalette`] extension and any slot
+/// the app installed itself ride across untouched.
+///
+/// `[unpublished]` — Apple states no touch ladder at all (macOS has no
+/// touchscreen), so this uses the generic [`InputTokens::for_density`] ladder.
+/// The `[measured]` 22 dp control height stays at Apple's number in the paint
+/// at every density; what rises is the minimum *hit box* around it.
+fn reproject(base: &Theme, density: TargetDensity) -> Theme {
+    let mut theme = base.clone();
+    theme.input = InputTokens::for_density(density);
+    install_styles(&mut theme);
+    theme
 }
 
 /// Install the macOS Tier-3 chrome. Every style resolves its colours from
 /// the live theme at paint time, so one install serves both appearances —
 /// and a custom-accent theme too.
 fn install_styles(theme: &mut Theme) {
+    // Every metric below comes from `theme.input`, so `reproject` can re-run
+    // this alone to move the whole preset to another density.
+    let tokens = theme.input;
     let slots = &mut theme.style_slots;
 
     // Structurally macOS — see `styles`.
@@ -216,25 +241,35 @@ fn install_styles(theme: &mut Theme) {
 
     // macOS metrics over the shipped composition.
     slots.card = Some(Rc::new(styles::metrics::MacOsCardStyle));
-    slots.panel = Some(Rc::new(styles::metrics::macos_panel_style()));
-    slots.popover = Some(Rc::new(styles::metrics::macos_popover_style()));
-    slots.tooltip = Some(Rc::new(styles::metrics::macos_tooltip_style()));
-    slots.dialog = Some(Rc::new(styles::metrics::macos_dialog_style()));
-    slots.snackbar = Some(Rc::new(styles::metrics::macos_snackbar_style()));
-    slots.toast = Some(Rc::new(styles::metrics::macos_toast_style()));
-    slots.banner = Some(Rc::new(styles::metrics::macos_banner_style()));
-    slots.combo_box = Some(Rc::new(styles::metrics::macos_combo_box_style()));
-    slots.icon_button = Some(Rc::new(styles::metrics::macos_icon_button_style()));
-    slots.link = Some(Rc::new(styles::metrics::macos_link_style()));
-    slots.segmented_control = Some(Rc::new(styles::metrics::macos_segmented_control_style()));
-    slots.badge = Some(Rc::new(styles::metrics::macos_badge_style()));
-    slots.progress_bar = Some(Rc::new(styles::metrics::macos_progress_bar_style()));
-    slots.scroll_bar = Some(Rc::new(styles::metrics::macos_scroll_bar_style()));
-    slots.tab = Some(Rc::new(styles::metrics::macos_tab_style()));
-    slots.table = Some(Rc::new(styles::metrics::macos_table_style()));
-    slots.calendar = Some(Rc::new(styles::metrics::macos_calendar_style()));
-    slots.search_field = Some(Rc::new(styles::metrics::macos_search_field_style()));
-    slots.avatar = Some(Rc::new(styles::metrics::macos_avatar_style()));
+    slots.panel = Some(Rc::new(styles::metrics::macos_panel_style_for(&tokens)));
+    slots.popover = Some(Rc::new(styles::metrics::macos_popover_style_for(&tokens)));
+    slots.tooltip = Some(Rc::new(styles::metrics::macos_tooltip_style_for(&tokens)));
+    slots.dialog = Some(Rc::new(styles::metrics::macos_dialog_style_for(&tokens)));
+    slots.snackbar = Some(Rc::new(styles::metrics::macos_snackbar_style_for(&tokens)));
+    slots.toast = Some(Rc::new(styles::metrics::macos_toast_style_for(&tokens)));
+    slots.banner = Some(Rc::new(styles::metrics::macos_banner_style_for(&tokens)));
+    slots.combo_box = Some(Rc::new(styles::metrics::macos_combo_box_style_for(&tokens)));
+    slots.icon_button = Some(Rc::new(styles::metrics::macos_icon_button_style_for(
+        &tokens,
+    )));
+    slots.link = Some(Rc::new(styles::metrics::macos_link_style_for(&tokens)));
+    slots.segmented_control = Some(Rc::new(styles::metrics::macos_segmented_control_style_for(
+        &tokens,
+    )));
+    slots.badge = Some(Rc::new(styles::metrics::macos_badge_style_for(&tokens)));
+    slots.progress_bar = Some(Rc::new(styles::metrics::macos_progress_bar_style_for(
+        &tokens,
+    )));
+    slots.scroll_bar = Some(Rc::new(styles::metrics::macos_scroll_bar_style_for(
+        &tokens,
+    )));
+    slots.tab = Some(Rc::new(styles::metrics::macos_tab_style_for(&tokens)));
+    slots.table = Some(Rc::new(styles::metrics::macos_table_style_for(&tokens)));
+    slots.calendar = Some(Rc::new(styles::metrics::macos_calendar_style_for(&tokens)));
+    slots.search_field = Some(Rc::new(styles::metrics::macos_search_field_style_for(
+        &tokens,
+    )));
+    slots.avatar = Some(Rc::new(styles::metrics::macos_avatar_style_for(&tokens)));
 }
 
 #[cfg(test)]
@@ -435,5 +470,49 @@ mod tests {
             assert_ne!(inactive.colors.focus_ring, t.colors.focus_ring);
             assert_eq!(inactive.colors.surface_main, t.colors.surface_main);
         }
+    }
+    /// A density switch must re-derive the Tier-3 slots this preset installs —
+    /// see the Fluent twin of this test, and `Theme::with_density`.
+    ///
+    /// `[unpublished]` — macOS has no touch ladder of its own, so the preset
+    /// uses the generic one. What moves is the *row*; the `[measured]` 22 dp
+    /// control height stays at Apple's number in the paint.
+    #[test]
+    fn a_density_switch_re_derives_the_installed_slots() {
+        let base = light();
+        let before = base
+            .style_slots
+            .standard_item
+            .clone()
+            .expect("slot installed");
+
+        let touch = base.with_density(TargetDensity::Touch);
+        let after = touch
+            .style_slots
+            .standard_item
+            .clone()
+            .expect("slot survives");
+
+        assert_eq!(touch.input.density, TargetDensity::Touch);
+        assert!(
+            !Rc::ptr_eq(&before, &after),
+            "the projection must rebuild the preset's own slots, not carry them across"
+        );
+
+        let compact = styles::standard_item::macos_standard_item_recipe_for(
+            &InputTokens::for_density(TargetDensity::Compact),
+        );
+        let touched = styles::standard_item::macos_standard_item_recipe_for(
+            &InputTokens::for_density(TargetDensity::Touch),
+        );
+        assert_eq!(
+            compact.min_height_single_line, 24.0,
+            "`NSTableView.rowHeight` on macOS 11+"
+        );
+        assert_eq!(touched.min_height_single_line, 44.0, "the Touch target");
+
+        assert_eq!(touch.id, base.id);
+        assert_eq!(touch.colors, base.colors);
+        assert!(touch.extension::<MacOsPalette>().is_some());
     }
 }

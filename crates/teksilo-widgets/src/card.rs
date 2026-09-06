@@ -230,7 +230,11 @@ impl Widget for Card {
             .style_override
             .clone()
             .or_else(|| ctx.theme().style_slots.card.clone())
-            .unwrap_or_else(|| Rc::new(crate::styles::RecipeCardStyle::default()));
+            .unwrap_or_else(|| {
+                Rc::new(crate::styles::RecipeCardStyle::for_tokens(
+                    &ctx.theme().input,
+                ))
+            });
         let cfg = CardStyleConfig {
             content,
             is_hovered: None,

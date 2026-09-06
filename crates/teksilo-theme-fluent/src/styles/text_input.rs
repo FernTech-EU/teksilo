@@ -26,12 +26,13 @@ use teksilo_core::accessibility::AccessNodeBuilder;
 use teksilo_core::binding::BindingLevel;
 use teksilo_core::build_context::BuildContext;
 use teksilo_core::signal::Signal;
+use teksilo_core::styles::density::{dp, spacing};
 use teksilo_core::styles::{
     TextInputStyle, TextInputStyleConfig, TextInputValidationLevel, TextInputVariant,
 };
 use teksilo_core::widget::{LayoutContext, LayoutResponse, PaintContext, Widget, WidgetPlacement};
 use teksilo_core::widget_id::WidgetId;
-use teksilo_tokens::{Color, CornerRadius};
+use teksilo_tokens::{Color, CornerRadius, TargetRole};
 use teksilo_widgets::primitives::{MinSize, Padding, ZStack};
 
 use crate::palette::{FluentEdgeSide, FluentPalette};
@@ -68,6 +69,8 @@ impl TextInputStyle for FluentTextInputStyle {
         if cfg.variant == TextInputVariant::Bare {
             return cfg.editor;
         }
+        let tokens = ctx.theme().input;
+        let tokens = &tokens;
 
         let chrome = ctx.add(FluentFieldChrome {
             is_focused: cfg.is_focused.clone(),
@@ -77,10 +80,17 @@ impl TextInputStyle for FluentTextInputStyle {
             variant: cfg.variant,
         });
         // Horizontal only — see `PADDING_LEADING`.
-        let padded =
-            ctx.add(Padding::new(0.0, PADDING_TRAILING, 0.0, PADDING_LEADING).child_id(cfg.editor));
+        let padded = ctx.add(
+            Padding::new(
+                0.0,
+                spacing(PADDING_TRAILING, tokens),
+                0.0,
+                spacing(PADDING_LEADING, tokens),
+            )
+            .child_id(cfg.editor),
+        );
         let stack = ctx.add(ZStack::new().add_child(chrome).add_child(padded));
-        ctx.add(MinSize::new(0.0, MIN_HEIGHT).child_id(stack))
+        ctx.add(MinSize::new(0.0, dp(MIN_HEIGHT, TargetRole::Target, tokens)).child_id(stack))
     }
 }
 

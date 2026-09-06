@@ -151,12 +151,12 @@ impl Widget for DockResizeHandle {
         // the dock divider's grip, colours, sizes and hover/drag/focus states
         // are identical to a Splitter handle.
         ctx.register_animated_signal(&self.hover_progress);
-        let style: SharedSplitterStyle = ctx
-            .theme()
-            .style_slots
-            .splitter
-            .clone()
-            .unwrap_or_else(|| Rc::new(crate::styles::RecipeSplitterStyle::default()));
+        let style: SharedSplitterStyle =
+            ctx.theme().style_slots.splitter.clone().unwrap_or_else(|| {
+                Rc::new(crate::styles::RecipeSplitterStyle::for_tokens(
+                    &ctx.theme().input,
+                ))
+            });
         let orientation = if self.side.is_horizontal_axis() {
             Orientation::Horizontal
         } else {

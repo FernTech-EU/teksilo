@@ -15,12 +15,13 @@
 use teksilo_canvas::{Canvas, Rect, Size, SizeProposal};
 use teksilo_core::accessibility::AccessNodeBuilder;
 use teksilo_core::build_context::BuildContext;
+use teksilo_core::styles::density::spacing;
 use teksilo_core::styles::{SnackbarStyle, SnackbarStyleConfig};
 use teksilo_core::widget::{
     LayoutContext, LayoutResponse, PaintContext, PendingChild, Widget, WidgetPlacement,
 };
 use teksilo_core::widget_id::WidgetId;
-use teksilo_tokens::CornerRadius;
+use teksilo_tokens::{CornerRadius, InputTokens};
 
 // IntUI design tokens for Snackbar. The recipe owns its own dimensions.
 pub const SNACKBAR_PADDING_HORIZONTAL: f32 = 12.0;
@@ -35,13 +36,24 @@ pub struct SnackbarRecipe {
     pub corner_radius: f32,
 }
 
-impl Default for SnackbarRecipe {
-    fn default() -> Self {
+impl SnackbarRecipe {
+    /// This recipe's dimensions resolved against a density's [`InputTokens`].
+    ///
+    /// [`Default`] is `for_tokens(&InputTokens::default())` — the Compact
+    /// ladder — so the shipped values below are the Compact column by
+    /// construction and cannot drift from it.
+    pub fn for_tokens(tokens: &InputTokens) -> Self {
         Self {
-            padding_horizontal: SNACKBAR_PADDING_HORIZONTAL,
-            padding_vertical: SNACKBAR_PADDING_VERTICAL,
+            padding_horizontal: spacing(SNACKBAR_PADDING_HORIZONTAL, tokens),
+            padding_vertical: spacing(SNACKBAR_PADDING_VERTICAL, tokens),
             corner_radius: SNACKBAR_CORNER_RADIUS,
         }
+    }
+}
+
+impl Default for SnackbarRecipe {
+    fn default() -> Self {
+        Self::for_tokens(&InputTokens::default())
     }
 }
 
@@ -55,6 +67,18 @@ pub struct RecipeSnackbarStyle {
 impl RecipeSnackbarStyle {
     pub fn new(recipe: SnackbarRecipe) -> Self {
         Self { recipe }
+    }
+
+    /// This style with every dimension resolved against a density's
+    /// [`InputTokens`], as `RecipeSnackbarStyle::for_tokens(&ctx.theme().input)` at
+    /// the widget's own build site.
+    ///
+    /// [`Default`] is the `TargetDensity::Compact` projection, so a Compact
+    /// tree gets exactly the values this module documents.
+    pub fn for_tokens(tokens: &InputTokens) -> Self {
+        Self {
+            recipe: SnackbarRecipe::for_tokens(tokens),
+        }
     }
 }
 

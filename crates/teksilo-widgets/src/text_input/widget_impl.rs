@@ -204,12 +204,21 @@ impl Widget for TextInput {
         // bound text signal — the field's ext→internal effect
         // picks this up and wipes the document.
         if self.show_clear_button {
+            let clear_hit = teksilo_core::styles::density::density_min_size(
+                teksilo_canvas::Size::new(16.0, 16.0),
+                teksilo_tokens::TargetAxes::BOTH,
+                &ctx.theme().input,
+            );
             let icon = (crate::icon_button::BuiltInIcons::global().clear)()
                 .icon_size(12.0)
                 .color(TextRole::Secondary);
             let text_for_clear = self.text.clone();
             let clear_id = ctx.add(
-                MinSize::new(16.0, 16.0)
+                // Raised to the 24 dp WCAG 2.2 SC 2.5.8 floor: this was the
+                // one control in the crate whose own minimum hit box was below
+                // it. The 12 dp glyph is unchanged — only the box around it
+                // grows, and only up to the floor.
+                MinSize::new(clear_hit.width, clear_hit.height)
                     .child(crate::primitives::Center::new().child(icon))
                     .on_tap(move |_pos, ctx| {
                         text_for_clear.set(String::new());
@@ -259,7 +268,11 @@ impl Widget for TextInput {
             .style_override
             .clone()
             .or_else(|| ctx.theme().style_slots.text_input.clone())
-            .unwrap_or_else(|| Rc::new(crate::styles::RecipeTextInputStyle::default()));
+            .unwrap_or_else(|| {
+                Rc::new(crate::styles::RecipeTextInputStyle::for_tokens(
+                    &ctx.theme().input,
+                ))
+            });
 
         let cfg = TextInputStyleConfig {
             editor: row_id,
@@ -272,8 +285,13 @@ impl Widget for TextInput {
         let chrome_id = style.make_body(&cfg, ctx);
 
         let min_w = self.min_width.unwrap_or(65.0);
-        let frame_id =
-            ctx.add(MinSize::new(min_w, field_dims::TEXT_FIELD_HEIGHT).child_id(chrome_id));
+        let frame_id = ctx.add(
+            MinSize::new(
+                min_w,
+                crate::styles::TextInputRecipe::for_tokens(&ctx.theme().input).height,
+            )
+            .child_id(chrome_id),
+        );
 
         // ── Inline validation strip ────────────────────────────────
         // Maps `Signal<ValidationState>` to the `Signal<ValidationFeedback>`

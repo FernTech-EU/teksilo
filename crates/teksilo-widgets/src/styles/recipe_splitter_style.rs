@@ -22,7 +22,7 @@ use teksilo_core::signal::Signal;
 use teksilo_core::styles::{SplitterStyle, SplitterStyleConfig};
 use teksilo_core::widget::{LayoutContext, LayoutResponse, PaintContext, Widget, WidgetPlacement};
 use teksilo_core::widget_id::WidgetId;
-use teksilo_tokens::Orientation;
+use teksilo_tokens::{InputTokens, Orientation};
 
 /// Thickness of the always-present resting divider line, in dp.
 pub const SPLITTER_DIVIDER_LINE_THICKNESS: f32 = 1.0;
@@ -39,11 +39,27 @@ pub struct SplitterRecipe {
     pub divider_line_thickness: f32,
 }
 
-impl Default for SplitterRecipe {
-    fn default() -> Self {
+impl SplitterRecipe {
+    /// This recipe's dimensions resolved against a density's [`InputTokens`].
+    ///
+    /// [`Default`] is `for_tokens(&InputTokens::default())` — the Compact
+    /// ladder — so the shipped values below are the Compact column by
+    /// construction and cannot drift from it.
+    ///
+    /// Every dimension this recipe carries is a decoration (a corner radius, a
+    /// hairline, a glyph metric), so the parameter is unused: the density
+    /// ladder never moves any of them. It is taken all the same, so every
+    /// recipe is constructed the same way at its widget's build site.
+    pub fn for_tokens(_tokens: &InputTokens) -> Self {
         Self {
             divider_line_thickness: SPLITTER_DIVIDER_LINE_THICKNESS,
         }
+    }
+}
+
+impl Default for SplitterRecipe {
+    fn default() -> Self {
+        Self::for_tokens(&InputTokens::default())
     }
 }
 
@@ -57,6 +73,18 @@ pub struct RecipeSplitterStyle {
 impl RecipeSplitterStyle {
     pub fn new(recipe: SplitterRecipe) -> Self {
         Self { recipe }
+    }
+
+    /// This style with every dimension resolved against a density's
+    /// [`InputTokens`], as `RecipeSplitterStyle::for_tokens(&ctx.theme().input)` at
+    /// the widget's own build site.
+    ///
+    /// [`Default`] is the `TargetDensity::Compact` projection, so a Compact
+    /// tree gets exactly the values this module documents.
+    pub fn for_tokens(tokens: &InputTokens) -> Self {
+        Self {
+            recipe: SplitterRecipe::for_tokens(tokens),
+        }
     }
 }
 

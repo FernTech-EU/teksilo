@@ -538,11 +538,18 @@ fn a_text_field_is_at_least_the_control_height() {
 
         let button = height_of(Box::new(Button::new(lit!("Save"))));
         let field = height_of(Box::new(TextInput::new(Signal::new(String::new()))));
-        let expected = teksilo_theme_macos::shape::MACOS_CONTROL_HEIGHT;
+        let bezel = teksilo_theme_macos::shape::MACOS_CONTROL_HEIGHT;
+        // The painted bezel is still Apple's `[measured]` 22 dp, but the
+        // button's *minimum hit box* is now the 24 dp WCAG 2.2 SC 2.5.8 floor:
+        // the density sweep routes every `MinSize` through `density_min_size`,
+        // and a `MinSize` is exactly the hit box that floor governs. This is
+        // one of the three sites in the whole tree where that raised a
+        // dimension at the Compact density — see `docs/density-inventory.md`.
+        let expected = bezel.max(24.0);
 
         assert!(
             (button - expected).abs() < 0.5,
-            "button is {button}, expected the {expected} dp macOS control height"
+            "button is {button}, expected the {expected} dp floor over the {bezel} dp bezel"
         );
         assert!(
             field >= button - 0.5,

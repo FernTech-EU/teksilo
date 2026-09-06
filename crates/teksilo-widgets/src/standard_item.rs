@@ -477,7 +477,11 @@ impl StandardListItem {
             .style_override
             .clone()
             .or_else(|| ctx.theme().style_slots.standard_item.clone())
-            .unwrap_or_else(|| Rc::new(crate::styles::RecipeStandardItemStyle::default()));
+            .unwrap_or_else(|| {
+                Rc::new(crate::styles::RecipeStandardItemStyle::for_tokens(
+                    &ctx.theme().input,
+                ))
+            });
         let on_selected = style.selected_label_role();
         let emphasised =
             on_selected.map(|_| ctx.view_focus_active().and(&ctx.window_active_signal()));
@@ -1336,7 +1340,8 @@ mod tests {
             cfg: &StandardItemStyleConfig,
             ctx: &mut teksilo_core::build_context::BuildContext,
         ) -> WidgetId {
-            crate::styles::RecipeStandardItemStyle::default().make_body(cfg, ctx)
+            crate::styles::RecipeStandardItemStyle::for_tokens(&ctx.theme().input)
+                .make_body(cfg, ctx)
         }
 
         fn selected_label_role(&self) -> Option<TextRole> {

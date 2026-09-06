@@ -20,12 +20,15 @@ use teksilo_core::build_context::BuildContext;
 use teksilo_core::color_prop::ColorProp;
 use teksilo_core::paint_prop::PaintProp;
 use teksilo_core::signal::Signal;
+use teksilo_core::styles::density::{density_min_size, spacing};
 use teksilo_core::styles::{
     BorderRecipe, ButtonRecipe, ButtonStyle, ButtonStyleConfig, ButtonVariant, FillRecipe,
     PerStateRecipe, RecipeColor, ShapeRecipe, WidgetState,
 };
 use teksilo_core::widget_id::WidgetId;
-use teksilo_tokens::{BorderRole, Color, CornerRadius, SurfaceRole, TextRole};
+use teksilo_tokens::{
+    BorderRole, Color, CornerRadius, InputTokens, SurfaceRole, TargetAxes, TextRole,
+};
 
 use super::window_resolution_colors;
 use crate::primitives::{MinSize, Padding, RectWidget, ZStack};
@@ -62,20 +65,32 @@ pub struct RecipeButtonStyle {
 }
 
 impl RecipeButtonStyle {
-    /// IntUI's per-variant ButtonRecipe set.
+    /// IntUI's per-variant ButtonRecipe set at the Compact density.
     pub fn intui() -> Self {
+        Self::for_tokens(&InputTokens::default())
+    }
+
+    /// IntUI's per-variant `ButtonRecipe` set with every dimension resolved
+    /// against a density's [`InputTokens`], as
+    /// `RecipeButtonStyle::for_tokens(&ctx.theme().input)` at `Button`'s own
+    /// build site.
+    ///
+    /// [`Default`] and [`intui`](Self::intui) are the `TargetDensity::Compact`
+    /// projection, so a Compact tree gets exactly the values this module
+    /// documents.
+    pub fn for_tokens(tokens: &InputTokens) -> Self {
         let mut recipes = HashMap::new();
-        recipes.insert(ButtonVariant::Filled, intui_filled_recipe());
+        recipes.insert(ButtonVariant::Filled, intui_filled_recipe(tokens));
         // IntUI maps Destructive → Filled (the warning lives in the
         // dialog title/body, not the button).
-        recipes.insert(ButtonVariant::Destructive, intui_filled_recipe());
-        recipes.insert(ButtonVariant::Plain, intui_plain_recipe());
+        recipes.insert(ButtonVariant::Destructive, intui_filled_recipe(tokens));
+        recipes.insert(ButtonVariant::Plain, intui_plain_recipe(tokens));
         // IntUI maps Tinted/Outlined → Plain.
-        recipes.insert(ButtonVariant::Tinted, intui_plain_recipe());
-        recipes.insert(ButtonVariant::Outlined, intui_plain_recipe());
-        recipes.insert(ButtonVariant::Ghost, intui_ghost_recipe());
+        recipes.insert(ButtonVariant::Tinted, intui_plain_recipe(tokens));
+        recipes.insert(ButtonVariant::Outlined, intui_plain_recipe(tokens));
+        recipes.insert(ButtonVariant::Ghost, intui_ghost_recipe(tokens));
         // IntUI maps Link → Ghost.
-        recipes.insert(ButtonVariant::Link, intui_ghost_recipe());
+        recipes.insert(ButtonVariant::Link, intui_ghost_recipe(tokens));
         // IntUI keeps the Button's built-in label-role mapping.
         Self {
             recipes,
@@ -235,7 +250,7 @@ fn resolve_fill_to_color(fill: &FillRecipe, colors: &teksilo_tokens::ColorTokens
 
 // ─── IntUI per-variant recipe constructors ──────────────────────────
 
-fn intui_filled_recipe() -> ButtonRecipe {
+fn intui_filled_recipe(tokens: &InputTokens) -> ButtonRecipe {
     ButtonRecipe {
         shape: ShapeRecipe::rounded(4.0),
         fill: PerStateRecipe {
@@ -263,12 +278,19 @@ fn intui_filled_recipe() -> ButtonRecipe {
             disabled: None,
         },
         shadow: PerStateRecipe::uniform(None),
-        padding: EdgeInsets::symmetric(14.0, 0.0),
-        min_size: Size::new(72.0, 24.0),
+        padding: EdgeInsets::symmetric(
+            spacing(BUTTON_PADDING_HORIZONTAL, tokens),
+            spacing(BUTTON_PADDING_VERTICAL, tokens),
+        ),
+        min_size: density_min_size(
+            Size::new(BUTTON_MIN_WIDTH, BUTTON_HEIGHT),
+            TargetAxes::BOTH,
+            tokens,
+        ),
     }
 }
 
-fn intui_plain_recipe() -> ButtonRecipe {
+fn intui_plain_recipe(tokens: &InputTokens) -> ButtonRecipe {
     ButtonRecipe {
         shape: ShapeRecipe::rounded(4.0),
         fill: PerStateRecipe {
@@ -294,12 +316,19 @@ fn intui_plain_recipe() -> ButtonRecipe {
             disabled: None,
         },
         shadow: PerStateRecipe::uniform(None),
-        padding: EdgeInsets::symmetric(14.0, 0.0),
-        min_size: Size::new(72.0, 24.0),
+        padding: EdgeInsets::symmetric(
+            spacing(BUTTON_PADDING_HORIZONTAL, tokens),
+            spacing(BUTTON_PADDING_VERTICAL, tokens),
+        ),
+        min_size: density_min_size(
+            Size::new(BUTTON_MIN_WIDTH, BUTTON_HEIGHT),
+            TargetAxes::BOTH,
+            tokens,
+        ),
     }
 }
 
-fn intui_ghost_recipe() -> ButtonRecipe {
+fn intui_ghost_recipe(tokens: &InputTokens) -> ButtonRecipe {
     ButtonRecipe {
         shape: ShapeRecipe::rounded(4.0),
         fill: PerStateRecipe {
@@ -321,14 +350,21 @@ fn intui_ghost_recipe() -> ButtonRecipe {
             disabled: None,
         },
         shadow: PerStateRecipe::uniform(None),
-        padding: EdgeInsets::symmetric(14.0, 0.0),
-        min_size: Size::new(72.0, 24.0),
+        padding: EdgeInsets::symmetric(
+            spacing(BUTTON_PADDING_HORIZONTAL, tokens),
+            spacing(BUTTON_PADDING_VERTICAL, tokens),
+        ),
+        min_size: density_min_size(
+            Size::new(BUTTON_MIN_WIDTH, BUTTON_HEIGHT),
+            TargetAxes::BOTH,
+            tokens,
+        ),
     }
 }
 
-// `Rc::new(RecipeButtonStyle::default())` is a common allocation point
-// for callers that need a `SharedButtonStyle`; expose a tiny helper
-// so they don't have to repeat the type name.
-pub fn shared_intui() -> Rc<dyn ButtonStyle> {
-    Rc::new(RecipeButtonStyle::default())
+// `Rc::new(RecipeButtonStyle::for_tokens(&ctx.theme().input))` is a common
+// allocation point for callers that need a `SharedButtonStyle`; expose a tiny
+// helper so they don't have to repeat the type name.
+pub fn shared_intui(tokens: &InputTokens) -> Rc<dyn ButtonStyle> {
+    Rc::new(RecipeButtonStyle::for_tokens(tokens))
 }

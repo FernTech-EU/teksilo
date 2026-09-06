@@ -43,7 +43,7 @@ use teksilo_core::styles::{
 };
 use teksilo_core::widget_builder::WidgetBuilder;
 use teksilo_core::widget_id::WidgetId;
-use teksilo_tokens::{BorderRole, CornerRadius};
+use teksilo_tokens::{BorderRole, CornerRadius, InputTokens};
 
 use crate::card::Card;
 use crate::drop_target::overlay::DropRegionOverlay;
@@ -71,14 +71,30 @@ pub struct DropTargetRecipe {
     pub border_width_subtle: f32,
 }
 
-impl Default for DropTargetRecipe {
-    fn default() -> Self {
+impl DropTargetRecipe {
+    /// This recipe's dimensions resolved against a density's [`InputTokens`].
+    ///
+    /// [`Default`] is `for_tokens(&InputTokens::default())` — the Compact
+    /// ladder — so the shipped values below are the Compact column by
+    /// construction and cannot drift from it.
+    ///
+    /// Every dimension this recipe carries is a decoration (a corner radius, a
+    /// hairline, a glyph metric), so the parameter is unused: the density
+    /// ladder never moves any of them. It is taken all the same, so every
+    /// recipe is constructed the same way at its widget's build site.
+    pub fn for_tokens(_tokens: &InputTokens) -> Self {
         Self {
             corner_radius: DROP_TARGET_CORNER_RADIUS,
             border_width_default: DROP_TARGET_BORDER_WIDTH_DEFAULT,
             border_width_prominent: DROP_TARGET_BORDER_WIDTH_PROMINENT,
             border_width_subtle: DROP_TARGET_BORDER_WIDTH_SUBTLE,
         }
+    }
+}
+
+impl Default for DropTargetRecipe {
+    fn default() -> Self {
+        Self::for_tokens(&InputTokens::default())
     }
 }
 
@@ -93,6 +109,18 @@ impl RecipeDropTargetStyle {
     /// Create a style with custom recipe dimensions.
     pub fn new(recipe: DropTargetRecipe) -> Self {
         Self { recipe }
+    }
+
+    /// This style with every dimension resolved against a density's
+    /// [`InputTokens`], as `RecipeDropTargetStyle::for_tokens(&ctx.theme().input)` at
+    /// the widget's own build site.
+    ///
+    /// [`Default`] is the `TargetDensity::Compact` projection, so a Compact
+    /// tree gets exactly the values this module documents.
+    pub fn for_tokens(tokens: &InputTokens) -> Self {
+        Self {
+            recipe: DropTargetRecipe::for_tokens(tokens),
+        }
     }
 }
 

@@ -705,19 +705,10 @@ impl<T: 'static> Widget for ListView<T> {
             let scroll_for_tick = self.scroll_y.clone();
             let max_scroll_for_tick = self.max_scroll_y.clone();
             let viewport_for_tick = self.viewport_height.clone();
-            handlers = handlers.on_drag_tick(move |pos, _ctx| {
-                const EDGE: f32 = 32.0;
-                const MAX_VELOCITY: f32 = 12.0;
+            handlers = handlers.on_drag_tick(move |pos, ctx| {
                 let h = viewport_for_tick.get();
-                let above = (EDGE - pos.y).max(0.0);
-                let below = (pos.y - (h - EDGE)).max(0.0);
-                let delta = if above > 0.0 {
-                    -(above / EDGE) * MAX_VELOCITY
-                } else if below > 0.0 {
-                    (below / EDGE) * MAX_VELOCITY
-                } else {
-                    0.0
-                };
+                let band = crate::common::drag_autoscroll::band_for(ctx.pointer_kind());
+                let delta = crate::common::drag_autoscroll::step(pos.y, h, band);
                 if delta.abs() > 0.01 {
                     let max = max_scroll_for_tick.get();
                     let new_y = (scroll_for_tick.get() + delta).clamp(0.0, max);
