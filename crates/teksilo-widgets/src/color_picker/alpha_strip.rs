@@ -161,6 +161,7 @@ impl Widget for AlphaStrip {
                 DragPhase::Started {
                     position,
                     button: PointerButton::Primary,
+                    ..
                 } => {
                     dragging.set(true);
                     apply(position.x, position.y);

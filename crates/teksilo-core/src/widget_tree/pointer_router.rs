@@ -133,7 +133,14 @@ impl WidgetTree {
     ) {
         // A legacy event names no pointer, so it is the mouse at the epoch —
         // which is exactly what it has always meant.
-        let snapshot = crate::pointer::InputSnapshot::from_event(&event);
+        let mut snapshot = crate::pointer::InputSnapshot::from_event(&event);
+        // A legacy `WidgetEvent` carries no timestamp of its own, so stamp it
+        // from the tree clock. Without this the gesture layer would see every
+        // hand-built event at the epoch and no interval — a double tap, a long
+        // press and a swipe would all be undecidable.
+        if snapshot.pointer.time == crate::pointer::EventTime::ZERO {
+            snapshot.pointer.time = self.input_now();
+        }
         self.dispatch_with_input_snapshot(event, snapshot, ops)
     }
 
@@ -1150,22 +1157,44 @@ impl WidgetTree {
     /// [`Self::localize_event`].
     fn localize_gesture(&self, id: WidgetId, gesture: &GestureEvent) -> GestureEvent {
         let loc = |p: teksilo_canvas::Point| self.arena.local_pointer_position(id, p);
-        let tap = |t: &TapEvent| TapEvent::new(loc(t.position), t.button, t.modifiers);
+        let tap = |t: &TapEvent| {
+            TapEvent::new(loc(t.position), t.button, t.modifiers).with_pointer(t.pointer)
+        };
         match gesture {
             GestureEvent::Tap(t) => GestureEvent::Tap(tap(t)),
             GestureEvent::DoubleTap(t) => GestureEvent::DoubleTap(tap(t)),
             GestureEvent::TripleTap(t) => GestureEvent::TripleTap(tap(t)),
             GestureEvent::LongPress(t) => GestureEvent::LongPress(tap(t)),
-            GestureEvent::DragStarted { position, button } => GestureEvent::DragStarted {
+            GestureEvent::DragStarted {
+                position,
+                button,
+                pointer,
+            } => GestureEvent::DragStarted {
                 position: loc(*position),
                 button: *button,
+                pointer: *pointer,
             },
-            GestureEvent::DragMoved { position, delta } => GestureEvent::DragMoved {
+            GestureEvent::DragMoved {
+                position,
+                delta,
+                pointer,
+            } => GestureEvent::DragMoved {
                 position: loc(*position),
                 delta: *delta,
+                pointer: *pointer,
             },
-            GestureEvent::DragEnded { position } => GestureEvent::DragEnded {
+            GestureEvent::DragEnded { position, pointer } => GestureEvent::DragEnded {
                 position: loc(*position),
+                pointer: *pointer,
+            },
+            GestureEvent::DragCancelled {
+                position,
+                pointer,
+                reason,
+            } => GestureEvent::DragCancelled {
+                position: loc(*position),
+                pointer: *pointer,
+                reason: *reason,
             },
             GestureEvent::PinchStarted { center } => GestureEvent::PinchStarted {
                 center: loc(*center),
@@ -1180,6 +1209,9 @@ impl WidgetTree {
                 rotation: *rotation,
             },
             GestureEvent::PinchEnded => GestureEvent::PinchEnded,
+            GestureEvent::PinchCancelled { reason } => {
+                GestureEvent::PinchCancelled { reason: *reason }
+            }
             GestureEvent::Swipe {
                 direction,
                 velocity,
@@ -1283,6 +1315,7 @@ impl WidgetTree {
             // Convert any pointer position into this node's widget-local
             // space before its handlers (and its gesture arena) see it.
             let localized = self.localize_event(id, event);
+            let gesture_cx = self.recognizer_context(id);
             let WidgetTree {
                 arena,
                 gesture_owners,
@@ -1290,8 +1323,16 @@ impl WidgetTree {
             } = self;
             let event = localized.as_ref().unwrap_or(event);
             let response = if let Some(node) = arena.get_mut(id) {
-                Self::try_handler_bubble(node, event, &mut ctx, is_target, id, gesture_owners)
-                    .unwrap_or(EventResponse::Ignored)
+                Self::try_handler_bubble(
+                    node,
+                    event,
+                    &mut ctx,
+                    is_target,
+                    id,
+                    gesture_owners,
+                    gesture_cx,
+                )
+                .unwrap_or(EventResponse::Ignored)
             } else {
                 EventResponse::Ignored
             };
@@ -1339,14 +1380,23 @@ impl WidgetTree {
         let mut ctx = self
             .make_event_context(&mut *ops)
             .with_dispatch_node(target);
+        let gesture_cx = self.recognizer_context(target);
         let WidgetTree {
             arena,
             gesture_owners,
             ..
         } = self;
         let response = if let Some(node) = arena.get_mut(target) {
-            Self::try_handler_bubble(node, event, &mut ctx, true, target, gesture_owners)
-                .unwrap_or(EventResponse::Ignored)
+            Self::try_handler_bubble(
+                node,
+                event,
+                &mut ctx,
+                true,
+                target,
+                gesture_owners,
+                gesture_cx,
+            )
+            .unwrap_or(EventResponse::Ignored)
         } else {
             EventResponse::Ignored
         };
@@ -1429,6 +1479,7 @@ impl WidgetTree {
         fire_on_pointer_event: bool,
         node_id: WidgetId,
         gesture_owners: &mut std::collections::HashSet<WidgetId>,
+        gesture_cx: crate::gesture::RecognizerContext<'_>,
     ) -> Option<EventResponse> {
         match event {
             WidgetEvent::PointerEnter => {
@@ -1666,6 +1717,7 @@ impl WidgetTree {
                 }
                 Self::ensure_gesture_arena(node, node_id, gesture_owners);
                 if let Some(arena) = node.handlers.gesture_arena.as_mut() {
+                    let cx = gesture_cx;
                     // Implicit capture for the Down..Up sequence so that
                     // moves leaving the widget bounds still reach the
                     // arena. Without this, a drag that starts inside the
@@ -1675,11 +1727,16 @@ impl WidgetTree {
                     // Released unconditionally by the `PointerUp` branch
                     // in `dispatch_event`.
                     ctx.capture_pointer();
-                    let result = arena.process(&RawPointerEvent::Down {
-                        position: *position,
-                        button: *button,
-                        modifiers: *modifiers,
-                    });
+                    let result = arena.process(
+                        &RawPointerEvent::Down {
+                            position: *position,
+                            button: *button,
+                            modifiers: *modifiers,
+                            pointer: cx.pointer,
+                            time: cx.now,
+                        },
+                        &cx,
+                    );
                     if let Some(gesture) = result {
                         Self::dispatch_recognized_gesture(node, gesture, ctx);
                     }
@@ -1704,11 +1761,17 @@ impl WidgetTree {
                     }
                 }
                 if let Some(arena) = node.handlers.gesture_arena.as_mut() {
-                    let result = arena.process(&RawPointerEvent::Up {
-                        position: *position,
-                        button: *button,
-                        modifiers: *modifiers,
-                    });
+                    let cx = gesture_cx;
+                    let result = arena.process(
+                        &RawPointerEvent::Up {
+                            position: *position,
+                            button: *button,
+                            modifiers: *modifiers,
+                            pointer: cx.pointer,
+                            time: cx.now,
+                        },
+                        &cx,
+                    );
                     if let Some(gesture) = result {
                         Self::dispatch_recognized_gesture(node, gesture, ctx);
                     }
@@ -1729,9 +1792,15 @@ impl WidgetTree {
                     }
                 }
                 if let Some(arena) = node.handlers.gesture_arena.as_mut() {
-                    let result = arena.process(&RawPointerEvent::Move {
-                        position: *position,
-                    });
+                    let cx = gesture_cx;
+                    let result = arena.process(
+                        &RawPointerEvent::Move {
+                            position: *position,
+                            pointer: cx.pointer,
+                            time: cx.now,
+                        },
+                        &cx,
+                    );
                     if let Some(gesture) = result {
                         Self::dispatch_recognized_gesture(node, gesture, ctx);
                         // A recognized gesture (DragStarted / DragMoved / …)
@@ -2623,7 +2692,8 @@ mod tests {
                     match phase {
                         DragPhase::Started { position, .. }
                         | DragPhase::Moved { position, .. }
-                        | DragPhase::Ended { position } => gp.set(Some(position)),
+                        | DragPhase::Ended { position, .. } => gp.set(Some(position)),
+                        _ => {}
                     }
                 }),
         );

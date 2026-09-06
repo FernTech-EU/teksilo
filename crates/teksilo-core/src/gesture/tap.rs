@@ -5,7 +5,9 @@ use teksilo_canvas::Point;
 
 use crate::event::{ButtonMask, PointerButton};
 
-use super::{GestureEvent, GestureRecognizer, GestureResult, RawPointerEvent, TapEvent};
+use super::{
+    GestureEvent, GestureRecognizer, GestureResult, RawPointerEvent, RecognizerContext, TapEvent,
+};
 
 /// Recognizes a single tap (pointer down + up without significant movement).
 ///
@@ -14,9 +16,13 @@ use super::{GestureEvent, GestureRecognizer, GestureResult, RawPointerEvent, Tap
 /// [`accept`](TapRecognizer::accept_buttons). Default `accept` is
 /// [`ButtonMask::PRIMARY`] — left-click only — which is what users
 /// expect from a "tap" and keeps right-click free for context menus.
+///
+/// The travel a tap tolerates comes from the active profile's `tap_slop` —
+/// 5 dp for a mouse (exactly the pre-P06 constant), 18 dp for a finger —
+/// unless [`max_distance`](Self::max_distance) pins it.
 #[derive(Debug)]
 pub struct TapRecognizer {
-    max_distance: f32,
+    max_distance: Option<f32>,
     accept: ButtonMask,
     down_position: Option<Point>,
     down_button: Option<PointerButton>,
@@ -25,16 +31,21 @@ pub struct TapRecognizer {
 impl TapRecognizer {
     pub fn new() -> Self {
         Self {
-            max_distance: 5.0,
+            max_distance: None,
             accept: ButtonMask::PRIMARY,
             down_position: None,
             down_button: None,
         }
     }
 
+    /// Pin the travel a tap tolerates, overriding the profile's `tap_slop`.
     pub fn max_distance(mut self, d: f32) -> Self {
-        self.max_distance = d;
+        self.max_distance = Some(d);
         self
+    }
+
+    fn slop(&self, cx: &RecognizerContext) -> f32 {
+        self.max_distance.unwrap_or(cx.profile.tap_slop)
     }
 
     /// Restrict (or extend) the set of buttons that can fire this
@@ -57,7 +68,8 @@ impl Default for TapRecognizer {
 }
 
 impl GestureRecognizer for TapRecognizer {
-    fn process(&mut self, event: &RawPointerEvent) -> GestureResult {
+    fn process(&mut self, event: &RawPointerEvent, cx: &RecognizerContext) -> GestureResult {
+        let max_distance = self.slop(cx);
         match event {
             RawPointerEvent::Down {
                 position, button, ..
@@ -69,11 +81,11 @@ impl GestureRecognizer for TapRecognizer {
                 self.down_button = Some(*button);
                 GestureResult::Pending
             }
-            RawPointerEvent::Move { position } => {
+            RawPointerEvent::Move { position, .. } => {
                 if let Some(down) = self.down_position {
                     let dx = position.x - down.x;
                     let dy = position.y - down.y;
-                    if (dx * dx + dy * dy).sqrt() > self.max_distance {
+                    if (dx * dx + dy * dy).sqrt() > max_distance {
                         self.down_position = None;
                         self.down_button = None;
                         return GestureResult::Failed;
@@ -85,6 +97,8 @@ impl GestureRecognizer for TapRecognizer {
                 position,
                 button,
                 modifiers,
+                pointer,
+                ..
             } => {
                 let Some(down) = self.down_position.take() else {
                     return GestureResult::Failed;
@@ -97,13 +111,19 @@ impl GestureRecognizer for TapRecognizer {
                 }
                 let dx = position.x - down.x;
                 let dy = position.y - down.y;
-                if (dx * dx + dy * dy).sqrt() <= self.max_distance {
+                if (dx * dx + dy * dy).sqrt() <= max_distance {
                     return GestureResult::Recognized(GestureEvent::Tap(TapEvent {
                         position: *position,
                         button: *button,
                         modifiers: *modifiers,
+                        pointer: *pointer,
                     }));
                 }
+                GestureResult::Failed
+            }
+            RawPointerEvent::Cancel { .. } => {
+                self.down_position = None;
+                self.down_button = None;
                 GestureResult::Failed
             }
         }
@@ -116,6 +136,21 @@ impl GestureRecognizer for TapRecognizer {
 
     fn priority(&self) -> u32 {
         10
+    }
+
+    fn tap_family(&self) -> bool {
+        true
+    }
+}
+
+#[cfg(test)]
+impl TapRecognizer {
+    /// Drive the recognizer with the shipped profile for the event's own
+    /// pointer kind. The pre-P06 call shape, kept so the migration is checked
+    /// against unchanged tests.
+    fn process(&mut self, event: &RawPointerEvent) -> GestureResult {
+        let cx = super::config::RecognizerContext::for_event(event);
+        GestureRecognizer::process(self, event, &cx)
     }
 }
 

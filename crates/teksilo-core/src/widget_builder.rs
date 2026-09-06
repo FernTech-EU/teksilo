@@ -21,6 +21,7 @@ use teksilo_canvas::Point;
 
 use crate::event::{ButtonMask, EventResponse, WidgetEvent};
 use crate::event_handlers::EventHandlers;
+use crate::gesture::MultiContact;
 use crate::gesture::{DragPhase, PinchPhase, SwipeDirection, TapEvent};
 use crate::pointer::touch_action::{PanAxes, PanClaim, TouchAction};
 use crate::signal::Prop;
@@ -317,6 +318,10 @@ pub struct HandlerSet {
     /// When `Some(..)`, declares this node a pan surface. See
     /// [`super::arena::WidgetNode::pan_claim`].
     pub(crate) pan_claim: Option<PanClaim>,
+
+    /// How many simultaneous contacts this node's recognizers serve. See
+    /// [`super::arena::WidgetNode::multi_contact`].
+    pub(crate) multi_contact: Option<MultiContact>,
     /// When `Some(true)` and this node holds keyboard focus, a `KeyDown`
     /// bypasses shortcut resolution and is delivered straight to it (a
     /// *keyboard capture* surface — terminals, game viewports). See
@@ -367,6 +372,7 @@ impl HandlerSet {
             gesture_dead_zone: None,
             touch_action: None,
             pan_claim: None,
+            multi_contact: None,
             keyboard_capture: None,
             hit_transparent: None,
             context_menu_factory: None,
@@ -653,6 +659,14 @@ impl HandlerSet {
     /// mask. See [`super::arena::WidgetNode::pan_claim`].
     pub fn pan_claim(mut self, claim: PanClaim) -> Self {
         self.pan_claim = Some(claim);
+        self
+    }
+
+    /// How many simultaneous contacts this node serves. Default
+    /// [`MultiContact::First`]. See
+    /// [`super::arena::WidgetNode::multi_contact`].
+    pub fn multi_contact(mut self, policy: MultiContact) -> Self {
+        self.multi_contact = Some(policy);
         self
     }
 
@@ -1051,6 +1065,12 @@ impl<W: Widget> WidgetWithHandlers<W> {
     /// [`HandlerSet::pan_claim`].
     pub fn pan_claim(mut self, claim: PanClaim) -> Self {
         self.handler_set.pan_claim = Some(claim);
+        self
+    }
+
+    /// [`HandlerSet::multi_contact`].
+    pub fn multi_contact(mut self, policy: MultiContact) -> Self {
+        self.handler_set.multi_contact = Some(policy);
         self
     }
 
@@ -1720,6 +1740,13 @@ pub trait WidgetBuilder: Widget + Sized + 'static {
     /// [`HandlerSet::pan_claim`].
     fn pan_claim(self, claim: PanClaim) -> WidgetWithHandlers<Self> {
         WidgetWithHandlers::new(self).pan_claim(claim)
+    }
+
+    /// Declare how many simultaneous contacts this widget serves. Default
+    /// [`MultiContact::First`] — the second finger on a single-contact control
+    /// is terminated there rather than reaching an ancestor.
+    fn multi_contact(self, policy: MultiContact) -> WidgetWithHandlers<Self> {
+        WidgetWithHandlers::new(self).multi_contact(policy)
     }
 
     /// Mark this widget a keyboard capture surface (terminals, game

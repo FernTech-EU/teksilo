@@ -82,9 +82,10 @@ pub use event_source::{
 pub use focus::{FocusOrigin, TraversalScopePolicy};
 pub use frame_tick_scheduler::{FrameTickScheduler, FrameTickSubscription};
 pub use gesture::{
-    DoubleTapRecognizer, DragRecognizer, GestureArena, GestureEvent, GestureRecognizer,
-    GestureResult, LongPressRecognizer, RawPointerEvent, SwipeDirection, SwipeRecognizer, TapEvent,
-    TapRecognizer, TripleTapRecognizer,
+    DoubleTapRecognizer, DragRecognizer, GestureArena, GestureArenaSet, GestureEvent, GestureProto,
+    GestureRecognizer, GestureResult, LongPressRecognizer, MultiContact, RawPointerEvent,
+    RecognizerContext, SwipeDirection, SwipeRecognizer, TapEvent, TapRecognizer, TapStreak,
+    TripleTapRecognizer,
 };
 pub use idle::IdleDeadline;
 pub use ime::{ImeContext, ImePurpose};

@@ -3152,6 +3152,9 @@ impl WidgetTree {
                         if let Some(claim) = handler_set.pan_claim {
                             node.pan_claim = Some(claim);
                         }
+                        if let Some(policy) = handler_set.multi_contact {
+                            node.multi_contact = policy;
+                        }
                         if let Some(keyboard_capture) = handler_set.keyboard_capture {
                             node.keyboard_capture = keyboard_capture;
                         }
@@ -3314,6 +3317,9 @@ impl WidgetTree {
                         }
                         if let Some(claim) = handler_set.pan_claim {
                             node.pan_claim = Some(claim);
+                        }
+                        if let Some(policy) = handler_set.multi_contact {
+                            node.multi_contact = policy;
                         }
                         if let Some(keyboard_capture) = handler_set.keyboard_capture {
                             node.keyboard_capture = keyboard_capture;

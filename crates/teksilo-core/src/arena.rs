@@ -6,6 +6,7 @@ use slotmap::SlotMap;
 use crate::environment::ThemeOverride;
 use crate::event_handlers::EventHandlers;
 use crate::event_source::{SubscriptionHandle, SubscriptionId};
+use crate::gesture::MultiContact;
 use crate::pointer::touch_action::{PanClaim, TouchAction};
 use crate::signal::{ObserverHandle, Prop, Signal};
 use crate::widget::{CursorIcon, Widget};
@@ -196,6 +197,14 @@ pub struct WidgetNode {
     /// Set via `.pan_claim(..)` or the `.scroll_container(..)` sugar. **Not
     /// yet read at dispatch time** — see [`crate::pointer::touch_action`].
     pub pan_claim: Option<PanClaim>,
+    /// How many simultaneous contacts this node's gesture recognizers serve.
+    /// Default [`MultiContact::First`] — one press at a time, which is what
+    /// every widget written before the touch programme assumes. Under it a
+    /// *second* contact arriving while the first is live is terminated at this
+    /// node: not delivered to it, and not bubbled to an ancestor either, so two
+    /// fingers on a button inside a scroll area cannot start a pan with the
+    /// second finger. Set via `.multi_contact(..)`.
+    pub multi_contact: MultiContact,
     /// When `true` and this widget holds keyboard focus, a `KeyDown` is
     /// delivered straight to it **without** first running shortcut →
     /// intent → action resolution. The node is a *keyboard capture*
@@ -423,6 +432,7 @@ impl WidgetNode {
             gesture_dead_zone: false,
             touch_action: TouchAction::AUTO,
             pan_claim: None,
+            multi_contact: MultiContact::First,
             keyboard_capture: false,
             hit_transparent: false,
             opacity_prop: None,
@@ -1424,6 +1434,9 @@ impl WidgetArena {
             }
             if let Some(claim) = handler_set.pan_claim {
                 node.pan_claim = Some(claim);
+            }
+            if let Some(policy) = handler_set.multi_contact {
+                node.multi_contact = policy;
             }
             if let Some(keyboard_capture) = handler_set.keyboard_capture {
                 node.keyboard_capture = keyboard_capture;

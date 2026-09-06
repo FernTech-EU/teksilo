@@ -237,6 +237,21 @@ impl EventTime {
     }
 }
 
+impl std::ops::Add<Duration> for EventTime {
+    type Output = Self;
+
+    /// `now + d`, saturating at [`Duration::MAX`].
+    ///
+    /// Saturating rather than panicking for the same reason
+    /// [`checked_add`](EventTime::checked_add) exists: `Duration::MAX` is a
+    /// legitimate way to say "never", and a deadline arithmetic panic in the
+    /// middle of a gesture would be absurd. Reach for `checked_add` where the
+    /// overflow itself has to be observed.
+    fn add(self, d: Duration) -> Self {
+        Self(self.0.saturating_add(d))
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Sample payloads
 // ---------------------------------------------------------------------------

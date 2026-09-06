@@ -137,7 +137,7 @@ pub(crate) fn build_marquee_handler(
                     ctx.request_frame();
                 }
             }
-            DragPhase::Ended { position } => {
+            DragPhase::Ended { position, .. } => {
                 if let Some(mut st) = cfg.marquee.get() {
                     st.current = position;
                     let local = st.local_rect(scroll);
@@ -149,6 +149,10 @@ pub(crate) fn build_marquee_handler(
                     cfg.marquee.set(None);
                 }
             }
+            // A revoked drag selects nothing: the rubber band goes away and
+            // the selection stays as it was before the press.
+            DragPhase::Cancelled { .. } => cfg.marquee.set(None),
+            _ => {}
         }
     }
 }

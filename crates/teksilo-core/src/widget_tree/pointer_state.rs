@@ -36,6 +36,35 @@ impl WidgetTree {
         self.input_clock.now()
     }
 
+    /// Everything a recognizer on `id` is allowed to know beyond the event in
+    /// front of it: now, the profile for the pointer being dispatched, the
+    /// node's own bounds, and the pointer itself.
+    ///
+    /// Rebuilt per dispatch rather than cached, so a theme change, a density
+    /// change or a different pointer kind reaches the recognizers without any
+    /// of them holding a copy of a threshold.
+    pub(crate) fn recognizer_context(
+        &self,
+        id: WidgetId,
+    ) -> crate::gesture::RecognizerContext<'static> {
+        let pointer = self.current_input.pointer;
+        let profile = *self.effective_theme.input.profile(pointer.kind);
+        let size = self.bounds(id).size();
+        // A dispatch that carries no timestamp of its own (a hand-built
+        // `WidgetEvent` from a test) reads the tree clock instead.
+        let now = if pointer.time == crate::pointer::EventTime::ZERO {
+            self.input_now()
+        } else {
+            pointer.time
+        };
+        crate::gesture::RecognizerContext::new(
+            now,
+            profile,
+            Rect::new(0.0, 0.0, size.width, size.height),
+            pointer,
+        )
+    }
+
     // -----------------------------------------------------------------
     // The pointer table
     // -----------------------------------------------------------------
@@ -329,6 +358,7 @@ impl WidgetTree {
     ) -> bool {
         let localized = self.localize_event(id, event);
         let event = localized.as_ref().unwrap_or(event);
+        let cx = self.recognizer_context(id);
         let raw = match event {
             WidgetEvent::PointerDown {
                 position,
@@ -338,9 +368,13 @@ impl WidgetTree {
                 position: *position,
                 button: *button,
                 modifiers: *modifiers,
+                pointer: cx.pointer,
+                time: cx.now,
             },
             WidgetEvent::PointerMove { position } => crate::gesture::RawPointerEvent::Move {
                 position: *position,
+                pointer: cx.pointer,
+                time: cx.now,
             },
             WidgetEvent::PointerUp {
                 position,
@@ -350,6 +384,8 @@ impl WidgetTree {
                 position: *position,
                 button: *button,
                 modifiers: *modifiers,
+                pointer: cx.pointer,
+                time: cx.now,
             },
             _ => return false,
         };
@@ -357,7 +393,7 @@ impl WidgetTree {
         let WidgetTree { arena, .. } = self;
         let recognized = if let Some(node) = arena.get_mut(id) {
             if let Some(arena_ref) = node.handlers.gesture_arena.as_mut() {
-                if let Some(gesture) = arena_ref.process(&raw) {
+                if let Some(gesture) = arena_ref.process(&raw, &cx) {
                     Self::dispatch_recognized_gesture(node, gesture, &mut ctx);
                     true
                 } else {
@@ -439,25 +475,64 @@ impl WidgetTree {
                 .copied()
                 .filter(|id| self.arena.is_active(*id)),
         );
+        let now = self.event_time_for(now);
         for &id in &ids {
-            let gesture = match self.arena.get_mut(id) {
+            let cx = self.recognizer_context(id);
+            let cx = crate::gesture::RecognizerContext { now, ..cx };
+            let gestures = match self.arena.get_mut(id) {
                 Some(node) => node
                     .handlers
                     .gesture_arena
                     .as_mut()
-                    .and_then(|arena| arena.tick(now)),
-                None => None,
+                    .map(|arena| arena.tick(&cx))
+                    .unwrap_or_default(),
+                None => Vec::new(),
             };
-            let Some(gesture) = gesture else { continue };
-
-            let mut ctx = self.make_event_context(&mut *ops);
-            if let Some(node) = self.arena.get_mut(id) {
-                Self::dispatch_recognized_gesture(node, gesture, &mut ctx);
+            if gestures.is_empty() {
+                continue;
             }
-            self.collect_from_ctx(ctx, id);
+
+            // One entry per contact: two fingers holding on the same node both
+            // long-press, and neither may be dropped.
+            for (_pointer, gesture) in gestures {
+                let mut ctx = self.make_event_context(&mut *ops);
+                if let Some(node) = self.arena.get_mut(id) {
+                    Self::dispatch_recognized_gesture(node, gesture, &mut ctx);
+                }
+                self.collect_from_ctx(ctx, id);
+            }
             self.arena.mark_needs_paint(id);
         }
         self.active_ids_scratch = ids;
+    }
+
+    /// Read an `Instant` handed in by the event loop on this tree's input
+    /// timeline.
+    ///
+    /// The two clocks share an epoch by construction (see
+    /// [`input_clock`](Self::input_clock)), so this is a subtraction. A clock
+    /// with no wall-clock anchor — a
+    /// [`ManualClock`](crate::pointer::clock::ManualClock) in a test — ignores
+    /// the argument and answers with its own reading, which is the whole point
+    /// of installing one.
+    fn event_time_for(&self, now: std::time::Instant) -> crate::pointer::EventTime {
+        match self.input_clock.epoch() {
+            Some(epoch) => {
+                crate::pointer::EventTime::from_duration(now.saturating_duration_since(epoch))
+            }
+            None => self.input_now(),
+        }
+    }
+
+    /// Turn an input-timeline deadline back into an `Instant` for the event
+    /// loop, which schedules in wall-clock terms.
+    fn instant_for(&self, time: crate::pointer::EventTime) -> std::time::Instant {
+        match self.input_clock.epoch() {
+            Some(epoch) => epoch + time.as_duration(),
+            // An unanchored clock has no wall-clock answer; the best available
+            // one is "as far from now as it is from the clock's reading".
+            None => std::time::Instant::now() + time.saturating_since(self.input_now()),
+        }
     }
 
     /// Earliest wall-clock deadline at which any active gesture arena
@@ -475,6 +550,7 @@ impl WidgetTree {
             .filter_map(|node| node.handlers.gesture_arena.as_ref())
             .filter_map(|arena| arena.next_deadline())
             .min()
+            .map(|deadline| self.instant_for(deadline))
     }
 
     /// The [`TouchAction`] permitted for `target`: every node's own

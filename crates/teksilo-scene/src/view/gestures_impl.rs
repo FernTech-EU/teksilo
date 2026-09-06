@@ -599,6 +599,7 @@ impl SceneView {
                     center,
                     scale,
                     rotation: rotation_delta,
+                    ..
                 } = phase
                 else {
                     return;
@@ -915,7 +916,9 @@ impl SceneView {
             }
             use teksilo_core::gesture::DragPhase;
             match phase {
-                DragPhase::Started { position, button } => {
+                DragPhase::Started {
+                    position, button, ..
+                } => {
                     if !matches!(button, teksilo_core::event::PointerButton::Primary) {
                         return;
                     }
@@ -1048,7 +1051,7 @@ impl SceneView {
                         marquee.set(Some(state));
                     }
                 }
-                DragPhase::Ended { position } => {
+                DragPhase::Ended { position, .. } => {
                     // Port-drag release: fire the connection if the wire
                     // snapped onto an accepting target. No item moves.
                     if port_drag.borrow().is_some() {
@@ -1164,6 +1167,14 @@ impl SceneView {
                     pending_marquee_commit.set(Some((scene_rect, state.additive)));
                     reconcile_dirty.set(reconcile_dirty.get().wrapping_add(1));
                 }
+                // A revoked drag commits nothing: the lasso and any port-drag
+                // wire disappear and the scene is left as it was.
+                DragPhase::Cancelled { .. } => {
+                    port_drag.replace(None);
+                    marquee.set(None);
+                    reconcile_dirty.set(reconcile_dirty.get().wrapping_add(1));
+                }
+                _ => {}
             }
         });
         handlers

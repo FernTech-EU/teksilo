@@ -439,6 +439,7 @@ impl Widget for Slider {
                 DragPhase::Started {
                     position,
                     button: PointerButton::Primary,
+                    ..
                 } => {
                     dragging.set(true);
                     set_value(position.x, position.y, ctx.is_rtl());

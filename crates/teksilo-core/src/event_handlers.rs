@@ -21,7 +21,7 @@ use teksilo_canvas::Point;
 use crate::drag_payload::{DragPayload, DropOutcome};
 use crate::drag_state::DropFeedback;
 use crate::event::{ButtonMask, EventResponse, WidgetEvent};
-use crate::gesture::{DragPhase, GestureArena, PinchPhase, SwipeDirection, TapEvent};
+use crate::gesture::{DragPhase, GestureArenaSet, PinchPhase, SwipeDirection, TapEvent};
 use crate::widget::EventContext;
 
 /// Type alias for the four tap-family handler closures
@@ -135,7 +135,7 @@ pub(crate) struct EventHandlers {
     /// used e.g. to remove the dragged item on an `OsMove`.
     pub on_drag_ended: Option<Box<dyn FnMut(DropOutcome, &mut EventContext)>>,
 
-    pub gesture_arena: Option<GestureArena>,
+    pub gesture_arena: Option<GestureArenaSet>,
 }
 
 impl EventHandlers {

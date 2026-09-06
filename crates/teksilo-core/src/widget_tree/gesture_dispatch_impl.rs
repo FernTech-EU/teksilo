@@ -3,13 +3,19 @@
 
 use super::*;
 
-use crate::gesture::{GestureArena, GestureEvent};
+use crate::gesture::{GestureArenaSet, GestureEvent};
 
 impl WidgetTree {
-    /// Lazily install a gesture arena populated with whichever recognizers
+    /// Lazily install a gesture arena set populated with whichever recognizers
     /// the widget's handler set actually needs. Without this, a widget
     /// that wires `on_drag` or `on_double_tap` (but not `on_tap`) would
     /// never get a gesture arena and the handlers would never fire.
+    ///
+    /// What is installed is a list of *prototypes*, not live recognizers: the
+    /// set instantiates an arena per contact as contacts arrive. The node's
+    /// tap streak is installed with them and outlives every one of those
+    /// arenas — which is what makes a touch double tap, two presses with two
+    /// different pointer ids, recognizable at all.
     ///
     /// Checks BOTH handler buckets (own + external) so a recognizer gets
     /// installed whether the handler was attached via
@@ -19,10 +25,12 @@ impl WidgetTree {
         id: WidgetId,
         gesture_owners: &mut std::collections::HashSet<WidgetId>,
     ) {
-        if node.handlers.gesture_arena.is_some() {
-            // Already installed — make sure the owners set is in sync
-            // (covers a widget that re-enters dispatch after a
-            // pre-existing arena was carried across rebuild).
+        if let Some(set) = node.handlers.gesture_arena.as_mut() {
+            // Already installed — refresh the policy (a rebuild may have
+            // changed it) and make sure the owners set is in sync (covers a
+            // widget that re-enters dispatch after a pre-existing arena was
+            // carried across rebuild).
+            set.set_multi_contact(node.multi_contact);
             gesture_owners.insert(id);
             return;
         }
@@ -59,7 +67,8 @@ impl WidgetTree {
             .long_press_buttons
             .or(node.external_handlers.long_press_buttons);
 
-        let mut arena = GestureArena::new();
+        let mut set = GestureArenaSet::new();
+        set.set_multi_contact(node.multi_contact);
         // Important: install `TapRecognizer` ONLY when the widget actually
         // wired `on_tap` AND no multi-tap recognizer is in the arena. A
         // parallel `TapRecognizer` would let `Tap` win on the first up
@@ -72,40 +81,50 @@ impl WidgetTree {
         // use `on_pointer_event::PointerDown` (which fires before the
         // gesture arena and runs regardless of multi-tap state).
         if has_tap && !(has_double_tap || has_triple_tap) {
-            let mut rec = crate::gesture::TapRecognizer::new();
-            if let Some(mask) = tap_buttons {
-                rec = rec.accept_buttons(mask);
-            }
-            arena.add(rec);
+            set.add(move || {
+                let rec = crate::gesture::TapRecognizer::new();
+                match tap_buttons {
+                    Some(mask) => rec.accept_buttons(mask),
+                    None => rec,
+                }
+            });
         }
         if has_double_tap {
-            let mut rec = crate::gesture::DoubleTapRecognizer::new();
-            if let Some(mask) = double_tap_buttons {
-                rec = rec.accept_buttons(mask);
-            }
-            arena.add(rec);
+            set.add(move || {
+                let rec = crate::gesture::DoubleTapRecognizer::new();
+                match double_tap_buttons {
+                    Some(mask) => rec.accept_buttons(mask),
+                    None => rec,
+                }
+            });
         }
         if has_triple_tap {
-            let mut rec = crate::gesture::TripleTapRecognizer::new();
-            if let Some(mask) = triple_tap_buttons {
-                rec = rec.accept_buttons(mask);
-            }
-            arena.add(rec);
+            set.add(move || {
+                let rec = crate::gesture::TripleTapRecognizer::new();
+                match triple_tap_buttons {
+                    Some(mask) => rec.accept_buttons(mask),
+                    None => rec,
+                }
+            });
         }
         if has_drag {
-            arena.add(crate::gesture::DragRecognizer::new().threshold(5.0));
+            // No `.threshold(..)`: the drag slop is the active profile's, so a
+            // finger gets 18 dp where a mouse keeps its 5.
+            set.add(crate::gesture::DragRecognizer::new);
         }
         if has_long_press {
-            let mut rec = crate::gesture::LongPressRecognizer::new();
-            if let Some(mask) = long_press_buttons {
-                rec = rec.accept_buttons(mask);
-            }
-            arena.add(rec);
+            set.add(move || {
+                let rec = crate::gesture::LongPressRecognizer::new();
+                match long_press_buttons {
+                    Some(mask) => rec.accept_buttons(mask),
+                    None => rec,
+                }
+            });
         }
         if has_swipe {
-            arena.add(crate::gesture::SwipeRecognizer::new());
+            set.add(crate::gesture::SwipeRecognizer::new);
         }
-        node.handlers.gesture_arena = Some(arena);
+        node.handlers.gesture_arena = Some(set);
         gesture_owners.insert(id);
     }
 
@@ -164,12 +183,20 @@ impl WidgetTree {
                     h(&event, ctx);
                 }
             }
-            GestureEvent::DragStarted { position, button } => {
+            GestureEvent::DragStarted {
+                position,
+                button,
+                pointer,
+            } => {
                 // Auto-capture the pointer for the duration of the drag so
                 // the widget keeps receiving `Moved` / `Ended` even when
                 // the cursor leaves its bounds. Released on `DragEnded`.
                 ctx.capture_pointer();
-                let phase = DragPhase::Started { position, button };
+                let phase = DragPhase::Started {
+                    position,
+                    button,
+                    pointer,
+                };
                 if let Some(h) = node.external_handlers.on_drag.as_mut() {
                     h(phase, ctx);
                 }
@@ -177,8 +204,16 @@ impl WidgetTree {
                     h(phase, ctx);
                 }
             }
-            GestureEvent::DragMoved { position, delta } => {
-                let phase = DragPhase::Moved { position, delta };
+            GestureEvent::DragMoved {
+                position,
+                delta,
+                pointer,
+            } => {
+                let phase = DragPhase::Moved {
+                    position,
+                    delta,
+                    pointer,
+                };
                 if let Some(h) = node.external_handlers.on_drag.as_mut() {
                     h(phase, ctx);
                 }
@@ -186,8 +221,29 @@ impl WidgetTree {
                     h(phase, ctx);
                 }
             }
-            GestureEvent::DragEnded { position } => {
-                let phase = DragPhase::Ended { position };
+            GestureEvent::DragEnded { position, pointer } => {
+                let phase = DragPhase::Ended { position, pointer };
+                if let Some(h) = node.external_handlers.on_drag.as_mut() {
+                    h(phase, ctx);
+                }
+                if let Some(h) = node.handlers.on_drag.as_mut() {
+                    h(phase, ctx);
+                }
+                ctx.release_pointer();
+            }
+            GestureEvent::DragCancelled {
+                position,
+                pointer,
+                reason,
+            } => {
+                // Same shape as `DragEnded`: the handler is told, then the
+                // implicit capture the drag took is given back. A handler that
+                // committed as it went unwinds here.
+                let phase = DragPhase::Cancelled {
+                    position,
+                    pointer,
+                    reason,
+                };
                 if let Some(h) = node.external_handlers.on_drag.as_mut() {
                     h(phase, ctx);
                 }
@@ -208,11 +264,15 @@ impl WidgetTree {
                 }
             }
             GestureEvent::PinchStarted { center } => {
+                let phase = PinchPhase::Started {
+                    center,
+                    pointer: ctx.pointer(),
+                };
                 if let Some(h) = node.external_handlers.on_pinch.as_mut() {
-                    h(PinchPhase::Started { center }, ctx);
+                    h(phase, ctx);
                 }
                 if let Some(h) = node.handlers.on_pinch.as_mut() {
-                    h(PinchPhase::Started { center }, ctx);
+                    h(phase, ctx);
                 }
             }
             GestureEvent::PinchChanged {
@@ -224,6 +284,7 @@ impl WidgetTree {
                     center,
                     scale,
                     rotation,
+                    pointer: ctx.pointer(),
                 };
                 if let Some(h) = node.external_handlers.on_pinch.as_mut() {
                     h(phase, ctx);
@@ -233,11 +294,26 @@ impl WidgetTree {
                 }
             }
             GestureEvent::PinchEnded => {
+                let phase = PinchPhase::Ended {
+                    pointer: ctx.pointer(),
+                };
                 if let Some(h) = node.external_handlers.on_pinch.as_mut() {
-                    h(PinchPhase::Ended, ctx);
+                    h(phase, ctx);
                 }
                 if let Some(h) = node.handlers.on_pinch.as_mut() {
-                    h(PinchPhase::Ended, ctx);
+                    h(phase, ctx);
+                }
+            }
+            GestureEvent::PinchCancelled { reason } => {
+                let phase = PinchPhase::Cancelled {
+                    pointer: ctx.pointer(),
+                    reason,
+                };
+                if let Some(h) = node.external_handlers.on_pinch.as_mut() {
+                    h(phase, ctx);
+                }
+                if let Some(h) = node.handlers.on_pinch.as_mut() {
+                    h(phase, ctx);
                 }
             }
         }
@@ -360,7 +436,8 @@ mod tests {
         tree.add(FillWidget::new().on_pinch(move |phase, _ctx| match phase {
             PinchPhase::Started { .. } => started_flag.set(true),
             PinchPhase::Changed { scale, .. } => scale_flag.set(scale),
-            PinchPhase::Ended => ended_flag.set(true),
+            PinchPhase::Ended { .. } => ended_flag.set(true),
+            _ => {}
         }));
         tree.layout(SizeProposal::exact(100.0, 50.0));
 
@@ -404,6 +481,7 @@ mod tests {
             DragPhase::Started { .. } => started_flag.set(true),
             DragPhase::Moved { .. } => moved_flag.set(moved_flag.get() + 1),
             DragPhase::Ended { .. } => ended_flag.set(true),
+            _ => {}
         }));
         tree.layout(SizeProposal::exact(100.0, 50.0));
 
@@ -693,5 +771,337 @@ mod tests {
             !drag_started.get(),
             "a hover after a click must not start a phantom ancestor drag"
         );
+    }
+    // ---------------------------------------------------------------
+    // P06: per-contact arenas, the node tap streak, and the profile
+    // ---------------------------------------------------------------
+
+    use crate::pointer::{
+        BackendDeviceKey, EventTime, PointerId, PointerIdAllocator, PointerInfo, PointerPhase,
+        PointerSample,
+    };
+
+    /// A fresh touch contact — the platform mints a new id per press, which is
+    /// exactly why the tap streak cannot live inside a recognizer.
+    fn new_contact() -> PointerId {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static NEXT: AtomicU64 = AtomicU64::new(1);
+        PointerIdAllocator::global().begin(
+            BackendDeviceKey::DEFAULT,
+            NEXT.fetch_add(1, Ordering::Relaxed),
+        )
+    }
+
+    fn touch_sample(
+        id: PointerId,
+        phase: PointerPhase,
+        position: Point,
+        time: EventTime,
+    ) -> PointerSample {
+        PointerSample {
+            pointer: PointerInfo::touch(id, time),
+            phase,
+            position,
+            button: None,
+            modifiers: Modifiers::NONE,
+            coalesced: Vec::new(),
+        }
+    }
+
+    /// Press and release one fresh contact at `at`.
+    fn touch_tap(tree: &mut WidgetTree, at: Point, down_ms: u64, up_ms: u64) {
+        let id = new_contact();
+        tree.dispatch_pointer(touch_sample(
+            id,
+            PointerPhase::Down,
+            at,
+            EventTime::from_millis(down_ms),
+        ));
+        tree.dispatch_pointer(touch_sample(
+            id,
+            PointerPhase::Up,
+            at,
+            EventTime::from_millis(up_ms),
+        ));
+    }
+
+    #[test]
+    fn a_touch_double_tap_survives_two_pointer_ids_through_the_tree() {
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        let doubles = Rc::new(Cell::new(0));
+        let flag = doubles.clone();
+
+        let mut tree = WidgetTree::new();
+        tree.add(FillWidget::new().on_double_tap(move |_e, _ctx| {
+            flag.set(flag.get() + 1);
+        }));
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+
+        let at = Point::new(50.0, 25.0);
+        touch_tap(&mut tree, at, 0, 40);
+        assert_eq!(doubles.get(), 0, "one tap is not a double tap");
+        touch_tap(&mut tree, at, 150, 190);
+        assert_eq!(
+            doubles.get(),
+            1,
+            "the pair must be recognized across two contacts"
+        );
+    }
+
+    #[test]
+    fn gesture_owners_holds_exactly_the_arena_owning_nodes() {
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        let ticks = Rc::new(Cell::new(0));
+        let flag = ticks.clone();
+
+        let mut tree = WidgetTree::new();
+        // Two nodes, only one of which wires a gesture handler.
+        let plain = tree.add(FillWidget::new());
+        let gestured = tree.add(FillWidget::new().on_long_press(move |_e, _ctx| {
+            flag.set(flag.get() + 1);
+        }));
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+
+        // Prototypes are installed on the first press that reaches the node…
+        assert!(tree.gesture_owners.is_empty());
+        let center = tree.bounds(gestured).center();
+        tree.dispatch_event(WidgetEvent::PointerDown {
+            position: center,
+            button: PointerButton::Primary,
+            modifiers: Modifiers::NONE,
+        });
+        assert_eq!(
+            tree.gesture_owners.iter().copied().collect::<Vec<_>>(),
+            vec![gestured],
+            "only the node that actually carries recognizers is an owner"
+        );
+        assert!(!tree.gesture_owners.contains(&plain));
+
+        // …and the install is what the sweep is bounded by, not the live
+        // per-contact arenas: the owner is visited and does fire.
+        tree.tick_gestures(std::time::Instant::now() + std::time::Duration::from_millis(600));
+        assert_eq!(ticks.get(), 1, "the tick sweep must visit the owner");
+
+        // Destroying the widget takes it back out of the set.
+        tree.destroy_subtree(gestured);
+        assert!(!tree.gesture_owners.contains(&gestured));
+    }
+
+    #[test]
+    fn under_multi_contact_first_only_one_contact_is_served() {
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        let taps = Rc::new(Cell::new(0));
+        let flag = taps.clone();
+
+        let mut tree = WidgetTree::new();
+        // No `.multi_contact(..)`: `First` is the default, and it is what every
+        // widget written before the touch programme assumes.
+        tree.add(FillWidget::new().on_tap(move |_e, _ctx| {
+            flag.set(flag.get() + 1);
+        }));
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+
+        let a = new_contact();
+        let b = new_contact();
+        tree.dispatch_pointer(touch_sample(
+            a,
+            PointerPhase::Down,
+            Point::new(40.0, 25.0),
+            EventTime::from_millis(0),
+        ));
+        // Second finger while the first is still down: terminated at the node.
+        tree.dispatch_pointer(touch_sample(
+            b,
+            PointerPhase::Down,
+            Point::new(60.0, 25.0),
+            EventTime::from_millis(5),
+        ));
+        tree.dispatch_pointer(touch_sample(
+            b,
+            PointerPhase::Up,
+            Point::new(60.0, 25.0),
+            EventTime::from_millis(20),
+        ));
+        tree.dispatch_pointer(touch_sample(
+            a,
+            PointerPhase::Up,
+            Point::new(40.0, 25.0),
+            EventTime::from_millis(30),
+        ));
+
+        assert_eq!(taps.get(), 1, "the refused contact must produce no tap");
+    }
+
+    #[test]
+    fn under_multi_contact_all_every_contact_is_served() {
+        use crate::gesture::MultiContact;
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        let taps = Rc::new(Cell::new(0));
+        let flag = taps.clone();
+
+        let mut tree = WidgetTree::new();
+        tree.add(
+            FillWidget::new()
+                .on_tap(move |_e, _ctx| {
+                    flag.set(flag.get() + 1);
+                })
+                .multi_contact(MultiContact::All),
+        );
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+
+        let a = new_contact();
+        let b = new_contact();
+        // Overlapping presses: a goes down, b goes down, b lifts, a lifts.
+        for (id, x, ms) in [(a, 40.0, 0u64), (b, 60.0, 5)] {
+            tree.dispatch_pointer(touch_sample(
+                id,
+                PointerPhase::Down,
+                Point::new(x, 25.0),
+                EventTime::from_millis(ms),
+            ));
+        }
+        for (id, x, ms) in [(b, 60.0, 20u64), (a, 40.0, 30)] {
+            tree.dispatch_pointer(touch_sample(
+                id,
+                PointerPhase::Up,
+                Point::new(x, 25.0),
+                EventTime::from_millis(ms),
+            ));
+        }
+
+        assert_eq!(taps.get(), 2, "both contacts must tap");
+    }
+
+    #[test]
+    fn a_mouse_drag_still_arms_at_five_pixels_and_a_finger_does_not() {
+        use crate::gesture::DragPhase;
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        fn armed_after(travel: f32, touch: bool) -> bool {
+            let started = Rc::new(Cell::new(false));
+            let flag = started.clone();
+            let mut tree = WidgetTree::new();
+            tree.add(FillWidget::new().on_drag(move |phase, _ctx| {
+                if matches!(phase, DragPhase::Started { .. }) {
+                    flag.set(true);
+                }
+            }));
+            tree.layout(SizeProposal::exact(200.0, 50.0));
+
+            let from = Point::new(20.0, 25.0);
+            let to = Point::new(20.0 + travel, 25.0);
+            if touch {
+                let id = new_contact();
+                tree.dispatch_pointer(touch_sample(
+                    id,
+                    PointerPhase::Down,
+                    from,
+                    EventTime::from_millis(0),
+                ));
+                tree.dispatch_pointer(touch_sample(
+                    id,
+                    PointerPhase::Move,
+                    to,
+                    EventTime::from_millis(10),
+                ));
+            } else {
+                tree.dispatch_event(WidgetEvent::PointerDown {
+                    position: from,
+                    button: PointerButton::Primary,
+                    modifiers: Modifiers::NONE,
+                });
+                tree.dispatch_event(WidgetEvent::PointerMove { position: to });
+            }
+            started.get()
+        }
+
+        // The mouse column of `GestureProfile::MOUSE` is byte-for-byte the
+        // pre-P06 constant: 5 dp, `>=`.
+        assert!(!armed_after(4.0, false), "4 dp is under the mouse slop");
+        assert!(armed_after(5.0, false), "5 dp is the mouse slop");
+
+        // The same travel on a finger is nothing — 18 dp of touch slop.
+        assert!(!armed_after(5.0, true));
+        assert!(!armed_after(17.0, true));
+        assert!(armed_after(18.0, true), "18 dp is the touch slop");
+    }
+
+    #[test]
+    fn a_long_press_fires_on_a_simulated_clock() {
+        use crate::pointer::clock::ManualClock;
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        let pressed = Rc::new(Cell::new(false));
+        let flag = pressed.clone();
+
+        let mut tree = WidgetTree::new();
+        let clock = std::rc::Rc::new(ManualClock::new(EventTime::ZERO));
+        tree.set_input_clock(clock.clone());
+        let widget = tree.add(FillWidget::new().on_long_press(move |_e, _ctx| {
+            flag.set(true);
+        }));
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+
+        let center = tree.bounds(widget).center();
+        tree.dispatch_event(WidgetEvent::PointerDown {
+            position: center,
+            button: PointerButton::Primary,
+            modifiers: Modifiers::NONE,
+        });
+
+        // Not yet: 499 ms is under the mouse profile's 500 ms hold.
+        clock.set(EventTime::from_millis(499));
+        tree.tick_gestures(std::time::Instant::now());
+        assert!(!pressed.get());
+
+        // Exactly at the hold, with no sleeping anywhere.
+        clock.set(EventTime::from_millis(500));
+        tree.tick_gestures(std::time::Instant::now());
+        assert!(pressed.get(), "the hold is 500 ms on the mouse profile");
+    }
+
+    #[test]
+    fn a_mouse_triple_click_still_escalates_through_the_tree() {
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        let doubles = Rc::new(Cell::new(0));
+        let triples = Rc::new(Cell::new(0));
+        let d = doubles.clone();
+        let t = triples.clone();
+
+        let mut tree = WidgetTree::new();
+        let widget = tree.add(
+            FillWidget::new()
+                .on_double_tap(move |_e, _ctx| d.set(d.get() + 1))
+                .on_triple_tap(move |_e, _ctx| t.set(t.get() + 1)),
+        );
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+
+        let center = tree.bounds(widget).center();
+        for _ in 0..3 {
+            tree.dispatch_event(WidgetEvent::PointerDown {
+                position: center,
+                button: PointerButton::Primary,
+                modifiers: Modifiers::NONE,
+            });
+            tree.dispatch_event(WidgetEvent::PointerUp {
+                position: center,
+                button: PointerButton::Primary,
+                modifiers: Modifiers::NONE,
+            });
+        }
+        assert_eq!(doubles.get(), 1, "click 2 fires DoubleTap");
+        assert_eq!(triples.get(), 1, "click 3 fires TripleTap");
     }
 }

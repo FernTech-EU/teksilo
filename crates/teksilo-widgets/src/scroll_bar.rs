@@ -381,6 +381,7 @@ impl Widget for ScrollBar {
                     DragPhase::Started {
                         position,
                         button: PointerButton::Primary,
+                        ..
                     } if thumb_rect().contains(position) => {
                         dragging.set(true);
                         drag_start_pointer.set(axis_value(position));

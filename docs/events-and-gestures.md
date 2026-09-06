@@ -136,6 +136,7 @@ pub struct TapEvent {
     pub position: Point,         // widget-local coords
     pub button: PointerButton,   // which button finalised the gesture
     pub modifiers: Modifiers,    // held at the finalising event
+    pub pointer: PointerInfo,    // which pointer — mouse, finger, stylus
 }
 ```
 
@@ -252,14 +253,14 @@ The `event()`-method vs attached-handlers tradeoff flipped once three things bec
 
 ## 4. Gesture recognizers — composition with backpressure
 
-[`gesture.rs`](../crates/teksilo-core/src/gesture.rs) defines the recognizer state machines. Each is a pure, platform-free value type that consumes `RawPointerEvent::{Down, Move, Up}` and emits `GestureResult::{Pending, Recognized(GestureEvent), Failed}`.
+[`gesture.rs`](../crates/teksilo-core/src/gesture.rs) defines the recognizer state machines. Each is a pure, platform-free value type that consumes `RawPointerEvent::{Down, Move, Up, Cancel}` and emits `GestureResult::{Pending, Recognized(GestureEvent), Failed}`. Every raw event carries the [`PointerInfo`](../crates/teksilo-core/src/pointer.rs) that produced it and the [`EventTime`](../crates/teksilo-core/src/pointer.rs) the backend stamped it with.
 
 Built-in recognizers (the four click-style ones default to `ButtonMask::PRIMARY` — call `.accept_buttons(...)` / `.accept_any_button()` to widen):
 
 - `TapRecognizer` — fires on a down-up without movement past the tap-slop threshold. Down/Up button must match.
-- `DoubleTapRecognizer` — two taps within 300 ms. Both taps must use the same button.
+- `DoubleTapRecognizer` — two taps inside the profile's multi-tap window. Both taps must use the same button.
 - `TripleTapRecognizer` — three. Same button across all three.
-- `LongPressRecognizer` — pointer held past ~500 ms. Modifiers are captured at `Down`.
+- `LongPressRecognizer` — pointer held past the profile's long-press hold. Modifiers are captured at `Down`.
 - `DragRecognizer` — emits `DragStarted` once the pointer moves past the drag-start threshold, then `DragMoved` per move, then `DragEnded` on pointer-up.
 - `SwipeRecognizer` — pointer moves fast enough to qualify as a swipe in one of four cardinal directions.
 
@@ -274,6 +275,123 @@ When a widget attaches multiple gesture handlers (`on_tap` + `on_long_press`), b
 - Cooperative recognizers (tap and triple-tap, for instance) run to completion side-by-side.
 
 Widget authors never touch the arena directly. Attaching handlers via `WidgetBuilder` or `HandlerSet` auto-wires the recognizers and the arena on the node.
+
+### 4.1.1 `RecognizerContext` — where thresholds and time come from
+
+A recognizer holds **no** thresholds and reads **no** clock. Both arrive per call, in a
+[`RecognizerContext`](../crates/teksilo-core/src/gesture/config.rs):
+
+```rust
+pub struct RecognizerContext<'a> {
+    pub now: EventTime,            // the tree's one input clock, never Instant::now()
+    pub profile: GestureProfile,   // the tuning for *this* pointer's kind
+    pub local_bounds: Rect,        // the owning node, origin at zero
+    pub pointer: PointerInfo,      // who is pointing
+    pub streak: &'a TapStreak,     // the node's tap count — see below
+}
+```
+
+`profile` is `theme.input.profile(pointer.kind)`: the mouse column is byte-for-byte the
+constants Teksilo shipped before the touch programme (5 dp tap and drag slop, 10 dp
+multi-tap slop, 300 ms multi-tap window, 500 ms long press, 200 dp/s and 30 dp for a
+swipe), so a mouse behaves exactly as it did. A finger reads the touch column instead —
+18 dp of slop, 40 dp of multi-tap slop — without any recognizer knowing that a finger
+exists. Retuning `Theme::input` retunes every recognizer live, because the context is
+rebuilt per dispatch rather than captured.
+
+The builder overrides (`TapRecognizer::max_distance`, `DragRecognizer::threshold`,
+`LongPressRecognizer::min_duration`, `DoubleTapRecognizer::max_interval`, …) still work
+and still win over the profile. They are the exception, not the road: a widget that pins
+a threshold pins it for every pointer kind.
+
+`now` is an [`EventTime`](../crates/teksilo-core/src/pointer.rs) — a duration since the
+tree epoch, produced by the tree's one `InputClock`. A test installs a `ManualClock` and
+a long press, a double-tap window or a fling resolves exactly when the test says, with no
+sleeping. `Instant::now()` is banned from the gesture layer outside its own test blocks,
+and a source scan (`no_wall_clock_in_gestures`) fails the build if it reappears.
+
+### 4.1.2 `GestureArenaSet` — one arena per contact
+
+A `GestureArena` follows **one** press. That was enough while the only pointer was a
+mouse; a touchscreen delivers two presses that overlap in time and each needs its own
+recognizer state. So a node carries a
+[`GestureArenaSet`](../crates/teksilo-core/src/gesture/arena_set.rs): the recognizer
+*list* decided once when its handlers are read (as `GestureProto` factories), one arena
+instantiated lazily per live `PointerId`, and the node's `TapStreak`.
+
+A contact stops being followed the moment it lifts or is cancelled — touch ids are minted
+per press, so a set that kept them would grow without bound.
+
+### 4.1.3 `TapStreak` — the tap count lives on the node
+
+Counting taps used to live inside `DoubleTapRecognizer` and `TripleTapRecognizer`. It
+cannot stay there: on a touchscreen the second tap of a double tap is a **different**
+`PointerId` — a different contact, a different arena — so tap one's count would be
+destroyed before tap two arrived, and touch double-tap would be structurally impossible.
+
+The count therefore lives on the node, in a `TapStreak` that outlives every contact. The
+arena set advances it once per qualifying release, *before* the recognizers see the
+event; the recognizers only read `cx.streak.count()` and fire at two and three.
+
+**Continuation rule.** A tap continues the streak when **all** of these hold, and starts a
+new streak (count 1) otherwise:
+
+1. it landed on the same node — true by construction, the streak *is* the node's;
+2. it used the same button as the previous tap;
+3. `now - last_up <= profile.multi_tap_interval`;
+4. `distance(press point, last_position) <= profile.multi_tap_slop`;
+5. no other gesture completed on the node in between — a drag, a swipe or a long press
+   finishing resets the streak.
+
+Condition 4 measures press to press. (The pre-P06 recognizers measured release to
+release; the two differ only by the within-tap travel, which is itself bounded by the tap
+slop.) A release that strayed further than `multi_tap_slop` from its own press does not
+count as a tap at all: it neither advances the streak nor breaks it, which is what lets
+"tap, press-and-scrub-and-release, tap" still read as a double tap. A streak of three
+restarts at one, so a long burst keeps producing alternating double and triple taps.
+
+An explicit `max_interval` / `max_distance` on a multi-tap recognizer can only ever
+**narrow** the window — the streak is shared by every recognizer on the node and uses the
+profile.
+
+### 4.1.4 The two cancels
+
+`GestureArenaSet` revokes in two grains, and the distinction is load-bearing:
+
+- **`cancel(pointer)`** — terminal for that contact. Every recognizer it was feeding is
+  cancelled, the contact stops being followed, and the node's streak is broken. This is
+  what the system-level revocations raise: the window lost focus, a modal opened over the
+  interaction, the OS took the pointer (`CancelReason::{WindowDeactivated, ModalOpened,
+  Platform, …}`).
+- **`cancel_taps(pointer)`** — kills only the *tap family* (tap, double tap, triple tap,
+  long press) and leaves everything else running. A drag the same press started keeps
+  reporting.
+
+The second is what WCAG 2.2 SC 2.5.2 ("Pointer Cancellation") needs: sliding a finger off
+a control must abort its **activation** without aborting the **drag** the same press is
+driving. Recognizers declare which family they are in via
+`GestureRecognizer::tap_family`.
+
+A `RawPointerEvent::Cancel` fed through the set does the same for the recognizers that
+care: a running drag emits `DragCancelled` (so its handler can unwind) rather than a
+`DragEnded` at wherever the pointer happened to be, and `DragPhase`/`PinchPhase` gained a
+matching `Cancelled` arm. Both enums are now `#[non_exhaustive]`.
+
+### 4.1.5 Multi-contact policy
+
+```rust
+pub enum MultiContact { First, All }   // default: First
+```
+
+Declared per node with `.multi_contact(..)` on `HandlerSet`, `WidgetWithHandlers` or the
+`WidgetBuilder` trait. Under `First` — the default, and what every widget written before
+the touch programme assumes — a node serves its first contact and an **extra** contact is
+*terminated at that node*: not delivered to it, and not bubbled to an ancestor either.
+
+That last half is the point. Without it, two fingers landing on a button inside a scroll
+area would give the button the first and the scroll area the second, and the second finger
+would start a pan out from under a press the user thinks is a click. `All` opts a genuine
+multi-touch surface (a pinch-zoom canvas, a piano keyboard) into per-contact arenas.
 
 ### 4.2 Cross-widget tap/drag disambiguation — drag observers
 
