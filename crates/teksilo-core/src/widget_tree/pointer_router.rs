@@ -276,11 +276,25 @@ impl WidgetTree {
             // the funnel owns the teardown order, and lowering would first
             // *admit* the pointer the sample is revoking.
             PointerPhase::Cancel => {
+                // The dismissal this contact had armed goes with it. The funnel
+                // below returns early for a pointer with nothing revocable, and
+                // a suppressed arming `Down` leaves exactly that shape — no
+                // sequence, no capture — so the abort cannot ride on it.
+                self.overlay_manager.abort_dismiss(sample.pointer.id);
                 self.cancel_pointer(
                     sample.pointer.id,
                     crate::pointer::CancelReason::Platform,
                     ops,
                 );
+                // A revoked contact ceases to exist, exactly as a lifted one
+                // does — the `ends_pointer` rule below, which this arm returns
+                // before reaching. The funnel ends the entry itself *when it
+                // runs*; for a pointer that had no press to revoke it returns
+                // first, and the entry would outlive the finger. Idempotent, so
+                // the ordinary path is unaffected.
+                if !sample.pointer.kind.hovers() {
+                    self.pointers.end(sample.pointer.id);
+                }
                 return;
             }
         };
@@ -526,37 +540,30 @@ impl WidgetTree {
             return;
         }
 
-        if let WidgetEvent::PointerDown {
-            position, button, ..
-        } = &event
-        {
-            let (dismissed, focus_restore, toggle_anchors) =
-                self.overlay_manager.handle_click_outside(*position);
-            if !dismissed.is_empty() {
-                self.dormant_dismissed_content(&dismissed, &mut *ops);
-                if let Some(restore_id) = focus_restore
-                    && self.arena.is_active(restore_id)
-                {
-                    self.focus_ops(restore_id, &mut *ops);
-                }
-                // The press dismissed one or more overlays. By default it
-                // now ALSO falls through to the widget under the cursor,
-                // so a single click both closes the menu/popover and
-                // activates the control beneath — the behaviour a
-                // secondary press already had. The one case still
-                // swallowed: a primary press on the anchor of a
-                // click-opened overlay, because the anchor's own tap
-                // handler would otherwise reopen the overlay this very
-                // press just dismissed (click-the-trigger-to-close).
-                let on_toggle_anchor = *button == PointerButton::Primary
-                    && toggle_anchors.iter().any(|&anchor| {
-                        self.arena.is_active(anchor)
-                            && self.arena.bounds(anchor).contains(*position)
-                    });
-                if on_toggle_anchor {
+        // Outside-press overlay dismissal. Two shapes, chosen by the pointer:
+        // an indirect one dismisses on the press and falls through, exactly as
+        // it always has; a direct one *arms* on the press and commits on the
+        // release. See `arm_outside_press_dismissal`.
+        match &event {
+            WidgetEvent::PointerDown {
+                position, button, ..
+            } => {
+                if self.arm_outside_press_dismissal(*position, *button, &mut *ops) {
                     return;
                 }
             }
+            WidgetEvent::PointerUp { position, .. } => {
+                if self.commit_outside_press_dismissal(*position, &mut *ops) {
+                    return;
+                }
+            }
+            WidgetEvent::PointerCancel { pointer, .. } => {
+                // A revoked press dismisses nothing. The arming Down was never
+                // delivered beneath either, so the whole gesture leaves no
+                // trace — which is the point of deferring to the release.
+                self.overlay_manager.abort_dismiss(pointer.id);
+            }
+            _ => {}
         }
 
         // Key-capture mode: if a callback is armed (via
@@ -1260,10 +1267,18 @@ impl WidgetTree {
 
         let content_id = self.add_boxed(menu_widget);
         let prev_focus = self.focused;
+        // One branch, every menu: a coarse pointer gets a placement that keeps
+        // clear of its own contact patch, everything else the historical
+        // `AtPointer`. A point-anchored panel that puts its own corner under
+        // the finger is the defect this exists to fix, and it is invisible from
+        // a mouse — which is why the decision lives in
+        // `OverlayPlacement::at_pointer_for` rather than at each call site.
+        let placement =
+            crate::overlay::OverlayPlacement::at_pointer_for(position, &self.current_input.pointer);
         self.overlay_manager.show(crate::overlay::OverlayRequest {
             content_id,
             anchor: owner_id,
-            placement: crate::overlay::OverlayPlacement::AtPointer(position),
+            placement,
             dismiss: crate::overlay::DismissBehavior::EscapeOrClickOutside,
             layer: crate::overlay::OverlayLayer::InTree,
             parent_overlay: None,
@@ -1280,6 +1295,140 @@ impl WidgetTree {
         // its own drain — fire ours here.
         self.drain_pending_intents(&mut *ops);
         true
+    }
+
+    // -----------------------------------------------------------------
+    // Outside-press overlay dismissal
+    // -----------------------------------------------------------------
+
+    /// Handle a press that lands outside one or more dismissable overlays.
+    ///
+    /// Returns `true` when the press is consumed and must not reach the tree.
+    ///
+    /// **An indirect pointer is unchanged.** It dismisses on the press and
+    /// falls through, so one click still closes a menu and actuates the control
+    /// beneath — deliberate behaviour for a cursor, which names one pixel that
+    /// the user could see the whole time they were aiming at it.
+    ///
+    /// **A direct pointer arms instead.** A finger covers what it is about to
+    /// actuate: the menu is the only thing the user was looking at, and the
+    /// control underneath is one they never saw. So the `Down` is withheld from
+    /// the tree, the dismissal waits for the release, and a press that is
+    /// cancelled — or slid onto the very overlay it would have closed — leaves
+    /// nothing behind at all. Both the arming `Down` and the committing `Up`
+    /// are consumed, so nothing beneath ever sees half a press.
+    fn arm_outside_press_dismissal(
+        &mut self,
+        position: Point,
+        button: PointerButton,
+        ops: &mut dyn crate::window::WindowOps,
+    ) -> bool {
+        self.prune_stale_dismiss_arms();
+        let pressing = self.current_input.pointer;
+        let busy = self.busy_press_points(pressing.id);
+
+        if pressing.kind.is_direct() {
+            return self
+                .overlay_manager
+                .arm_dismiss(pressing.id, position, &busy)
+                .suppress_beneath;
+        }
+
+        let (dismissed, focus_restore, toggle_anchors) =
+            self.overlay_manager.dismiss_outside_press(position, &busy);
+        if dismissed.is_empty() {
+            return false;
+        }
+        self.dormant_dismissed_content(&dismissed, &mut *ops);
+        if let Some(restore_id) = focus_restore
+            && self.arena.is_active(restore_id)
+        {
+            self.focus_ops(restore_id, &mut *ops);
+        }
+        // The press dismissed one or more overlays. By default it
+        // now ALSO falls through to the widget under the cursor,
+        // so a single click both closes the menu/popover and
+        // activates the control beneath — the behaviour a
+        // secondary press already had. The one case still
+        // swallowed: a primary press on the anchor of a
+        // click-opened overlay, because the anchor's own tap
+        // handler would otherwise reopen the overlay this very
+        // press just dismissed (click-the-trigger-to-close).
+        button == PointerButton::Primary
+            && toggle_anchors.iter().any(|&anchor| {
+                self.arena.is_active(anchor) && self.arena.bounds(anchor).contains(position)
+            })
+    }
+
+    /// Complete a direct pointer's armed dismissal on its release.
+    ///
+    /// Returns `true` when this pointer held an arm — in which case the `Up` is
+    /// consumed whether or not anything actually closed. Nothing beneath saw
+    /// the `Down`, so delivering the `Up` alone would hand a widget the second
+    /// half of a press it never started.
+    fn commit_outside_press_dismissal(
+        &mut self,
+        position: Point,
+        ops: &mut dyn crate::window::WindowOps,
+    ) -> bool {
+        let pointer = self.current_pointer_id();
+        if !self.overlay_manager.has_armed_dismiss(pointer) {
+            return false;
+        }
+        let (dismissed, focus_restore, _anchors) =
+            self.overlay_manager.commit_dismiss(pointer, position);
+        if !dismissed.is_empty() {
+            self.dormant_dismissed_content(&dismissed, &mut *ops);
+            if let Some(restore_id) = focus_restore
+                && self.arena.is_active(restore_id)
+            {
+                self.focus_ops(restore_id, &mut *ops);
+            }
+        }
+        true
+    }
+
+    /// Where every *other* live pointer is holding a press.
+    ///
+    /// A press is only "outside" relative to the overlays nobody else is
+    /// working in — see
+    /// [`OverlayManager::dismiss_outside_press`](crate::overlay::OverlayManager::dismiss_outside_press).
+    /// Liveness is judged with
+    /// [`press_is_revocable`](Self::press_is_revocable), the predicate the
+    /// cancel funnel already uses, and for the same reason: a pointer with
+    /// neither a sequence nor a capture has no interaction that could be taken
+    /// away, so it has none to protect either. That also exempts a pointer
+    /// inside its terminal `Up` — its sequence is still installed but already
+    /// terminating — which is what lets a menu item's own handler close its
+    /// menu while a second contact rests elsewhere.
+    ///
+    /// The *press* position, not the current one: a contact that grabbed a
+    /// menu and dragged past its edge is still manipulating that menu.
+    fn busy_press_points(&self, exclude: crate::pointer::PointerId) -> Vec<Point> {
+        self.pointers
+            .iter()
+            .filter(|entry| entry.info.id != exclude)
+            .filter(|entry| self.press_is_revocable(entry.info.id))
+            .map(|entry| entry.down_position)
+            .collect()
+    }
+
+    /// Drop arms whose contact is gone.
+    ///
+    /// An arm is normally retired by its own `Up` or `Cancel`. A contact that
+    /// disappears without either — a table sweep, a window losing its input —
+    /// would otherwise leave one behind, and a later contact minted with the
+    /// same id would inherit a dismissal it never asked for.
+    fn prune_stale_dismiss_arms(&mut self) {
+        let stale: Vec<crate::pointer::PointerId> = self
+            .overlay_manager
+            .armed_pointers()
+            .into_iter()
+            .filter(|id| self.pointers.get(*id).is_none())
+            .collect();
+        for id in stale {
+            self.overlay_manager.abort_dismiss(id);
+        }
     }
 
     // -----------------------------------------------------------------
@@ -7333,5 +7482,397 @@ mod press_and_focus_tests {
         fn children(&self) -> Vec<WidgetId> {
             self.children.clone()
         }
+    }
+}
+
+#[cfg(test)]
+mod overlay_release_dismissal_tests {
+    //! Outside-press overlay dismissal, driven through the real ingress door.
+    //!
+    //! The defect: `handle_click_outside` ran on the `PointerDown` and then
+    //! *fell through*, so one press both closed a menu and actuated whatever
+    //! the menu was covering. With a cursor that is defensible — the user aimed
+    //! at a pixel they could see the whole time. With a finger it is not: the
+    //! menu is the only thing they were looking at, and the control underneath
+    //! is one they never saw.
+
+    use std::cell::Cell;
+    use std::rc::Rc;
+
+    use teksilo_canvas::{Point, Rect, Size, SizeProposal};
+
+    use crate::WidgetId;
+    use crate::event::{Modifiers, PointerButton, WidgetEvent};
+    use crate::overlay::{DismissBehavior, OverlayLayer, OverlayPlacement, OverlayRequest};
+    use crate::pointer::{
+        BackendDeviceKey, EventTime, PointerId, PointerIdAllocator, PointerInfo, PointerPhase,
+        PointerSample,
+    };
+    use crate::test_widgets::FillWidget;
+    use crate::widget::{LayoutContext, LayoutResponse, Widget};
+    use crate::widget_builder::WidgetBuilder;
+    use crate::widget_tree::WidgetTree;
+
+    // -----------------------------------------------------------------
+    // Fixtures
+    // -----------------------------------------------------------------
+
+    /// A leaf with an intrinsic size, so an overlay hung off it gets real
+    /// bounds out of `position_overlays` instead of a zero rect.
+    #[derive(Debug)]
+    struct Panel(Size);
+
+    impl Widget for Panel {
+        fn layout_response(&self, _proposal: SizeProposal, _ctx: &LayoutContext) -> LayoutResponse {
+            self.0.into()
+        }
+    }
+
+    /// A root that puts its first child over the whole window and its second in
+    /// a 10 dp corner.
+    ///
+    /// Two bare roots would both be laid out at the window's full size — the
+    /// trigger would then contain every press point, and the pre-existing
+    /// "a press on a click-opened overlay's own anchor is consumed" rule would
+    /// swallow the very presses these tests are about.
+    #[derive(Debug)]
+    struct PageAndTrigger {
+        children: Vec<WidgetId>,
+    }
+
+    impl Widget for PageAndTrigger {
+        fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> LayoutResponse {
+            proposal.resolve(0.0, 0.0).into()
+        }
+
+        fn place_children(
+            &self,
+            bounds: Rect,
+            _proposal: SizeProposal,
+            children: &mut [crate::widget::WidgetPlacement],
+            _ctx: &LayoutContext,
+        ) {
+            if let Some(page) = children.get_mut(0) {
+                page.origin = bounds.origin();
+                page.size = bounds.size();
+            }
+            if let Some(trigger) = children.get_mut(1) {
+                trigger.origin = bounds.origin();
+                trigger.size = Size::new(10.0, 10.0);
+            }
+        }
+
+        fn children(&self) -> Vec<WidgetId> {
+            self.children.clone()
+        }
+    }
+
+    fn contact_id(n: u64) -> PointerId {
+        PointerIdAllocator::global().begin(BackendDeviceKey::new(0x0FA2), n)
+    }
+
+    fn touch(id: PointerId, phase: PointerPhase, at: Point) -> PointerSample {
+        PointerSample {
+            pointer: PointerInfo::touch(id, EventTime::ZERO),
+            phase,
+            position: at,
+            button: None,
+            modifiers: Modifiers::NONE,
+            coalesced: Vec::new(),
+        }
+    }
+
+    /// The scene every test below shares: a tappable page filling the window,
+    /// and a menu overlay floating over part of it at (100, 100, 200, 200).
+    ///
+    /// The menu's content is a separate root, so a press outside it lands on
+    /// the page and a press inside it lands on the menu — which is exactly the
+    /// arrangement the dismissal rule is about.
+    fn page_with_a_menu() -> (WidgetTree, WidgetId, Rc<Cell<u32>>) {
+        let mut tree = WidgetTree::new();
+        let taps = Rc::new(Cell::new(0u32));
+        let counter = taps.clone();
+        let page = tree.add(
+            FillWidget::new()
+                .focusable()
+                .on_tap(move |_e, _c| counter.set(counter.get() + 1)),
+        );
+        // A small trigger in the corner, well clear of both press points — see
+        // `PageAndTrigger` for why it cannot simply be a second root.
+        let trigger = tree.add(Panel(Size::new(10.0, 10.0)));
+        let _root = tree.add(PageAndTrigger {
+            children: vec![page, trigger],
+        });
+        let menu = tree.add(Panel(Size::new(200.0, 200.0)));
+        tree.show_overlay(OverlayRequest {
+            content_id: menu,
+            anchor: trigger,
+            placement: OverlayPlacement::AtPointer(Point::new(100.0, 100.0)),
+            dismiss: DismissBehavior::ClickOutside,
+            layer: OverlayLayer::InTree,
+            parent_overlay: None,
+            on_dismiss: None,
+            fade_duration: None,
+        });
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+        assert_eq!(tree.active_overlays().len(), 1, "the menu is open");
+        (tree, page, taps)
+    }
+
+    fn outside() -> Point {
+        Point::new(600.0, 500.0)
+    }
+
+    fn inside_menu() -> Point {
+        Point::new(150.0, 150.0)
+    }
+
+    // -----------------------------------------------------------------
+    // The direct-pointer contract
+    // -----------------------------------------------------------------
+
+    /// The arming press reaches nothing: no press record, no capture, and the
+    /// menu is still up because the decision belongs to the release.
+    #[test]
+    fn the_suppressed_down_leaves_nothing_pressed_or_captured_beneath() {
+        let (mut tree, page, taps) = page_with_a_menu();
+        let finger = contact_id(1);
+        tree.dispatch_pointer(touch(finger, PointerPhase::Down, outside()));
+
+        assert_eq!(
+            tree.active_overlays().len(),
+            1,
+            "the press does not close the menu; the release does"
+        );
+        assert_eq!(tree.pressed_by(page), None, "nothing beneath is pressed");
+        let entry = tree.pointers.get(finger).expect("the contact is live");
+        assert_eq!(entry.captured_by, None, "nothing beneath captured it");
+        assert!(entry.sequence.is_none(), "no arbitration was opened");
+        assert_eq!(taps.get(), 0);
+    }
+
+    /// …and the release closes the menu without actuating what it covered.
+    #[test]
+    fn a_touch_tap_outside_a_menu_closes_it_and_actuates_nothing() {
+        let (mut tree, page, taps) = page_with_a_menu();
+        let finger = contact_id(2);
+        tree.dispatch_pointer(touch(finger, PointerPhase::Down, outside()));
+        tree.dispatch_pointer(touch(finger, PointerPhase::Up, outside()));
+
+        assert!(tree.active_overlays().is_empty(), "the menu closed");
+        assert_eq!(taps.get(), 0, "the page beneath was never tapped");
+        assert_eq!(tree.pressed_by(page), None);
+        tree.assert_no_leaked_pointer_state();
+    }
+
+    /// A press that never completes delivers nothing at all — neither the
+    /// dismissal it armed nor the press it withheld.
+    #[test]
+    fn a_cancelled_press_aborts_the_arm() {
+        let (mut tree, page, taps) = page_with_a_menu();
+        let finger = contact_id(3);
+        tree.dispatch_pointer(touch(finger, PointerPhase::Down, outside()));
+        tree.dispatch_pointer(touch(finger, PointerPhase::Cancel, outside()));
+
+        assert_eq!(tree.active_overlays().len(), 1, "the menu survives");
+        assert_eq!(taps.get(), 0);
+        assert_eq!(tree.pressed_by(page), None);
+        tree.assert_no_leaked_pointer_state();
+    }
+
+    /// Land beside the menu, drag onto it, lift there. The finger changed its
+    /// mind: the menu stays, and the page under the arming press was never
+    /// touched either.
+    #[test]
+    fn a_press_slid_onto_the_menu_dismisses_nothing() {
+        let (mut tree, _page, taps) = page_with_a_menu();
+        let finger = contact_id(4);
+        tree.dispatch_pointer(touch(finger, PointerPhase::Down, outside()));
+        tree.dispatch_pointer(touch(finger, PointerPhase::Move, inside_menu()));
+        tree.dispatch_pointer(touch(finger, PointerPhase::Up, inside_menu()));
+
+        assert_eq!(tree.active_overlays().len(), 1, "the menu survives");
+        assert_eq!(taps.get(), 0);
+        tree.assert_no_leaked_pointer_state();
+    }
+
+    /// A finger working *inside* the menu is an interaction, and a second one
+    /// landing on the page is not a reason to take it away mid-flight.
+    #[test]
+    fn a_second_contact_cannot_dismiss_what_the_first_is_manipulating() {
+        let (mut tree, _page, _taps) = page_with_a_menu();
+        let first = contact_id(5);
+        let second = contact_id(6);
+
+        tree.dispatch_pointer(touch(first, PointerPhase::Down, inside_menu()));
+        assert!(
+            tree.pointers
+                .get(first)
+                .is_some_and(|e| e.sequence.is_some()),
+            "the first contact holds a live press inside the menu"
+        );
+
+        tree.dispatch_pointer(touch(second, PointerPhase::Down, outside()));
+        tree.dispatch_pointer(touch(second, PointerPhase::Up, outside()));
+        assert_eq!(
+            tree.active_overlays().len(),
+            1,
+            "the menu the first finger is holding must not close under it"
+        );
+
+        // Once the first contact's press is over there is nothing left to
+        // revoke, so it protects nothing and the same tap closes the menu.
+        tree.dispatch_pointer(touch(first, PointerPhase::Up, inside_menu()));
+        let third = contact_id(7);
+        tree.dispatch_pointer(touch(third, PointerPhase::Down, outside()));
+        tree.dispatch_pointer(touch(third, PointerPhase::Up, outside()));
+        assert!(tree.active_overlays().is_empty());
+        tree.assert_no_leaked_pointer_state();
+    }
+
+    /// A contact that is merely *holding an arm* has no sequence and no
+    /// capture, so `press_is_revocable` says it has no press — and it must not
+    /// block a second contact's dismissal the way a real press does.
+    #[test]
+    fn an_arm_is_not_itself_a_press_that_blocks_another_contact() {
+        let (mut tree, _page, _taps) = page_with_a_menu();
+        let first = contact_id(8);
+        let second = contact_id(9);
+
+        tree.dispatch_pointer(touch(first, PointerPhase::Down, outside()));
+        assert!(
+            tree.overlay_manager().has_armed_dismiss(first),
+            "the first contact armed"
+        );
+        // The first contact is live but holds nothing revocable.
+        assert!(tree.busy_press_points(second).is_empty());
+
+        tree.dispatch_pointer(touch(second, PointerPhase::Down, outside()));
+        assert!(tree.overlay_manager().has_armed_dismiss(second));
+        tree.dispatch_pointer(touch(second, PointerPhase::Up, outside()));
+        assert!(tree.active_overlays().is_empty());
+
+        // The first contact's arm now names an overlay that is gone; its own
+        // release must be a quiet no-op rather than a panic.
+        tree.dispatch_pointer(touch(first, PointerPhase::Up, outside()));
+        tree.assert_no_leaked_pointer_state();
+    }
+
+    /// A tap *inside* the menu is not an outside press, so nothing is armed and
+    /// the menu's own content handles the press exactly as before.
+    #[test]
+    fn a_touch_inside_the_menu_arms_nothing() {
+        let (mut tree, _page, _taps) = page_with_a_menu();
+        let finger = contact_id(10);
+        tree.dispatch_pointer(touch(finger, PointerPhase::Down, inside_menu()));
+        assert!(!tree.overlay_manager().has_armed_dismiss(finger));
+        tree.dispatch_pointer(touch(finger, PointerPhase::Up, inside_menu()));
+        assert_eq!(tree.active_overlays().len(), 1);
+        tree.assert_no_leaked_pointer_state();
+    }
+
+    /// A contact whose press was never opened — it hit nothing, or its `Down`
+    /// was suppressed by an arm — still ceases to exist when the platform
+    /// revokes it.
+    ///
+    /// The cancel funnel returns early for a pointer with nothing revocable and
+    /// so never reaches the step that drops the table entry. Before the release
+    /// dismissal that shape was rare (a press on bare background); the arm makes
+    /// it the ordinary case, so the ingress door applies the same
+    /// contact-ceases-to-exist rule it applies to an `Up`.
+    #[test]
+    fn a_contact_with_no_press_still_ends_when_the_platform_revokes_it() {
+        let mut tree = WidgetTree::new();
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+        let finger = contact_id(99);
+        tree.dispatch_pointer(touch(finger, PointerPhase::Down, outside()));
+        tree.dispatch_pointer(touch(finger, PointerPhase::Cancel, outside()));
+        tree.assert_no_leaked_pointer_state();
+    }
+
+    // -----------------------------------------------------------------
+    // The mouse, unchanged
+    // -----------------------------------------------------------------
+
+    /// The press dismisses and falls through, exactly as before: one click both
+    /// closes the menu and actuates the control beneath.
+    #[test]
+    fn a_mouse_click_outside_a_menu_dismisses_on_the_press_and_falls_through() {
+        let (mut tree, _page, taps) = page_with_a_menu();
+        tree.dispatch_event(WidgetEvent::PointerDown {
+            position: outside(),
+            button: PointerButton::Primary,
+            modifiers: Modifiers::NONE,
+        });
+        assert!(
+            tree.active_overlays().is_empty(),
+            "the mouse still dismisses on the press"
+        );
+        assert!(
+            tree.pointers
+                .get(PointerId::MOUSE)
+                .is_some_and(|e| e.sequence.is_some()),
+            "and the press still reaches the page beneath"
+        );
+        tree.dispatch_event(WidgetEvent::PointerUp {
+            position: outside(),
+            button: PointerButton::Primary,
+            modifiers: Modifiers::NONE,
+        });
+        assert_eq!(taps.get(), 1, "the control beneath activated");
+        assert!(
+            !tree.overlay_manager().has_armed_dismiss(PointerId::MOUSE),
+            "a mouse never arms"
+        );
+        tree.assert_no_leaked_pointer_state();
+    }
+
+    // -----------------------------------------------------------------
+    // Contact avoidance
+    // -----------------------------------------------------------------
+
+    /// A context menu raised by a finger keeps clear of the contact patch; the
+    /// same menu raised by a mouse lands on the pixel, as it always has.
+    #[test]
+    fn a_context_menu_avoids_the_contact_that_opened_it() {
+        fn menu_bounds(pointer: PointerInfo, at: Point) -> Rect {
+            let mut tree = WidgetTree::new();
+            let page = tree.add(
+                FillWidget::new()
+                    .focusable()
+                    .context_menu(|_p, _ctx| Some(Box::new(Panel(Size::new(200.0, 160.0))))),
+            );
+            let _ = page;
+            tree.layout(SizeProposal::exact(800.0, 600.0));
+            tree.dispatch_pointer(PointerSample {
+                pointer,
+                phase: PointerPhase::Down,
+                position: at,
+                button: Some(PointerButton::Secondary),
+                modifiers: Modifiers::NONE,
+                coalesced: Vec::new(),
+            });
+            tree.layout(SizeProposal::exact(800.0, 600.0));
+            let id = *tree
+                .active_overlays()
+                .first()
+                .expect("the context menu opened");
+            tree.overlay_manager().bounds_for(id).expect("bounds")
+        }
+
+        let at = Point::new(400.0, 300.0);
+        let finger = menu_bounds(PointerInfo::touch(contact_id(11), EventTime::ZERO), at);
+        let contact = crate::overlay::rect_centred_on(at, crate::overlay::ASSUMED_CONTACT_PATCH);
+        assert!(
+            finger.x < contact.x && finger.right() <= contact.x,
+            "a touch menu clears the contact patch: {finger:?} vs {contact:?}"
+        );
+
+        let mouse = menu_bounds(PointerInfo::mouse(EventTime::ZERO), at);
+        assert_eq!(
+            (mouse.x, mouse.y),
+            (at.x, at.y),
+            "a mouse menu still opens with its corner on the pointer"
+        );
     }
 }

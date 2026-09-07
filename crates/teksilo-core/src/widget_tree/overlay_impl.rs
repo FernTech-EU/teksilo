@@ -812,9 +812,18 @@ impl WidgetTree {
             | P::Above
             | P::TrailingEdge
             | P::AtPointer(_)
+            | P::AtPointerAvoiding { .. }
             | P::NearAnchor { .. }
             | P::BelowPreferred => true,
-            P::Centered | P::BottomCenter | P::ViewportCorner { .. } | P::FullViewport => false,
+            // `AboveSelection` joins the viewport-placed group: what it hangs
+            // off is a range of text, not the widget recorded as its anchor.
+            // Its lifetime belongs to the selection controller that raised it,
+            // which is also why it lives in the text-affordance band.
+            P::Centered
+            | P::BottomCenter
+            | P::ViewportCorner { .. }
+            | P::FullViewport
+            | P::AboveSelection { .. } => false,
         }
     }
 
@@ -1860,6 +1869,35 @@ impl WidgetTree {
         // the pre-popup snapshot. The unconditional `a11y_dirty = true`
         // in `layout()` previously masked this gap; now this explicit
         // set is required.
+        self.a11y_dirty = true;
+        if let Some(duration) = fade_duration {
+            self.attach_overlay_fade(id, content_id, duration);
+        }
+        id
+    }
+
+    /// Show an overlay in an explicit z-band.
+    ///
+    /// [`show_overlay`](Self::show_overlay) is this with
+    /// [`OverlayBand::Standard`](crate::overlay::OverlayBand::Standard). The
+    /// other band is for the touch text affordances — selection handles, the
+    /// magnifier, the selection toolbar — which must render above the editor's
+    /// `clips_children` ancestor, below every menu, and outside the
+    /// outside-press dismissal that every caret-moving tap would otherwise
+    /// trigger. See [`crate::overlay::text_affordance`].
+    pub fn show_overlay_in_band(
+        &mut self,
+        request: crate::overlay::OverlayRequest,
+        band: crate::overlay::OverlayBand,
+    ) -> crate::overlay::OverlayId {
+        let fade_duration = request.fade_duration;
+        let content_id = request.content_id;
+        let is_modal = matches!(
+            request.placement,
+            crate::overlay::OverlayPlacement::Centered
+        );
+        let id = self.overlay_manager.show_in_band(request, band);
+        self.cancel_pointers_for_modal(is_modal);
         self.a11y_dirty = true;
         if let Some(duration) = fade_duration {
             self.attach_overlay_fade(id, content_id, duration);

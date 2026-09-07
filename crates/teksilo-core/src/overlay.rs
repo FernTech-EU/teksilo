@@ -15,11 +15,19 @@ use teksilo_canvas::{Point, Rect, Size, Vec2};
 use teksilo_tokens::Corner;
 
 use crate::environment::LayoutDirection;
+use crate::pointer::PointerId;
 use crate::signal::Signal;
 use crate::widget_id::WidgetId;
 
+pub mod direction;
 mod placement_impl;
 mod safe_triangle;
+pub mod text_affordance;
+mod viewport;
+
+pub use direction::{HorizontalSide, InlineDirection, inline_band_at, inline_edge_band};
+pub use text_affordance::{OverlayBand, SelectionHandleKind};
+pub use viewport::OverlayViewport;
 
 pub(crate) use safe_triangle::point_in_safe_triangle;
 
@@ -64,11 +72,52 @@ pub enum OverlayPlacement {
     /// Below the anchor, leading-edge aligned (dropdown).
     Below,
     /// Above the anchor (fallback when no space below).
+    ///
+    /// A panel taller than the room above its anchor is pinned to the top of
+    /// the usable area and **shrunk to that room**, not slid down onto the
+    /// anchor: the control that opened a panel has to stay visible, or the
+    /// user is choosing blind. Where there is no room at all to shrink into,
+    /// the ideal position is kept — an empty panel is not an improvement on a
+    /// badly placed one.
     Above,
     /// To the trailing side of the anchor (submenu).
     TrailingEdge,
     /// At the pointer position (context menu).
     AtPointer(Point),
+    /// At the pointer, but never *under* it: the panel is placed in a quadrant
+    /// that clears `avoid` entirely.
+    ///
+    /// The touch form of [`AtPointer`](Self::AtPointer). A mouse cursor is an
+    /// arrow drawn *beside* the pixel it names, so a menu whose corner lands on
+    /// that pixel is fully visible; a finger is an opaque disc centred on it,
+    /// so the same menu opens with its first two rows underneath the hand. The
+    /// fix is not an offset — an offset large enough for a thumb is absurd for
+    /// a stylus — but a rectangle to keep clear, which the caller sizes from
+    /// the contact patch the digitiser reported.
+    ///
+    /// Quadrant preference is **inline-start first** (left of the contact under
+    /// LTR, right of it under RTL), then above-versus-below, then the mirrored
+    /// side: a hand approaches from the reader's own side, so the far side is
+    /// the one that stays visible. Every candidate clears `avoid` outright; the
+    /// viewport clamp is applied on the axis that is already clear, so clamping
+    /// can never push the panel back under the contact.
+    AtPointerAvoiding {
+        /// Where the contact was reported.
+        point: Point,
+        /// The rectangle the panel must not overlap — the contact patch,
+        /// centred on `point`.
+        avoid: Rect,
+    },
+    /// Above a text selection, centred on it, flipping below when the selection
+    /// is against the top of the usable area.
+    ///
+    /// The selection toolbar's placement. Anchor bounds are ignored: the thing
+    /// it hangs off is a range of text, whose rectangle the editor supplies and
+    /// updates as the selection changes, not a widget.
+    AboveSelection {
+        /// The selection's bounding rectangle, in window coordinates.
+        selection: Rect,
+    },
     /// Near the anchor with a preferred alignment and offset (tooltip).
     NearAnchor { offset: Vec2 },
     /// Centered within the viewport (dialog).
@@ -77,6 +126,10 @@ pub enum OverlayPlacement {
     BottomCenter,
     /// Below the anchor if space allows, otherwise above (combo box dropdown).
     /// The viewport height is supplied by `position_overlays()` at layout time.
+    ///
+    /// When the panel fits on neither side it takes whichever side has more
+    /// room and is shrunk to it — a tie keeps the flip upward. It is never slid
+    /// over the anchor; see [`Above`](Self::Above).
     BelowPreferred,
     /// Snaps content to a viewport corner with a per-axis margin
     /// (used by `ToastHost` for stacked toast notifications, also
@@ -90,6 +143,57 @@ pub enum OverlayPlacement {
     /// centered modal panel — the scrim covers the full window so the
     /// content behind dims uniformly. Anchor bounds are ignored.
     FullViewport,
+}
+
+/// The contact patch assumed for a coarse pointer whose backend reports none.
+///
+/// 24 dp is the size of the smallest thing a finger is ever asked to hit, so it
+/// is the smallest rectangle a finger can be assumed to cover. Backends that do
+/// report a patch (Windows `WM_POINTER`, Wayland `wp_touch` with the shape
+/// extension) usually report a larger one, and that number is preferred — this
+/// is the floor, not the answer.
+pub const ASSUMED_CONTACT_PATCH: Size = Size {
+    width: 24.0,
+    height: 24.0,
+};
+
+impl OverlayPlacement {
+    /// The placement a point-anchored panel — a context menu, a drop-down
+    /// raised from a long press — should use for the pointer that opened it.
+    ///
+    /// **One branch, every menu.** A coarse pointer gets
+    /// [`AtPointerAvoiding`](Self::AtPointerAvoiding) with the contact patch as
+    /// the rectangle to clear; everything else gets the
+    /// [`AtPointer`](Self::AtPointer) it has always had, byte for byte. Putting
+    /// the decision here rather than at each call site is the point: a menu
+    /// that forgot to ask opens under the finger, and there is no way to notice
+    /// that from a mouse.
+    pub fn at_pointer_for(point: Point, pointer: &crate::pointer::PointerInfo) -> Self {
+        if !pointer.kind.is_coarse() {
+            return OverlayPlacement::AtPointer(point);
+        }
+        let contact = pointer.axes.contact.unwrap_or(ASSUMED_CONTACT_PATCH);
+        let patch = Size::new(
+            contact.width.max(ASSUMED_CONTACT_PATCH.width),
+            contact.height.max(ASSUMED_CONTACT_PATCH.height),
+        );
+        OverlayPlacement::AtPointerAvoiding {
+            point,
+            avoid: rect_centred_on(point, patch),
+        }
+    }
+}
+
+/// `size`, centred on `point`. `Rect` has no such constructor and the two
+/// places that need one must agree exactly, since one computes the rectangle a
+/// menu must clear and the other asserts that it did.
+pub(crate) fn rect_centred_on(point: Point, size: Size) -> Rect {
+    Rect::new(
+        point.x - size.width / 2.0,
+        point.y - size.height / 2.0,
+        size.width,
+        size.height,
+    )
 }
 
 /// Placement preference for a tooltip relative to its anchor. Resolved to
@@ -226,6 +330,10 @@ pub(crate) struct ActiveOverlay {
     pub placement: OverlayPlacement,
     pub dismiss: DismissBehavior,
     pub layer: OverlayLayer,
+    /// Which z-band this overlay sits in. See [`OverlayBand`]; the stack is
+    /// kept sorted by it, so this is also the overlay's position class within
+    /// `stack`.
+    pub band: OverlayBand,
     pub parent_overlay: Option<OverlayId>,
     /// Computed bounds after positioning.
     pub bounds: Rect,
@@ -306,6 +414,7 @@ impl std::fmt::Debug for ActiveOverlay {
             .field("placement", &self.placement)
             .field("dismiss", &self.dismiss)
             .field("layer", &self.layer)
+            .field("band", &self.band)
             .field("parent_overlay", &self.parent_overlay)
             .field("bounds", &self.bounds)
             .field("focus_restore", &self.focus_restore)
@@ -335,8 +444,46 @@ impl std::fmt::Debug for ActiveOverlay {
 /// instead of growing the stack without bound.
 pub(crate) const MAX_OVERLAY_NESTING_DEPTH: usize = 12;
 
+/// What an outside press owes the tree, decided on the arming
+/// [`PointerDown`](crate::event::WidgetEvent::PointerDown) and answered again
+/// on the release.
+///
+/// Two questions, asked on two different samples, which is why they are two
+/// fields rather than one bool: the `Down` needs to know whether to withhold
+/// itself from the widget beneath, and the `Up` needs to know whether anything
+/// is still waiting to close.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct DismissArm {
+    /// At least one overlay is armed to close when this press completes.
+    pub will_dismiss: bool,
+    /// The arming press must not be delivered to the widget under it.
+    ///
+    /// This is the whole point of arming. Today's press-time dismissal *falls
+    /// through*, so one tap closes a menu **and** actuates whatever the menu was
+    /// covering — a destructive button, a list row, a tab. With a mouse the user
+    /// sees the menu vanish under a cursor they aimed deliberately; with a
+    /// finger the menu is what they were looking at and the control beneath is
+    /// one they never saw.
+    pub suppress_beneath: bool,
+}
+
+/// An outside press that has not completed yet.
+struct ArmedDismiss {
+    pointer: PointerId,
+    /// The overlays the arming press selected. Re-checked at commit time
+    /// against the live stack, so an overlay that closed in the meantime is
+    /// simply absent rather than an error.
+    overlays: Vec<OverlayId>,
+    /// The click-opened overlays' anchors, carried so the commit can report
+    /// them exactly as the press-time path does.
+    anchors: Vec<WidgetId>,
+}
+
 pub struct OverlayManager {
     pub(crate) stack: Vec<ActiveOverlay>,
+    /// Outside presses awaiting their release, one per contact. Almost always
+    /// empty, and never longer than the number of live contacts.
+    arms: Vec<ArmedDismiss>,
     next_id: u64,
     /// Latest known sim-clock value, mirrored from
     /// `WidgetTree::sim_clock` via [`Self::set_sim_clock`]. Read by
@@ -357,6 +504,7 @@ impl OverlayManager {
     pub fn new() -> Self {
         Self {
             stack: Vec::new(),
+            arms: Vec::new(),
             next_id: 1,
             sim_clock: Instant::now(),
             version: Signal::new(0),
@@ -385,18 +533,35 @@ impl OverlayManager {
 
     /// Show a new overlay. Returns the OverlayId.
     pub fn show(&mut self, request: OverlayRequest) -> OverlayId {
-        self.show_with_auto_dismiss(request, None)
+        self.show_with_auto_dismiss(request, None, OverlayBand::Standard)
+    }
+
+    /// Show a new overlay in an explicit z-band.
+    ///
+    /// [`show`](Self::show) is this with [`OverlayBand::Standard`]. The other
+    /// band exists for the touch text affordances — see
+    /// [`text_affordance`] — which must sit
+    /// under every menu and survive the presses that drive them.
+    ///
+    /// A band below the top is inserted **mid-stack**, so
+    /// [`set_top_focus_restore`](Self::set_top_focus_restore) — which addresses
+    /// the top of the stack — does not describe it. That is correct rather than
+    /// a limitation: an affordance in this band never takes focus from the
+    /// editor it belongs to, so it has no focus to restore.
+    pub fn show_in_band(&mut self, request: OverlayRequest, band: OverlayBand) -> OverlayId {
+        self.show_with_auto_dismiss(request, None, band)
     }
 
     /// Show a new overlay that dismisses automatically after `duration`.
     pub fn show_for(&mut self, request: OverlayRequest, duration: Duration) -> OverlayId {
-        self.show_with_auto_dismiss(request, Some(duration))
+        self.show_with_auto_dismiss(request, Some(duration), OverlayBand::Standard)
     }
 
     fn show_with_auto_dismiss(
         &mut self,
         request: OverlayRequest,
         auto_dismiss_after: Option<Duration>,
+        band: OverlayBand,
     ) -> OverlayId {
         let id = OverlayId::new(self.next_id);
         self.next_id += 1;
@@ -421,6 +586,7 @@ impl OverlayManager {
             placement: request.placement,
             dismiss: request.dismiss,
             layer: request.layer,
+            band,
             parent_overlay: request.parent_overlay,
             bounds: Rect::ZERO,
             focus_restore: None,
@@ -436,7 +602,17 @@ impl OverlayManager {
             on_dismiss: request.on_dismiss,
             fade: None,
         };
-        self.stack.push(overlay);
+        // Sorted insert, not a push: an overlay goes above everything in a
+        // lower band and below everything in a higher one, so a selection
+        // handle raised while a menu is open still lands under the menu. Within
+        // a band the historical push order stands — a `Standard` overlay in a
+        // tree that raises no text affordance is appended, exactly as before.
+        let at = self
+            .stack
+            .iter()
+            .position(|existing| existing.band > band)
+            .unwrap_or(self.stack.len());
+        self.stack.insert(at, overlay);
         self.bump_version();
         id
     }
@@ -1128,8 +1304,40 @@ impl OverlayManager {
         &mut self,
         point: Point,
     ) -> (Vec<WidgetId>, Option<WidgetId>, Vec<WidgetId>) {
+        self.dismiss_outside_press(point, &[])
+    }
+
+    /// [`handle_click_outside`](Self::handle_click_outside) with the points at
+    /// which *other* contacts are holding a live press.
+    ///
+    /// A press is only "outside" relative to the overlays nobody else is
+    /// working in. A second finger landing on the page while the first is
+    /// dragging a menu's scrollbar is not a dismissal gesture; it is the second
+    /// finger of a two-finger interaction, and closing the menu under the first
+    /// one takes the interaction away mid-flight. Each busy point raises the
+    /// floor of the layered rule to the overlay it is inside, so overlays at or
+    /// below any busy contact survive and everything above still closes.
+    ///
+    /// An empty `busy` is the historical behaviour exactly, which is what a
+    /// mouse-only tree always passes.
+    pub fn dismiss_outside_press(
+        &mut self,
+        point: Point,
+        busy: &[Point],
+    ) -> (Vec<WidgetId>, Option<WidgetId>, Vec<WidgetId>) {
+        let (to_dismiss, toggle_anchors) = self.outside_press_targets(point, busy);
+        self.apply_outside_press(to_dismiss, toggle_anchors)
+    }
+
+    /// The overlays an outside press at `point` selects, and the click-opened
+    /// ones' anchors. Pure: nothing is dismissed.
+    fn outside_press_targets(
+        &self,
+        point: Point,
+        busy: &[Point],
+    ) -> (Vec<OverlayId>, Vec<WidgetId>) {
         if self.stack.is_empty() {
-            return (Vec::new(), None, Vec::new());
+            return (Vec::new(), Vec::new());
         }
 
         // Dismissal is *layered*, not stack-wide. A press that lands inside
@@ -1147,13 +1355,21 @@ impl OverlayManager {
         // short-circuit that returned as soon as the press hit *any* overlay:
         // once a modal — or its full-viewport scrim — was open, that guard
         // made *no* click-outside overlay dismissable at all.
-        let hit_index = self.stack.iter().enumerate().rev().find_map(|(i, o)| {
-            let fading_out = o
-                .fade
-                .as_ref()
-                .is_some_and(|f| f.dismissing_started_real.is_some());
-            (!fading_out && o.bounds.contains(point)).then_some(i)
-        });
+        let index_at = |p: Point| {
+            self.stack.iter().enumerate().rev().find_map(|(i, o)| {
+                let fading_out = o
+                    .fade
+                    .as_ref()
+                    .is_some_and(|f| f.dismissing_started_real.is_some());
+                (!fading_out && o.bounds.contains(p)).then_some(i)
+            })
+        };
+        // The press's own floor, raised by every contact already working inside
+        // an overlay — see `dismiss_outside_press`.
+        let hit_index = std::iter::once(point)
+            .chain(busy.iter().copied())
+            .filter_map(index_at)
+            .max();
 
         // Collect the overlays this outside-click should close, and — for
         // the *click-opened* ones — their anchor widgets. The anchors let
@@ -1171,6 +1387,14 @@ impl OverlayManager {
             if hit_index.is_some_and(|k| i <= k) {
                 continue;
             }
+            // The text-affordance band is not part of anyone's outside-press
+            // dismissal: every tap that moves a caret is outside a selection
+            // handle, so this rule would retire the handles on the first tap
+            // that used them. Their lifetime belongs to the controller that
+            // raised them.
+            if !o.band.dismissed_by_outside_press() {
+                continue;
+            }
             match o.dismiss {
                 DismissBehavior::ClickOutside | DismissBehavior::EscapeOrClickOutside => {
                     to_dismiss.push(o.id);
@@ -1181,6 +1405,15 @@ impl OverlayManager {
             }
         }
 
+        (to_dismiss, toggle_anchors)
+    }
+
+    /// Close a selected set and report what the dispatcher needs.
+    fn apply_outside_press(
+        &mut self,
+        to_dismiss: Vec<OverlayId>,
+        toggle_anchors: Vec<WidgetId>,
+    ) -> (Vec<WidgetId>, Option<WidgetId>, Vec<WidgetId>) {
         if to_dismiss.is_empty() {
             return (Vec::new(), None, Vec::new());
         }
@@ -1196,6 +1429,95 @@ impl OverlayManager {
             all_dismissed.extend(self.dismiss(id));
         }
         (all_dismissed, focus_restore, toggle_anchors)
+    }
+
+    // -----------------------------------------------------------------
+    // Release dismissal
+    // -----------------------------------------------------------------
+
+    /// Arm an outside press for `pointer` at `point`, to be committed on its
+    /// release.
+    ///
+    /// The direct-pointer half of outside-press dismissal. A mouse dismisses on
+    /// the press and falls through, because a cursor names one pixel and the
+    /// user aimed at it; a finger covers what it is about to actuate, so a tap
+    /// that closes a menu must close only the menu. Arming defers the decision
+    /// to the release and, while it stands, withholds the `Down` from whatever
+    /// is beneath — so if the press is cancelled, or slid onto the very overlay
+    /// it would have closed, the whole gesture delivers nothing at all.
+    ///
+    /// Returns a zeroed [`DismissArm`] and stores nothing when the press would
+    /// close no overlay: an arm that has nothing to commit must not suppress
+    /// the press beneath it.
+    pub fn arm_dismiss(&mut self, pointer: PointerId, point: Point, busy: &[Point]) -> DismissArm {
+        self.abort_dismiss(pointer);
+        let (overlays, anchors) = self.outside_press_targets(point, busy);
+        if overlays.is_empty() {
+            return DismissArm::default();
+        }
+        self.arms.push(ArmedDismiss {
+            pointer,
+            overlays,
+            anchors,
+        });
+        DismissArm {
+            will_dismiss: true,
+            suppress_beneath: true,
+        }
+    }
+
+    /// Complete `pointer`'s armed dismissal at its release point.
+    ///
+    /// Returns the same triple as
+    /// [`handle_click_outside`](Self::handle_click_outside), empty when the
+    /// pointer holds no arm.
+    ///
+    /// The release point is re-tested, and only overlays the release is *still*
+    /// outside are closed. That is the slide-off case: a finger that lands
+    /// beside a menu, drags onto it and lifts there has changed its mind, and
+    /// the menu it is now touching must not be the thing it closes. The
+    /// suppressed `Down` means nothing beneath ever saw the press either, so an
+    /// aborted commit leaves the tree exactly as it found it.
+    pub fn commit_dismiss(
+        &mut self,
+        pointer: PointerId,
+        point: Point,
+    ) -> (Vec<WidgetId>, Option<WidgetId>, Vec<WidgetId>) {
+        let Some(index) = self.arms.iter().position(|a| a.pointer == pointer) else {
+            return (Vec::new(), None, Vec::new());
+        };
+        let arm = self.arms.remove(index);
+        let (still_outside, _) = self.outside_press_targets(point, &[]);
+        let to_dismiss: Vec<OverlayId> = arm
+            .overlays
+            .into_iter()
+            .filter(|id| still_outside.contains(id))
+            .collect();
+        let anchors = if to_dismiss.is_empty() {
+            Vec::new()
+        } else {
+            arm.anchors
+        };
+        self.apply_outside_press(to_dismiss, anchors)
+    }
+
+    /// Drop `pointer`'s arm without dismissing anything. Returns whether there
+    /// was one — a cancelled press, or a contact that ended without a release.
+    pub fn abort_dismiss(&mut self, pointer: PointerId) -> bool {
+        let before = self.arms.len();
+        self.arms.retain(|a| a.pointer != pointer);
+        self.arms.len() != before
+    }
+
+    /// Whether `pointer` is holding an armed dismissal.
+    pub fn has_armed_dismiss(&self, pointer: PointerId) -> bool {
+        self.arms.iter().any(|a| a.pointer == pointer)
+    }
+
+    /// Every pointer currently holding an arm. Used by the dispatcher to drop
+    /// arms whose contact has gone away without either releasing or cancelling.
+    pub fn armed_pointers(&self) -> Vec<PointerId> {
+        self.arms.iter().map(|a| a.pointer).collect()
     }
 
     /// Set the content bounds for an overlay (after its content has been laid out).
@@ -2116,5 +2438,246 @@ mod tests {
         let mut mgr = OverlayManager::new();
         mgr.pause_auto_dismiss(OverlayId::new(9999)); // must not panic
         mgr.resume_auto_dismiss(OverlayId::new(9999));
+    }
+
+    // -----------------------------------------------------------------
+    // Bands
+    // -----------------------------------------------------------------
+
+    fn show_at(
+        mgr: &mut OverlayManager,
+        content: u64,
+        bounds: Rect,
+        dismiss: DismissBehavior,
+        band: OverlayBand,
+    ) -> OverlayId {
+        let id = mgr.show_in_band(
+            OverlayRequest {
+                content_id: fake_id(content),
+                anchor: fake_id(content + 100),
+                placement: OverlayPlacement::Centered,
+                dismiss,
+                layer: OverlayLayer::InTree,
+                parent_overlay: None,
+                on_dismiss: None,
+                fade_duration: None,
+            },
+            band,
+        );
+        if let Some(overlay) = mgr.stack.iter_mut().find(|o| o.id == id) {
+            overlay.bounds = bounds;
+        }
+        id
+    }
+
+    /// A selection handle raised while a menu is open must go **under** the
+    /// menu. Show order alone would put it on top, and then the menu would be
+    /// unreachable behind a 44 dp handle.
+    #[test]
+    fn a_text_affordance_is_inserted_below_the_menus_already_open() {
+        let mut mgr = OverlayManager::new();
+        let menu = show_at(
+            &mut mgr,
+            1,
+            Rect::new(0.0, 0.0, 100.0, 100.0),
+            DismissBehavior::ClickOutside,
+            OverlayBand::Standard,
+        );
+        let handle = show_at(
+            &mut mgr,
+            2,
+            Rect::new(200.0, 200.0, 44.0, 44.0),
+            DismissBehavior::Manual,
+            OverlayBand::TextAffordance,
+        );
+        let order: Vec<OverlayId> = mgr.stack.iter().map(|o| o.id).collect();
+        assert_eq!(order, vec![handle, menu], "the handle sits under the menu");
+        assert_eq!(mgr.topmost().map(|o| o.id), Some(menu));
+    }
+
+    /// Every tap that moves a caret is "outside" a selection handle, so
+    /// outside-press dismissal would retire the handles on the first tap that
+    /// used them. The band is exempt; the menu above it still closes.
+    #[test]
+    fn an_outside_press_leaves_the_text_affordance_band_alone() {
+        let mut mgr = OverlayManager::new();
+        let handle = show_at(
+            &mut mgr,
+            2,
+            Rect::new(200.0, 200.0, 44.0, 44.0),
+            DismissBehavior::ClickOutside,
+            OverlayBand::TextAffordance,
+        );
+        let menu = show_at(
+            &mut mgr,
+            1,
+            Rect::new(0.0, 0.0, 100.0, 100.0),
+            DismissBehavior::ClickOutside,
+            OverlayBand::Standard,
+        );
+        let (dismissed, _, _) = mgr.handle_click_outside(Point::new(600.0, 600.0));
+        assert_eq!(dismissed, vec![fake_id(1)], "only the menu closes");
+        assert!(mgr.overlay(handle).is_some());
+        assert!(mgr.overlay(menu).is_none());
+    }
+
+    // -----------------------------------------------------------------
+    // Release dismissal
+    // -----------------------------------------------------------------
+
+    fn contact(n: u64) -> PointerId {
+        crate::pointer::PointerIdAllocator::global()
+            .begin(crate::pointer::BackendDeviceKey::new(0x0FA1), n)
+    }
+
+    fn with_one_menu() -> (OverlayManager, OverlayId) {
+        let mut mgr = OverlayManager::new();
+        let menu = show_at(
+            &mut mgr,
+            1,
+            Rect::new(100.0, 100.0, 200.0, 200.0),
+            DismissBehavior::ClickOutside,
+            OverlayBand::Standard,
+        );
+        (mgr, menu)
+    }
+
+    #[test]
+    fn an_armed_press_suppresses_the_down_and_dismisses_on_the_up() {
+        let (mut mgr, menu) = with_one_menu();
+        let finger = contact(1);
+        let arm = mgr.arm_dismiss(finger, Point::new(500.0, 500.0), &[]);
+        assert!(arm.will_dismiss && arm.suppress_beneath);
+        assert!(mgr.overlay(menu).is_some(), "nothing closes on the press");
+
+        let (dismissed, _, anchors) = mgr.commit_dismiss(finger, Point::new(500.0, 500.0));
+        assert_eq!(dismissed, vec![fake_id(1)]);
+        assert_eq!(anchors, vec![fake_id(101)]);
+        assert!(!mgr.has_armed_dismiss(finger));
+    }
+
+    /// A press that would close nothing must not suppress itself — otherwise
+    /// every touch anywhere in a window with no overlay open would be eaten.
+    #[test]
+    fn a_press_with_nothing_to_close_arms_nothing() {
+        let mut mgr = OverlayManager::new();
+        let finger = contact(2);
+        assert_eq!(
+            mgr.arm_dismiss(finger, Point::new(10.0, 10.0), &[]),
+            DismissArm::default()
+        );
+        assert!(!mgr.has_armed_dismiss(finger));
+    }
+
+    #[test]
+    fn a_cancelled_press_aborts_the_arm() {
+        let (mut mgr, menu) = with_one_menu();
+        let finger = contact(3);
+        assert!(
+            mgr.arm_dismiss(finger, Point::new(500.0, 500.0), &[])
+                .will_dismiss
+        );
+        assert!(mgr.abort_dismiss(finger));
+        assert!(mgr.overlay(menu).is_some(), "the menu survives a cancel");
+        assert!(!mgr.abort_dismiss(finger), "aborting twice is a no-op");
+
+        // And a commit after the abort finds nothing to do.
+        let (dismissed, restore, anchors) = mgr.commit_dismiss(finger, Point::new(500.0, 500.0));
+        assert!(dismissed.is_empty() && restore.is_none() && anchors.is_empty());
+    }
+
+    /// Land beside the menu, drag onto it, lift there: the finger changed its
+    /// mind, and the menu it is now touching is not the thing it closes.
+    #[test]
+    fn a_press_that_slides_onto_the_menu_dismisses_nothing() {
+        let (mut mgr, menu) = with_one_menu();
+        let finger = contact(4);
+        assert!(
+            mgr.arm_dismiss(finger, Point::new(500.0, 500.0), &[])
+                .will_dismiss
+        );
+        let (dismissed, _, anchors) = mgr.commit_dismiss(finger, Point::new(150.0, 150.0));
+        assert!(dismissed.is_empty(), "the release landed inside the menu");
+        assert!(anchors.is_empty());
+        assert!(mgr.overlay(menu).is_some());
+    }
+
+    /// A second finger landing on the page while the first works inside the
+    /// menu is not a dismissal gesture.
+    #[test]
+    fn a_second_contact_cannot_dismiss_what_the_first_is_manipulating() {
+        let (mut mgr, menu) = with_one_menu();
+        let second = contact(5);
+        let busy = [Point::new(150.0, 150.0)]; // the first finger, inside the menu
+        assert_eq!(
+            mgr.arm_dismiss(second, Point::new(500.0, 500.0), &busy),
+            DismissArm::default()
+        );
+        assert!(mgr.overlay(menu).is_some());
+
+        // With the first finger lifted the same press closes it.
+        assert!(
+            mgr.arm_dismiss(second, Point::new(500.0, 500.0), &[])
+                .will_dismiss
+        );
+        let (dismissed, _, _) = mgr.commit_dismiss(second, Point::new(500.0, 500.0));
+        assert_eq!(dismissed, vec![fake_id(1)]);
+    }
+
+    /// Two contacts, each with its own arm: neither may commit the other's.
+    #[test]
+    fn arms_are_tracked_per_pointer() {
+        let mut mgr = OverlayManager::new();
+        let lower = show_at(
+            &mut mgr,
+            1,
+            Rect::new(0.0, 0.0, 100.0, 100.0),
+            DismissBehavior::ClickOutside,
+            OverlayBand::Standard,
+        );
+        let upper = show_at(
+            &mut mgr,
+            2,
+            Rect::new(400.0, 0.0, 100.0, 100.0),
+            DismissBehavior::ClickOutside,
+            OverlayBand::Standard,
+        );
+        let a = contact(6);
+        let b = contact(7);
+        // `a` lands inside the lower overlay: only the upper one is above it.
+        assert!(mgr.arm_dismiss(a, Point::new(50.0, 50.0), &[]).will_dismiss);
+        // `b` lands on the background: both are above it.
+        assert!(
+            mgr.arm_dismiss(b, Point::new(700.0, 700.0), &[])
+                .will_dismiss
+        );
+        assert_eq!(mgr.armed_pointers().len(), 2);
+
+        let (dismissed, _, _) = mgr.commit_dismiss(a, Point::new(50.0, 50.0));
+        assert_eq!(dismissed, vec![fake_id(2)], "only the overlay above `a`");
+        assert!(mgr.overlay(lower).is_some());
+        assert!(mgr.overlay(upper).is_none());
+
+        // `b`'s arm still names the upper overlay, which is gone; committing it
+        // closes what is left and does not panic on the absent id.
+        let (dismissed, _, _) = mgr.commit_dismiss(b, Point::new(700.0, 700.0));
+        assert_eq!(dismissed, vec![fake_id(1)]);
+        assert!(mgr.armed_pointers().is_empty());
+    }
+
+    /// Re-arming the same pointer replaces its arm rather than stacking one.
+    #[test]
+    fn a_second_arm_for_one_pointer_replaces_the_first() {
+        let (mut mgr, _menu) = with_one_menu();
+        let finger = contact(8);
+        assert!(
+            mgr.arm_dismiss(finger, Point::new(500.0, 500.0), &[])
+                .will_dismiss
+        );
+        assert!(
+            mgr.arm_dismiss(finger, Point::new(600.0, 600.0), &[])
+                .will_dismiss
+        );
+        assert_eq!(mgr.armed_pointers(), vec![finger]);
     }
 }

@@ -39,6 +39,7 @@
 - [Data-view keyboard navigation](data-view-keyboard.md)
 - [Bounded-scalar keyboard navigation](range-keyboard.md)
 - [Tooltips](tooltips.md)
+- [Overlays](overlays.md)
 - [Native menus](native-menu.md)
 - [WebView](web-view.md)
 - [Drag & drop](drag-and-drop.md)
