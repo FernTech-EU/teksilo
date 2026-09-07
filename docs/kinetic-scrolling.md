@@ -6,14 +6,16 @@
 Velocity tracking, fling physics and the rubber band, implemented once in
 [`teksilo-core::kinetic`](../crates/teksilo-core/src/kinetic.rs).
 
-Fourteen surfaces in this workspace hand-roll the same boundary clamp followed
-by the same 150 ms ease-out tween. None of them tracks velocity, so none of them
-can fling, and none has a rubber band. Adding physics to each would mean
+Fourteen surfaces in this workspace hand-rolled the same boundary clamp followed
+by the same 150 ms ease-out tween. None of them tracked velocity, so none could
+fling, and none had a rubber band. Adding physics to each would mean
 fourteen integrators, fourteen tolerance constants, and fourteen places to
 forget `prefers-reduced-motion` — a failure mode this codebase already
 demonstrates, with `EDGE = 32` and `MAX_VELOCITY = 12` copied across five
 widgets that have since drifted apart. So the physics lives in one module, as
-pure computation, and the surfaces drive it.
+pure computation, and the surfaces drive it — through
+[`ScrollableBehavior`](../crates/teksilo-widgets/src/common/scrollable.rs), which
+is the one `on_scroll` body they now share. §10 is the adoption recipe.
 
 Nothing here owns a widget, reads a clock, or touches the arena. Time arrives as
 an [`EventTime`](../crates/teksilo-core/src/pointer.rs) from the tree's single
@@ -450,7 +452,8 @@ dependent generator inputs must be coupled with `prop_flat_map`, so an extent of
 
 ## 9. Status
 
-The physics is wired at the **tree** level and not yet at the widget level.
+The physics is wired at the tree level and, since P21, at the widget level too —
+for `ScrollArea`. The remaining scrollables adopt it in P22.
 
 Landed:
 
@@ -461,14 +464,111 @@ Landed:
   beside the gesture deadlines, and `next_timer_deadline` folds *that* into the
   one `ControlFlow::WaitUntil`;
 - a finger's pan is synthesised as `Scroll { source: TouchPan }` and delivered
-  along the claimant chain, with the release handing its velocity to the driver.
+  along the claimant chain, with the release handing its velocity to the driver;
+- `teksilo-widgets`'
+  [`common::scrollable`](../crates/teksilo-widgets/src/common/scrollable.rs)
+  folds the fourteen hand-rolled `on_scroll` bodies into one, and **`ScrollArea`
+  owns a `KineticScroller`** — the rubber band, the boundary answer and the
+  offset a pan is holding all come from it;
+- `ScrollBar` reaches its thumb with a finger: a 48 dp `hit_outset` over an
+  unchanged 8–12 dp paint, a density-following minimum thumb length, the thumb
+  and its paging track published through `target_regions`, and a reveal an
+  overlay bar can be shown by while a pan runs.
 
-Still to come, in the widget packages:
+Still to come:
 
-- **no scrollable owns a `KineticScroller`.** `ScrollArea`, the four data views
-  and the rest still hand-roll their clamp and their 150 ms tween, so a pan
-  moves them but the rubber band and the per-surface settle are not theirs yet.
-  That is `ScrollableBehavior`'s job (P21/P22).
-- the platform layer does not yet produce `ScrollSource::TouchPan` samples of its
-  own; the core door (`dispatch_scroll` with that source, which derives its own
-  chain from the sample's position) is open and waiting for it.
+- the other thirteen scrollables (P22): `ListView`, `TreeView`, `TableView`,
+  `TreeTableView`, `GridView`, `MenuList`, `RichTextEditor`, `CodeEditor`,
+  `LogView`, `Terminal`, `SceneView` and the `TabBar` strip. `SpinBox` is the
+  one surface in that sweep that gets a `touch_action(PAN_Y)` and **no** claim:
+  a finger dragging over it must scroll the list it sits in, never change the
+  value;
+- the platform layer does not yet produce `ScrollSource::TouchPan` samples of
+  its own; the core door (`dispatch_scroll` with that source, which derives its
+  own chain from the sample's position) is open and waiting for it;
+- nothing paints the overscroll yet. `ScrollableAxes::overscroll` publishes it,
+  and the release is an immediate clamped settle rather than a spring: a
+  surface's `KineticScroller` is driven by events, not by a per-frame
+  subscription of its own, so it has no tick to spring on. A stretch or glow
+  renderer is what would make a spring visible, and is what will want one.
+
+---
+
+## 10. Adopting `ScrollableBehavior`
+
+[`common::scrollable`](../crates/teksilo-widgets/src/common/scrollable.rs) is the
+widget-side half. A surface adopts it in four steps, and `ScrollArea`
+([`scroll_area.rs`](../crates/teksilo-widgets/src/scroll_area.rs)) is the
+reference to copy.
+
+**1. Own a scroller.** One `Rc<RefCell<KineticScroller>>` field, built in the
+widget's constructor rather than in `build`, so the physics survives a rebuild:
+
+```rust
+scroller: Rc::new(RefCell::new(KineticScroller::new(OverscrollStyle::Clamp))),
+```
+
+**2. Publish the viewport from layout.** The rubber-band curve is a fraction of
+the viewport, and the layout pass is the only place that number exists. The cell
+is a `RefCell` precisely so a `&self` `place_children` can write it:
+
+```rust
+self.scroller
+    .borrow_mut()
+    .set_viewport(Vec2::new(viewport_width, viewport_height));
+```
+
+**3. Install the behaviour in `build`.** Both halves at once — the handler and
+the pan claim:
+
+```rust
+let axes = ScrollableAxes { x, y, max_x, max_y, overscroll };
+let behavior = ScrollableBehavior::new(axes)
+    .with_scroller(self.scroller.clone())
+    .axes(PanAxes::BOTH)
+    .overscroll(self.overscroll_behavior)
+    .smooth(self.smooth_scrolling)
+    .line_height(self.line_height)
+    .reduced_motion(ctx.prefers_reduced_motion())
+    .physics(ctx.theme().input.scroll_physics);
+ctx.apply_self_handlers(behavior.install(HandlerSet::new()));
+```
+
+**4. Keep your own scroll-adjacent arms in `.before(..)`.** It runs first for
+every event: return `Handled` to claim one outright (a `ScrollIntoView` reveal),
+or observe and return `Ignored` to run bookkeeping ahead of a delta the shared
+handler will then apply.
+
+### The four rules that are easy to get wrong
+
+**Both offsets must be `Signal::new_animated`** on a surface with `smooth` on. A
+smooth notch aims a tween at *both* axes — the unmoved one at where it already
+is, which is what keeps a cross-axis tween from being cut short — and
+`animate_to` on a plain `Signal<f32>` panics.
+
+**The claim is not optional.** `install` attaches it, but a surface that hand-
+rolls the handler and forgets `.scroll_container(..)` / `.pan_claim(..)` scrolls
+on a wheel and ignores a finger entirely, because `pan_candidates` is a list of
+claimants and it would not be on it.
+
+**The rubber band is off by default, and should stay off on anything nested.** A
+band absorbs the movement, so a surface that follows the finger past its own end
+can never hand the gesture to the container around it. The band belongs to the
+outermost surface of a scroll chain.
+
+**The end of a gesture is not movement.** `ScrollPhase::Ended` carries a zero
+delta and is answered `Ignored` even under `Contain`, so the claimant walk
+carries it to every container outward and each releases its own band. A claimant
+that answered `Handled` there would leave the ones around it holding a band
+nobody told them to let go of.
+
+### What the surface does *not* do
+
+It does not run the coast. A release hands its velocity to the tree's
+`FlingDriver` (§5), whose deltas come back as `ScrollPhase::Fling` samples on the
+same chain. The surface applies them with a **hard clamp** — the driver's
+simulation is unbounded, so stopping at the boundary and declining, which is what
+chains the coast outward, is the surface's job.
+
+It also does not read a clock, subscribe to frame ticks, or animate. Everything
+it does happens inside an event.

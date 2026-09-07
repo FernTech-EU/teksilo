@@ -90,6 +90,14 @@ fn resolve_thumb_color(
 pub struct ScrollBarRecipe {
     pub thickness_idle: f32,
     pub thickness_hover: f32,
+    /// The density-resolved floor a thumb may not be shorter than.
+    ///
+    /// The **widget** decides the number the painters actually use — it resolves
+    /// the same `dp(SCROLLBAR_MIN_THUMB_LENGTH, Target, ..)` unless the caller
+    /// named a floor of their own, and passes the answer down as
+    /// `ScrollBarStyleConfig::min_thumb_length`. This field is the same value,
+    /// kept here so a custom style building its own painters has it in hand
+    /// without reaching for the tokens again.
     pub min_thumb_length: f32,
     pub corner_radius: f32,
 }

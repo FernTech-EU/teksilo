@@ -14,6 +14,25 @@
 //! scroll host (e.g. the `RichTextEditor` manages its own bars to avoid the
 //! wrap/scrollbar circular dependency).
 //!
+//! ## Reaching the thumb with a finger
+//!
+//! The bar is 8–12 dp wide, and it stays that way at every density: growing it
+//! would move the content beside it, and a scroll bar is chrome. The thumb is
+//! reached instead by the two mechanisms built for exactly this — the node
+//! widens for a coarse pointer through [`Widget::hit_outset`], to the 48 dp
+//! Android reserves for a scrollbar touch target, and the thumb itself is
+//! published through [`Widget::target_regions`] so the target-conformance audit
+//! can see a rectangle that is painted inside one leaf node and would otherwise
+//! be invisible to it. A precise pointer gets no outset at all: a cursor's
+//! hot-spot is exact, and widening its targets steals clicks from the content.
+//!
+//! Because the outset widens the bar *across* the scroll axis, every decision
+//! about whether a press is on the thumb is taken **along the axis only** — a
+//! finger 15 dp inboard of an 8 dp bar is beside the thumb, not past it.
+//!
+//! The minimum thumb length follows the density (24 dp Compact, 44 dp Touch),
+//! so a short thumb on a long document is still something a finger can land on.
+//!
 //! ## Accessibility
 //!
 //! Hidden from AT via `set_hidden()`. Scroll actions (Up/Down/Left/Right) are
@@ -39,16 +58,19 @@
 use std::cell::Cell;
 use std::rc::Rc;
 
-use teksilo_canvas::{Point, Rect, Size, SizeProposal};
+use teksilo_canvas::{EdgeInsets, Point, Rect, Size, SizeProposal};
 use teksilo_core::accessibility::AccessNodeBuilder;
 use teksilo_core::color_prop::ColorProp;
 use teksilo_core::event::{EventResponse, PointerButton, WidgetEvent};
 use teksilo_core::gesture::DragPhase;
+use teksilo_core::partition::TargetRegion;
 use teksilo_core::signal::Signal;
+use teksilo_core::styles::density::dp;
 use teksilo_core::styles::{ScrollBarStyle, ScrollBarStyleConfig, SharedScrollBarStyle};
 use teksilo_core::widget::{LayoutContext, LayoutResponse, Widget, WidgetPlacement};
 use teksilo_core::widget_builder::HandlerSet;
 use teksilo_core::widget_id::WidgetId;
+use teksilo_tokens::{RevealPolicy, TargetRole};
 
 use crate::common::range_nav::{self, RangeAxis, RangeKind, RangeMove};
 
@@ -59,6 +81,26 @@ use crate::common::range_nav::{self, RangeAxis, RangeKind, RangeMove};
 pub use teksilo_core::styles::ScrollBarOrientation;
 pub use teksilo_core::styles::ScrollBarVariant;
 pub use teksilo_core::styles::ScrollBarVariant as ScrollBarVisual;
+
+/// The width a scroll bar's thumb must be reachable across for a finger.
+///
+/// Android's `ViewConfiguration.MIN_SCROLLBAR_TOUCH_TARGET` — the bar keeps its
+/// 8–12 dp paint at every density and reaches this through
+/// [`Widget::hit_outset`], which moves nothing and repaints nothing.
+pub const SCROLLBAR_COARSE_TARGET: f32 = 48.0;
+
+/// The shipped minimum thumb length, at Compact. Raised to the density's
+/// `target_size` (44 dp at Touch) at build time; a
+/// [`min_thumb_length`](ScrollBar::min_thumb_length) override wins over both.
+pub const SCROLLBAR_MIN_THUMB_LENGTH: f32 = 24.0;
+
+/// Which part of the bar a [`TargetRegion`] describes.
+///
+/// Reported so an audit — and a router routing a coarse press — can tell the
+/// grab affordance from the paging surface around it.
+pub const SCROLLBAR_PART_THUMB: u16 = 0;
+/// The track either side of the thumb: a tap there pages.
+pub const SCROLLBAR_PART_TRACK: u16 = 1;
 
 /// A scroll bar that shares reactive scroll-position state with a [`ScrollArea`](crate::scroll_area::ScrollArea).
 ///
@@ -98,8 +140,18 @@ pub struct ScrollBar {
     // --- visual tuning ---
     /// Thickness of the scroll bar (width for vertical, height for horizontal).
     thickness: f32,
-    /// Minimum thumb length in pixels.
-    min_thumb_length: f32,
+    /// Minimum thumb length in pixels, or `None` to follow the density.
+    min_thumb_length: Option<f32>,
+    /// The density floor [`Self::min_thumb_length`] falls back to, resolved at
+    /// the last `build`. Shared with the event closures and read by the
+    /// geometry helpers, which run outside a build and have no tokens in scope.
+    /// An explicit floor does not go through it — it is known from the moment
+    /// it is set, so the geometry is right before the first build too.
+    resolved_min_thumb_length: Rc<Cell<f32>>,
+    /// Raised from outside — by a `ScrollArea` while a finger's pan is in
+    /// flight, and by a density whose `RevealPolicy` is `Always` — to show an
+    /// overlay bar that hover alone would keep hidden.
+    revealed: Signal<bool>,
     /// Pixels to scroll per keyboard step.
     step_size: f32,
     /// Visual variant: Permanent / Overlay / Thin.
@@ -151,7 +203,9 @@ impl ScrollBar {
             cached_rtl: Rc::new(Cell::new(false)),
             body_id: None,
             thickness: 8.0,
-            min_thumb_length: 24.0,
+            min_thumb_length: None,
+            resolved_min_thumb_length: Rc::new(Cell::new(SCROLLBAR_MIN_THUMB_LENGTH)),
+            revealed: Signal::new(false),
             step_size: 40.0,
             variant: ScrollBarVariant::default(),
             style_override: None,
@@ -165,9 +219,25 @@ impl ScrollBar {
         self
     }
 
-    /// Set the minimum thumb length in pixels.
+    /// Set the minimum thumb length in pixels, overriding the density.
+    ///
+    /// Left unset the floor is [`SCROLLBAR_MIN_THUMB_LENGTH`] raised to the
+    /// density's target size — 24 dp at Compact, 44 dp at Touch — so a short
+    /// thumb on a long document stays something a finger can land on.
     pub fn min_thumb_length(mut self, len: f32) -> Self {
-        self.min_thumb_length = len;
+        self.min_thumb_length = Some(len);
+        self
+    }
+
+    /// Show the bar for as long as `revealed` is true, whatever hover says.
+    ///
+    /// An overlay bar is normally revealed by pointer proximity, which a
+    /// contact never produces. `ScrollArea` raises this while a finger's pan is
+    /// in flight; a density whose [`RevealPolicy`]
+    /// is `Always` seeds it true at build. It only ever adds a reveal — nothing
+    /// here can hide a bar that hover has shown.
+    pub fn reveal(mut self, revealed: Signal<bool>) -> Self {
+        self.revealed = revealed;
         self
     }
 
@@ -209,6 +279,60 @@ impl ScrollBar {
         self.thumb_color = Some(color.into());
         self
     }
+
+    // --- geometry helpers (kept on the parent because event handlers
+    // need them; the style body re-derives the same numbers from cfg).
+
+    /// The total length of the track (along the scroll axis).
+    fn track_length(&self) -> f32 {
+        let bounds = self.cached_bounds.get();
+        match self.orientation {
+            ScrollBarOrientation::Vertical => bounds.height,
+            ScrollBarOrientation::Horizontal => bounds.width,
+        }
+    }
+
+    /// The floor the thumb may not be shorter than: the caller's, else the one
+    /// the last build resolved from the density.
+    fn min_thumb(&self) -> f32 {
+        self.min_thumb_length
+            .unwrap_or_else(|| self.resolved_min_thumb_length.get())
+    }
+
+    /// Computed thumb length based on viewport ratio.
+    fn thumb_length(&self) -> f32 {
+        let ratio = self.viewport_ratio.get().clamp(0.0, 1.0);
+        let track = self.track_length();
+        (track * ratio).max(self.min_thumb()).min(track)
+    }
+
+    /// Thumb offset from the start of the track.
+    fn thumb_offset(&self) -> f32 {
+        let max = self.max_scroll.get();
+        if max <= 0.0 {
+            return 0.0;
+        }
+        let pos = self.scroll_position.get();
+        let ratio = (pos / max).clamp(0.0, 1.0);
+        let available = self.track_length() - self.thumb_length();
+        ratio * available
+    }
+
+    /// The thumb rect in absolute coordinates — the rectangle the active style
+    /// actually paints, derived from the same three numbers the painters read.
+    fn thumb_rect(&self) -> Rect {
+        let bounds = self.cached_bounds.get();
+        let offset = self.thumb_offset();
+        let thumb_len = self.thumb_length();
+        match self.orientation {
+            ScrollBarOrientation::Vertical => {
+                Rect::new(bounds.x, bounds.y + offset, bounds.width, thumb_len)
+            }
+            ScrollBarOrientation::Horizontal => {
+                Rect::new(bounds.x + offset, bounds.y, thumb_len, bounds.height)
+            }
+        }
+    }
 }
 
 impl Widget for ScrollBar {
@@ -224,6 +348,26 @@ impl Widget for ScrollBar {
                     &ctx.theme().input,
                 ))
             });
+
+        // The minimum thumb length follows the density unless the caller named
+        // one. 24 dp at Compact is exactly today's constant, so `dp` here
+        // raises nothing at the density CI runs at — the P20 rule that a
+        // dimension may go through `dp` only when its Compact value already
+        // clears the conformance floor, which 24 dp does by being it.
+        let min_thumb_length = self.min_thumb_length.unwrap_or_else(|| {
+            dp(
+                SCROLLBAR_MIN_THUMB_LENGTH,
+                TargetRole::Target,
+                &ctx.theme().input,
+            )
+        });
+        self.resolved_min_thumb_length.set(min_thumb_length);
+
+        // A density that reveals every affordance (Touch) shows the bar without
+        // being asked; `ScrollArea` raises the same signal while a pan runs.
+        if ctx.theme().input.reveal == RevealPolicy::Always && !self.revealed.get() {
+            self.revealed.set(true);
+        }
 
         // Derived `scroll_ratio = scroll_position / max_scroll` (clamped
         // to 0..1). Re-renders the body on every scroll.
@@ -243,12 +387,15 @@ impl Widget for ScrollBar {
         let cfg = ScrollBarStyleConfig {
             scroll_ratio,
             viewport_ratio: self.viewport_ratio.clone(),
-            is_hovered: self.hovered.clone(),
+            // An external reveal reads as hover to the style: it is the same
+            // question ("is this bar being attended to?") asked by a mechanism
+            // a contact can answer.
+            is_hovered: self.hovered.or(&self.revealed),
             is_dragging: self.dragging.clone(),
             is_idle,
             orientation: self.orientation,
             variant: self.variant,
-            min_thumb_length: self.min_thumb_length,
+            min_thumb_length,
             thumb_color: self.thumb_color.clone(),
         };
         let body_id = style.make_body(&cfg, ctx);
@@ -264,7 +411,6 @@ impl Widget for ScrollBar {
         let drag_start_scroll = self.drag_start_scroll.clone();
         let cached_bounds = self.cached_bounds.clone();
         let step_size = self.step_size;
-        let min_thumb_length = self.min_thumb_length;
 
         // A horizontal bar mirrors in a right-to-left window, because
         // `ScrollArea` already anchors its content to the right and grows
@@ -351,6 +497,22 @@ impl Widget for ScrollBar {
             }
         };
 
+        // Is this press on the thumb? Asked **along the scroll axis only**,
+        // because `hit_outset` widens the bar across that axis for a coarse
+        // pointer: a finger 15 dp inboard of an 8 dp bar is beside the thumb,
+        // and treating it as a miss would page the view out from under it.
+        let on_thumb = {
+            let thumb_rect = thumb_rect.clone();
+            move |position: Point| -> bool {
+                let tr = thumb_rect();
+                let v = axis_value(position);
+                match orientation {
+                    ScrollBarOrientation::Vertical => v >= tr.y && v <= tr.bottom(),
+                    ScrollBarOrientation::Horizontal => v >= tr.x && v <= tr.right(),
+                }
+            }
+        };
+
         // Scrollbars are pointer affordances. AT scrolls through the parent
         // ScrollView node's ScrollUp/Down/Left/Right actions, not by focusing
         // the scrollbar widget itself.
@@ -372,7 +534,7 @@ impl Widget for ScrollBar {
             let scroll_position = scroll_position.clone();
             let max_scroll = max_scroll.clone();
             let set_scroll = set_scroll.clone();
-            let thumb_rect = thumb_rect.clone();
+            let on_thumb = on_thumb.clone();
             let track_length = track_length.clone();
             let thumb_length = thumb_length.clone();
             let mirrored = mirrored.clone();
@@ -386,7 +548,7 @@ impl Widget for ScrollBar {
                         position,
                         button: PointerButton::Primary,
                         ..
-                    } if thumb_rect().contains(position) => {
+                    } if on_thumb(position) => {
                         dragging.set(true);
                         drag_start_pointer.set(axis_value(position));
                         drag_start_scroll.set(scroll_position.get());
@@ -423,6 +585,7 @@ impl Widget for ScrollBar {
             let set_scroll = set_scroll.clone();
             let thumb_rect = thumb_rect.clone();
             let mirrored = mirrored.clone();
+            let on_thumb = on_thumb.clone();
             handlers = handlers.on_tap(move |event, _ctx| {
                 let max = max_scroll.get();
                 if max <= 0.0 {
@@ -430,7 +593,7 @@ impl Widget for ScrollBar {
                 }
                 let tr = thumb_rect();
                 let position = event.position;
-                if tr.contains(position) {
+                if on_thumb(position) {
                     return;
                 }
                 let click_axis = axis_value(position);
@@ -582,6 +745,99 @@ impl Widget for ScrollBar {
 
     fn children(&self) -> Vec<WidgetId> {
         self.body_id.into_iter().collect()
+    }
+
+    /// Widen the bar across its scroll axis for a coarse pointer, to the 48 dp
+    /// Android reserves for a scrollbar touch target.
+    ///
+    /// Hit-only: the 8–12 dp paint is untouched at every density, nothing
+    /// relayouts, and a Compact build renders byte for byte as it did. Zero for
+    /// a mouse and for a pen, both of which are precise enough to land on the
+    /// bar as drawn — a pen's tip is where its cursor is, and widening a
+    /// precise pointer's targets takes clicks away from the content.
+    ///
+    /// Only the axis that is too thin grows. Growing the bar *along* the scroll
+    /// axis would claim a strip of content above and below it for no benefit:
+    /// the track already spans the viewport, and its ends are where the corner
+    /// and the other bar live.
+    fn hit_outset(
+        &self,
+        kind: teksilo_tokens::PointerKind,
+        _tokens: &teksilo_tokens::InputTokens,
+    ) -> EdgeInsets {
+        if !matches!(kind, teksilo_tokens::PointerKind::Touch) {
+            return EdgeInsets::ZERO;
+        }
+        let grow = ((SCROLLBAR_COARSE_TARGET - self.thickness) / 2.0).max(0.0);
+        match self.orientation {
+            ScrollBarOrientation::Vertical => EdgeInsets::symmetric(grow, 0.0),
+            ScrollBarOrientation::Horizontal => EdgeInsets::symmetric(0.0, grow),
+        }
+    }
+
+    /// The thumb, and the track either side of it.
+    ///
+    /// Both are paint geometry inside one leaf node: the bar's body is a single
+    /// private painter widget, so without this the thumb does not exist to
+    /// anything outside `paint` — not to the target-conformance audit, and not
+    /// to a router that would route a coarse press to the nearest target. The
+    /// rectangles come from the same three numbers the painters read, so the
+    /// geometry reported and the geometry drawn cannot drift.
+    ///
+    /// A bar with nothing to scroll paints nothing and reports nothing.
+    fn target_regions(&self, bounds: Rect) -> Vec<TargetRegion> {
+        if self.max_scroll.get() <= 0.0 {
+            return Vec::new();
+        }
+        // `thumb_rect` reads the bounds cached by the last `place_children`;
+        // answer in the caller's frame so a query before the first layout, or
+        // after the bar has moved, is still in the space it asked about.
+        let cached = self.cached_bounds.get();
+        let thumb = self.thumb_rect();
+        let thumb = Rect::new(
+            bounds.x + (thumb.x - cached.x),
+            bounds.y + (thumb.y - cached.y),
+            thumb.width,
+            thumb.height,
+        );
+        let mut regions = vec![TargetRegion::grab(thumb, SCROLLBAR_PART_THUMB)];
+        // The track pages on a tap, so it is a target in its own right — but
+        // only the parts of it the thumb has left over.
+        match self.orientation {
+            ScrollBarOrientation::Vertical => {
+                let before = thumb.y - bounds.y;
+                if before > 0.0 {
+                    regions.push(TargetRegion::target(
+                        Rect::new(bounds.x, bounds.y, bounds.width, before),
+                        SCROLLBAR_PART_TRACK,
+                    ));
+                }
+                let after = bounds.bottom() - thumb.bottom();
+                if after > 0.0 {
+                    regions.push(TargetRegion::target(
+                        Rect::new(bounds.x, thumb.bottom(), bounds.width, after),
+                        SCROLLBAR_PART_TRACK,
+                    ));
+                }
+            }
+            ScrollBarOrientation::Horizontal => {
+                let before = thumb.x - bounds.x;
+                if before > 0.0 {
+                    regions.push(TargetRegion::target(
+                        Rect::new(bounds.x, bounds.y, before, bounds.height),
+                        SCROLLBAR_PART_TRACK,
+                    ));
+                }
+                let after = bounds.right() - thumb.right();
+                if after > 0.0 {
+                    regions.push(TargetRegion::target(
+                        Rect::new(thumb.right(), bounds.y, after, bounds.height),
+                        SCROLLBAR_PART_TRACK,
+                    ));
+                }
+            }
+        }
+        regions
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
@@ -1258,5 +1514,506 @@ mod tests {
             pos_before,
             pos_after,
         );
+    }
+}
+
+/// Reaching the thumb with a finger: the hit mechanisms, the density floor,
+/// and the axis-only decisions the widened bar forces.
+#[cfg(test)]
+mod touch_tests {
+    use super::*;
+    use teksilo_canvas::SizeProposal;
+    use teksilo_core::event::{Modifiers, WidgetEvent};
+    use teksilo_core::widget::{LayoutContext, Widget};
+    use teksilo_core::widget_tree::WidgetTree;
+    use teksilo_tokens::{InputTokens, PenKind, PointerKind, TargetDensity};
+
+    /// A 12 dp vertical bar over 400 dp of track, content twice the viewport —
+    /// so the thumb is half the track and starts at the top.
+    fn bar() -> (ScrollBar, Signal<f32>, Signal<f32>, Signal<f32>) {
+        let position = Signal::new(0.0_f32);
+        let max_scroll = Signal::new(500.0_f32);
+        let viewport_ratio = Signal::new(0.5_f32);
+        let bar = ScrollBar::new(
+            ScrollBarOrientation::Vertical,
+            position.clone(),
+            max_scroll.clone(),
+            viewport_ratio.clone(),
+        )
+        .thickness(12.0);
+        (bar, position, max_scroll, viewport_ratio)
+    }
+
+    fn mounted() -> (WidgetTree, WidgetId, Signal<f32>) {
+        let (bar, position, ..) = bar();
+        let mut tree = WidgetTree::new();
+        let id = tree.add(bar);
+        tree.layout(SizeProposal::exact(12.0, 400.0));
+        tree.render();
+        (tree, id, position)
+    }
+
+    /// The bar's own reported regions, primed the way a layout pass primes
+    /// them. There is no tree-level accessor for `target_regions` yet — the
+    /// conformance walker that will grow one is a later package — so the widget
+    /// is asked directly, off the tree, which is also what makes the reported
+    /// geometry checkable against the arithmetic the painters use rather than
+    /// against itself.
+    fn regions_of(bar: &ScrollBar, bounds: Rect) -> Vec<TargetRegion> {
+        let theme = teksilo_core::presets::intui::light();
+        let ctx = LayoutContext::for_testing(&theme);
+        bar.place_children(
+            bounds,
+            SizeProposal::exact(bounds.width, bounds.height),
+            &mut [],
+            &ctx,
+        );
+        bar.target_regions(bounds)
+    }
+
+    // -- target_regions ---------------------------------------------------
+
+    /// The reported thumb is the rectangle the style paints: half a 400 dp
+    /// track at a 0.5 viewport ratio, at the top while the scroll is at zero.
+    /// Nothing outside this widget can otherwise see it — the whole bar is one
+    /// leaf node whose body paints the thumb inside its own `paint`.
+    #[test]
+    fn target_regions_report_the_thumb_at_its_paint_rect() {
+        let (bar, position, ..) = bar();
+        let bounds = Rect::new(0.0, 0.0, 12.0, 400.0);
+
+        let regions = regions_of(&bar, bounds);
+        let thumb = regions
+            .iter()
+            .find(|r| r.part == SCROLLBAR_PART_THUMB)
+            .expect("the thumb is reported");
+        assert_eq!(thumb.role, TargetRole::Grab);
+        assert!((thumb.rect.y - bounds.y).abs() < 0.01, "{:?}", thumb.rect);
+        assert!((thumb.rect.height - 200.0).abs() < 0.01, "{:?}", thumb.rect);
+        assert!((thumb.rect.width - 12.0).abs() < 0.01);
+
+        // Scrolled to the end, the thumb is at the end of the track.
+        position.set(500.0);
+        let regions = regions_of(&bar, bounds);
+        let thumb = regions
+            .iter()
+            .find(|r| r.part == SCROLLBAR_PART_THUMB)
+            .expect("the thumb is reported");
+        assert!(
+            (thumb.rect.bottom() - bounds.bottom()).abs() < 0.01,
+            "{:?}",
+            thumb.rect
+        );
+    }
+
+    /// The regions are answered in the frame the caller asked about, so an
+    /// audit that asks about a bar sitting at an offset gets rectangles there
+    /// rather than at the origin the last layout happened to use.
+    #[test]
+    fn target_regions_answer_in_the_frame_they_were_asked_about() {
+        let (bar, ..) = bar();
+        let moved = Rect::new(180.0, 40.0, 12.0, 400.0);
+        let thumb = regions_of(&bar, moved)
+            .into_iter()
+            .find(|r| r.part == SCROLLBAR_PART_THUMB)
+            .expect("the thumb");
+        assert!((thumb.rect.x - 180.0).abs() < 0.01, "{:?}", thumb.rect);
+        assert!((thumb.rect.y - 40.0).abs() < 0.01, "{:?}", thumb.rect);
+    }
+
+    /// The track either side of the thumb is a target too — a tap there pages —
+    /// and it is exactly the part of the bar the thumb has left over.
+    #[test]
+    fn target_regions_report_the_paging_track_around_the_thumb() {
+        let (bar, position, ..) = bar();
+        position.set(250.0);
+        let regions = regions_of(&bar, Rect::new(0.0, 0.0, 12.0, 400.0));
+        let thumb = regions
+            .iter()
+            .find(|r| r.part == SCROLLBAR_PART_THUMB)
+            .expect("the thumb");
+        let track: Vec<_> = regions
+            .iter()
+            .filter(|r| r.part == SCROLLBAR_PART_TRACK)
+            .collect();
+        assert_eq!(track.len(), 2, "one strip above the thumb and one below");
+        assert!((track[0].rect.bottom() - thumb.rect.y).abs() < 0.01);
+        assert!((track[1].rect.y - thumb.rect.bottom()).abs() < 0.01);
+    }
+
+    /// A bar with nothing to scroll paints nothing, so it reports nothing.
+    #[test]
+    fn a_bar_with_nothing_to_scroll_reports_no_targets() {
+        let bar = ScrollBar::new(
+            ScrollBarOrientation::Vertical,
+            Signal::new(0.0),
+            Signal::new(0.0),
+            Signal::new(1.0),
+        );
+        assert!(regions_of(&bar, Rect::new(0.0, 0.0, 12.0, 400.0)).is_empty());
+    }
+
+    // -- hit_outset -------------------------------------------------------
+
+    /// A finger reaches the bar across 48 dp; the paint stays 12 dp, and the
+    /// growth is on the cross axis only.
+    #[test]
+    fn a_finger_reaches_a_48_dp_bar_over_a_12_dp_paint() {
+        let (bar, ..) = bar();
+        let tokens = InputTokens::for_density(TargetDensity::Compact);
+        let outset = bar.hit_outset(PointerKind::Touch, &tokens);
+        assert_eq!(outset.leading, 18.0);
+        assert_eq!(outset.trailing, 18.0);
+        assert_eq!(outset.top, 0.0, "the track already spans the viewport");
+        assert_eq!(outset.bottom, 0.0);
+        assert_eq!(
+            12.0 + outset.leading + outset.trailing,
+            SCROLLBAR_COARSE_TARGET
+        );
+    }
+
+    /// A precise pointer gets nothing — its hot-spot is exact, and widening it
+    /// would take clicks from the content beside the bar. Same at every
+    /// density: this is a property of the device, not of the ladder.
+    #[test]
+    fn a_precise_pointer_gets_no_outset_at_any_density() {
+        let (bar, ..) = bar();
+        for density in [
+            TargetDensity::Compact,
+            TargetDensity::Comfortable,
+            TargetDensity::Touch,
+        ] {
+            let tokens = InputTokens::for_density(density);
+            for kind in [PointerKind::Mouse, PointerKind::Pen(PenKind::Pen)] {
+                assert_eq!(
+                    bar.hit_outset(kind, &tokens),
+                    EdgeInsets::ZERO,
+                    "{kind:?} at {density:?}"
+                );
+            }
+        }
+    }
+
+    /// A horizontal bar grows the other way.
+    #[test]
+    fn a_horizontal_bar_grows_vertically() {
+        let bar = ScrollBar::new(
+            ScrollBarOrientation::Horizontal,
+            Signal::new(0.0),
+            Signal::new(500.0),
+            Signal::new(0.5),
+        )
+        .thickness(8.0);
+        let tokens = InputTokens::for_density(TargetDensity::Compact);
+        let outset = bar.hit_outset(PointerKind::Touch, &tokens);
+        assert_eq!(outset.top, 20.0);
+        assert_eq!(outset.bottom, 20.0);
+        assert_eq!(outset.leading, 0.0);
+        assert_eq!(outset.trailing, 0.0);
+    }
+
+    // -- the minimum thumb ------------------------------------------------
+
+    /// The floor follows the density — 24 dp at Compact, which is exactly the
+    /// value this widget has always shipped, and 44 dp at Touch.
+    /// What the widget resolved reaches the style, which is the number the
+    /// painters actually size the thumb from.
+    fn floor_seen_by_the_style(density: TargetDensity, explicit: Option<f32>) -> f32 {
+        use std::cell::Cell;
+        use std::rc::Rc;
+        use teksilo_core::build_context::BuildContext;
+        use teksilo_core::styles::{ScrollBarStyle, ScrollBarStyleConfig};
+
+        struct Recording(Rc<Cell<f32>>);
+        impl ScrollBarStyle for Recording {
+            fn make_body(&self, cfg: &ScrollBarStyleConfig, ctx: &mut BuildContext) -> WidgetId {
+                self.0.set(cfg.min_thumb_length);
+                ctx.add(crate::primitives::Spacer::new())
+            }
+        }
+
+        let seen = Rc::new(Cell::new(f32::NAN));
+        let mut bar = ScrollBar::new(
+            ScrollBarOrientation::Vertical,
+            Signal::new(0.0),
+            Signal::new(500.0),
+            Signal::new(0.02),
+        )
+        .style(Recording(seen.clone()));
+        if let Some(explicit) = explicit {
+            bar = bar.min_thumb_length(explicit);
+        }
+        let mut tree = WidgetTree::new();
+        tree.set_input_density(density);
+        tree.add(bar);
+        tree.layout(SizeProposal::exact(12.0, 400.0));
+        seen.get()
+    }
+
+    /// The floor follows the density — 24 dp at Compact, which is exactly the
+    /// value this widget has always shipped, and 44 dp at Touch.
+    #[test]
+    fn the_minimum_thumb_follows_the_density() {
+        assert_eq!(floor_seen_by_the_style(TargetDensity::Compact, None), 24.0);
+        assert_eq!(
+            floor_seen_by_the_style(TargetDensity::Comfortable, None),
+            32.0
+        );
+        assert_eq!(floor_seen_by_the_style(TargetDensity::Touch, None), 44.0);
+    }
+
+    /// An explicit floor wins over the density.
+    #[test]
+    fn an_explicit_minimum_thumb_wins_over_the_density() {
+        assert_eq!(
+            floor_seen_by_the_style(TargetDensity::Touch, Some(60.0)),
+            60.0
+        );
+    }
+
+    /// …and the floor the widget resolved is the one its own geometry uses, so
+    /// the thumb an audit reads and the thumb a press lands on are the same
+    /// rectangle at every density.
+    #[test]
+    fn the_resolved_floor_reaches_the_reported_thumb() {
+        let bar = ScrollBar::new(
+            ScrollBarOrientation::Vertical,
+            Signal::new(0.0),
+            Signal::new(500.0),
+            Signal::new(0.02),
+        )
+        .min_thumb_length(44.0);
+        let thumb = regions_of(&bar, Rect::new(0.0, 0.0, 12.0, 400.0))
+            .into_iter()
+            .find(|r| r.part == SCROLLBAR_PART_THUMB)
+            .expect("the thumb");
+        assert_eq!(thumb.rect.height, 44.0);
+    }
+
+    // -- grabbing and paging ----------------------------------------------
+
+    /// A press inside the thumb's own paint rectangle grabs it. The bar is
+    /// widened for a finger, so this is the case the axis-only test has to keep
+    /// answering the same way it always did.
+    #[test]
+    fn the_thumb_is_grabbable_at_its_paint_rect() {
+        let thumb = regions_of(&bar().0, Rect::new(0.0, 0.0, 12.0, 400.0))
+            .into_iter()
+            .find(|r| r.part == SCROLLBAR_PART_THUMB)
+            .expect("the thumb");
+        let (mut tree, _id, position) = mounted();
+        let grab = Point::new(thumb.rect.center().x, thumb.rect.center().y);
+
+        tree.pointer_move(grab);
+        tree.dispatch_event(WidgetEvent::PointerDown {
+            position: grab,
+            button: PointerButton::Primary,
+            modifiers: Modifiers::NONE,
+        });
+        tree.dispatch_event(WidgetEvent::PointerMove {
+            position: Point::new(grab.x, grab.y + 10.0),
+        });
+        tree.dispatch_event(WidgetEvent::PointerMove {
+            position: Point::new(grab.x, grab.y + 100.0),
+        });
+        assert!(
+            position.get() > 200.0,
+            "the drag moved the thumb: {}",
+            position.get()
+        );
+    }
+
+    /// A finger 13 dp inboard of a 12 dp bar reaches it through the outset —
+    /// and, being level with the thumb, grabs the thumb rather than paging the
+    /// track. Deciding thumb-versus-track on the full rectangle would have
+    /// paged the view out from under the finger that was reaching for the grab,
+    /// which is why that decision is taken along the scroll axis alone.
+    #[test]
+    fn a_finger_reaching_through_the_outset_grabs_the_thumb() {
+        use teksilo_core::pointer::{
+            BackendDeviceKey, EventTime, PointerIdAllocator, PointerInfo, PointerPhase,
+            PointerSample,
+        };
+
+        let (bar, position, ..) = bar();
+        let mut tree = WidgetTree::new();
+        let bar_id = tree.add(bar);
+        // The bar at the trailing edge of a 200 dp row, with a spacer taking
+        // the rest — an overlay bar's arrangement, and the one where the outset
+        // has content beside it to reach across.
+        tree.add(
+            crate::primitives::HStack::new()
+                .child(crate::primitives::Spacer::new())
+                .add_child(bar_id),
+        );
+        tree.layout(SizeProposal::exact(200.0, 400.0));
+        tree.render();
+        let bounds = tree.bounds(bar_id);
+        assert!((bounds.width - 12.0).abs() < 0.01, "the paint is unchanged");
+
+        let alloc = PointerIdAllocator::global();
+        let device = BackendDeviceKey::new(0x5B47);
+        let finger = alloc.begin(device, 1);
+        alloc.end(device, 1);
+        let sample = |phase: PointerPhase, at: Point| PointerSample {
+            pointer: PointerInfo::touch(finger, EventTime::ZERO),
+            phase,
+            position: at,
+            button: None,
+            modifiers: Modifiers::NONE,
+            coalesced: Vec::new(),
+        };
+
+        // 13 dp inboard of the bar: off its paint, inside its 18 dp outset,
+        // and level with a thumb that spans the top half of the track.
+        let grab = Point::new(bounds.x - 13.0, 100.0);
+        assert_eq!(
+            tree.hit_test_for(grab, &PointerInfo::touch(finger, EventTime::ZERO)),
+            Some(bar_id),
+            "the outset put the finger on the bar"
+        );
+        assert_ne!(
+            tree.hit_test(grab),
+            Some(bar_id),
+            "…and a mouse at the same point lands on the content beside it"
+        );
+        tree.dispatch_pointer(sample(PointerPhase::Down, grab));
+        tree.dispatch_pointer(sample(
+            PointerPhase::Move,
+            Point::new(grab.x, grab.y + 30.0),
+        ));
+        tree.dispatch_pointer(sample(
+            PointerPhase::Move,
+            Point::new(grab.x, grab.y + 100.0),
+        ));
+        assert!(
+            position.get() > 200.0,
+            "the finger dragged the thumb rather than paging: {}",
+            position.get()
+        );
+    }
+
+    /// A tap on the track past the thumb pages one viewport toward it.
+    #[test]
+    fn a_track_tap_pages_toward_the_tap() {
+        let (mut tree, _id, position) = mounted();
+        let tap = Point::new(6.0, 390.0);
+        tree.pointer_move(tap);
+        tree.dispatch_event(WidgetEvent::PointerDown {
+            position: tap,
+            button: PointerButton::Primary,
+            modifiers: Modifiers::NONE,
+        });
+        tree.dispatch_event(WidgetEvent::PointerUp {
+            position: tap,
+            button: PointerButton::Primary,
+            modifiers: Modifiers::NONE,
+        });
+        // max = 500 at a 0.5 ratio, so one viewport is 500 × 0.5 / 0.5 = 500,
+        // clamped to the end.
+        assert_eq!(position.get(), 500.0);
+
+        // …and a tap above the thumb pages back.
+        let tap = Point::new(6.0, 10.0);
+        tree.pointer_move(tap);
+        tree.dispatch_event(WidgetEvent::PointerDown {
+            position: tap,
+            button: PointerButton::Primary,
+            modifiers: Modifiers::NONE,
+        });
+        tree.dispatch_event(WidgetEvent::PointerUp {
+            position: tap,
+            button: PointerButton::Primary,
+            modifiers: Modifiers::NONE,
+        });
+        assert_eq!(position.get(), 0.0);
+    }
+
+    // -- reveal -----------------------------------------------------------
+
+    /// An external reveal reads as hover to the style, which is how an overlay
+    /// bar becomes visible under a gesture that writes no hover.
+    #[test]
+    fn an_external_reveal_reads_as_hover_to_the_style() {
+        use std::cell::Cell;
+        use std::rc::Rc;
+        use teksilo_core::build_context::BuildContext;
+        use teksilo_core::styles::{ScrollBarStyle, ScrollBarStyleConfig};
+
+        #[derive(Clone)]
+        struct Recording(Rc<Cell<bool>>);
+        impl ScrollBarStyle for Recording {
+            fn make_body(&self, cfg: &ScrollBarStyleConfig, ctx: &mut BuildContext) -> WidgetId {
+                self.0.set(cfg.is_hovered.get());
+                ctx.add(crate::primitives::Spacer::new())
+            }
+        }
+
+        let hovered = Rc::new(Cell::new(false));
+        let revealed = Signal::new(false);
+        let bar = ScrollBar::new(
+            ScrollBarOrientation::Vertical,
+            Signal::new(0.0),
+            Signal::new(500.0),
+            Signal::new(0.5),
+        )
+        .reveal(revealed.clone())
+        .style(Recording(hovered.clone()));
+        let mut tree = WidgetTree::new();
+        tree.add(bar);
+        tree.layout(SizeProposal::exact(12.0, 400.0));
+        assert!(!hovered.get(), "nothing has revealed it yet");
+
+        revealed.set(true);
+        tree.layout(SizeProposal::exact(12.0, 400.0));
+        let bar = ScrollBar::new(
+            ScrollBarOrientation::Vertical,
+            Signal::new(0.0),
+            Signal::new(500.0),
+            Signal::new(0.5),
+        )
+        .reveal(revealed.clone())
+        .style(Recording(hovered.clone()));
+        let mut tree = WidgetTree::new();
+        tree.add(bar);
+        tree.layout(SizeProposal::exact(12.0, 400.0));
+        assert!(hovered.get(), "a raised reveal shows the bar");
+    }
+
+    /// A density that reveals every affordance seeds the reveal itself, so a
+    /// touch build's overlay bar is visible without anyone raising it.
+    #[test]
+    fn a_touch_density_reveals_the_bar_at_rest() {
+        let revealed = Signal::new(false);
+        let bar = ScrollBar::new(
+            ScrollBarOrientation::Vertical,
+            Signal::new(0.0),
+            Signal::new(500.0),
+            Signal::new(0.5),
+        )
+        .reveal(revealed.clone());
+        let mut tree = WidgetTree::new();
+        tree.set_input_density(TargetDensity::Touch);
+        tree.add(bar);
+        tree.layout(SizeProposal::exact(12.0, 400.0));
+        assert!(revealed.get(), "RevealPolicy::Always shows it at rest");
+    }
+
+    /// …and a Compact build does not, which is the invariant every density
+    /// change in this programme has to keep.
+    #[test]
+    fn a_compact_density_leaves_the_bar_at_rest() {
+        let revealed = Signal::new(false);
+        let bar = ScrollBar::new(
+            ScrollBarOrientation::Vertical,
+            Signal::new(0.0),
+            Signal::new(500.0),
+            Signal::new(0.5),
+        )
+        .reveal(revealed.clone());
+        let mut tree = WidgetTree::new();
+        tree.add(bar);
+        tree.layout(SizeProposal::exact(12.0, 400.0));
+        assert!(!revealed.get());
     }
 }
