@@ -1013,7 +1013,157 @@ release or the drag already, and need no conversion:
 
 ---
 
-## 8. What is not here yet
+## 8. Performance budget
+
+A frame is 16.6 ms. Ten fingers on a digitizer reporting at 120 Hz is ten
+samples per frame before any coalescing, and dispatch is the part of the frame
+that happens *before* layout, paint and present get their turn. So the budget is
+stated per sample rather than per frame, and it is stated at the contact cap,
+because ten is the worst case the pointer table will admit.
+
+Two numbers, and they are not the same kind of thing.
+
+| | value | what it is |
+| --- | --- | --- |
+| **Hard budget** | ≤ 25 µs per pointer sample at ten contacts | a build gate — CI fails |
+| **Advisory** | ≤ 5 % against a mouse baseline | a number to read — nothing fails |
+
+25 µs leaves a hundred samples of headroom inside one frame. The 5 % is not a
+gate because it cannot be one: at microsecond scale a shared CI runner swings
+further than that between two runs of *unchanged* code — the mouse baseline in
+this file's own two consecutive local runs moved 20 % — so a job enforcing it
+would fail on the weather, and a red build nobody believes is worse than no
+build at all.
+
+### 8.1 The separation is structural, not a convention
+
+The gate is the bench binary's **exit status**. The advisories are **stdout**.
+
+```console
+$ cargo bench -p teksilo-core --bench pointer_dispatch -- --gate-only
+gate      pointer_move touch x10 depth12: 9.44 µs/sample (budget 25.00 µs) -> PASS
+advisory  pointer_move touch x1 depth12: 9.42 µs/sample vs 9.77 µs baseline (…) -> -3.5 % (informational, margin 5 %)
+advisory  hit_test touch miss, 400 candidates: 9.80 µs/sample vs 3.68 µs baseline (…) -> +166.4 % (informational, margin 5 %)
+$ echo $?
+0
+```
+
+That last advisory is 166 % over its baseline and the build is green, which is
+the point: `Report::verdict` in `crates/teksilo-core/benches/budget.rs` takes
+`&self` and reads only `Report::gate`. `Report::advisories` is a separate field
+and there is no path from it to the exit status —
+`advisories_never_move_the_verdict` and
+`a_healthy_advisory_cannot_rescue_a_breached_gate` in `benches/budget_gate.rs`
+pin both directions.
+
+`TEKSILO_DISPATCH_BUDGET_NS` tightens the budget for a local run and is clamped
+to the published 25 µs, so it can rehearse a breach but never excuse one.
+
+### 8.2 What is measured
+
+`crates/teksilo-core/benches/pointer_dispatch.rs`, under criterion.
+
+| bench | shape | what it is for |
+| --- | --- | --- |
+| `pointer_move/mouse_depth12` | one mouse, twelve-deep tree | the baseline every advisory is read against |
+| `pointer_move/touch_1_contact_depth12` | one finger, same tree | what one contact costs |
+| `pointer_move/touch_10_contacts_depth12` | ten fingers, same tree | **the gate's subject** |
+| `hit_test/slop_miss_touch_400_candidates` | a probe in a gutter, 400 eligible targets | the miss-only slop pass, in its expensive case — a *hit* short-circuits, a miss walks and sorts the whole subtree |
+| `hit_test/slop_miss_mouse_400_candidates` | the same probe, precise pointer | the "a mouse pays nothing new" claim, measured rather than asserted |
+| `touch_action/tap_declared_path/{2,20}` | a tap where every node declares | the two path folds, `effective_touch_action` and `pan_candidates` |
+| `fling/tick` | one coast tick, chained scroll and all | the per-frame cost of momentum |
+| `workspace/{mouse_move,touch_10_contacts_move}` | an IDE-shaped tree | the composite, under live pan claimants |
+
+Every contact in a multi-contact fixture is checked to have actually been
+admitted before anything is timed: a sample the table refuses returns before any
+work happens, so one contact over the cap would have the gate dividing by more
+work than it did.
+
+### 8.3 Running it
+
+```console
+$ cargo bench -p teksilo-core --bench pointer_dispatch                  # measure, then gate  (~100 s)
+$ cargo bench -p teksilo-core --bench pointer_dispatch -- --gate-only   # gate alone          (~1 s)
+$ cargo test  -p teksilo-core --benches                                 # the gate's own tests + a smoke run
+$ cargo bench -p teksilo-core --bench pointer_dispatch -- --save-baseline p01
+$ cargo bench -p teksilo-core --bench pointer_dispatch -- --baseline p01
+```
+
+The last two are criterion's own baseline machinery, and they are how a mouse
+path is compared against a recorded SHA. A stored baseline is a directory of
+measurements taken on one machine; it belongs in that machine's `target/`, never
+in the repository, because a baseline recorded on one host says nothing on
+another.
+
+The gate does its own timing rather than parsing criterion's estimates.
+criterion is the instrument you reach for when a number moved and you want to
+know why — distributions, outliers, baselines. The gate answers one question in
+about a second, from a median of block-timed rounds, and stays correct wherever
+`CRITERION_HOME` happens to point.
+
+### 8.4 What the numbers look like
+
+One workstation, one run, September 2026. Absolute values are a property of the
+machine; the *ratios* are the part worth reading.
+
+| bench | per sample |
+| --- | --- |
+| `pointer_move` mouse, depth 12 | 11.8 µs |
+| `pointer_move` touch ×1, depth 12 | 9.4 µs |
+| `pointer_move` touch ×10, depth 12 | 9.7 µs |
+| `hit_test` slop miss, touch, 400 candidates | 10.1 µs |
+| `hit_test` slop miss, mouse, 400 candidates | 4.2 µs |
+| `touch_action` tap, declared path of 2 | 4.2 µs |
+| `touch_action` tap, declared path of 20 | 21.3 µs |
+| `fling` tick | 0.6 µs |
+| `workspace` mouse move | 5.7 µs |
+| `workspace` touch ×10 move | 4.5 µs |
+
+Three things fall out of that table.
+
+**A tenth contact costs no more than the first.** Per-sample cost is flat from
+one contact to ten, which is what the per-pointer entry model was for: nothing
+in the dispatch path iterates the other live pointers.
+
+**Depth, not node count, is what dispatch costs.** The workspace is roughly
+six hundred nodes and is *cheaper per sample* than the forty-node twelve-deep
+fixture, because its root-to-target path is half as long. The declared-path pair
+says the same thing louder: 2 deep is 4.2 µs, 20 deep is 21.3 µs.
+
+**The slop pass is the one genuinely expensive mechanism**, and only on a miss:
+6 µs over 400 candidates, against a precise pointer that skips it entirely. It
+is bounded by the subtree it searches, so the number to watch is not this one
+but what happens when someone runs it over a list of ten thousand rows.
+
+Two operational cautions. First, the headroom here is 2.5×; a CI runner more
+than 2.5× slower than this workstation will fail the gate for being slow rather
+than for a regression, so the gate wants a machine class it can hold to.
+Second, criterion reports `pointer_move/touch_10_contacts_depth12` **per
+iteration** — ten samples — so its number is ten times the gate's; the `thrpt`
+line beside it is the per-sample figure.
+
+### 8.5 Two things the benchmark could not do as written
+
+A21 asks the composite to be "a docking workspace with a virtualized
+`TableView`". It cannot be. `DockingLayout` and `TableView` live in
+`teksilo-widgets`, which depends on `teksilo-core`; a dev-dependency the other
+way would invert the crate graph for the sake of a benchmark. The shape is
+reproduced from core's own parts instead — a rail, two docked panels, forty
+realized table rows by eight columns, each panel a live pan claimant — because
+forty rows is what a virtualized body actually mounts and the work the
+dispatcher does over them is the same work either way.
+
+A21 also asks for "the touch-action fold on a 20-deep path" as a thing of its
+own. `WidgetTree::effective_touch_action` and `WidgetTree::pan_candidates` are
+both `pub(crate)`, so a bench — which compiles as a separate crate — can only
+reach them through the press that runs them. The bench therefore measures a tap
+at two depths and reads the difference, which includes the preview and bubble
+walks over the same lengthening path. That is a fair measure of what a deep path
+costs and an imperfect one of what the folds alone cost.
+
+---
+
+## 9. What is not here yet
 
 Deliberately, and in this order: wiring the app event loop to the multi-sample
 translator (nothing dispatches a touch or pen sample yet — the platform layer
