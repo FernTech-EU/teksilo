@@ -17,6 +17,22 @@
 //! occlusion — is exactly the old `(width, height)`, which is why
 //! `From<(f32, f32)>` exists and why a desktop tree's placement is unchanged to
 //! the last pixel.
+//!
+//! # Nothing supplies the insets yet — package P18
+//!
+//! That default is, at the moment, the *only* thing anything constructs.
+//! [`WidgetTree::layout_with_ops`](crate::WidgetTree::layout_with_ops) — where
+//! both production calls to `position_overlays` are, and what `teksilo-app`
+//! calls and what [`layout`](crate::WidgetTree::layout) delegates to — passes a
+//! bare `(width, height)` tuple, and neither
+//! [`with_safe_area`](OverlayViewport::with_safe_area) nor
+//! [`with_occluded`](OverlayViewport::with_occluded) has a caller outside this
+//! crate's tests. Reading the platform's real insets and the keyboard
+//! rectangle and threading them through to here is package **P18**. Until it
+//! lands, every window claims to be usable to its last pixel, so the notch, the
+//! rounded corner, the home indicator and the keyboard band described above are
+//! a contract this type is ready to honour rather than one it is being asked
+//! to.
 
 use teksilo_canvas::{EdgeInsets, Rect, Size};
 
@@ -139,6 +155,14 @@ fn largest_free_slab(area: Rect, blocked: Rect) -> Rect {
         return area;
     }
     let above = Rect::new(area.x, area.y, area.width, (blocked.y - area.y).max(0.0));
+    // `below` and `trailing` take their origin from the far edge of `blocked`
+    // but their extent from `area`'s, so an occlusion ending before `area`
+    // begins would describe a slab hanging past `area`'s far edge. It cannot:
+    // an occlusion that clears `area` on an axis makes that axis' overlap zero
+    // and returns above, so by here `blocked` reaches into `area` on both axes
+    // and `blocked.bottom() >= area.y`, `blocked.right() >= area.x`. The two
+    // `.max` guards on those origins are therefore dead code the early return
+    // protects — kept because they cost nothing and state the invariant.
     let below = Rect::new(
         area.x,
         blocked.bottom().max(area.y),
@@ -233,5 +257,44 @@ mod tests {
         let viewport = OverlayViewport::from((800.0, 600.0))
             .with_occluded(Some(Rect::new(-10.0, -10.0, 900.0, 700.0)));
         assert_eq!(viewport.usable(LTR), Rect::new(0.0, 0.0, 800.0, 600.0));
+    }
+
+    /// The other two slabs [`largest_free_slab`] considers.
+    ///
+    /// Its doc says four are, and two of them answer the cases above: an
+    /// occlusion at the bottom keeps the band above, one at the trailing side
+    /// keeps the band before it. The other two are the mirror images, and
+    /// deleting either from the candidate list leaves every test above green
+    /// — the survivors are all zero-area, so the fallback hands back the whole
+    /// safe rect and the overlay lands behind the thing covering it.
+    ///
+    /// Both mirrors are real hardware: a platform IME candidate bar docks to
+    /// the top of the window as readily as a soft keyboard docks to the
+    /// bottom, and a side-docked panel sits on the leading edge in Arabic
+    /// wherever it sits on the trailing edge in English.
+    #[test]
+    fn a_top_occlusion_leaves_the_band_below_it() {
+        let viewport = OverlayViewport::from((800.0, 600.0))
+            .with_occluded(Some(Rect::new(0.0, 0.0, 800.0, 200.0)));
+        assert_eq!(
+            viewport.usable(LTR),
+            Rect::new(0.0, 200.0, 800.0, 400.0),
+            "the band below the bar, not the whole window"
+        );
+    }
+
+    /// The transpose of [`a_side_occlusion_leaves_the_band_beside_it`]: that
+    /// one covers the trailing side and keeps the leading band, this one
+    /// covers the leading side and keeps the trailing band.
+    #[test]
+    fn a_leading_side_occlusion_leaves_the_band_after_it() {
+        let viewport = OverlayViewport::from((800.0, 600.0))
+            .with_occluded(Some(Rect::new(0.0, 0.0, 300.0, 600.0)));
+        let usable = viewport.usable(LTR);
+        assert_eq!(
+            (usable.x, usable.width),
+            (300.0, 500.0),
+            "the band after the panel, not the whole window"
+        );
     }
 }
