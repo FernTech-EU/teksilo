@@ -8,24 +8,50 @@
 //! anti-jump drag math (recover the window position via the handle's own
 //! `self_bounds`, then map into the stable container) and emits a
 //! `Role::Splitter` accessibility node.
+//!
+//! ## Reaching the divider with a finger
+//!
+//! The handle borrows the active [`SplitterStyle`]'s body, so it is as thin as
+//! a splitter gutter — 6 dp — and it keeps that thickness at every density: a
+//! dock divider that grew with the density would take its width out of the
+//! panel beside it, which is content, not slack.
+//!
+//! The grab instead comes from [`Widget::hit_outset`], the same mechanism the
+//! splitter handle uses. For a direct pointer the handle is offered the press
+//! against bounds inflated across the thickness axis to the density's target
+//! size (24 dp Compact, 44 dp Touch); the arena runs that pre-pass before the
+//! ordinary reverse-sibling walk, so the widened band beats the side panel and
+//! the centre it lies between. For a precise pointer the outset is zero and a
+//! mouse press lands exactly where it did before.
+//!
+//! Layout is untouched: the geometry engine still hands the handle the same
+//! rectangle, the side keeps its size, and nothing repaints differently.
+//!
+//! A second contact arriving during a resize is refused, not served: the drag
+//! recovers its anti-jump offset from the pressing pointer's position, so a
+//! second finger would make the divider leap to wherever it landed.
+//!
+//! [`SplitterStyle`]: teksilo_core::styles::SplitterStyle
 
 use std::cell::Cell;
 use std::rc::Rc;
 use std::time::Duration;
 
-use teksilo_canvas::{Point, Rect, SizeProposal};
+use teksilo_canvas::{EdgeInsets, Point, Rect, SizeProposal};
+use teksilo_core::TouchAction;
 use teksilo_core::accessibility::AccessNodeBuilder;
 use teksilo_core::build_context::BuildContext;
 use teksilo_core::event::{EventResponse, Key, PointerButton, WidgetEvent};
 use teksilo_core::focus::FocusOrigin;
 use teksilo_core::signal::Signal;
+use teksilo_core::styles::density::dp;
 use teksilo_core::styles::{SharedSplitterStyle, SplitterStyleConfig};
 use teksilo_core::widget::{
     CursorIcon, EventContext, LayoutContext, LayoutResponse, Widget, WidgetPlacement,
 };
 use teksilo_core::widget_builder::HandlerSet;
 use teksilo_core::widget_id::WidgetId;
-use teksilo_tokens::{Easing, Orientation};
+use teksilo_tokens::{DragActivation, Easing, InputTokens, Orientation, PointerKind, TargetRole};
 
 use crate::common::range_nav::{self, RangeAxis, RangeKind, RangeMove};
 
@@ -39,6 +65,18 @@ const SNAP_OFFSET: f32 = 30.0;
 /// divider feels identical.
 const HOVER_DWELL_TOTAL: Duration = Duration::from_millis(400);
 const HOVER_FADE_OUT: Duration = Duration::from_millis(120);
+
+/// Per-side hit inflation lifting a `visual`-thick grip to the density's target
+/// size, for a **direct** pointer only. The dock divider's twin of the splitter
+/// handle's own helper — see that file for why routing a hit outset (never a
+/// paint dimension) through [`dp`] is not the density-rule violation it looks
+/// like.
+fn grab_outset(visual: f32, kind: PointerKind, tokens: &InputTokens) -> f32 {
+    if !kind.is_direct() || !visual.is_finite() || visual <= 0.0 {
+        return 0.0;
+    }
+    ((dp(visual, TargetRole::Target, tokens) - visual) * 0.5).max(0.0)
+}
 
 pub(super) struct DockResizeHandleConfig {
     pub side: DockSide,
@@ -195,6 +233,12 @@ impl Widget for DockResizeHandle {
         let mut handlers = HandlerSet::new()
             .focusable(true)
             .cursor(self.cursor())
+            // The divider's drag *is* the interaction: forbid every default
+            // touch behaviour in this subtree and arm the drag at the slop
+            // rather than after a long press. Direct-pointer policy only — a
+            // mouse reads neither, so the mouse drag is unchanged.
+            .touch_action(TouchAction::NONE)
+            .drag_activation(DragActivation::Immediate)
             .on_hover({
                 let hovered = hovered_h.clone();
                 let hover_progress = self.hover_progress.clone();
@@ -238,6 +282,14 @@ impl Widget for DockResizeHandle {
                         position, button, ..
                     } => {
                         if *button != PointerButton::Primary {
+                            return EventResponse::Ignored;
+                        }
+                        // One divider, one contact: a second finger would
+                        // recapture the anti-jump offset from its own position
+                        // and make the side leap. `MultiContact::First` gates
+                        // the gesture arena, not raw pointer dispatch, so the
+                        // guard belongs here. A mouse is always primary.
+                        if !ctx.pointer().primary || is_dragging_h.get() {
                             return EventResponse::Ignored;
                         }
                         let container = container_bounds.get();
@@ -469,5 +521,260 @@ impl Widget for DockResizeHandle {
 
     fn children(&self) -> Vec<WidgetId> {
         self.body_id.into_iter().collect()
+    }
+
+    /// The grab band, across the thickness axis only.
+    ///
+    /// A leading or trailing side is divided by a vertical bar, thin on the
+    /// reading axis; a top or bottom side by a horizontal one. The thickness is
+    /// read from the handle's own last-placed bounds rather than from a
+    /// constant, because the body comes from the active
+    /// [`SplitterStyle`](teksilo_core::styles::SplitterStyle) and a theme is
+    /// free to make it thicker — an already-generous grip then earns no
+    /// inflation at all, which is what [`dp`]'s floor semantics give for free.
+    ///
+    /// Zero before the first layout (degenerate bounds) and zero for a disabled
+    /// handle, which refuses the press: widening a node that then ignores the
+    /// press would punch a hole in the panel behind it.
+    fn hit_outset(&self, kind: PointerKind, tokens: &InputTokens) -> EdgeInsets {
+        if !self.enabled {
+            return EdgeInsets::ZERO;
+        }
+        let bounds = self.self_bounds.get();
+        let horizontal_axis = self.side.is_horizontal_axis();
+        let thickness = if horizontal_axis {
+            bounds.width
+        } else {
+            bounds.height
+        };
+        let out = grab_outset(thickness, kind, tokens);
+        if out <= 0.0 {
+            return EdgeInsets::ZERO;
+        }
+        if horizontal_axis {
+            EdgeInsets::new(0.0, out, 0.0, out)
+        } else {
+            EdgeInsets::new(out, 0.0, out, 0.0)
+        }
+    }
+}
+
+#[cfg(test)]
+mod grab_tests {
+    use std::time::Duration;
+
+    use teksilo_canvas::{Point, Size, SizeProposal};
+    use teksilo_core::accesskit::Role;
+    use teksilo_core::pointer::{
+        BackendDeviceKey, EventTime, PointerId, PointerIdAllocator, PointerInfo, PointerPhase,
+        PointerSample,
+    };
+    use teksilo_core::widget::{LayoutContext, LayoutResponse, Widget};
+    use teksilo_core::widget_id::WidgetId;
+    use teksilo_core::widget_tree::WidgetTree;
+    use teksilo_i18n::lit;
+    use teksilo_tokens::TargetDensity;
+
+    use crate::docking::{
+        DockOpenLocation, DockSide, DockWidget, DockWidgetId, DockingLayout, DockingModel,
+    };
+
+    #[derive(Debug)]
+    struct FixedLeaf(f32, f32);
+    impl Widget for FixedLeaf {
+        fn layout_response(&self, _p: SizeProposal, _c: &LayoutContext) -> LayoutResponse {
+            Size::new(self.0, self.1).into()
+        }
+    }
+
+    /// A layout with one leading dock open, settled past its reveal animation.
+    ///
+    /// The centre is **tappable** on purpose: over inert content the miss-only
+    /// slop pass re-attributes a nearby press to the divider by itself, and a
+    /// hit test written over an inert centre would pass with `hit_outset`
+    /// deleted. Beating a target that owns the press is what the outset is for.
+    fn leading_dock(density: TargetDensity) -> (WidgetTree, WidgetId, DockingModel) {
+        use teksilo_core::widget_builder::WidgetBuilder;
+        let model = DockingModel::new();
+        let id = DockWidgetId::fresh();
+        let dw = DockWidget::new(id, lit!("Explorer"), |_| FixedLeaf(120.0, 120.0));
+        let mut tree = WidgetTree::new()
+            .with_theme(teksilo_core::presets::intui::light().with_density(density));
+        let root = tree.add(
+            DockingLayout::new(model.clone())
+                .center(FixedLeaf(200.0, 200.0).on_tap(|_, _| {}))
+                .dock(dw),
+        );
+        model.open_dock(id, DockOpenLocation::side(DockSide::Leading));
+        tree.layout(SizeProposal::exact(1000.0, 800.0));
+        tree.tick_animations(Duration::from_millis(600));
+        tree.layout(SizeProposal::exact(1000.0, 800.0));
+        (tree, root, model)
+    }
+
+    /// Depth-first search for the `Role::Splitter` node — the dock's resize
+    /// handle. The layout shape is not this test's subject, so it is found by
+    /// what it *is* rather than by an index path.
+    fn find_splitter(tree: &WidgetTree, id: WidgetId) -> Option<WidgetId> {
+        if tree.accessibility_node(id).role() == Role::Splitter && tree.bounds(id).width > 0.0 {
+            return Some(id);
+        }
+        tree.children(id)
+            .iter()
+            .find_map(|&c| find_splitter(tree, c))
+    }
+
+    fn finger(raw: u64, primary: bool) -> PointerInfo {
+        let id: PointerId = PointerIdAllocator::global().begin(BackendDeviceKey::new(0x50D0), raw);
+        let mut info = PointerInfo::touch(id, EventTime::ZERO);
+        info.primary = primary;
+        info
+    }
+
+    fn sample(pointer: PointerInfo, phase: PointerPhase, at: Point) -> PointerSample {
+        PointerSample {
+            pointer,
+            phase,
+            position: at,
+            button: None,
+            modifiers: teksilo_core::event::Modifiers::NONE,
+            coalesced: Vec::new(),
+        }
+    }
+
+    /// Hit-only: the divider keeps its painted thickness and the side keeps its
+    /// size at every density. The grab lives between the pointer and the arena.
+    #[test]
+    fn the_grab_moves_no_layout_at_any_density() {
+        let mut widths = Vec::new();
+        for density in [
+            TargetDensity::Compact,
+            TargetDensity::Comfortable,
+            TargetDensity::Touch,
+        ] {
+            let (tree, root, model) = leading_dock(density);
+            let handle = find_splitter(&tree, root).expect("a dock resize handle");
+            widths.push((
+                tree.bounds(handle).width,
+                model.side_size(DockSide::Leading),
+            ));
+        }
+        let first = widths[0];
+        for (w, size) in &widths {
+            assert_eq!(
+                *w, first.0,
+                "the divider is painted the same at every density"
+            );
+            assert_eq!(*size, first.1, "and the side keeps its size");
+        }
+    }
+
+    /// A mouse press beside the divider lands where it always did — the band is
+    /// direct-pointer-only.
+    #[test]
+    fn a_mouse_press_beside_the_divider_does_not_reach_it() {
+        let (tree, root, _) = leading_dock(TargetDensity::Compact);
+        let handle = find_splitter(&tree, root).expect("a dock resize handle");
+        let bar = tree.bounds(handle);
+        let mouse = PointerInfo::mouse(EventTime::ZERO);
+        let at = Point::new(bar.right() + 5.0, bar.center().y);
+        let hit = tree.hit_test_for(at, &mouse);
+        assert!(
+            hit.is_none_or(|id| id != handle && !tree.is_descendant_of(id, handle)),
+            "a mouse 5 dp past the divider must not reach it, got {hit:?}"
+        );
+    }
+
+    /// A finger reaches the divider over the tappable content painted beside
+    /// it.
+    ///
+    /// Probed at **Touch**, 14 dp out: the ring is 19 dp there while the
+    /// miss-only slop pass reaches at most its 8 dp radius, so only the outset
+    /// can answer and the test fails if `hit_outset` is removed.
+    #[test]
+    fn a_finger_grabs_the_divider_over_the_content_beside_it() {
+        let (tree, root, _) = leading_dock(TargetDensity::Touch);
+        let handle = find_splitter(&tree, root).expect("a dock resize handle");
+        let bar = tree.bounds(handle);
+        let contact = finger(21, true);
+        for at in [
+            Point::new(bar.right() + 14.0, bar.center().y),
+            Point::new(bar.x - 14.0, bar.center().y),
+        ] {
+            let hit = tree.hit_test_for(at, &contact);
+            assert!(
+                hit.is_some_and(|id| id == handle || tree.is_descendant_of(id, handle)),
+                "the widened divider must take the press at {at:?}, got {hit:?}"
+            );
+        }
+    }
+
+    /// A mouse drag resizes the side by exactly the distance travelled, as it
+    /// always has.
+    #[test]
+    fn a_mouse_drag_resizes_the_side_by_exactly_the_travel() {
+        let (mut tree, root, model) = leading_dock(TargetDensity::Compact);
+        let handle = find_splitter(&tree, root).expect("a dock resize handle");
+        let start = tree.bounds(handle).center();
+        let before = model.side_size(DockSide::Leading);
+
+        tree.pointer_down_button(start, teksilo_core::event::PointerButton::Primary);
+        tree.pointer_move(Point::new(start.x + 40.0, start.y));
+        tree.pointer_up_button(
+            Point::new(start.x + 40.0, start.y),
+            teksilo_core::event::PointerButton::Primary,
+        );
+
+        assert!(
+            (model.side_size(DockSide::Leading) - (before + 40.0)).abs() < 0.01,
+            "the side must widen by exactly 40 dp: {} → {}",
+            before,
+            model.side_size(DockSide::Leading)
+        );
+    }
+
+    /// A second contact landing on the divider mid-resize must not recapture
+    /// the anti-jump offset — the first finger's next move would otherwise be
+    /// measured against the intruder and the side would leap.
+    #[test]
+    fn a_second_contact_during_a_resize_is_ignored() {
+        let (mut tree, root, model) = leading_dock(TargetDensity::Compact);
+        let handle = find_splitter(&tree, root).expect("a dock resize handle");
+        let start = tree.bounds(handle).center();
+        let before = model.side_size(DockSide::Leading);
+
+        let first = finger(22, true);
+        tree.dispatch_pointer(sample(first, PointerPhase::Down, start));
+        tree.dispatch_pointer(sample(
+            first,
+            PointerPhase::Move,
+            Point::new(start.x + 20.0, start.y),
+        ));
+        tree.layout(SizeProposal::exact(1000.0, 800.0));
+
+        let second = finger(23, false);
+        let bar = tree.bounds(handle);
+        let intruder = Point::new(bar.center().x + 6.0, bar.center().y + 30.0);
+        assert_eq!(
+            tree.hit_test_for(intruder, &second)
+                .map(|id| id == handle || tree.is_descendant_of(id, handle)),
+            Some(true),
+            "the intruder must actually reach the handle, or this proves nothing"
+        );
+        tree.dispatch_pointer(sample(second, PointerPhase::Down, intruder));
+
+        tree.dispatch_pointer(sample(
+            first,
+            PointerPhase::Move,
+            Point::new(start.x + 50.0, start.y),
+        ));
+        tree.layout(SizeProposal::exact(1000.0, 800.0));
+
+        assert!(
+            (model.side_size(DockSide::Leading) - (before + 50.0)).abs() < 0.01,
+            "the side must track the first finger, not the intruder: {} → {}",
+            before,
+            model.side_size(DockSide::Leading)
+        );
     }
 }

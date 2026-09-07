@@ -16,7 +16,10 @@
 use std::rc::Rc;
 use std::sync::Arc;
 
-use teksilo_core::{PlatformError, PlatformTitleBarHost, ResizeEdge, TitleBarHostCallbacks};
+use teksilo_core::{
+    HitRegions, PlatformError, PlatformTitleBarHost, ResizeBorders, ResizeEdge,
+    TitleBarHostCallbacks,
+};
 use winit::window::{ResizeDirection, Window};
 
 /// Map a teksilo-core [`ResizeEdge`] to winit's [`ResizeDirection`].
@@ -35,6 +38,82 @@ pub(crate) fn edge_to_direction(edge: ResizeEdge) -> ResizeDirection {
         ResizeEdge::BottomLeft => ResizeDirection::SouthWest,
         ResizeEdge::Left => ResizeDirection::West,
         ResizeEdge::TopLeft => ResizeDirection::NorthWest,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// The non-client resize band
+// ---------------------------------------------------------------------------
+
+/// Whether `regions` is a **band update** rather than a full chrome snapshot.
+///
+/// [`HitRegions`] is a whole-snapshot channel with one aggregator per window —
+/// `TitleBar::after_paint` collects the drag region, the dead-zone holes and the
+/// three control buttons into one payload every frame. A `WindowFrame` has a
+/// second, disjoint thing to say (how wide its resize strips will actually
+/// catch, once [`Widget::hit_outset`] has widened them for a coarse pointer),
+/// and it must be able to say it without erasing the aggregate.
+///
+/// The two are told apart by shape, not by a flag: a payload that carries a
+/// non-zero [`ResizeBorders`] **and nothing else** is a band update. The
+/// aggregator never produces that — it builds from `HitRegions::new()` and
+/// leaves the band zero — so the classification is unambiguous in both
+/// directions, including for the deliberately-empty snapshot a title bar
+/// publishes to *clear* its regions when its control cluster is hidden.
+///
+/// [`Widget::hit_outset`]: teksilo_core::widget::Widget::hit_outset
+pub fn is_resize_band_update(regions: &HitRegions) -> bool {
+    let b = regions.resize_borders;
+    let has_band = b.top > 0.0 || b.right > 0.0 || b.bottom > 0.0 || b.left > 0.0;
+    has_band
+        && regions.minimize.is_none()
+        && regions.maximize.is_none()
+        && regions.close.is_none()
+        && regions.drag.is_empty()
+        && regions.no_drag.is_empty()
+}
+
+/// Fold an incoming payload into the stored snapshot.
+///
+/// A band update (see [`is_resize_band_update`]) writes only
+/// [`HitRegions::resize_borders`]; anything else replaces the snapshot whole,
+/// which is what keeps a title bar able to clear its own regions.
+pub fn merge_hit_regions(stored: &mut HitRegions, incoming: HitRegions) {
+    if is_resize_band_update(&incoming) {
+        stored.resize_borders = incoming.resize_borders;
+    } else {
+        *stored = incoming;
+    }
+}
+
+/// The resize band the non-client hit test should use, per edge.
+///
+/// `os_metric` is what the window manager itself allows (on Windows,
+/// `SM_CXPADDEDBORDER + SM_CXFRAME` — around 8 physical pixels at 100 %).
+/// `published` is the widget layer's *coarse* band, already converted to the
+/// same units, or all-zero when no widget published one.
+///
+/// Two rules, and the first one is the whole reason this is a function rather
+/// than a `max`:
+///
+/// * **A precise pointer gets the OS metric, exactly.** Widening the band for a
+///   mouse would steal presses from the client area along every edge of every
+///   window — an 8 px border becoming 24 px is a quarter of a toolbar. The
+///   coarse band exists because a finger cannot aim at 8 px, not because 8 px
+///   is wrong.
+/// * **The band never shrinks.** A widget that publishes a band narrower than
+///   the OS metric (a frame built with a 2 dp strip, say) must not take away
+///   resize area the window manager was already giving; the published value is
+///   a floor to raise to, never a ceiling.
+pub fn resize_band(os_metric: f32, published: ResizeBorders, coarse: bool) -> ResizeBorders {
+    if !coarse {
+        return ResizeBorders::uniform(os_metric);
+    }
+    ResizeBorders {
+        top: published.top.max(os_metric),
+        right: published.right.max(os_metric),
+        bottom: published.bottom.max(os_metric),
+        left: published.left.max(os_metric),
     }
 }
 
@@ -122,5 +201,131 @@ pub fn create_title_bar_host(
     {
         let _ = (window, callbacks);
         Err(PlatformError::Unsupported)
+    }
+}
+
+#[cfg(test)]
+mod resize_band_tests {
+    use super::*;
+    use teksilo_canvas::Rect;
+
+    fn band(v: f32) -> ResizeBorders {
+        ResizeBorders::uniform(v)
+    }
+
+    /// The invariant the whole mechanism stands on: with a precise pointer the
+    /// band is the OS metric and nothing else, whatever a widget published.
+    #[test]
+    fn a_mouse_gets_the_os_metric_untouched() {
+        for published in [0.0_f32, 6.0, 24.0, 44.0, 200.0] {
+            let out = resize_band(8.0, band(published), false);
+            assert_eq!(out.top, 8.0);
+            assert_eq!(out.right, 8.0);
+            assert_eq!(out.bottom, 8.0);
+            assert_eq!(out.left, 8.0);
+        }
+    }
+
+    /// A coarse pointer takes the published band where it is wider.
+    #[test]
+    fn a_coarse_pointer_takes_the_published_band() {
+        let out = resize_band(8.0, band(24.0), true);
+        assert_eq!(out.top, 24.0);
+        assert_eq!(out.left, 24.0);
+    }
+
+    /// …and never less than the OS metric, so a narrow publication cannot take
+    /// away resize area the window manager was already giving.
+    #[test]
+    fn the_published_band_is_a_floor_never_a_ceiling() {
+        let out = resize_band(8.0, band(2.0), true);
+        assert_eq!(out.top, 8.0);
+        assert_eq!(out.bottom, 8.0);
+    }
+
+    /// No publication at all is the same as a mouse: the OS metric stands.
+    #[test]
+    fn an_unpublished_band_falls_back_to_the_os_metric() {
+        let out = resize_band(8.0, ResizeBorders::default(), true);
+        assert_eq!(out.top, 8.0);
+        assert_eq!(out.right, 8.0);
+    }
+
+    /// Per-edge, not uniform: a frame is free to publish four different numbers.
+    #[test]
+    fn each_edge_is_resolved_on_its_own() {
+        let published = ResizeBorders {
+            top: 44.0,
+            right: 4.0,
+            bottom: 24.0,
+            left: 0.0,
+        };
+        let out = resize_band(8.0, published, true);
+        assert_eq!(out.top, 44.0);
+        assert_eq!(out.right, 8.0, "below the metric → the metric");
+        assert_eq!(out.bottom, 24.0);
+        assert_eq!(out.left, 8.0, "unpublished → the metric");
+    }
+
+    /// A band-only payload is recognised as an update to the band.
+    #[test]
+    fn a_band_only_payload_is_a_band_update() {
+        let regions = HitRegions {
+            resize_borders: band(24.0),
+            ..HitRegions::default()
+        };
+        assert!(is_resize_band_update(&regions));
+    }
+
+    /// The title bar's aggregate snapshot never is — it leaves the band zero.
+    #[test]
+    fn a_chrome_snapshot_is_not_a_band_update() {
+        let regions = HitRegions {
+            drag: vec![Rect::new(0.0, 0.0, 400.0, 32.0)],
+            ..HitRegions::default()
+        };
+        assert!(!is_resize_band_update(&regions));
+    }
+
+    /// Nor is the deliberately empty one a title bar publishes to *clear* its
+    /// regions when its control cluster goes hidden — which is exactly the case
+    /// a "merge when empty" rule would have got wrong.
+    #[test]
+    fn an_empty_clearing_snapshot_is_not_a_band_update() {
+        assert!(!is_resize_band_update(&HitRegions::default()));
+    }
+
+    /// A band update leaves every other region standing.
+    #[test]
+    fn merging_a_band_update_preserves_the_chrome_snapshot() {
+        let mut stored = HitRegions {
+            drag: vec![Rect::new(0.0, 0.0, 400.0, 32.0)],
+            close: Some(Rect::new(370.0, 0.0, 30.0, 32.0)),
+            ..HitRegions::default()
+        };
+        merge_hit_regions(
+            &mut stored,
+            HitRegions {
+                resize_borders: band(24.0),
+                ..HitRegions::default()
+            },
+        );
+        assert_eq!(stored.drag.len(), 1, "the drag rect survived");
+        assert!(stored.close.is_some(), "the close button survived");
+        assert_eq!(stored.resize_borders.top, 24.0);
+    }
+
+    /// A chrome snapshot replaces wholesale — including clearing a stale band,
+    /// so a frame that stops publishing is not remembered forever.
+    #[test]
+    fn merging_a_chrome_snapshot_replaces_everything() {
+        let mut stored = HitRegions {
+            resize_borders: band(24.0),
+            close: Some(Rect::new(370.0, 0.0, 30.0, 32.0)),
+            ..HitRegions::default()
+        };
+        merge_hit_regions(&mut stored, HitRegions::default());
+        assert_eq!(stored.resize_borders.top, 0.0);
+        assert!(stored.close.is_none());
     }
 }

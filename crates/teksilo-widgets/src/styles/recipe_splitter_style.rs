@@ -6,12 +6,31 @@
 //! Reproduces the old `SplitView` chrome: a thin static line at the
 //! gutter's center (so the divider never disappears), with a thicker
 //! focus-color line that cross-fades in on hover-dwell and snaps to full
-//! strength on keyboard focus or drag. The hit area is the full gutter
-//! width; the cursor change is what signals grabbability.
+//! strength on keyboard focus or drag.
 //!
 //! The visual body is a small private leaf (`SplitterHandleBody`) — same
 //! "leaf body" choice as `RecipeSliderStyle`. Custom `SplitterStyle`
 //! impls compose their own body instead.
+//!
+//! # The resting line is unconditional, and that is load-bearing
+//!
+//! The divider a user has to aim at is painted whether or not anything is
+//! hovering it — `fill_rect(line_rect(line_thickness), colors.border)` runs
+//! before any state is consulted. The 400 ms hover dwell only fades in a
+//! *second*, focus-coloured line that keyboard focus and an active drag both
+//! show instantly.
+//!
+//! So the splitter owes a touch user no reveal: there is nothing hidden behind
+//! hover to reveal. What it owed was a **grab**, and that is
+//! [`SplitterHandle`](crate::splitter)'s `Widget::hit_outset` — a hit-only
+//! widening of the 6 dp gutter to the density's target size that leaves this
+//! paint untouched at every density. The cursor change over the gutter is a
+//! mouse affordance and stays exactly as it was.
+//!
+//! An earlier reading of the hover census had this style hiding the divider
+//! until hover and owing a touch reveal; the source says otherwise, and
+//! `the_resting_line_is_painted_with_no_interaction_at_all` below keeps it
+//! that way.
 
 use teksilo_canvas::{Canvas, Rect, SizeProposal};
 use teksilo_core::accessibility::AccessNodeBuilder;
@@ -196,5 +215,105 @@ impl Widget for SplitterHandleBody {
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         // Presentational — the SplitterHandle owns the Role::Splitter node.
         builder.set_hidden();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::rc::Rc;
+
+    use teksilo_canvas::{Size, SizeProposal};
+    use teksilo_core::widget::{LayoutContext, LayoutResponse, Widget};
+    use teksilo_core::widget_tree::WidgetTree;
+    use teksilo_tokens::{Orientation, TargetDensity};
+
+    use crate::splitter::{PaneDescriptor, SPLITTER_GUTTER_THICKNESS, Splitter, SplitterModel};
+
+    #[derive(Debug)]
+    struct FixedLeaf(f32, f32);
+    impl Widget for FixedLeaf {
+        fn layout_response(&self, _p: SizeProposal, _c: &LayoutContext) -> LayoutResponse {
+            Size::new(self.0, self.1).into()
+        }
+    }
+
+    fn splitter_tree(density: TargetDensity) -> (WidgetTree, teksilo_core::styles::Theme) {
+        let theme = teksilo_core::presets::intui::light().with_density(density);
+        let avail = 400.0 - SPLITTER_GUTTER_THICKNESS;
+        let model = SplitterModel::from_panes(
+            vec![
+                PaneDescriptor::new()
+                    .size(avail * 0.5)
+                    .min_size(0.0)
+                    .stretch(0.0),
+                PaneDescriptor::new()
+                    .size(avail * 0.5)
+                    .min_size(0.0)
+                    .stretch(0.0),
+            ],
+            Orientation::Horizontal,
+        );
+        let mut tree = WidgetTree::new()
+            .with_theme(theme.clone())
+            .with_text_backend(Rc::new(std::cell::RefCell::new(
+                teksilo_canvas::MockTextBackend::new(),
+            )));
+        tree.add(
+            Splitter::new(model)
+                .pane(FixedLeaf(100.0, 40.0))
+                .pane(FixedLeaf(100.0, 40.0)),
+        );
+        tree.layout(SizeProposal::exact(400.0, 200.0));
+        (tree, theme)
+    }
+
+    /// The correction this package was told not to undo: the divider is drawn
+    /// with **no** pointer anywhere near it, so touch is owed a grab and not a
+    /// reveal. Asserted against the rendered frame rather than against the
+    /// source, so a future refactor that moves the fill behind a hover check
+    /// fails here.
+    #[test]
+    fn the_resting_line_is_painted_with_no_interaction_at_all() {
+        let (mut tree, theme) = splitter_tree(TargetDensity::Compact);
+        let frame = tree.render();
+        let border = theme.colors.border;
+        let painted = frame.decorations.iter().any(|d| {
+            let [x, _y, w, h] = d.rect;
+            // The gutter's own hairline: one logical pixel wide, tall, and
+            // sitting at the divider between the two 197 dp panes.
+            (w - super::SPLITTER_DIVIDER_LINE_THICKNESS).abs() < 0.01
+                && h > 100.0
+                && x > 190.0
+                && x < 210.0
+                && (d.color[0] - border.r()).abs() < 0.001
+                && (d.color[1] - border.g()).abs() < 0.001
+                && (d.color[2] - border.b()).abs() < 0.001
+                && d.color[3] > 0.0
+        });
+        assert!(
+            painted,
+            "the resting divider must be painted with nothing hovering it"
+        );
+    }
+
+    /// …and it stays exactly one hairline at every density: the divider is a
+    /// decoration, so the density ladder never grows it. What grows is the
+    /// hit band, which paints nothing.
+    #[test]
+    fn the_resting_line_is_a_hairline_at_every_density() {
+        for density in [
+            TargetDensity::Compact,
+            TargetDensity::Comfortable,
+            TargetDensity::Touch,
+        ] {
+            let recipe = super::SplitterRecipe::for_tokens(
+                &teksilo_tokens::InputTokens::for_density(density),
+            );
+            assert_eq!(
+                recipe.divider_line_thickness,
+                super::SPLITTER_DIVIDER_LINE_THICKNESS,
+                "{density:?}"
+            );
+        }
     }
 }

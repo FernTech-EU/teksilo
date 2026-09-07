@@ -16,12 +16,32 @@
 //! container's main-axis leading edge). For RTL horizontal splits the
 //! coordinate is mirrored from the trailing edge, so the same formulas
 //! work in both directions (model index 0 is always the leading pane).
+//!
+//! ## Reaching a 6 dp gutter with a finger
+//!
+//! The divider's **paint is untouched at every density**: the gutter stays
+//! [`SPLITTER_GUTTER_THICKNESS`](super::SPLITTER_GUTTER_THICKNESS) dp wide and
+//! the resting line the style draws inside it is painted unconditionally, so
+//! there is no touch *reveal* to owe — only a touch *grab*.
+//!
+//! The grab is [`Widget::hit_outset`]: for a direct pointer the handle is
+//! offered the press against bounds inflated across the thickness axis to the
+//! density's target size (24 dp Compact, 44 dp Touch), and the arena's outset
+//! pre-pass runs *before* the ordinary reverse-sibling walk, so the widened
+//! gutter wins over the two panes it lies between instead of losing to
+//! whichever is painted on top. For a precise pointer the outset is zero, so a
+//! mouse press resolves exactly where it always did.
+//!
+//! Nothing about that moves layout: the panes keep every pixel they had, the
+//! handle keeps its own bounds, and `place_children` is not consulted. The
+//! band is a hit-test-only inflation living between the pointer and the arena.
 
 use std::cell::Cell;
 use std::rc::Rc;
 use std::time::Duration;
 
-use teksilo_canvas::{Point, Rect, Size, SizeProposal};
+use teksilo_canvas::{EdgeInsets, Point, Rect, Size, SizeProposal};
+use teksilo_core::TouchAction;
 use teksilo_core::accessibility::AccessNodeBuilder;
 use teksilo_core::accesskit::{Action, Orientation as A11yOrientation, Role};
 use teksilo_core::binding::BindingLevel;
@@ -29,13 +49,14 @@ use teksilo_core::build_context::BuildContext;
 use teksilo_core::event::{EventResponse, Key, PointerButton, WidgetEvent};
 use teksilo_core::focus::FocusOrigin;
 use teksilo_core::signal::Signal;
+use teksilo_core::styles::density::dp;
 use teksilo_core::styles::{SharedSplitterStyle, SplitterStyleConfig};
 use teksilo_core::widget::{
     CursorIcon, EventContext, LayoutContext, LayoutResponse, Widget, WidgetPlacement,
 };
 use teksilo_core::widget_builder::HandlerSet;
 use teksilo_core::widget_id::WidgetId;
-use teksilo_tokens::{Easing, Orientation};
+use teksilo_tokens::{DragActivation, Easing, InputTokens, Orientation, PointerKind, TargetRole};
 
 use crate::common::range_nav::{self, RangeAxis, RangeKind, RangeMove};
 
@@ -47,6 +68,31 @@ use super::model::SplitterModel;
 const HOVER_DWELL_TOTAL: Duration = Duration::from_millis(400);
 /// Fade-out duration on hover-leave.
 const HOVER_FADE_OUT: Duration = Duration::from_millis(120);
+
+/// Per-side hit inflation that lifts a `visual`-thick grip to the density's
+/// target size, for a **direct** pointer only.
+///
+/// This is the one arithmetic the three window-chrome grips share (splitter
+/// gutter, dock resize handle, window-frame resize strip): the grip keeps its
+/// painted thickness, and the difference between that and
+/// [`TargetRole::Target`]'s floor is split evenly across the two sides of the
+/// thickness axis. 6 dp against a 24 dp Compact floor gives the 9 dp the touch
+/// design's constants table names; against Touch's 44 dp floor it gives 19 dp.
+///
+/// Routing a 6 dp *paint* dimension through [`dp`] would be the density-rule
+/// violation P20 recorded — a `Target` may only take the floor when its Compact
+/// value already clears 24 dp. Nothing is painted from this: the value is a
+/// hit-test outset, consumed by [`Widget::hit_outset`] and by nothing else, and
+/// the grip's own box is untouched at every density.
+///
+/// Zero for a precise pointer: a mouse hot-spot is exact and occludes nothing,
+/// so widening its targets would steal presses from the panes either side.
+fn grab_outset(visual: f32, kind: PointerKind, tokens: &InputTokens) -> f32 {
+    if !kind.is_direct() {
+        return 0.0;
+    }
+    ((dp(visual, TargetRole::Target, tokens) - visual) * 0.5).max(0.0)
+}
 
 /// Grouped construction args (so `Splitter` passes the resolved style /
 /// gutter / shared cells in one shot).
@@ -236,6 +282,17 @@ impl Widget for SplitterHandle {
         } else {
             CursorIcon::Default
         });
+        if enabled {
+            // The divider's drag *is* the interaction, so a contact on it must
+            // not be held back to see whether a pan develops: `NONE` forbids
+            // every default touch behaviour in this subtree and `Immediate`
+            // arms the drag at the slop rather than after a long press. Both
+            // are direct-pointer policy — a mouse consults neither, so the
+            // mouse drag below is byte-identical to what it was.
+            handlers = handlers
+                .touch_action(TouchAction::NONE)
+                .drag_activation(DragActivation::Immediate);
+        }
 
         // --- Pointer drag (anti-jump) + snap-to-collapse / restore ------
         {
@@ -269,6 +326,17 @@ impl Widget for SplitterHandle {
                         position, button, ..
                     } => {
                         if *button != PointerButton::Primary {
+                            return EventResponse::Ignored;
+                        }
+                        // One divider serves one contact. A second finger
+                        // landing on the gutter mid-resize is not a second
+                        // resize: it would re-capture the anti-jump offsets
+                        // from its own position and make the divider leap.
+                        // `MultiContact::First` governs the gesture arena, not
+                        // raw pointer dispatch, so the guard has to be here.
+                        // A mouse is always primary, so this never fires for
+                        // one.
+                        if !ctx.pointer().primary || is_dragging.get() {
                             return EventResponse::Ignored;
                         }
                         let sizes = layout_sizes.borrow().clone();
@@ -693,6 +761,32 @@ impl Widget for SplitterHandle {
         self.body_id.into_iter().collect()
     }
 
+    /// The grab band, across the thickness axis only.
+    ///
+    /// A horizontal splitter puts its panes side by side, so its divider is a
+    /// vertical bar and the axis it is thin on is the reading axis — hence
+    /// `leading`/`trailing`. A vertical splitter is the transpose. The band is
+    /// never applied along the bar's length: the handle already spans the whole
+    /// cross axis, and inflating it there would reach into whatever sits above
+    /// or below the splitter.
+    ///
+    /// Zero whenever the handle would refuse the press anyway — disabled, or
+    /// parked because a neighbouring pane is hidden — because a widened node
+    /// that then ignores the press is a hole punched in the panes behind it.
+    fn hit_outset(&self, kind: PointerKind, tokens: &InputTokens) -> EdgeInsets {
+        if !self.enabled || !self.active.get() {
+            return EdgeInsets::ZERO;
+        }
+        let out = grab_outset(self.gutter_thickness, kind, tokens);
+        if out <= 0.0 {
+            return EdgeInsets::ZERO;
+        }
+        match self.model.orientation() {
+            Orientation::Horizontal => EdgeInsets::new(0.0, out, 0.0, out),
+            Orientation::Vertical => EdgeInsets::new(out, 0.0, out, 0.0),
+        }
+    }
+
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         // A handle whose gutter is hidden (a neighbor is hidden) is removed
         // from the AT tree entirely — it reads as absent, like its gutter.
@@ -761,4 +855,287 @@ impl Widget for SplitterHandle {
 fn commit_resize(model: &SplitterModel, i: usize, new_i: f32, pair: f32) {
     let clamped = new_i.clamp(0.0, pair);
     model.set_pair_sizes(i, clamped, pair - clamped);
+}
+
+#[cfg(test)]
+mod grab_tests {
+    use teksilo_canvas::{Point, Size, SizeProposal};
+    use teksilo_core::event::PointerButton;
+    use teksilo_core::pointer::{
+        BackendDeviceKey, EventTime, PointerId, PointerIdAllocator, PointerInfo, PointerPhase,
+        PointerSample,
+    };
+    use teksilo_core::widget::{LayoutContext, LayoutResponse, Widget};
+    use teksilo_core::widget_tree::WidgetTree;
+    use teksilo_tokens::{Orientation, TargetDensity};
+
+    use crate::splitter::{PaneDescriptor, SPLITTER_GUTTER_THICKNESS, Splitter, SplitterModel};
+
+    #[derive(Debug)]
+    struct FixedLeaf(f32, f32);
+
+    impl Widget for FixedLeaf {
+        fn layout_response(&self, _proposal: SizeProposal, _ctx: &LayoutContext) -> LayoutResponse {
+            Size::new(self.0, self.1).into()
+        }
+    }
+
+    fn h_model(sizes: &[f32]) -> SplitterModel {
+        SplitterModel::from_panes(
+            sizes
+                .iter()
+                .map(|&s| PaneDescriptor::new().size(s).min_size(0.0).stretch(0.0))
+                .collect(),
+            Orientation::Horizontal,
+        )
+    }
+
+    /// A 400 × 200 two-pane horizontal splitter, panes 197 dp each with the
+    /// 6 dp gutter between them. Returns the tree and the root.
+    ///
+    /// The panes are **tappable**, which is load-bearing for every hit test
+    /// here: an inert pane lets the miss-only slop pass re-attribute a nearby
+    /// press to the divider all by itself, and a test over inert panes would
+    /// pass with `hit_outset` deleted. A pane that owns the press is the case
+    /// the outset exists for — it is the only mechanism that can *beat* a
+    /// competing target rather than merely fill a vacuum.
+    fn two_pane_with_tappable_panes(
+        density: TargetDensity,
+    ) -> (WidgetTree, teksilo_core::widget_id::WidgetId) {
+        use teksilo_core::widget_builder::WidgetBuilder;
+        let avail = 400.0 - SPLITTER_GUTTER_THICKNESS;
+        let mut tree = WidgetTree::new()
+            .with_theme(teksilo_core::presets::intui::light().with_density(density));
+        let root = tree.add(
+            Splitter::new(h_model(&[avail * 0.5, avail * 0.5]))
+                .pane(FixedLeaf(100.0, 40.0).on_tap(|_, _| {}))
+                .pane(FixedLeaf(100.0, 40.0).on_tap(|_, _| {})),
+        );
+        tree.layout(SizeProposal::exact(400.0, 200.0));
+        (tree, root)
+    }
+
+    fn two_pane() -> (WidgetTree, teksilo_core::widget_id::WidgetId) {
+        two_pane_with_tappable_panes(TargetDensity::Compact)
+    }
+
+    fn finger(raw: u64, primary: bool) -> PointerInfo {
+        let id: PointerId = PointerIdAllocator::global().begin(BackendDeviceKey::new(0x5031), raw);
+        let mut info = PointerInfo::touch(id, EventTime::ZERO);
+        info.primary = primary;
+        info
+    }
+
+    fn sample(pointer: PointerInfo, phase: PointerPhase, at: Point) -> PointerSample {
+        PointerSample {
+            pointer,
+            phase,
+            position: at,
+            button: None,
+            modifiers: teksilo_core::event::Modifiers::NONE,
+            coalesced: Vec::new(),
+        }
+    }
+
+    /// The mouse invariant: the widened band is direct-pointer-only, so a
+    /// press 9 dp clear of the 6 dp gutter still lands on the pane, exactly as
+    /// it did before the grab existed.
+    #[test]
+    fn a_mouse_press_beside_the_gutter_still_lands_on_the_pane() {
+        let (tree, root) = two_pane();
+        let handle = tree.child_widget(root, 1);
+        let pane1 = tree.child_widget(root, 2);
+        let gutter = tree.bounds(handle);
+        let mouse = PointerInfo::mouse(EventTime::ZERO);
+
+        let just_outside = Point::new(gutter.right() + 4.0, gutter.center().y);
+        let hit = tree.hit_test_for(just_outside, &mouse);
+        assert!(
+            hit == Some(pane1) || tree.is_descendant_of(hit.unwrap(), pane1),
+            "a mouse 4 dp past the gutter must reach the pane, got {hit:?}"
+        );
+        // And inside the gutter it still reaches the handle.
+        let inside = tree.hit_test_for(gutter.center(), &mouse);
+        assert!(
+            inside == Some(handle) || tree.is_descendant_of(inside.unwrap(), handle),
+            "a mouse inside the gutter must reach the handle, got {inside:?}"
+        );
+    }
+
+    /// A finger reaches the 6 dp gutter from inside the tappable pane painted
+    /// beside it — which is what "wins over the panes it overlaps" means.
+    ///
+    /// Probed at **Touch**, 14 dp out: the ring is 19 dp there while the
+    /// miss-only slop pass reaches at most its 8 dp radius, so only the outset
+    /// can answer, and the test fails if `hit_outset` is removed.
+    #[test]
+    fn a_finger_grabs_the_gutter_over_the_pane_beside_it() {
+        let (tree, root) = two_pane_with_tappable_panes(TargetDensity::Touch);
+        let handle = tree.child_widget(root, 1);
+        let pane1 = tree.child_widget(root, 2);
+        let gutter = tree.bounds(handle);
+        let contact = finger(1, true);
+
+        for at in [
+            Point::new(gutter.right() + 14.0, gutter.center().y),
+            Point::new(gutter.x - 14.0, gutter.center().y),
+        ] {
+            let hit = tree.hit_test_for(at, &contact);
+            assert!(
+                hit.is_some_and(|id| id == handle || tree.is_descendant_of(id, handle)),
+                "the widened gutter must beat the pane it overlaps at {at:?}, got {hit:?}"
+            );
+        }
+        assert!(
+            tree.bounds(pane1)
+                .contains(Point::new(gutter.right() + 14.0, gutter.center().y)),
+            "the probe must be inside the pane, or it proves nothing"
+        );
+        // Past the ring the pane takes it back.
+        let at = Point::new(gutter.right() + 30.0, gutter.center().y);
+        let hit = tree.hit_test_for(at, &contact).unwrap();
+        assert!(
+            hit == pane1 || tree.is_descendant_of(hit, pane1),
+            "30 dp away is outside the band, got {hit:?}"
+        );
+    }
+
+    /// Hit-only: the grab moves no layout. Every pane and the gutter itself
+    /// occupy the identical rectangles they would with the mechanism absent —
+    /// asserted against the arithmetic, not against a snapshot, so the test
+    /// still means something if the fixture changes.
+    #[test]
+    fn the_grab_moves_no_layout_at_any_density() {
+        for density in [
+            TargetDensity::Compact,
+            TargetDensity::Comfortable,
+            TargetDensity::Touch,
+        ] {
+            let avail = 400.0 - SPLITTER_GUTTER_THICKNESS;
+            let mut tree = WidgetTree::new()
+                .with_theme(teksilo_core::presets::intui::light().with_density(density));
+            let root = tree.add(
+                Splitter::new(h_model(&[avail * 0.5, avail * 0.5]))
+                    .pane(FixedLeaf(100.0, 40.0))
+                    .pane(FixedLeaf(100.0, 40.0)),
+            );
+            tree.layout(SizeProposal::exact(400.0, 200.0));
+
+            let gutter = tree.bounds(tree.child_widget(root, 1));
+            assert_eq!(
+                gutter.width, SPLITTER_GUTTER_THICKNESS,
+                "the gutter is painted 6 dp at {density:?}"
+            );
+            assert_eq!(tree.bounds(tree.child_widget(root, 0)).width, avail * 0.5);
+            assert_eq!(tree.bounds(tree.child_widget(root, 2)).width, avail * 0.5);
+        }
+    }
+
+    /// A mouse drag is byte-identical to what it was: the same press, the same
+    /// two moves, the same resulting pane sizes to the last float.
+    #[test]
+    fn a_mouse_drag_lands_the_divider_exactly_where_it_always_did() {
+        let (mut tree, root) = two_pane();
+        let handle = tree.child_widget(root, 1);
+        let start = tree.bounds(handle).center();
+        tree.pointer_down_button(start, PointerButton::Primary);
+        tree.pointer_move(Point::new(start.x + 60.0, start.y));
+        tree.pointer_up_button(Point::new(start.x + 60.0, start.y), PointerButton::Primary);
+        tree.layout(SizeProposal::exact(400.0, 200.0));
+
+        let avail = 400.0 - SPLITTER_GUTTER_THICKNESS;
+        let w0 = tree.bounds(tree.child_widget(root, 0)).width;
+        assert!(
+            (w0 - (avail * 0.5 + 60.0)).abs() < 0.01,
+            "pane 0 must land exactly 60 dp wider, got {w0}"
+        );
+    }
+
+    /// A second finger arriving mid-resize is refused.
+    ///
+    /// The failure this pins is not that the intruder drives the divider —
+    /// `owns_pointer` already stops its *moves* — but that its **press**
+    /// recaptures the anti-jump offset from wherever it landed. The first
+    /// finger's next move would then be measured against the intruder's
+    /// position, and the divider would leap by the distance between them.
+    #[test]
+    fn a_second_contact_during_a_resize_is_ignored() {
+        let avail = 400.0 - SPLITTER_GUTTER_THICKNESS;
+        let (mut tree, root) = two_pane();
+        let handle = tree.child_widget(root, 1);
+        let start = tree.bounds(handle).center();
+
+        let first = finger(11, true);
+        tree.dispatch_pointer(sample(first, PointerPhase::Down, start));
+        tree.dispatch_pointer(sample(
+            first,
+            PointerPhase::Move,
+            Point::new(start.x + 40.0, start.y),
+        ));
+        tree.layout(SizeProposal::exact(400.0, 200.0));
+
+        // A second contact lands on the gutter — inside its grab band, so it
+        // really does reach the handle — 15 dp off the divider's centre.
+        let second = finger(12, false);
+        let gutter = tree.bounds(handle);
+        let intruder = Point::new(gutter.center().x + 6.0, gutter.center().y + 15.0);
+        assert_eq!(
+            tree.hit_test_for(intruder, &second)
+                .map(|id| tree.is_descendant_of(id, handle) || id == handle),
+            Some(true),
+            "the intruder must actually reach the handle, or this proves nothing"
+        );
+        tree.dispatch_pointer(sample(second, PointerPhase::Down, intruder));
+
+        // The first finger keeps going. Its offsets must be the ones it
+        // captured at ITS press.
+        tree.dispatch_pointer(sample(
+            first,
+            PointerPhase::Move,
+            Point::new(start.x + 70.0, start.y),
+        ));
+        tree.layout(SizeProposal::exact(400.0, 200.0));
+
+        let w0 = tree.bounds(tree.child_widget(root, 0)).width;
+        assert!(
+            (w0 - (avail * 0.5 + 70.0)).abs() < 0.01,
+            "the divider must track the first finger, not the intruder: {w0}"
+        );
+    }
+
+    /// The arithmetic itself, so a density change is a one-line diff rather
+    /// than a re-derivation: 6 dp against a 24 dp Compact floor is 9 dp a side,
+    /// against Touch's 44 dp floor 19 dp, and zero for a precise pointer at
+    /// every density.
+    #[test]
+    fn the_band_is_the_target_floor_split_across_the_thickness() {
+        use teksilo_tokens::{InputTokens, PointerKind};
+
+        for (density, expected) in [
+            (TargetDensity::Compact, 9.0_f32),
+            (TargetDensity::Comfortable, 13.0),
+            (TargetDensity::Touch, 19.0),
+        ] {
+            let tokens = InputTokens::for_density(density);
+            assert_eq!(
+                super::grab_outset(SPLITTER_GUTTER_THICKNESS, PointerKind::Touch, &tokens),
+                expected,
+                "{density:?}"
+            );
+            assert_eq!(
+                super::grab_outset(SPLITTER_GUTTER_THICKNESS, PointerKind::Mouse, &tokens),
+                0.0,
+                "a precise pointer is never widened ({density:?})"
+            );
+        }
+    }
+
+    /// An already-generous grip earns nothing: `dp` is a floor, so a theme that
+    /// paints a 32 dp gutter gets no outset at Compact at all.
+    #[test]
+    fn a_gutter_that_already_clears_the_floor_is_not_widened() {
+        use teksilo_tokens::{InputTokens, PointerKind};
+        let tokens = InputTokens::for_density(TargetDensity::Compact);
+        assert_eq!(super::grab_outset(32.0, PointerKind::Touch, &tokens), 0.0);
+    }
 }

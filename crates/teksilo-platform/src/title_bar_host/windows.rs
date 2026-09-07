@@ -74,7 +74,7 @@ use teksilo_canvas::{Point, Rect, Size};
 use teksilo_core::signal::Signal;
 use teksilo_core::widget_id::WidgetId;
 use teksilo_core::{
-    ControlTarget, HitRegions, PlatformError, PlatformTitleBarHost, ResizeEdge,
+    ControlTarget, HitRegions, PlatformError, PlatformTitleBarHost, ResizeBorders, ResizeEdge,
     TitleBarHostCallbacks, TitleBarHoverEvent, TitleBarSyntheticEvent,
 };
 use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
@@ -90,6 +90,9 @@ use windows::Win32::UI::Controls::{HOVER_DEFAULT, MARGINS};
 use windows::Win32::UI::HiDpi::{GetDpiForWindow, GetSystemMetricsForDpi};
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     TME_LEAVE, TME_NONCLIENT, TRACKMOUSEEVENT, TrackMouseEvent,
+};
+use windows::Win32::UI::Input::{
+    GetCurrentInputMessageSource, IMDT_PEN, IMDT_TOUCH, INPUT_MESSAGE_SOURCE,
 };
 use windows::Win32::UI::Shell::{DefSubclassProc, RemoveWindowSubclass, SetWindowSubclass};
 use windows::Win32::UI::WindowsAndMessaging::{
@@ -296,7 +299,11 @@ impl PlatformTitleBarHost for WindowsHost {
         let scale = if dpi > 0.0 { dpi / 96.0 } else { 1.0 };
         let scaled = scale_hit_regions(regions, scale);
         if let Ok(mut shared) = self.data.hit_regions.lock() {
-            *shared = scaled;
+            // A band-only payload updates the resize band and leaves the
+            // aggregate chrome snapshot standing; anything else replaces the
+            // snapshot whole. See `super::merge_hit_regions` for why the two
+            // are told apart by shape rather than by a flag.
+            super::merge_hit_regions(&mut shared, scaled);
         }
     }
 
@@ -352,8 +359,32 @@ fn scale_hit_regions(src: &HitRegions, scale: f32) -> HitRegions {
         close_id: src.close_id,
         drag: src.drag.iter().copied().map(scale_rect).collect(),
         no_drag: src.no_drag.iter().copied().map(scale_rect).collect(),
-        resize_borders: src.resize_borders,
+        // The band is a length, not a rectangle, but it lives in the same
+        // coordinate system as the rest of the payload and the proc compares it
+        // against physical `WM_NCHITTEST` coordinates — so it scales too.
+        resize_borders: ResizeBorders {
+            top: src.resize_borders.top * scale,
+            right: src.resize_borders.right * scale,
+            bottom: src.resize_borders.bottom * scale,
+            left: src.resize_borders.left * scale,
+        },
     }
+}
+
+/// Whether the message being processed came from a finger or a stylus.
+///
+/// `GetCurrentInputMessageSource` is the documented way to ask, and it is valid
+/// exactly where this is called from — inside the handling of the message. When
+/// the call fails (no input message in flight, which happens when
+/// `WM_NCHITTEST` is sent by `DefWindowProc`'s own mouse tracking rather than
+/// by a real packet) the answer is "precise", so the fallback is the OS metric
+/// the window has always used.
+fn current_input_is_coarse() -> bool {
+    let mut source = INPUT_MESSAGE_SOURCE::default();
+    if unsafe { GetCurrentInputMessageSource(&mut source) }.is_err() {
+        return false;
+    }
+    source.deviceType == IMDT_TOUCH || source.deviceType == IMDT_PEN
 }
 
 /// The subclass procedure. Runs on the UI thread (Win32 marshals
@@ -570,22 +601,42 @@ fn handle_nchittest(hwnd: HWND, lparam: LPARAM, data: &SubclassData) -> LRESULT 
     let _ = unsafe { ScreenToClient(hwnd, &mut pt) };
 
     let dpi = unsafe { GetDpiForWindow(hwnd) };
-    let resize = unsafe {
+    let os_metric = unsafe {
         GetSystemMetricsForDpi(SM_CXPADDEDBORDER, dpi) + GetSystemMetricsForDpi(SM_CXFRAME, dpi)
     };
 
     let mut rect = RECT::default();
     let _ = unsafe { GetClientRect(hwnd, &mut rect) };
 
+    // One `try_lock` for the whole message: the band decides the edges and the
+    // rects decide everything after them, and taking the lock twice would let
+    // the two disagree. `try_lock` so a re-entered proc never deadlocks; on
+    // contention there are no published regions and no band, so the OS metric
+    // stands and the message falls through to `HTCLIENT` — one frame of
+    // non-client routing missed, which is invisible.
+    let regions = data.hit_regions.try_lock().ok();
+
+    // The band the widget layer says its resize strips will actually catch,
+    // once `Widget::hit_outset` has widened them for a coarse pointer. A mouse
+    // gets the OS metric untouched — see `super::resize_band`.
+    let band = super::resize_band(
+        os_metric as f32,
+        regions
+            .as_ref()
+            .map(|r| r.resize_borders)
+            .unwrap_or_default(),
+        current_input_is_coarse(),
+    );
+
     // Resize borders win first — these are the 8 outer edges.
     // When maximized, no resize borders (the OS won't allow resize
     // anyway).
     let zoomed = unsafe { IsZoomed(hwnd) }.as_bool();
     if !zoomed {
-        let on_top = pt.y < resize;
-        let on_bottom = pt.y >= rect.bottom - resize;
-        let on_left = pt.x < resize;
-        let on_right = pt.x >= rect.right - resize;
+        let on_top = (pt.y as f32) < band.top;
+        let on_bottom = (pt.y as f32) >= rect.bottom as f32 - band.bottom;
+        let on_left = (pt.x as f32) < band.left;
+        let on_right = (pt.x as f32) >= rect.right as f32 - band.right;
 
         let edge: Option<u32> = match (on_top, on_bottom, on_left, on_right) {
             (true, false, true, false) => Some(HTTOPLEFT),
@@ -603,11 +654,8 @@ fn handle_nchittest(hwnd: HWND, lparam: LPARAM, data: &SubclassData) -> LRESULT 
         }
     }
 
-    // Control-button rects + drag region. `try_lock` so a re-entered
-    // proc never deadlocks; on contention we fall through to
-    // `HTCLIENT` (the user might miss one frame of NC routing,
-    // which is invisible).
-    if let Ok(regions) = data.hit_regions.try_lock() {
+    // Control-button rects + drag region, from the snapshot taken above.
+    if let Some(regions) = regions {
         let pt_canvas = Point::new(pt.x as f32, pt.y as f32);
 
         // Holes win over EVERY published rect, buttons included: `HTCLIENT`
