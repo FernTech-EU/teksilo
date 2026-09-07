@@ -735,3 +735,181 @@ fn the_composite_hints_at_its_own_field() {
         "the hint has to be the field, not the container that cannot hold focus"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Touch: the clear affordance
+// ---------------------------------------------------------------------------
+
+/// The clear affordance is 16 dp of paint inside a field that takes presses of
+/// its own for the caret, so neither the miss-only slop pass (defeated by a
+/// bubble owner at distance zero) nor a bigger `MinSize` (pinned by the slot
+/// that reserves the row's space) can reach it. It earns its 24 dp from the
+/// pointer side: a finger 3 dp beside it still clears the field.
+#[test]
+fn a_finger_just_outside_the_clear_button_still_clears() {
+    use crate::button::press_test_support::{finger, touch};
+    use teksilo_canvas::Point;
+    use teksilo_core::pointer::PointerPhase;
+
+    let text = Signal::new("hello".to_string());
+    let row_taps = std::rc::Rc::new(std::cell::Cell::new(0_u32));
+    let (mut tree, field) = field_in_a_tappable_row(text.clone(), row_taps.clone());
+
+    let clear = clear_slot(&tree, field).expect("the clear slot is in the row");
+    assert!(
+        clear.width < 24.0,
+        "the slot is meant to stay at 16 dp, got {clear:?}"
+    );
+    // 3 dp above the affordance: inside the field's frame, outside the 16 dp
+    // slot, inside the 24 dp target the outset earns it.
+    let at = Point::new(clear.center().x, clear.y - 3.0);
+    let id = finger();
+    tree.dispatch_pointer(touch(id, PointerPhase::Down, at, 0));
+    tree.dispatch_pointer(touch(id, PointerPhase::Up, at, 30));
+    assert_eq!(
+        text.get(),
+        "",
+        "the clear affordance's outset did not take the press"
+    );
+    assert_eq!(row_taps.get(), 0, "and the row must not have taken it too");
+}
+
+/// …and a mouse there does not: an exact hot-spot 3 dp outside the affordance
+/// is a click in the text field, exactly as it was before the touch programme.
+#[test]
+fn a_mouse_just_outside_the_clear_button_does_not_clear() {
+    use teksilo_canvas::Point;
+    use teksilo_core::event::PointerButton;
+
+    let text = Signal::new("hello".to_string());
+    let row_taps = std::rc::Rc::new(std::cell::Cell::new(0_u32));
+    let (mut tree, field) = field_in_a_tappable_row(text.clone(), row_taps.clone());
+
+    let clear = clear_slot(&tree, field).expect("the clear slot is in the row");
+    let at = Point::new(clear.center().x, clear.y - 3.0);
+    tree.pointer_down_button(at, PointerButton::Primary);
+    tree.pointer_up_button(at, PointerButton::Primary);
+    assert_eq!(text.get(), "hello");
+    assert_eq!(row_taps.get(), 1, "the press belongs to the row");
+}
+
+/// An empty field's slot still reserves its room, so the row does not jump when
+/// the affordance appears — and it withdraws its outset, so an invisible
+/// affordance never swallows a press meant for the field.
+#[test]
+fn an_empty_fields_clear_slot_reserves_room_but_claims_nothing() {
+    use crate::button::press_test_support::{finger, touch};
+    use teksilo_canvas::Point;
+    use teksilo_core::pointer::PointerPhase;
+
+    let text = Signal::new(String::new());
+    let row_taps = std::rc::Rc::new(std::cell::Cell::new(0_u32));
+    let (mut tree, field) = field_in_a_tappable_row(text.clone(), row_taps.clone());
+    let clear = clear_slot(&tree, field).expect("the slot is still laid out");
+    assert!(clear.width > 0.0, "an empty field still reserves the slot");
+
+    let at = Point::new(clear.center().x, clear.y - 3.0);
+    let id = finger();
+    tree.dispatch_pointer(touch(id, PointerPhase::Down, at, 0));
+    tree.dispatch_pointer(touch(id, PointerPhase::Up, at, 30));
+    assert_eq!(text.get(), "", "nothing to clear, and nothing crashed");
+    // …and the withdrawn outset is what lets the press through: a widened slot
+    // that then refuses it would be a hole punched in the row behind it.
+    assert_eq!(
+        row_taps.get(),
+        1,
+        "the inactive slot kept the outset and swallowed the row's press",
+    );
+}
+
+/// The clear handler's own emptiness guard, pressed where it can be reached.
+///
+/// The slot keeps its 16 dp of room while the field is empty — that is what
+/// stops the row jumping when the affordance appears — and the node that
+/// reserves that room is the same node that carries `on_tap`. Only the glyph
+/// inside it goes dormant. So the handler *is* reachable on an empty field, by
+/// the obvious gesture of pressing where the clear button will be, and without
+/// the guard it answers by writing `String::new()` into the bound text signal.
+///
+/// The value does not change, so nothing on screen moves; what moves is the
+/// signal's observers. Every consumer of a `TextInput`'s text — a validation
+/// pass, a live search, a dirty flag on a settings page, the field's own
+/// external→internal effect — is told the text changed because a finger landed
+/// on a control that was showing nothing.
+///
+/// The neighbouring test presses 3 dp *above* the slot, which is the outset
+/// question, not this one: it never reaches the handler at all.
+#[test]
+fn pressing_an_empty_fields_clear_slot_notifies_nobody() {
+    use crate::button::press_test_support::{finger, touch};
+    use teksilo_core::pointer::PointerPhase;
+
+    let text = Signal::new(String::new());
+    let notifications = std::rc::Rc::new(std::cell::Cell::new(0_u32));
+    let counter = notifications.clone();
+    let _observer = text.observe(move |_| counter.set(counter.get() + 1));
+
+    let row_taps = std::rc::Rc::new(std::cell::Cell::new(0_u32));
+    let (mut tree, field) = field_in_a_tappable_row(text.clone(), row_taps.clone());
+    let clear = clear_slot(&tree, field).expect("the slot is still laid out");
+
+    // Dead centre of the slot — not beside it. Nothing here is a near miss.
+    let at = clear.center();
+    let id = finger();
+    tree.dispatch_pointer(touch(id, PointerPhase::Down, at, 0));
+    tree.dispatch_pointer(touch(id, PointerPhase::Up, at, 30));
+
+    assert_eq!(text.get(), "", "there was nothing to clear");
+    assert_eq!(
+        notifications.get(),
+        0,
+        "pressing the empty field's clear slot wrote to the text signal",
+    );
+}
+
+/// A field with a clear affordance, inside a settings row that takes taps of
+/// its own — the shape the census names as the reason the miss-only slop pass
+/// cannot serve the affordance.
+///
+/// The row is what makes these two tests discriminate. The slop pass only wins
+/// when the exact hit's bubble path carries no eligible handler, or when its
+/// candidate is strictly closer than that path's owner; the row owns the press
+/// at distance zero, and a near-miss does not beat zero. So the only mechanism
+/// left that can carry a press beside the affordance onto it is the slot's own
+/// `HitTarget::hit_outset` — with a bare field, the slop pass served the press
+/// either way and the test could not tell the two apart.
+fn field_in_a_tappable_row(
+    text: Signal<String>,
+    row_taps: std::rc::Rc<std::cell::Cell<u32>>,
+) -> (WidgetTree, teksilo_core::widget_id::WidgetId) {
+    use teksilo_core::widget_builder::WidgetBuilder;
+
+    let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+    let field = tree.add(TextInput::new(text).show_clear_button(true));
+    let row = tree.add(
+        crate::primitives::HStack::new()
+            .add_child(field)
+            .on_tap(move |_e, _c| row_taps.set(row_taps.get() + 1)),
+    );
+    let _ = row;
+    tree.layout(SizeProposal::exact(240.0, 40.0));
+    (tree, field)
+}
+
+/// The `HitTarget` slot that carries the clear affordance, by type.
+fn clear_slot(
+    tree: &WidgetTree,
+    field: teksilo_core::widget_id::WidgetId,
+) -> Option<teksilo_canvas::Rect> {
+    let mut stack = vec![field];
+    while let Some(id) = stack.pop() {
+        if tree
+            .widget_type_name(id)
+            .is_some_and(|n| n.contains("HitTarget"))
+        {
+            return Some(tree.bounds(id));
+        }
+        stack.extend(tree.children(id).iter().copied());
+    }
+    None
+}

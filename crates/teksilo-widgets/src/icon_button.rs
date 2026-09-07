@@ -76,6 +76,14 @@
 //!         .child(IconButton::browse().embedded().on_activate_fn(|ctx| ctx.send_intent(Intent::new("app.browse"))))
 //!     );
 //! ```
+//!
+//! ## Touch and pen
+//!
+//! Shares [`build_interaction_handlers`](crate::button) with `Button`, so it
+//! gets the framework press, release activation and slide-off abort with it —
+//! see that module's "Touch and pen" section. Every shipped size clears the
+//! 24 dp target floor at Compact (`Compact` and `Default` are both 24 dp) and
+//! follows the density ladder above it.
 
 use std::rc::Rc;
 use std::sync::OnceLock;
@@ -783,8 +791,12 @@ impl teksilo_core::widget::Widget for IconButton {
         // The focus walker skips disabled subtrees on its own; the static
         // `self.focusable` flag is the caller's intent (e.g. a
         // close-button-inside-tab wants `false`).
-        let handler_set =
-            crate::button::build_interaction_handlers(interaction, on_activate, self.focusable);
+        let handler_set = crate::button::build_interaction_handlers(
+            ctx,
+            interaction,
+            on_activate,
+            self.focusable,
+        );
 
         ctx.apply_self_handlers(handler_set);
 

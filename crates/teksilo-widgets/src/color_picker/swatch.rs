@@ -283,6 +283,29 @@ impl Widget for ColorSwatch {
         Size::new(size, size).into()
     }
 
+    /// A 22 dp swatch is 2 dp under the conformance floor, and a swatch grid is
+    /// a wall of them: the neighbours are targets too, so the miss-only slop
+    /// pass — which only re-attributes to a candidate strictly closer than the
+    /// bubble owner — has nothing to work with. The outset makes the shortfall
+    /// up inside the exact pass, and where two neighbours' rings meet in the
+    /// gap between them the arena resolves by distance, so the boundary sits
+    /// halfway.
+    ///
+    /// Zero for a swatch that takes no press: a widened node that then ignores
+    /// it is a hole punched in the grid behind it.
+    fn hit_outset(
+        &self,
+        kind: teksilo_tokens::PointerKind,
+        tokens: &teksilo_tokens::InputTokens,
+    ) -> teksilo_canvas::EdgeInsets {
+        use crate::styles::recipe_color_picker_style as cp;
+        if self.on_activate.is_none() || !self.enabled.get() {
+            return teksilo_canvas::EdgeInsets::ZERO;
+        }
+        let size = self.size.unwrap_or(cp::SWATCH_SIZE);
+        crate::button::target_outset(Size::new(size, size), kind, tokens)
+    }
+
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
         use crate::styles::recipe_color_picker_style as cp;
         let radius = CornerRadius::uniform(self.corner_radius.unwrap_or(cp::SWATCH_CORNER_RADIUS));

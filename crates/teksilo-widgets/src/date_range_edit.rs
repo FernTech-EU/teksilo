@@ -57,6 +57,10 @@
 //!     .first_day_of_week(Weekday::Monday)
 //!     .on_value_changed(|r, _ctx| println!("{r:?}"));
 //! ```
+//!
+//! ## Touch and pen
+//!
+//! See [`DateEdit`](crate::date_edit)'s "Touch and pen" section.
 
 #[cfg(test)]
 mod tests;

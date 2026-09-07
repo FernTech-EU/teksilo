@@ -35,6 +35,7 @@ use teksilo_core::accesskit::Role;
 use teksilo_core::build_context::BuildContext;
 use teksilo_core::event::PointerButton;
 use teksilo_core::gesture::DragPhase;
+use teksilo_core::pointer::touch_action::TouchAction;
 use teksilo_core::signal::Signal;
 use teksilo_core::widget::{
     CursorIcon, LayoutContext, LayoutResponse, PaintContext, Widget, WidgetPlacement,
@@ -137,7 +138,16 @@ impl Widget for HsvCanvas {
 
         let mut handlers = HandlerSet::new()
             .focusable(false)
-            .cursor(CursorIcon::Crosshair);
+            .cursor(CursorIcon::Crosshair)
+            // A continuous manipulator: the value it produces IS the press
+            // position, so no default touch behaviour may be run on it. `NONE`
+            // freezes the hit path's touch action at the press
+            // (`docs/touch-and-pen.md` §7.3); what it forbids, with a test on
+            // it, is a two-contact pinch started on this control reaching the
+            // surface underneath. The press capture the drag takes is what
+            // separately keeps a scroller the picker sits in from taking the
+            // gesture away.
+            .touch_action(TouchAction::NONE);
 
         {
             let dragging = dragging.clone();

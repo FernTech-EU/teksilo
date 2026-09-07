@@ -18,6 +18,20 @@
 //! `CheckboxStyle`; three visual variants are available via
 //! [`CheckboxVariant`].
 //!
+//! ## Touch and pen
+//!
+//! The pressed state comes from the framework press
+//! (`docs/touch-and-pen.md` §7.1) rather than from this widget: sliding off
+//! abandons it, sliding back on restores it, and a pan claimant winning the
+//! press clears it with no release. Before the controls sweep `is_pressed`
+//! could only ever be set by a keyboard `Space`, so a mouse-down showed no
+//! pressed chrome at all — themes that paint one (IntUI's checked box, Material
+//! 3's state layer) now get it from every pointer.
+//!
+//! The 24 dp `MinSize` around the 19 dp glyph already meets the WCAG 2.2
+//! SC 2.5.8 floor at Compact and follows the density ladder above it, so no
+//! hit-widening mechanism is involved.
+//!
 //! ## Accessibility
 //!
 //! Announces as `Role::CheckBox`. A label is required in debug builds
@@ -34,6 +48,7 @@
 //!     .label(lit!("Accept terms and conditions"));
 //! ```
 
+use std::cell::Cell;
 use std::rc::Rc;
 
 use teksilo_canvas::{Rect, Size, SizeProposal};
@@ -437,19 +452,40 @@ impl Widget for Checkbox {
         let int_key = interaction.clone();
         let int_focus = interaction.clone();
 
+        // The pointer press is the framework's, not this control's own: the
+        // router knows about a press that slid off its target, one that slid
+        // back on, and one a pan claimant took away with no release to reset
+        // from — none of which a `PointerDown` / `PointerUp` pair here can
+        // see. `docs/touch-and-pen.md` §7.1. `pointer_over` carries the hover
+        // truth across the press, so a press that ends without an activation
+        // rests on the right state.
+        let pointer_over = Rc::new(Cell::new(false));
+        crate::button::bind_press_interaction(ctx, interaction.clone(), pointer_over.clone());
+
         // Framework gates events on `arena.is_enabled(self_id)`, so
         // these closures only run when the widget is effectively
         // enabled. The old `if !enabled { return; }` snapshot guards
         // are gone.
         let handler_set = HandlerSet::new()
             .on_tap({
-                move |_pos, _ctx: &mut EventContext| {
+                let hovering = pointer_over.clone();
+                move |_pos, ctx: &mut EventContext| {
                     kind_tap.toggle();
-                    int_tap.set(InteractionState::Hovered);
+                    // A mouse or a pen is still over the control after the
+                    // release; a finger is gone and sends no hover-leave to
+                    // correct a `Hovered` state with.
+                    int_tap.set(if ctx.pointer_kind().hovers() {
+                        hovering.set(true);
+                        InteractionState::Hovered
+                    } else {
+                        InteractionState::Idle
+                    });
                 }
             })
             .on_hover({
+                let hovering = pointer_over.clone();
                 move |entered: bool, _ctx: &mut EventContext| {
+                    hovering.set(entered);
                     if entered {
                         int_hover.set(InteractionState::Hovered);
                     } else {
@@ -815,6 +851,162 @@ mod tests {
         assert!(
             info.actions()
                 .contains(&teksilo_core::accesskit::Action::Click)
+        );
+    }
+
+    // -----------------------------------------------------------------
+    // The framework press (docs/touch-and-pen.md §7.1)
+    // -----------------------------------------------------------------
+
+    /// A `CheckboxStyle` that hands the press and hover signals its chrome
+    /// reads back to the test.
+    struct PressProbe(std::rc::Rc<std::cell::RefCell<Option<(Signal<bool>, Signal<bool>)>>>);
+
+    impl teksilo_core::styles::CheckboxStyle for PressProbe {
+        fn make_body(
+            &self,
+            cfg: &teksilo_core::styles::CheckboxStyleConfig,
+            ctx: &mut BuildContext,
+        ) -> WidgetId {
+            *self.0.borrow_mut() = Some((cfg.is_pressed.clone(), cfg.is_hovered.clone()));
+            ctx.add(crate::primitives::FixedSize::new().width(19.0).height(19.0))
+        }
+    }
+
+    #[allow(clippy::type_complexity)]
+    fn probed_checkbox_with_hover() -> (
+        WidgetTree,
+        WidgetId,
+        Signal<bool>,
+        Signal<bool>,
+        Signal<bool>,
+    ) {
+        let probe: std::rc::Rc<std::cell::RefCell<Option<(Signal<bool>, Signal<bool>)>>> =
+            std::rc::Rc::new(std::cell::RefCell::new(None));
+        let checked = Signal::new(false);
+        let mut theme = teksilo_core::presets::intui::light();
+        theme.style_slots.checkbox = Some(std::rc::Rc::new(PressProbe(probe.clone())));
+        let mut tree = WidgetTree::new().with_theme(theme);
+        let cb = tree.add(Checkbox::new(checked.clone()).label(lit!("Ready")));
+        tree.layout(SizeProposal::exact(200.0, 60.0));
+        let (pressed, hovered) = probe.borrow().clone().expect("style ran");
+        (tree, cb, pressed, hovered, checked)
+    }
+
+    fn probed_checkbox() -> (WidgetTree, WidgetId, Signal<bool>, Signal<bool>) {
+        let (tree, cb, pressed, _hovered, checked) = probed_checkbox_with_hover();
+        (tree, cb, pressed, checked)
+    }
+
+    /// A mouse press now lights the checkbox's own `is_pressed` — the signal
+    /// the style has always been handed, and which until the controls sweep
+    /// only a keyboard `Space` could ever set. The toggle still lands on the
+    /// release.
+    #[test]
+    fn a_mouse_press_lights_the_pressed_state_and_the_release_toggles() {
+        let (mut tree, cb, pressed, checked) = probed_checkbox();
+        let at = tree.bounds(cb).center();
+        tree.pointer_move(at);
+        tree.pointer_down_button(at, teksilo_core::event::PointerButton::Primary);
+        assert!(pressed.get(), "the press shows");
+        assert!(!checked.get(), "and has not toggled anything yet");
+        tree.pointer_up_button(at, teksilo_core::event::PointerButton::Primary);
+        assert!(!pressed.get());
+        assert!(checked.get(), "the release toggles");
+    }
+
+    /// A finger: the press lights, the release toggles, and — with no hover to
+    /// clear it — the control rests idle rather than stuck in the hover tint a
+    /// finger never earned.
+    #[test]
+    fn a_touch_tap_toggles_on_release() {
+        use crate::button::press_test_support::{finger, touch};
+        use teksilo_core::pointer::PointerPhase;
+
+        let (mut tree, cb, pressed, checked) = probed_checkbox();
+        let at = tree.bounds(cb).center();
+        let id = finger();
+        tree.dispatch_pointer(touch(id, PointerPhase::Down, at, 0));
+        assert!(pressed.get());
+        assert!(!checked.get());
+        tree.dispatch_pointer(touch(id, PointerPhase::Up, at, 30));
+        assert!(checked.get());
+        assert!(!pressed.get());
+    }
+
+    /// Sliding off abandons the press visual and the toggle; sliding back on
+    /// restores the visual (WCAG 2.2 SC 2.5.2's abort gesture, reversible).
+    #[test]
+    fn a_touch_press_disarms_on_slide_off_and_re_arms_on_re_entry() {
+        use crate::button::press_test_support::{finger, touch};
+        use teksilo_core::pointer::PointerPhase;
+
+        let (mut tree, cb, pressed, checked) = probed_checkbox();
+        let bounds = tree.bounds(cb);
+        let at = bounds.center();
+        let away = teksilo_canvas::Point::new(at.x, bounds.y + bounds.height + 80.0);
+        let id = finger();
+        tree.dispatch_pointer(touch(id, PointerPhase::Down, at, 0));
+        tree.dispatch_pointer(touch(id, PointerPhase::Move, away, 20));
+        assert!(!pressed.get(), "the press left its target");
+        tree.dispatch_pointer(touch(id, PointerPhase::Move, at, 40));
+        assert!(pressed.get(), "and came back");
+        tree.dispatch_pointer(touch(id, PointerPhase::Up, away, 60));
+        assert!(!checked.get(), "a release off the control toggles nothing");
+    }
+
+    /// Where the checkbox comes to rest after a toggle — the `on_tap` copy of
+    /// the button family's resting-state rule, which lives in this file rather
+    /// than being shared, and so has to be pinned here too.
+    ///
+    /// The pressed transitions are shared (`button::bind_press_interaction`);
+    /// this one is not. A mouse is still over the box when it lifts, so the
+    /// box rests hovered; a finger is gone and sends no hover-leave, so it
+    /// rests idle. Asserted through `CheckboxStyleConfig::is_hovered`, the
+    /// signal the chrome tints from.
+    #[test]
+    fn a_mouse_toggle_rests_hovered_and_a_finger_toggle_rests_idle() {
+        use crate::button::press_test_support::touch_tap;
+
+        let (mut tree, cb, pressed, hovered, checked) = probed_checkbox_with_hover();
+        let at = tree.bounds(cb).center();
+        tree.pointer_move(at);
+        assert!(hovered.get(), "the pointer arrived over the box");
+        tree.pointer_down_button(at, teksilo_core::event::PointerButton::Primary);
+        tree.pointer_up_button(at, teksilo_core::event::PointerButton::Primary);
+        assert!(checked.get(), "the release toggled");
+        assert!(!pressed.get());
+        assert!(
+            hovered.get(),
+            "a mouse that clicked the box is still on it, so it rests hovered",
+        );
+
+        let (mut tree, cb, pressed, hovered, checked) = probed_checkbox_with_hover();
+        let at = tree.bounds(cb).center();
+        touch_tap(&mut tree, at);
+        assert!(checked.get(), "the contact toggled on its release");
+        assert!(!pressed.get());
+        assert!(
+            !hovered.get(),
+            "a finger leaves nothing behind, so the box must rest idle",
+        );
+    }
+
+    /// The hit area is the 24 dp box the recipe reserves around a 19 dp glyph,
+    /// so the checkbox needs no widening mechanism at all.
+    #[test]
+    fn the_checkbox_hit_box_clears_the_conformance_floor_at_compact() {
+        let theme = teksilo_core::presets::intui::light();
+        let floor = theme.input.min_target_conformance;
+        let mut tree = WidgetTree::new().with_theme(theme);
+        let cb = tree.add(Checkbox::new(Signal::new(false)));
+        tree.layout(SizeProposal::exact(200.0, 60.0));
+        let b = tree.bounds(cb);
+        assert!(
+            b.width >= floor && b.height >= floor,
+            "a bare Compact Checkbox measured {}x{}",
+            b.width,
+            b.height,
         );
     }
 }

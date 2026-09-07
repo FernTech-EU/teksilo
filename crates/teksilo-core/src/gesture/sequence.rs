@@ -195,6 +195,26 @@ impl TapBoundary {
     /// A `Bounds` boundary with no bounds to test against — the pressed node
     /// went away — falls back to the radius, so the answer is never "the press
     /// can travel anywhere".
+    ///
+    /// So does a `Bounds` boundary whose press **began outside the node**. A
+    /// press can be accepted for a node it did not land in: a control that
+    /// declares a [`Widget::hit_outset`] is offered the ring around it (a 12 dp
+    /// twist arrow lifted to a 24 dp target, a 16 dp clear affordance inside a
+    /// text field), and the miss-only slop pass re-attributes a near miss the
+    /// same way. For such a press the node's rectangle never contained the
+    /// origin, so testing `position` against it alone would report the press as
+    /// already-left at the instant it arrived — and the tap could never
+    /// complete, silently making the whole outset mechanism useless to every
+    /// coarse-pointer tap. The rule for that case is the pointer's own radius
+    /// around where it landed, unioned with the node's bounds so sliding *onto*
+    /// the control keeps the press alive. Android's `ViewGroup` takes the same
+    /// shape from the other direction (`pointInView(x, y, mTouchSlop)` — the
+    /// view's rect inflated by touch slop).
+    ///
+    /// A press that began inside the node is untouched: the rectangle is the
+    /// boundary, exactly as before.
+    ///
+    /// [`Widget::hit_outset`]: crate::widget::Widget::hit_outset
     pub fn left(
         &self,
         origin: Point,
@@ -205,7 +225,10 @@ impl TapBoundary {
         match self {
             Self::Radius(radius) => super::distance(origin, position) > *radius,
             Self::Bounds => match bounds {
-                Some(rect) => !rect.contains(position),
+                Some(rect) if rect.contains(origin) => !rect.contains(position),
+                Some(rect) => {
+                    !rect.contains(position) && super::distance(origin, position) > profile.tap_slop
+                }
                 None => super::distance(origin, position) > profile.tap_slop,
             },
         }
@@ -946,5 +969,115 @@ mod tests {
             None,
             touch_profile,
         ));
+    }
+
+    /// A press accepted through a `Widget::hit_outset` begins outside the node
+    /// it was accepted for, so the node's rectangle cannot be its boundary:
+    /// with `Bounds` taken literally the press is "already gone" on arrival and
+    /// the tap can never complete. It falls back to the pointer's own radius
+    /// around where it landed, and sliding onto the control keeps it alive.
+    #[test]
+    fn a_press_that_began_outside_the_node_is_bounded_by_its_own_radius() {
+        let tokens = tokens();
+        let touch_profile = tokens.profile(PointerKind::Touch);
+        let rect = teksilo_canvas::Rect::new(0.0, 0.0, 12.0, 12.0);
+        // Landed 4 dp past the trailing edge — inside the outset ring the
+        // arena offered it, outside the rectangle.
+        let origin = Point::new(16.0, 6.0);
+        assert!(
+            !TapBoundary::Bounds.left(origin, origin, Some(rect), touch_profile),
+            "a press cannot have left the boundary on the sample that opened it",
+        );
+        assert!(
+            !TapBoundary::Bounds.left(origin, Point::new(6.0, 6.0), Some(rect), touch_profile),
+            "sliding onto the control keeps the press",
+        );
+        assert!(
+            TapBoundary::Bounds.left(
+                origin,
+                Point::new(16.0 + touch_profile.tap_slop + 1.0, 6.0),
+                Some(rect),
+                touch_profile,
+            ),
+            "and past the radius it is gone, so the abort gesture still works",
+        );
+    }
+
+    /// The union term, on its own.
+    ///
+    /// The radius half of the outside-origin rule is a *travel* allowance, and
+    /// on a small control it runs out before the finger has finished arriving:
+    /// a contact that lands in the outset ring of a wide control and then
+    /// slides well past `tap_slop` **onto** the control is further from its
+    /// origin than the radius permits and squarely inside the rectangle. Only
+    /// the union with the node's bounds keeps that press alive; with the
+    /// `!rect.contains(position)` term gone, the radius alone kills a press
+    /// that is sitting on the middle of the thing it is pressing.
+    #[test]
+    fn sliding_onto_the_control_keeps_a_press_the_radius_alone_would_lose() {
+        let tokens = tokens();
+        let touch_profile = tokens.profile(PointerKind::Touch);
+        let rect = teksilo_canvas::Rect::new(0.0, 0.0, 100.0, 20.0);
+        // 4 dp past the trailing edge — inside the outset ring, outside the rect.
+        let origin = Point::new(104.0, 10.0);
+        // 24 dp of travel, against a Touch `tap_slop` of 18: past the radius,
+        // and 20 dp inside the control.
+        let onto = Point::new(80.0, 10.0);
+        assert!(
+            super::super::distance(origin, onto) > touch_profile.tap_slop,
+            "the probe is only discriminating while the travel exceeds tap_slop",
+        );
+        assert!(rect.contains(onto), "…and lands inside the control");
+        assert!(
+            !TapBoundary::Bounds.left(origin, onto, Some(rect), touch_profile),
+            "a finger resting on the control it pressed has not left it",
+        );
+    }
+
+    /// Which rule applies is decided by the **origin**, not by where the
+    /// pointer is now.
+    ///
+    /// The two questions agree on most samples, which is why the distinction
+    /// has to be pinned on the one geometry where they cannot: a press that
+    /// began *inside* the node and has moved a short way outside it. The rule
+    /// for that press is the rectangle — it left the moment it crossed the
+    /// edge, however little it travelled — while a press that began outside is
+    /// allowed the pointer's radius around where it landed, so with the same
+    /// `position` it has not left at all. Reading `position` instead of
+    /// `origin` collapses both onto the second answer and silently hands every
+    /// coarse press that starts inside a control a `tap_slop` grace band
+    /// outside it, which is exactly the slop `Bounds` exists to replace.
+    #[test]
+    fn the_boundary_rule_is_chosen_by_where_the_press_began() {
+        let tokens = tokens();
+        let touch_profile = tokens.profile(PointerKind::Touch);
+        let rect = teksilo_canvas::Rect::new(0.0, 0.0, 100.0, 20.0);
+        // One sample, 4 dp past the trailing edge, reached from two origins —
+        // both within `tap_slop` of it, so the radius rule cannot fail either.
+        let position = Point::new(104.0, 10.0);
+        let from_inside = Point::new(96.0, 10.0);
+        let from_outside = Point::new(108.0, 10.0);
+        assert!(rect.contains(from_inside), "the first press began inside");
+        assert!(
+            !rect.contains(from_outside) && !rect.contains(position),
+            "the second began outside, and neither sample is in the rect",
+        );
+        for origin in [from_inside, from_outside] {
+            assert!(
+                super::super::distance(origin, position) < touch_profile.tap_slop,
+                "the probe only discriminates while the travel is inside tap_slop",
+            );
+        }
+
+        assert!(
+            TapBoundary::Bounds.left(from_inside, position, Some(rect), touch_profile),
+            "a press that began inside the node is bounded by the node: crossing \
+             the edge ends it, with no radius grace outside",
+        );
+        assert!(
+            !TapBoundary::Bounds.left(from_outside, position, Some(rect), touch_profile),
+            "a press that began outside is bounded by its own radius, and this \
+             one has barely moved",
+        );
     }
 }

@@ -189,6 +189,8 @@ impl Widget for SliderBody {
         let enabled = !self.is_disabled.get();
         let t = self.value_normalized.get().clamp(0.0, 1.0);
 
+        let rtl = ctx.layout_direction == LayoutDirection::RightToLeft;
+
         let radius = CornerRadius::uniform(track_height * 0.5);
         let track_color = if enabled {
             colors.surface_sunken
@@ -211,24 +213,24 @@ impl Widget for SliderBody {
                     track_height,
                 );
                 let usable = track.width;
-                // The minimum sits at the *leading* edge, which is the right
-                // one in a right-to-left window — so the thumb travels the
-                // other way and the fill grows leftward from it. Read at paint
-                // time, so a locale flip needs no rebuild. `Slider`'s pointer
-                // mapping and arrow keys mirror against the same value, which
-                // is the only way the three can agree.
-                let rtl = ctx.layout_direction == LayoutDirection::RightToLeft;
-                let t_geometric = if rtl { 1.0 - t } else { t };
-                let thumb_pos = track.x + usable * t_geometric;
-                let fill = if rtl {
-                    Rect::new(
-                        thumb_pos,
-                        ty,
-                        (track.x + usable - thumb_pos).max(0.0),
-                        track_height,
-                    )
+                // A horizontal slider is a reading-order axis: its minimum sits
+                // at the leading edge, which is the RIGHT edge in an RTL UI.
+                // Mirroring here and in `Slider`'s own position→value map is
+                // one change made twice, and the two are pinned to each other
+                // by `Slider::target_regions`, which reports the thumb the same
+                // way. A vertical slider is unaffected — RTL is a horizontal
+                // convention.
+                let thumb_pos = if rtl {
+                    track.x + usable * (1.0 - t)
                 } else {
-                    Rect::new(track.x, ty, (thumb_pos - track.x).max(0.0), track_height)
+                    track.x + usable * t
+                };
+                let fill = if rtl {
+                    let fill_w = (track.right() - thumb_pos).max(0.0);
+                    Rect::new(thumb_pos, ty, fill_w, track_height)
+                } else {
+                    let fill_w = (thumb_pos - track.x).max(0.0);
+                    Rect::new(track.x, ty, fill_w, track_height)
                 };
                 (track, fill, thumb_pos, bounds.y + bounds.height * 0.5)
             }
@@ -278,6 +280,7 @@ impl Widget for SliderBody {
                 let tt = i as f32 / (n - 1) as f32;
                 match self.orientation {
                     SliderOrientation::Horizontal => {
+                        let tt = if rtl { 1.0 - tt } else { tt };
                         let tx = track_rect.x + track_rect.width * tt;
                         let ty = track_rect.y - tick_size - 2.0;
                         let r = Rect::new(tx - tick_size * 0.5, ty, tick_size, tick_size);

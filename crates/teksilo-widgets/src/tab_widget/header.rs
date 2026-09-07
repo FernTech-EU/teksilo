@@ -22,6 +22,18 @@
 //! - Focus ring: 2 dp `focus_ring` stroke painted around the visual
 //!   rect, and only on keyboard focus (pointer focus does not paint
 //!   the ring — IntelliJ / VS Code convention).
+//!
+//! ## Touch and pen
+//!
+//! No press-time actuation and no target shortfall: a tab activates from
+//! `on_tap` (so already on the release), `TabHeaderInteraction` has no pressed
+//! state to move onto the framework press, and the close affordance is an
+//! `IconButton` at `IconButtonSize::Compact` — 24 dp at Compact, and it
+//! inherits the framework press from the button family. What is **not** solved
+//! here is that the close button is revealed by hover only, so a finger cannot
+//! see it at all; that is row 5 of `docs/hover-affordance-census.md` and
+//! belongs to the hover-reveal package, which gives it `RevealPolicy::Always`
+//! at Touch density plus an assistive "Close" action.
 
 use std::cell::RefCell;
 use std::rc::Rc;

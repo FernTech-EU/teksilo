@@ -16,6 +16,20 @@
 //!   to the repeat closure — frame-tick effects have no way to
 //!   synthesise one, so value updates must go through signal
 //!   mutation only.
+//! - Owns the press for the whole hold (`capture_pointer` on the down). A
+//!   18 x 13 dp arrow is small enough that a finger routinely slides off it
+//!   before lifting, and the repeat has to stop when it does. Capture is also
+//!   what makes this node the cancel funnel's recipient: it is an *ancestor*
+//!   of its own body, so its `on_pointer_event` runs in the preview pass,
+//!   which never records it as the pointer's last acceptor.
+//!
+//!   There is no matching `release_pointer` on the up, because the release is
+//!   not this widget's to perform: the router clears the capture of the
+//!   pointer it is serving on **every** `PointerUp`, and the cancel funnel
+//!   does the same on a cancel. An explicit release here ran one line earlier
+//!   and changed nothing — with it deleted the whole spin-box suite, and the
+//!   workspace, stayed green, which is the definition of a line that only
+//!   looks load-bearing.
 //! - Visual `Pressed` state flashes while the pointer is down.
 //! - Not focusable: focus stays on the `TextInputField`, so arrow
 //!   keys and typing keep working while the user holds the
@@ -243,6 +257,9 @@ impl Widget for StepButton {
         let hovered_for_hover = hovered.clone();
         let frame_for_pointer = frame_req.clone();
         let wake_for_pointer = wake_at.clone();
+        let repeat_for_cancel = repeat_state.clone();
+        let int_cancel = interaction.clone();
+        let hovered_for_cancel = hovered.clone();
 
         let handlers = HandlerSet::new()
             .focusable(false)
@@ -258,6 +275,18 @@ impl Widget for StepButton {
                         // Fire once on press (Qt convention).
                         (on_tap_for_press)(ctx);
                         int_pointer.set(InteractionState::Pressed);
+                        // Own the press for the whole hold. Two things depend
+                        // on it and neither worked without it. A release that
+                        // lands anywhere but on this button — the finger slid
+                        // off before lifting — is routed here and disarms the
+                        // repeat; and the cancel funnel addresses the captor,
+                        // so `on_pointer_cancel` below is reachable at all.
+                        // (This node is an *ancestor* of its own body, so its
+                        // `on_pointer_event` runs in the preview pass, which
+                        // never records it as the pointer's last acceptor —
+                        // capture is the only thing that makes it the
+                        // recipient.)
+                        ctx.capture_pointer();
                         // Arm hold-to-repeat if configured.
                         if on_auto.is_some() {
                             let first_fire =
@@ -289,6 +318,19 @@ impl Widget for StepButton {
                     }
                     _ => EventResponse::Ignored,
                 }
+            })
+            .on_pointer_cancel(move |_pointer, _reason, _ctx| {
+                // Terminal: no `PointerUp` follows, so the arm that normally
+                // disarms the repeat never runs. A pan claimant winning the
+                // press — a finger that came to rest on a step button inside a
+                // scrolling form and then dragged — used to leave the button
+                // stepping for the rest of the session.
+                repeat_for_cancel.set(RepeatState::Idle);
+                int_cancel.set(if hovered_for_cancel.get() {
+                    InteractionState::Hovered
+                } else {
+                    InteractionState::Idle
+                });
             })
             .on_hover(move |entered, _ctx| {
                 hovered_for_hover.set(entered);
@@ -338,6 +380,27 @@ impl Widget for StepButton {
         }
     }
 
+    /// **No hit outset, and the reason is worth recording**, because it is the
+    /// one place in the controls sweep where none of the three targeting
+    /// mechanisms can reach.
+    ///
+    /// The step is 18 x 13 dp, well under the 24 dp floor. An outset never
+    /// escapes its parent (`Widget::hit_outset`), and this button's parent is
+    /// the spin box's trailing column, which is exactly 18 dp wide and exactly
+    /// two buttons tall — so an outset would have nowhere to grow into, and the
+    /// space it *would* claim vertically is the other step's. The miss-only
+    /// slop pass cannot serve it either: the enclosing field takes presses of
+    /// its own, so a point beside the button is at distance zero from an
+    /// eligible bubble owner. And `TouchTarget` cannot help while the two steps
+    /// are stacked inside the field's own height: two conforming targets need
+    /// 88 dp of column, which no density projection of the field produces.
+    ///
+    /// Reaching the floor here needs the *layout* to change — the desktop
+    /// stacked pair replaced by a side-by-side −/+ at coarse densities, which
+    /// is what Material does — and that is a design decision, not a targeting
+    /// one. Meanwhile the value is fully reachable by keyboard (Up/Down,
+    /// PageUp/PageDown) and by the `Increment` / `Decrement` assistive actions
+    /// the `SpinBox` advertises, so no function is lost; only the direct hit is.
     fn children(&self) -> Vec<WidgetId> {
         self.root_child_id.into_iter().collect()
     }

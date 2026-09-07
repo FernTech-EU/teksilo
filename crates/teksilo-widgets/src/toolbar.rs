@@ -61,6 +61,17 @@
 //!     .action(ToolbarAction::new(lit!("Undo"), undo_icon).priority(-1))
 //!     .item(ToolbarItem::flexible_space());
 //! ```
+//!
+//! ## Touch and pen
+//!
+//! Nothing to do here, and it is worth recording why: every command on the bar
+//! is an [`IconButton`] or a [`PopoverIconButton`], so each one inherits the
+//! framework press, release activation and slide-off abort from the button
+//! family, and each is already 24 dp at Compact
+//! (`IconButtonSize::Compact`/`Default`). The bar itself carries only roving
+//! keyboard navigation and takes no press of its own. The overflow chevron is
+//! gated on the layout-derived `is_overflowing` signal, not on hover, so it is
+//! reachable by a finger without any reveal policy.
 
 use std::cell::RefCell;
 use std::rc::Rc;

@@ -58,6 +58,10 @@
 //!     .seconds(SecondsMode::Hidden)
 //!     .on_value_changed(|dt, _ctx| println!("{dt:?}"));
 //! ```
+//!
+//! ## Touch and pen
+//!
+//! See [`DateEdit`](crate::date_edit)'s "Touch and pen" section.
 
 #[cfg(test)]
 mod tests;

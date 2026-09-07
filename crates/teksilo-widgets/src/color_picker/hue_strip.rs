@@ -27,6 +27,7 @@ use teksilo_core::build_context::BuildContext;
 use teksilo_core::event::{EventResponse, PointerButton, WidgetEvent};
 use teksilo_core::focus::FocusOrigin;
 use teksilo_core::gesture::DragPhase;
+use teksilo_core::pointer::touch_action::TouchAction;
 use teksilo_core::signal::Signal;
 use teksilo_core::widget::{
     CursorIcon, LayoutContext, LayoutResponse, PaintContext, Widget, WidgetPlacement,
@@ -177,7 +178,16 @@ impl Widget for HueStrip {
 
         let mut handlers = HandlerSet::new()
             .focusable(true)
-            .cursor(CursorIcon::Pointer);
+            .cursor(CursorIcon::Pointer)
+            // A continuous manipulator: the value it produces IS the press
+            // position, so no default touch behaviour may be run on it. `NONE`
+            // freezes the hit path's touch action at the press
+            // (`docs/touch-and-pen.md` §7.3); what it forbids, with a test on
+            // it, is a two-contact pinch started on this control reaching the
+            // surface underneath. The press capture the drag takes is what
+            // separately keeps a scroller the picker sits in from taking the
+            // gesture away.
+            .touch_action(TouchAction::NONE);
 
         {
             let dragging = dragging.clone();
@@ -367,6 +377,50 @@ impl Widget for HueStrip {
             Color::new(0.0, 0.0, 0.0, 0.5),
             1.0,
         );
+    }
+
+    /// A 14 dp strip is well under the 24 dp conformance floor across its short
+    /// axis, and it cannot grow: the picker's column geometry is built around
+    /// it, so widening the paint at Compact would move the whole panel. The
+    /// shortfall is made up between the pointer and the arena instead. The long
+    /// axis is already generous and takes nothing, which also keeps the two
+    /// strips from reaching into the controls above and below them.
+    fn hit_outset(
+        &self,
+        kind: teksilo_tokens::PointerKind,
+        tokens: &teksilo_tokens::InputTokens,
+    ) -> teksilo_canvas::EdgeInsets {
+        crate::button::target_outset(self.cached_bounds.get().size(), kind, tokens)
+    }
+
+    /// The strip paints two things on one canvas: the gradient it is, and the
+    /// thumb marking the chosen hue. The node is the target — a press
+    /// anywhere on it jumps the value — and the thumb is the grab affordance
+    /// the user aims at, which nothing else in the tree can see because it is
+    /// drawn rather than laid out. Derived exactly as `paint` derives it.
+    fn target_regions(&self, bounds: Rect) -> Vec<teksilo_core::partition::TargetRegion> {
+        use crate::styles::recipe_color_picker_style as cp;
+        use teksilo_core::partition::TargetRegion;
+
+        let t = (self.hue.get() / 360.0).clamp(0.0, 1.0);
+        let thumb = match self.orientation {
+            Orientation::Vertical => Rect::new(
+                bounds.x - 2.0,
+                bounds.y + bounds.height * t - cp::STRIP_THUMB_HEIGHT * 0.5,
+                bounds.width + 4.0,
+                cp::STRIP_THUMB_HEIGHT,
+            ),
+            Orientation::Horizontal => Rect::new(
+                bounds.x + bounds.width * t - cp::STRIP_THUMB_WIDTH * 0.5,
+                bounds.y - 2.0,
+                cp::STRIP_THUMB_WIDTH,
+                bounds.height + 4.0,
+            ),
+        };
+        vec![
+            TargetRegion::target(bounds, 0),
+            TargetRegion::grab(thumb, 1),
+        ]
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {

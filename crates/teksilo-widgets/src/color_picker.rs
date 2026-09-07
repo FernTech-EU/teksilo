@@ -30,6 +30,25 @@
 //! (no ARIA precedent for 2D pointer gestures); the hue strip, alpha
 //! strip, RGB / HSV spinners, hex input, current-color preview, and
 //! swatch grid each carry their own appropriate role and value.
+//!
+//! ## Touch and pen
+//!
+//! The hue strip, the alpha strip and the HSV canvas are **continuous
+//! manipulators** — the value each produces *is* the press position — so all
+//! three declare `touch_action(NONE)`: a finger that lands on one adjusts it
+//! rather than scrolling the surface the picker sits in.  What `NONE` forbids,
+//! with a test on it, is a two-contact pinch begun on one of them reaching the
+//! surface underneath; the press capture each takes on its own `PointerDown` is
+//! what separately keeps an enclosing scroller from taking the gesture away.
+//! `docs/touch-and-pen.md` §7.3.
+//!
+//! The strips are 14 dp across and cannot grow — the panel's column geometry is
+//! built around them — so they make the 24 dp shortfall up between the pointer
+//! and the arena, through `Widget::hit_outset`, on the short axis only. A
+//! 22 dp preset swatch earns the same widening, on both of its axes. The
+//! strips also report what they painted through `Widget::target_regions`, so
+//! the knob a user aims at is visible to a conformance audit even though no
+//! layout ever produced it.
 
 pub mod alpha_strip;
 pub mod hsv_canvas;

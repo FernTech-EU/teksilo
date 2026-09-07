@@ -10,6 +10,13 @@
 //! [`RadioGroup`](crate::radio_group::RadioGroup) to provide the AT "2 of 3"
 //! positional announcement required by ARIA.
 //!
+//! ## Touch and pen
+//!
+//! Same shape as [`Checkbox`](crate::Checkbox): the pressed state is the
+//! framework's (`docs/touch-and-pen.md` §7.1), selection lands on the release,
+//! and the 24 dp `MinSize` around the 19 dp dot already clears the conformance
+//! floor at Compact.
+//!
 //! ## Accessibility
 //!
 //! Reports `Role::RadioButton` with `set_toggled` mirroring the selected
@@ -29,7 +36,7 @@
 //! let _r2 = RadioButton::new(2, selected.clone()).label(lit!("System"));
 //! ```
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use teksilo_canvas::{Rect, Size, SizeProposal};
@@ -297,17 +304,35 @@ impl Widget for RadioButton {
         let int_key = interaction.clone();
         let int_focus = interaction.clone();
 
+        // The pointer press is the framework's, not this control's own: the
+        // router knows about a press that slid off its target, one that slid
+        // back on, and one a pan claimant took away with no release to reset
+        // from — none of which a `PointerDown` / `PointerUp` pair here can
+        // see. `docs/touch-and-pen.md` §7.1. `pointer_over` carries the hover
+        // truth across the press, so a press that ends without an activation
+        // rests on the right state.
+        let pointer_over = Rc::new(Cell::new(false));
+        crate::button::bind_press_interaction(ctx, interaction.clone(), pointer_over.clone());
+
         // Framework gates events on arena.is_enabled; no per-handler
         // snapshot guards anymore.
         let handler_set = HandlerSet::new()
             .on_tap({
-                move |_pos, _ctx: &mut EventContext| {
+                let hovering = pointer_over.clone();
+                move |_pos, ctx: &mut EventContext| {
                     sel_tap.set(value);
-                    int_tap.set(InteractionState::Hovered);
+                    int_tap.set(if ctx.pointer_kind().hovers() {
+                        hovering.set(true);
+                        InteractionState::Hovered
+                    } else {
+                        InteractionState::Idle
+                    });
                 }
             })
             .on_hover({
+                let hovering = pointer_over.clone();
                 move |entered: bool, _ctx: &mut EventContext| {
+                    hovering.set(entered);
                     if entered {
                         int_hover.set(InteractionState::Hovered);
                     } else {
@@ -548,6 +573,136 @@ mod tests {
             info.actions()
                 .contains(&teksilo_core::accesskit::Action::Click)
         );
+    }
+    // -----------------------------------------------------------------
+    // The framework press (docs/touch-and-pen.md §7.1)
+    // -----------------------------------------------------------------
+
+    struct PressProbe(std::rc::Rc<std::cell::RefCell<Option<(Signal<bool>, Signal<bool>)>>>);
+
+    impl teksilo_core::styles::RadioStyle for PressProbe {
+        fn make_body(
+            &self,
+            cfg: &teksilo_core::styles::RadioStyleConfig,
+            ctx: &mut BuildContext,
+        ) -> WidgetId {
+            *self.0.borrow_mut() = Some((cfg.is_pressed.clone(), cfg.is_hovered.clone()));
+            ctx.add(crate::primitives::FixedSize::new().width(19.0).height(19.0))
+        }
+    }
+
+    #[allow(clippy::type_complexity)]
+    fn probed_radio_with_hover() -> (
+        WidgetTree,
+        WidgetId,
+        Signal<bool>,
+        Signal<bool>,
+        Signal<usize>,
+    ) {
+        let probe: std::rc::Rc<std::cell::RefCell<Option<(Signal<bool>, Signal<bool>)>>> =
+            std::rc::Rc::new(std::cell::RefCell::new(None));
+        let selected = Signal::new(9_usize);
+        let mut theme = teksilo_core::presets::intui::light();
+        theme.style_slots.radio = Some(std::rc::Rc::new(PressProbe(probe.clone())));
+        let mut tree = WidgetTree::new().with_theme(theme);
+        let rb = tree.add(RadioButton::new(0, selected.clone()).label(lit!("One")));
+        tree.layout(SizeProposal::exact(200.0, 60.0));
+        let (pressed, hovered) = probe.borrow().clone().expect("style ran");
+        (tree, rb, pressed, hovered, selected)
+    }
+
+    fn probed_radio() -> (WidgetTree, WidgetId, Signal<bool>, Signal<usize>) {
+        let (tree, rb, pressed, _hovered, selected) = probed_radio_with_hover();
+        (tree, rb, pressed, selected)
+    }
+
+    /// Where the radio comes to rest after a selection — its own copy of the
+    /// button family's `on_tap` resting-state rule, which is duplicated per
+    /// control rather than shared, so it needs its own probe.
+    #[test]
+    fn a_mouse_selection_rests_hovered_and_a_finger_selection_rests_idle() {
+        use crate::button::press_test_support::touch_tap;
+
+        let (mut tree, rb, pressed, hovered, selected) = probed_radio_with_hover();
+        let at = tree.bounds(rb).center();
+        tree.pointer_move(at);
+        assert!(hovered.get(), "the pointer arrived over the dot");
+        tree.pointer_down_button(at, teksilo_core::event::PointerButton::Primary);
+        tree.pointer_up_button(at, teksilo_core::event::PointerButton::Primary);
+        assert_eq!(selected.get(), 0, "the release selected");
+        assert!(!pressed.get());
+        assert!(
+            hovered.get(),
+            "a mouse that clicked the dot is still on it, so it rests hovered",
+        );
+
+        let (mut tree, rb, pressed, hovered, selected) = probed_radio_with_hover();
+        let at = tree.bounds(rb).center();
+        touch_tap(&mut tree, at);
+        assert_eq!(selected.get(), 0, "the contact selected on its release");
+        assert!(!pressed.get());
+        assert!(
+            !hovered.get(),
+            "a finger leaves nothing behind, so the dot must rest idle",
+        );
+    }
+
+    /// The mouse path: press lights the state the style has always been given,
+    /// release selects.
+    #[test]
+    fn a_mouse_press_lights_the_pressed_state_and_the_release_selects() {
+        let (mut tree, rb, pressed, selected) = probed_radio();
+        let at = tree.bounds(rb).center();
+        tree.pointer_move(at);
+        tree.pointer_down_button(at, teksilo_core::event::PointerButton::Primary);
+        assert!(pressed.get());
+        assert_eq!(selected.get(), 9, "the press selects nothing");
+        tree.pointer_up_button(at, teksilo_core::event::PointerButton::Primary);
+        assert!(!pressed.get());
+        assert_eq!(selected.get(), 0);
+    }
+
+    /// And a finger, with the slide-off abort in the middle.
+    #[test]
+    fn a_touch_tap_selects_on_release_and_a_slide_off_abandons_it() {
+        use crate::button::press_test_support::{finger, touch};
+        use teksilo_core::pointer::PointerPhase;
+
+        let (mut tree, rb, pressed, selected) = probed_radio();
+        let bounds = tree.bounds(rb);
+        let at = bounds.center();
+        let away = teksilo_canvas::Point::new(at.x, bounds.y + bounds.height + 80.0);
+
+        let id = finger();
+        tree.dispatch_pointer(touch(id, PointerPhase::Down, at, 0));
+        assert!(pressed.get());
+        tree.dispatch_pointer(touch(id, PointerPhase::Move, away, 20));
+        assert!(!pressed.get());
+        tree.dispatch_pointer(touch(id, PointerPhase::Up, away, 40));
+        assert_eq!(
+            selected.get(),
+            9,
+            "a release off the control selects nothing"
+        );
+
+        let id = finger();
+        tree.dispatch_pointer(touch(id, PointerPhase::Down, at, 100));
+        tree.dispatch_pointer(touch(id, PointerPhase::Up, at, 130));
+        assert_eq!(selected.get(), 0);
+        assert!(!pressed.get());
+    }
+
+    /// A 24 dp hit box around a 19 dp dot: at the floor already, so no widening
+    /// mechanism is involved.
+    #[test]
+    fn the_radio_hit_box_clears_the_conformance_floor_at_compact() {
+        let theme = teksilo_core::presets::intui::light();
+        let floor = theme.input.min_target_conformance;
+        let mut tree = WidgetTree::new().with_theme(theme);
+        let rb = tree.add(RadioButton::new(0, Signal::new(0_usize)));
+        tree.layout(SizeProposal::exact(200.0, 60.0));
+        let b = tree.bounds(rb);
+        assert!(b.width >= floor && b.height >= floor, "measured {b:?}");
     }
 }
 

@@ -72,6 +72,18 @@
 //! chevron adds a second, because an overflow menu that no keyboard can
 //! reach is not an overflow menu; it cannot join the arrow sequence,
 //! since here arrows move *selection* rather than a roving focus.
+//!
+//! ## Touch and pen
+//!
+//! Nothing changed for the controls sweep, and the reasons are worth recording.
+//! A segment activates from `on_tap`, so it already lands on the release and a
+//! finger that slides off one selects nothing. The recipe's own 24 dp height
+//! meets the WCAG 2.2 SC 2.5.8 floor at Compact and follows the density ladder
+//! above it, and the 12 dp horizontal padding puts every segment's width over
+//! it too — so none of the three hit-targeting mechanisms is involved. And
+//! [`teksilo_core::styles::SegmentedControlStyleConfig`]
+//! carries no pressed state, so there is no press visual to move onto the
+//! framework press.
 
 mod cell;
 mod id;

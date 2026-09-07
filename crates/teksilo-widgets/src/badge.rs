@@ -31,6 +31,15 @@
 //! let _badge = Badge::new(lit!("NEW"))
 //!     .background(Color::new(0.2, 0.6, 1.0, 1.0));
 //! ```
+//!
+//! ## Touch and pen
+//!
+//! Nothing to do, and it is worth saying why: a `Badge` carries no pointer
+//! handler of any kind — no tap, no hover, no drag — so it is not a target,
+//! takes no press and needs no widened hit area. Its only pointer-adjacent
+//! feature is a tooltip, whose touch route is the long press the tooltip
+//! package owns. A badge that an app makes tappable does so by wrapping it,
+//! and the wrapper is the target.
 
 use std::rc::Rc;
 

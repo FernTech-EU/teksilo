@@ -119,6 +119,47 @@
 //!         .wrap_mode(WrapMode::Clamp),
 //! );
 //! ```
+//!
+//! ## Touch and pen
+//!
+//! The step buttons are the controls sweep's one **unreachable target**, and
+//! the reason is recorded rather than papered over. Each is 18 x 13 dp inside a
+//! trailing column exactly its own width and exactly two buttons tall, so a
+//! `Widget::hit_outset` has nowhere to grow (an outset never escapes its
+//! parent); the field beside them takes presses of its own, so the miss-only
+//! slop pass has an eligible bubble owner at distance zero; and two conforming
+//! targets stacked need 88 dp of column, which no density projection of the
+//! field produces. Reaching the floor here is a *layout* change — the desktop
+//! stacked pair replaced by a side-by-side −/+ at coarse densities, as Material
+//! does — and that is a design decision, not a targeting one. The value stays
+//! fully reachable by keyboard (Up/Down, PageUp/PageDown) and by the
+//! `Increment` / `Decrement` assistive actions.
+//!
+//! One thing the sweep did fix. A step still fires on the *press* and arms
+//! hold-to-repeat from it (Qt's `QAbstractSpinBox` convention — there is no
+//! release to start a repeat from), but the repeat now stops on a
+//! `PointerCancel`: a pan claimant winning the press used to leave the box
+//! stepping for the rest of the session, because a cancel is terminal and no
+//! `PointerUp` follows it.
+//!
+//! What the box does about panning, it does by omission. It declares no
+//! [`touch_action`] and makes no pan claim, so its subtree keeps the default
+//! [`TouchAction::AUTO`] and a finger that comes to rest on it and then drags
+//! is won by the enclosing scroller rather than changing the value — asserted
+//! by `a_finger_pan_over_the_spin_box_scrolls_its_container` in `spin_box/
+//! tests.rs`. The `on_scroll` handler below is a *wheel* handler and not a pan;
+//! it never sees a finger.
+//!
+//! The explicit `touch_action(PAN_Y)` declaration
+//! `docs/widget-pointer-inventory.md` asks this file for is a **narrowing** on
+//! top of that behaviour, not a restatement of it: it would additionally forbid
+//! a horizontal pan and a pinch through the field, which is a change to make
+//! against the pan-claim arbitration rather than on its own. That row is
+//! assigned to **P22**, the scrollables migration, which owns this file's
+//! `on_scroll`; P24 owns `spin_box/step_button.rs`.
+//!
+//! [`touch_action`]: teksilo_core::widget_builder::WidgetBuilder::touch_action
+//! [`TouchAction::AUTO`]: teksilo_core::pointer::touch_action::TouchAction::AUTO
 
 mod step_button;
 #[cfg(test)]

@@ -1038,3 +1038,69 @@ fn a_segment_that_overflows_while_hovered_clears_the_hover() {
     // exercised here as "the frame builds without a stale slot lookup".
     t.render();
 }
+
+// ───────────────────────────────── touch ─────────────────────────────────
+
+/// A segment's activation is `on_tap`, so it already lands on the release —
+/// which is the whole of what the controls sweep owes it. Pinned here so a
+/// later change to the cell's handler set is caught.
+#[test]
+fn a_touch_tap_selects_a_segment_on_release() {
+    use crate::button::press_test_support::{finger, touch};
+    use teksilo_core::pointer::PointerPhase;
+
+    let selected = Signal::new(Some(A));
+    let mut tree = measured_tree();
+    let control = tree.add(abc(selected.clone()));
+    settle(&mut tree, 300.0, 40.0);
+    let cells = active_cells(&tree, control);
+    let third = tree.bounds(cells[2]);
+
+    let id = finger();
+    tree.dispatch_pointer(touch(id, PointerPhase::Down, third.center(), 0));
+    assert_eq!(selected.get(), Some(A), "the press selects nothing");
+    tree.dispatch_pointer(touch(id, PointerPhase::Up, third.center(), 30));
+    assert_eq!(selected.get(), Some(C), "the release selects");
+}
+
+/// A finger that lands on a segment and then slides off it selects nothing —
+/// the abort gesture WCAG 2.2 SC 2.5.2 asks for, applied to a control whose
+/// segments sit edge to edge.
+#[test]
+fn a_finger_that_slides_off_a_segment_selects_nothing() {
+    use crate::button::press_test_support::{finger, touch};
+    use teksilo_core::pointer::PointerPhase;
+
+    let selected = Signal::new(Some(A));
+    let mut tree = measured_tree();
+    let control = tree.add(abc(selected.clone()));
+    settle(&mut tree, 300.0, 40.0);
+    let cells = active_cells(&tree, control);
+    let third = tree.bounds(cells[2]);
+    let away = teksilo_canvas::Point::new(third.center().x, third.y + third.height + 90.0);
+
+    let id = finger();
+    tree.dispatch_pointer(touch(id, PointerPhase::Down, third.center(), 0));
+    tree.dispatch_pointer(touch(id, PointerPhase::Move, away, 20));
+    tree.dispatch_pointer(touch(id, PointerPhase::Up, away, 40));
+    assert_eq!(selected.get(), Some(A));
+}
+
+/// Every visible segment clears the 24 dp conformance floor at Compact, which
+/// is why the control needs no widening mechanism: the recipe's own height is
+/// already the floor and the horizontal padding puts the width over it.
+#[test]
+fn every_segment_clears_the_conformance_floor_at_compact() {
+    let selected = Signal::new(Some(A));
+    let mut tree = measured_tree();
+    let floor = tree.theme().input.min_target_conformance;
+    let control = tree.add(abc(selected));
+    settle(&mut tree, 300.0, 40.0);
+    for cell in active_cells(&tree, control) {
+        let b = tree.bounds(cell);
+        assert!(
+            b.width >= floor && b.height >= floor,
+            "a Compact segment measured {b:?}, under the {floor} dp floor",
+        );
+    }
+}

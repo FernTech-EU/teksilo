@@ -17,6 +17,26 @@
 //! - Danger: `ButtonVariant::Destructive` (IntUI maps this to Filled).
 //! - Text-only link: `ButtonVariant::Link` / `ButtonVariant::Ghost`.
 //!
+//! ## Touch and pen
+//!
+//! The pressed visual is the **framework's**, not the button's own: the router
+//! keeps one press record per contact and `Button` mirrors it onto its
+//! `InteractionState` (`bind_press_interaction`). That buys four things a
+//! `PointerDown` / `PointerUp` pair inside a handler cannot see — a press that
+//! slides off its target goes out and comes back on re-entry (WCAG 2.2
+//! SC 2.5.2), a press a pan claimant or an ancestor drag wins is cleared with
+//! no release to hang the reset on, a cancel clears it, and a press inside a
+//! scrollable withholds the visual for 100 ms so a finger that turns out to be
+//! scrolling never flashes a highlight. `docs/touch-and-pen.md` §7.1.
+//!
+//! Activation has always been `on_tap`, so it already lands on the release.
+//! After a mouse or pen release the button rests hovered as it always has;
+//! after a finger release it rests idle, because a finger sends no
+//! hover-leave to correct a hovered state with.
+//!
+//! The whole family — `IconButton`, `CommandLinkButton`, every `Toolbar`
+//! command — shares `build_interaction_handlers` and gets all of this with it.
+//!
 //! ## Accessibility
 //!
 //! Announces as `Role::Button` with the resolved label as its AT name.
@@ -87,7 +107,250 @@ pub enum InteractionState {
 /// `IconButton`'s toggle flip) into this single closure so the guard
 /// gates all activation paths uniformly. `focusable` is the node's
 /// focusability (`Button` is always focusable; `IconButton` exposes it).
+/// A layout-transparent wrapper that lifts its child's **hit** area to the
+/// density's target size at every density, for direct pointers only.
+///
+/// The residue the other three mechanisms cannot serve: a control that is
+/// under 24 dp, is composed out of primitives rather than being its own
+/// `Widget` (so it has no `hit_outset` of its own to implement), and sits
+/// inside something that takes presses (so the miss-only slop pass, which only
+/// re-attributes to a candidate strictly closer than the bubble owner, can
+/// never reach it). The text field's 16 dp clear affordance is the case this
+/// was written for.
+///
+/// Distinct from [`TouchTarget`](crate::primitives::TouchTarget), which is the
+/// wrapper that *moves* things: it reserves layout space and is deliberately
+/// the identity below `TargetDensity::Touch`. This one never moves anything
+/// and is live at every density, because `min_target_conformance` is 24 dp at
+/// every density and is never scaled. The two are candidates for merging into
+/// one wrapper with two modes; they are separate here because `TouchTarget` is
+/// not this package's file.
+pub(crate) struct HitTarget {
+    child: Option<WidgetId>,
+    size: Option<teksilo_canvas::Size>,
+    active: teksilo_core::signal::Prop<bool>,
+    bounds: std::cell::Cell<teksilo_canvas::Size>,
+}
+
+impl HitTarget {
+    pub(crate) fn new() -> Self {
+        Self {
+            child: None,
+            size: None,
+            active: teksilo_core::signal::Prop::Static(true),
+            bounds: std::cell::Cell::new(teksilo_canvas::Size::ZERO),
+        }
+    }
+
+    /// Pin the slot's own size instead of forwarding the child's.
+    ///
+    /// For the shape this exists to serve: the slot has to keep reserving its
+    /// room while the affordance inside it is hidden, so the row does not jump
+    /// when the affordance appears. Without it a dormant child would collapse
+    /// the wrapper to nothing — and, being the wrapper the ring resolves to,
+    /// it would take the outset with it.
+    pub(crate) fn fixed(mut self, width: f32, height: f32) -> Self {
+        self.size = Some(teksilo_canvas::Size::new(width, height));
+        self
+    }
+
+    /// Whether the wrapper currently claims its widened target.
+    ///
+    /// `false` withdraws the outset entirely, because a widened node that then
+    /// refuses the press is a hole punched in whatever is behind it — the same
+    /// rule the splitter handle and the twist arrow apply. Reactive, so a
+    /// clear affordance that comes and goes with the field's contents does not
+    /// need a rebuild.
+    pub(crate) fn active(mut self, active: impl Into<teksilo_core::signal::Prop<bool>>) -> Self {
+        self.active = active.into();
+        self
+    }
+
+    pub(crate) fn child_id(mut self, id: WidgetId) -> Self {
+        self.child = Some(id);
+        self
+    }
+}
+
+impl std::fmt::Debug for HitTarget {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("HitTarget").finish()
+    }
+}
+
+impl Widget for HitTarget {
+    fn build(&mut self, _ctx: &mut BuildContext) -> Vec<WidgetId> {
+        self.child.into_iter().collect()
+    }
+
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        ctx: &LayoutContext,
+    ) -> teksilo_core::widget::LayoutResponse {
+        if let Some(size) = self.size {
+            return size.into();
+        }
+        // Fully transparent: the child's whole response, not just its size, so
+        // a shrinkable or flexible child stays so through the wrapper.
+        self.child
+            .and_then(|id| ctx.child_layout_response(id, proposal))
+            .unwrap_or_else(|| proposal.resolve(0.0, 0.0).into())
+    }
+
+    fn place_children(
+        &self,
+        bounds: Rect,
+        _proposal: SizeProposal,
+        children: &mut [WidgetPlacement],
+        _ctx: &LayoutContext,
+    ) {
+        self.bounds.set(bounds.size());
+        for child in children.iter_mut() {
+            child.origin = bounds.origin();
+            child.size = bounds.size();
+        }
+    }
+
+    fn children(&self) -> Vec<WidgetId> {
+        self.child.into_iter().collect()
+    }
+
+    fn hit_outset(
+        &self,
+        kind: teksilo_tokens::PointerKind,
+        tokens: &teksilo_tokens::InputTokens,
+    ) -> teksilo_canvas::EdgeInsets {
+        if !self.active.get() {
+            return teksilo_canvas::EdgeInsets::ZERO;
+        }
+        target_outset(self.bounds.get(), kind, tokens)
+    }
+}
+
+/// The per-edge hit outset that lifts a control painted at `visual` up to the
+/// density's target size, for the pointer that is asking.
+///
+/// The controls sweep's answer to a control that is genuinely smaller than 24
+/// dp and cannot grow: a 12 dp twist arrow inside a tree row, a 16 dp clear
+/// button inside a text field. The **density rule** forbids routing such a
+/// dimension through [`dp`](teksilo_core::styles::density::dp) at layout time
+/// — that would raise its paint at Compact and break the programme's
+/// Compact-is-unchanged invariant — so the shortfall is made up between the
+/// pointer and the arena instead, which is what [`Widget::hit_outset`] is for
+/// (`docs/density-and-targets.md`).
+///
+/// Zero for a precise pointer, always: a mouse hot-spot is exact and a widened
+/// node would steal clicks from whatever it overlaps. Zero on an axis that is
+/// already at or above the target, so a control that only falls short on one
+/// axis grows only on that one.
+///
+/// Two outset controls close enough for their rings to overlap both claim the
+/// space between them; the arena resolves that by distance to the uninflated
+/// rect, so the boundary lands halfway, which is the answer a user aiming
+/// between them expects.
+///
+/// [`Widget::hit_outset`]: teksilo_core::widget::Widget::hit_outset
+pub(crate) fn target_outset(
+    visual: teksilo_canvas::Size,
+    kind: teksilo_tokens::PointerKind,
+    tokens: &teksilo_tokens::InputTokens,
+) -> teksilo_canvas::EdgeInsets {
+    use teksilo_core::styles::density::dp;
+    use teksilo_tokens::TargetRole;
+
+    if !kind.is_direct() {
+        return teksilo_canvas::EdgeInsets::ZERO;
+    }
+    let grow = |extent: f32| {
+        if extent > 0.0 && extent.is_finite() {
+            ((dp(extent, TargetRole::Target, tokens) - extent) * 0.5).max(0.0)
+        } else {
+            0.0
+        }
+    };
+    teksilo_canvas::EdgeInsets::symmetric(grow(visual.width), grow(visual.height))
+}
+
+/// Drive a button-family control's `Pressed` state from the framework press.
+///
+/// The family used to keep this itself: `PointerDown` set `Pressed`,
+/// `PointerUp` put it back. That is right for a mouse and wrong for a finger
+/// in four ways a handler cannot see — a press that slides off its target, a
+/// press that slides back on, a press a pan claimant takes away with no
+/// release to hang the reset on, and a press that must not light up at all
+/// until the pan has been ruled out. `docs/touch-and-pen.md` §7.1 has the
+/// rules; the router keeps the state and this mirrors it onto the family's
+/// five-state `interaction` signal.
+///
+/// Only the `Pressed` transitions move: this writes `Pressed` when the
+/// framework press lights — and at build time when it is already lit — and,
+/// when it goes out, the resting state below. The `Pressed` guard on that
+/// second branch is what keeps it from overwriting a resting state the
+/// `on_tap` above has already chosen for the release. Hover, focus and the
+/// keyboard `Space`/`Enter` machine set their own states, and the framework
+/// press never moves for a key — it is a *pointer's* record — so nothing here
+/// raises `Pressed` on a key's behalf. It can still clear one, because both
+/// write the same signal: a pointer press that ends while `Space` is held
+/// finds the signal on `Pressed` and rests it, which also disarms the
+/// lone-`KeyUp` guard in `on_key`. Reaching that takes a held key and a
+/// pointer press on one control.
+///
+/// Ending a press with no activation — a slide-off, a cancel, an ancestor
+/// drag winning the arbitration — rests the control on the `hovered` cell
+/// beside the signal, and the two pointer kinds part ways there.
+///
+/// **A contact never writes that cell.** The router refuses a contact the
+/// hover-owner role outright, so `on_hover` never fires for one, and the
+/// `on_tap` write above sits behind `pointer_kind().hovers()`. A finger
+/// therefore leaves the cell exactly as it found it: on a touch-only device
+/// `false`, so a *revoked* contact — the pan claimant's — leaves the control
+/// `Idle`, which is what stops a pan-stolen tap staying lit with nothing
+/// touching it. Where a mouse is resting on the same control the cell is that
+/// mouse's, and the control rests `Hovered` on the strength of a pointer that
+/// really is there.
+///
+/// **A mouse keeps whatever the cell held when it pressed.** A mouse that
+/// pointed at the control before pressing it left the cell `true`, and nothing
+/// clears it while the press lasts: the press holds the pointer capture, so
+/// moves route straight to the owner and no `PointerLeave` — and so no
+/// `on_hover(false)` — is synthesised even while the pointer is off the
+/// control. A mouse press that
+/// ends without activating therefore rests `Hovered` whether it was revoked
+/// under the pointer or had slid off, because the cell records where the
+/// pointer was when it pressed rather than where it is now. The `Idle` branch
+/// is reached under a mouse by a press that never had the hover to begin
+/// with — a `PointerDown` with no `PointerMove` over the control before it.
+pub(crate) fn bind_press_interaction(
+    ctx: &mut BuildContext,
+    interaction: Signal<InteractionState>,
+    hovered: Rc<std::cell::Cell<bool>>,
+) {
+    let pressed = ctx.pressed_signal();
+    // Seed from the live state rather than from `false`: a rebuild that
+    // happens *during* a press must not blink the visual off. Rare, because
+    // `process_pending_rebuilds` defers a rebuild aimed at the widget holding
+    // the capture — and a press owner is the capture owner — but a live drag
+    // session lifts that deferral for the whole tree, so a second contact
+    // dragging elsewhere is enough to land one here.
+    if pressed.get() {
+        interaction.set(InteractionState::Pressed);
+    }
+    ctx.effect(&pressed, move |showing| {
+        if *showing {
+            interaction.set(InteractionState::Pressed);
+        } else if interaction.get() == InteractionState::Pressed {
+            interaction.set(if hovered.get() {
+                InteractionState::Hovered
+            } else {
+                InteractionState::Idle
+            });
+        }
+    });
+}
+
 pub(crate) fn build_interaction_handlers(
+    ctx: &mut BuildContext,
     interaction: Signal<InteractionState>,
     on_activate: Rc<dyn Fn(&mut EventContext)>,
     focusable: bool,
@@ -95,47 +358,42 @@ pub(crate) fn build_interaction_handlers(
     let act_tap = on_activate.clone();
     let act_key = on_activate.clone();
     let act_access = on_activate;
+    // Whether the pointer is currently over the control, kept beside the
+    // interaction signal so the press binding can restore the *right* resting
+    // state when a press ends without an activation. `interaction` alone
+    // cannot answer it: while the control is `Pressed` the hover truth has
+    // nowhere to live.
+    let hovered = Rc::new(std::cell::Cell::new(false));
+    bind_press_interaction(ctx, interaction.clone(), hovered.clone());
     HandlerSet::new()
         .on_tap({
             let interaction = interaction.clone();
+            let hovered = hovered.clone();
             move |_pos: &teksilo_core::TapEvent, ctx: &mut EventContext| {
                 act_tap(ctx);
-                interaction.set(InteractionState::Hovered);
-            }
-        })
-        .on_hover({
-            let interaction = interaction.clone();
-            move |entered: bool, _ctx: &mut EventContext| {
-                interaction.set(if entered {
+                // Where the control rests after an activation. A mouse or a
+                // pen is still over it, so it rests hovered exactly as it
+                // always has; a finger is gone the instant it lifts and never
+                // sent a hover-leave to correct a `Hovered` state with, so it
+                // rests idle.
+                interaction.set(if ctx.pointer_kind().hovers() {
+                    hovered.set(true);
                     InteractionState::Hovered
                 } else {
                     InteractionState::Idle
                 });
             }
         })
-        // Pointer-down press state. The family PROVIDES the Pressed state
-        // on mouse-down so the *theme* decides whether to render it: Int
-        // UI regular buttons have no pressed state (their recipe resolves
-        // pressed → hover), while Int UI icon buttons and other themes do.
-        // Returns `Ignored` so the event still reaches the tap recognizer
-        // and `on_tap` activation fires. Reverts to Hovered on release
-        // only if still Pressed — a drag-out release already went to Idle
-        // via `on_hover(false)`, so the guard leaves it there.
-        .on_pointer_event({
+        .on_hover({
             let interaction = interaction.clone();
-            move |event: &WidgetEvent, _ctx: &mut EventContext| -> EventResponse {
-                match event {
-                    WidgetEvent::PointerDown { .. } => {
-                        interaction.set(InteractionState::Pressed);
-                    }
-                    WidgetEvent::PointerUp { .. }
-                        if interaction.get() == InteractionState::Pressed =>
-                    {
-                        interaction.set(InteractionState::Hovered);
-                    }
-                    _ => {}
-                }
-                EventResponse::Ignored
+            let hovered = hovered.clone();
+            move |entered: bool, _ctx: &mut EventContext| {
+                hovered.set(entered);
+                interaction.set(if entered {
+                    InteractionState::Hovered
+                } else {
+                    InteractionState::Idle
+                });
             }
         })
         .on_key({
@@ -192,6 +450,52 @@ pub(crate) fn build_interaction_handlers(
         )
         .focusable(focusable)
         .cursor(CursorIcon::Pointer)
+}
+
+/// Test-only helpers for driving a control with a synthetic contact.
+///
+/// Lives here because the button family is where the framework press first
+/// lands; every other control in the controls sweep reaches it as
+/// `crate::button::press_test_support`.
+#[cfg(test)]
+pub(crate) mod press_test_support {
+    use teksilo_canvas::Point;
+    use teksilo_core::event::Modifiers;
+    use teksilo_core::pointer::{
+        BackendDeviceKey, EventTime, PointerId, PointerIdAllocator, PointerInfo, PointerPhase,
+        PointerSample,
+    };
+    use teksilo_core::widget_tree::WidgetTree;
+
+    /// A brand-new contact id. Every touch press mints one — winit reuses
+    /// `Touch::id`, the allocator does not.
+    pub(crate) fn finger() -> PointerId {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static NEXT: AtomicU64 = AtomicU64::new(1);
+        PointerIdAllocator::global().begin(
+            BackendDeviceKey::new(0x0B24),
+            NEXT.fetch_add(1, Ordering::Relaxed),
+        )
+    }
+
+    /// One touch sample for `id` at `at`, stamped `ms` into the tree epoch.
+    pub(crate) fn touch(id: PointerId, phase: PointerPhase, at: Point, ms: u64) -> PointerSample {
+        PointerSample {
+            pointer: PointerInfo::touch(id, EventTime::from_millis(ms)),
+            phase,
+            position: at,
+            button: None,
+            modifiers: Modifiers::NONE,
+            coalesced: Vec::new(),
+        }
+    }
+
+    /// Press, then release, at the same point: the whole touch tap.
+    pub(crate) fn touch_tap(tree: &mut WidgetTree, at: Point) {
+        let id = finger();
+        tree.dispatch_pointer(touch(id, PointerPhase::Down, at, 0));
+        tree.dispatch_pointer(touch(id, PointerPhase::Up, at, 30));
+    }
 }
 
 /// Where an optional icon is placed relative to the button label.
@@ -648,7 +952,11 @@ impl Button {
     /// skips disabled subtrees, so none of these closures need a
     /// build-time enabled snapshot — that duality was removed in the
     /// single-sourced-enabled refactor.
-    fn build_handler_set(&mut self, interaction: Signal<InteractionState>) -> HandlerSet {
+    fn build_handler_set(
+        &mut self,
+        ctx: &mut BuildContext,
+        interaction: Signal<InteractionState>,
+    ) -> HandlerSet {
         // Bundle the optional command action into the unified
         // `on_activate` closure consumed by the shared family helper.
         let action: Rc<Option<CommandFactory>> = Rc::new(self.action.take());
@@ -657,7 +965,7 @@ impl Button {
                 action(ctx);
             }
         });
-        build_interaction_handlers(interaction, on_activate, true)
+        build_interaction_handlers(ctx, interaction, on_activate, true)
     }
 }
 
@@ -911,7 +1219,8 @@ impl teksilo_core::widget::Widget for Button {
 
         self.root_child_id = Some(root_id);
 
-        ctx.apply_self_handlers(self.build_handler_set(interaction));
+        let handlers = self.build_handler_set(ctx, interaction);
+        ctx.apply_self_handlers(handlers);
 
         vec![root_id]
     }
@@ -986,7 +1295,7 @@ impl teksilo_core::widget::Widget for Button {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::cell::Cell;
+    use std::cell::{Cell, RefCell};
     use std::rc::Rc;
     use teksilo_core::event::{Modifiers, WidgetEvent};
     use teksilo_core::widget_tree::WidgetTree;
@@ -1639,6 +1948,458 @@ mod tests {
         assert!(
             !frame.shapes.iter().any(|s| s.color == magenta),
             "theme slot must be ignored when per-call override is set — magenta should not appear",
+        );
+    }
+    // -----------------------------------------------------------------
+    // The framework press (docs/touch-and-pen.md §7.1)
+    // -----------------------------------------------------------------
+
+    /// A `ButtonStyle` that hands the interaction signals its chrome reads back
+    /// to the test, so the press *visual* and the resting state can be asserted
+    /// through the surface a real style sees rather than through the router's
+    /// own bookkeeping.
+    struct PressProbe(Rc<RefCell<Option<(Signal<bool>, Signal<bool>)>>>);
+
+    impl teksilo_core::styles::ButtonStyle for PressProbe {
+        fn make_body(
+            &self,
+            cfg: &teksilo_core::styles::ButtonStyleConfig,
+            ctx: &mut BuildContext,
+        ) -> WidgetId {
+            *self.0.borrow_mut() = Some((cfg.is_pressed.clone(), cfg.is_hovered.clone()));
+            ctx.add(crate::primitives::ZStack::new().add_child(cfg.label))
+        }
+    }
+
+    /// A button, its press-visual signal, its hover-visual signal, and how many
+    /// times it activated.
+    fn probed_button_with_hover() -> (
+        WidgetTree,
+        WidgetId,
+        Signal<bool>,
+        Signal<bool>,
+        Rc<Cell<u32>>,
+    ) {
+        let probe: Rc<RefCell<Option<(Signal<bool>, Signal<bool>)>>> = Rc::new(RefCell::new(None));
+        let hits = Rc::new(Cell::new(0_u32));
+        let counter = hits.clone();
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let btn = tree.add(
+            Button::new(lit!("Save"))
+                .style(PressProbe(probe.clone()))
+                .on_activate_fn(move |_| counter.set(counter.get() + 1)),
+        );
+        tree.layout(SizeProposal::exact(200.0, 80.0));
+        let (pressed, hovered) = probe.borrow().clone().expect("style ran");
+        (tree, btn, pressed, hovered, hits)
+    }
+
+    /// A button, its press-visual signal, and how many times it activated.
+    fn probed_button() -> (WidgetTree, WidgetId, Signal<bool>, Rc<Cell<u32>>) {
+        let (tree, btn, pressed, _hovered, hits) = probed_button_with_hover();
+        (tree, btn, pressed, hits)
+    }
+
+    fn mouse_at(tree: &mut WidgetTree, at: teksilo_canvas::Point, down: bool) {
+        let event = if down {
+            WidgetEvent::PointerDown {
+                position: at,
+                button: teksilo_core::event::PointerButton::Primary,
+                modifiers: Modifiers::NONE,
+            }
+        } else {
+            WidgetEvent::PointerUp {
+                position: at,
+                button: teksilo_core::event::PointerButton::Primary,
+                modifiers: Modifiers::NONE,
+            }
+        };
+        tree.dispatch_event(event);
+    }
+
+    /// The mouse path, unchanged: press lights the visual, release puts it out
+    /// and activates once.
+    #[test]
+    fn a_mouse_click_presses_then_activates_on_release() {
+        let (mut tree, btn, pressed, hits) = probed_button();
+        let at = tree.bounds(btn).center();
+        tree.dispatch_event(WidgetEvent::PointerMove { position: at });
+        mouse_at(&mut tree, at, true);
+        assert!(pressed.get(), "a mouse press lights the pressed visual");
+        assert_eq!(hits.get(), 0, "nothing has activated on the press");
+        mouse_at(&mut tree, at, false);
+        assert!(!pressed.get(), "the release puts the visual out");
+        assert_eq!(hits.get(), 1, "activation lands on the release");
+    }
+
+    /// A finger: the same two steps, with no hover anywhere in them.
+    #[test]
+    fn a_touch_tap_activates_on_release() {
+        use super::press_test_support::{finger, touch};
+        use teksilo_core::pointer::PointerPhase;
+
+        let (mut tree, btn, pressed, hits) = probed_button();
+        let at = tree.bounds(btn).center();
+        let id = finger();
+        tree.dispatch_pointer(touch(id, PointerPhase::Down, at, 0));
+        assert!(pressed.get(), "a contact on a button lights it at once");
+        assert_eq!(hits.get(), 0, "a press is not an activation");
+        tree.dispatch_pointer(touch(id, PointerPhase::Up, at, 40));
+        assert_eq!(hits.get(), 1, "the release activates");
+        assert!(!pressed.get(), "and clears the visual");
+    }
+
+    /// WCAG 2.2 SC 2.5.2: sliding off abandons the press and sliding back on
+    /// restores the *visual*.
+    ///
+    /// The activation does not come back with it, and that is the framework's
+    /// contract rather than this control's choice:
+    /// [`TapRecognizer`](teksilo_core::gesture::TapRecognizer) clears its
+    /// recorded press position the moment the pointer leaves the tap boundary
+    /// (`gesture/tap.rs`, the `Move` arm), so the failure is terminal, while
+    /// the router's press record is reversible. Pinned here so a later change
+    /// to either half has to change this test deliberately —
+    /// `docs/touch-and-pen.md` §7.1 currently says the two "can never
+    /// disagree", which holds for the predicate but not for its latching.
+    #[test]
+    fn a_touch_press_disarms_on_slide_off_and_re_arms_on_re_entry() {
+        use super::press_test_support::{finger, touch};
+        use teksilo_core::pointer::PointerPhase;
+
+        let (mut tree, btn, pressed, hits) = probed_button();
+        let bounds = tree.bounds(btn);
+        let at = bounds.center();
+        let away = teksilo_canvas::Point::new(at.x, bounds.y + bounds.height + 60.0);
+        let id = finger();
+        tree.dispatch_pointer(touch(id, PointerPhase::Down, at, 0));
+        assert!(pressed.get());
+        tree.dispatch_pointer(touch(id, PointerPhase::Move, away, 20));
+        assert!(!pressed.get(), "the press slid off its target");
+        tree.dispatch_pointer(touch(id, PointerPhase::Move, at, 40));
+        assert!(pressed.get(), "and came back — the visual is reversible");
+        tree.dispatch_pointer(touch(id, PointerPhase::Up, at, 60));
+        assert_eq!(
+            hits.get(),
+            0,
+            "the tap recognizer's failure is terminal, so the release that \
+             follows an excursion activates nothing",
+        );
+    }
+
+    /// A release that lands off the button activates nothing and leaves no
+    /// visual behind.
+    #[test]
+    fn a_touch_release_off_the_button_activates_nothing() {
+        use super::press_test_support::{finger, touch};
+        use teksilo_core::pointer::PointerPhase;
+
+        let (mut tree, btn, pressed, hits) = probed_button();
+        let bounds = tree.bounds(btn);
+        let at = bounds.center();
+        let away = teksilo_canvas::Point::new(at.x, bounds.y + bounds.height + 60.0);
+        let id = finger();
+        tree.dispatch_pointer(touch(id, PointerPhase::Down, at, 0));
+        tree.dispatch_pointer(touch(id, PointerPhase::Move, away, 20));
+        tree.dispatch_pointer(touch(id, PointerPhase::Up, away, 40));
+        assert_eq!(hits.get(), 0, "a slid-off release is not an activation");
+        assert!(!pressed.get());
+    }
+
+    /// Where the button comes to rest **after an activation**, in both
+    /// directions.
+    ///
+    /// A mouse or a pen is still over the control when it lifts, so the button
+    /// rests hovered exactly as it always has. A finger is gone the instant it
+    /// lifts and never sends the hover-leave that would correct a `Hovered`
+    /// state, so it rests idle — leaving a finger-tapped button lit is the
+    /// stuck-highlight every touch port of a desktop toolkit ships first.
+    ///
+    /// This is the decision inside `on_tap`, and it is asserted through
+    /// `ButtonStyleConfig::is_hovered` — the signal a style's chrome actually
+    /// reads — rather than through the interaction enum, because the enum is
+    /// the button's private business and the tint is not.
+    #[test]
+    fn a_mouse_release_rests_hovered_and_a_finger_release_rests_idle() {
+        use super::press_test_support::touch_tap;
+
+        let (mut tree, btn, pressed, hovered, hits) = probed_button_with_hover();
+        let at = tree.bounds(btn).center();
+        tree.dispatch_event(WidgetEvent::PointerMove { position: at });
+        assert!(hovered.get(), "the pointer arrived over the button");
+        mouse_at(&mut tree, at, true);
+        assert!(
+            pressed.get() && !hovered.get(),
+            "pressed supersedes hovered"
+        );
+        mouse_at(&mut tree, at, false);
+        assert_eq!(hits.get(), 1, "the release activated");
+        assert!(!pressed.get(), "and put the press visual out");
+        assert!(
+            hovered.get(),
+            "a mouse that clicked a button is still on it, so the button rests hovered",
+        );
+
+        // The same release, made by a finger. A fresh tree: the mouse above
+        // still owns a hover this one must not inherit.
+        let (mut tree, btn, pressed, hovered, hits) = probed_button_with_hover();
+        let at = tree.bounds(btn).center();
+        touch_tap(&mut tree, at);
+        assert_eq!(hits.get(), 1, "the contact activated on its release");
+        assert!(!pressed.get());
+        assert!(
+            !hovered.get(),
+            "a finger leaves nothing behind, so the button must rest idle",
+        );
+    }
+
+    /// Where the button comes to rest when the press ends with **no**
+    /// activation — the other decision site, in `bind_press_interaction`.
+    ///
+    /// A pan claimant or an ancestor drag winning the arbitration revokes the
+    /// press with no release to hang a reset on, so the binding has to restore
+    /// the resting state itself. A mouse is still sitting on the control and
+    /// must go back to hovered; a finger has no hover to go back to and must go
+    /// to idle. Getting either wrong is invisible until it is on screen: a
+    /// mouse-cancelled button that resets to idle loses its hover tint until
+    /// the pointer moves again, and a finger-cancelled one that resets to
+    /// hovered stays lit with nothing touching it.
+    #[test]
+    fn a_press_taken_away_rests_hovered_under_a_mouse_and_idle_under_a_finger() {
+        use super::press_test_support::{finger, touch};
+        use teksilo_core::pointer::{CancelReason, PointerId, PointerPhase};
+
+        let (mut tree, btn, pressed, hovered, hits) = probed_button_with_hover();
+        let at = tree.bounds(btn).center();
+        tree.dispatch_event(WidgetEvent::PointerMove { position: at });
+        mouse_at(&mut tree, at, true);
+        assert!(pressed.get());
+        tree.cancel_pointer(
+            PointerId::MOUSE,
+            CancelReason::PeerClaimed,
+            &mut teksilo_core::window::NoopWindowOps,
+        );
+        assert_eq!(hits.get(), 0, "a revoked press activates nothing");
+        assert!(!pressed.get(), "and the press visual goes out");
+        assert!(
+            hovered.get(),
+            "the mouse never left the button, so it rests hovered",
+        );
+
+        let (mut tree, btn, pressed, hovered, hits) = probed_button_with_hover();
+        let at = tree.bounds(btn).center();
+        let id = finger();
+        tree.dispatch_pointer(touch(id, PointerPhase::Down, at, 0));
+        assert!(pressed.get());
+        tree.cancel_pointer(
+            id,
+            CancelReason::PeerClaimed,
+            &mut teksilo_core::window::NoopWindowOps,
+        );
+        assert_eq!(hits.get(), 0);
+        assert!(!pressed.get());
+        assert!(
+            !hovered.get(),
+            "a finger hovers nothing, so a revoked contact must leave the button idle",
+        );
+    }
+
+    /// A rebuild that lands **during** a press must not blink the press visual
+    /// off — the third decision in `bind_press_interaction`, and the reason it
+    /// seeds the interaction signal from the live press instead of from
+    /// `false`.
+    ///
+    /// Every `build()` allocates a fresh interaction signal and derives a fresh
+    /// `is_pressed` for the style from it, while the press itself lives on the
+    /// arena node and outlives any number of rebuilds. So a button rebuilt with
+    /// a contact still on it comes back reading `Idle` unless the binding
+    /// re-seeds it, and the chrome goes dark under a finger that never lifted.
+    ///
+    /// Reaching that needs a **live drag session**, and not by contrivance:
+    /// `process_pending_rebuilds` defers any rebuild aimed at a widget holding
+    /// a pointer capture, and a press owner *is* the capture owner
+    /// (`adopt_press_owner`). The one documented exception is a drag — "a
+    /// mid-drag rebuild is safe regardless of topology" — which lifts the
+    /// deferral for every widget at once. Two contacts is what puts a real app
+    /// there: one finger dragging a row while another rests on a button, which
+    /// a data-driven rebuild then reaches.
+    ///
+    /// The probe is re-read after the rebuild, and the builds are counted, so
+    /// the assertion cannot pass on the handles the *first* pass published.
+    #[test]
+    fn a_rebuild_during_a_press_keeps_the_press_visual_lit() {
+        use super::press_test_support::{finger, touch};
+        use teksilo_core::drag_payload::DragPayload;
+        use teksilo_core::gesture::DragPhase;
+        use teksilo_core::pointer::PointerPhase;
+        use teksilo_core::widget::LayoutResponse;
+
+        /// `PressProbe`'s counting twin: republishes the config's press signal
+        /// on every build, and says how many builds there have been.
+        struct CountingProbe(Rc<RefCell<Option<Signal<bool>>>>, Rc<Cell<u32>>);
+
+        impl teksilo_core::styles::ButtonStyle for CountingProbe {
+            fn make_body(
+                &self,
+                cfg: &teksilo_core::styles::ButtonStyleConfig,
+                ctx: &mut BuildContext,
+            ) -> WidgetId {
+                *self.0.borrow_mut() = Some(cfg.is_pressed.clone());
+                self.1.set(self.1.get() + 1);
+                ctx.add(crate::primitives::ZStack::new().add_child(cfg.label))
+            }
+        }
+
+        /// The other contact's target: anything that opens a drag session.
+        #[derive(Debug)]
+        struct DragSource(Rc<Cell<bool>>);
+
+        impl Widget for DragSource {
+            fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+                let self_id = ctx.self_id();
+                let started = self.0.clone();
+                ctx.apply_self_handlers(HandlerSet::new().on_drag(
+                    move |phase, ctx: &mut EventContext| {
+                        if let DragPhase::Started { .. } = phase {
+                            started.set(true);
+                            ctx.start_drag(self_id, DragPayload::typed(42_u32));
+                        }
+                    },
+                ));
+                Vec::new()
+            }
+
+            fn layout_response(&self, _p: SizeProposal, _c: &LayoutContext) -> LayoutResponse {
+                teksilo_canvas::Size::new(120.0, 80.0).into()
+            }
+        }
+
+        let probe: Rc<RefCell<Option<Signal<bool>>>> = Rc::new(RefCell::new(None));
+        let builds = Rc::new(Cell::new(0_u32));
+        let dragging = Rc::new(Cell::new(false));
+
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let btn = tree.add(
+            Button::new(lit!("Save"))
+                .style(CountingProbe(probe.clone(), builds.clone()))
+                .on_activate_fn(|_| {}),
+        );
+        let idle_probe: Rc<RefCell<Option<Signal<bool>>>> = Rc::new(RefCell::new(None));
+        let builds_idle = Rc::new(Cell::new(0_u32));
+        let idle = tree.add(
+            Button::new(lit!("Open"))
+                .style(CountingProbe(idle_probe.clone(), builds_idle.clone()))
+                .on_activate_fn(|_| {}),
+        );
+        let src = tree.add(DragSource(dragging.clone()));
+        let _row = tree.add(HStack::new().add_child(btn).add_child(idle).add_child(src));
+        tree.layout(SizeProposal::exact(400.0, 100.0));
+        let first_pass = builds.get();
+        assert_eq!(first_pass, 1, "the style ran once for the first build");
+
+        // One finger on the button.
+        let on_button = tree.bounds(btn).center();
+        let held = finger();
+        tree.dispatch_pointer(touch(held, PointerPhase::Down, on_button, 0));
+        assert!(
+            probe.borrow().clone().expect("style ran").get(),
+            "the contact lit the press visual",
+        );
+
+        // A second finger opens a drag elsewhere, which is what lets a rebuild
+        // through while the first contact is still down.
+        let on_source = tree.bounds(src).center();
+        let dragger = finger();
+        tree.dispatch_pointer(touch(dragger, PointerPhase::Down, on_source, 5));
+        for (step, ms) in [(60.0_f32, 20_u64), (90.0, 30)] {
+            let to = teksilo_canvas::Point::new(on_source.x + step, on_source.y);
+            tree.dispatch_pointer(touch(dragger, PointerPhase::Move, to, ms));
+        }
+        assert!(dragging.get(), "the second contact opened a drag session");
+        assert!(
+            tree.is_pressed(btn),
+            "the first contact still holds the button's press",
+        );
+
+        // Now the rebuild — a data change, a bound signal at `Rebuild`, a
+        // parent re-emitting its children. It lands with the finger still down.
+        tree.arena_mark_needs_rebuild_for_testing(btn);
+        tree.arena_mark_needs_rebuild_for_testing(idle);
+        tree.layout(SizeProposal::exact(400.0, 100.0));
+        assert!(
+            builds.get() > first_pass,
+            "the rebuild never reached the style, so there is no second config to read",
+        );
+        assert!(
+            tree.is_pressed(btn),
+            "the router still holds the press across the rebuild",
+        );
+
+        let after = probe.borrow().clone().expect("the style ran again");
+        assert!(
+            after.get(),
+            "the rebuilt button handed its style a config saying it is not pressed, \
+             while the finger holding it has not lifted",
+        );
+
+        // …and the seed reads the live press rather than lighting every rebuild
+        // up: the untouched button rebuilt in the same pass comes back dark.
+        assert!(
+            !tree.is_pressed(idle),
+            "nothing is pressing the second button"
+        );
+        assert!(
+            builds_idle.get() > 1,
+            "the second button's rebuild never reached the style either",
+        );
+        assert!(
+            !idle_probe.borrow().clone().expect("style ran").get(),
+            "an unpressed button must not come out of a rebuild looking pressed",
+        );
+    }
+
+    /// Keyboard activation is untouched by the press migration: `Space` still
+    /// drives the pressed visual through the family's own key machine, and the
+    /// lone-`KeyUp` guard still holds.
+    #[test]
+    fn keyboard_activation_is_unchanged_by_the_framework_press() {
+        let (mut tree, btn, pressed, hits) = probed_button();
+        tree.focus(btn);
+        tree.dispatch_event(WidgetEvent::KeyDown {
+            key: Key::Space,
+            modifiers: Modifiers::NONE,
+            text: Key::Space.to_text().map(str::to_string),
+        });
+        assert!(pressed.get(), "Space holds the button pressed");
+        tree.dispatch_event(WidgetEvent::KeyUp {
+            key: Key::Space,
+            modifiers: Modifiers::NONE,
+        });
+        assert_eq!(hits.get(), 1);
+        assert!(!pressed.get());
+        // A stray KeyUp with no matching KeyDown must not activate.
+        tree.dispatch_event(WidgetEvent::KeyUp {
+            key: Key::Space,
+            modifiers: Modifiers::NONE,
+        });
+        assert_eq!(hits.get(), 1, "the lone-KeyUp guard still holds");
+    }
+
+    /// The Button's own node is the target the audit measures, and it clears
+    /// the 24 dp conformance floor at Compact — the density every existing
+    /// layout golden was recorded at.
+    #[test]
+    fn a_compact_button_clears_the_conformance_floor() {
+        let theme = teksilo_core::presets::intui::light();
+        let floor = theme.input.min_target_conformance;
+        let mut tree = WidgetTree::new().with_theme(theme);
+        let btn = tree.add(Button::new(lit!("Save")).on_activate_fn(|_| {}));
+        tree.layout(SizeProposal::exact(400.0, 200.0));
+        let b = tree.bounds(btn);
+        assert!(
+            b.width >= floor && b.height >= floor,
+            "a Compact Button measured {}x{}, under the {floor} dp floor",
+            b.width,
+            b.height,
         );
     }
 }

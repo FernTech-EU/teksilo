@@ -3542,6 +3542,66 @@ impl WidgetTree {
     }
 
     // -----------------------------------------------------------------
+    // In-node target geometry
+    // -----------------------------------------------------------------
+
+    /// The interactive sub-regions the widget at `id` paints inside its own
+    /// single node, in absolute arena coordinates.
+    ///
+    /// The read side of [`Widget::target_regions`]:
+    /// a scroll bar's thumb, a slider's knob, a header cell's filter
+    /// affordance. Empty for the overwhelming majority of widgets, whose node
+    /// *is* their target and which therefore have nothing to add.
+    ///
+    /// Reporting only — reading this changes nothing. It exists so a
+    /// conformance audit, and a test of one, can see geometry that no layout
+    /// ever produced.
+    pub fn widget_target_regions(&self, id: WidgetId) -> Vec<crate::partition::TargetRegion> {
+        let Some(node) = self.arena.get(id) else {
+            return Vec::new();
+        };
+        node.widget.target_regions(self.arena.bounds(id))
+    }
+
+    /// The hit outset the **mounted** widget at `id` declares for `kind`,
+    /// against the tree's live input tokens.
+    ///
+    /// The read side of [`Widget::hit_outset`], and the companion of
+    /// [`widget_target_regions`](Self::widget_target_regions): both let a
+    /// conformance audit — and a test of one — see target geometry that no
+    /// layout ever produced.
+    ///
+    /// It has to read the mounted node rather than a freshly-built widget,
+    /// because an outset is usually derived from what the widget *painted*,
+    /// and an unmounted one has painted nothing. That is also what makes the
+    /// **gates** assertable: a decorative avatar, an inert twist arrow, a
+    /// disabled swatch and a breadcrumb's current crumb all take no press, so
+    /// each must declare `EdgeInsets::ZERO` — a widened node that then refuses
+    /// the press is a hole punched in whatever is behind it.
+    ///
+    /// The tokens are the **effective** theme's, not `theme`'s, because that
+    /// is what the hit path itself reads:
+    /// `hit_test_for_excluding` builds its `HitContext` from
+    /// `effective_theme.input`, as do the pointer profile and the touch-enabled
+    /// gate in `pointer_state.rs`. The two themes agree only for as long as
+    /// nothing between them touches `input` — `recompute_effective_theme`
+    /// currently projects typography alone — and an accessor that describes a
+    /// path has to read that path's source rather than one that happens to
+    /// match it.
+    ///
+    /// Reporting only — reading this changes nothing.
+    pub fn widget_hit_outset(
+        &self,
+        id: WidgetId,
+        kind: teksilo_tokens::PointerKind,
+    ) -> teksilo_canvas::EdgeInsets {
+        let Some(node) = self.arena.get(id) else {
+            return teksilo_canvas::EdgeInsets::ZERO;
+        };
+        node.widget.hit_outset(kind, &self.effective_theme.input)
+    }
+
+    // -----------------------------------------------------------------
     // Press state
     // -----------------------------------------------------------------
 

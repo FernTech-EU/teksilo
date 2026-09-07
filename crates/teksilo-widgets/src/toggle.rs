@@ -27,6 +27,13 @@
 //! let _w = Toggle::new(dark_mode)
 //!     .label(lit!("Dark mode"));
 //! ```
+//!
+//! ## Touch and pen
+//!
+//! The pressed state is the framework's (`docs/touch-and-pen.md` §7.1) — a
+//! Material 3 thumb that grows on press must not stay grown after the finger
+//! has slid off the switch, nor grow under a finger that turns out to be
+//! scrolling the list the switch sits in. The flip lands on the release.
 
 use std::rc::Rc;
 
@@ -717,5 +724,79 @@ mod tests {
             "tooltip should appear on hover"
         );
         assert!(tree.find_by_label("Tip").is_some());
+    }
+
+    // -----------------------------------------------------------------
+    // The framework press (docs/touch-and-pen.md §7.1)
+    // -----------------------------------------------------------------
+
+    struct PressProbe(std::rc::Rc<std::cell::RefCell<Option<Signal<bool>>>>);
+
+    impl teksilo_core::styles::ToggleStyle for PressProbe {
+        fn make_body(
+            &self,
+            cfg: &teksilo_core::styles::ToggleStyleConfig,
+            ctx: &mut BuildContext,
+        ) -> WidgetId {
+            *self.0.borrow_mut() = Some(cfg.is_pressed.clone());
+            ctx.add(crate::primitives::FixedSize::new().width(36.0).height(20.0))
+        }
+    }
+
+    fn probed_toggle() -> (WidgetTree, WidgetId, Signal<bool>, Signal<bool>) {
+        let probe: std::rc::Rc<std::cell::RefCell<Option<Signal<bool>>>> =
+            std::rc::Rc::new(std::cell::RefCell::new(None));
+        let on = Signal::new(false);
+        let mut theme = teksilo_core::presets::intui::light();
+        theme.style_slots.toggle = Some(std::rc::Rc::new(PressProbe(probe.clone())));
+        let mut tree = WidgetTree::new().with_theme(theme);
+        let t = tree.add(Toggle::new(on.clone()));
+        tree.layout(SizeProposal::exact(200.0, 60.0));
+        let pressed = probe.borrow().clone().expect("style ran");
+        (tree, t, pressed, on)
+    }
+
+    /// The worked example the rest of the sweep follows: the press visual comes
+    /// from the router, the flip lands on the release, and sliding off abandons
+    /// both — a thumb that stayed grown under a finger which turned out to be
+    /// scrolling is exactly what the framework press exists to prevent.
+    #[test]
+    fn a_touch_tap_flips_on_release_and_a_slide_off_abandons_it() {
+        use crate::button::press_test_support::{finger, touch};
+        use teksilo_core::pointer::PointerPhase;
+
+        let (mut tree, t, pressed, on) = probed_toggle();
+        let bounds = tree.bounds(t);
+        let at = bounds.center();
+        let away = teksilo_canvas::Point::new(at.x, bounds.y + bounds.height + 90.0);
+
+        let id = finger();
+        tree.dispatch_pointer(touch(id, PointerPhase::Down, at, 0));
+        assert!(pressed.get(), "the contact holds the switch");
+        assert!(!on.get(), "and has flipped nothing");
+        tree.dispatch_pointer(touch(id, PointerPhase::Move, away, 20));
+        assert!(!pressed.get(), "the press slid off its target");
+        tree.dispatch_pointer(touch(id, PointerPhase::Up, away, 40));
+        assert!(!on.get(), "a release off the switch flips nothing");
+
+        let id = finger();
+        tree.dispatch_pointer(touch(id, PointerPhase::Down, at, 100));
+        tree.dispatch_pointer(touch(id, PointerPhase::Up, at, 130));
+        assert!(on.get(), "and a tap that stays on it does");
+        assert!(!pressed.get());
+    }
+
+    /// The mouse path is unchanged: press shows, release flips.
+    #[test]
+    fn a_mouse_click_presses_then_flips_on_release() {
+        let (mut tree, t, pressed, on) = probed_toggle();
+        let at = tree.bounds(t).center();
+        tree.pointer_move(at);
+        tree.pointer_down_button(at, teksilo_core::event::PointerButton::Primary);
+        assert!(pressed.get());
+        assert!(!on.get());
+        tree.pointer_up_button(at, teksilo_core::event::PointerButton::Primary);
+        assert!(!pressed.get());
+        assert!(on.get());
     }
 }

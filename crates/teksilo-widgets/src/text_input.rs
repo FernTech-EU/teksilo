@@ -25,6 +25,19 @@
 //!     .leading_slot(IconWidget::from_svg(SEARCH_ICON))
 //!     .on_submit_fn(|ctx| ctx.send_intent(AppIntent::Search))
 //! ```
+//!
+//! ## Touch and pen
+//!
+//! The trailing clear affordance is 16 dp of paint and a 24 dp target: raising
+//! its box would widen every field in the workspace at Compact, so the
+//! shortfall is made up between the pointer and the arena through
+//! `Widget::hit_outset` — declared by the slot that takes the tap, because the
+//! ring around an outset resolves to the declaring node rather than to a
+//! descendant, and by a direct child of the row, because an outset never
+//! escapes its parent. The slot keeps its 16 dp while the affordance is hidden
+//! so the row does not jump, and withdraws its outset while there is nothing to
+//! clear. The caret and selection behaviour of the field itself belongs to the
+//! touch-text package.
 
 mod widget_impl;
 

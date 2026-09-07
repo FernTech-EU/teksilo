@@ -204,37 +204,46 @@ impl Widget for TextInput {
         // bound text signal — the field's ext→internal effect
         // picks this up and wipes the document.
         if self.show_clear_button {
-            let clear_hit = teksilo_core::styles::density::density_min_size(
-                teksilo_canvas::Size::new(16.0, 16.0),
-                teksilo_tokens::TargetAxes::BOTH,
-                &ctx.theme().input,
-            );
             let icon = (crate::icon_button::BuiltInIcons::global().clear)()
                 .icon_size(12.0)
                 .color(TextRole::Secondary);
             let text_for_clear = self.text.clone();
+            let visible = text_signal_for_vis.map(|t| !t.is_empty());
+
+            // 16 dp of paint, 24 dp of target — the density rule's shape for a
+            // control genuinely below the floor that cannot grow: the slot's
+            // 16 dp reserves room inside the field's trailing edge, and raising
+            // it would widen every `TextInput` in the workspace at Compact. The
+            // shortfall is made up between the pointer and the arena instead.
+            //
+            // Three things about the arrangement are load-bearing. The outset
+            // has to be declared by the node that *takes* the press (the ring
+            // around an outset resolves to the declaring node, never to a
+            // descendant); it has to be declared by a direct child of the row
+            // (an outset never escapes its parent, so a wrapper pinned to the
+            // affordance's own size would have nowhere to grow); and the slot
+            // has to keep its size while the affordance is hidden or the row
+            // would jump — hence `fixed`, with the visibility on the glyph
+            // inside rather than on the slot. `active` withdraws the outset
+            // when the field is empty, so an invisible affordance never punches
+            // a hole in the field behind it.
+            let glyph_id = ctx.add(crate::primitives::Center::new().child(icon));
+            ctx.visible_when(glyph_id, visible.clone());
             let clear_id = ctx.add(
-                // Raised to the 24 dp WCAG 2.2 SC 2.5.8 floor: this was the
-                // one control in the crate whose own minimum hit box was below
-                // it. The 12 dp glyph is unchanged — only the box around it
-                // grows, and only up to the floor.
-                MinSize::new(clear_hit.width, clear_hit.height)
-                    .child(crate::primitives::Center::new().child(icon))
+                crate::button::HitTarget::new()
+                    .fixed(16.0, 16.0)
+                    .active(visible.clone())
+                    .child_id(glyph_id)
                     .on_tap(move |_pos, ctx| {
+                        if text_for_clear.get().is_empty() {
+                            return;
+                        }
                         text_for_clear.set(String::new());
                         ctx.request_frame();
                     })
                     .cursor(CursorIcon::Pointer),
             );
-            let visible = text_signal_for_vis.map(|t| !t.is_empty());
-            ctx.visible_when(clear_id, visible);
-            let reserve_id = ctx.add(
-                crate::primitives::FixedSize::new()
-                    .width(16.0_f32)
-                    .height(16.0_f32)
-                    .child_id(clear_id),
-            );
-            row = row.add_child(reserve_id);
+            row = row.add_child(clear_id);
         }
 
         if let Some(trailing) = self.trailing_slot.take() {

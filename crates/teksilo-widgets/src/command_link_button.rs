@@ -16,6 +16,12 @@
 //!     .icon(IconWidget::from_svg(NEW_PROJECT_ICON))
 //!     .on_activate_fn(|ctx| ctx.send_intent(AppIntent::NewProject))
 //! ```
+//!
+//! ## Touch and pen
+//!
+//! Shares [`build_interaction_handlers`](crate::button) with `Button`; see that
+//! module's "Touch and pen" section. A command link is a tall, wide target by
+//! construction, so no hit-widening mechanism is involved.
 
 use teksilo_canvas::{Rect, SizeProposal};
 use teksilo_core::accessibility::AccessNodeBuilder;
@@ -372,7 +378,8 @@ impl Widget for CommandLinkButton {
                     a(ctx);
                 }
             });
-        let handlers = crate::button::build_interaction_handlers(interaction, on_activate, true);
+        let handlers =
+            crate::button::build_interaction_handlers(ctx, interaction, on_activate, true);
         ctx.apply_self_handlers(handlers);
 
         self.root_child_id = Some(root);
