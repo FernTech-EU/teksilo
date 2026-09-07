@@ -313,6 +313,14 @@ impl WidgetTree {
                 ));
             }
         }
+        // The framework press. Every exit — a release, a cancel, a peer claim —
+        // goes through `end_press`, so a surviving record means one of them was
+        // missed and some node is painted as held by a pointer that is gone.
+        for id in self.arena.active_ids_iter() {
+            if let Some(pointer) = self.pressed_by(id) {
+                leaks.push(format!("{id:?} is still pressed by {pointer:?}"));
+            }
+        }
         assert!(
             leaks.is_empty(),
             "pointer state leaked after the interaction:\n  - {}",

@@ -306,25 +306,13 @@ impl Widget for Toggle {
                 hovered.set(entered);
             });
         }
-        {
-            // Pointer-pressed signal (PointerDown→true, Up/Leave→false).
-            // IntUI ignores it; design languages with press feedback
-            // (the Material 3 switch's thumb-grow) read `is_pressed`.
-            // Returns `Ignored` so the tap gesture still recognises.
-            let pressed = pressed.clone();
-            handlers = handlers.on_pointer_event(move |event, _ctx| {
-                use teksilo_core::event::{PointerButton, WidgetEvent};
-                match event {
-                    WidgetEvent::PointerDown {
-                        button: PointerButton::Primary,
-                        ..
-                    } => pressed.set(true),
-                    WidgetEvent::PointerUp { .. } | WidgetEvent::PointerLeave => pressed.set(false),
-                    _ => {}
-                }
-                teksilo_core::event::EventResponse::Ignored
-            });
-        }
+        // Pointer-pressed signal, taken from the framework rather than kept
+        // here. IntUI ignores it; design languages with press feedback (the
+        // Material 3 switch's thumb-grow) read `is_pressed`, and a thumb that
+        // stays grown after the finger has slid off the switch — or that grows
+        // under a finger which turns out to be scrolling the list the switch
+        // sits in — is exactly what the router's state exists to prevent.
+        crate::common::interaction::bind_pressed(ctx, pressed.clone());
         {
             let toggle = toggle.clone();
             // Lone-KeyUp guard: track whether we saw the matching KeyDown so
@@ -358,7 +346,7 @@ impl Widget for Toggle {
                 focused.set(gained);
                 if gained {
                     focus_origin.set(Some(if hovered_for_focus.get() {
-                        FocusOrigin::Pointer
+                        FocusOrigin::POINTER
                     } else {
                         FocusOrigin::Keyboard
                     }));
@@ -508,6 +496,34 @@ mod tests {
             .iter()
             .any(|s| s.color == color && s.stroke_width > 0.0)
             || frame.cosmetic_lines.iter().any(|l| l.color == color)
+    }
+
+    /// A middle-click is not a `Toggle` activation, so it must neither flip
+    /// the switch nor raise the press visual: before the framework owned the
+    /// press this widget gated its own handler on `PointerButton::Primary`,
+    /// and the framework gate has to keep that promise.
+    #[test]
+    fn a_middle_press_leaves_the_toggle_alone() {
+        use teksilo_core::event::PointerButton;
+
+        let on = Signal::new(false);
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let t = tree.add(Toggle::new(on.clone()));
+        tree.layout(SizeProposal::exact(120.0, 60.0));
+        let b = tree.bounds(t);
+        let center = teksilo_canvas::Point::new(b.x + b.width / 2.0, b.y + b.height / 2.0);
+
+        tree.pointer_down_button(center, PointerButton::Middle);
+        assert!(!tree.is_pressed(t), "a middle press raises no visual");
+        tree.pointer_up_button(center, PointerButton::Middle);
+        assert!(!on.get(), "and flips nothing");
+
+        // The button the toggle does act on still does both.
+        tree.pointer_down_button(center, PointerButton::Primary);
+        assert!(tree.is_pressed(t), "a primary press raises the visual");
+        tree.pointer_up_button(center, PointerButton::Primary);
+        assert!(!tree.is_pressed(t), "the release clears it");
+        assert!(on.get(), "and the toggle flipped");
     }
 
     #[test]

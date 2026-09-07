@@ -952,7 +952,7 @@ impl Widget for SegmentedControl {
             } else if *v {
                 Some(FocusOrigin::Keyboard)
             } else {
-                Some(FocusOrigin::Pointer)
+                Some(FocusOrigin::POINTER)
             }
         });
 

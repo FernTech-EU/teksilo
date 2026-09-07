@@ -338,6 +338,11 @@ pub struct EventContext<'ops> {
     /// [`touch_action`](EventContext::touch_action) and
     /// `crate::pointer::touch_action`.
     pub(crate) touch_action: TouchAction,
+    /// The framework press held by the pointer being dispatched, as the router
+    /// tracks it: `(inside, pending)`. `None` when that pointer holds no press
+    /// — every handler outside a press, and every hand-constructed context.
+    /// Read by [`is_pressed`](EventContext::is_pressed) and its two siblings.
+    pub(crate) press: Option<(bool, bool)>,
     /// Debug-only WCAG 3.2.1 guard: `Some(flag)` where `flag` is set while a
     /// focus-change dispatch is running. `open_window` / `focus_window` warn if
     /// invoked while it reads `true` (a focus handler changing context). `None`
@@ -489,6 +494,7 @@ impl<'ops> EventContext<'ops> {
             layout_direction: crate::environment::LayoutDirection::LeftToRight,
             input: crate::pointer::InputSnapshot::default(),
             touch_action: TouchAction::AUTO,
+            press: None,
             in_focus_dispatch: None,
             explicit_capture: false,
             recognized_owning_gesture: false,
@@ -502,6 +508,39 @@ impl<'ops> EventContext<'ops> {
     pub(crate) fn with_touch_action(mut self, action: TouchAction) -> Self {
         self.touch_action = action;
         self
+    }
+
+    /// Record the framework press held by the pointer being dispatched, as
+    /// `(inside, pending)`. Called by `make_event_context`.
+    pub(crate) fn with_press(mut self, press: Option<(bool, bool)>) -> Self {
+        self.press = press;
+        self
+    }
+
+    /// Whether the pointer being dispatched holds a press whose visual is
+    /// showing — inside its tap boundary and past any press-feedback delay.
+    ///
+    /// The framework already drives the pressed node's own
+    /// [`pressed_signal`](crate::BuildContext::pressed_signal) from the same
+    /// state; this is for a handler that has to *branch* on the press rather
+    /// than paint it. `false` outside a press.
+    pub fn is_pressed(&self) -> bool {
+        matches!(self.press, Some((true, false)))
+    }
+
+    /// Whether the pointer being dispatched holds a press that has not left
+    /// its tap boundary. Unlike [`is_pressed`](Self::is_pressed) this is still
+    /// true during the press-feedback delay: the press is real, only its
+    /// visual is being withheld.
+    pub fn press_is_inside(&self) -> bool {
+        matches!(self.press, Some((true, _)))
+    }
+
+    /// Whether the pointer being dispatched holds a press whose feedback delay
+    /// has not elapsed — the press is inside a pan claimant and the framework
+    /// is waiting to see whether it becomes a scroll.
+    pub fn press_pending(&self) -> bool {
+        matches!(self.press, Some((_, true)))
     }
 
     /// Record what the tree knows about the sample being dispatched. Called by

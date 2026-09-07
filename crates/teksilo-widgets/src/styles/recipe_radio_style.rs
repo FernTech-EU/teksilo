@@ -99,7 +99,7 @@ impl RadioStyle for RecipeRadioStyle {
             .map(|(focused, hovered)| {
                 if *focused {
                     Some(if *hovered {
-                        FocusOrigin::Pointer
+                        FocusOrigin::POINTER
                     } else {
                         FocusOrigin::Keyboard
                     })

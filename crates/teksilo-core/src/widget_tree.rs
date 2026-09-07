@@ -251,6 +251,10 @@ pub struct WidgetTree {
     highlight_tooltip: Option<(crate::overlay::OverlayId, WidgetId)>,
     /// How the currently focused widget gained focus.
     focus_origin: Option<crate::focus::FocusOrigin>,
+    /// Every live pointer press, keyed by the node whose gesture arena took it.
+    /// The framework's press visual — see [`crate::press`] for the four things
+    /// a widget's own `PointerDown`/`PointerUp` bookkeeping cannot see.
+    presses: crate::press::PressTable,
     /// Input-modality "focus-visible" state: `true` after keyboard input,
     /// `false` after pointer input. Focus rings (e.g. `StandardItem`'s current
     /// row) show only while this is `true`, the standard `:focus-visible`
@@ -748,6 +752,7 @@ impl WidgetTree {
                 teksilo_tokens::PointerKind::Mouse,
             ),
             focus_visible: crate::signal::Signal::new(false),
+            presses: crate::press::PressTable::default(),
             view_focus_stack: Vec::new(),
             previous_pointer_position: None,
             pending_focus_restore: None,
@@ -877,6 +882,7 @@ impl WidgetTree {
             .with_window_active(self.is_window_active())
             .with_input_snapshot(self.current_input.clone())
             .with_touch_action(self.current_frozen_touch_action())
+            .with_press(self.current_press_snapshot())
             .with_focus_dispatch_flag(self.in_focus_dispatch.clone())
     }
 
@@ -3532,6 +3538,87 @@ impl WidgetTree {
             // Node missing (shouldn't happen in build) — hand back a
             // detached signal so the caller still gets a valid handle.
             crate::signal::Signal::new(true)
+        }
+    }
+
+    // -----------------------------------------------------------------
+    // Press state
+    // -----------------------------------------------------------------
+
+    /// Install (or reuse) the framework press signal on a node and return a
+    /// handle to it.
+    ///
+    /// `true` while the node holds a pointer press whose visual is showing:
+    /// between press and release, `false` once the pointer leaves the press's
+    /// tap boundary and `true` again on re-entry, cleared on a cancel or when
+    /// a peer wins the arbitration. See `docs/touch-and-pen.md` §7.
+    pub fn pressed_signal(&mut self, id: WidgetId) -> crate::signal::Signal<bool> {
+        let showing = self.is_pressed(id);
+        let Some(node) = self.arena.get_mut(id) else {
+            // Node missing (should not happen during build) — hand back a
+            // detached signal so the caller still gets a valid handle.
+            return crate::signal::Signal::new(false);
+        };
+        if let Some(existing) = node.pressed_signal.clone() {
+            return existing;
+        }
+        let sig = crate::signal::Signal::new(showing);
+        node.pressed_signal = Some(sig.clone());
+        sig
+    }
+
+    /// The press held by the pointer being dispatched, as `(inside, pending)`,
+    /// for [`EventContext`](crate::widget::EventContext)'s per-dispatch
+    /// snapshot. `None` when that pointer holds no press.
+    pub(crate) fn current_press_snapshot(&self) -> Option<(bool, bool)> {
+        self.presses
+            .get(self.current_pointer_id())
+            .map(|p| (p.inside, p.pending()))
+    }
+
+    /// The contact holding `id`'s press, whether or not its visual is showing.
+    ///
+    /// `None` for a node nothing is pressing. A node held by a finger whose
+    /// press-feedback delay has not elapsed still answers with that finger:
+    /// the press is real, only its visual is waiting.
+    pub fn pressed_by(&self, id: WidgetId) -> Option<crate::pointer::PointerId> {
+        self.presses.owner_of(id)
+    }
+
+    /// Whether `id`'s press visual is showing — held, inside its tap boundary,
+    /// and past any press-feedback delay. What the node's
+    /// [`pressed_signal`](Self::pressed_signal) mirrors.
+    pub fn is_pressed(&self, id: WidgetId) -> bool {
+        self.presses
+            .for_node(id)
+            .is_some_and(crate::press::Press::showing)
+    }
+
+    /// Whether `id` is held and the pointer has not left the press's tap
+    /// boundary. True during a press-feedback delay, unlike
+    /// [`is_pressed`](Self::is_pressed).
+    pub fn press_is_inside(&self, id: WidgetId) -> bool {
+        self.presses.for_node(id).is_some_and(|p| p.inside)
+    }
+
+    /// Whether `id` is held but its press-feedback delay has not elapsed, so
+    /// the visual is deliberately withheld.
+    pub fn press_pending(&self, id: WidgetId) -> bool {
+        self.presses
+            .for_node(id)
+            .is_some_and(crate::press::Press::pending)
+    }
+
+    /// Publish `id`'s press signal from the table. The one place a press
+    /// signal is written, so "the table changed" and "the recipe was told"
+    /// cannot drift apart.
+    pub(crate) fn publish_pressed(&mut self, id: WidgetId) {
+        let showing = self.is_pressed(id);
+        if let Some(node) = self.arena.get(id)
+            && let Some(sig) = node.pressed_signal.clone()
+            && sig.get() != showing
+        {
+            sig.set(showing);
         }
     }
 

@@ -163,6 +163,12 @@ pub struct WidgetNode {
     /// that resource. This signal is that notification. Set only on an
     /// actual Active↔Dormant transition. See `set_dormant` / `activate`.
     pub(crate) activation_signal: Option<Signal<bool>>,
+    /// Framework-written press visual: `true` while this node holds a pointer
+    /// press that has not slid off, been claimed by a peer, or been cancelled.
+    /// Opted into via `BuildContext::pressed_signal`, and written by the
+    /// router — see [`crate::press`] for why the widget cannot maintain this
+    /// from its own handlers.
+    pub(crate) pressed_signal: Option<Signal<bool>>,
     /// Framework-written mirror of [`WidgetArena::is_enabled`] for this node —
     /// the AND of its own `enabled_state` and every ancestor's. Opted into via
     /// `BuildContext::effective_enabled_signal`.
@@ -489,6 +495,7 @@ impl WidgetNode {
             view_focus_signal: None,
             hover_within_signal: None,
             activation_signal: None,
+            pressed_signal: None,
             effective_enabled_signal: None,
             alignment_override: None,
             clips_children: false,

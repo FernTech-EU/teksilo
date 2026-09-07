@@ -64,6 +64,19 @@ impl WidgetTree {
         }
         self.set_focused(Some(id));
         self.focus_origin = Some(origin);
+        // `:focus-visible` is one tree-level signal, so the assignment itself
+        // has to declare the modality: a direct pointer's focus lands on the
+        // release, an event kind the dispatch root's modality sniff does not
+        // name, and an assistive `Action::Focus` carries no input event at all.
+        // Keying the write on the origin makes "the ring moved" and "focus
+        // moved" the same event. `Programmatic` declares nothing — a scripted
+        // focus leaves the ring where the user's last real interaction left it,
+        // which is what `:focus-visible` does for `element.focus()`.
+        if let Some(visible) = origin.focus_visible()
+            && self.focus_visible.get() != visible
+        {
+            self.focus_visible.set(visible);
+        }
         self.a11y_dirty = true;
         self.update_focus_within_signals(previously_focused, Some(id));
         self.update_view_focus_signals(previously_focused, Some(id));
@@ -92,7 +105,7 @@ impl WidgetTree {
         // pointer sets the real caret *after* focus, and the widget's own
         // caret-chase then keeps it visible). Reveal only for keyboard /
         // programmatic focus, where the newly-focused target may be off-screen.
-        if origin != crate::focus::FocusOrigin::Pointer {
+        if !origin.is_pointer() {
             self.scroll_focused_into_view(id, &mut *ops);
         }
     }

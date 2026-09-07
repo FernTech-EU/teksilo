@@ -365,14 +365,16 @@ impl WidgetTree {
         //    with it. The palm watch is dropped rather than judged: a cancel is
         //    not a release, so there is nothing to be a palm *of*. The pinch is
         //    told, because a handler that has been zooming since `PinchStarted`
-        //    must be given its `Cancelled` to unwind on. P11 clears the
-        //    framework press signal here; that subject does not exist yet.
+        //    must be given its `Cancelled` to unwind on. The framework press
+        //    visual goes with them: a press that was taken away must not stay
+        //    painted, and the node is never sent an `Up` to clear it from.
         let pan_chain: Vec<WidgetId> = self.pan_chain_ids(pointer);
         self.abandon_pan(pointer);
         for id in pan_chain {
             self.stop_fling(id);
         }
         self.forget_palm_watch(pointer);
+        self.end_press(pointer);
         self.cancel_pinch(pointer, reason, ops);
 
         // 6. The table entry, for a pointer that ceases to exist when it is

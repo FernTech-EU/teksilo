@@ -38,6 +38,8 @@ pub mod paint_prop;
 pub mod partition;
 pub mod pointer;
 pub mod presets;
+/// Per-node press state — see the module docs for why the router owns it.
+pub(crate) mod press;
 pub mod raw_handle;
 pub mod shortcut;
 pub mod signal;

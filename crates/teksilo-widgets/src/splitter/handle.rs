@@ -294,7 +294,7 @@ impl Widget for SplitterHandle {
                         expanding_i.set(false);
                         expanding_j.set(false);
                         is_dragging.set(true);
-                        focus_origin.set(Some(FocusOrigin::Pointer));
+                        focus_origin.set(Some(FocusOrigin::Pointer(ctx.pointer_kind())));
                         ctx.capture_pointer();
                         ctx.request_focus(self_id);
                         // Return `Ignored` so the gesture arena still sees this
@@ -467,7 +467,7 @@ impl Widget for SplitterHandle {
             handlers = handlers.on_focus(move |gained, _ctx| {
                 if gained {
                     let origin = if hovered.get() {
-                        FocusOrigin::Pointer
+                        FocusOrigin::POINTER
                     } else {
                         FocusOrigin::Keyboard
                     };

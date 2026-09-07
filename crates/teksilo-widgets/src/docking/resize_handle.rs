@@ -215,7 +215,7 @@ impl Widget for DockResizeHandle {
                         focus.set(None);
                     } else {
                         focus.set(Some(if hov.get() {
-                            FocusOrigin::Pointer
+                            FocusOrigin::POINTER
                         } else {
                             FocusOrigin::Keyboard
                         }));
@@ -246,7 +246,7 @@ impl Widget for DockResizeHandle {
                         let size = model.side_size(side);
                         drag_offset.set(main - (rail + size));
                         is_dragging_h.set(true);
-                        focus.set(Some(FocusOrigin::Pointer));
+                        focus.set(Some(FocusOrigin::Pointer(ctx.pointer_kind())));
                         ctx.capture_pointer();
                         ctx.request_focus(drag_self_id);
                         EventResponse::Ignored

@@ -1142,6 +1142,10 @@ impl WidgetTree {
         // (`next_input_deadline`), and giving it its own call site would mean
         // every host had to learn a second one.
         self.tick_flings_with_ops(now, &mut *ops);
+        // …and so does the press-feedback delay, for the same reason: it is an
+        // input deadline folded into the same `WaitUntil`, and a finger resting
+        // on a control produces no further samples to resolve it from.
+        self.resolve_press_delays(self.event_time_for(now));
 
         let mut ids = std::mem::take(&mut self.active_ids_scratch);
         ids.clear();

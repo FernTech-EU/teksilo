@@ -324,7 +324,7 @@ impl Widget for Slider {
                 } else if *v {
                     Some(FocusOrigin::Keyboard)
                 } else {
-                    Some(FocusOrigin::Pointer)
+                    Some(FocusOrigin::POINTER)
                 }
             }),
             orientation,

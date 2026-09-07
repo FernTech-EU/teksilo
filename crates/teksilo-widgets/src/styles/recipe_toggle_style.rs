@@ -130,7 +130,7 @@ impl ToggleStyle for RecipeToggleStyle {
                     Some(if *visible {
                         FocusOrigin::Keyboard
                     } else {
-                        FocusOrigin::Pointer
+                        FocusOrigin::POINTER
                     })
                 } else {
                     None

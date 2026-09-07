@@ -101,7 +101,7 @@ impl CheckboxStyle for RecipeCheckboxStyle {
             .map(|(focused, hovered)| {
                 if *focused {
                     Some(if *hovered {
-                        FocusOrigin::Pointer
+                        FocusOrigin::POINTER
                     } else {
                         FocusOrigin::Keyboard
                     })

@@ -14,6 +14,7 @@ pub(crate) mod column_geometry;
 pub mod datetime;
 pub mod drag_autoscroll;
 pub(crate) mod editor_runtime;
+pub(crate) mod interaction;
 pub(crate) mod list_nav;
 #[cfg(test)]
 pub(crate) mod locale_switch_test;

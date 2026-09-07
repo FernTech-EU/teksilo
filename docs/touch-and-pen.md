@@ -12,10 +12,12 @@ It is written alongside the migration, so it grows as the packages land. What is
 here now is what exists now: the pointer model, the clock, the trace switch, and
 the platform translator that turns an OS touch packet into pointer samples.
 
-> **Status.** A mouse behaves exactly as it always has. The platform layer can
-> now *produce* touch and pen samples, but nothing dispatches them yet: the app
-> event loop still feeds the tree the single-`WidgetEvent` mouse path, and the
-> gesture recognizers still see the same stream they always did.
+> **Status.** A mouse behaves exactly as it always has. The tree now routes
+> touch and pen samples end to end — arbitration, pan delivery, cancellation,
+> hit targeting and the press — but the **app event loop** is not yet wired to
+> the multi-sample translator, so a running application still feeds the tree the
+> single-`WidgetEvent` mouse path. Everything below the ingress doors is live
+> and tested; the last hop from the platform layer into the loop is not.
 
 ---
 
@@ -838,7 +840,180 @@ Teksilo's, not winit's.
 
 ---
 
-## 7. What is not here yet
+## 7. The press
+
+A mouse press and a finger press are not the same act. A mouse is placed
+exactly and stays where it is put; a finger lands on an estimate, wanders while
+it rests, and is very often the beginning of a scroll rather than the beginning
+of a choice. Three consequences run through this section: the framework, not
+each widget, decides when a control looks pressed; a direct pointer's focus is
+decided by its **release**; and the surviving press-time actuations are named
+and justified rather than left to accumulate.
+
+### 7.1 The framework press
+
+The router keeps one record per live press, keyed by the node whose gesture
+arena took it — the node whose `on_tap` would fire. Recipes read it as one
+signal:
+
+```rust
+// in build()
+let pressed = ctx.pressed_signal();   // Signal<bool>, bind at RepaintOnly
+```
+
+and the tree answers three separate questions about it, because a press and a
+press *visual* are not the same thing:
+
+| question | true when |
+| --- | --- |
+| `WidgetTree::pressed_by(id) -> Option<PointerId>` | the node is held, wherever the pointer has since moved |
+| `WidgetTree::press_is_inside(id)` | …and the pointer has not left the press's tap boundary |
+| `WidgetTree::is_pressed(id)` | …and the press-feedback delay has elapsed |
+
+`is_pressed` is what `pressed_signal` mirrors and what a recipe paints. From
+inside a handler the same three are on `EventContext`, for the pointer being
+dispatched: `is_pressed()`, `press_is_inside()`, `press_pending()`.
+
+A press visual says "release here and this control acts", so it answers to the
+same buttons the activation does: the union of the owner's own click-style
+`ButtonMask`s — `PRIMARY` unless the widget widened it with
+`accept_tap_buttons` and friends. A middle-click, or a right-click on a node
+with no context menu, therefore lights nothing up; a widget that widened its
+mask lights up on the buttons it widened to. A node whose arena also *drags* or
+*swipes* — neither recognizer carries a mask, both act on whatever button they
+are given — has nothing to say against any button and keeps its visual for all
+of them. A finger and a pen tip report no button at all and are lowered to
+`Primary`, so the gate is a mouse-and-barrel-button concern only.
+
+The record itself is opened for **every** button, because it also holds the
+focusable a direct pointer defers to its release (§7.2). A press on a button the
+control cannot act on owns no visual and still chooses what it lands on.
+
+The state moved out of the widgets because four of its rules are invisible from
+inside a handler:
+
+* **Slide-off.** WCAG 2.2 SC 2.5.2 asks that a press travelling off its target
+  be abandonable. "Off its target" is the pointer's `TapBoundary` — a 5 dp
+  radius for a mouse, the node's own bounds for a finger, because a finger's
+  reported centre wanders several device pixels while resting inside the
+  control it is pressing. It is the same predicate that fails the tap, so the
+  activation and the visual can never disagree.
+* **Re-entry.** Sliding back on restores the visual. The abort gesture is
+  reversible right up to the release.
+* **A peer claim.** When a pan claimant or an ancestor drag wins the
+  arbitration, the pressed control loses the press and is never sent a release
+  to clear itself from. Only the arbitration knows.
+* **The feedback delay.** Inside a pan claimant the visual is withheld for
+  `GestureProfile::press_feedback_delay` (100 ms — Flutter `kPressTimeout` /
+  Android `ViewConfiguration.getTapTimeout()`), so a finger resting on a list
+  row does not flash the row before the pan has been ruled out. **Only inside a
+  claimant**: a control nothing can scroll out from under has no ambiguity to
+  wait out and lights up at once. A mouse never waits at all — an indirect
+  pointer opens no pan session, so the delay cannot reach it.
+
+A cancel clears the visual as part of the ordered teardown. A second contact
+never takes over a node's visual: under `MultiContact::First` it is terminated
+before it reaches the arena, and under any other policy the first contact keeps
+the boolean — otherwise the first release would clear a visual the second is
+still holding.
+
+`teksilo-widgets`' `common/interaction.rs` is the consumer side: `bind_pressed`
+mirrors the framework press onto a control's own signal (keeping its identity,
+so a Tier-3 style that captured it goes on working), and `press_shows_now` /
+`press_survives` are for a control that keeps its own state machine and needs to
+consult the framework from inside handlers it already has.
+
+### 7.2 Focus lands on the release, for a direct pointer
+
+A mouse focuses on press, exactly as it always has. A finger and a pen do not:
+their focus is assigned on the `PointerUp`, guarded by **"the release landed on
+the same focusable as the press"**. A finger that presses one control, slides
+onto its neighbour and lifts has activated nothing, and must move focus nowhere
+— the rule the tap recognizer applies to activation, applied to focus so the
+two cannot disagree.
+
+`FocusOrigin` grew a device to say which of these happened:
+
+```rust
+#[non_exhaustive]
+pub enum FocusOrigin {
+    Keyboard,
+    Pointer(PointerKind),
+    Programmatic,
+    Accessibility,
+}
+```
+
+`is_pointer()` replaces the `== FocusOrigin::Pointer` comparisons; `pointer_kind()`
+answers with the device. A control deriving its *own* origin from hover or from
+the input-modality signal — it knows only "not the keyboard" — writes
+`FocusOrigin::POINTER`, which is `Pointer(PointerKind::Unknown)`, rather than
+naming a device it never saw.
+
+`focus_visible` is one tree-level signal, not a per-node flag, so the assignment
+itself declares the modality: `Keyboard` and `Accessibility` reveal the ring,
+`Pointer(_)` hides it, and `Programmatic` declares nothing at all — a scripted
+focus leaves the ring where the user's last real interaction left it, which is
+what `:focus-visible` does for `element.focus()`. The keystroke *also* still
+sets the signal at the dispatch root, because a keystroke that moves no focus
+must still reveal the ring.
+
+`Accessibility` is new, and fixes a real bug: an assistive `Action::Focus` used
+to route through `Programmatic`, so a screen-reader user who had clicked
+anything got an invisible focus for the rest of the session.
+
+### 7.3 The press-time actuation census
+
+What still happens on `PointerDown`, and why. Every entry was read in the source
+rather than inferred; the list of conversions still owed names the package that
+owes each one.
+
+#### Kept on press, with the reason
+
+| site | what it does on press | why it stays |
+| --- | --- | --- |
+| [`title_bar/resize_strip.rs:116`](../crates/teksilo-widgets/src/title_bar/resize_strip.rs) | `host.begin_resize(edge)` | The OS owns the gesture from the press onward. `begin_resize` hands the pointer to the compositor's own interactive-resize loop, which never delivers the release back to us — there is no release to move the actuation to. |
+| [`splitter/handle.rs:266`](../crates/teksilo-widgets/src/splitter/handle.rs) | captures the pointer, records the drag origin and the pane pair | A continuous manipulator: the value it produces **is** the press position, and everything after the press is measured from it. Deferring to the release would mean the divider only ever jumped, never dragged. |
+| [`docking/resize_handle.rs:235`](../crates/teksilo-widgets/src/docking/resize_handle.rs) | captures, records the drag offset | The Splitter handle's twin, and the same reason. |
+| [`table_view/header.rs:707`](../crates/teksilo-widgets/src/table_view/header.rs) | latches a column resize / reorder grip | Same family: the grip's whole output is the delta from the press point. |
+| [`spin_box/step_button.rs:252`](../crates/teksilo-widgets/src/spin_box/step_button.rs) | steps once, then arms hold-to-repeat | Qt's `QAbstractSpinBox` convention, and the auto-repeat needs a press to start counting from. A step is cheap and reversible; a release-only step would make the repeat impossible to express. |
+| [`primitives/text_input_field/mouse.rs:25`](../crates/teksilo-widgets/src/primitives/text_input_field/mouse.rs), [`rich_text/mouse.rs:251`](../crates/teksilo-widgets/src/rich_text/mouse.rs), [`code_editor/mouse.rs:46`](../crates/teksilo-widgets/src/code_editor/mouse.rs) | places the caret and latches a selection anchor | The mouse-only selection latches. A drag-select is a continuous manipulator whose anchor is the press point, and every desktop text surface behaves this way. Touch text selection is a different gesture set entirely and is owed by the touch-text package, which will not reuse this path. |
+| [`password_field.rs:527`](../crates/teksilo-widgets/src/password_field.rs) | starts a hold-to-reveal | The gesture *is* "while held". There is nothing to defer. |
+| [`grid_view/body_pane.rs:335`](../crates/teksilo-widgets/src/grid_view/body_pane.rs), [`list_view/body_pane.rs:309`](../crates/teksilo-widgets/src/list_view/body_pane.rs), [`tree_view/body_pane.rs:298`](../crates/teksilo-widgets/src/tree_view/body_pane.rs), [`table_view/body_pane.rs:392`](../crates/teksilo-widgets/src/table_view/body_pane.rs), [`tree_table_view/body_pane.rs:601`](../crates/teksilo-widgets/src/tree_table_view/body_pane.rs) | Ctrl- and Shift-modified row selection | The **mouse-only** selection latches: an accelerator-click extends a selection whose anchor is the press, and a Shift-drag range needs the press to anchor from. The unmodified press on an already-selected row is *already* deferred to the release (`data_views::deferred_select`) so grabbing a multi-selection drags the whole set; the remaining press-time paths are the modified ones. |
+| [`grid_view.rs:1274`](../crates/teksilo-widgets/src/grid_view.rs) | records the modifiers the marquee will use | Not an actuation. It reads the press so the drag that may follow knows whether it is additive; the marquee itself starts from `DragPhase::Started`. |
+| [`button.rs:128`](../crates/teksilo-widgets/src/button.rs) | sets `InteractionState::Pressed` | Not an actuation either — a press *visual*, which is what §7.1 exists to govern. The button family's own bookkeeping is left in place for now; converting it is the controls sweep's job. |
+
+#### Owed to a later package
+
+| site | what it does on press | owed by |
+| --- | --- | --- |
+| [`widget_tree/pointer_router.rs:529`](../crates/teksilo-core/src/widget_tree/pointer_router.rs) — `handle_click_outside` | dismisses every click-outside overlay | **P17.** A finger that presses outside a popover and slides back in has not dismissed it; the dismissal belongs on the release, with the same "landed where it started" guard focus now uses. |
+| [`widget_tree/pointer_router.rs:823`](../crates/teksilo-core/src/widget_tree/pointer_router.rs) — the `PointerButton::Secondary` arm | opens the context menu | **P29.** For a coarse pointer there is no secondary button to press: the gesture is a long press, and the menu should open from the long-press recognizer instead of from a button a finger does not have. |
+| [`title_bar/drag_region.rs:155`](../crates/teksilo-widgets/src/title_bar/drag_region.rs) | `host.show_window_menu(position)` on a Secondary press | **P29.** The same conversion, for the OS window menu. (The window *move* on this node is not a press-time actor at all — it starts from `DragPhase::Started`, `drag_region.rs:131`.) |
+| `data_views::deferred_select::on_down` — the `command()` and `shift()` arms, at the five body panes listed above | modified row selection | **P23.** Listed in both tables on purpose: the *mouse* behaviour is kept and justified above; what P23 owes is the touch gesture set that replaces it, since a finger has no Ctrl and no Shift. |
+
+#### Already release-driven, and worth recording
+
+Three widgets the design expected to find on the press turned out to be on the
+release or the drag already, and need no conversion:
+
+* the **ScrollBar** — the thumb latches from `DragPhase::Started`
+  ([`scroll_bar.rs:502`](../crates/teksilo-widgets/src/scroll_bar.rs)) and a
+  track click is an `on_tap` (`scroll_bar.rs:546`);
+* the **Slider** — likewise, `DragPhase::Started` at
+  [`slider.rs:358`](../crates/teksilo-widgets/src/slider.rs) and `on_tap` at
+  `slider.rs:380`;
+* **menu triggers, submenu opening and tab activation** — all `on_tap` or
+  `on_hover` ([`menu_bar/trigger.rs:74`](../crates/teksilo-widgets/src/menu_bar/trigger.rs),
+  [`menu_item/widget_impl.rs:577`](../crates/teksilo-widgets/src/menu_item/widget_impl.rs),
+  [`tab_widget/header.rs:732`](../crates/teksilo-widgets/src/tab_widget/header.rs)),
+  so their remaining touch problem is the hover-only half, not the press-time
+  half.
+
+
+---
+
+## 8. What is not here yet
 
 Deliberately, and in this order: wiring the app event loop to the multi-sample
 translator (nothing dispatches a touch or pen sample yet — the platform layer
@@ -846,10 +1021,9 @@ only *produces* them), the kinetic scrolling core, the density sweep across the
 widget catalogue, and touch text editing. Each has its own package; this file
 grows with them.
 
-Two steps of the cancel teardown are missing because their subject does not
-exist yet: the framework press signal clears there (P11), and a fling this
-pointer was driving stops there (P13/P21). Both insert at the point the funnel
-marks.
+The cancel teardown is complete: the framework press signal clears there
+(§7.1) and a fling this pointer was driving stops there, both at the point the
+funnel marks.
 
 See also: [Density & targets](density-and-targets.md), the
 [widget pointer inventory](widget-pointer-inventory.md), the

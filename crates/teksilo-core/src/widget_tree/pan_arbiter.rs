@@ -268,6 +268,17 @@ impl WidgetTree {
         );
     }
 
+    /// Whether `pointer`'s press opened a pan session — i.e. whether a claimant
+    /// along its hit path accepts this pointer kind.
+    ///
+    /// Read by the press-feedback delay: a press that nothing can scroll out
+    /// from under has no ambiguity to wait out, so only a press *inside a
+    /// claimant* withholds its visual. See
+    /// `WidgetTree::begin_press`.
+    pub(crate) fn pan_session_open(&self, pointer: PointerId) -> bool {
+        self.touch_motion.pans.contains_key(&pointer)
+    }
+
     /// The arbitration decided for a pan claimant. Record it: from here on
     /// every sample for this pointer is delivered as a synthesised scroll.
     pub(super) fn note_pan_claimed(&mut self, pointer: PointerId, owner: WidgetId) {
@@ -796,8 +807,8 @@ impl WidgetTree {
     // -----------------------------------------------------------------
 
     /// The earliest wall-clock instant at which the **input** layer wants the
-    /// event loop back: a pending gesture deadline (a long press, a
-    /// press-feedback delay) or a live fling simulation.
+    /// event loop back: a pending gesture deadline (a long press), a press
+    /// whose feedback delay has not elapsed, or a live fling simulation.
     ///
     /// Folded into [`next_timer_deadline`](Self::next_timer_deadline) beside
     /// the tooltip, overlay and animation terms, so there is one
@@ -809,10 +820,14 @@ impl WidgetTree {
             .driver
             .next_deadline()
             .map(|t| self.instant_for(t));
-        [self.next_gesture_deadline(), fling]
-            .into_iter()
-            .flatten()
-            .min()
+        [
+            self.next_gesture_deadline(),
+            fling,
+            self.next_press_deadline(),
+        ]
+        .into_iter()
+        .flatten()
+        .min()
     }
 }
 

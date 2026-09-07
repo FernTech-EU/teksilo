@@ -3,9 +3,128 @@
 
 use super::*;
 
+use crate::event::ButtonMask;
 use crate::gesture::{GestureArenaSet, GestureEvent};
 
+/// Which recognizers a node's handler set asks for, and on which buttons.
+///
+/// Read once and used twice: [`WidgetTree::ensure_gesture_arena`] installs the
+/// arena from it, and [`WidgetTree::press_buttons`] decides from the very same
+/// reading which buttons may raise the node's press visual. One reader, so the
+/// arena and the visual cannot come to disagree about what this node acts on.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct ArenaRecognizers {
+    has_tap: bool,
+    has_double_tap: bool,
+    has_triple_tap: bool,
+    has_long_press: bool,
+    has_drag: bool,
+    has_swipe: bool,
+    /// Per-recognizer overrides, own bucket preferred over external. `None`
+    /// leaves the recognizer on its own default, [`ButtonMask::PRIMARY`].
+    tap_buttons: Option<ButtonMask>,
+    double_tap_buttons: Option<ButtonMask>,
+    triple_tap_buttons: Option<ButtonMask>,
+    long_press_buttons: Option<ButtonMask>,
+}
+
+impl ArenaRecognizers {
+    /// Read BOTH handler buckets, so a handler attached via
+    /// `apply_self_handlers` and one attached through the `WidgetBuilder`
+    /// chain count the same.
+    pub(crate) fn read(node: &crate::arena::WidgetNode) -> Self {
+        Self {
+            has_tap: node.any_handler(|h| h.on_tap.is_some()),
+            has_double_tap: node.any_handler(|h| h.on_double_tap.is_some()),
+            has_triple_tap: node.any_handler(|h| h.on_triple_tap.is_some()),
+            has_long_press: node.any_handler(|h| h.on_long_press.is_some()),
+            has_drag: node.any_handler(|h| h.on_drag.is_some()),
+            has_swipe: node.any_handler(|h| h.on_swipe.is_some()),
+            tap_buttons: node
+                .handlers
+                .tap_buttons
+                .or(node.external_handlers.tap_buttons),
+            double_tap_buttons: node
+                .handlers
+                .double_tap_buttons
+                .or(node.external_handlers.double_tap_buttons),
+            triple_tap_buttons: node
+                .handlers
+                .triple_tap_buttons
+                .or(node.external_handlers.triple_tap_buttons),
+            long_press_buttons: node
+                .handlers
+                .long_press_buttons
+                .or(node.external_handlers.long_press_buttons),
+        }
+    }
+
+    /// Whether any recognizer at all is wanted — the gate on installing an
+    /// arena.
+    fn any(self) -> bool {
+        self.has_tap
+            || self.has_double_tap
+            || self.has_triple_tap
+            || self.has_drag
+            || self.has_long_press
+            || self.has_swipe
+    }
+
+    /// Whether the plain `TapRecognizer` is one of the installed prototypes.
+    ///
+    /// A multi-tap recognizer in the arena suppresses it — see the comment at
+    /// the install site — so its mask must not speak for a node whose
+    /// `TapRecognizer` was never built.
+    fn installs_tap(self) -> bool {
+        self.has_tap && !(self.has_double_tap || self.has_triple_tap)
+    }
+
+    /// The buttons a press on this node could actually act on.
+    ///
+    /// The four click-style recognizers each carry a [`ButtonMask`], defaulting
+    /// to [`ButtonMask::PRIMARY`]; a drag and a swipe carry none and act on
+    /// whatever button the press arrived with. So a node whose arena is
+    /// click-style throughout answers with the union of those masks, and one
+    /// that also drags or swipes — or that carries no recognizer at all,
+    /// because it captured the pointer explicitly and drives its own
+    /// `on_pointer_event` — has nothing to say against any button and answers
+    /// [`ButtonMask::ALL`].
+    fn accepted_buttons(self) -> ButtonMask {
+        if self.has_drag || self.has_swipe {
+            return ButtonMask::ALL;
+        }
+        let mut mask = ButtonMask::NONE;
+        let mut add = |on: bool, declared: Option<ButtonMask>| {
+            if on {
+                mask = mask.union(declared.unwrap_or(ButtonMask::PRIMARY));
+            }
+        };
+        add(self.installs_tap(), self.tap_buttons);
+        add(self.has_double_tap, self.double_tap_buttons);
+        add(self.has_triple_tap, self.triple_tap_buttons);
+        add(self.has_long_press, self.long_press_buttons);
+        if mask.is_empty() {
+            ButtonMask::ALL
+        } else {
+            mask
+        }
+    }
+}
+
 impl WidgetTree {
+    /// The buttons on which a press over `id` may raise its press visual.
+    ///
+    /// The visual says "release here and this control acts", so it must answer
+    /// to the same buttons the activation does — otherwise a middle-click, or a
+    /// right-click on a node with no context menu, lights a control up for a
+    /// press that can never complete. See
+    /// [`ArenaRecognizers::accepted_buttons`].
+    pub(crate) fn press_buttons(&self, id: WidgetId) -> ButtonMask {
+        self.arena.get(id).map_or(ButtonMask::ALL, |node| {
+            ArenaRecognizers::read(node).accepted_buttons()
+        })
+    }
+
     /// Lazily install a gesture arena set populated with whichever recognizers
     /// the widget's handler set actually needs. Without this, a widget
     /// that wires `on_drag` or `on_double_tap` (but not `on_tap`) would
@@ -34,38 +153,28 @@ impl WidgetTree {
             gesture_owners.insert(id);
             return;
         }
-        let has_tap = node.any_handler(|h| h.on_tap.is_some());
-        let has_double_tap = node.any_handler(|h| h.on_double_tap.is_some());
-        let has_triple_tap = node.any_handler(|h| h.on_triple_tap.is_some());
-        let has_drag = node.any_handler(|h| h.on_drag.is_some());
-        let has_long_press = node.any_handler(|h| h.on_long_press.is_some());
-        let has_swipe = node.any_handler(|h| h.on_swipe.is_some());
-
-        if !(has_tap || has_double_tap || has_triple_tap || has_drag || has_long_press || has_swipe)
-        {
+        // One reading of the handler buckets, shared with `press_buttons` so
+        // the arena that fires and the visual that lights up cannot come to
+        // disagree about which buttons this node acts on.
+        let wanted = ArenaRecognizers::read(node);
+        if !wanted.any() {
             return;
         }
-
-        // Read per-handler button-mask overrides from BOTH buckets,
-        // preferring the own (`handlers`) bucket. Falls back to the
-        // recognizer's own default (`ButtonMask::PRIMARY`) when neither
-        // bucket sets a mask.
-        let tap_buttons = node
-            .handlers
-            .tap_buttons
-            .or(node.external_handlers.tap_buttons);
-        let double_tap_buttons = node
-            .handlers
-            .double_tap_buttons
-            .or(node.external_handlers.double_tap_buttons);
-        let triple_tap_buttons = node
-            .handlers
-            .triple_tap_buttons
-            .or(node.external_handlers.triple_tap_buttons);
-        let long_press_buttons = node
-            .handlers
-            .long_press_buttons
-            .or(node.external_handlers.long_press_buttons);
+        let ArenaRecognizers {
+            // `has_tap` alone does not decide: a multi-tap recognizer
+            // suppresses the plain one, so the install below asks
+            // `installs_tap()`.
+            has_tap: _,
+            has_double_tap,
+            has_triple_tap,
+            has_long_press,
+            has_drag,
+            has_swipe,
+            tap_buttons,
+            double_tap_buttons,
+            triple_tap_buttons,
+            long_press_buttons,
+        } = wanted;
 
         let mut set = GestureArenaSet::new();
         set.set_multi_contact(node.multi_contact);
@@ -80,7 +189,7 @@ impl WidgetTree {
         // callers that need click-1 behaviour under a multi-tap widget
         // use `on_pointer_event::PointerDown` (which fires before the
         // gesture arena and runs regardless of multi-tap state).
-        if has_tap && !(has_double_tap || has_triple_tap) {
+        if wanted.installs_tap() {
             set.add(move || {
                 let rec = crate::gesture::TapRecognizer::new();
                 match tap_buttons {

@@ -796,6 +796,9 @@ impl WidgetTree {
                 // After the arbitration, so a claim taken on *this* sample
                 // already delivers its own movement rather than waiting a frame.
                 self.advance_pan(*position, &mut *ops);
+                // …and after that, so the press visual answers to a claim taken
+                // on this very sample rather than surviving it by one move.
+                self.update_press(*position);
                 self.update_pointer_leave_overlays(*position, &mut *ops);
             }
             WidgetEvent::PointerDown {
@@ -839,10 +842,23 @@ impl WidgetTree {
                     self.begin_pan(target, *position, modifiers);
                     self.begin_palm_watch(*position);
                     self.feed_pinch(super::pan_arbiter::PinchFeed::Down, *position, &mut *ops);
-                    if let Some(focusable) = self.find_focusable_at_or_above(target) {
+                    // Open the press record before the dispatch, so a handler
+                    // asking `ctx.press_pending()` on its own `PointerDown`
+                    // gets the answer the router already knows.
+                    let focusable = self.find_focusable_at_or_above(target);
+                    self.begin_press(focusable);
+                    // An indirect pointer focuses on press, as it always has.
+                    // A direct one waits for the release: a finger that lands
+                    // on a control and slides away has not chosen it, and
+                    // moving focus at touch-down would leave the ring — and
+                    // the caret — on a control the user never activated. See
+                    // `focus_on_release`.
+                    if !pressing.kind.is_direct()
+                        && let Some(focusable) = focusable
+                    {
                         self.focus_with_origin_ops(
                             focusable,
-                            crate::focus::FocusOrigin::Pointer,
+                            crate::focus::FocusOrigin::Pointer(pressing.kind),
                             &mut *ops,
                         );
                     }
@@ -854,6 +870,10 @@ impl WidgetTree {
                     if self.active_drag.is_none() {
                         self.enrol_sequence_members(&event, &mut *ops);
                     }
+                    // The arena has now claimed the press, so the node whose
+                    // visual this record drives is known — and whether the
+                    // button that opened it is one that node can act on.
+                    self.adopt_press_owner(*button);
                 }
             }
             WidgetEvent::PointerUp { position, .. } => {
@@ -901,6 +921,10 @@ impl WidgetTree {
                 // armed, and the next hover move starts a phantom drag.
                 self.note_sequence_position(*position);
                 self.end_sequence(&event, &mut *ops);
+                // A direct pointer's focus lands here, before the release is
+                // dispatched, so a handler activating on the `Up` runs with the
+                // focus its own press earned.
+                self.focus_on_release(*position, &mut *ops);
                 if let Some(captured) = self.current_pointer_capture() {
                     self.dispatch_to_widget(captured, &event, &mut *ops);
                     // Per pointer: this Up releases *this* pointer's capture and
@@ -916,6 +940,10 @@ impl WidgetTree {
                 // its `Down` but not its `Up` — see `release_arenas_following`.
                 let released = self.current_pointer_id();
                 self.release_arenas_following(released);
+                // The visual goes with it. After the dispatch, so a release
+                // handler reading `ctx.is_pressed()` still sees the press it is
+                // completing.
+                self.end_press(released);
             }
             WidgetEvent::PointerCancel {
                 reason, pointer, ..
@@ -1041,9 +1069,14 @@ impl WidgetTree {
                         // which is the honest answer.
                         if self.advertises_focus_action(id) {
                             let target = self.first_focusable_descendant(id).unwrap_or(id);
+                            // An assistive move, not a scripted one: the user is
+                            // navigating, so the focus ring appears exactly as it
+                            // would for a Tab. `Programmatic` — what this used to
+                            // pass — declares no modality and left a screen-reader
+                            // user with an invisible focus after any click.
                             self.focus_with_origin_ops(
                                 target,
-                                crate::focus::FocusOrigin::Programmatic,
+                                crate::focus::FocusOrigin::Accessibility,
                                 &mut *ops,
                             );
                             // Focus is serviced here rather than by the widget,
@@ -1247,6 +1280,190 @@ impl WidgetTree {
         // its own drain — fire ours here.
         self.drain_pending_intents(&mut *ops);
         true
+    }
+
+    // -----------------------------------------------------------------
+    // Press state
+    // -----------------------------------------------------------------
+
+    /// Open the press record for the contact being dispatched.
+    ///
+    /// Called from the `PointerDown` arm before the press is dispatched, with
+    /// the focusable the press landed on (which a direct pointer will hold
+    /// until its release). The node whose visual the record drives is not
+    /// known yet — the arena claims the press during the dispatch — so
+    /// [`adopt_press_owner`](Self::adopt_press_owner) finishes the record
+    /// afterwards.
+    ///
+    /// The press-feedback delay applies **only inside a pan claimant**: a
+    /// finger resting on a list row must not flash the row before the pan has
+    /// been ruled out, while a button that nothing can scroll has no ambiguity
+    /// to wait out and highlights at once. `begin_pan` has already decided
+    /// whether this press is inside one — a session exists only when a claimant
+    /// along the hit path accepts this pointer kind — so this reads its answer
+    /// rather than re-deriving it.
+    fn begin_press(&mut self, focusable: Option<WidgetId>) {
+        let pointer = self.current_pointer_id();
+        let now = self.sequence_now();
+        let delay = self
+            .pan_session_open(pointer)
+            .then(|| self.current_profile().press_feedback_delay)
+            .filter(|d| !d.is_zero());
+        self.presses.press(pointer, focusable, now, delay);
+    }
+
+    /// Record the node whose gesture arena took this press, and publish its
+    /// signal.
+    ///
+    /// The owner is the sequence's `pressed_owner` — the node holding the
+    /// pointer capture once the `Down` has been dispatched, which is exactly
+    /// the node whose `on_tap` would fire. A press no arena took owns no
+    /// visual, and its record stays for the focus deferral alone.
+    ///
+    /// So does a press on a **button the owner cannot act on**. A press visual
+    /// says "release here and this control acts", so it has to answer to the
+    /// same buttons the activation does: the router opens a record for every
+    /// button, but only [`press_buttons`](Self::press_buttons) — the union of
+    /// the owner's own click-style [`ButtonMask`](crate::event::ButtonMask)s,
+    /// `PRIMARY` unless the widget widened it — decides which of them may light
+    /// the control up. Without the gate a middle-click, or a right-click on a
+    /// node with no context menu, would raise a press that can never complete;
+    /// with it, the visual and the activation agree by construction, exactly as
+    /// they do at the tap boundary where one predicate fails the tap, fires
+    /// `cancel_taps` and clears the visual.
+    ///
+    /// The record itself is untouched either way, so the focus a direct
+    /// pointer deferred to its release is still there to be assigned.
+    fn adopt_press_owner(&mut self, button: PointerButton) {
+        let pointer = self.current_pointer_id();
+        let Some(owner) = self.current_sequence().and_then(|s| s.pressed_owner()) else {
+            return;
+        };
+        if !self.press_buttons(owner).contains(button) {
+            crate::trace_input!(
+                Samples,
+                "no press visual for {owner:?}: {button:?} is not one of its accepted buttons"
+            );
+            return;
+        }
+        self.presses.set_owner(pointer, owner);
+        self.publish_pressed(owner);
+    }
+
+    /// Re-evaluate the press being dispatched against `position`.
+    ///
+    /// Three ways a press visual changes without a release:
+    ///
+    /// * the pointer left the press's [`TapBoundary`](crate::gesture::TapBoundary)
+    ///   — the same predicate that fails the tap and fires `cancel_taps`, so
+    ///   the visual and the activation are abandoned together;
+    /// * it came back inside, which restores the visual: WCAG 2.2 SC 2.5.2's
+    ///   abort gesture is reversible right up to the release;
+    /// * the arbitration decided for somebody else — a pan claimant, an
+    ///   ancestor drag — and the pressed control has lost the press without
+    ///   ever seeing a release.
+    fn update_press(&mut self, position: Point) {
+        let pointer = self.current_pointer_id();
+        if self.presses.get(pointer).is_none() {
+            return;
+        }
+        // A peer claim ends the press outright: the node was never told, and
+        // leaving its visual up would advertise an interaction it has lost.
+        let claimed_elsewhere = self.current_sequence().is_some_and(|sequence| {
+            sequence
+                .winner()
+                .is_some_and(|winner| Some(winner) != sequence.pressed_owner())
+        });
+        if claimed_elsewhere {
+            self.end_press(pointer);
+            return;
+        }
+        let profile = self.current_profile();
+        let origin = self.current_sequence().map(|s| s.press_origin());
+        let owner = self.presses.get(pointer).and_then(|p| p.owner);
+        let inside = match (origin, owner) {
+            (Some(origin), Some(owner)) => {
+                let bounds = self
+                    .arena
+                    .is_active(owner)
+                    .then(|| self.arena.bounds(owner));
+                !crate::gesture::TapBoundary::for_pointer(&self.current_input.pointer, &profile)
+                    .left(origin, position, bounds, &profile)
+            }
+            // No sequence to measure from, or no owner to measure against:
+            // there is no visual either way, so the flag is moot.
+            _ => true,
+        };
+        let Some(press) = self.presses.get_mut(pointer) else {
+            return;
+        };
+        if press.inside == inside {
+            return;
+        }
+        press.inside = inside;
+        if let Some(owner) = owner {
+            self.publish_pressed(owner);
+        }
+    }
+
+    /// Close the press held by `pointer` and republish the node it drove.
+    ///
+    /// The one exit: a release, a cancel, and a peer claim all come through
+    /// here, so a node can never be left painted as pressed by a path that
+    /// forgot to clear it.
+    pub(crate) fn end_press(&mut self, pointer: crate::pointer::PointerId) {
+        if let Some(owner) = self.presses.release(pointer) {
+            self.publish_pressed(owner);
+        }
+    }
+
+    /// Resolve every elapsed press-feedback delay and publish the visuals that
+    /// just appeared. Driven by the same tick that advances the long press.
+    pub(crate) fn resolve_press_delays(&mut self, now: crate::pointer::EventTime) {
+        if self.presses.is_empty() {
+            return;
+        }
+        for id in self.presses.resolve_delays(now) {
+            self.publish_pressed(id);
+            self.arena.mark_needs_paint(id);
+        }
+    }
+
+    /// The earliest instant a pending press wants the event loop back, so a
+    /// finger that lands and does not move still gets its highlight.
+    pub(crate) fn next_press_deadline(&self) -> Option<std::time::Instant> {
+        self.presses.next_deadline().map(|t| self.instant_for(t))
+    }
+
+    /// Assign the focus a direct pointer's press deferred, if the release
+    /// earned it.
+    ///
+    /// The guard is "the release landed on the same focusable as the press".
+    /// A finger that presses a button, slides onto its neighbour and lifts has
+    /// activated nothing and must move focus nowhere — the same rule the tap
+    /// recognizer applies to activation, applied to focus so the two cannot
+    /// disagree. A press that found no focusable defers nothing.
+    ///
+    /// A no-op for an indirect pointer, which focused at press.
+    fn focus_on_release(&mut self, position: Point, ops: &mut dyn crate::window::WindowOps) {
+        let releasing = self.current_input.pointer;
+        if !releasing.kind.is_direct() {
+            return;
+        }
+        let pointer = self.current_pointer_id();
+        let Some(pressed) = self.presses.get(pointer).and_then(|p| p.focusable) else {
+            return;
+        };
+        let released_on = self
+            .hit_test_for(position, &releasing)
+            .and_then(|target| self.find_focusable_at_or_above(target));
+        if released_on == Some(pressed) {
+            self.focus_with_origin_ops(
+                pressed,
+                crate::focus::FocusOrigin::Pointer(releasing.kind),
+                &mut *ops,
+            );
+        }
     }
 
     fn handle_pointer_move(&mut self, position: Point, ops: &mut dyn crate::window::WindowOps) {
@@ -6184,5 +6401,937 @@ mod input_ingress_tests {
                 .at(Point::new(10.0, 10.0)),
         );
         assert_eq!(tree.current_input, before);
+    }
+}
+
+#[cfg(test)]
+mod press_and_focus_tests {
+    //! The framework press, focus-on-release for direct pointers, and the one
+    //! `focus_visible` signal — driven through the real ingress doors against
+    //! real trees.
+
+    use std::cell::{Cell, RefCell};
+    use std::rc::Rc;
+    use teksilo_canvas::{Point, SizeProposal};
+
+    use crate::WidgetId;
+    use crate::event::{EventResponse, Key, Modifiers, PointerButton, WidgetEvent};
+    use crate::focus::FocusOrigin;
+    use crate::pointer::clock::ManualClock;
+    use crate::pointer::touch_action::PanClaim;
+    use crate::pointer::{
+        BackendDeviceKey, EventTime, PointerId, PointerIdAllocator, PointerInfo, PointerPhase,
+        PointerSample,
+    };
+    use crate::test_widgets::{FillWidget, StackWidget};
+    use crate::widget_builder::WidgetBuilder;
+    use crate::widget_tree::WidgetTree;
+
+    // -----------------------------------------------------------------
+    // Fixtures
+    // -----------------------------------------------------------------
+
+    /// A fresh contact identity, minted through the real allocator.
+    fn contact_id() -> PointerId {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static NEXT: AtomicU64 = AtomicU64::new(1);
+        PointerIdAllocator::global().begin(
+            BackendDeviceKey::new(0x0B11),
+            NEXT.fetch_add(1, Ordering::Relaxed),
+        )
+    }
+
+    fn contact(id: PointerId, phase: PointerPhase, at: Point, t: EventTime) -> PointerSample {
+        PointerSample {
+            pointer: PointerInfo::touch(id, t),
+            phase,
+            position: at,
+            button: None,
+            modifiers: Modifiers::NONE,
+            coalesced: Vec::new(),
+        }
+    }
+
+    /// A tree on a clock the test drives, so every deadline in these tests is
+    /// virtual.
+    fn tree_on_a_clock() -> (WidgetTree, Rc<ManualClock>) {
+        let mut tree = WidgetTree::new();
+        let clock = Rc::new(ManualClock::new(EventTime::ZERO));
+        tree.set_input_clock(clock.clone());
+        (tree, clock)
+    }
+
+    /// A tappable leaf with a framework press signal installed on it, plus the
+    /// signal itself.
+    ///
+    /// `on_tap` is what gives the node a gesture arena, which is what makes it
+    /// the press owner — the same thing a `Button` gets from its own tap
+    /// handler.
+    fn tappable(tree: &mut WidgetTree) -> (WidgetId, crate::signal::Signal<bool>) {
+        let id = tree.add(FillWidget::new().focusable().on_tap(|_e, _c| {}));
+        let signal = tree.pressed_signal(id);
+        (id, signal)
+    }
+
+    // -----------------------------------------------------------------
+    // The enum
+    // -----------------------------------------------------------------
+
+    /// `FocusOrigin` now names the device behind a pointer focus, and the two
+    /// accessors that replaced `== FocusOrigin::Pointer` answer for every arm.
+    #[test]
+    fn a_pointer_origin_names_its_device() {
+        use teksilo_tokens::{PenKind, PointerKind};
+
+        assert!(FocusOrigin::Pointer(PointerKind::Touch).is_pointer());
+        assert!(FocusOrigin::Pointer(PointerKind::Pen(PenKind::Pen)).is_pointer());
+        assert!(FocusOrigin::POINTER.is_pointer());
+        assert!(!FocusOrigin::Keyboard.is_pointer());
+        assert!(!FocusOrigin::Programmatic.is_pointer());
+        assert!(!FocusOrigin::Accessibility.is_pointer());
+
+        assert_eq!(
+            FocusOrigin::Pointer(PointerKind::Touch).pointer_kind(),
+            Some(PointerKind::Touch),
+        );
+        assert_eq!(FocusOrigin::Keyboard.pointer_kind(), None);
+        assert_eq!(
+            FocusOrigin::POINTER.pointer_kind(),
+            Some(PointerKind::Unknown),
+            "a widget deriving its own origin says so rather than naming a device it never saw",
+        );
+    }
+
+    /// The `:focus-visible` verdict, per origin. `Programmatic` abstains — a
+    /// scripted focus declares no modality, so the ring stays where the user's
+    /// last real interaction left it.
+    #[test]
+    fn only_a_real_navigation_declares_a_modality() {
+        use teksilo_tokens::PointerKind;
+
+        assert_eq!(FocusOrigin::Keyboard.focus_visible(), Some(true));
+        assert_eq!(FocusOrigin::Accessibility.focus_visible(), Some(true));
+        assert_eq!(
+            FocusOrigin::Pointer(PointerKind::Touch).focus_visible(),
+            Some(false),
+        );
+        assert_eq!(FocusOrigin::Programmatic.focus_visible(), None);
+    }
+
+    /// The three Tier-3 configs still carry `Signal<Option<FocusOrigin>>`, and
+    /// a style reading one still gets what it was written against.
+    #[test]
+    fn the_tier_three_configs_are_unchanged() {
+        let origin: crate::signal::Signal<Option<FocusOrigin>> =
+            crate::signal::Signal::new(Some(FocusOrigin::Keyboard));
+        let slider: crate::signal::Signal<Option<FocusOrigin>> = origin.clone();
+        let splitter: crate::signal::Signal<Option<FocusOrigin>> = origin.clone();
+        let segmented: crate::signal::Signal<Option<FocusOrigin>> = origin.clone();
+        for field in [slider, splitter, segmented] {
+            assert_eq!(field.get(), Some(FocusOrigin::Keyboard));
+        }
+        origin.set(Some(FocusOrigin::POINTER));
+        assert_ne!(
+            origin.get(),
+            Some(FocusOrigin::Keyboard),
+            "the `== Some(Keyboard)` test every consumer makes still discriminates",
+        );
+    }
+
+    // -----------------------------------------------------------------
+    // focus-visible per kind
+    // -----------------------------------------------------------------
+
+    /// Keyboard focus, then a touch tap, leaves no ring.
+    ///
+    /// The behaviour predates this package; what is new is that the focus the
+    /// tap installs lands on the **release**, so this pins that moving the
+    /// assignment did not leave a keyboard ring standing over a control the
+    /// finger just took.
+    #[test]
+    fn a_touch_tap_after_keyboard_focus_leaves_no_ring() {
+        let (mut tree, _clock) = tree_on_a_clock();
+        let a = tree.add(FillWidget::new().focusable());
+        let b = tree.add(FillWidget::new().focusable());
+        let root = tree.add(SideBySide {
+            children: vec![a, b],
+        });
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+        let _ = root;
+
+        let visible = tree.focus_visible_signal();
+        tree.press_key(Key::Tab, Modifiers::NONE);
+        assert_eq!(tree.focused(), Some(a));
+        assert!(visible.get(), "keyboard navigation reveals the ring");
+
+        let id = contact_id();
+        let at = tree.bounds(b).center();
+        tree.dispatch_pointer(contact(id, PointerPhase::Down, at, EventTime::ZERO));
+        tree.dispatch_pointer(contact(
+            id,
+            PointerPhase::Up,
+            at,
+            EventTime::from_millis(30),
+        ));
+
+        assert_eq!(tree.focused(), Some(b), "the release moved focus");
+        assert!(!visible.get(), "and the ring did not come with it");
+        assert_eq!(
+            tree.focus_origin(),
+            Some(FocusOrigin::Pointer(teksilo_tokens::PointerKind::Touch)),
+        );
+    }
+
+    /// An assistive `Action::Focus` reveals the ring. The user is navigating —
+    /// they are simply not doing it with a key — and this used to route through
+    /// `Programmatic`, which declares nothing and left a screen-reader user
+    /// with an invisible focus after any click.
+    #[test]
+    fn an_assistive_focus_reveals_the_ring() {
+        let mut tree = WidgetTree::new();
+        let a = tree.add(FillWidget::new().focusable());
+        let b = tree.add(FillWidget::new().focusable());
+        let root = tree.add(SideBySide {
+            children: vec![a, b],
+        });
+        tree.layout(SizeProposal::exact(200.0, 50.0));
+        let _ = root;
+        let visible = tree.focus_visible_signal();
+
+        tree.click(a);
+        assert_eq!(tree.focused(), Some(a));
+        assert!(!visible.get(), "the click hid it");
+
+        tree.dispatch_event(WidgetEvent::AccessAction {
+            target: Some(b),
+            action: accesskit::Action::Focus,
+            target_node: crate::accessibility::widget_id_to_node_id(b),
+            data: None,
+        });
+        assert_eq!(tree.focused(), Some(b));
+        assert!(visible.get(), "an assistive move is a navigation");
+        assert_eq!(tree.focus_origin(), Some(FocusOrigin::Accessibility));
+    }
+
+    /// A programmatic focus abstains: it declares no modality, so the ring
+    /// stays exactly where the last real interaction left it. This is what
+    /// `Button` / `Checkbox`'s pre-existing focus-ring tests pin, and what
+    /// browsers do for `element.focus()`.
+    #[test]
+    fn a_programmatic_focus_leaves_the_modality_alone() {
+        let mut tree = WidgetTree::new();
+        let a = tree.add(FillWidget::new().focusable());
+        let b = tree.add(FillWidget::new().focusable());
+        let root = tree.add(SideBySide {
+            children: vec![a, b],
+        });
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+        let _ = root;
+        let visible = tree.focus_visible_signal();
+
+        tree.press_key(Key::Tab, Modifiers::NONE);
+        assert_eq!(tree.focused(), Some(a));
+        assert!(visible.get());
+        tree.focus(b);
+        assert!(
+            visible.get(),
+            "a scripted focus does not hide a keyboard ring"
+        );
+
+        tree.click(a);
+        assert!(!visible.get());
+        tree.focus(b);
+        assert!(
+            !visible.get(),
+            "and does not reveal one after a click either",
+        );
+    }
+
+    // -----------------------------------------------------------------
+    // Activation on release
+    // -----------------------------------------------------------------
+
+    /// A mouse focuses on press, exactly as it always has.
+    #[test]
+    fn a_mouse_still_focuses_on_press() {
+        let mut tree = WidgetTree::new();
+        let w = tree.add(FillWidget::new().focusable());
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        let center = tree.bounds(w).center();
+
+        tree.dispatch_event(WidgetEvent::PointerDown {
+            position: center,
+            button: PointerButton::Primary,
+            modifiers: Modifiers::NONE,
+        });
+        assert_eq!(
+            tree.focused(),
+            Some(w),
+            "focus lands on the press for an indirect pointer",
+        );
+    }
+
+    /// A finger's focus waits for the release.
+    #[test]
+    fn a_finger_focuses_on_release() {
+        let (mut tree, _clock) = tree_on_a_clock();
+        let w = tree.add(FillWidget::new().focusable());
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        let center = tree.bounds(w).center();
+
+        let id = contact_id();
+        tree.dispatch_pointer(contact(id, PointerPhase::Down, center, EventTime::ZERO));
+        assert_eq!(
+            tree.focused(),
+            None,
+            "a finger that has only landed has chosen nothing yet",
+        );
+
+        tree.dispatch_pointer(contact(
+            id,
+            PointerPhase::Up,
+            center,
+            EventTime::from_millis(40),
+        ));
+        assert_eq!(tree.focused(), Some(w));
+        assert_eq!(
+            tree.focus_origin().and_then(FocusOrigin::pointer_kind),
+            Some(teksilo_tokens::PointerKind::Touch),
+            "the origin names the device that delivered it",
+        );
+    }
+
+    /// …and only when the release lands back on the same focusable. A finger
+    /// that presses one control, slides onto its neighbour and lifts has
+    /// activated nothing and must move focus nowhere.
+    #[test]
+    fn a_release_on_a_different_focusable_moves_no_focus() {
+        let (mut tree, _clock) = tree_on_a_clock();
+        let a = tree.add(FillWidget::new().focusable());
+        let b = tree.add(FillWidget::new().focusable());
+        let root = tree.add(SideBySide {
+            children: vec![a, b],
+        });
+        tree.layout(SizeProposal::exact(200.0, 50.0));
+        let _ = root;
+
+        let on_a = tree.bounds(a).center();
+        let on_b = tree.bounds(b).center();
+        let id = contact_id();
+        tree.dispatch_pointer(contact(id, PointerPhase::Down, on_a, EventTime::ZERO));
+        tree.dispatch_pointer(contact(
+            id,
+            PointerPhase::Move,
+            on_b,
+            EventTime::from_millis(20),
+        ));
+        tree.dispatch_pointer(contact(
+            id,
+            PointerPhase::Up,
+            on_b,
+            EventTime::from_millis(40),
+        ));
+
+        assert_eq!(
+            tree.focused(),
+            None,
+            "the guard is `the release landed on the same focusable as the press`",
+        );
+    }
+
+    // -----------------------------------------------------------------
+    // The press visual
+    // -----------------------------------------------------------------
+
+    /// A mouse press lights the visual at once and the release clears it —
+    /// the pre-touch rule, and no press-feedback delay anywhere near it.
+    #[test]
+    fn a_mouse_press_visual_is_unchanged() {
+        let mut tree = WidgetTree::new();
+        let (w, pressed) = tappable(&mut tree);
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        let center = tree.bounds(w).center();
+
+        assert!(!pressed.get(), "not pressed at rest");
+        tree.dispatch_event(WidgetEvent::PointerDown {
+            position: center,
+            button: PointerButton::Primary,
+            modifiers: Modifiers::NONE,
+        });
+        assert!(pressed.get(), "an indirect pointer lights up on the press");
+        assert!(
+            !tree.press_pending(w),
+            "and never waits: a mouse opens no pan session, so there is no \
+             ambiguity to wait out",
+        );
+        assert_eq!(tree.pressed_by(w), Some(PointerId::MOUSE));
+
+        tree.dispatch_event(WidgetEvent::PointerUp {
+            position: center,
+            button: PointerButton::Primary,
+            modifiers: Modifiers::NONE,
+        });
+        assert!(!pressed.get(), "the release clears it");
+        assert_eq!(tree.pressed_by(w), None);
+    }
+
+    /// A slide off the target clears the visual, and sliding back on restores
+    /// it. WCAG 2.2 SC 2.5.2's abort gesture, and reversible right up to the
+    /// release.
+    #[test]
+    fn a_slide_off_clears_the_visual_and_re_entry_restores_it() {
+        let (mut tree, _clock) = tree_on_a_clock();
+        let (w, pressed) = tappable(&mut tree);
+        tree.layout(SizeProposal::exact(100.0, 200.0));
+        let inside = tree.bounds(w).center();
+        let outside = Point::new(inside.x, inside.y + 400.0);
+
+        let id = contact_id();
+        tree.dispatch_pointer(contact(id, PointerPhase::Down, inside, EventTime::ZERO));
+        assert!(
+            pressed.get(),
+            "nothing here claims a pan, so no delay applies"
+        );
+
+        tree.dispatch_pointer(contact(
+            id,
+            PointerPhase::Move,
+            outside,
+            EventTime::from_millis(20),
+        ));
+        assert!(!pressed.get(), "the press has left its target");
+        assert!(!tree.press_is_inside(w));
+        assert_eq!(
+            tree.pressed_by(w),
+            Some(id),
+            "the contact still holds the press — it is the *visual* that is off",
+        );
+
+        tree.dispatch_pointer(contact(
+            id,
+            PointerPhase::Move,
+            inside,
+            EventTime::from_millis(40),
+        ));
+        assert!(pressed.get(), "sliding back on restores it");
+
+        tree.dispatch_pointer(contact(
+            id,
+            PointerPhase::Up,
+            inside,
+            EventTime::from_millis(60),
+        ));
+        assert!(!pressed.get());
+    }
+
+    /// A second contact cannot clear the first's visual. Its own release
+    /// removes only the press it owns.
+    #[test]
+    fn a_second_contact_cannot_clear_the_first_visual() {
+        let (mut tree, _clock) = tree_on_a_clock();
+        let (w, pressed) = tappable(&mut tree);
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        let bounds = tree.bounds(w);
+        let first_at = Point::new(bounds.x + 20.0, bounds.y + 25.0);
+        let second_at = Point::new(bounds.x + 70.0, bounds.y + 25.0);
+
+        let first = contact_id();
+        let second = contact_id();
+        tree.dispatch_pointer(contact(
+            first,
+            PointerPhase::Down,
+            first_at,
+            EventTime::ZERO,
+        ));
+        assert!(pressed.get());
+        assert_eq!(tree.pressed_by(w), Some(first));
+
+        tree.dispatch_pointer(contact(
+            second,
+            PointerPhase::Down,
+            second_at,
+            EventTime::from_millis(10),
+        ));
+        assert_eq!(
+            tree.pressed_by(w),
+            Some(first),
+            "under `MultiContact::First` the second contact is terminated before \
+             it reaches the arena at all",
+        );
+
+        tree.dispatch_pointer(contact(
+            second,
+            PointerPhase::Up,
+            second_at,
+            EventTime::from_millis(20),
+        ));
+        assert!(
+            pressed.get(),
+            "so the second contact's release cannot clear a visual it never owned",
+        );
+        assert_eq!(tree.pressed_by(w), Some(first));
+
+        tree.dispatch_pointer(contact(
+            first,
+            PointerPhase::Up,
+            first_at,
+            EventTime::from_millis(30),
+        ));
+        assert!(!pressed.get(), "the owner's release does clear it");
+    }
+
+    /// A cancel clears the visual. The node is never sent an `Up` to clear it
+    /// from, so nothing else could.
+    #[test]
+    fn a_cancel_clears_the_visual() {
+        let (mut tree, _clock) = tree_on_a_clock();
+        let (w, pressed) = tappable(&mut tree);
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        let center = tree.bounds(w).center();
+
+        let id = contact_id();
+        tree.dispatch_pointer(contact(id, PointerPhase::Down, center, EventTime::ZERO));
+        assert!(pressed.get());
+
+        tree.dispatch_pointer(contact(
+            id,
+            PointerPhase::Cancel,
+            center,
+            EventTime::from_millis(20),
+        ));
+        assert!(!pressed.get(), "a press that was taken away is not painted");
+        assert_eq!(tree.pressed_by(w), None);
+    }
+
+    /// A peer winning the arbitration clears the visual. The pressed control is
+    /// never told; only the router knows it has lost the press.
+    #[test]
+    fn a_pan_claim_clears_the_visual() {
+        let (mut tree, clock) = tree_on_a_clock();
+        let (row, pressed) = tappable(&mut tree);
+        let list = tree.add(
+            StackWidget::new()
+                .add_child(row)
+                .pan_claim(PanClaim::vertical())
+                .on_scroll(|_e, _c| EventResponse::Handled),
+        );
+        tree.layout(SizeProposal::exact(200.0, 400.0));
+        let _ = list;
+        let start = Point::new(100.0, 200.0);
+
+        let id = contact_id();
+        tree.dispatch_pointer(contact(id, PointerPhase::Down, start, EventTime::ZERO));
+        // Inside a claimant, so the visual waits.
+        assert!(tree.press_pending(row));
+        clock.set(EventTime::from_millis(100));
+        tree.tick_gestures(std::time::Instant::now());
+        assert!(pressed.get(), "…and appears once the delay has elapsed");
+
+        // Past the touch profile's 36 dp pan slop: the list claims.
+        tree.dispatch_pointer(contact(
+            id,
+            PointerPhase::Move,
+            Point::new(100.0, 260.0),
+            EventTime::from_millis(120),
+        ));
+        assert!(
+            !pressed.get(),
+            "the row lost the press to the list and must stop advertising it",
+        );
+        assert_eq!(tree.pressed_by(row), None);
+    }
+
+    // -----------------------------------------------------------------
+    // Which button may raise the visual
+    // -----------------------------------------------------------------
+
+    /// The visual answers to the same buttons the activation does. A node
+    /// carrying a plain `on_tap` accepts `PRIMARY` and nothing else, so a
+    /// middle, back or forward press must light nothing up — the press it
+    /// would be advertising can never complete.
+    #[test]
+    fn a_button_the_control_cannot_act_on_raises_no_visual() {
+        let taps = Rc::new(Cell::new(0u32));
+        let count = taps.clone();
+        let mut tree = WidgetTree::new();
+        let w = tree.add(FillWidget::new().focusable().on_tap(move |_e, _c| {
+            count.set(count.get() + 1);
+        }));
+        let pressed = tree.pressed_signal(w);
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        let center = tree.bounds(w).center();
+
+        for button in [
+            PointerButton::Middle,
+            PointerButton::Back,
+            PointerButton::Forward,
+        ] {
+            tree.dispatch_event(WidgetEvent::PointerDown {
+                position: center,
+                button,
+                modifiers: Modifiers::NONE,
+            });
+            assert!(
+                !pressed.get(),
+                "{button:?} cannot activate an `on_tap` node, so it must not light one up",
+            );
+            assert_eq!(tree.pressed_by(w), None, "and owns no visual to clear");
+            tree.dispatch_event(WidgetEvent::PointerUp {
+                position: center,
+                button,
+                modifiers: Modifiers::NONE,
+            });
+            assert_eq!(
+                taps.get(),
+                0,
+                "the tap recognizer refuses {button:?} too — that is the point",
+            );
+        }
+
+        // …and the button it does act on is untouched.
+        tree.dispatch_event(WidgetEvent::PointerDown {
+            position: center,
+            button: PointerButton::Primary,
+            modifiers: Modifiers::NONE,
+        });
+        assert!(pressed.get(), "a primary press lights up as it always has");
+        assert_eq!(tree.pressed_by(w), Some(PointerId::MOUSE));
+        tree.dispatch_event(WidgetEvent::PointerUp {
+            position: center,
+            button: PointerButton::Primary,
+            modifiers: Modifiers::NONE,
+        });
+        assert!(!pressed.get());
+        assert_eq!(taps.get(), 1);
+    }
+
+    /// The case a real user hits: a right-click on a control with no context
+    /// menu. The secondary arm finds nothing to open and falls through to the
+    /// ordinary press path, which must still raise nothing.
+    #[test]
+    fn a_secondary_press_with_no_context_menu_raises_no_visual() {
+        let mut tree = WidgetTree::new();
+        let (w, pressed) = tappable(&mut tree);
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        let center = tree.bounds(w).center();
+
+        tree.dispatch_event(WidgetEvent::PointerDown {
+            position: center,
+            button: PointerButton::Secondary,
+            modifiers: Modifiers::NONE,
+        });
+        assert!(
+            !pressed.get(),
+            "nothing opened, and nothing may look pressed either",
+        );
+        assert_eq!(tree.pressed_by(w), None);
+        assert!(!tree.press_is_inside(w));
+    }
+
+    /// A widget that widened its own mask keeps the visual on the buttons it
+    /// widened to: the gate reads the node's declared acceptance, it does not
+    /// hardcode `PRIMARY`.
+    #[test]
+    fn a_widened_mask_widens_the_visual_with_it() {
+        use crate::event::ButtonMask;
+
+        let mut tree = WidgetTree::new();
+        let w = tree.add(
+            FillWidget::new()
+                .on_tap(|_e, _c| {})
+                .accept_tap_buttons(ButtonMask::PRIMARY | ButtonMask::MIDDLE),
+        );
+        let pressed = tree.pressed_signal(w);
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        let center = tree.bounds(w).center();
+
+        tree.dispatch_event(WidgetEvent::PointerDown {
+            position: center,
+            button: PointerButton::Middle,
+            modifiers: Modifiers::NONE,
+        });
+        assert!(pressed.get(), "this node really does act on a middle-click");
+
+        tree.dispatch_event(WidgetEvent::PointerUp {
+            position: center,
+            button: PointerButton::Middle,
+            modifiers: Modifiers::NONE,
+        });
+        assert!(!pressed.get());
+    }
+
+    /// A press that raises no visual still records the focus a direct pointer
+    /// defers to its release. A stylus barrel button reports `Secondary`, and
+    /// a pen that presses a control and lifts on it has chosen that control
+    /// whether or not the button lit it up — the record exists for the focus,
+    /// not only for the visual.
+    #[test]
+    fn a_press_that_raises_no_visual_still_defers_its_focus() {
+        use teksilo_tokens::{PenKind, PointerKind};
+
+        let (mut tree, _clock) = tree_on_a_clock();
+        let (w, pressed) = tappable(&mut tree);
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        let center = tree.bounds(w).center();
+
+        let id = contact_id();
+        let barrel = |phase, t| PointerSample {
+            pointer: PointerInfo {
+                kind: PointerKind::Pen(PenKind::Pen),
+                ..PointerInfo::touch(id, t)
+            },
+            phase,
+            position: center,
+            button: Some(PointerButton::Secondary),
+            modifiers: Modifiers::NONE,
+            coalesced: Vec::new(),
+        };
+
+        tree.dispatch_pointer(barrel(PointerPhase::Down, EventTime::ZERO));
+        assert!(!pressed.get(), "the barrel button activates nothing here");
+        assert_eq!(tree.pressed_by(w), None);
+        assert_eq!(
+            tree.focused(),
+            None,
+            "a direct pointer has chosen nothing until it lifts",
+        );
+
+        tree.dispatch_pointer(barrel(PointerPhase::Up, EventTime::from_millis(40)));
+        assert_eq!(
+            tree.focused(),
+            Some(w),
+            "the deferral is not button-gated: the release landed where the press did",
+        );
+        assert_eq!(
+            tree.focus_origin().and_then(FocusOrigin::pointer_kind),
+            Some(PointerKind::Pen(PenKind::Pen)),
+        );
+    }
+
+    // -----------------------------------------------------------------
+    // The press-feedback delay
+    // -----------------------------------------------------------------
+
+    /// The delay applies only inside a pan claimant — a control nothing can
+    /// scroll out from under has no ambiguity to wait out.
+    #[test]
+    fn the_feedback_delay_applies_only_inside_a_claimant() {
+        // Outside a claimant: immediate.
+        let (mut tree, _clock) = tree_on_a_clock();
+        let (w, pressed) = tappable(&mut tree);
+        tree.layout(SizeProposal::exact(200.0, 400.0));
+        let id = contact_id();
+        let at = tree.bounds(w).center();
+        tree.dispatch_pointer(contact(id, PointerPhase::Down, at, EventTime::ZERO));
+        assert!(
+            !tree.press_pending(w),
+            "no claimant above it, so nothing to rule out",
+        );
+        assert!(pressed.get());
+
+        // Inside one: withheld, then released by the delay.
+        let (mut tree, clock) = tree_on_a_clock();
+        let (row, pressed) = tappable(&mut tree);
+        let list = tree.add(
+            StackWidget::new()
+                .add_child(row)
+                .pan_claim(PanClaim::vertical())
+                .on_scroll(|_e, _c| EventResponse::Handled),
+        );
+        tree.layout(SizeProposal::exact(200.0, 400.0));
+        let _ = list;
+        let id = contact_id();
+        let at = Point::new(100.0, 200.0);
+        tree.dispatch_pointer(contact(id, PointerPhase::Down, at, EventTime::ZERO));
+        assert!(tree.press_pending(row), "a finger might be about to scroll");
+        assert!(!pressed.get(), "so the row does not flash");
+        assert!(
+            tree.press_is_inside(row),
+            "the press is real; only its visual is being withheld",
+        );
+
+        clock.set(EventTime::from_millis(99));
+        tree.tick_gestures(std::time::Instant::now());
+        assert!(!pressed.get(), "99 ms is under the 100 ms delay");
+
+        clock.set(EventTime::from_millis(100));
+        tree.tick_gestures(std::time::Instant::now());
+        assert!(pressed.get(), "and 100 ms is it");
+        assert!(!tree.press_pending(row));
+    }
+
+    /// A mouse pressing inside the very same claimant waits for nothing: an
+    /// indirect pointer opens no pan session, so the delay never reaches it.
+    #[test]
+    fn a_mouse_inside_a_claimant_never_waits() {
+        let mut tree = WidgetTree::new();
+        let (row, pressed) = tappable(&mut tree);
+        let list = tree.add(
+            StackWidget::new()
+                .add_child(row)
+                .pan_claim(PanClaim::vertical())
+                .on_scroll(|_e, _c| EventResponse::Handled),
+        );
+        tree.layout(SizeProposal::exact(200.0, 400.0));
+        let _ = list;
+
+        tree.dispatch_event(WidgetEvent::PointerDown {
+            position: Point::new(100.0, 200.0),
+            button: PointerButton::Primary,
+            modifiers: Modifiers::NONE,
+        });
+        assert!(!tree.press_pending(row));
+        assert!(pressed.get(), "Compact with a mouse is exactly as it was");
+    }
+
+    // -----------------------------------------------------------------
+    // The EventContext queries
+    // -----------------------------------------------------------------
+
+    /// The three queries `teksilo-widgets`' `common/interaction.rs` consumes,
+    /// read from inside a real handler.
+    #[test]
+    fn a_handler_can_read_the_press_it_is_inside() {
+        let (mut tree, _clock) = tree_on_a_clock();
+        let seen: Rc<RefCell<Vec<(bool, bool, bool)>>> = Rc::new(RefCell::new(Vec::new()));
+        let log = seen.clone();
+        let row = tree.add(FillWidget::new().on_tap(|_e, _c| {}).on_pointer_event(
+            move |event, ctx| {
+                if matches!(event, WidgetEvent::PointerUp { .. }) {
+                    log.borrow_mut().push((
+                        ctx.is_pressed(),
+                        ctx.press_is_inside(),
+                        ctx.press_pending(),
+                    ));
+                }
+                EventResponse::Ignored
+            },
+        ));
+        let list = tree.add(
+            StackWidget::new()
+                .add_child(row)
+                .pan_claim(PanClaim::vertical())
+                .on_scroll(|_e, _c| EventResponse::Handled),
+        );
+        tree.layout(SizeProposal::exact(200.0, 400.0));
+        let _ = list;
+
+        let id = contact_id();
+        let at = Point::new(100.0, 200.0);
+        tree.dispatch_pointer(contact(id, PointerPhase::Down, at, EventTime::ZERO));
+        tree.dispatch_pointer(contact(
+            id,
+            PointerPhase::Up,
+            at,
+            EventTime::from_millis(30),
+        ));
+
+        assert_eq!(
+            seen.borrow().as_slice(),
+            &[(false, true, true)],
+            "released inside the claimant before the delay elapsed: inside, \
+             pending, and therefore not yet showing",
+        );
+    }
+
+    /// A handler outside any press reads three falses rather than a panic or a
+    /// stale answer.
+    #[test]
+    fn a_handler_outside_a_press_reads_nothing() {
+        let mut tree = WidgetTree::new();
+        let asked = Rc::new(Cell::new(false));
+        let flag = asked.clone();
+        let w = tree.add(FillWidget::new().focusable().on_key(move |_e, ctx| {
+            flag.set(ctx.is_pressed() || ctx.press_is_inside() || ctx.press_pending());
+            EventResponse::Ignored
+        }));
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        tree.focus(w);
+        tree.press_key(Key::ArrowDown, Modifiers::NONE);
+        assert!(!asked.get());
+    }
+
+    /// A completed interaction leaves no press behind, and the leak detector
+    /// says so — it now reads the press table, which it could not before this
+    /// package landed one.
+    #[test]
+    fn a_completed_press_leaves_the_detector_clean() {
+        let (mut tree, _clock) = tree_on_a_clock();
+        let (w, pressed) = tappable(&mut tree);
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        let at = tree.bounds(w).center();
+
+        let id = contact_id();
+        tree.dispatch_pointer(contact(id, PointerPhase::Down, at, EventTime::ZERO));
+        assert!(pressed.get());
+        tree.dispatch_pointer(contact(
+            id,
+            PointerPhase::Up,
+            at,
+            EventTime::from_millis(30),
+        ));
+        tree.assert_no_leaked_pointer_state();
+    }
+
+    /// …and it would have caught the opposite. Driven by holding the press open
+    /// rather than by faking state, so the assertion is about the real exit
+    /// path.
+    #[test]
+    fn the_detector_reports_a_press_still_held() {
+        let (mut tree, _clock) = tree_on_a_clock();
+        let (w, _pressed) = tappable(&mut tree);
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        let at = tree.bounds(w).center();
+
+        let id = contact_id();
+        tree.dispatch_pointer(contact(id, PointerPhase::Down, at, EventTime::ZERO));
+        let held = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            tree.assert_no_leaked_pointer_state()
+        }));
+        let message = *held
+            .expect_err("a live press is leaked state")
+            .downcast::<String>()
+            .expect("the detector panics with a message");
+        assert!(
+            message.contains("is still pressed by"),
+            "the press is named in the report, got: {message}",
+        );
+    }
+
+    /// A container that lays its children out side by side, so a hit test at a
+    /// given x picks a specific child. `StackWidget` deliberately stacks at one
+    /// origin, which is the opposite of what a release-elsewhere test needs.
+    #[derive(Debug)]
+    struct SideBySide {
+        children: Vec<WidgetId>,
+    }
+
+    impl crate::widget::Widget for SideBySide {
+        fn layout_response(
+            &self,
+            proposal: SizeProposal,
+            _ctx: &crate::widget::LayoutContext,
+        ) -> crate::widget::LayoutResponse {
+            proposal.resolve(0.0, 0.0).into()
+        }
+
+        fn place_children(
+            &self,
+            bounds: teksilo_canvas::Rect,
+            _proposal: SizeProposal,
+            children: &mut [crate::widget::WidgetPlacement],
+            _ctx: &crate::widget::LayoutContext,
+        ) {
+            let n = children.len().max(1) as f32;
+            let w = bounds.width / n;
+            for (i, child) in children.iter_mut().enumerate() {
+                child.origin = Point::new(bounds.x + w * i as f32, bounds.y);
+                child.size = teksilo_canvas::Size::new(w, bounds.height);
+            }
+        }
+
+        fn children(&self) -> Vec<WidgetId> {
+            self.children.clone()
+        }
     }
 }

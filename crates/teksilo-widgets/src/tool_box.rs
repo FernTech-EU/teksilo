@@ -804,7 +804,7 @@ impl Widget for ToolBoxHeader {
                 // so the focus border stays hidden. Otherwise treat it
                 // as keyboard-driven.
                 let origin = if interaction_for_focus.get() == HeaderInteraction::Hovered {
-                    teksilo_core::focus::FocusOrigin::Pointer
+                    teksilo_core::focus::FocusOrigin::POINTER
                 } else {
                     teksilo_core::focus::FocusOrigin::Keyboard
                 };
