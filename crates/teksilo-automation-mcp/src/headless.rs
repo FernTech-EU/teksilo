@@ -11,10 +11,14 @@
 //! runtime (calling `pollster::block_on` inside an async rmcp handler would
 //! panic).
 
+use teksilo::core::PanClaim;
 use teksilo::core::WidgetTree;
 use teksilo::core::accesskit;
+use teksilo::core::widget_builder::WidgetBuilder;
 use teksilo::prelude::*;
-use teksilo::widgets::{Button, ButtonVariant, Checkbox, TextInput, TextWidget, VStack};
+use teksilo::widgets::{
+    Button, ButtonVariant, Checkbox, FixedSize, RectWidget, TextInput, TextWidget, VStack, ZStack,
+};
 use teksilo_automation::dto::{
     AutomationOp, AutomationReply, AutomationRequest, WindowInfo, codes,
 };
@@ -42,7 +46,8 @@ pub type Job = (AutomationRequest, oneshot::Sender<HostReply>);
 
 /// Build the headless demo app. Representative of a real Teksilo UI: a
 /// heading, two buttons, a text field, and a checkbox — enough surface for
-/// agents and golden tests to exercise the toolkit.
+/// agents and golden tests to exercise the toolkit — plus the arbitration
+/// fixture below, which the touch ops need.
 fn build_app() -> teksilo::app::HeadlessApp {
     TeksiloAppBuilder::new()
         .theme(intui::light())
@@ -61,11 +66,49 @@ fn build_app() -> teksilo::app::HeadlessApp {
                             .child(Button::new(lit!("Save")).variant(ButtonVariant::Filled))
                             .child(Button::new(lit!("Cancel")))
                             .child(TextInput::new(name).placeholder(lit!("Name")))
-                            .child(Checkbox::new(checked).label(lit!("Enabled"))),
+                            .child(Checkbox::new(checked).label(lit!("Enabled")))
+                            .child(arbitration_fixture()),
                     )
                 }),
         )
         .build_headless()
+}
+
+/// The shape one row of the arbitration matrix is written against — a
+/// reorderable list row's own drag inside a vertical scroller's pan claim.
+///
+/// It is here because the touch ops' CI gate drives it: `a_scripted_touch_/// sequence_reproduces_the_documented_arbitration_row` in
+/// `tests/stdio_smoke.rs` presses it, moves twice, and checks the winner
+/// against the table generated into `docs/events-and-gestures.md`. Nothing
+/// else in this demo has a competitor at all, so without it the gate could
+/// only assert that the op returned — which is green whatever the arbitration
+/// did.
+///
+/// The shape is `Scenario::ListRow` in
+/// `crates/teksilo-core/tests/arbitration_matrix.rs`, restated with real
+/// widgets: a bare leaf inside a node carrying a tap and a drag inside a node
+/// declaring a vertical [`PanClaim`]. Both competitors are named and given a
+/// role so `find_node` can resolve them; the box is 160 dp tall so the row's
+/// tap boundary — a coarse pointer's is the member's own bounds — is nowhere
+/// near the ±19 dp the row's movement asks for.
+fn arbitration_fixture() -> impl teksilo::core::Widget + 'static {
+    ZStack::new()
+        .child(
+            ZStack::new()
+                .child(
+                    FixedSize::new()
+                        .width(360.0)
+                        .height(160.0)
+                        .child(RectWidget::new()),
+                )
+                .on_tap(|_e, _c| {})
+                .on_drag(|_p, _c| {})
+                .access_role(accesskit::Role::ListItem)
+                .access_label(lit!("arbitration-row")),
+        )
+        .pan_claim(PanClaim::vertical())
+        .access_role(accesskit::Role::ScrollView)
+        .access_label(lit!("arbitration-scroller"))
 }
 
 /// Spawn the tree-owning thread. It builds the app, lays it out, then loops

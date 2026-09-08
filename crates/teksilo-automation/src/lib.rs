@@ -50,8 +50,10 @@ pub mod wire;
 pub use client::{CLIENT_BIN, CLIENT_VERSION, find_client, install_command};
 pub use dto::{
     AnnouncementDto, Assertion, AssertionResult, AutomationOp, AutomationReply, AutomationRequest,
-    LayoutNode, NodeBounds, NodeRef, PointerAction, PointerButtonDto, ScreenshotMeta, SemanticNode,
-    SettleSpec, ShortcutInfo, WaitCondition, WindowInfo, codes,
+    DensityDto, LayoutNode, NodeBounds, NodeRef, PointerAction, PointerButtonDto, PointerKindDto,
+    PointerReport, ScreenshotMeta, SemanticNode, SequenceMemberDto, SettleSpec, ShortcutInfo,
+    TouchPhaseDto, TouchSequenceReport, TouchStep, TouchStepReport, WaitCondition, WindowInfo,
+    codes,
 };
 pub use executor::{execute, run_settle};
 pub use mcp_schema::{TOOL_CATALOG, TOOL_COUNT, ToolDescriptor};

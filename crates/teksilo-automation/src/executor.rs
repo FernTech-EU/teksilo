@@ -21,13 +21,19 @@ use std::time::{Duration, Instant};
 use teksilo_canvas::{Point, Rect};
 use teksilo_core::WidgetTree;
 use teksilo_core::accesskit;
-use teksilo_core::event::{Key, Modifiers, ScrollDelta, WidgetEvent};
+use teksilo_core::event::{ButtonMask, Key, Modifiers, PointerButton, ScrollDelta, WidgetEvent};
+use teksilo_core::pointer::touch_action::TouchAction;
+use teksilo_core::pointer::{
+    PointerId, PointerInfo, PointerPhase, PointerSample, ScrollSample, ScrollSource,
+};
 use teksilo_core::widget_id::WidgetId;
 use teksilo_core::window::WindowOps;
 
 use crate::dto::{
     AnnouncementDto, Assertion, AssertionResult, AutomationOp, AutomationReply, NodeBounds,
-    NodeRef, SemanticNode, SettleSpec, ShortcutInfo, WaitCondition, codes,
+    NodeRef, PointerKindDto, PointerReport, SemanticNode, SequenceMemberDto, SettleSpec,
+    ShortcutInfo, TouchPhaseDto, TouchSequenceReport, TouchStep, TouchStepReport, WaitCondition,
+    codes,
 };
 
 /// Perform one automation operation. See the module docs.
@@ -170,13 +176,28 @@ fn execute_op(
             // wheel is a distinct gesture (Ctrl-wheel-to-zoom is why
             // `WidgetEvent::Scroll` has this field at all), and a probe that
             // could only send a bare wheel could not reach it.
-            tree.dispatch_event_with_ops(
-                WidgetEvent::scroll(
-                    ScrollDelta::Pixels { x: *dx, y: *dy },
-                    modifiers(*ctrl, *shift, *alt, *meta, *command),
-                ),
-                ops,
+            //
+            // A `ScrollSample` rather than the bare `WidgetEvent::scroll`
+            // constructor, for one field: the source. This scroll is
+            // [`ScrollSource::Programmatic`] — the app scrolled itself — and it
+            // used to arrive as `Wheel`, because that is what
+            // `InputSnapshot::from_event` gives a legacy event that names no
+            // source. A widget that branches on the source (one notch = one
+            // item for a wheel, follow-exactly for a driver) was therefore told
+            // a driven scroll was a user turning a wheel. Everything else about
+            // the sample is what it always was: no position, so it still routes
+            // by hover; `ScrollPhase::Discrete`; the singular mouse pointer.
+            // The route is unchanged too — `ScrollDelivery::for_source` sends
+            // only `TouchPan` down the pan-claimant chain, so a programmatic
+            // scroll bubbles exactly as a wheel notch does and no pan claimant
+            // competes for it.
+            let mut sample = ScrollSample::wheel(
+                ScrollDelta::Pixels { x: *dx, y: *dy },
+                modifiers(*ctrl, *shift, *alt, *meta, *command),
+                tree.input_now(),
             );
+            sample.source = ScrollSource::Programmatic;
+            tree.dispatch_scroll_with_ops(sample, ops);
             finish_settle(tree, ops, settle)
         }
 
@@ -186,35 +207,278 @@ fn execute_op(
             y,
             action,
             button,
+            kind,
+            pointer_id,
+            pressure,
+            tilt,
             ctrl,
             shift,
             alt,
             meta,
             command,
         } => {
-            use crate::dto::PointerAction as PA;
             let p = Point::new(*x, *y);
-            let btn = button.to_core();
             let m = modifiers(*ctrl, *shift, *alt, *meta, *command);
-            match action {
-                PA::Move => pointer_move(tree, ops, p),
-                PA::Down => pointer_down(tree, ops, p, btn, m),
-                PA::Up => pointer_up(tree, ops, p, btn, m),
-                PA::Click => {
-                    pointer_down(tree, ops, p, btn, m);
-                    pointer_up(tree, ops, p, btn, m);
+            let outcome = match kind {
+                // The pre-touch path, unchanged: a legacy `PointerDown` /
+                // `PointerUp` pair, whose `InputSnapshot` names
+                // `PointerInfo::mouse`. Kept as its own arm rather than folded
+                // into a `PointerSample` for uniformity, because the two lower
+                // to the same widget events only as long as nothing about the
+                // sample differs, and a mouse is the one device every existing
+                // script and every existing assertion was written against.
+                PointerKindDto::Mouse => inject_mouse(
+                    tree,
+                    ops,
+                    p,
+                    button.to_core(),
+                    m,
+                    *action,
+                    *pointer_id,
+                    *pressure,
+                    *tilt,
+                ),
+                PointerKindDto::Touch | PointerKindDto::Pen => inject_direct(
+                    tree,
+                    ops,
+                    p,
+                    m,
+                    *action,
+                    *kind,
+                    *pointer_id,
+                    *pressure,
+                    *tilt,
+                ),
+            };
+            if let Err(reply) = outcome {
+                return reply;
+            }
+            finish_settle(tree, ops, settle)
+        }
+        AutomationOp::InjectTouchSequence { steps } => match run_touch_sequence(tree, ops, steps) {
+            Err(reply) => reply,
+            Ok(step_reports) => match run_settle(tree, ops, settle) {
+                Some(code) => AutomationReply::err(code, "settle exceeded its time budget"),
+                None => AutomationReply::ok_json(&TouchSequenceReport {
+                    steps: step_reports,
+                    live: live_pointer_reports(tree),
+                }),
+            },
+        },
+        AutomationOp::Pinch {
+            ax0,
+            ay0,
+            bx0,
+            by0,
+            ax1,
+            ay1,
+            bx1,
+            by1,
+            steps,
+        } => {
+            // Both contacts land before either moves: the recognizer's
+            // reference span is the distance between the two landings, so a
+            // pinch whose second finger arrives after the first has moved
+            // describes a different gesture entirely.
+            let steps = (*steps).max(1);
+            let (a0, b0) = (Point::new(*ax0, *ay0), Point::new(*bx0, *by0));
+            let (a1, b1) = (Point::new(*ax1, *ay1), Point::new(*bx1, *by1));
+            let mut plan = vec![
+                TouchStep {
+                    contact: 0,
+                    phase: TouchPhaseDto::Down,
+                    x: a0.x,
+                    y: a0.y,
+                    advance_ms: 0,
+                },
+                TouchStep {
+                    contact: 1,
+                    phase: TouchPhaseDto::Down,
+                    x: b0.x,
+                    y: b0.y,
+                    advance_ms: 0,
+                },
+            ];
+            for step in 1..=steps {
+                let t = step as f32 / steps as f32;
+                let a = lerp(a0, a1, t);
+                let b = lerp(b0, b1, t);
+                plan.push(TouchStep {
+                    contact: 0,
+                    phase: TouchPhaseDto::Move,
+                    x: a.x,
+                    y: a.y,
+                    advance_ms: 0,
+                });
+                plan.push(TouchStep {
+                    contact: 1,
+                    phase: TouchPhaseDto::Move,
+                    x: b.x,
+                    y: b.y,
+                    advance_ms: 0,
+                });
+            }
+            plan.push(TouchStep {
+                contact: 0,
+                phase: TouchPhaseDto::Up,
+                x: a1.x,
+                y: a1.y,
+                advance_ms: 0,
+            });
+            plan.push(TouchStep {
+                contact: 1,
+                phase: TouchPhaseDto::Up,
+                x: b1.x,
+                y: b1.y,
+                advance_ms: 0,
+            });
+            match run_touch_sequence(tree, ops, &plan) {
+                Err(reply) => reply,
+                Ok(_) => finish_settle(tree, ops, settle),
+            }
+        }
+        AutomationOp::Fling {
+            from_x,
+            from_y,
+            to_x,
+            to_y,
+            over_ms,
+        } => {
+            let from = Point::new(*from_x, *from_y);
+            let to = Point::new(*to_x, *to_y);
+            // Sampled at one 60 Hz frame per step, and never fewer steps than
+            // the velocity tracker's minimum sample count: a flick described by
+            // two far-apart samples yields no velocity at all, and would report
+            // success while silently never flinging. The cadence is a duration,
+            // not a whole number of milliseconds, which is why this walks the
+            // path itself instead of building `TouchStep`s (whose `advance_ms`
+            // is milliseconds, as a wire field should be).
+            let total = Duration::from_millis(*over_ms);
+            let steps = (total.as_micros() as u64)
+                .div_ceil(FLING_SAMPLE_INTERVAL.as_micros() as u64)
+                .max(MIN_FLING_SAMPLES);
+            let per_step = total / steps as u32;
+            freeze_clock(tree, ops);
+            let id = mint_or_reuse(tree, teksilo_tokens::PointerKind::Touch, None);
+            direct_dispatch(
+                tree,
+                ops,
+                id,
+                teksilo_tokens::PointerKind::Touch,
+                PointerPhase::Down,
+                from,
+                true,
+                Modifiers::NONE,
+                None,
+                None,
+            );
+            for step in 1..=steps {
+                tree.advance_time_with_ops(per_step, ops);
+                let t = step as f32 / steps as f32;
+                direct_dispatch(
+                    tree,
+                    ops,
+                    id,
+                    teksilo_tokens::PointerKind::Touch,
+                    PointerPhase::Move,
+                    lerp(from, to, t),
+                    true,
+                    Modifiers::NONE,
+                    None,
+                    None,
+                );
+            }
+            direct_dispatch(
+                tree,
+                ops,
+                id,
+                teksilo_tokens::PointerKind::Touch,
+                PointerPhase::Up,
+                to,
+                false,
+                Modifiers::NONE,
+                None,
+                None,
+            );
+            finish_settle(tree, ops, settle)
+        }
+        AutomationOp::LongPress { x, y, kind } => {
+            let p = Point::new(*x, *y);
+            // The hold is the *device's* threshold, read off the active input
+            // profile rather than written here: the recognizer fires at
+            // `>= long_press`, so a script that picked its own number would
+            // either miss the threshold on a device it did not know about or
+            // stop the threshold itself from ever being asserted.
+            let hold = tree.theme().input.profile(kind.to_core()).long_press;
+            freeze_clock(tree, ops);
+            match kind {
+                PointerKindDto::Mouse => {
+                    pointer_down(tree, ops, p, PointerButton::Primary, Modifiers::NONE);
+                    tree.advance_time_with_ops(hold, ops);
+                    pointer_up(tree, ops, p, PointerButton::Primary, Modifiers::NONE);
                 }
-                PA::DoubleClick => {
-                    // Both pairs in one op, with no settle between them: a
-                    // client sending two `Click` ops cannot make a double-click,
-                    // because the round trip between them is longer than the
-                    // recogniser's window.
-                    pointer_down(tree, ops, p, btn, m);
-                    pointer_up(tree, ops, p, btn, m);
-                    pointer_down(tree, ops, p, btn, m);
-                    pointer_up(tree, ops, p, btn, m);
+                PointerKindDto::Touch | PointerKindDto::Pen => {
+                    let core_kind = kind.to_core();
+                    let id = mint_or_reuse(tree, core_kind, None);
+                    // A resting tip reports the pressure a press has; the lift
+                    // reports none, exactly as a digitizer does.
+                    direct_dispatch(
+                        tree,
+                        ops,
+                        id,
+                        core_kind,
+                        PointerPhase::Down,
+                        p,
+                        true,
+                        Modifiers::NONE,
+                        Some(0.5),
+                        None,
+                    );
+                    tree.advance_time_with_ops(hold, ops);
+                    direct_dispatch(
+                        tree,
+                        ops,
+                        id,
+                        core_kind,
+                        PointerPhase::Up,
+                        p,
+                        false,
+                        Modifiers::NONE,
+                        Some(0.0),
+                        None,
+                    );
                 }
             }
+            finish_settle(tree, ops, settle)
+        }
+        AutomationOp::CancelPointer { pointer_id } => {
+            let Some(info) = tree.live_pointers().find(|i| i.id.get() == *pointer_id) else {
+                return AutomationReply::err(
+                    codes::NOT_FOUND,
+                    format!("no live pointer {pointer_id}; call query_pointers for the live set"),
+                );
+            };
+            let at = tree
+                .pointer_position(info.id)
+                .unwrap_or(Point::new(0.0, 0.0));
+            freeze_clock(tree, ops);
+            direct_dispatch(
+                tree,
+                ops,
+                info.id,
+                info.kind,
+                PointerPhase::Cancel,
+                at,
+                false,
+                Modifiers::NONE,
+                None,
+                None,
+            );
+            finish_settle(tree, ops, settle)
+        }
+        AutomationOp::QueryPointers => AutomationReply::ok_json(&live_pointer_reports(tree)),
+        AutomationOp::SetDensity { density } => {
+            tree.set_input_density(density.to_core());
             finish_settle(tree, ops, settle)
         }
         AutomationOp::RightClick { node } => {
@@ -489,6 +753,517 @@ fn type_text(tree: &mut WidgetTree, ops: &mut dyn WindowOps, text: &str) {
             },
             ops,
         );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Direct pointers — touch and pen
+// ---------------------------------------------------------------------------
+//
+// A touch or pen op builds a real
+// [`PointerSample`](teksilo_core::PointerSample) and pushes it through
+// [`dispatch_pointer_with_ops`](teksilo_core::WidgetTree::dispatch_pointer_with_ops),
+// the tree's one pointer ingress door — never a fabricated `WidgetEvent`. The
+// hit-test-by-kind, the per-kind slop, the pointer table, the cross-widget
+// sequence, the pan session, the palm watch and the pinch feed all hang off
+// that door, so a helper that stepped around it would exercise the helper
+// rather than the framework.
+//
+// `WidgetTree`'s own A21 test helpers build samples of exactly this shape, and
+// this module deliberately does not call them: every one of them ends in
+// `dispatch_pointer`, the standalone variant that substitutes a
+// `NoopWindowOps` whose `open_window` panics. That is the trap the "Synthetic
+// input" section above was written for, and a finger is no more exempt from it
+// than a mouse — a long press this module recognizes runs a handler, and that
+// handler may open a window.
+//
+// The sample's shape mirrors `teksilo-platform`'s translator: a contact holds
+// `ButtonMask::PRIMARY` while it is down and reports `Some(Primary)` on the two
+// phases that change a button; a stylus adds its axes.
+
+/// The cadence a [`AutomationOp::Fling`]
+/// samples at: one 60 Hz frame, which is under the velocity tracker's
+/// [`STOP_GAP`](teksilo_core::kinetic::STOP_GAP) and therefore never splits a
+/// flick into two unrelated runs.
+const FLING_SAMPLE_INTERVAL: Duration = Duration::from_micros(16_667);
+
+/// The fewest moves a fling may be described by — the velocity tracker's own
+/// minimum, below which it reports no velocity and the flick silently coasts
+/// nowhere.
+const MIN_FLING_SAMPLES: u64 = teksilo_core::kinetic::MIN_SAMPLE_SIZE as u64;
+
+/// Linear interpolation between two points, `t` in `0.0..=1.0`. Every
+/// multi-sample op walks its path with this, so a pinch and a fling place their
+/// intermediate samples by one rule.
+fn lerp(from: Point, to: Point, t: f32) -> Point {
+    Point::new(from.x + (to.x - from.x) * t, from.y + (to.y - from.y) * t)
+}
+
+/// Put the tree on the simulated clock before an op's first sample.
+///
+/// A zero-duration advance, because [`WidgetTree::advance_time_with_ops`] is
+/// the one door onto simulated time and the switch itself is `pub(super)` to
+/// `widget_tree`. It is the same tick an `advance_clock {millis: 0}` runs, and
+/// it is what makes an op's samples deterministic: on the wall clock two
+/// consecutive samples are stamped however many microseconds apart the host
+/// happened to run two lines of code, so a drag meaning "travel 200 dp, no time
+/// passes" would instead describe a flick at some thousands of dp per second —
+/// differently on every machine. Once frozen, the interval between two samples
+/// is exactly what the op advanced and nothing else.
+///
+/// `execute` hands the clock back at its single exit, so the freeze never
+/// outlives the op.
+fn freeze_clock(tree: &mut WidgetTree, ops: &mut dyn WindowOps) {
+    tree.advance_time_with_ops(Duration::ZERO, ops);
+}
+
+/// The identity a direct-pointer op should use.
+///
+/// An explicit id wins. Failing that a **pen** reuses the live stylus if there
+/// is one — a stylus is singular and it hovers, so its table entry outlives a
+/// lift and the next sample continues the same session — while a **finger**
+/// always mints: a backend reuses its own contact ids the moment a finger
+/// lifts, so identity is per press.
+fn mint_or_reuse(
+    tree: &WidgetTree,
+    kind: teksilo_tokens::PointerKind,
+    explicit: Option<PointerId>,
+) -> PointerId {
+    if let Some(id) = explicit {
+        return id;
+    }
+    if matches!(kind, teksilo_tokens::PointerKind::Pen(_))
+        && let Some(info) = tree
+            .live_pointers()
+            .find(|i| matches!(i.kind, teksilo_tokens::PointerKind::Pen(_)))
+    {
+        return info.id;
+    }
+    tree.new_contact()
+}
+
+/// Build one direct-pointer sample and push it through the tree's pointer door.
+#[allow(clippy::too_many_arguments)]
+fn direct_dispatch(
+    tree: &mut WidgetTree,
+    ops: &mut dyn WindowOps,
+    id: PointerId,
+    kind: teksilo_tokens::PointerKind,
+    phase: PointerPhase,
+    at: Point,
+    down: bool,
+    modifiers: Modifiers,
+    pressure: Option<f32>,
+    tilt: Option<[f32; 2]>,
+) {
+    let mut pointer = PointerInfo::touch(id, tree.input_now());
+    pointer.kind = kind;
+    pointer.buttons = if down {
+        ButtonMask::PRIMARY
+    } else {
+        ButtonMask::NONE
+    };
+    pointer.axes.pressure = pressure;
+    pointer.axes.tilt = tilt.map(|[x, y]| (x, y));
+    let sample = PointerSample {
+        pointer,
+        phase,
+        position: at,
+        // The translator reports a button only where one changed.
+        button: match phase {
+            PointerPhase::Down | PointerPhase::Up => Some(PointerButton::Primary),
+            PointerPhase::Move | PointerPhase::Cancel => None,
+        },
+        modifiers,
+        coalesced: Vec::new(),
+    };
+    tree.dispatch_pointer_with_ops(sample, ops);
+}
+
+/// The mouse arm of `inject_pointer`: the pre-touch path, and a refusal for the
+/// three fields a mouse cannot carry.
+///
+/// Refusing rather than ignoring, because this op's whole contract is that an
+/// argument it does not act on is an error — a silently-dropped `pressure` on a
+/// mouse is the same defect as a silently-dropped misspelled field, and the
+/// caller who wrote it believed they had said something.
+#[allow(clippy::too_many_arguments)]
+fn inject_mouse(
+    tree: &mut WidgetTree,
+    ops: &mut dyn WindowOps,
+    p: Point,
+    button: PointerButton,
+    m: Modifiers,
+    action: crate::dto::PointerAction,
+    pointer_id: Option<u64>,
+    pressure: Option<f32>,
+    tilt: Option<[f32; 2]>,
+) -> Result<(), AutomationReply> {
+    use crate::dto::PointerAction as PA;
+    if pointer_id.is_some() {
+        return Err(AutomationReply::err(
+            codes::BAD_ARGUMENT,
+            "a mouse has one identity — pointer_id is only meaningful for kind=touch or kind=pen",
+        ));
+    }
+    if pressure.is_some() || tilt.is_some() {
+        return Err(AutomationReply::err(
+            codes::BAD_ARGUMENT,
+            "pressure and tilt are digitizer axes — set kind=pen to send them",
+        ));
+    }
+    match action {
+        PA::Move => pointer_move(tree, ops, p),
+        PA::Down => pointer_down(tree, ops, p, button, m),
+        PA::Up => pointer_up(tree, ops, p, button, m),
+        PA::Click => {
+            pointer_down(tree, ops, p, button, m);
+            pointer_up(tree, ops, p, button, m);
+        }
+        PA::DoubleClick => {
+            // Both pairs in one op, with no settle between them: a
+            // client sending two `Click` ops cannot make a double-click,
+            // because the round trip between them is longer than the
+            // recogniser's window.
+            pointer_down(tree, ops, p, button, m);
+            pointer_up(tree, ops, p, button, m);
+            pointer_down(tree, ops, p, button, m);
+            pointer_up(tree, ops, p, button, m);
+        }
+    }
+    Ok(())
+}
+
+/// The touch / pen arm of `inject_pointer`.
+///
+/// A `down` mints a contact and a `click` is a whole contact's life, so both
+/// make their own identity. A `move` or an `up` continues one that is already
+/// live, and may name it with `pointer_id`; naming it is optional exactly while
+/// it is unambiguous — one live pointer of that kind — because a script driving
+/// two fingers through separate ops that never said which one it meant would
+/// move whichever the table happened to yield first. The one phase that may
+/// find nothing live and still proceed is a **pen** `move`: a stylus moves in
+/// proximity without ever having been down, which is the framework's only
+/// direct-pointer hover.
+#[allow(clippy::too_many_arguments)]
+fn inject_direct(
+    tree: &mut WidgetTree,
+    ops: &mut dyn WindowOps,
+    p: Point,
+    m: Modifiers,
+    action: crate::dto::PointerAction,
+    kind: PointerKindDto,
+    pointer_id: Option<u64>,
+    pressure: Option<f32>,
+    tilt: Option<[f32; 2]>,
+) -> Result<(), AutomationReply> {
+    use crate::dto::PointerAction as PA;
+    let core_kind = kind.to_core();
+    // `pointer_id` addresses a contact that is *already live*, so it belongs to
+    // exactly the phases that continue one. A `down` mints an identity and a
+    // click is a whole contact's life; accepting an id there would let a caller
+    // name a finger that the op is about to replace, and believe they had.
+    let addressable = matches!(action, PA::Move | PA::Up);
+    if pointer_id.is_some() && !addressable {
+        return Err(AutomationReply::err(
+            codes::BAD_ARGUMENT,
+            "pointer_id addresses a contact that is already down — it belongs              on a move or an up, not on a down or a click, which mint their own",
+        ));
+    }
+    let explicit = match pointer_id {
+        None => None,
+        Some(raw) => match tree.live_pointers().find(|i| i.id.get() == raw) {
+            Some(info) => Some(info.id),
+            None => {
+                return Err(AutomationReply::err(
+                    codes::NOT_FOUND,
+                    format!("no live pointer {raw}; call query_pointers for the live set"),
+                ));
+            }
+        },
+    };
+    freeze_clock(tree, ops);
+    match action {
+        PA::Down => {
+            let id = mint_or_reuse(tree, core_kind, None);
+            direct_dispatch(
+                tree,
+                ops,
+                id,
+                core_kind,
+                PointerPhase::Down,
+                p,
+                true,
+                m,
+                pressure,
+                tilt,
+            );
+        }
+        PA::Move | PA::Up => {
+            // A pen in proximity moves without ever having been down, so a
+            // `move` may mint one; a finger cannot, and says so.
+            let id = match explicit {
+                Some(id) => id,
+                None => match sole_live_of_kind(tree, core_kind) {
+                    Ok(Some(id)) => id,
+                    Ok(None) if matches!(action, PA::Move) && kind == PointerKindDto::Pen => {
+                        tree.new_contact()
+                    }
+                    Ok(None) => {
+                        return Err(AutomationReply::err(
+                            codes::BAD_ARGUMENT,
+                            "no live pointer of that kind — a move or up must follow a down",
+                        ));
+                    }
+                    Err(n) => {
+                        return Err(AutomationReply::err(
+                            codes::BAD_ARGUMENT,
+                            format!(
+                                "{n} live pointers of that kind — name one with pointer_id, \
+                                 or drive the whole gesture with inject_touch_sequence"
+                            ),
+                        ));
+                    }
+                },
+            };
+            // Whether the sample reports a held button is read off the table,
+            // not assumed from the phase: a pen in proximity moves with nothing
+            // down, and a finger dragging has `PRIMARY` held. An `up` is a
+            // release, so it holds nothing whatever the table said.
+            let phase = if matches!(action, PA::Move) {
+                PointerPhase::Move
+            } else {
+                PointerPhase::Up
+            };
+            let down = phase == PointerPhase::Move
+                && tree
+                    .live_pointers()
+                    .find(|i| i.id == id)
+                    .is_some_and(|i| !i.buttons.is_empty());
+            direct_dispatch(tree, ops, id, core_kind, phase, p, down, m, pressure, tilt);
+        }
+        PA::Click | PA::DoubleClick => {
+            let repeats = if matches!(action, PA::DoubleClick) {
+                2
+            } else {
+                1
+            };
+            for _ in 0..repeats {
+                // A fresh contact per tap: a finger that lifts and lands again
+                // is a new contact, which is what makes the two taps a
+                // double-tap rather than one contact reporting twice.
+                let id = mint_or_reuse(tree, core_kind, None);
+                direct_dispatch(
+                    tree,
+                    ops,
+                    id,
+                    core_kind,
+                    PointerPhase::Down,
+                    p,
+                    true,
+                    m,
+                    pressure,
+                    tilt,
+                );
+                direct_dispatch(
+                    tree,
+                    ops,
+                    id,
+                    core_kind,
+                    PointerPhase::Up,
+                    p,
+                    false,
+                    m,
+                    pressure,
+                    tilt,
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
+/// The one live pointer of `kind`, `Ok(None)` if there is none, or `Err(n)` if
+/// there are `n > 1` and the caller must say which.
+fn sole_live_of_kind(
+    tree: &WidgetTree,
+    kind: teksilo_tokens::PointerKind,
+) -> Result<Option<PointerId>, usize> {
+    let matches_kind = |k: teksilo_tokens::PointerKind| match kind {
+        teksilo_tokens::PointerKind::Pen(_) => matches!(k, teksilo_tokens::PointerKind::Pen(_)),
+        other => k == other,
+    };
+    let ids: Vec<PointerId> = tree
+        .live_pointers()
+        .filter(|i| matches_kind(i.kind))
+        .map(|i| i.id)
+        .collect();
+    match ids.len() {
+        0 => Ok(None),
+        1 => Ok(Some(ids[0])),
+        n => Err(n),
+    }
+}
+
+/// Drive a whole multi-touch gesture, reporting the arbitration after every
+/// step.
+///
+/// The observation is taken **immediately** after each sample and before any
+/// settle: an arbitration is decided sample by sample, so a report taken after
+/// the gesture had been settled would answer for the end of the press and not
+/// for the step that was asked about.
+fn run_touch_sequence(
+    tree: &mut WidgetTree,
+    ops: &mut dyn WindowOps,
+    steps: &[TouchStep],
+) -> Result<Vec<TouchStepReport>, AutomationReply> {
+    if steps.is_empty() {
+        return Err(AutomationReply::err(
+            codes::BAD_ARGUMENT,
+            "inject_touch_sequence needs at least one step",
+        ));
+    }
+    freeze_clock(tree, ops);
+    let mut slots: std::collections::BTreeMap<u32, PointerId> = std::collections::BTreeMap::new();
+    let mut reports = Vec::with_capacity(steps.len());
+    for step in steps {
+        if step.advance_ms > 0 {
+            tree.advance_time_with_ops(Duration::from_millis(step.advance_ms), ops);
+        }
+        let at = Point::new(step.x, step.y);
+        let id = match step.phase {
+            TouchPhaseDto::Down => {
+                let id = tree.new_contact();
+                slots.insert(step.contact, id);
+                id
+            }
+            _ => match slots.get(&step.contact) {
+                Some(id) => *id,
+                None => {
+                    return Err(AutomationReply::err(
+                        codes::BAD_ARGUMENT,
+                        format!(
+                            "contact {} is not down — a move, up or cancel must follow a down",
+                            step.contact
+                        ),
+                    ));
+                }
+            },
+        };
+        let (phase, down) = match step.phase {
+            TouchPhaseDto::Down => (PointerPhase::Down, true),
+            TouchPhaseDto::Move => (PointerPhase::Move, true),
+            TouchPhaseDto::Up => (PointerPhase::Up, false),
+            TouchPhaseDto::Cancel => (PointerPhase::Cancel, false),
+        };
+        direct_dispatch(
+            tree,
+            ops,
+            id,
+            teksilo_tokens::PointerKind::Touch,
+            phase,
+            at,
+            down,
+            Modifiers::NONE,
+            None,
+            None,
+        );
+        if matches!(step.phase, TouchPhaseDto::Up | TouchPhaseDto::Cancel) {
+            slots.remove(&step.contact);
+        }
+        reports.push(TouchStepReport {
+            contact: step.contact,
+            pointer_id: id.get(),
+            pointer: pointer_report_for(tree, id),
+        });
+    }
+    Ok(reports)
+}
+
+/// Every live pointer, reported.
+fn live_pointer_reports(tree: &WidgetTree) -> Vec<PointerReport> {
+    let infos: Vec<PointerInfo> = tree.live_pointers().collect();
+    infos.into_iter().map(|i| pointer_report(tree, i)).collect()
+}
+
+/// One pointer's report, or `None` if it is no longer in the table — a finger
+/// is simply gone after its up or cancel, and reporting a stale copy would let
+/// a script assert a winner for a pointer that no longer exists.
+fn pointer_report_for(tree: &WidgetTree, id: PointerId) -> Option<PointerReport> {
+    let info = tree.live_pointers().find(|i| i.id == id)?;
+    Some(pointer_report(tree, info))
+}
+
+fn pointer_report(tree: &WidgetTree, info: PointerInfo) -> PointerReport {
+    PointerReport {
+        pointer_id: info.id.get(),
+        kind: PointerKindDto::from_core(info.kind),
+        primary: info.primary,
+        down: !info.buttons.is_empty(),
+        position: tree.pointer_position(info.id).map(|p| [p.x, p.y]),
+        pressure: info.axes.pressure,
+        tilt: info.axes.tilt.map(|(x, y)| [x, y]),
+        captured_by: tree.captured_by(info.id).map(node_ref_of),
+        touch_action: render_touch_action(tree.sequence_touch_action(info.id)).to_string(),
+        sequence_members: tree
+            .sequence_members(info.id)
+            .into_iter()
+            .map(|(id, role, state)| SequenceMemberDto {
+                node: node_ref_of(id),
+                role: member_role_name(role),
+                state: member_state_name(state),
+            })
+            .collect(),
+        sequence_winner: tree.sequence_winner(info.id).map(node_ref_of),
+    }
+}
+
+fn node_ref_of(id: WidgetId) -> NodeRef {
+    teksilo_core::accessibility::widget_id_to_node_id(id).0
+}
+
+/// A `TouchAction` under the name it is declared by. `Debug` prints the raw bit
+/// field, which no client can decode. The same seven names the generated
+/// arbitration-matrix table in `docs/events-and-gestures.md` uses.
+fn render_touch_action(action: TouchAction) -> &'static str {
+    match action {
+        TouchAction::AUTO => "AUTO",
+        TouchAction::NONE => "NONE",
+        TouchAction::PAN => "PAN",
+        TouchAction::PAN_X => "PAN_X",
+        TouchAction::PAN_Y => "PAN_Y",
+        TouchAction::PINCH_ZOOM => "PINCH_ZOOM",
+        TouchAction::MANIPULATION => "MANIPULATION",
+        _ => "(composite)",
+    }
+}
+
+/// The wire name for a member's role. `MemberRole::Pan` carries the claim it
+/// was enrolled for; the wire names the role, because the axes are already
+/// pinned by the frozen touch action beside it.
+///
+/// `MemberRole` is `#[non_exhaustive]`: a role added later renders as its
+/// `Debug` form rather than panicking. A DTO builder that panicked would take
+/// down the thread that owns the `!Send` tree, and with it every later op.
+fn member_role_name(role: teksilo_core::gesture::MemberRole) -> String {
+    use teksilo_core::gesture::MemberRole as R;
+    match role {
+        R::Gesture => "gesture".to_string(),
+        R::Pan(_) => "pan".to_string(),
+        R::RawDrag => "raw_drag".to_string(),
+        R::RawPreview => "raw_preview".to_string(),
+        other => format!("{other:?}"),
+    }
+}
+
+fn member_state_name(state: teksilo_core::gesture::MemberState) -> String {
+    use teksilo_core::gesture::MemberState as S;
+    match state {
+        S::Possible => "possible".to_string(),
+        S::Held => "held".to_string(),
+        S::Rejected => "rejected".to_string(),
+        S::Won => "won".to_string(),
+        other => format!("{other:?}"),
     }
 }
 

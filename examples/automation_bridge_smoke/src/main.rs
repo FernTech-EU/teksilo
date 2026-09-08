@@ -26,6 +26,8 @@ use std::time::{Duration, Instant};
 
 use teksilo::automation::dto::{AutomationOp, AutomationReply, AutomationRequest, SettleSpec};
 use teksilo::automation::wire::{self, EndpointFile};
+use teksilo::core::binding::BindingLevel;
+use teksilo::core::widget_builder::HandlerSet;
 use teksilo::prelude::*;
 use teksilo::widgets::{Button, VStack};
 use teksilo_platform::automation_transport::{self, TransportStream};
@@ -66,10 +68,77 @@ fn main() {
                 .title("automation bridge smoke")
                 .size(400, 300)
                 .root(|tree, _state| {
-                    tree.add(VStack::new().spacing(8.0).child(Button::new(lit!("Save"))))
+                    tree.add(
+                        VStack::new()
+                            .spacing(8.0)
+                            .child(Button::new(lit!("Save")))
+                            .child(InputProbe::new()),
+                    )
                 }),
         )
         .run();
+}
+
+/// A widget that publishes what the last input it saw actually *was*, as its
+/// accessible value.
+///
+/// The two clauses A21 pins for the pre-existing ops — `scroll` injects a
+/// `ScrollSource::Programmatic` sample, `drag_node` injects a mouse pointer —
+/// are properties of the sample a handler receives, and nothing in a reply says
+/// which sample was sent. Putting the observation on the AT value is what lets
+/// the smoke assert them over the live socket, on the transport each OS
+/// actually uses, rather than only in a unit test against `execute`.
+#[derive(Debug)]
+struct InputProbe {
+    observed: Signal<String>,
+}
+
+impl InputProbe {
+    fn new() -> Self {
+        Self {
+            observed: Signal::new(String::new()),
+        }
+    }
+}
+
+impl Widget for InputProbe {
+    fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+        let self_id = ctx.self_id();
+        self.observed.bind_to(
+            self_id,
+            ctx.binding_registry(),
+            BindingLevel::AccessibilityOnly,
+        );
+        let on_scroll = self.observed.clone();
+        let on_pointer = self.observed.clone();
+        ctx.apply_self_handlers(
+            HandlerSet::new()
+                .on_scroll(move |_event, ctx| {
+                    on_scroll.set(format!("scroll={:?}", ctx.scroll_source()));
+                    EventResponse::Handled
+                })
+                .on_pointer_event(move |event, ctx| {
+                    if matches!(event, WidgetEvent::PointerDown { .. }) {
+                        on_pointer.set(format!("pointer={:?}", ctx.pointer().kind));
+                    }
+                    EventResponse::Ignored
+                }),
+        );
+        Vec::new()
+    }
+
+    fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> LayoutResponse {
+        proposal.resolve(200.0, 80.0).into()
+    }
+
+    fn accessibility(&self, builder: &mut AccessNodeBuilder) {
+        // `Role::Button`, not `Role::Label`: a label's own name is republished
+        // as its text runs and does not survive as a node label, so a probe
+        // that named itself that way could not be found by `find_node` at all.
+        builder.set_role(teksilo::core::accesskit::Role::Button);
+        builder.set_name("input-probe".to_string());
+        builder.set_value(self.observed.get());
+    }
 }
 
 /// Wait for this process's own endpoint descriptor, then drive the bridge.
@@ -128,7 +197,74 @@ fn run_smoke() -> Result<(), String> {
         return Err("re-snapshot returned no nodes".into());
     }
 
-    // 4. screenshot: the live-window capture path, including the BGRA swizzle
+    // 4. The two clauses A21 pins for the pre-existing input ops, asserted here
+    //    because this is the only place they cross the real socket / named pipe
+    //    on the OS that owns it. `teksilo-automation`'s own unit tests assert
+    //    the same two against `execute`; what this adds is the transport.
+    let probe = snap["nodes"]
+        .as_array()
+        .ok_or("snapshot has no nodes")?
+        .iter()
+        .find(|n| n["label"] == "input-probe")
+        .and_then(|n| n["id"].as_u64())
+        .ok_or_else(|| {
+            // Name what the tree *did* carry: "not found" on its own sends the
+            // reader looking for a transport fault when the cause is a node
+            // that never reached the accessibility tree.
+            let labels: Vec<String> = snap["nodes"]
+                .as_array()
+                .map(|ns| {
+                    ns.iter()
+                        .map(|n| format!("{}/{}", n["role"], n["label"]))
+                        .collect()
+                })
+                .unwrap_or_default();
+            format!("could not find the input probe; the tree carries {labels:?}")
+        })?;
+
+    // `scroll` must arrive as a scroll the app made, not a wheel the user
+    // turned: a widget that branches on the source would otherwise be told a
+    // driven scroll was a real wheel notch.
+    data(exchange(
+        &mut stream,
+        AutomationOp::Scroll {
+            node: probe,
+            dx: 0.0,
+            dy: -40.0,
+            ctrl: false,
+            shift: false,
+            alt: false,
+            meta: false,
+            command: false,
+        },
+    )?)?;
+    let observed = probe_value(&mut stream, probe)?;
+    if observed != "scroll=Programmatic" {
+        return Err(format!(
+            "scroll must inject a Programmatic sample, the probe saw {observed:?}"
+        ));
+    }
+
+    // `drag_node` must stay an indirect precise pointer: the kind is what
+    // decides its slop, its hover, and whether an ancestor's pan claim is
+    // enrolled at all, and the op has no argument that says which device it is.
+    data(exchange(
+        &mut stream,
+        AutomationOp::DragNode {
+            node: probe,
+            to_node: None,
+            to_x: Some(60.0),
+            to_y: Some(60.0),
+        },
+    )?)?;
+    let observed = probe_value(&mut stream, probe)?;
+    if observed != "pointer=Mouse" {
+        return Err(format!(
+            "drag_node must inject a mouse pointer, the probe saw {observed:?}"
+        ));
+    }
+
+    // 5. screenshot: the live-window capture path, including the BGRA swizzle
     //    that only ever executes on a Windows or macOS surface format. A host
     //    with no usable GPU reports that cleanly instead of failing.
     match exchange(&mut stream, AutomationOp::Screenshot { node: None })? {
@@ -186,6 +322,12 @@ fn run_smoke() -> Result<(), String> {
     }
 
     Ok(())
+}
+
+/// Read the input probe's published observation back off the accessibility tree.
+fn probe_value(stream: &mut Box<dyn TransportStream>, node: u64) -> Result<String, String> {
+    let n = data(exchange(stream, AutomationOp::ReadNode { node })?)?;
+    Ok(n["value"].as_str().unwrap_or_default().to_string())
 }
 
 /// The descriptor carries the token, so it must not be world-readable.

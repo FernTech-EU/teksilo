@@ -16,8 +16,8 @@ use rmcp::{ErrorData as McpError, ServerHandler, schemars, tool, tool_handler, t
 use tokio::sync::{mpsc::UnboundedSender, oneshot};
 
 use teksilo_automation::dto::{
-    Assertion, AutomationOp, AutomationReply, AutomationRequest, PointerAction, PointerButtonDto,
-    SettleSpec, WaitCondition,
+    Assertion, AutomationOp, AutomationReply, AutomationRequest, DensityDto, PointerAction,
+    PointerButtonDto, PointerKindDto, SettleSpec, TouchPhaseDto, TouchStep, WaitCondition,
 };
 
 use crate::headless::{HostReply, Job};
@@ -191,6 +191,107 @@ pub struct InjectPointerParams {
     /// right-click (opens a context menu); prefer the node-based `right_click`
     /// tool for that so you don't have to compute a point.
     pub button: Option<String>,
+    /// mouse (default), touch or pen. A touch or pen enters through the tree's
+    /// pointer door, so the kind reaches the hit test, the per-kind slop, the
+    /// hover rules and the cross-widget arbitration — it is a different device,
+    /// not a mouse with a label.
+    pub kind: Option<String>,
+    /// Continue a contact a previous call left down, using an id from
+    /// `query_pointers`. Belongs on a move or an up — a down and a click mint
+    /// their own identity and refuse it, and so does a mouse. Omit it when
+    /// there is exactly one live pointer of that kind.
+    pub pointer_id: Option<u64>,
+    /// Tip pressure, 0.0..=1.0, as a digitizer reports it. Pen only.
+    pub pressure: Option<f32>,
+    /// Tilt as [tilt_x, tilt_y] in degrees. Pen only.
+    pub tilt: Option<[f32; 2]>,
+    pub settle: Option<SettleArg>,
+}
+
+/// One step of an `inject_touch_sequence`.
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct TouchStepParams {
+    /// Which finger — a small slot number, not a pointer id. Defaults to 0.
+    pub contact: Option<u32>,
+    /// down, move, up or cancel.
+    pub phase: String,
+    pub x: f32,
+    pub y: f32,
+    /// Simulated milliseconds to advance BEFORE this sample. Default 0. This is
+    /// what separates a hold from a tap and a flick from a drag; it is
+    /// simulated time, so the result is the same on every machine.
+    pub advance_ms: Option<u64>,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct TouchSequenceParams {
+    pub window_id: Option<u64>,
+    pub steps: Vec<TouchStepParams>,
+    pub settle: Option<SettleArg>,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct PinchParams {
+    pub window_id: Option<u64>,
+    /// The first finger's start point.
+    pub ax0: f32,
+    pub ay0: f32,
+    /// The second finger's start point.
+    pub bx0: f32,
+    pub by0: f32,
+    /// The first finger's end point.
+    pub ax1: f32,
+    pub ay1: f32,
+    /// The second finger's end point.
+    pub bx1: f32,
+    pub by1: f32,
+    /// Intermediate moves per finger. Default 8.
+    pub steps: Option<usize>,
+    pub settle: Option<SettleArg>,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct FlingParams {
+    pub window_id: Option<u64>,
+    pub from_x: f32,
+    pub from_y: f32,
+    pub to_x: f32,
+    pub to_y: f32,
+    /// The flick's duration in simulated milliseconds.
+    pub over_ms: u64,
+    pub settle: Option<SettleArg>,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct LongPressParams {
+    pub window_id: Option<u64>,
+    pub x: f32,
+    pub y: f32,
+    /// mouse (default), touch or pen. The hold is that device's own threshold.
+    pub kind: Option<String>,
+    pub settle: Option<SettleArg>,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct CancelPointerParams {
+    pub window_id: Option<u64>,
+    /// An id from `query_pointers`.
+    pub pointer_id: u64,
+    pub settle: Option<SettleArg>,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SetDensityParams {
+    pub window_id: Option<u64>,
+    /// compact, comfortable or touch.
+    pub density: String,
     pub settle: Option<SettleArg>,
 }
 
@@ -532,6 +633,10 @@ impl AutomationServer {
                 y: p.y,
                 action: pointer_action(&p.action)?,
                 button: pointer_button(&p.button)?,
+                kind: pointer_kind(&p.kind)?,
+                pointer_id: p.pointer_id,
+                pressure: p.pressure,
+                tilt: p.tilt,
                 ctrl: p.ctrl.unwrap_or(false),
                 shift: p.shift.unwrap_or(false),
                 alt: p.alt.unwrap_or(false),
@@ -635,6 +740,181 @@ impl AutomationServer {
                 to_node: p.to_node,
                 to_x: p.to_x,
                 to_y: p.to_y,
+            },
+            settle,
+        )
+        .await
+    }
+
+    #[tool(
+        description = "Drive a whole multi-touch gesture in one call and report the arbitration \
+                       after every step. `steps` is a list of {contact?, phase, x, y, advance_ms?}: \
+                       phase is down/move/up/cancel, `contact` names a finger by slot (default 0, \
+                       not a pointer id), and `advance_ms` advances the SIMULATED clock before that \
+                       sample — which is what separates a hold from a tap and a flick from a drag. \
+                       The reply gives, per step, the identity that slot got and that pointer's \
+                       whole state: the frozen touch_action, every competitor with its role and \
+                       state, and the arbitration winner. A sequence that stops short of its `up` \
+                       leaves the finger down, which is how a live arbitration stays observable — \
+                       finish it with an `up`, or with cancel_pointer."
+    )]
+    pub(crate) async fn inject_touch_sequence(
+        &self,
+        Parameters(p): Parameters<TouchSequenceParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let settle = settle_spec(&p.settle);
+        let mut steps = Vec::with_capacity(p.steps.len());
+        for step in &p.steps {
+            steps.push(TouchStep {
+                contact: step.contact.unwrap_or(0),
+                phase: touch_phase(&step.phase)?,
+                x: step.x,
+                y: step.y,
+                advance_ms: step.advance_ms.unwrap_or(0),
+            });
+        }
+        self.run(
+            p.window_id,
+            AutomationOp::InjectTouchSequence { steps },
+            settle,
+        )
+        .await
+    }
+
+    #[tool(
+        description = "Two fingers moving from one span to another — the pinch a zoomable surface \
+                       reads. Both land before either moves, because the recogniser's reference \
+                       span is the distance between the landings. `steps` is the number of \
+                       intermediate moves per finger (default 8)."
+    )]
+    pub(crate) async fn pinch(
+        &self,
+        Parameters(p): Parameters<PinchParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let settle = settle_spec(&p.settle);
+        self.run(
+            p.window_id,
+            AutomationOp::Pinch {
+                ax0: p.ax0,
+                ay0: p.ay0,
+                bx0: p.bx0,
+                by0: p.by0,
+                ax1: p.ax1,
+                ay1: p.ay1,
+                bx1: p.bx1,
+                by1: p.by1,
+                steps: p.steps.unwrap_or(8),
+            },
+            settle,
+        )
+        .await
+    }
+
+    #[tool(
+        description = "One finger travelling from one point to another over `over_ms` simulated \
+                       milliseconds and released while still moving — the shape a kinetic coast is \
+                       handed off from. A drag latches on distance; a fling hands a velocity to the \
+                       scroller, so the duration is the whole difference. Sampled at one 60 Hz \
+                       frame per step, because a flick described by too few samples yields no \
+                       velocity and silently never flings."
+    )]
+    pub(crate) async fn fling(
+        &self,
+        Parameters(p): Parameters<FlingParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let settle = settle_spec(&p.settle);
+        self.run(
+            p.window_id,
+            AutomationOp::Fling {
+                from_x: p.from_x,
+                from_y: p.from_y,
+                to_x: p.to_x,
+                to_y: p.to_y,
+                over_ms: p.over_ms,
+            },
+            settle,
+        )
+        .await
+    }
+
+    #[tool(
+        description = "Press at a point, hold for exactly the device's long-press threshold, \
+                       release. The hold is read off the active input profile for `kind` \
+                       (mouse/touch/pen), so the call means 'hold long enough' without the script \
+                       knowing the number."
+    )]
+    pub(crate) async fn long_press(
+        &self,
+        Parameters(p): Parameters<LongPressParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let settle = settle_spec(&p.settle);
+        self.run(
+            p.window_id,
+            AutomationOp::LongPress {
+                x: p.x,
+                y: p.y,
+                kind: pointer_kind(&p.kind)?,
+            },
+            settle,
+        )
+        .await
+    }
+
+    #[tool(
+        description = "Revoke a live pointer the way the system does (a compositor grab, a lost \
+                       capture). Not an up: no tap completes, the end position carries no meaning, \
+                       and every widget working on the pointer is told. Takes a `pointer_id` from \
+                       query_pointers."
+    )]
+    pub(crate) async fn cancel_pointer(
+        &self,
+        Parameters(p): Parameters<CancelPointerParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let settle = settle_spec(&p.settle);
+        self.run(
+            p.window_id,
+            AutomationOp::CancelPointer {
+                pointer_id: p.pointer_id,
+            },
+            settle,
+        )
+        .await
+    }
+
+    #[tool(
+        description = "Every live pointer with its id, kind, position, pressure/tilt, capture, \
+                       frozen touch_action, competitors and arbitration winner. How to learn the \
+                       id of a contact left down by anything but inject_touch_sequence, whose reply \
+                       names its own. A mouse appears once it has produced a sample and stays; a \
+                       finger appears at its press and is gone after its up or cancel."
+    )]
+    pub(crate) async fn query_pointers(
+        &self,
+        Parameters(p): Parameters<WindowOnlyParams>,
+    ) -> Result<CallToolResult, McpError> {
+        self.run(
+            p.window_id,
+            AutomationOp::QueryPointers,
+            SettleSpec::default(),
+        )
+        .await
+    }
+
+    #[tool(
+        description = "Switch the app's target density: compact (desktop), comfortable (hybrid) or \
+                       touch (finger-first). WARNING: a density change rebuilds every widget, so \
+                       every node id captured before it is dead — re-snapshot or re-find \
+                       afterwards. Setting the density it already has is a no-op and keeps the ids."
+    )]
+    pub(crate) async fn set_density(
+        &self,
+        Parameters(p): Parameters<SetDensityParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let settle = settle_spec(&p.settle);
+        self.run(
+            p.window_id,
+            AutomationOp::SetDensity {
+                density: density(&p.density)?,
             },
             settle,
         )
@@ -806,6 +1086,24 @@ Windows and Linux and Command on macOS, which is what a shortcut *declared* \
 binding and still reports success, because the key really was injected. `ctrl` \
 stays literal Control, for the chords that genuinely are Control everywhere \
 (Ctrl+Tab).
+
+Touch and pen. `inject_pointer` takes `kind` = mouse (default), touch or pen; a \
+touch or pen enters through the tree's pointer door, so the kind reaches the \
+hit test, the per-kind slop, the hover rules and the cross-widget arbitration — \
+it is a different device, not a mouse with a label, and `pen` carries \
+`pressure` and `tilt`. For a gesture rather than one sample use \
+`inject_touch_sequence {steps: [{contact?, phase, x, y, advance_ms?}]}`, which \
+drives every finger in one call and reports, after each step, the frozen \
+touch_action, every competitor with its role and state, and the arbitration \
+winner. `pinch`, `fling` and `long_press` are the three named shapes: a pinch \
+lands both fingers before either moves, a fling is spread over simulated time \
+so it has a velocity to hand off, and a long press holds for exactly the \
+device's own threshold. `query_pointers` lists every live pointer, and is \
+how to learn the id of a contact left down by anything but a sequence (whose \
+reply names its own); `cancel_pointer {pointer_id}` revokes one the way the \
+system does (no tap completes). \
+`set_density {density}` switches compact/comfortable/touch — and REBUILDS every \
+widget, so every node id you hold is dead afterwards: re-snapshot or re-find.
 3. Verify. Re-`snapshot_tree`, `read_node {node}`, or `assert_node {node, kind, \
 value?/flag?}` where kind is role_equals, label_equals, label_contains, \
 value_equals, toggled, expanded, selected, disabled, exists, focused, \
@@ -973,6 +1271,49 @@ fn pointer_action(s: &Option<String>) -> Result<PointerAction, McpError> {
                 format!(
                     "unknown pointer action '{other}'                          (click, double_click, down, up, move)"
                 ),
+                None,
+            ));
+        }
+    })
+}
+
+fn pointer_kind(s: &Option<String>) -> Result<PointerKindDto, McpError> {
+    Ok(match s.as_deref().map(str::to_ascii_lowercase).as_deref() {
+        None | Some("mouse") => PointerKindDto::Mouse,
+        Some("touch") => PointerKindDto::Touch,
+        Some("pen") => PointerKindDto::Pen,
+        Some(other) => {
+            return Err(McpError::invalid_params(
+                format!("unknown pointer kind '{other}' (mouse, touch, pen)"),
+                None,
+            ));
+        }
+    })
+}
+
+fn touch_phase(s: &str) -> Result<TouchPhaseDto, McpError> {
+    Ok(match s.to_ascii_lowercase().as_str() {
+        "down" => TouchPhaseDto::Down,
+        "move" => TouchPhaseDto::Move,
+        "up" => TouchPhaseDto::Up,
+        "cancel" => TouchPhaseDto::Cancel,
+        other => {
+            return Err(McpError::invalid_params(
+                format!("unknown touch phase '{other}' (down, move, up, cancel)"),
+                None,
+            ));
+        }
+    })
+}
+
+fn density(s: &str) -> Result<DensityDto, McpError> {
+    Ok(match s.to_ascii_lowercase().as_str() {
+        "compact" => DensityDto::Compact,
+        "comfortable" => DensityDto::Comfortable,
+        "touch" => DensityDto::Touch,
+        other => {
+            return Err(McpError::invalid_params(
+                format!("unknown density '{other}' (compact, comfortable, touch)"),
                 None,
             ));
         }
