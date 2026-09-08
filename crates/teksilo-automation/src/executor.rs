@@ -31,7 +31,27 @@ use crate::dto::{
 };
 
 /// Perform one automation operation. See the module docs.
+///
+/// Whatever the operation, the tree is handed back to the wall clock before the
+/// reply returns — see [`WidgetTree::resume_real_time`]. Advancing the
+/// simulated clock freezes both the input timeline and the animation clock so
+/// the operation is deterministic; leaving them frozen would stop a *live*
+/// attached window from ever measuring another gesture, or advancing another
+/// animation frame.
 pub fn execute(
+    tree: &mut WidgetTree,
+    ops: &mut dyn WindowOps,
+    op: &AutomationOp,
+    settle: &SettleSpec,
+) -> AutomationReply {
+    let reply = execute_op(tree, ops, op, settle);
+    // One site rather than one per time-moving arm: any op can reach a settle,
+    // and an arm added later must not have to remember this.
+    tree.resume_real_time();
+    reply
+}
+
+fn execute_op(
     tree: &mut WidgetTree,
     ops: &mut dyn WindowOps,
     op: &AutomationOp,
@@ -356,7 +376,9 @@ pub fn execute(
 
         // ---- Time / settle ----
         AutomationOp::AdvanceClock { millis } => {
-            tree.advance_time(Duration::from_millis(*millis));
+            // Over the caller's sink: a long press this jump recognizes runs
+            // its handler, and that handler may open a window.
+            tree.advance_time_with_ops(Duration::from_millis(*millis), ops);
             tree.sync_accessibility();
             AutomationReply::ok_unit()
         }
@@ -502,13 +524,19 @@ pub fn run_settle(
     settle: &SettleSpec,
 ) -> Option<&'static str> {
     let deadline = Instant::now() + Duration::from_millis(settle.settle_timeout_ms.max(1));
+    // One door for both halves of the settle. The requested clock jump and the
+    // animation frames below go through the same `advance_time`, so the
+    // simulated clock moves by exactly `clock_millis + 16 * frames` and the
+    // gesture, fling, tooltip and animation deadlines all land on it. When
+    // these were two calls they advanced the clock twice and moved disjoint
+    // halves of the tree.
     if settle.clock_millis > 0 {
-        tree.advance_time(Duration::from_millis(settle.clock_millis));
+        tree.advance_time_with_ops(Duration::from_millis(settle.clock_millis), ops);
     }
     let mut frames = 0u32;
     let mut timed_out = false;
     while tree.has_active_animations() && frames < settle.max_anim_frames {
-        tree.tick_animations(Duration::from_millis(16));
+        tree.advance_time_with_ops(Duration::from_millis(16), ops);
         frames += 1;
         if Instant::now() >= deadline {
             timed_out = true;
@@ -520,6 +548,11 @@ pub fn run_settle(
         tree.layout_with_ops(proposal, ops);
     }
     tree.sync_accessibility();
+    // `pub`, and called directly by the headless tree-thread and the live
+    // bridge as well as from `execute`. Hand the clock back here too, so a
+    // caller that never goes through `execute` does not leave a live window
+    // frozen. Idempotent — `execute` calling it again is free.
+    tree.resume_real_time();
     timed_out.then_some(codes::SETTLE_TIMEOUT)
 }
 
@@ -626,8 +659,11 @@ fn wait_for_condition(
         }
         // Drive timed / animated state forward one frame, then re-layout so
         // reactive (AccessibilityOnly) bindings flush before the next sync.
-        tree.advance_time(WAIT_FRAME);
-        tree.tick_animations(WAIT_FRAME);
+        // ONE call: `advance_time` moves everything the frame is meant to move,
+        // and pairing it with a second door advanced the simulated clock by two
+        // frames per poll while `WAIT_FRAME` and this function's own doc both
+        // say one.
+        tree.advance_time_with_ops(WAIT_FRAME, ops);
         let proposal = tree.last_proposal();
         tree.layout_with_ops(proposal, ops);
     }

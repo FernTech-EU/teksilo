@@ -227,10 +227,77 @@ pub struct WidgetTree {
     /// runs. Holds its default — a mouse at the epoch — outside a pointer or
     /// scroll dispatch.
     current_input: crate::pointer::InputSnapshot,
-    /// Whether [`tick_animations`](Self::tick_animations) has ever driven this
-    /// tree — i.e. whether [`Self::sim_clock`], rather than the wall clock, is
-    /// the one animations are measured against. See [`Self::animation_clock`].
-    sim_driven: bool,
+    /// Whether simulated time is *currently* what this tree measures against —
+    /// i.e. whether [`Self::sim_clock`], rather than the wall clock, is what
+    /// [`Self::animation_clock`] answers with and what freezes the input
+    /// timeline.
+    ///
+    /// Set by `enter_simulated_mode`, which
+    /// [`advance_time`](Self::advance_time) calls before it moves anything, and
+    /// cleared by [`resume_real_time`](Self::resume_real_time). Both axes turn
+    /// on this one flag, so the tree has one notion of "is time simulated right
+    /// now" rather than two that can disagree.
+    ///
+    /// It is not a latch. A headless test never hands the clock back, so for a
+    /// test it behaves like one: an animation may then only progress by
+    /// advancing the clock, never by the test taking a long time. A host
+    /// sharing a live tree with a real event loop — the debug automation bridge
+    /// — hands it back after every operation, and real time drives the tree
+    /// again until the next advance.
+    ///
+    /// What each axis does across the two transitions differs, because the two
+    /// carry different state. The animation scheduler holds absolute instants,
+    /// so switching axes **rebases** them (`AnimationScheduler::rebase`) and the
+    /// reading itself is simply whichever clock is in charge. The input axis
+    /// holds none, so it is the *reading* that is carried: see
+    /// [`Self::sim_input_origin`] and [`Self::sim_input_offset`].
+    sim_time_frozen: bool,
+    /// Where the input timeline stood when this tree entered simulated mode,
+    /// as `(the reading then, the `sim_clock` then)`.
+    ///
+    /// The input axis cannot simply become `sim_clock - epoch`: samples
+    /// dispatched *before* the switch were stamped from the wall clock, which
+    /// by then is ahead of `sim_clock`, so every one of them would sit in the
+    /// virtual future and no interval measured from them would ever elapse.
+    /// Continuing the axis from where it stood instead makes every stamp taken
+    /// before the switch lie in the past and every interval after it exactly
+    /// the duration advanced.
+    ///
+    /// `None` while the tree runs on real time, and also under a clock that has
+    /// no wall-clock anchor — a
+    /// [`ManualClock`](crate::pointer::clock::ManualClock) *is* the virtual
+    /// axis already, and is moved directly by `advance_time`.
+    ///
+    /// Cleared by [`resume_real_time`](Self::resume_real_time), which hands the
+    /// axis back to the wall clock with what was advanced carried forward in
+    /// [`Self::sim_input_offset`].
+    sim_input_origin: Option<(crate::pointer::EventTime, std::time::Instant)>,
+    /// How far ahead of the raw input clock this tree's input timeline runs,
+    /// having been advanced and then handed back to real time.
+    ///
+    /// Added to every reading of the clock, and **re-measured** (not
+    /// accumulated) at each hand-back as `frozen reading − raw reading`, floored
+    /// at zero. That is what makes the axis monotone across the hand-back: the
+    /// reading at the instant of
+    /// [`resume_real_time`](Self::resume_real_time) is the later of the frozen
+    /// reading it had and the raw one, and it moves with the wall clock from
+    /// there. Without it
+    /// the axis would jump *backwards* by everything that was advanced, and a
+    /// monotone [`EventTime`](crate::pointer::EventTime) is a platform
+    /// conformance invariant.
+    ///
+    /// So it is not monotone in itself: a tree that spent longer on the wall
+    /// clock than it was ever advanced is already ahead of its frozen reading
+    /// and the right offset is then zero, which is what the floor is for. It is
+    /// also dropped outright by
+    /// [`set_input_clock`](Self::set_input_clock) — it is a distance measured
+    /// against one clock's readings and means nothing against another's.
+    ///
+    /// It is also what keeps a deadline schedulable: `instant_for` subtracts it
+    /// again, so a long press armed after an advance is reported to the event
+    /// loop at a *future* `Instant` rather than one in the past that can never
+    /// ripen.
+    sim_input_offset: std::time::Duration,
     /// Overlay manager for tooltips, menus, popovers.
     pub(crate) overlay_manager: crate::overlay::OverlayManager,
     /// Tooltip attachments: (anchor_id, content_id, text, delay, hover_start, overlay_id).
@@ -769,7 +836,9 @@ impl WidgetTree {
             sim_clock: epoch,
             input_clock: std::rc::Rc::new(crate::pointer::clock::MonotonicClock::new(epoch)),
             current_input: crate::pointer::InputSnapshot::default(),
-            sim_driven: false,
+            sim_time_frozen: false,
+            sim_input_origin: None,
+            sim_input_offset: std::time::Duration::ZERO,
             focus_origin: None,
             overlay_manager: crate::overlay::OverlayManager::new(),
             tooltips: Vec::new(),
@@ -1845,9 +1914,16 @@ impl WidgetTree {
         active: bool,
         ops: &mut dyn crate::window::WindowOps,
     ) {
-        let now = std::time::Instant::now();
-        self.animation_scheduler.set_window_active(active, now);
-        self.animated_quads.set_window_active(active, now);
+        // The scheduler is measured on the tree's animation axis, so its pause
+        // mark has to be taken there too — a pause stamped on the wall clock
+        // while time is simulated would rebase every animation by the gap
+        // between the axes on resume. The shader-driven quad registry has no
+        // simulated door at all (it is ticked from `render()`), so it keeps the
+        // wall clock.
+        self.animation_scheduler
+            .set_window_active(active, self.animation_clock());
+        self.animated_quads
+            .set_window_active(active, std::time::Instant::now());
         if self.window_active_signal.get() != active {
             self.window_active_signal.set(active);
             self.arena.mark_all_needs_paint_only();
@@ -1911,35 +1987,17 @@ impl WidgetTree {
     }
 
     /// Advance animations by simulated time (for deterministic testing).
-    /// Pending `animate_to` requests are started at the current sim_clock,
-    /// then time advances by `duration`, and the scheduler ticks at the new time.
+    ///
+    /// An **alias** of [`advance_time`](Self::advance_time), not a second door.
+    /// It was one once, and the two moved disjoint halves of the tree from
+    /// clocks they each advanced independently: a caller that wanted both had
+    /// to call both, which advanced simulated time twice, and a caller that
+    /// wanted one silently froze the other — an animation and the fling it was
+    /// racing could not be moved to the same instant by any sequence of calls.
+    /// Kept as a name rather than folded away because it reads correctly at
+    /// its ~120 call sites, all of which mean "advance the clock".
     pub fn tick_animations(&mut self, duration: std::time::Duration) {
-        // From here on this tree is simulation-driven: `layout` must stamp the
-        // animations it promotes with `sim_clock` too, or they are measured
-        // against a clock that never reaches them. See `animation_clock`.
-        self.sim_driven = true;
-        self.process_pending_animations_at(self.sim_clock);
-
-        self.sim_clock += duration;
-        // Mirror onto the overlay manager so any fade-out tween
-        // started during this tick stamps its sim-time start in
-        // lockstep with real time.
-        self.overlay_manager.set_sim_clock(self.sim_clock);
-
-        if self.frame_tick_requested.get() {
-            self.frame_tick_requested.set(false);
-            let delta = duration.as_secs_f32().clamp(0.0, 0.1);
-            self.frame_tick.set(delta);
-        }
-
-        self.animation_scheduler
-            .tick(self.sim_clock, &self.arena, self.paint_epoch);
-
-        // Simulated-time test helper — use NoopWindowOps; tests that
-        // need a real sink call layout_with_ops / dispatch_event_with_ops
-        // themselves.
-        let mut noop = crate::window::NoopWindowOps;
-        self.process_state_changes(&mut noop);
+        self.advance_time(duration);
     }
 
     /// Switch the tree-level theme at runtime.
@@ -4588,6 +4646,56 @@ mod cross_window_redraw_signal_tests {
         assert!(
             !tree.has_active_animations(),
             "and having reached its target it must be off the scheduler"
+        );
+    }
+
+    /// A layout pass on a simulated tree advances no animation.
+    ///
+    /// The mirror image of the test above, and the other half of the same
+    /// contract: `layout` both **promotes** a pending `animate_to` and
+    /// **ticks** the scheduler, and it has to do both against the same clock.
+    /// Promoting at `sim_clock` while ticking at `Instant::now()` hands the
+    /// freshly promoted animation an elapsed time equal to the tree's entire
+    /// wall-clock age — so it finishes inside the very layout pass that started
+    /// it, and how much of it a test ever observes depends on how long that
+    /// test took to get there.
+    ///
+    /// The 120 ms slept below is what the wall clock would contribute; the
+    /// tween is 100 ms, so under the old behaviour it is already over before
+    /// the caller advances anything.
+    #[test]
+    fn a_layout_pass_on_a_simulated_tree_advances_no_animation() {
+        let mut tree = WidgetTree::new();
+        let id = tree.add(FillWidget::new());
+        tree.layout(SizeProposal::exact(50.0, 50.0));
+
+        // Put the tree on the simulated clock, then let real time run past the
+        // whole duration of the animation that is about to be armed.
+        tree.advance_time(std::time::Duration::from_millis(1));
+        std::thread::sleep(std::time::Duration::from_millis(120));
+
+        let anim = Signal::new_animated(0.0_f32);
+        tree.register_animated_signal(&anim, id);
+        anim.animate_to(
+            100.0,
+            std::time::Duration::from_millis(100),
+            teksilo_tokens::Easing::Linear,
+        );
+        tree.layout(SizeProposal::exact(50.0, 50.0));
+
+        assert_eq!(
+            anim.get(),
+            0.0,
+            "a layout pass promotes the animation; it does not also age it by \
+             however long the tree has been alive"
+        );
+
+        // It moves when, and only when, the clock is advanced.
+        tree.advance_time(std::time::Duration::from_millis(50));
+        assert!(
+            (anim.get() - 50.0).abs() < 2.0,
+            "half of a 100 ms linear tween: {}",
+            anim.get()
         );
     }
 

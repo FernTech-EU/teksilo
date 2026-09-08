@@ -1774,6 +1774,13 @@ impl WidgetTree {
         // user has walked away from stays on screen for as long as the app
         // stays idle.
         let pointer_leave_deadline = self.overlay_manager.next_pointer_leave_deadline();
+        // A fade-out defers the overlay's removal by the tween's duration, and
+        // that removal is what parks the content. The tween's own scheduler
+        // deadline usually wakes the loop at the same instant, but only while
+        // the tween is registered — a fade that is cancelled, completed early
+        // or never scheduled (reduced motion) leaves nothing else to wake for,
+        // and the surface stays on screen until unrelated input arrives.
+        let fade_dismiss_deadline = self.overlay_manager.next_fade_dismiss_deadline();
         let animation_deadline = self
             .animation_scheduler
             .next_deadline(&self.arena, self.paint_epoch);
@@ -1804,6 +1811,7 @@ impl WidgetTree {
             delayed_overlay_deadline,
             auto_dismiss_deadline,
             pointer_leave_deadline,
+            fade_dismiss_deadline,
             animation_deadline,
             animated_quad_deadline,
             gesture_deadline,
@@ -2983,6 +2991,56 @@ mod tests {
         );
     }
 
+    /// A fading-out overlay must be a wake source in its own right.
+    ///
+    /// Its removal is deferred by the tween's duration and fires from
+    /// `process_overlay_fade_dismissals_*`, which only runs when something
+    /// wakes the loop. The tween's own scheduler deadline usually is that
+    /// something — but the scheduler withholds a deadline for an animation
+    /// whose owner is not being painted, and an overlay dismissed before it was
+    /// ever rendered is exactly that. Without a term of its own the surface
+    /// then stays on the stack, its content held active, until unrelated input
+    /// happens to redraw the window.
+    #[test]
+    fn a_fading_out_overlay_schedules_a_wake_for_its_deferred_removal() {
+        let mut tree = WidgetTree::new();
+        let anchor = tree.add(FillWidget::new());
+        let content = tree.add(FillWidget::new().label("Faded"));
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        let id = tree.show_overlay(crate::overlay::OverlayRequest {
+            content_id: content,
+            anchor,
+            placement: crate::overlay::OverlayPlacement::Below,
+            dismiss: crate::overlay::DismissBehavior::Manual,
+            layer: crate::overlay::OverlayLayer::InTree,
+            parent_overlay: None,
+            on_dismiss: None,
+            fade_duration: Some(std::time::Duration::from_millis(200)),
+        });
+        tree.dismiss_overlay(id);
+        assert!(
+            tree.is_visible(content),
+            "precondition: the removal is deferred, so there is something to wake for"
+        );
+
+        // `is_some()` would pass on any of the eleven terms the fold carries,
+        // so assert the *value*: the deadline the loop will sleep to is this
+        // overlay's, at its fade start plus its duration. The tween's own
+        // scheduler term is absent here — the content has never been painted,
+        // which is the case this term exists for.
+        let expected = tree.overlay_manager.next_fade_dismiss_deadline();
+        assert!(
+            expected.is_some(),
+            "precondition: the fade start was stamped, so there is a deadline to compare against"
+        );
+        assert_eq!(
+            tree.next_timer_deadline(),
+            expected,
+            "the wake deadline must be the deferred removal's own, not merely some deadline"
+        );
+    }
+
     #[test]
     fn pressing_cancels_a_pending_dwell_and_dismisses_a_shown_tooltip() {
         let mut tree = WidgetTree::new();
@@ -3231,16 +3289,86 @@ mod tests {
             on_dismiss: None,
             fade_duration: Some(std::time::Duration::from_millis(100)),
         });
+        // Move the simulated clock **before** the dismiss. Without this the
+        // manager's mirror — seeded with `Instant::now()` at construction —
+        // happens to agree with the tree's sim clock, and the fade start is
+        // stamped correctly whether or not `advance_time` ever mirrors it.
+        // A second of virtual time is what makes the mirror load-bearing.
+        tree.advance_time(std::time::Duration::from_secs(1));
+
         tree.dismiss_overlay(id);
         assert!(
             tree.is_visible(content),
             "content stays active during fade-out"
         );
 
-        tree.advance_time(std::time::Duration::from_millis(150));
+        // Less than the tween: a stale mirror would have stamped the start a
+        // whole second in the past, and this advance would reap the content
+        // instead of leaving it up.
+        tree.advance_time(std::time::Duration::from_millis(60));
+        assert!(
+            tree.is_visible(content),
+            "60 ms into a 100 ms tween the content is still up"
+        );
+
+        tree.advance_time(std::time::Duration::from_millis(90));
         assert!(
             !tree.is_visible(content),
             "after sim-time past the tween window, deferred removal fires"
+        );
+    }
+
+    /// The sim-clock mirror is refreshed **before** the dismissing passes run,
+    /// not after them.
+    ///
+    /// The test above pins that `advance_time` mirrors the clock at all; this
+    /// one pins *where in the call* it does it. An overlay dismissed from
+    /// inside `advance_time` — by its own auto-dismiss timer — reads the
+    /// mirror as it stands at that moment. Refresh it after the dismissing
+    /// passes and the fade start is stamped one whole advance in the past, so
+    /// a fade longer than nothing is over before it began: the surface is
+    /// reaped in the same virtual frame that started fading it, and the tween
+    /// the caller asked for never plays.
+    #[test]
+    fn an_auto_dismissed_fade_starts_at_the_instant_the_dismiss_ran() {
+        let mut tree = WidgetTree::new();
+        let anchor = tree.add(FillWidget::new());
+        let content = tree.add(FillWidget::new().label("Toast"));
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        tree.show_overlay_for(
+            crate::overlay::OverlayRequest {
+                content_id: content,
+                anchor,
+                placement: crate::overlay::OverlayPlacement::Below,
+                dismiss: crate::overlay::DismissBehavior::Manual,
+                layer: crate::overlay::OverlayLayer::InTree,
+                parent_overlay: None,
+                on_dismiss: None,
+                fade_duration: Some(std::time::Duration::from_millis(100)),
+            },
+            std::time::Duration::from_millis(500),
+        );
+        assert_eq!(tree.active_overlays().len(), 1);
+
+        // One advance, well past the auto-dismiss deadline: the auto-dismiss
+        // pass fires the dismiss, and the fade pass right after it must find a
+        // tween that started *this* instant and has 100 ms to run.
+        tree.advance_time(std::time::Duration::from_millis(600));
+        assert!(
+            tree.active_overlays().is_empty(),
+            "precondition: the auto-dismiss fired inside this advance"
+        );
+        assert!(
+            tree.is_visible(content),
+            "the fade must start at the instant the dismiss ran, so the \
+             content survives the frame that dismissed it"
+        );
+
+        tree.advance_time(std::time::Duration::from_millis(150));
+        assert!(
+            !tree.is_visible(content),
+            "and is reaped once the tween's own window has passed"
         );
     }
 }

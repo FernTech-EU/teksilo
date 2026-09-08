@@ -121,6 +121,50 @@ loop (a file dialog, menu tracking, a window drag) — the bridge replies
 `BRIDGE_TIMEOUT` and keeps serving, rather than blocking forever and holding
 the single connection slot for the life of the process.
 
+#### Time, and handing it back
+
+`advance_clock`, `settle` and `wait_for_condition` all move the tree's
+**simulated clock**. That clock drives two things: the input timeline — gesture
+deadlines, tap streaks, press-feedback delays, fling decay — and the animation
+scheduler. While an op runs, both read that clock and nothing else: two
+dispatches with no advance between them are stamped the same instant, and
+animations age by exactly what the op advanced. That is what makes the op
+deterministic on every host regardless of how long the main thread actually
+took.
+
+For a live window that freeze must not outlast the op, and it does not: the
+executor calls `WidgetTree::resume_real_time()` before it replies — once at the
+end of `execute`, so no op arm has to remember it, and once at the end of
+`run_settle`, so a caller that reaches the settle without going through
+`execute` is covered too. Both axes go back on the wall clock there, each in the
+way its own state requires (see
+[touch-and-pen.md § 2.2](touch-and-pen.md#22-the-epoch-is-shared)). For an
+animation that means it resumes from the phase the op left it at, driven by real
+frames again — not stuck at that phase, and not snapped to its end.
+
+For the input timeline, what was advanced is carried forward as an offset rather
+than discarded, so:
+
+- the timeline never runs backwards (a monotone event time is what every
+  velocity fit, tap streak and hold depends on, and re-issuing a time already
+  handed out corrupts all three);
+- the user's next real press, drag and hold are timed from the real clock
+  again, each with its own distinct timestamp;
+- a deadline the app arms afterwards is reported to the event loop as a
+  *future* instant, so `ControlFlow::WaitUntil` still ripens instead of waking
+  immediately, finding nothing due, and spinning.
+
+The visible consequence is that a jump you asked for is real: after
+`advance_clock(500)` the app's idea of elapsed time is permanently 500 ms
+further along than the wall clock. Timed UI that was already pending — a tooltip
+dwell, a long press, a coasting fling — resolves as if that half-second had
+passed, because from the app's point of view it did.
+
+`settle`'s `max_anim_frames` bounds the animation frames an op will advance
+through before it gives up waiting for the tree to go quiet; it bounds the op,
+not the app, and the app keeps animating on real frames once the op has
+returned.
+
 #### The endpoint descriptor
 
 ```jsonc
@@ -329,12 +373,12 @@ fields optional) is:
 
 | Field | Default | Meaning |
 | --- | --- | --- |
-| `clock_millis` | `0` | Advance the simulation clock first (drives tooltip / overlay timers). |
-| `max_anim_frames` | `60` | Cap on 16 ms animation ticks (~1 s). A perpetually-looping animation hits the cap — expected. |
+| `clock_millis` | `0` | Advance the simulation clock first. One clock: gesture deadlines, press feedback, flings, animations, tooltip and overlay timers all move with it. |
+| `max_anim_frames` | `60` | Cap on 16 ms simulated frames (~1 s). A perpetually-looping animation hits the cap — expected. |
 | `layout_after` | `true` | Run a layout pass after ticking, so height-for-width / reflow settles before the AT re-walk. |
 | `settle_timeout_ms` | `500` | The budget. For a settle it is a hard **wall-clock** cap; exceeding it ends the settle (the live bridge reports `SETTLE_TIMEOUT`). For `wait_for_condition` the same field is a **simulated-time** budget — see below. |
 
-The settle loop is **simulation-clock-driven** (`tick_animations` doesn't wait
+The settle loop is **simulation-clock-driven** (`advance_time` doesn't wait
 on VSync or OS events), so it can't deadlock — it progresses to quiescence or
 the cap. `wait_for_condition` polls `snapshot → predicate` on the same clock
 until a `node_exists` / `node_value` / `node_gone` / `at_version_at_least`

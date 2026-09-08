@@ -5,6 +5,8 @@
 //! snapshots the tree validates the produced `TreeUpdate` with the real
 //! `accesskit_consumer`, exactly as teksilo-core's own AT tests do.
 
+use std::time::Duration;
+
 use teksilo_canvas::SizeProposal;
 use teksilo_core::WidgetTree;
 use teksilo_core::accesskit;
@@ -60,6 +62,10 @@ struct Probe {
     focusable: bool,
     accept_set_value: bool,
     opens_window: bool,
+    /// Open a window from `on_long_press` rather than from a click/tap. The
+    /// fixture for "a clock jump recognizes a gesture whose handler reaches the
+    /// multi-window API".
+    opens_window_on_long_press: bool,
     tristate_mixed: bool,
     /// Attach a `.context_menu(..)` factory that mounts a `Role::Menu` child
     /// labelled "context-menu" — the fixture for right-click / ShowContextMenu.
@@ -108,6 +114,7 @@ impl Probe {
             focusable: true,
             accept_set_value: false,
             opens_window: false,
+            opens_window_on_long_press: false,
             tristate_mixed: false,
             has_context_menu: false,
             handles_show_context_menu: false,
@@ -130,6 +137,12 @@ impl Probe {
     }
     fn opens_window(mut self) -> Self {
         self.opens_window = true;
+        self
+    }
+    /// Open a window when a long press is *recognized* — which happens on a
+    /// clock tick, not on an incoming event.
+    fn opens_window_on_long_press(mut self) -> Self {
+        self.opens_window_on_long_press = true;
         self
     }
     /// Emit `Toggled::Mixed` (tristate / indeterminate).
@@ -173,6 +186,7 @@ impl Widget for Probe {
         let opens_on_tap = self.opens_window;
         let opens_on_key = self.opens_window;
         let handles_show = self.handles_show_context_menu;
+        let opens_on_long_press = self.opens_window_on_long_press;
         let taps = self.taps.clone();
         let typed = self.typed.clone();
         let received = self.received.clone();
@@ -259,6 +273,11 @@ impl Widget for Probe {
                 }
                 EventResponse::Ignored
             });
+        if opens_on_long_press {
+            handlers = handlers.on_long_press(move |_e: &TapEvent, ctx| {
+                ctx.open_window(probe_child_window());
+            });
+        }
         if self.has_context_menu {
             handlers = handlers.context_menu(|_pos, _ctx| {
                 Some(Box::new(Probe::new(accesskit::Role::Menu, "context-menu")) as Box<dyn Widget>)
@@ -1280,6 +1299,309 @@ fn wait_for_condition_succeeds_and_times_out() {
         },
     );
     assert!(matches!(timeout, AutomationReply::Err { code, .. } if code == codes::WAIT_TIMEOUT));
+}
+
+// ---------------------------------------------------------------------------
+// What the time-moving ops do, now that they all go through one door
+// ---------------------------------------------------------------------------
+//
+// `AdvanceClock`, `Settle` and `WaitForCondition` are the three ops that move
+// the clock, and each one changed behaviour when they were folded onto
+// `WidgetTree::advance_time_with_ops`. Each change is named and asserted here,
+// because none of them is visible from the ops' replies: a `Settle` that
+// silently stopped ripening dwells, or a wait whose per-poll step doubled,
+// still answers `Ok`.
+
+/// A tooltip whose dwell is `delay`, hovered but not yet ripe.
+///
+/// The fixture for "something becomes true only after N ms of *simulated*
+/// time". A dwell is the cheapest such thing the toolkit can reach: it needs
+/// no animation registration, and it is one of the passes the folded
+/// `advance_time` is claimed to run.
+fn hovered_tooltip(delay: Duration) -> WidgetTree {
+    let mut tree = WidgetTree::new();
+    let anchor = tree.add(Probe::new(accesskit::Role::Button, "Anchor"));
+    let tip = tree.add(Probe::new(accesskit::Role::Tooltip, "the tip"));
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    tree.attach_tooltip(anchor, tip, delay);
+    tree.pointer_move(tree.bounds(anchor).center());
+    assert!(
+        tree.active_overlays().is_empty(),
+        "the dwell has not run yet"
+    );
+    tree
+}
+
+/// `wait_for_condition` spends its budget as simulated time, one 16 ms frame
+/// per poll — so a budget of N ms buys N ms of simulated time, not two N.
+///
+/// The pair of arms is the assertion. A condition that ripens strictly between
+/// the two budgets is red if the per-poll advance moves at all: double it and
+/// the short arm stops timing out, halve it and the long arm stops resolving.
+/// The existing `wait_for_condition_succeeds_and_times_out` cannot see any of
+/// that — its conditions are true immediately or never.
+#[test]
+fn a_wait_spends_its_budget_as_simulated_time_one_frame_per_poll() {
+    // The dwell sits between the two budgets below, so which arm it lands in
+    // is decided by how much simulated time a poll buys.
+    let dwell = Duration::from_millis(128);
+    let condition = WaitCondition::NodeExists {
+        role: None,
+        label: Some("the tip".into()),
+    };
+
+    let mut tree = hovered_tooltip(dwell);
+    let mut ops = RecordingWindowOps::new();
+    let resolved = execute(
+        &mut tree,
+        &mut ops,
+        &AutomationOp::WaitForCondition {
+            condition: condition.clone(),
+        },
+        &SettleSpec {
+            settle_timeout_ms: 160,
+            ..Default::default()
+        },
+    );
+    assert!(
+        resolved.is_ok(),
+        "160 ms of budget must buy 160 ms of simulated time: {resolved:?}"
+    );
+
+    let mut tree = hovered_tooltip(dwell);
+    let mut ops = RecordingWindowOps::new();
+    let timed_out = execute(
+        &mut tree,
+        &mut ops,
+        &AutomationOp::WaitForCondition { condition },
+        &SettleSpec {
+            settle_timeout_ms: 80,
+            ..Default::default()
+        },
+    );
+    assert!(
+        matches!(&timed_out, AutomationReply::Err { code, .. } if code == codes::WAIT_TIMEOUT),
+        "half the budget must buy half the simulated time: {timed_out:?}"
+    );
+}
+
+/// A settle ripens what the clock owns — here a tooltip dwell — and moves the
+/// simulated clock by exactly `clock_millis` plus one 16 ms step per animation
+/// frame it ran.
+///
+/// Both halves are behaviour the fold introduced. The settle used to move the
+/// clock through a door that reached the animation scheduler and nothing else,
+/// so a dwell, a delayed overlay, a pointer-leave grace and a long press could
+/// all sit unresolved through any number of settles; and the jump and the
+/// frames used to be two calls, which advanced the clock twice.
+#[test]
+fn a_settle_ripens_a_dwell_and_advances_by_exactly_what_it_says() {
+    // (a) the clock jump: it ripens the dwell, and it is the *whole* advance
+    //     when nothing is animating.
+    let jump = Duration::from_millis(200);
+    let mut tree = hovered_tooltip(Duration::from_millis(128));
+    let mut ops = RecordingWindowOps::new();
+    let before = tree.simulated_now();
+    let reply = execute(
+        &mut tree,
+        &mut ops,
+        &AutomationOp::Settle,
+        &SettleSpec {
+            clock_millis: jump.as_millis() as u64,
+            ..Default::default()
+        },
+    );
+    assert!(reply.is_ok(), "{reply:?}");
+    assert_eq!(
+        tree.active_overlays().len(),
+        1,
+        "the settle's clock jump ran the dwell to term"
+    );
+    assert_eq!(
+        tree.simulated_now().duration_since(before),
+        jump,
+        "nothing was animating, so the jump is the whole advance"
+    );
+
+    // (b) the animation frames: one 16 ms step each, on top of the jump.
+    let frame = Duration::from_millis(16);
+    let mut tree = WidgetTree::new();
+    let owner = tree.add(Probe::new(accesskit::Role::Button, "Animated"));
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    let animated = Signal::<f32>::new_animated(0.0);
+    tree.register_animated_signal(&animated, owner);
+    let easing = tree.theme().motion.easing_standard;
+    // Deliberately off a frame boundary, so how many frames it needs does not
+    // turn on whether the scheduler retires an animation at `elapsed == d` or
+    // at `elapsed > d`: 72 ms is done at the 80 ms tick either way. The
+    // settle's own jump is the first 16 ms step — that is where a pending
+    // `animate_to` is promoted and started — leaving four for the loop.
+    let anim_frames = 4;
+    animated.animate_to(1.0, frame * 4 + frame / 2, easing);
+
+    let before = tree.simulated_now();
+    let reply = execute(
+        &mut tree,
+        &mut ops,
+        &AutomationOp::Settle,
+        &SettleSpec {
+            clock_millis: frame.as_millis() as u64,
+            ..Default::default()
+        },
+    );
+    assert!(reply.is_ok(), "{reply:?}");
+    assert!(
+        !tree.has_active_animations(),
+        "the settle ran the animation out"
+    );
+    assert_eq!(
+        tree.simulated_now().duration_since(before),
+        frame + frame * anim_frames,
+        "clock_millis plus one 16 ms step per animation frame"
+    );
+}
+
+/// A clock jump runs over the caller's window sink.
+///
+/// The hazard the fold created: `AdvanceClock` used to move a scheduler and
+/// nothing else, and now it recognizes gestures — so a long press that ripens
+/// inside the jump runs its handler, and that handler may call
+/// `ctx.open_window`. Dispatched standalone that is a panic on
+/// `NoopWindowOps`, which is precisely why `advance_time_with_ops` exists.
+/// Nothing else in the workspace exercises `AdvanceClock` at all.
+#[test]
+fn a_clock_jump_recognizes_a_long_press_over_the_callers_window_sink() {
+    let probe = Probe::new(accesskit::Role::Button, "Hold me").opens_window_on_long_press();
+    let (mut tree, _id) = laid_out(probe);
+    let mut ops = RecordingWindowOps::new();
+
+    // A finger/mouse goes down and stays down: nothing has been recognized,
+    // and no further event will arrive to recognize it.
+    let hold = tree.theme().input.gestures.mouse.long_press;
+    tree.pointer_down_button(
+        tree.bounds(_id).center(),
+        teksilo_core::event::PointerButton::Primary,
+    );
+    assert!(ops.opened.is_empty(), "a press alone opens nothing");
+
+    let reply = execute(
+        &mut tree,
+        &mut ops,
+        &AutomationOp::AdvanceClock {
+            millis: hold.as_millis() as u64,
+        },
+        &default_settle(),
+    );
+    assert!(reply.is_ok(), "{reply:?}");
+    assert_eq!(
+        ops.opened.len(),
+        1,
+        "the jump recognized the hold and its handler reached the window sink"
+    );
+    assert_eq!(ops.opened[0].string_id.as_deref(), Some("probe-child"));
+
+    // …and the op gave the input timeline back. Advancing the clock freezes it
+    // — that is what makes the jump deterministic — and on a live attached
+    // window a timeline left frozen never measures another gesture.
+    assert_wall_clock_resumed(&mut tree);
+}
+
+/// The reading of a tree's input timeline moves with the wall clock again.
+///
+/// A frozen timeline answers the same instant however long you wait, so a real
+/// window's every later keystroke, tap and hold is stamped one moment.
+fn assert_wall_clock_resumed(tree: &mut WidgetTree) {
+    let a = tree.input_now();
+    std::thread::sleep(Duration::from_millis(5));
+    let b = tree.input_now();
+    assert!(
+        b > a,
+        "the input timeline is still frozen at {a:?} after 5 ms of real time"
+    );
+}
+
+/// `run_settle` is `pub` and is called directly by the headless tree-thread and
+/// the live bridge, not only through [`execute`] — so it hands the input
+/// timeline back itself.
+#[test]
+fn a_settle_called_directly_hands_the_input_timeline_back() {
+    let (mut tree, _id) = laid_out(Probe::new(accesskit::Role::Button, "Direct"));
+    let mut ops = RecordingWindowOps::new();
+    let timed_out = crate::run_settle(
+        &mut tree,
+        &mut ops,
+        &SettleSpec {
+            clock_millis: 100,
+            ..Default::default()
+        },
+    );
+    assert!(timed_out.is_none(), "{timed_out:?}");
+    assert_wall_clock_resumed(&mut tree);
+}
+
+/// …and the *animation* clock too: an animation still in flight when the op
+/// returns goes on running on the window's own frames.
+///
+/// The two ways the axis can be wrong are both fatal to a live attached app,
+/// and each is what the other's fix looks like from the wrong side. Left on
+/// the simulated clock, an attached app's animations only ever move when an
+/// op advances them — every transition on screen freezes between operations.
+/// Handed back without rebasing what the scheduler stored, the first real
+/// frame measures each animation from a start on the abandoned axis and
+/// completes it outright.
+#[test]
+fn an_animation_goes_on_running_after_an_op_returns() {
+    let mut tree = WidgetTree::new();
+    let owner = tree.add(Probe::new(accesskit::Role::Button, "Animated"));
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+
+    // The tree spends real time alive before anything simulates it, and more
+    // of it than the op will advance. That is the *live* condition, and it is
+    // what separates the two failures: with the wall clock ahead of the
+    // simulated one, an un-rebased hand-back hands the animation an elapsed
+    // time longer than its whole duration.
+    std::thread::sleep(Duration::from_millis(300));
+
+    let animated = Signal::<f32>::new_animated(0.0);
+    tree.register_animated_signal(&animated, owner);
+    // The theme's own easing, so this asserts nothing about the shape of the
+    // curve — only that the animation is somewhere in the middle of it, keeps
+    // moving, and is not retired.
+    let easing = tree.theme().motion.easing_standard;
+    animated.animate_to(1.0, Duration::from_millis(400), easing);
+
+    // `AdvanceClock` runs no settle, so the 100 ms it reports is the whole
+    // advance: a quarter of the way in, with the animation still live.
+    let mut ops = RecordingWindowOps::new();
+    let reply = execute(
+        &mut tree,
+        &mut ops,
+        &AutomationOp::AdvanceClock { millis: 100 },
+        &default_settle(),
+    );
+    assert!(reply.is_ok(), "{reply:?}");
+    let at_reply = animated.get();
+    assert!(
+        at_reply > 0.0 && at_reply < 0.9,
+        "100 ms of 400 leaves it part-way: {at_reply}"
+    );
+    assert!(
+        tree.has_active_animations(),
+        "100 ms of 400 does not retire it"
+    );
+
+    // The op has returned and the window is painting its own frames again.
+    std::thread::sleep(Duration::from_millis(100));
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    let after = animated.get();
+    assert!(
+        after > at_reply + 0.02,
+        "frozen: 100 ms of real frames moved it from {at_reply} to {after}"
+    );
+    assert!(
+        tree.has_active_animations(),
+        "snapped to its end: 100 ms of a 400 ms animation retired it ({at_reply} -> {after})"
+    );
 }
 
 #[test]

@@ -492,6 +492,67 @@ fn a_release_flings_and_advance_time_moves_it() {
     );
 }
 
+/// **One** `advance_time` moves an animation and a live fling to the same
+/// virtual now.
+///
+/// The two used to answer to different doors: `advance_time` pumped the coast
+/// and left the scheduler frozen, `tick_animations` ticked the scheduler and
+/// left the coast frozen, and each advanced the simulated clock on its own — so
+/// calling both moved the clock twice and there was no sequence of calls that
+/// put the animation and the fling at the same instant.
+///
+/// Timed entirely by the clock under test: no `ManualClock` anywhere, so the
+/// flick's own velocity comes off the same axis the coast is later ticked on.
+#[test]
+fn one_advance_time_moves_an_animation_and_a_fling_to_the_same_virtual_time() {
+    let mut n = nested(10_000.0, 10_000.0);
+    let signal = crate::signal::Signal::<f32>::new_animated(0.0);
+    n.tree.register_animated_signal(&signal, n.inner);
+
+    // A fast flick — 20 dp every 4 ms — with the intervals supplied by
+    // `advance_input_time`, which is `advance_time` under the name the input
+    // side reads by.
+    let finger = contact_id(21);
+    let from = Point::new(100.0, 180.0);
+    n.tree
+        .dispatch_pointer(contact(finger, PointerPhase::Down, from));
+    let mut y = from.y;
+    for _ in 0..5 {
+        n.tree.advance_input_time(Duration::from_millis(4));
+        y -= 20.0;
+        n.tree
+            .dispatch_pointer(contact(finger, PointerPhase::Move, Point::new(from.x, y)));
+    }
+    n.tree.advance_input_time(Duration::from_millis(4));
+    n.tree
+        .dispatch_pointer(contact(finger, PointerPhase::Up, Point::new(from.x, y)));
+    assert!(
+        n.tree.is_flinging(n.inner),
+        "the flick handed off to a coast"
+    );
+
+    signal.animate_to(
+        100.0,
+        Duration::from_millis(200),
+        teksilo_tokens::Easing::Linear,
+    );
+    let before = n.inner_log.borrow().offset;
+
+    // One call.
+    n.tree.advance_time(Duration::from_millis(100));
+
+    assert!(
+        (signal.get() - 50.0).abs() < 2.0,
+        "half of a 200 ms linear tween: {}",
+        signal.get()
+    );
+    assert!(
+        n.inner_log.borrow().offset > before,
+        "…and the coast moved in the same call: {before} -> {}",
+        n.inner_log.borrow().offset
+    );
+}
+
 /// A fling that runs out of inner list scrolls the outer one — the same chain,
 /// the same rule, and the inner container is still told nothing terminal.
 #[test]

@@ -178,9 +178,21 @@ impl GestureArenaSet {
                 if self.multi_contact == MultiContact::First && !self.live.is_empty() {
                     // Terminated here: not delivered to this node, and not
                     // bubbled to an ancestor either — the caller treats an
-                    // arena-bearing node as having consumed the press. This is
-                    // what stops a second finger on a button inside a scroll
-                    // area from starting a pan.
+                    // arena-bearing node as having consumed the press.
+                    //
+                    // The refusal is **arena-scoped**, and only that. It stops
+                    // the extra contact taking this node's press and completing
+                    // a tap of its own, and it stops the contact reaching an
+                    // ancestor *arena*. It does not stop the contact opening
+                    // its own `PointerSequence`, and so it does not stop it
+                    // enrolling an enclosing pan claimant and panning: capture,
+                    // arbitration and press ownership are per pointer. That is
+                    // what the platforms do — a second finger inside a scroll
+                    // view scrolls it — and it is asserted by
+                    // `a_second_finger_on_a_button_in_a_scroller_pans_the_scroller`
+                    // in `crates/teksilo-core/tests/arbitration_matrix.rs`,
+                    // beside `two_fingers_on_one_button_fire_one_tap` for the
+                    // half this *does* govern.
                     self.refused.push(id);
                     return None;
                 }

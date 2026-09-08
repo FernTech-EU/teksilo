@@ -29,11 +29,126 @@ impl WidgetTree {
     /// on how long the test itself took.
     pub fn set_input_clock(&mut self, clock: std::rc::Rc<dyn crate::pointer::clock::InputClock>) {
         self.input_clock = clock;
+        // The axis just changed underneath. Any offset carried forward from a
+        // hand-back belongs to the *old* clock's readings and means nothing
+        // against the new one, so it goes with it; then re-anchor the simulated
+        // origin against the new clock (or drop it, if the new clock is itself
+        // the virtual axis).
+        self.sim_input_offset = std::time::Duration::ZERO;
+        self.sim_input_origin = None;
+        self.rearm_sim_input_origin();
+    }
+
+    /// Put this tree on the simulated clock, if it is not already.
+    ///
+    /// Called from the one door that moves simulated time, and it moves **both**
+    /// axes together:
+    ///
+    /// * the animation scheduler's stored instants are rebased from the wall
+    ///   clock onto [`simulated_now`](Self::simulated_now), so an animation
+    ///   in flight when the freeze happens keeps the phase it had. Without the
+    ///   rebase every such animation would be measured from a start lying in
+    ///   the simulated clock's future — the simulated clock reads the tree's
+    ///   epoch plus whatever has been advanced, which on a live window is far
+    ///   behind the wall clock — and its elapsed time would clamp to zero for
+    ///   good;
+    /// * the input axis is anchored where it stood — see the
+    ///   `sim_input_origin` field — so no stamp taken before the switch lands
+    ///   in the virtual future.
+    ///
+    /// Re-entrant on purpose: [`resume_real_time`](Self::resume_real_time) may
+    /// have handed time back since the last call, and the next advance has to
+    /// take it again.
+    pub(super) fn enter_simulated_mode(&mut self) {
+        if !self.sim_time_frozen {
+            self.sim_time_frozen = true;
+            self.animation_scheduler
+                .rebase(std::time::Instant::now(), self.sim_clock);
+        }
+        if self.sim_input_origin.is_none() {
+            self.rearm_sim_input_origin();
+        }
+    }
+
+    /// Hand time back to the wall clock, carrying forward everything that was
+    /// advanced while it was simulated.
+    ///
+    /// **Who calls this.** A host that shares a live tree with a real event
+    /// loop — the debug automation bridge — after each operation that may have
+    /// advanced the clock. A headless test does not: a test wants the freeze,
+    /// and wants it to survive between calls, so that two samples it dispatches
+    /// without advancing are stamped the *same* instant rather than however
+    /// many microseconds apart the machine happened to run them.
+    ///
+    /// **The animation axis** is handed back by rebasing the scheduler's stored
+    /// instants the other way, the exact inverse of what
+    /// `enter_simulated_mode` did. An animation half-way through when the
+    /// operation ends is half-way through on the wall clock too, and the next
+    /// real layout pass advances it from there — neither snapped to its end
+    /// (which is what ticking at the wall clock against a start stamped on the
+    /// simulated one gives) nor stuck (which is what ticking a live tree at a
+    /// simulated clock nothing is advancing any more gives).
+    ///
+    /// **The input axis cannot simply drop its origin.** A frozen axis that has
+    /// been advanced reads *ahead* of the raw clock; dropping the origin would
+    /// send [`input_now`](Self::input_now) backwards, and a monotone
+    /// [`EventTime`](crate::pointer::EventTime) is a platform conformance
+    /// invariant every velocity tracker, tap streak and hold relies on. So the
+    /// gap is measured — afresh, against this hand-back's own readings, never
+    /// added to what a previous one measured, and floored at zero for the case
+    /// where the raw clock is already the later of the two — and kept in
+    /// `sim_input_offset`: the reading at this instant is the later of the
+    /// frozen reading and the raw one, and it moves with the wall clock from
+    /// here.
+    ///
+    /// A no-op on a tree that is not simulating time, so calling it after every
+    /// operation costs nothing.
+    pub fn resume_real_time(&mut self) {
+        if !self.sim_time_frozen {
+            return;
+        }
+        self.sim_time_frozen = false;
+        self.animation_scheduler
+            .rebase(self.sim_clock, std::time::Instant::now());
+        let Some((base, base_at)) = self.sim_input_origin.take() else {
+            // An unanchored clock — a `ManualClock` — *is* the virtual axis and
+            // was never frozen against the wall clock, so there is nothing to
+            // carry forward.
+            return;
+        };
+        let frozen = base + self.sim_clock.saturating_duration_since(base_at);
+        // `saturating_since` rather than `-`: on a tree advanced by less than
+        // it spent on the wall clock the raw reading is already ahead, and the
+        // right offset is then none at all.
+        self.sim_input_offset = frozen.saturating_since(self.input_clock.now());
+    }
+
+    /// Anchor (or drop) the simulated input origin against the current clock.
+    fn rearm_sim_input_origin(&mut self) {
+        self.sim_input_origin = if self.sim_time_frozen && self.input_clock.epoch().is_some() {
+            // `input_now`, not the raw clock: after a hand-back the axis runs
+            // an offset ahead of the clock, and re-freezing at the raw reading
+            // would step it backwards by exactly that offset.
+            Some((self.input_now(), self.sim_clock))
+        } else {
+            // Either the tree still runs on real time, or its clock has no
+            // wall-clock anchor and is moved directly by `advance_time`.
+            None
+        };
     }
 
     /// The current time on this tree's input timeline.
+    ///
+    /// While the axis is frozen this is a reading of
+    /// [`sim_clock`](Self::simulated_now), not of the wall clock, so a deadline
+    /// can only be reached by advancing the clock. Once
+    /// [`resume_real_time`](Self::resume_real_time) has handed it back it is
+    /// the clock again, plus everything that was advanced.
     pub fn input_now(&self) -> crate::pointer::EventTime {
-        self.input_clock.now()
+        match self.sim_input_origin {
+            Some((base, base_at)) => base + self.sim_clock.saturating_duration_since(base_at),
+            None => self.input_clock.now() + self.sim_input_offset,
+        }
     }
 
     /// Everything a recognizer on `id` is allowed to know beyond the event in
@@ -497,7 +612,10 @@ impl WidgetTree {
     /// Three rules, all no-ops for a press that stayed where it landed:
     ///
     /// * a hold older than `profile.max_hold` is released, because the
-    ///   framework never trusts a holder to answer;
+    ///   framework never trusts a holder to answer — the one rule here that is
+    ///   *also* driven by the clock, through
+    ///   [`expire_sequence_holds`](Self::expire_sequence_holds), so a contact
+    ///   that never moves is released on time too;
     /// * a member armed by [`DragActivation::AfterLongPress`] withdraws once
     ///   the press leaves the tap boundary — that travel is a pan, not a
     ///   considered grab;
@@ -920,12 +1038,46 @@ impl WidgetTree {
     ///
     /// Inert for every sequence nothing has decided, held or rejected — which
     /// is every plain mouse tap.
+    ///
+    /// Asked of the sequence belonging to the pointer being dispatched. The
+    /// timer-driven path has no pointer being dispatched and asks
+    /// [`sequence_blocks_arena_for`](Self::sequence_blocks_arena_for) instead,
+    /// naming the contact whose gesture is in hand.
     pub(super) fn sequence_blocks_arena(&self, id: WidgetId) -> bool {
+        match self.current_sequence() {
+            Some(sequence) => Self::sequence_blocks_member(sequence, id, self.sequence_now()),
+            None => false,
+        }
+    }
+
+    /// [`sequence_blocks_arena`](Self::sequence_blocks_arena) for a named
+    /// contact and a named instant, rather than for whatever sample is being
+    /// dispatched.
+    ///
+    /// The timer path needs both: nothing is being dispatched during a tick, so
+    /// `current_sequence` would answer about the wrong contact (or about none),
+    /// and `sequence_now` would answer with the timestamp of the last sample
+    /// dispatched — which for a contact resting on a control is its own press.
+    pub(super) fn sequence_blocks_arena_for(
+        &self,
+        pointer: crate::pointer::PointerId,
+        id: WidgetId,
+        now: crate::pointer::EventTime,
+    ) -> bool {
+        match self.pointers.get(pointer).and_then(|e| e.sequence.as_ref()) {
+            Some(sequence) => Self::sequence_blocks_member(sequence, id, now),
+            None => false,
+        }
+    }
+
+    /// The rule itself, shared by both doors above.
+    fn sequence_blocks_member(
+        sequence: &crate::gesture::PointerSequence,
+        id: WidgetId,
+        now: crate::pointer::EventTime,
+    ) -> bool {
         use crate::gesture::MemberState;
 
-        let Some(sequence) = self.current_sequence() else {
-            return false;
-        };
         let Some(member) = sequence.members().iter().find(|m| m.id == id) else {
             return false;
         };
@@ -945,7 +1097,7 @@ impl WidgetTree {
                 // win before its timer, and that has to hold on the ordinary
                 // bubble too — otherwise the deferral would only bind the
                 // arbitration's own walk.
-                !member.is_eligible_at(self.sequence_now())
+                !member.is_eligible_at(now)
             }
         }
     }
@@ -1082,25 +1234,24 @@ impl WidgetTree {
     /// The clock a newly promoted animation must be stamped with: the same one
     /// the scheduler will later be ticked against.
     ///
-    /// Normally the wall clock. But once [`tick_animations`](Self::tick_animations)
-    /// has driven this tree, the scheduler is *only* ever ticked at
-    /// [`Self::sim_clock`] — so an animation stamped `Instant::now()` is measured
-    /// against a clock that may never reach its start. A headless test
-    /// interleaving `layout()` (which promotes) with `tick_animations()` (which
-    /// ticks) advances the two clocks independently: simulated time by whatever
-    /// the test asks for, real time by however long the test actually takes. The
-    /// moment real time overtakes simulated time, every animation armed from then
-    /// on has a start in the scheduler's future and its progress **freezes** —
-    /// not slowly, completely, and no number of further ticks recovers it.
+    /// The wall clock, unless [`advance_time`](Self::advance_time) has taken
+    /// this tree onto its simulated one and not yet handed it back — see
+    /// [`resume_real_time`](Self::resume_real_time), which is what returns the
+    /// answer to the wall clock, rebasing the scheduler as it goes.
     ///
-    /// That made animated layout tests fail as a function of machine load rather
-    /// than of behaviour: green run alone or on a couple of threads, red once the
-    /// runner filled the cores and each test's wall-clock time stretched past the
-    /// simulated time it was asking for. The overlay manager already keeps its
-    /// real and simulated timestamps apart for this reason; animations now agree
-    /// on one clock the same way.
+    /// Everything that reads a time on the animation axis has to read it here,
+    /// promotion and tick alike, or the two drift apart and the drift *is* the
+    /// elapsed time the animation is measured by. Promoting at
+    /// `Instant::now()` while ticking at [`Self::sim_clock`] gave every
+    /// animation a start in the scheduler's future and froze its progress
+    /// completely, with no number of further ticks recovering it — a failure
+    /// that reproduced as a function of machine load rather than of behaviour,
+    /// green when the suite ran alone and red once the runner filled the cores
+    /// and each test's wall-clock time stretched past the simulated time it was
+    /// asking for. The overlay manager keeps its real and simulated timestamps
+    /// apart for the same reason.
     pub(super) fn animation_clock(&self) -> std::time::Instant {
-        if self.sim_driven {
+        if self.sim_time_frozen {
             self.sim_clock
         } else {
             std::time::Instant::now()
@@ -1116,6 +1267,45 @@ impl WidgetTree {
     /// handler on the owning widget is invoked with a fresh
     /// [`EventContext`], and any commands / overlay requests it emits are
     /// collected through the normal post-event path.
+    /// Release every hold that has stood for `profile.max_hold`, across every
+    /// contact — the time-driven half of
+    /// [`tick_sequence_timers`](Self::tick_sequence_timers), lifted out so the
+    /// gesture tick can run it too.
+    ///
+    /// Two things separate it from its move-driven sibling and are why it is a
+    /// distinct function rather than a call to that one.
+    ///
+    /// * **It reads the caller's `now`, not the sample's.** `sequence_now`
+    ///   answers with the timestamp of the last event *dispatched*, which
+    ///   during a tick is the press — so calling `tick_sequence_timers` from
+    ///   here would expire holds against the instant they were taken and never
+    ///   expire anything at all.
+    /// * **It is not scoped to the current pointer.** The rest of the sequence
+    ///   machinery serves the contact being dispatched; a tick serves the whole
+    ///   tree, and two fingers each holding on their own node must both be
+    ///   released.
+    ///
+    /// The other two rules in `tick_sequence_timers` — the deferred member's
+    /// withdrawal and the tap family's revocation — stay behind, because both
+    /// are decided by the [`TapBoundary`](crate::gesture::TapBoundary)
+    /// against where the pointer now is. A contact that has not moved cannot
+    /// have left the boundary, so running them here could only ever repeat the
+    /// answer the last move already gave.
+    pub(super) fn expire_sequence_holds(&mut self, now: crate::pointer::EventTime) {
+        let Self {
+            pointers,
+            effective_theme,
+            ..
+        } = self;
+        for entry in pointers.iter_mut() {
+            let Some(sequence) = entry.sequence.as_mut() else {
+                continue;
+            };
+            let profile = effective_theme.input.profile(sequence.pointer().kind);
+            sequence.expire_holds(now, profile);
+        }
+    }
+
     pub fn tick_gestures(&mut self, now: std::time::Instant) {
         let mut noop = crate::window::NoopWindowOps;
         self.tick_gestures_with_ops(now, &mut noop);
@@ -1146,6 +1336,12 @@ impl WidgetTree {
         // input deadline folded into the same `WaitUntil`, and a finger resting
         // on a control produces no further samples to resolve it from.
         self.resolve_press_delays(self.event_time_for(now));
+        // …and so does a standing hold's expiry, for the third time for the same
+        // reason: a contact resting on a control produces no further samples,
+        // and the framework's promise is that it stops trusting a holder after
+        // `max_hold` — not that it stops trusting one after `max_hold` *and* a
+        // move. See `expire_sequence_holds`.
+        self.expire_sequence_holds(self.event_time_for(now));
 
         let mut ids = std::mem::take(&mut self.active_ids_scratch);
         ids.clear();
@@ -1174,7 +1370,25 @@ impl WidgetTree {
 
             // One entry per contact: two fingers holding on the same node both
             // long-press, and neither may be dropped.
-            for (_pointer, gesture) in gestures {
+            for (pointer, gesture) in gestures {
+                // The arbitration binds the timer path exactly as it binds the
+                // sample path: a member that has been rejected, or that a peer's
+                // hold has frozen, does not get to deliver a gesture just
+                // because its own timer came due. Asked per contact, since two
+                // fingers on one node are two independent sequences.
+                //
+                // It comes out one step later than on the sample path, which
+                // withholds the *feed* — a tick is not addressed to a member,
+                // so the whole node's recognizers advance and the gesture is
+                // then dropped rather than deferred. That is what `Rejected`
+                // wants anyway; for the transient `Held` case it means a peer
+                // silenced at the instant its timer ripened loses that gesture
+                // rather than firing it late, and the hold that silenced it is
+                // released in this same pass (`expire_sequence_holds`, above)
+                // once it reaches `max_hold`.
+                if self.sequence_blocks_arena_for(pointer, id, now) {
+                    continue;
+                }
                 let mut ctx = self.make_event_context(&mut *ops);
                 if let Some(node) = self.arena.get_mut(id) {
                     Self::dispatch_recognized_gesture(node, gesture, &mut ctx);
@@ -1189,16 +1403,37 @@ impl WidgetTree {
     /// Read an `Instant` handed in by the event loop on this tree's input
     /// timeline.
     ///
-    /// The two clocks share an epoch by construction (see
-    /// [`input_clock`](Self::input_clock)), so this is a subtraction. A clock
-    /// with no wall-clock anchor — a
-    /// [`ManualClock`](crate::pointer::clock::ManualClock) in a test — ignores
-    /// the argument and answers with its own reading, which is the whole point
-    /// of installing one.
+    /// Three answers, and not one of them is unconditionally the plain
+    /// subtraction from the shared epoch (see
+    /// [`input_clock`](Self::input_clock)) that a single axis would suggest:
+    /// two ignore the caller's instant outright, and the third subtracts and
+    /// then adds back whatever was advanced before the axis was handed back.
+    ///
+    /// * **Time is simulated.** The argument is discarded: the tree has one
+    ///   now, and it is not the caller's — an `Instant` handed in by a real
+    ///   event loop is on an axis this tree has stopped following.
+    /// * **Time is real, under an anchored clock.** The caller's instant is
+    ///   honoured, as the distance from the shared epoch, *plus* whatever was
+    ///   advanced before the axis was handed back — a subtraction and then an
+    ///   addition, because the axis runs `sim_input_offset` ahead of the clock
+    ///   the caller read.
+    /// * **A clock with no wall-clock anchor** — a
+    ///   [`ManualClock`](crate::pointer::clock::ManualClock) in a test — also
+    ///   ignores the argument and answers with its own reading, which is the
+    ///   whole point of installing one.
     pub(super) fn event_time_for(&self, now: std::time::Instant) -> crate::pointer::EventTime {
         match self.input_clock.epoch() {
+            // While the axis is frozen the tree has one now, and it is not the
+            // caller's: an `Instant` handed in by a real event loop is on an
+            // axis this tree has stopped following for the length of the
+            // advance.
+            Some(_) if self.sim_input_origin.is_some() => self.input_now(),
+            // Otherwise the caller's instant is honoured — two real events
+            // milliseconds apart must not be stamped the same moment — shifted
+            // by whatever was advanced before the axis was handed back.
             Some(epoch) => {
                 crate::pointer::EventTime::from_duration(now.saturating_duration_since(epoch))
+                    + self.sim_input_offset
             }
             None => self.input_now(),
         }
@@ -1208,7 +1443,21 @@ impl WidgetTree {
     /// loop, which schedules in wall-clock terms.
     pub(super) fn instant_for(&self, time: crate::pointer::EventTime) -> std::time::Instant {
         match self.input_clock.epoch() {
-            Some(epoch) => epoch + time.as_duration(),
+            // Inverse of the frozen branch of `event_time_for`: a deadline on
+            // the virtual axis is reported against the virtual clock, so what
+            // comes back is comparable with `simulated_now()` and not with a
+            // wall clock this tree is not following for the length of the
+            // advance.
+            Some(_) if self.sim_input_origin.is_some() => {
+                self.sim_clock + time.saturating_since(self.input_now())
+            }
+            // Inverse of the offset branch. Subtracting what was advanced is
+            // what keeps this in the future: the deadline was stamped on an
+            // axis running `sim_input_offset` ahead of the clock the event loop
+            // schedules against, and reporting it unshifted would hand back an
+            // instant already past — a `WaitUntil` that can never ripen and a
+            // loop that spins on it.
+            Some(epoch) => epoch + time.as_duration().saturating_sub(self.sim_input_offset),
             // An unanchored clock has no wall-clock answer; the best available
             // one is "as far from now as it is from the clock's reading".
             None => std::time::Instant::now() + time.saturating_since(self.input_now()),
@@ -1231,6 +1480,26 @@ impl WidgetTree {
             .filter_map(|arena| arena.next_deadline())
             .min()
             .map(|deadline| self.instant_for(deadline))
+    }
+
+    /// The earliest instant at which a standing hold reaches its
+    /// `max_hold` and [`expire_sequence_holds`](Self::expire_sequence_holds)
+    /// has work.
+    ///
+    /// Folded into [`next_input_deadline`](Self::next_input_deadline) beside
+    /// the gesture, fling and press-feedback terms. A deadline the tick can
+    /// serve but nothing reports is a wake the event loop never takes, which
+    /// leaves the hold standing exactly as long as it did before the tick knew
+    /// how to release it.
+    pub(super) fn next_sequence_hold_deadline(&self) -> Option<crate::pointer::EventTime> {
+        self.pointers
+            .iter()
+            .filter_map(|entry| entry.sequence.as_ref())
+            .filter_map(|sequence| {
+                let profile = self.effective_theme.input.profile(sequence.pointer().kind);
+                sequence.next_hold_deadline(profile)
+            })
+            .min()
     }
 
     /// The [`TouchAction`] permitted for `target`: every node's own
@@ -1484,6 +1753,46 @@ mod clock_tests {
         );
     }
 
+    /// The simulated input axis continues from where the wall clock left it,
+    /// rather than restarting at the simulated clock's own offset.
+    ///
+    /// A stamp taken before the switch would otherwise land in the virtual
+    /// *future*: `sim_clock` only moves when it is advanced, so on a tree that
+    /// has been alive for 50 ms it still reads the epoch while every sample
+    /// dispatched so far is stamped 50 ms. Every interval measured from one of
+    /// those is then clamped to zero — a hold that can never elapse, a coast
+    /// that never starts.
+    #[test]
+    fn the_simulated_input_axis_continues_from_the_wall_clock() {
+        let mut tree = WidgetTree::new();
+        // Time the tree spent on the wall clock before anything simulated it —
+        // in a real suite this is however long the test took to get here.
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        let stamped_before_the_switch = tree.input_now();
+        assert!(
+            stamped_before_the_switch >= EventTime::from_millis(50),
+            "the default clock is the wall clock until told otherwise: {stamped_before_the_switch:?}"
+        );
+
+        tree.advance_time(std::time::Duration::from_millis(20));
+        let after_one = tree.input_now();
+        assert!(
+            after_one >= stamped_before_the_switch + std::time::Duration::from_millis(20),
+            "the axis carries on from the reading it had, not from the epoch: \
+             {stamped_before_the_switch:?} -> {after_one:?}"
+        );
+
+        // …and from then on it moves by exactly what is advanced, and by
+        // nothing else — however long this test itself takes.
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        tree.advance_time(std::time::Duration::from_millis(30));
+        assert_eq!(
+            tree.input_now(),
+            after_one + std::time::Duration::from_millis(30),
+            "a simulated tree's input timeline answers to the clock alone"
+        );
+    }
+
     /// A test can take the input timeline over entirely.
     #[test]
     fn a_manual_clock_replaces_the_default() {
@@ -1506,6 +1815,529 @@ mod clock_tests {
         let a = tree.input_now();
         let b = tree.input_now();
         assert!(b >= a);
+    }
+
+    /// Handing the axis back never steps it backwards.
+    ///
+    /// The whole reason the hand-back is not just "drop the origin": a frozen
+    /// axis that has been advanced reads *ahead* of the raw clock, and every
+    /// stamp already issued sits at that reading. Going back to the raw clock
+    /// would re-issue times that have already been handed out — a velocity
+    /// tracker fitting a negative interval, a tap streak whose second tap is
+    /// older than its first, a hold that un-elapses.
+    #[test]
+    fn handing_the_axis_back_never_steps_it_backwards() {
+        let mut tree = WidgetTree::new();
+        tree.advance_time(std::time::Duration::from_millis(500));
+        let frozen = tree.input_now();
+
+        tree.resume_real_time();
+        let resumed = tree.input_now();
+
+        assert!(
+            resumed >= frozen,
+            "the axis must carry the advance forward, not discard it: \
+             {frozen:?} -> {resumed:?}"
+        );
+        // …and it keeps every bit of what was advanced, rather than trading it
+        // for however little wall time the test itself took.
+        assert!(
+            resumed >= EventTime::from_millis(500),
+            "500 ms was advanced and must still be on the axis: {resumed:?}"
+        );
+    }
+
+    /// After the hand-back, real events are stamped from the real clock again:
+    /// two of them separated by real time are two distinct moments.
+    ///
+    /// This is the whole point of the hand-back. While the axis is frozen every
+    /// dispatch reads one instant, which is exactly right for a test driving
+    /// the clock itself and exactly wrong for a live window: a bridge that
+    /// advanced the clock once would leave every subsequent human keystroke,
+    /// tap and drag stamped the same moment, and no gesture decided by time
+    /// could ever be recognized again.
+    #[test]
+    fn after_the_hand_back_real_events_get_distinct_and_later_times() {
+        use crate::test_widgets::FillWidget;
+        use crate::widget_builder::WidgetBuilder;
+        use std::cell::RefCell;
+        use std::rc::Rc;
+
+        let seen: Rc<RefCell<Vec<EventTime>>> = Rc::new(RefCell::new(Vec::new()));
+        let log = seen.clone();
+        let mut tree = WidgetTree::new();
+        tree.add(FillWidget::new().on_pointer_event(move |_event, ctx| {
+            log.borrow_mut().push(ctx.pointer().time);
+            crate::event::EventResponse::Ignored
+        }));
+        tree.layout(SizeProposal::exact(100.0, 100.0));
+
+        tree.pointer_move(Point::new(10.0, 10.0));
+        tree.advance_time(std::time::Duration::from_millis(200));
+        tree.resume_real_time();
+
+        tree.pointer_move(Point::new(20.0, 20.0));
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        tree.pointer_move(Point::new(30.0, 30.0));
+
+        let seen = seen.borrow();
+        assert_eq!(seen.len(), 3, "three moves reached the widget: {seen:?}");
+        assert!(
+            seen[1] >= seen[0] + std::time::Duration::from_millis(200),
+            "an event after the advance is at least the advance later: {seen:?}"
+        );
+        assert!(
+            seen[2] > seen[1],
+            "two real events 5 ms apart are two moments, not one: {seen:?}"
+        );
+    }
+
+    /// …and the next advance freezes it again.
+    ///
+    /// The hand-back is not a latch in the other direction: a bridge running a
+    /// second operation must get the same determinism the first one did, and a
+    /// test's helpers (which enter simulated mode on every sample) must keep
+    /// stamping two un-advanced samples the same instant.
+    #[test]
+    fn the_freeze_comes_back_after_a_hand_back() {
+        let mut tree = WidgetTree::new();
+        tree.advance_time(std::time::Duration::from_millis(100));
+        tree.resume_real_time();
+
+        tree.advance_time(std::time::Duration::from_millis(100));
+        let a = tree.input_now();
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        let b = tree.input_now();
+        assert_eq!(a, b, "re-frozen: the wall clock stopped moving the axis");
+    }
+
+    /// Every hand-back re-measures the offset against its own readings; none
+    /// of them adds to what the last one measured.
+    ///
+    /// The live bridge hands the axis back after **every** operation, so this
+    /// is its ordinary path rather than an edge case — and accumulating
+    /// instead of assigning compounds: each cycle would carry the previous
+    /// offset into the frozen reading *and* add the previous offset again, so
+    /// the axis would run `2ⁿ − 1` advances ahead after `n` of them. Four
+    /// 50 ms cycles is 200 ms of advance and would be reported as 750 ms, and
+    /// every duration measured from a stamp taken before the run — a hold, a
+    /// tap streak, a fling's velocity window — would be wrong by the
+    /// difference.
+    ///
+    /// **This is the only guard on the offset's magnitude.** Its companion
+    /// `a_deadline_armed_after_the_hand_back_is_in_the_future` is insensitive
+    /// to it by construction — the offset cancels between `event_time_for` and
+    /// `instant_for`, so that test holds for a wrong offset as readily as for a
+    /// right one — and nothing else asserts a number. So the
+    /// ceiling below is expressed **per cycle**: the allowance scales with the
+    /// work done, so the error it admits per hand-back stays at
+    /// `SLACK_PER_CYCLE` whatever `CYCLES` is. A single absolute ceiling
+    /// instead divides by the cycle count — slack at a handful of cycles, and
+    /// firing on the loop's own wall-clock noise at a hundred.
+    #[test]
+    fn repeated_hand_backs_re_measure_the_offset_rather_than_accumulating_it() {
+        const CYCLES: u32 = 4;
+        const PER_CYCLE: std::time::Duration = std::time::Duration::from_millis(50);
+        // What one hand-back may cost beyond what it advanced: the wall clock
+        // moves while the loop runs, and the loop's own work is not free.
+        const SLACK_PER_CYCLE: std::time::Duration = std::time::Duration::from_millis(10);
+        let advanced = PER_CYCLE * CYCLES;
+
+        let mut tree = WidgetTree::new();
+        let before = tree.input_now();
+        for _ in 0..CYCLES {
+            tree.advance_time(PER_CYCLE);
+            tree.resume_real_time();
+        }
+        let after = tree.input_now();
+        let gained = after.saturating_since(before);
+
+        assert!(
+            gained >= advanced,
+            "every advance must still be on the axis: {gained:?} < {advanced:?}"
+        );
+        // The wall clock also moved while the loop ran, so the axis is allowed
+        // to have gained a little more than was advanced — but only a little,
+        // and the allowance is per hand-back rather than for the run.
+        // Accumulating would put it at 750 ms, three and a half times over.
+        assert!(
+            gained <= advanced + SLACK_PER_CYCLE * CYCLES,
+            "the axis gained {gained:?} for {advanced:?} of advancing over \
+             {CYCLES} hand-backs — the offset is compounding across them"
+        );
+    }
+
+    /// An animation in flight when the tree is put on the simulated clock
+    /// keeps the phase it had, and goes on progressing.
+    ///
+    /// The scheduler stores absolute instants, and the simulated clock reads
+    /// the tree's epoch plus whatever has been advanced — on a live window,
+    /// far behind the wall clock the animation was stamped against. Measuring
+    /// it there without rebasing clamps its elapsed time to roughly zero and
+    /// it never moves again, however many frames the operation advances.
+    #[test]
+    fn an_animation_in_flight_keeps_its_phase_when_time_is_taken_over() {
+        use crate::signal::Signal;
+        use crate::test_widgets::FillWidget;
+        use std::time::Duration;
+
+        let mut tree = WidgetTree::new();
+        let owner = tree.add(FillWidget::new());
+        tree.layout(SizeProposal::exact(100.0, 100.0));
+
+        let value = Signal::<f32>::new_animated(0.0);
+        tree.register_animated_signal(&value, owner);
+        value.animate_to(
+            1.0,
+            Duration::from_millis(400),
+            teksilo_tokens::Easing::Linear,
+        );
+
+        // Promote and age it on the wall clock, exactly as a live window does.
+        tree.layout(SizeProposal::exact(100.0, 100.0));
+        std::thread::sleep(Duration::from_millis(100));
+        tree.layout(SizeProposal::exact(100.0, 100.0));
+        let on_the_wall_clock = value.get();
+        assert!(
+            (0.15..0.45).contains(&on_the_wall_clock),
+            "about a quarter through after 100 ms of 400: {on_the_wall_clock}"
+        );
+
+        // Now an automation operation takes time over and advances a further
+        // 100 ms. The animation must be about half-way through, not stuck
+        // where the wall clock left it.
+        tree.advance_time(Duration::from_millis(100));
+        let simulated = value.get();
+        assert!(
+            simulated > on_the_wall_clock + 0.1,
+            "the advance must move it on: {on_the_wall_clock} -> {simulated}"
+        );
+        assert!(
+            (0.4..0.7).contains(&simulated),
+            "about half-way through after 200 ms of 400: {simulated}"
+        );
+    }
+
+    /// …and once time is handed back, the wall clock goes on driving it from
+    /// where the advance left it — neither frozen nor snapped to its end.
+    ///
+    /// The two failures this rules out are the two halves of getting the axis
+    /// wrong on a *live* attached window. Ticking at the simulated clock a
+    /// live tree no longer advances freezes every animation outright. Ticking
+    /// at the wall clock against a start stamped on the simulated one hands
+    /// the animation an elapsed time of the tree's whole age and completes it
+    /// on the first real frame.
+    #[test]
+    fn an_animation_goes_on_progressing_after_the_hand_back() {
+        use crate::signal::Signal;
+        use crate::test_widgets::FillWidget;
+        use std::time::Duration;
+
+        let mut tree = WidgetTree::new();
+        let owner = tree.add(FillWidget::new());
+        tree.layout(SizeProposal::exact(100.0, 100.0));
+
+        // The tree spends real time alive before anything simulates it, and
+        // more of it than will be advanced. That is the live condition, and it
+        // is what makes the *second* assertion below discriminating: with the
+        // wall clock ahead of the simulated one, an un-rebased hand-back hands
+        // the animation an elapsed time longer than its whole duration.
+        std::thread::sleep(Duration::from_millis(300));
+
+        let value = Signal::<f32>::new_animated(0.0);
+        tree.register_animated_signal(&value, owner);
+        value.animate_to(
+            1.0,
+            Duration::from_millis(400),
+            teksilo_tokens::Easing::Linear,
+        );
+
+        // The operation promotes it and advances it a quarter of the way.
+        tree.advance_time(Duration::from_millis(100));
+        let at_hand_back = value.get();
+        assert!(
+            (0.15..0.4).contains(&at_hand_back),
+            "a quarter through after 100 ms of 400: {at_hand_back}"
+        );
+
+        // The operation ends and the window goes back to painting frames.
+        tree.resume_real_time();
+        std::thread::sleep(Duration::from_millis(100));
+        tree.layout(SizeProposal::exact(100.0, 100.0));
+
+        let after = value.get();
+        assert!(
+            after > at_hand_back + 0.1,
+            "frozen: 100 ms of real time moved it from {at_hand_back} to {after}"
+        );
+        assert!(
+            after < 0.95,
+            "snapped to the end: 100 ms of 400 took it from {at_hand_back} to {after}"
+        );
+    }
+
+    /// A `max_duration` cap measures the animation's own age across the
+    /// hand-back, not the tree's.
+    ///
+    /// `started_at` is the only stored instant the cap reads, and until this
+    /// test nothing asserted that the rebase shifts it: no production caller
+    /// sets `max_duration` at all, so the branch is entered only from the
+    /// public
+    /// [`Signal::try_animate_with_options`](crate::signal::Signal::try_animate_with_options)
+    /// and from the scheduler's own unit tests, which never change axis.
+    /// Left behind on the abandoned axis, `started_at` makes the cap measure
+    /// the tree's whole wall-clock age instead of the animation's own elapsed
+    /// time, and the first real frame after the hand-back retires the
+    /// animation outright — the same snap the rebase exists to prevent,
+    /// arriving through a different door.
+    ///
+    /// The cap is deliberately smaller than the tree's age at the final layout
+    /// and larger than the animation's own elapsed time there, so the two ways
+    /// of measuring it disagree about whether it has been reached.
+    #[test]
+    fn a_capped_animation_survives_the_hand_back() {
+        use crate::animation::AnimationRequest;
+        use crate::signal::Signal;
+        use crate::test_widgets::FillWidget;
+        use std::time::Duration;
+
+        const CAP: Duration = Duration::from_millis(250);
+        const DURATION: Duration = Duration::from_millis(2000);
+
+        let mut tree = WidgetTree::new();
+        let owner = tree.add(FillWidget::new());
+        tree.layout(SizeProposal::exact(100.0, 100.0));
+
+        // Age the tree past the cap before the animation is armed at all.
+        std::thread::sleep(Duration::from_millis(300));
+
+        let value = Signal::<f32>::new_animated(0.0);
+        tree.register_animated_signal(&value, owner);
+        value
+            .try_animate_with_options(AnimationRequest {
+                target: 1.0,
+                duration: DURATION,
+                easing: teksilo_tokens::Easing::Linear,
+                max_duration: Some(CAP),
+                ..AnimationRequest::default()
+            })
+            .expect("an animated signal accepts a request");
+
+        // 100 ms simulated, then 100 ms real: 200 ms of the animation's own
+        // life, against a tree already older than the cap.
+        tree.advance_time(Duration::from_millis(100));
+        let at_hand_back = value.get();
+        tree.resume_real_time();
+        std::thread::sleep(Duration::from_millis(100));
+        tree.layout(SizeProposal::exact(100.0, 100.0));
+
+        let after = value.get();
+        assert!(
+            tree.has_active_animations(),
+            "a {CAP:?} cap retired a {DURATION:?} animation 200 ms in: \
+             {at_hand_back} -> {after}"
+        );
+        assert!(
+            after > at_hand_back,
+            "the animation must go on progressing: {at_hand_back} -> {after}"
+        );
+    }
+
+    /// An animation paused across a hand-back resumes from where it was
+    /// paused, rather than being driven backwards by the gap between the axes.
+    ///
+    /// The pause mark is the scheduler's one instant that is not per-animation,
+    /// and until this test nothing asserted that the rebase shifts it: on
+    /// reactivate the scheduler moves each `start_time` forward by
+    /// `now - paused_at`, so a mark left behind on the abandoned axis measures
+    /// the whole gap between the axes and puts the start ahead of the reading
+    /// that follows it — the animation's elapsed time collapses, and it
+    /// replays from near zero once the wall clock reaches the new start.
+    ///
+    /// The wall clock is deliberately left further ahead of the simulated one
+    /// than the real time that elapses after the hand-back, which is exactly
+    /// the condition under which the collapse leaves the animation *behind*
+    /// where it was paused rather than merely slowed.
+    #[test]
+    fn an_animation_paused_across_the_hand_back_resumes_forwards() {
+        use crate::signal::Signal;
+        use crate::test_widgets::FillWidget;
+        use std::time::Duration;
+
+        let mut tree = WidgetTree::new();
+        let owner = tree.add(FillWidget::new());
+        tree.layout(SizeProposal::exact(100.0, 100.0));
+        std::thread::sleep(Duration::from_millis(300));
+
+        let value = Signal::<f32>::new_animated(0.0);
+        tree.register_animated_signal(&value, owner);
+        value.animate_to(
+            1.0,
+            Duration::from_millis(1000),
+            teksilo_tokens::Easing::Linear,
+        );
+
+        tree.advance_time(Duration::from_millis(100));
+        let at_pause = value.get();
+        assert!(
+            (0.05..0.2).contains(&at_pause),
+            "a tenth through after 100 ms of 1000: {at_pause}"
+        );
+
+        // The window loses focus while the operation still owns the clock, and
+        // regains it after the hand-back — the ordering that makes the pause
+        // mark and the reading it is subtracted from land on different axes.
+        tree.set_window_active(false);
+        tree.resume_real_time();
+        tree.set_window_active(true);
+
+        std::thread::sleep(Duration::from_millis(150));
+        tree.layout(SizeProposal::exact(100.0, 100.0));
+
+        let after = value.get();
+        assert!(
+            after > at_pause,
+            "frozen or driven backwards across a paused hand-back: \
+             {at_pause} -> {after}"
+        );
+    }
+
+    /// …and the same, with the gap between the two axes the other way round:
+    /// the pause mark is stamped on the axis the scheduler is measured
+    /// against, not on the wall clock.
+    ///
+    /// The twin of the test above, and it cannot be merged with it. Which of
+    /// the two mistakes is observable depends on the *sign* of the gap at the
+    /// moment of the pause: a mark the rebase left behind only yields a
+    /// spurious offset while the wall clock leads, and a mark taken from the
+    /// wall clock instead of the animation clock only survives the
+    /// subtraction — rather than flooring at zero — while the simulated clock
+    /// leads. Each test rules out the sign the other needs, so each covers one
+    /// mistake.
+    ///
+    /// Here the simulated clock is advanced past a tree milliseconds old, so
+    /// it leads — and a wall-clock mark, shifted by the hand-back's rebase
+    /// like the animation-axis instant it is not, comes out a whole advance
+    /// early and is subtracted from the reading on reactivate as if the window
+    /// had been dark for that long.
+    #[test]
+    fn a_pause_mark_is_stamped_on_the_animation_axis() {
+        use crate::signal::Signal;
+        use crate::test_widgets::FillWidget;
+        use std::time::Duration;
+
+        let mut tree = WidgetTree::new();
+        let owner = tree.add(FillWidget::new());
+        tree.layout(SizeProposal::exact(100.0, 100.0));
+
+        let value = Signal::<f32>::new_animated(0.0);
+        tree.register_animated_signal(&value, owner);
+        value.animate_to(
+            1.0,
+            Duration::from_millis(5000),
+            teksilo_tokens::Easing::Linear,
+        );
+
+        // A second of simulated time on a tree milliseconds old: the advance,
+        // not a sleep, is what separates the axes, and it separates them the
+        // other way.
+        tree.advance_time(Duration::from_millis(1000));
+        let at_pause = value.get();
+        assert!(
+            (0.15..0.25).contains(&at_pause),
+            "a fifth through after 1000 ms of 5000: {at_pause}"
+        );
+
+        tree.set_window_active(false);
+        tree.resume_real_time();
+        tree.set_window_active(true);
+
+        std::thread::sleep(Duration::from_millis(150));
+        tree.layout(SizeProposal::exact(100.0, 100.0));
+
+        let after = value.get();
+        assert!(
+            after > at_pause,
+            "the deactivation cost the animation its phase: {at_pause} -> {after}"
+        );
+    }
+
+    /// A deadline armed after the hand-back is reported to the event loop as a
+    /// *future* instant.
+    ///
+    /// `instant_for` is what the winit loop turns into
+    /// `ControlFlow::WaitUntil`. A deadline reported in the past is not a
+    /// harmless rounding error: the loop wakes immediately, finds nothing
+    /// ripe, re-derives the same past instant and spins at full CPU on a
+    /// deadline that can never arrive.
+    ///
+    /// The advance is deliberately a large fraction of the hold, so that
+    /// shifting by it once too often or once too few — the two ways
+    /// `instant_for` can be wrong — moves the answer by far more than the
+    /// tolerance below. Reported *early* is the spinning loop above; reported
+    /// *late* is a long press the user waits an extra advance for.
+    ///
+    /// What this test does **not** cover is the offset's magnitude: it is
+    /// subtracted here by exactly the amount `event_time_for` added, so the two
+    /// cancel and the assertions below hold for a wrong offset as readily as
+    /// for a right one. That number is guarded only by
+    /// `repeated_hand_backs_re_measure_the_offset_rather_than_accumulating_it`.
+    #[test]
+    fn a_deadline_armed_after_the_hand_back_is_in_the_future() {
+        use crate::test_widgets::FillWidget;
+        use crate::widget_builder::WidgetBuilder;
+
+        // The tree spends real time alive before anything simulates it — which
+        // on a live app is every second since launch, and is what makes a
+        // deadline reported against the simulated clock land in the past.
+        let mut tree = WidgetTree::new();
+        tree.add(FillWidget::new().on_long_press(|_e, _c| {}));
+        tree.layout(SizeProposal::exact(100.0, 100.0));
+        std::thread::sleep(std::time::Duration::from_millis(60));
+
+        let advanced = std::time::Duration::from_millis(200);
+        tree.advance_time(advanced);
+        tree.resume_real_time();
+
+        tree.pointer_down_button(Point::new(50.0, 50.0), PointerButton::Primary);
+        let hold = tree
+            .theme()
+            .input
+            .profile(teksilo_tokens::PointerKind::Mouse)
+            .long_press;
+        let slack = std::time::Duration::from_millis(50);
+        // The two assertions below only mean something while the advance
+        // dominates the tolerance. Stated here so a later change to either
+        // constant fails loudly instead of quietly re-opening the gap a 10 ms
+        // advance and a 30 ms tolerance left.
+        assert!(
+            slack * 4 <= advanced && advanced * 4 >= hold,
+            "the tolerance must be a fraction of the advance, and the advance a \
+             large fraction of the hold: slack {slack:?}, advanced {advanced:?}, \
+             hold {hold:?}"
+        );
+        let deadline = tree
+            .next_timer_deadline()
+            .expect("a held press has a long-press deadline");
+        let wait = deadline.saturating_duration_since(std::time::Instant::now());
+
+        assert!(
+            wait > std::time::Duration::ZERO,
+            "the loop must be given something it can wait for"
+        );
+        // And it is the hold away — not the hold minus what was advanced
+        // (subtracted a second time, the spinning loop), and not the hold plus
+        // it (never subtracted at all). The tolerance is a quarter of the
+        // advance, so neither can hide inside it.
+        assert!(
+            wait <= hold,
+            "wake in ~{hold:?} after a {advanced:?} advance, got {wait:?} — reported late"
+        );
+        assert!(
+            wait + slack >= hold,
+            "wake in ~{hold:?} after a {advanced:?} advance, got {wait:?} — reported early"
+        );
+        tree.pointer_up_button(Point::new(50.0, 50.0), PointerButton::Primary);
     }
 }
 
@@ -1941,5 +2773,94 @@ mod pointer_table_tests {
         fn children(&self) -> Vec<WidgetId> {
             vec![self.child]
         }
+    }
+}
+
+/// The arbitration binds the **timer** path, not only the sample path.
+#[cfg(test)]
+mod tick_arbitration_tests {
+    use super::*;
+    use crate::event::EventResponse;
+    use crate::test_widgets::{FillWidget, StackWidget};
+    use crate::widget_builder::WidgetBuilder;
+    use std::cell::Cell;
+    use std::rc::Rc;
+    use std::time::Duration;
+
+    /// A tree whose innermost child holds the sequence on its press, under an
+    /// ancestor that competes for the same press (`on_drag` is what enrols it)
+    /// and also carries a long-press recognizer.
+    ///
+    /// `max_hold` is raised past `long_press` so the hold is still standing
+    /// when the ancestor's timer comes due; with the shipped 250 ms hold and
+    /// 500 ms long press the hold always expires first and the two never
+    /// overlap, so there would be nothing to observe.
+    fn tree_with_a_holder_under_a_long_pressing_peer(
+        hold_on_press: bool,
+    ) -> (WidgetTree, Rc<Cell<bool>>) {
+        let long_pressed = Rc::new(Cell::new(false));
+        let flag = long_pressed.clone();
+
+        let mut tree = WidgetTree::new();
+        let mut theme = tree.theme().clone();
+        theme.input.gestures.mouse.max_hold = Duration::from_millis(2000);
+        tree.set_theme(theme);
+
+        let child = tree.add(FillWidget::new().on_pointer_event(move |event, ctx| {
+            if hold_on_press && matches!(event, WidgetEvent::PointerDown { .. }) {
+                ctx.hold_gesture();
+            }
+            EventResponse::Ignored
+        }));
+        tree.add(
+            StackWidget::new()
+                .add_child(child)
+                .on_drag(|_phase, _c| {})
+                .on_long_press(move |_e, _c| flag.set(true)),
+        );
+        tree.layout(SizeProposal::exact(300.0, 50.0));
+        (tree, long_pressed)
+    }
+
+    /// The control: with nothing holding, the peer's long press does fire on
+    /// the tick. Without this the test below would pass on a fixture that
+    /// could never long-press at all.
+    #[test]
+    fn a_peers_long_press_fires_on_the_tick_when_nothing_holds() {
+        let (mut tree, long_pressed) = tree_with_a_holder_under_a_long_pressing_peer(false);
+        tree.pointer_down_button(Point::new(20.0, 25.0), PointerButton::Primary);
+        tree.advance_time(Duration::from_millis(600));
+        assert!(
+            long_pressed.get(),
+            "the ancestor is a member with a long-press recognizer and its \
+             timer came due"
+        );
+    }
+
+    /// …and it does not while a peer is holding.
+    ///
+    /// `hold_gesture` freezes the arbitration: no other member may win while a
+    /// member is still deciding. The sample path has always honoured that
+    /// (`sequence_blocks_arena`); the timer path dispatched whatever a
+    /// recognizer produced, so a long press whose deadline happened to fall
+    /// inside a hold fired anyway — which is the same recognizer winning, one
+    /// door over.
+    #[test]
+    fn a_peers_long_press_does_not_fire_on_the_tick_while_a_member_holds() {
+        let (mut tree, long_pressed) = tree_with_a_holder_under_a_long_pressing_peer(true);
+        tree.pointer_down_button(Point::new(20.0, 25.0), PointerButton::Primary);
+        assert!(
+            tree.sequence_members(crate::pointer::PointerId::MOUSE)
+                .iter()
+                .any(|(_, _, state)| *state == crate::gesture::MemberState::Held),
+            "the fixture must actually be holding"
+        );
+
+        tree.advance_time(Duration::from_millis(600));
+        assert!(
+            !long_pressed.get(),
+            "no peer may win while a member is holding — the timer path is not \
+             a way around the arbitration"
+        );
     }
 }

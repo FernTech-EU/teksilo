@@ -211,6 +211,46 @@ and the input timeline and the animation timeline are one axis rather than two.
 One `advance_time` call therefore moves gestures, long-press deadlines,
 tooltips, overlays *and* animations to the same virtual now.
 
+The shared epoch is what makes the two axes *comparable*; what makes them one is
+that they change hands together — `advance_time` takes the tree off the wall
+clock before it moves anything, and `resume_real_time` puts **both** axes back
+on it in one call. While time is taken over,
+`input_now()` is a reading of `sim_clock` and the animation scheduler is ticked
+at `sim_clock`, so a deadline can only be reached by advancing the clock — never
+by the test taking a long time, and never *not* reached because it did.
+
+That is one flag, `sim_time_frozen`, and it is **not a latch**. A headless test
+never gives time back, so for a test it behaves like one. A host sharing a live
+tree with a real event loop — the debug automation bridge — calls
+`WidgetTree::resume_real_time()` when the operation ends, and real time drives
+the tree again until the next advance. Leaving it frozen would stop the attached
+window measuring another gesture, and stop its animations advancing at all.
+
+The two axes are handed over and handed back differently, because they carry
+different state:
+
+* **The input axis carries no stored instants, so the *reading* is carried.**
+  Taking it over continues it from the reading the wall clock had at the switch
+  rather than restarting it at the simulated clock's own offset, so a sample
+  stamped before the switch stays in the past instead of landing in the virtual
+  future where no interval measured from it could elapse. Handing it back cannot
+  simply drop that anchor: an axis advanced by more than the wall clock moved
+  meanwhile reads *ahead* of the raw clock, and dropping it would step
+  `input_now()` backwards over times already handed out. So the gap is measured
+  — afresh at each hand-back, against that hand-back's own readings, and floored
+  at zero for the case where the raw clock is already the later of the two — and
+  carried in `sim_input_offset`, which every later reading adds. `instant_for` subtracts it again when it reports a deadline to the event
+  loop, which is what keeps a `WaitUntil` in the future rather than in the past,
+  where the loop would spin on it.
+* **The animation scheduler stores absolute instants, so *they* are carried.**
+  Each switch rebases every instant the scheduler holds by the gap between the
+  two clocks (`AnimationScheduler::rebase`), and the reading is then simply
+  whichever clock is in charge. Without the rebase both directions fail, in
+  opposite ways: taking time over would measure a wall-clock-stamped animation
+  against a simulated clock far behind it and clamp its elapsed time to zero for
+  good, and handing it back would measure a simulated-clock-stamped one against
+  the wall clock and complete it on the first real frame.
+
 This is not a nicety. The animation scheduler already had to be rescued from the
 two-clock version of this bug (see `WidgetTree::animation_clock`): while real
 time and simulated time advanced independently, every animation armed after real
@@ -218,6 +258,9 @@ time overtook simulated time had a start in the scheduler's future and froze
 completely — a failure that tracked machine load rather than behaviour. Giving
 the input layer its own unrelated epoch would have re-created exactly that,
 one subsystem over.
+
+See [automation-mcp.md](automation-mcp.md) § *Time, and handing it back* for the
+hand-back's call sites on the bridge side.
 
 `WidgetTree::input_clock().epoch()` returns the anchoring `Instant` for a clock
 that has one, and a test pins the shared origin:

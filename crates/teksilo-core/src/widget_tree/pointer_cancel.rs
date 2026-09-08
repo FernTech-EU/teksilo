@@ -388,6 +388,17 @@ impl WidgetTree {
             .is_some_and(|e| e.info.kind.hovers());
         if !hovers {
             self.pointers.end(pointer);
+        } else if let Some(entry) = self.pointers.get_mut(pointer) {
+            // …and *hovering* is the whole of what it is now doing. The entry's
+            // button mask is what `PointerEntry::is_contacting` reads for a
+            // hovering-capable pointer, so leaving the press's mask on it
+            // leaves the pointer reading as held by an interaction the
+            // framework has just finished forgetting — for ever, since a Cancel
+            // sample never reaches `PointerTable::admit` and the next real
+            // sample is the earliest correction. The platform layer already
+            // builds its pen proximity-leave with an empty mask, intending
+            // exactly this; the intent was being discarded.
+            entry.info.buttons = crate::event::ButtonMask::NONE;
         }
 
         // A cancel is terminal: an `Up` that arrives for this pointer
@@ -1438,6 +1449,72 @@ mod tests {
             phases.borrow().len(),
             before,
             "and no further drag phase — least of all an Ended — is reported"
+        );
+        tree.assert_no_leaked_pointer_state();
+    }
+
+    /// A cancelled hovering pointer stops reading as held.
+    ///
+    /// A contact that is taken away leaves the table; a mouse or a pen does
+    /// not, and the entry that stays behind is what every singular accessor
+    /// reads. Its button mask is what `PointerEntry::is_contacting` answers
+    /// from, and a `Cancel` sample never reaches `PointerTable::admit` — so
+    /// before this was cleared, a stylus whose press was revoked by a modal, a
+    /// window deactivation or an OS drag went on reporting a held tip until the
+    /// next real sample, and `assert_no_leaked_pointer_state` said so.
+    ///
+    /// A **pen**, not a mouse, because the legacy `WidgetEvent::PointerDown`
+    /// path admits `PointerInfo::mouse`, whose mask is empty — so a mouse press
+    /// has never read as contacting in the first place and could not show this.
+    /// The pen helpers build the sample the platform translator builds, mask
+    /// included.
+    #[test]
+    fn a_cancelled_hovering_pointer_stops_reading_as_held() {
+        let mut tree = WidgetTree::new();
+        let id_slot = Rc::new(std::cell::Cell::new(None::<WidgetId>));
+        let cancels = log();
+        // Built in one chain rather than through `recorder`: a second
+        // `WidgetBuilder` call on an already-wrapped `impl Widget` re-wraps
+        // instead of merging, and the inner handler set would be dropped.
+        let recorded = cancels.clone();
+        let slot = id_slot.clone();
+        let node = tree.add(
+            FillWidget::new()
+                .on_pointer_cancel(move |_pointer, reason, _ctx| {
+                    let id = slot.get().expect("the recorder's id was never recorded");
+                    recorded.borrow_mut().push((id, reason));
+                })
+                .on_tap(|_e, _c| {}),
+        );
+        id_slot.set(Some(node));
+        tree.layout(SizeProposal::exact(100.0, 100.0));
+
+        tree.pen_down(Point::new(50.0, 50.0), 0.5, (0.0, 0.0));
+        let pen = tree
+            .live_pointers()
+            .find(|p| matches!(p.kind, teksilo_tokens::PointerKind::Pen(_)))
+            .map(|p| p.id)
+            .expect("the pen was admitted");
+        assert!(
+            tree.pointers.get(pen).is_some_and(|e| e.is_contacting()),
+            "the tip is on the surface"
+        );
+
+        let mut noop = crate::window::NoopWindowOps;
+        tree.cancel_pointer(pen, CancelReason::ModalOpened, &mut noop);
+
+        assert_eq!(
+            cancels.borrow().as_slice(),
+            &[(node, CancelReason::ModalOpened)],
+            "the node was told"
+        );
+        assert!(
+            tree.pointers.get(pen).is_some(),
+            "a pen keeps its entry: it is still in proximity, still hovering"
+        );
+        assert!(
+            !tree.pointers.get(pen).is_some_and(|e| e.is_contacting()),
+            "…but it is no longer contacting anything"
         );
         tree.assert_no_leaked_pointer_state();
     }

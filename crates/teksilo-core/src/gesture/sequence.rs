@@ -630,16 +630,29 @@ impl PointerSequence {
         self.members.iter().any(|m| m.state == MemberState::Held)
     }
 
-    /// The next time [`expire_holds`](Self::expire_holds) or a deferred
-    /// member's eligibility needs re-examining.
-    pub fn next_deadline(&self, profile: &GestureProfile) -> Option<EventTime> {
+    /// When [`expire_holds`](Self::expire_holds) next has work: the earliest
+    /// instant at which a standing hold reaches `profile.max_hold`.
+    ///
+    /// **A deferred member's `eligible_at` is deliberately not a term here.**
+    /// It looks like a sibling deadline and is not one. Nothing happens at that
+    /// instant: eligibility is never *stored*, it is re-derived by
+    /// [`SequenceMember::is_eligible_at`] against whatever instant its caller
+    /// names, and no reader *transitions* anything on reaching it. Two call
+    /// sites read it — the arbitration walk, and the arena gate the ordinary
+    /// bubble and the timer tick share, the one naming the sample being
+    /// dispatched and the other the tick's own instant — and each of them only
+    /// answers a question its caller already had. A press that has sat
+    /// still past its `long_press` is already eligible the moment it moves,
+    /// with no intervening tick, so waking the event loop at `eligible_at`
+    /// would buy an idle frame with nothing to do in it. The expiry of a hold
+    /// is the opposite: it is a stored state transition, and if nobody performs
+    /// it the hold stands past the duration the framework promises to trust it
+    /// for.
+    pub fn next_hold_deadline(&self, profile: &GestureProfile) -> Option<EventTime> {
         self.members
             .iter()
-            .filter(|m| m.is_live())
-            .filter_map(|m| match m.state {
-                MemberState::Held => m.held_since.map(|since| since + profile.max_hold),
-                _ => m.eligible_at,
-            })
+            .filter(|m| m.state == MemberState::Held)
+            .filter_map(|m| m.held_since.map(|since| since + profile.max_hold))
             .min()
     }
 

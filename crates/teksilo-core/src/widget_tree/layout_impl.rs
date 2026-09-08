@@ -405,8 +405,18 @@ impl WidgetTree {
             self.frame_tick_requested.set(true);
         }
         self.advance_frame_tick(now);
+        // Ticked on the same clock the animations were *promoted* against
+        // (`process_pending_animations` immediately above reads it too). While
+        // the tree runs on real time that is `now`; while an automation
+        // operation has time taken over it is `sim_clock`, and ticking at
+        // `Instant::now()` there would hand every animation an elapsed time of
+        // the tree's whole wall-clock age and complete it on its first layout
+        // pass. The operation gives the clock back when it ends, rebasing the
+        // scheduler as it goes, so this reads the wall clock again from the
+        // next frame on — see `WidgetTree::resume_real_time`.
+        let animation_now = self.animation_clock();
         self.animation_scheduler
-            .tick(now, &self.arena, self.paint_epoch);
+            .tick(animation_now, &self.arena, self.paint_epoch);
 
         // Fire on_drag_tick on the current drop target, if any. Runs once
         // per layout pass so widgets can implement per-frame behaviours

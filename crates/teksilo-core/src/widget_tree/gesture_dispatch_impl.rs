@@ -1224,6 +1224,90 @@ mod tests {
         assert!(pressed.get(), "the hold is 500 ms on the mouse profile");
     }
 
+    /// A press, then one `advance_time` past the hold — and the long press
+    /// fires.
+    ///
+    /// It did not before: `advance_time` moved the simulated clock, the overlay
+    /// timers and the flings, and left the gesture arenas alone. A test that
+    /// wanted a hold had to install a `ManualClock` *and* call `tick_gestures`
+    /// by hand, which is why `advance_time`'s own doc comment promised
+    /// long-press recognition it had never delivered.
+    #[test]
+    fn one_advance_time_past_the_hold_recognises_a_long_press() {
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        let pressed = Rc::new(Cell::new(0u32));
+        let flag = pressed.clone();
+
+        let mut tree = WidgetTree::new();
+        let widget = tree.add(FillWidget::new().on_long_press(move |_e, _ctx| {
+            flag.set(flag.get() + 1);
+        }));
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+
+        let center = tree.bounds(widget).center();
+        tree.dispatch_event(WidgetEvent::PointerDown {
+            position: center,
+            button: PointerButton::Primary,
+            modifiers: Modifiers::NONE,
+        });
+
+        // Short of the mouse profile's 500 ms hold, and nothing has fired.
+        tree.advance_time(std::time::Duration::from_millis(400));
+        assert_eq!(pressed.get(), 0, "400 ms is under the hold");
+
+        // Past it, on the same clock and with no `tick_gestures` call and no
+        // hand-installed clock anywhere.
+        tree.advance_time(std::time::Duration::from_millis(150));
+        assert_eq!(pressed.get(), 1, "the hold is 500 ms on the mouse profile");
+
+        // …and only once, however long the press is held.
+        tree.advance_time(std::time::Duration::from_millis(1000));
+        assert_eq!(
+            pressed.get(),
+            1,
+            "a hold recognises once, not once per tick"
+        );
+    }
+
+    /// What a tick's handlers write is flushed inside the same tick.
+    ///
+    /// A recognized gesture is a dispatch: its handler writes signals, and
+    /// those signals drive rebuilds and dormancy transitions that only happen
+    /// in `process_state_changes`. Leaving that to the caller's next `layout`
+    /// would make the effect of a hold arrive a frame after the hold — and for
+    /// a caller that only advances the clock (the automation settle loop), not
+    /// arrive at all.
+    #[test]
+    fn a_gesture_recognized_by_a_tick_has_its_effect_flushed_by_the_same_tick() {
+        use crate::signal::Signal;
+        use crate::test_widgets::StackWidget;
+
+        let mut tree = WidgetTree::new();
+        let revealed = Signal::new(false);
+        let flag = revealed.clone();
+        let panel = tree.add(FillWidget::new().visible_when(revealed.clone()));
+        let widget = tree.add(FillWidget::new().on_long_press(move |_e, _ctx| {
+            flag.set(true);
+        }));
+        let _root = tree.add(StackWidget::new().add_child(widget).add_child(panel));
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        assert!(!tree.is_visible(panel), "precondition: the panel is parked");
+
+        tree.dispatch_event(WidgetEvent::PointerDown {
+            position: tree.bounds(widget).center(),
+            button: PointerButton::Primary,
+            modifiers: Modifiers::NONE,
+        });
+        tree.advance_time(std::time::Duration::from_millis(600));
+
+        assert!(
+            tree.is_visible(panel),
+            "the hold fired and its signal was drained in the same call"
+        );
+    }
+
     #[test]
     fn a_mouse_triple_click_still_escalates_through_the_tree() {
         use std::cell::Cell;
@@ -1279,6 +1363,7 @@ mod arbitration_tests {
     use crate::widget_builder::WidgetBuilder;
     use std::cell::Cell;
     use std::rc::Rc;
+    use std::time::Duration;
     use teksilo_canvas::{Point, SizeProposal};
     use teksilo_tokens::{DragActivation, PointerKind, TargetDensity};
 
@@ -1717,6 +1802,172 @@ mod arbitration_tests {
         assert!(
             dragged.get(),
             "the hold auto-releases at max_hold and the peer latches"
+        );
+    }
+
+    /// The auto-release is driven by **time**, not by the next sample. A
+    /// contact resting perfectly still finds its hold released the moment the
+    /// clock reaches `max_hold`, with no move to carry the transition.
+    ///
+    /// Before the tick knew how to expire a hold this was only true of a
+    /// sequence the user happened to move: every reader of `Held` re-reads it
+    /// against the timestamp of whatever sample it is serving, so the outcome
+    /// of a *later* move was already right — but the framework's promise is
+    /// that it stops trusting a holder after `max_hold`, and until then the
+    /// holder stayed listed as `Held` for as long as the user kept still.
+    #[test]
+    fn a_hold_auto_releases_on_the_tick_with_no_movement_at_all() {
+        use crate::pointer::clock::ManualClock;
+
+        let mut tree = WidgetTree::new();
+        let clock = Rc::new(ManualClock::new(EventTime::ZERO));
+        tree.set_input_clock(clock.clone());
+
+        let child = tree.add(FillWidget::new().on_pointer_event(|event, ctx| {
+            if matches!(event, WidgetEvent::PointerDown { .. }) {
+                ctx.hold_gesture();
+            }
+            EventResponse::Ignored
+        }));
+        tree.add(StackWidget::new().add_child(child).on_drag(|_phase, _c| {}));
+        tree.layout(SizeProposal::exact(300.0, 50.0));
+
+        let max_hold = teksilo_tokens::GestureProfile::MOUSE.max_hold;
+        let state_of = |tree: &WidgetTree, id: WidgetId| {
+            tree.sequence_members(PointerId::MOUSE)
+                .into_iter()
+                .find(|(m, ..)| *m == id)
+                .map(|(_, _, state)| state)
+        };
+
+        press(&mut tree, Point::new(20.0, 25.0));
+        assert_eq!(
+            state_of(&tree, child),
+            Some(MemberState::Held),
+            "the holder is listed as Held"
+        );
+
+        // One millisecond short of the promise, and nothing has moved.
+        tree.advance_time(max_hold - Duration::from_millis(1));
+        assert_eq!(
+            state_of(&tree, child),
+            Some(MemberState::Held),
+            "the hold stands right up to max_hold"
+        );
+
+        // …and at it.
+        tree.advance_time(Duration::from_millis(1));
+        assert_eq!(
+            state_of(&tree, child),
+            Some(MemberState::Possible),
+            "time alone releases the hold — no sample carried it"
+        );
+    }
+
+    /// …and the event loop is told to come back for it. A transition the tick
+    /// can perform but no deadline reports is a frame the loop never wakes for,
+    /// which leaves the hold standing exactly as long as it did before.
+    #[test]
+    fn a_standing_hold_wakes_the_event_loop_for_its_own_expiry() {
+        use crate::pointer::clock::ManualClock;
+
+        let mut tree = WidgetTree::new();
+        let clock = Rc::new(ManualClock::new(EventTime::ZERO));
+        tree.set_input_clock(clock.clone());
+
+        let child = tree.add(FillWidget::new().on_pointer_event(|event, ctx| {
+            if matches!(event, WidgetEvent::PointerDown { .. }) {
+                ctx.hold_gesture();
+            }
+            EventResponse::Ignored
+        }));
+        tree.add(StackWidget::new().add_child(child).on_drag(|_phase, _c| {}));
+        tree.layout(SizeProposal::exact(300.0, 50.0));
+
+        let max_hold = teksilo_tokens::GestureProfile::MOUSE.max_hold;
+        assert_eq!(
+            tree.next_input_deadline(),
+            None,
+            "nothing is pending before the press"
+        );
+
+        press(&mut tree, Point::new(20.0, 25.0));
+        let deadline = tree
+            .next_input_deadline()
+            .expect("a standing hold is an input deadline");
+        // The value, not merely its presence: a term reporting some other
+        // instant — the member's `eligible_at`, a wrong duration — would leave
+        // the assertion below green if it only asked `is_some`.
+        let expected = tree.instant_for(EventTime::from_duration(max_hold));
+        let skew = deadline
+            .saturating_duration_since(expected)
+            .max(expected.saturating_duration_since(deadline));
+        assert!(
+            skew < Duration::from_millis(5),
+            "the wake must be the hold's own expiry: expected ~{max_hold:?} out, \
+             deadline and expectation differ by {skew:?}"
+        );
+
+        // Serving it clears it: one wake, not a spin.
+        tree.advance_time(max_hold);
+        assert_eq!(
+            tree.next_input_deadline(),
+            None,
+            "the expiry ran, so nothing is pending any more"
+        );
+    }
+
+    /// The other half of the same decision, stated as a test so it cannot rot
+    /// into prose: a deferred member's `eligible_at` is **not** a deadline.
+    ///
+    /// Eligibility is never stored — it is re-derived against the timestamp of
+    /// whatever sample is being arbitrated — so nothing happens at that
+    /// instant and waking the loop for it would buy an idle frame with no work
+    /// in it. A press that sat still past its `long_press` is already eligible
+    /// on its very next move, with no tick in between.
+    #[test]
+    fn a_deferred_members_eligibility_is_not_a_wake() {
+        let mut tree = WidgetTree::new();
+        // The row must take the press: the deferral is armed by the ancestor
+        // walk that runs *through* a captor, and a row that captures nothing
+        // enrols the list by a path that never sets `eligible_at` at all —
+        // which would leave this test asserting nothing.
+        let row = tree.add(FillWidget::new().on_tap(|_e, _c| {}));
+        let list = tree.add(
+            StackWidget::new()
+                .add_child(row)
+                .drag_activation(DragActivation::AfterLongPress)
+                .on_drag(|_phase, _c| {}),
+        );
+        tree.layout(SizeProposal::exact(200.0, 50.0));
+
+        press(&mut tree, Point::new(20.0, 25.0));
+        assert_eq!(
+            tree.sequence_members(PointerId::MOUSE)
+                .into_iter()
+                .find(|(id, ..)| *id == list)
+                .map(|(_, _, state)| state),
+            Some(MemberState::Possible),
+            "the deferred member is enrolled and waiting on its timer"
+        );
+        assert_eq!(
+            tree.next_input_deadline(),
+            None,
+            "a deferred member asks the loop for nothing: there is no work at \
+             its eligibility instant"
+        );
+
+        // Proof that the deferral really was armed, and not that this fixture
+        // enrolled an ordinary drag member with no timer at all: only a
+        // deferred member self-rejects on leaving the tap boundary.
+        moved(&mut tree, Point::new(60.0, 25.0));
+        assert_eq!(
+            tree.sequence_members(PointerId::MOUSE)
+                .into_iter()
+                .find(|(id, ..)| *id == list)
+                .map(|(_, _, state)| state),
+            Some(MemberState::Rejected),
+            "the member under test is the deferred one"
         );
     }
 
