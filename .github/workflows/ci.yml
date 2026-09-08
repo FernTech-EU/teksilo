@@ -111,10 +111,18 @@ jobs:
       - name: Install Linux system dependencies
         uses: ./.github/actions/install-linux-deps
 
-      - name: Install X server and window manager
+      - name: Install X server, window manager and software GPU
         run: |
           sudo apt-get update
           sudo apt-get install --no-install-recommends -y xvfb openbox x11-utils
+          # teksilo-app's loop tests open a real window, which means wgpu has to
+          # find an adapter. The runner has no GPU, so Mesa's software
+          # implementations are the adapter: lavapipe for the Vulkan backend,
+          # llvmpipe for the GL fallback. Without these the test panics at
+          # window creation rather than skipping, which is the failure mode we
+          # want — a missing adapter must not read as a pass.
+          sudo apt-get install --no-install-recommends -y \
+            mesa-vulkan-drivers libgl1-mesa-dri libegl-mesa0
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@master
@@ -141,7 +149,9 @@ jobs:
             echo "::error::x11rb has forked into multiple versions"; exit 1; }
 
       - name: Build tests
-        run: cargo test -p teksilo-platform --no-run
+        run: |
+          cargo test -p teksilo-platform --no-run
+          cargo test -p teksilo-app --lib --no-run
 
       # Xvfb alone has NO window manager, which would turn every EWMH assertion
       # into a silent pass rather than a failure — openbox is what makes the
@@ -159,6 +169,19 @@ jobs:
           # WAYLAND_DISPLAY must be empty so Teksilo's window-system detection
           # (which mirrors winit's precedence) resolves to X11.
           WAYLAND_DISPLAY= cargo test -p teksilo-platform -- --ignored --test-threads=1
+
+      # The other half of what needs a display: `teksilo-app`'s
+      # `app::winit_loop_tests`, which builds a real winit event loop off the
+      # main thread and hands `TeksiloAppHandler`'s own callbacks hand-built
+      # events. It is the only test in the workspace that witnesses the winit
+      # call sites at all — see that module's docs for what it can and cannot
+      # decide. Separate step from the platform one so a failure names which
+      # half broke; the X server and openbox started above are still running.
+      - name: Run app event-loop tests (Xvfb + openbox)
+        run: |
+          export DISPLAY=:99
+          xdpyinfo -display :99 >/dev/null
+          WAYLAND_DISPLAY= cargo test -p teksilo-app --lib -- --ignored --test-threads=1
 
   test-cross:
     name: Test (${{ matrix.name }})
@@ -200,9 +223,11 @@ jobs:
   # — a Unix socket on Linux/macOS, a named pipe on Windows — so it is the one
   # that most needs to be *run* on each of them rather than merely compiled.
   # `cargo test --workspace` in test-cross already covers the wire, transport
-  # and stdio-smoke tests. This job adds the two things a test harness cannot
-  # reach: a live app with a real window driven over the bridge end to end, and
-  # the canary proving the bridge stays out of a release build.
+  # and stdio-smoke tests; the stdio smoke — which carries the touch gate — is
+  # re-run here under its own name so that gate is legible on the job that owns
+  # synthetic input. What this job adds beyond a test harness is a live app with
+  # a real window driven over the bridge end to end, and the canary proving the
+  # bridge stays out of a release build.
   test-automation:
     name: Automation (${{ matrix.name }})
     needs: test-linux
@@ -256,16 +281,28 @@ jobs:
       - name: Build the bridge smoke and the MCP server
         run: cargo build -p automation_bridge_smoke -p teksilo-automation-mcp
 
+      # The touch gate: a scripted multi-touch gesture, driven over real MCP
+      # stdio against the headless server, reproducing the arbitration answer
+      # documented in docs/events-and-gestures.md. It rides `cargo test
+      # --workspace` in test-linux and test-cross too, but it is named here so
+      # the gate is legible on the job that owns synthetic input — and so a
+      # failure says "the touch surface broke" rather than "some workspace test
+      # failed". Headless: no window, no GPU, no display, and the server's only
+      # clock is the simulated one, so the result is the same on all three.
+      - name: MCP touch gate (headless stdio)
+        run: cargo test -p teksilo-automation-mcp --test stdio_smoke
+
       # Drives a real window over the real endpoint: snapshot_tree →
-      # invoke_action → snapshot_tree → screenshot. Exits 0 on success, 1 on
-      # any failure, so the job result is the assertion. Every runner here has
-      # at least a software adapter — lavapipe above, DX12 WARP on Windows,
-      # Metal on macOS — so the screenshot is expected to really capture.
-      # `TEKSILO_SMOKE_REQUIRE_GPU` is what makes that an assertion rather than
-      # a hope: without it the smoke treats GPU_UNAVAILABLE as a skip and the
-      # job would go green having never exercised the capture path, so an
-      # adapter that stopped loading would retire this job's whole reason to
-      # exist without anyone noticing.
+      # invoke_action → snapshot_tree → the two input no-regression checks
+      # (scroll injects a Programmatic sample, drag_node injects a mouse
+      # pointer) → screenshot. Exits 0 on success, 1 on any failure, so the job
+      # result is the assertion. Every runner here has at least a software
+      # adapter — lavapipe above, DX12 WARP on Windows, Metal on macOS — so the
+      # screenshot is expected to really capture. `TEKSILO_SMOKE_REQUIRE_GPU` is
+      # what makes that an assertion rather than a hope: without it the smoke
+      # treats GPU_UNAVAILABLE as a skip and the job would go green having never
+      # exercised the capture path, so an adapter that stopped loading would
+      # retire this job's whole reason to exist without anyone noticing.
       - name: Live-bridge smoke (Unix socket)
         if: matrix.os != 'windows-latest'
         env:

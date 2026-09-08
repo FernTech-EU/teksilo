@@ -61,8 +61,11 @@ pub struct Environment {
     pub prefers_large_text: bool,
     /// The OS's stated preference for a touch-first UI (Windows tablet mode,
     /// a convertible in slate posture), or `None` when the platform does not
-    /// report one. Seeds `DensityPolicy::FollowLastPointer`; `None` leaves the
-    /// density where the app put it.
+    /// report one.
+    ///
+    /// Nothing writes it and nothing reads it yet: it is the input to a
+    /// density policy the framework does not act on — see
+    /// [`WidgetTree::set_density_policy`](crate::WidgetTree::set_density_policy).
     pub prefers_touch: Option<bool>,
     /// Whether an assistive technology is attached. See [`ScreenReaderState`].
     pub screen_reader: ScreenReaderState,

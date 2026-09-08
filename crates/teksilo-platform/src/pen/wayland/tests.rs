@@ -345,3 +345,34 @@ fn tilt_is_clamped_to_the_documented_range() {
     ]);
     assert_eq!(packets[0].tilt, Some((-90.0, 90.0)));
 }
+
+/// The idle tier is the whole answer to "a compositor advertises the tablet
+/// manager whether or not a digitizer exists". Collapsing it back onto one
+/// interval puts a 250 Hz timer on every window of every Wayland session with
+/// no tablet in it.
+#[test]
+fn a_session_with_no_tool_is_not_polled_at_stylus_rate() {
+    use super::{IDLE_POLL_INTERVAL, POLL_INTERVAL, WaylandPenSource};
+
+    assert_eq!(
+        WaylandPenSource::poll_interval(true),
+        POLL_INTERVAL,
+        "a live tool is a continuous stream and must be read at stylus rate"
+    );
+    assert_eq!(
+        WaylandPenSource::poll_interval(false),
+        IDLE_POLL_INTERVAL,
+        "no tool announced means no stroke is possible, so the thread must \
+         stand down"
+    );
+    assert!(
+        IDLE_POLL_INTERVAL >= POLL_INTERVAL * 8,
+        "an idle tier worth having is at least an order of magnitude cheaper: \
+         {IDLE_POLL_INTERVAL:?} vs {POLL_INTERVAL:?}"
+    );
+    assert!(
+        IDLE_POLL_INTERVAL <= std::time::Duration::from_millis(500),
+        "and short enough that a tablet plugged in mid-session is on the fast \
+         tier before a hand reaches the pen: {IDLE_POLL_INTERVAL:?}"
+    );
+}

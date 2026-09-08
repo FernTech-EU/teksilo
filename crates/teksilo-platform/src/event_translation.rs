@@ -535,6 +535,14 @@ impl TranslationState {
         self.pen.is_some()
     }
 
+    /// Whether the installed shim fills its buffer from a thread of its own.
+    ///
+    /// See [`PenSource::polls_off_thread`]: it is what tells the event loop
+    /// whether draining once per turn is enough. `false` with no shim.
+    pub fn pen_polls_off_thread(&self) -> bool {
+        self.pen.as_ref().is_some_and(|p| p.polls_off_thread())
+    }
+
     /// Whether a tool is currently in proximity — i.e. whether a pen is
     /// hovering or drawing right now.
     pub fn pen_in_proximity(&self) -> bool {

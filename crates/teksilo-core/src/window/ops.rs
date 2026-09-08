@@ -126,6 +126,51 @@ pub trait WindowOps {
     ///
     /// Default: no-op.
     fn cancel_os_drag(&mut self) {}
+
+    /// What the host platform can do about an on-screen keyboard.
+    ///
+    /// Read by a widget that must decide whether a touch-only user can reach a
+    /// keyboard at all: where the answer is [`SoftKeyboardSupport::None`] the
+    /// framework will never raise one and promises nothing about whether the
+    /// platform will, so a text surface that expects a finger has to offer its
+    /// own affordance.
+    ///
+    /// Default: [`SoftKeyboardSupport::None`], which is the truth for a
+    /// standalone tree with no window under it.
+    fn soft_keyboard_support(&self) -> SoftKeyboardSupport {
+        SoftKeyboardSupport::None
+    }
+}
+
+/// What a platform can do about an on-screen keyboard.
+///
+/// Three answers, and the difference between them is what a caller may
+/// *promise a user*, not how much code stands behind them.
+#[derive(Copy, Clone, PartialEq, Eq, Debug, Default, Hash)]
+#[non_exhaustive]
+pub enum SoftKeyboardSupport {
+    /// The framework has no keyboard request to send, and makes no promise
+    /// that anything will rise on its own. Either the platform has no software
+    /// keyboard at all, or it has one whose appearance is the platform's
+    /// business and not reliable enough to promise. A request is dropped, and a
+    /// text surface driven by touch needs its own affordance.
+    #[default]
+    None,
+    /// A keyboard exists and is **guaranteed** to rise when a text control
+    /// takes focus through the accessibility layer, so a touch-driven text
+    /// surface needs no affordance of its own. There is still nothing to ask:
+    /// the framework's ordinary IME-allowance reconcile is what summons it, and
+    /// an explicit ask would at best duplicate that and at worst re-assert
+    /// allowance, which cancels a live composition — so a request resolves to
+    /// "already done".
+    ///
+    /// The guarantee is what separates this from [`None`](Self::None), which
+    /// covers every platform where a keyboard may or may not appear.
+    ViaAccessibility,
+    /// A keyboard exists and can be shown and hidden on demand. Only a backend
+    /// that can honour **both** directions may report this: a toggle whose
+    /// current state is unknown cannot, because "show" would sometimes hide.
+    Explicit,
 }
 
 /// No-op implementation used by standalone `WidgetTree`s constructed

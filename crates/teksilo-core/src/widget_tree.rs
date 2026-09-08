@@ -80,9 +80,16 @@ pub struct WidgetTree {
     /// rebuilding the widget tree, so interaction state (focus, scroll, expanded
     /// panels, …) survives theme switches.
     theme_signal: crate::signal::Signal<Theme>,
-    /// How the active [`TargetDensity`] is chosen. `Fixed(Compact)` by default,
-    /// so nothing switches density unless the app asks. `FollowLastPointer` is
-    /// read by the pointer ingress (P15) — this tree only stores it.
+    /// How the active [`TargetDensity`](teksilo_tokens::TargetDensity) is chosen. `Fixed(Compact)` by default,
+    /// so nothing switches density unless the app asks.
+    ///
+    /// `FollowLastPointer` is **stored and read by nobody**. The pointer
+    /// ingress it was written for exists — the app event loop routes contacts
+    /// into `dispatch_pointer_with_ops` — but honouring the policy means
+    /// deciding what a stray tap costs (a density switch discards every widget
+    /// id in the tree), whether a pen counts as coarse, and how the hysteresis
+    /// commits when the user simply stops touching. None of that is settled, so
+    /// the policy is a declaration the framework does not yet act on.
     density_policy: teksilo_tokens::DensityPolicy,
     /// User-controlled global text-scale factor (`1.0` = 100 %). Layered on top
     /// of the OS `text_scale_factor`: the two multiply. Set via
@@ -223,7 +230,7 @@ pub struct WidgetTree {
     /// [`set_input_clock`](Self::set_input_clock).
     input_clock: std::rc::Rc<dyn crate::pointer::clock::InputClock>,
     /// What is known about the sample currently being dispatched, snapshotted
-    /// onto every [`EventContext`](crate::widget::EventContext) built while it
+    /// onto every [`EventContext`] built while it
     /// runs. Holds its default — a mouse at the epoch — outside a pointer or
     /// scroll dispatch.
     current_input: crate::pointer::InputSnapshot,
@@ -359,7 +366,7 @@ pub struct WidgetTree {
     pub(crate) frame_tick_scheduler: crate::frame_tick_scheduler::FrameTickScheduler,
     /// Live pans, live coasts, the window's pinch, and the palm watches — the
     /// whole touch-motion layer, in one field. See
-    /// [`pan_arbiter`](self::pan_arbiter).
+    /// [`pan_arbiter`].
     touch_motion: pan_arbiter::TouchMotion,
     /// The claimant chain the next synthesised scroll is to walk.
     ///
@@ -484,6 +491,23 @@ pub struct WidgetTree {
     /// the escape hatch for widgets that must size a device-pixel OS resource
     /// (e.g. a `WebView`'s native subview). 1.0 in headless / test contexts.
     device_scale_factor: f32,
+    /// Platform safe-area insets for the host window — a notch, a rounded
+    /// corner, a home indicator — in logical pixels, fed by `teksilo-app`
+    /// after every window resize. Reaches overlay placement through
+    /// [`OverlayViewport::safe_area`](crate::overlay::OverlayViewport::safe_area).
+    /// `ZERO` on every platform that reports nothing, which is every desktop
+    /// platform but macOS.
+    safe_area: teksilo_canvas::EdgeInsets,
+    /// A rectangle of the window currently covered by something outside the
+    /// tree — a soft keyboard, a platform IME candidate window — in
+    /// window-logical pixels. Reaches overlay placement through
+    /// [`OverlayViewport::occluded`](crate::overlay::OverlayViewport::occluded).
+    /// `None` on every frame where nothing is covering the window.
+    occluded_inset: Option<Rect>,
+    /// A pending `EventContext::request_soft_keyboard` call, taken by the app
+    /// layer once per dispatch. `Some(true)` asks for the keyboard,
+    /// `Some(false)` asks it to go away.
+    soft_keyboard_request: Option<bool>,
     /// Active drag-and-drop session, if any.
     pub(crate) active_drag: Option<crate::drag_state::DragSession>,
     /// Source widget of an in-flight OS (outbound) drag that escalated past
@@ -872,6 +896,9 @@ impl WidgetTree {
             prefers_reduced_motion: false,
             text_scale_factor: 1.0,
             device_scale_factor: 1.0,
+            safe_area: teksilo_canvas::EdgeInsets::ZERO,
+            occluded_inset: None,
+            soft_keyboard_request: None,
             active_drag: None,
             outbound_drag_source: None,
             os_drag_reentered: false,
@@ -2067,9 +2094,9 @@ impl WidgetTree {
     /// Set the density-selection policy.
     ///
     /// Storing a `Fixed(d)` policy does **not** by itself switch the density —
-    /// call [`Self::set_input_density`] for that. `FollowLastPointer` is acted
-    /// on by the pointer ingress once P15 lands; until then this is state and
-    /// an accessor.
+    /// call [`Self::set_input_density`] for that. `FollowLastPointer` is not
+    /// acted on either: it is state and an accessor, and the field's own
+    /// documentation says what is still undecided about honouring it.
     pub fn set_density_policy(&mut self, policy: teksilo_tokens::DensityPolicy) {
         self.density_policy = policy;
     }
@@ -2680,6 +2707,108 @@ impl WidgetTree {
     /// The host window HiDPI device scale most recently set (1.0 by default).
     pub fn device_scale_factor(&self) -> f32 {
         self.device_scale_factor
+    }
+
+    /// Report the host window's platform safe-area insets — the region the
+    /// window owns but a person cannot fully see or touch (a display cutout, a
+    /// rounded corner, a home indicator).
+    ///
+    /// Fed by `teksilo-app` from
+    /// `teksilo_platform::safe_area`, which reads the window on macOS and
+    /// answers `ZERO` everywhere else because no other desktop platform
+    /// reports one. Overlays clamp into what is left; the root layout
+    /// proposal is deliberately **not** shrunk — a safe area moves what floats
+    /// over the content, not the content.
+    pub fn set_safe_area(&mut self, insets: teksilo_canvas::EdgeInsets) {
+        if self.safe_area != insets {
+            self.safe_area = insets;
+            // Overlay placement is recomputed from scratch by every layout
+            // pass, so the change reaches the screen as soon as one runs; the
+            // frame request is what guarantees one does.
+            self.request_frame();
+        }
+    }
+
+    /// The safe-area insets most recently set (`ZERO` by default).
+    pub fn safe_area(&self) -> teksilo_canvas::EdgeInsets {
+        self.safe_area
+    }
+
+    /// Report a rectangle of the window currently covered from outside the
+    /// tree — a soft keyboard, a platform IME candidate window — in
+    /// window-logical pixels, or `None` when nothing covers it.
+    ///
+    /// A **rectangle**, not a named edge, because that is what a platform
+    /// reports and because the placement code resolves it by keeping the
+    /// largest free slab rather than by insetting an edge: a keyboard at the
+    /// bottom gives the band above it, a candidate window at a side gives the
+    /// band beside it, and neither needs the platform to say which edge it
+    /// came from.
+    ///
+    /// Scope: like the safe area, this reaches **overlay placement only**. The
+    /// root layout proposal keeps the whole window, so a scroll container
+    /// still extends behind the keyboard and nothing reflows when one rises —
+    /// which is what the desktop convention wants, and what keeps a keyboard
+    /// appearing from being a full relayout of the document. Bringing a
+    /// focused field out from behind the band is a scroll, against
+    /// [`usable_viewport`](Self::usable_viewport), not a resize.
+    pub fn set_occluded_inset(&mut self, occluded: Option<Rect>) {
+        if self.occluded_inset != occluded {
+            self.occluded_inset = occluded;
+            self.request_frame();
+        }
+    }
+
+    /// The occluding rectangle most recently set (`None` by default).
+    pub fn occluded_inset(&self) -> Option<Rect> {
+        self.occluded_inset
+    }
+
+    /// The viewport overlays are placed into: the last laid-out window size,
+    /// less the safe area, less anything covering it.
+    ///
+    /// The same rectangle `position_overlays` clamps into, exposed so a
+    /// consumer that must put something *in front of* a keyboard — a
+    /// scroll-into-view for the focused field — can ask for it rather than
+    /// re-deriving it.
+    pub fn usable_viewport(&self) -> Rect {
+        let proposal = self.last_proposal();
+        let size = teksilo_canvas::Size::new(
+            proposal.width.unwrap_or(0.0),
+            proposal.height.unwrap_or(0.0),
+        );
+        self.overlay_viewport_for(size)
+            .usable(self.layout_direction)
+    }
+
+    /// Build the overlay viewport for a window of `size`, folding in the
+    /// safe area and the occluding rectangle.
+    pub(crate) fn overlay_viewport_for(
+        &self,
+        size: teksilo_canvas::Size,
+    ) -> crate::overlay::OverlayViewport {
+        crate::overlay::OverlayViewport::new(size)
+            .with_safe_area(self.safe_area)
+            .with_occluded(self.occluded_inset)
+    }
+
+    /// Ask the platform to show (`true`) or hide (`false`) its on-screen
+    /// keyboard.
+    ///
+    /// Recorded here rather than pushed straight at the window because the one
+    /// thing the request must not do is re-assert IME allowance while a
+    /// composition is live, and the IME-allowance state lives in the app
+    /// layer's per-window reconcile. `teksilo-app` takes the request once per
+    /// dispatch, after that reconcile, and applies it against the platform's
+    /// [`SoftKeyboardSupport`](crate::window::SoftKeyboardSupport) answer.
+    pub fn request_soft_keyboard(&mut self, visible: bool) {
+        self.soft_keyboard_request = Some(visible);
+    }
+
+    /// Take the pending soft-keyboard request, if any. Called by the app layer
+    /// once per dispatch.
+    pub fn take_soft_keyboard_request(&mut self) -> Option<bool> {
+        self.soft_keyboard_request.take()
     }
 
     /// Mark a widget as clipping its children to its bounds (scroll areas).
@@ -3686,7 +3815,7 @@ impl WidgetTree {
     }
 
     /// The press held by the pointer being dispatched, as `(inside, pending)`,
-    /// for [`EventContext`](crate::widget::EventContext)'s per-dispatch
+    /// for [`EventContext`]'s per-dispatch
     /// snapshot. `None` when that pointer holds no press.
     pub(crate) fn current_press_snapshot(&self) -> Option<(bool, bool)> {
         self.presses

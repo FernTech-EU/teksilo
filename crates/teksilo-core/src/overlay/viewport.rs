@@ -18,21 +18,30 @@
 //! `From<(f32, f32)>` exists and why a desktop tree's placement is unchanged to
 //! the last pixel.
 //!
-//! # Nothing supplies the insets yet — package P18
+//! # Where the insets come from
 //!
-//! That default is, at the moment, the *only* thing anything constructs.
 //! [`WidgetTree::layout_with_ops`](crate::WidgetTree::layout_with_ops) — where
 //! both production calls to `position_overlays` are, and what `teksilo-app`
-//! calls and what [`layout`](crate::WidgetTree::layout) delegates to — passes a
-//! bare `(width, height)` tuple, and neither
-//! [`with_safe_area`](OverlayViewport::with_safe_area) nor
-//! [`with_occluded`](OverlayViewport::with_occluded) has a caller outside this
-//! crate's tests. Reading the platform's real insets and the keyboard
-//! rectangle and threading them through to here is package **P18**. Until it
-//! lands, every window claims to be usable to its last pixel, so the notch, the
-//! rounded corner, the home indicator and the keyboard band described above are
-//! a contract this type is ready to honour rather than one it is being asked
-//! to.
+//! calls and what [`layout`](crate::WidgetTree::layout) delegates to — builds
+//! this from the window size plus
+//! [`WidgetTree::safe_area`](crate::WidgetTree::safe_area) and
+//! [`WidgetTree::occluded_inset`](crate::WidgetTree::occluded_inset). Both are
+//! fed by `teksilo-app`: the safe area from `teksilo_platform::safe_area` after
+//! every resize and scale change, the occluding rectangle from whatever is
+//! covering the window.
+//!
+//! Both default to nothing, and on the desktop that default is usually the
+//! truth: only macOS reports a safe area at all (and only when the window
+//! covers the camera housing), and only Windows has a soft keyboard whose
+//! rectangle a client can find. A window with neither produces exactly the
+//! `(width, height)` this used to be handed, which is why `From<(f32, f32)>`
+//! exists and why a desktop tree's placement is unchanged to the last pixel.
+//!
+//! Scope: this reaches **overlay placement** and nothing else. The root layout
+//! proposal is still the whole window, so a keyboard rising does not reflow the
+//! document behind it. Bringing a focused field out from behind the band is a
+//! scroll against [`WidgetTree::usable_viewport`](crate::WidgetTree::usable_viewport),
+//! not a resize.
 
 use teksilo_canvas::{EdgeInsets, Rect, Size};
 

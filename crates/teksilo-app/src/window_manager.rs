@@ -758,6 +758,30 @@ impl WindowManager {
         // Create with AccessKit adapter (shows window after adapter is ready)
         let mut pw = pollster::block_on(PlatformWindow::new_with_a11y(window, target));
 
+        // Finish wiring the per-window input translator, now that a real
+        // surface exists to ask about. What each of the three facts is for is
+        // on `input_loop::wire_translator`; what is here is only the asking.
+        //
+        // `create_pen_source` never fails: it answers the null source — no
+        // capabilities, so `wire_translator` installs nothing — wherever the
+        // platform has no pen *path*. What it does NOT do is probe for an
+        // attached digitizer, on any platform: a Wayland session whose
+        // compositor advertises `zwp_tablet_manager_v2` and a Win32 window
+        // whose subclass installs both get a live shim with no stylus in the
+        // building. X11 and macOS have no path at all and always get the null
+        // source.
+        let window_system = winit::raw_window_handle::HasDisplayHandle::display_handle(pw.window())
+            .ok()
+            .map(|display| teksilo_platform::window_system_for_display_handle(&display.as_raw()));
+        let pen = teksilo_core::raw_handle::ParentHandle::from_window(pw.window())
+            .map(|parent| teksilo_platform::create_pen_source(&parent));
+        crate::input_loop::wire_translator(
+            &mut translation_state,
+            window_system,
+            initial_theme.input,
+            pen,
+        );
+
         // macOS-only: the parent-child attach was deferred out of the
         // winit builder above to avoid the AppKit auto-show that races
         // with AccessKit adapter creation. Wire it now that the child
@@ -993,6 +1017,16 @@ impl WindowManager {
             atlas_uploaded_version: primed_atlas_version,
         };
 
+        let mut managed = managed;
+        // The first safe-area read. It is refreshed on resize and on scale
+        // change; this is the one that answers before the window has ever
+        // been resized, which for a window created full-screen is the only
+        // one that matters.
+        {
+            let chrome = crate::app::WindowChrome::new(&managed.platform_window, None);
+            crate::input_loop::refresh_safe_area(&chrome, &mut managed.tree);
+        }
+
         self.windows.insert(winit_id, managed);
         self.teksilo_to_winit.insert(teksilo_id, winit_id);
 
@@ -1128,6 +1162,11 @@ impl WindowManager {
             // app-global typed-payload stash would leak and a later genuine
             // external drop could be misrecovered as the stale payload.
             managed.tree.abort_outbound_drag();
+            // Revoke every live contact at the translator before it is
+            // dropped — see `input_loop::release_contacts` for what that
+            // buys, which is not widget teardown.
+            let now = managed.tree.input_now();
+            crate::input_loop::release_contacts(&mut managed.translation_state, now);
             if let Some(sid) = managed.string_id.as_deref() {
                 self.string_to_id.remove(sid);
             }
@@ -1491,6 +1530,10 @@ impl WindowManager {
         self.theme = theme.clone();
         for managed in self.windows.values_mut() {
             managed.tree.set_theme(theme.clone());
+            // The translator holds the input tokens, not the theme, so a
+            // theme swap has to re-install them or the touch kill switch and
+            // the wheel-notch scale stay at whatever the old theme said.
+            managed.translation_state.set_input_tokens(theme.input);
         }
     }
 
@@ -2135,6 +2178,17 @@ impl teksilo_core::WindowOps for WindowOpsImpl<'_> {
         // during event delivery.
         let arc = self.current_window_arc.as_ref()?;
         teksilo_core::raw_handle::ParentHandle::from_window(arc.as_ref())
+    }
+
+    fn soft_keyboard_support(&self) -> teksilo_core::window::SoftKeyboardSupport {
+        // The host's row, not the trait's `None` default. Without this
+        // override every widget asking whether a keyboard can be raised is
+        // told no on every platform — including the one whose row is
+        // `Explicit` — and offers the wrong affordance. Named there rather
+        // than written here so a test can assert against the same thing;
+        // `host_soft_keyboard_support`'s own doc says what such a test can
+        // and cannot catch.
+        crate::input_loop::host_soft_keyboard_support()
     }
 
     fn set_ime_cursor_area(&mut self, area: teksilo_canvas::Rect) {

@@ -20,8 +20,11 @@
 //! (`blocking_dispatch` → `prepare_read` / `read_events`) is a fatal error in
 //! libwayland. The multi-queue model buffers events for our objects whenever
 //! *anyone* reads, so `dispatch_pending` on a short interval is both correct
-//! and sufficient. The interval here is shorter than the drag backend's,
-//! because a stylus is a continuous input where a drag is a discrete one.
+//! and sufficient. While a tool is live the interval here is shorter than the
+//! drag backend's, because a stylus is a continuous input where a drag is a
+//! discrete one; while no tool has been announced it is far longer, because
+//! binding the protocol says nothing about whether a digitizer exists — see
+//! `WaylandPenSource::poll_interval`.
 //!
 //! # Surface-local is already logical
 //!
@@ -64,7 +67,6 @@
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
 
 use raw_window_handle::{RawDisplayHandle, RawWindowHandle};
 use teksilo_canvas::Point;
@@ -98,7 +100,7 @@ use super::{PenButtons, PenCaps, PenPacket, PenSource};
 /// Half the drag backend's 8 ms: a stylus is a continuous input a user watches
 /// ink follow, and 4 ms is a quarter of a 60 Hz frame — under the threshold at
 /// which added latency is visible in a stroke, without spinning a thread.
-const POLL_INTERVAL: Duration = Duration::from_millis(4);
+use super::PEN_POLL_INTERVAL as POLL_INTERVAL;
 
 /// `zwp_tablet_tool_v2::pressure` is normalised over this range.
 const PRESSURE_RANGE: f32 = 65535.0;
@@ -307,6 +309,11 @@ impl ToolState {
 struct PenQueue {
     packets: Mutex<Vec<PenPacket>>,
     stop: AtomicBool,
+    /// Whether the tablet seat has announced at least one live tool.
+    ///
+    /// The dispatch thread's only clock: see [`WaylandPenSource::poll_interval`]
+    /// for why a session with no tool must not be polled at stylus rate.
+    has_tool: AtomicBool,
 }
 
 /// Dispatch-thread state.
@@ -323,6 +330,21 @@ struct TabletState {
 }
 
 impl TabletState {
+    /// Publish whether any tool is live, so the dispatch thread can pick its
+    /// poll rate. See [`WaylandPenSource::poll_interval`], which is where the
+    /// rule this feeds is tested.
+    ///
+    /// The *calls* to this, on the seat's `ToolAdded` and `ToolRemoved` arms,
+    /// are not witnessed: reaching them needs a compositor advertising a
+    /// tablet manager, so deleting either leaves the suite green while a real
+    /// stylus is polled at the idle rate. Listed with the other
+    /// reviewed-rather-than-tested call sites in `docs/touch-and-pen.md` §9.
+    fn sync_tool_presence(&self) {
+        self.queue
+            .has_tool
+            .store(!self.tools.is_empty(), Ordering::Relaxed);
+    }
+
     fn push(&self, packets: Vec<PenPacket>) {
         if packets.is_empty() {
             return;
@@ -392,6 +414,7 @@ impl Dispatch<ZwpTabletSeatV2, ()> for TabletState {
     ) {
         if let zwp_tablet_seat_v2::Event::ToolAdded { id } = event {
             state.tools.insert(id.id(), ToolState::default());
+            state.sync_tool_presence();
         }
     }
 
@@ -428,6 +451,7 @@ impl Dispatch<ZwpTabletToolV2, ()> for TabletState {
         }
         if removed {
             state.tools.remove(&id);
+            state.sync_tool_presence();
         }
         state.push(out);
     }
@@ -541,13 +565,67 @@ pub struct WaylandPenSource {
     queue: Arc<PenQueue>,
 }
 
+/// How long the dispatch thread waits between `dispatch_pending` calls when no
+/// tool has been announced.
+///
+/// See [`WaylandPenSource::poll_interval`] for the whole argument; the number
+/// itself is chosen to be far enough below human hot-plug reaction time that a
+/// tablet plugged in mid-session is on the fast tier long before its owner can
+/// pick the pen up, and far enough above [`POLL_INTERVAL`] that the idle cost
+/// is not a timer the kernel has to honour 250 times a second.
+const IDLE_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(250);
+
 impl WaylandPenSource {
+    /// How long to wait before looking at the queue again.
+    ///
+    /// This exists because binding the protocol says nothing about the
+    /// hardware (see [`Self::attach`]): a compositor advertises
+    /// `zwp_tablet_manager_v2` whether or not a digitizer is attached, so on a
+    /// modern desktop most windows get one of these threads and most of them
+    /// will never see a packet. At [`POLL_INTERVAL`] (4 ms) that thread is 250
+    /// timer wakeups a second, for the life of every window, on a machine with
+    /// no tablet — which is exactly the kind of idle cost the rest of the
+    /// framework is built to avoid.
+    ///
+    /// The protocol answers it itself. A tablet seat announces `tool_added`
+    /// before any tool can be in proximity, so "has a tool ever been
+    /// announced" is a sound gate: no tool means no stroke is possible, and
+    /// [`IDLE_POLL_INTERVAL`] costs 4 wakeups a second instead of 250. The
+    /// moment a tool is announced — at bind time for an already-plugged
+    /// tablet, within one idle interval for one plugged in later — the thread
+    /// returns to stylus rate, and it drops back when the last tool is
+    /// removed.
+    ///
+    /// The consequence, stated plainly: a tablet hot-plugged mid-session is
+    /// noticed up to [`IDLE_POLL_INTERVAL`] late. Nothing is dropped in that
+    /// window (the events are buffered in our queue, not discarded) — they are
+    /// simply dispatched at the next look, and the next look is a quarter of a
+    /// second at worst, before a hand can reach the pen.
+    fn poll_interval(has_tool: bool) -> std::time::Duration {
+        if has_tool {
+            POLL_INTERVAL
+        } else {
+            IDLE_POLL_INTERVAL
+        }
+    }
+
     /// Bind the tablet protocol for `parent`'s window, or `None` when this is
     /// not a Wayland window or the compositor advertises no tablet manager.
     ///
-    /// A compositor with no `zwp_tablet_manager_v2` is the common case on a
-    /// machine with no tablet, so the failure is quiet: the caller falls back
-    /// to the null source and the window reports no pen.
+    /// The failure is quiet — the caller falls back to the null source and the
+    /// window reports no pen — because it says nothing about the hardware.
+    /// Whether `zwp_tablet_manager_v2` is advertised is a **compositor-support
+    /// question**, not a proxy for whether a digitizer is plugged in: the
+    /// machine this was written on advertises the manager at version 2 with no
+    /// digitizer attached at all — checked on a machine where `wayland-info`
+    /// reports `zwp_tablet_manager_v2` at version 2 and no input device is a
+    /// digitizer.
+    /// Every compositor with tablet support advertises the global
+    /// unconditionally, so on a modern desktop this returns `Some` on most
+    /// machines whether or not a tablet exists — and what decides the *cost*
+    /// of that is `Self::poll_interval`, not this. `attach` fails where the
+    /// compositor has no tablet support to offer, which today means an older
+    /// or a deliberately minimal one.
     pub fn attach(parent: &ParentHandle) -> Option<Self> {
         let RawDisplayHandle::Wayland(display) = parent.raw_display_handle() else {
             return None;
@@ -602,7 +680,9 @@ impl WaylandPenSource {
                         break;
                     }
                     let _ = conn.flush();
-                    std::thread::sleep(POLL_INTERVAL);
+                    std::thread::sleep(Self::poll_interval(
+                        thread_queue.has_tool.load(Ordering::Relaxed),
+                    ));
                 }
             })
             .ok()?;
@@ -626,6 +706,13 @@ impl PenSource for WaylandPenSource {
 
     fn capabilities(&self) -> PenCaps {
         PenCaps::FULL_PEN
+    }
+
+    /// Yes: the tablet listener runs on its own thread — at [`POLL_INTERVAL`]
+    /// while a tool is announced, and on a slower tier while none is — so the
+    /// event loop has to look again after a wake.
+    fn polls_off_thread(&self) -> bool {
+        true
     }
 }
 

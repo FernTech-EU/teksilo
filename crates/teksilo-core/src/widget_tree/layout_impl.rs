@@ -517,10 +517,14 @@ impl WidgetTree {
         let anchor_bounds = |id: WidgetId| -> Option<Rect> {
             self.arena.is_active(id).then(|| self.arena.bounds(id))
         };
-        let viewport = (
+        // The window, less the platform safe area, less whatever is covering
+        // it. Both are `ZERO`/`None` unless something supplied them, so a
+        // desktop frame produces exactly the bare `(width, height)` this used
+        // to pass.
+        let viewport = self.overlay_viewport_for(teksilo_canvas::Size::new(
             proposal.width.unwrap_or(800.0),
             proposal.height.unwrap_or(600.0),
-        );
+        ));
         self.overlay_manager
             .position_overlays(anchor_bounds, viewport, self.layout_direction);
         for content_id in &overlay_content_ids {
@@ -846,6 +850,139 @@ mod tests {
     use crate::test_widgets::{FillWidget, InsetWidget, StackWidget};
     use teksilo_canvas::Size;
     use teksilo_tokens::Color;
+
+    /// A leaf of a fixed intrinsic size, so a `Centered` overlay has something
+    /// to centre.
+    #[derive(Debug)]
+    struct Sized(f32, f32);
+
+    impl Widget for Sized {
+        fn layout_response(
+            &self,
+            _proposal: SizeProposal,
+            _ctx: &LayoutContext,
+        ) -> crate::widget::LayoutResponse {
+            Size::new(self.0, self.1).into()
+        }
+    }
+
+    fn tree_with_centred_modal(content_height: f32) -> (WidgetTree, crate::overlay::OverlayId) {
+        let mut tree = WidgetTree::new();
+        let anchor = tree.add(FillWidget::new());
+        let content = tree.add(Sized(200.0, content_height));
+        let id = tree.show_overlay(crate::overlay::OverlayRequest {
+            content_id: content,
+            anchor,
+            placement: crate::overlay::OverlayPlacement::Centered,
+            dismiss: crate::overlay::DismissBehavior::Manual,
+            layer: crate::overlay::OverlayLayer::InTree,
+            parent_overlay: None,
+            on_dismiss: None,
+            fade_duration: None,
+        });
+        (tree, id)
+    }
+
+    /// The supply this package exists to add: with nothing covering the window
+    /// and no safe area, the viewport is the whole window — byte for byte the
+    /// bare `(width, height)` tuple that used to be passed.
+    #[test]
+    fn a_bare_window_is_usable_to_its_last_pixel() {
+        let (mut tree, id) = tree_with_centred_modal(100.0);
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        assert_eq!(tree.usable_viewport(), Rect::new(0.0, 0.0, 400.0, 300.0));
+        let bounds = tree.overlay_content_bounds(id).expect("placed");
+        assert_eq!(bounds.y, 100.0, "centred in 300: (300 - 100) / 2");
+    }
+
+    /// A soft keyboard covering the bottom band shrinks the viewport, and the
+    /// modal recomputes against what is left instead of centring behind it.
+    #[test]
+    fn an_occluding_band_shrinks_the_viewport_and_moves_the_modal() {
+        let (mut tree, id) = tree_with_centred_modal(100.0);
+        // The bottom 140 of a 300-tall window: a keyboard.
+        tree.set_occluded_inset(Some(Rect::new(0.0, 160.0, 400.0, 140.0)));
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+
+        assert_eq!(
+            tree.usable_viewport(),
+            Rect::new(0.0, 0.0, 400.0, 160.0),
+            "the largest free slab is the band above the keyboard"
+        );
+        let bounds = tree.overlay_content_bounds(id).expect("placed");
+        assert_eq!(bounds.y, 30.0, "centred in 160: (160 - 100) / 2");
+        assert!(
+            bounds.y + bounds.height <= 160.0,
+            "and the whole modal clears the keyboard"
+        );
+    }
+
+    /// When the content is taller than what is left, centring would push it off
+    /// the top. It pins to the top of the usable area instead, so the first
+    /// line stays reachable and the rest is scrolled to.
+    #[test]
+    fn a_modal_taller_than_the_usable_area_pins_to_its_top() {
+        let (mut tree, id) = tree_with_centred_modal(240.0);
+        tree.set_occluded_inset(Some(Rect::new(0.0, 160.0, 400.0, 140.0)));
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        let bounds = tree.overlay_content_bounds(id).expect("placed");
+        assert_eq!(bounds.y, 0.0, "pinned to the top of the usable band");
+    }
+
+    /// A safe area does the same for the reason a notch exists.
+    #[test]
+    fn a_safe_area_insets_the_viewport() {
+        let (mut tree, id) = tree_with_centred_modal(100.0);
+        tree.set_safe_area(teksilo_canvas::EdgeInsets {
+            top: 40.0,
+            bottom: 20.0,
+            leading: 10.0,
+            trailing: 10.0,
+        });
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        assert_eq!(tree.usable_viewport(), Rect::new(10.0, 40.0, 380.0, 240.0));
+        let bounds = tree.overlay_content_bounds(id).expect("placed");
+        assert_eq!(bounds.y, 40.0 + (240.0 - 100.0) / 2.0);
+    }
+
+    /// The scrim is deliberately not inset: one that respected the safe area
+    /// would leave the notch undimmed and the content behind it legible.
+    #[test]
+    fn the_supply_does_not_move_the_root_layout() {
+        // Occlusion reaches overlay placement and nothing else. A keyboard
+        // rising must not reflow the document behind it — that is a scroll, not
+        // a resize, and this is where the difference is decided.
+        let mut tree = WidgetTree::new();
+        let root = tree.add(FillWidget::new());
+        tree.set_occluded_inset(Some(Rect::new(0.0, 160.0, 400.0, 140.0)));
+        tree.set_safe_area(teksilo_canvas::EdgeInsets {
+            top: 40.0,
+            bottom: 0.0,
+            leading: 0.0,
+            trailing: 0.0,
+        });
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        assert_eq!(
+            tree.bounds(root),
+            Rect::new(0.0, 0.0, 400.0, 300.0),
+            "the root still owns the whole window"
+        );
+    }
+
+    /// A pending soft-keyboard request is recorded on the tree and taken
+    /// exactly once, by the app layer, after its IME reconcile.
+    #[test]
+    fn a_soft_keyboard_request_is_taken_once() {
+        let mut tree = WidgetTree::new();
+        assert_eq!(tree.take_soft_keyboard_request(), None);
+        tree.request_soft_keyboard(true);
+        assert_eq!(tree.take_soft_keyboard_request(), Some(true));
+        assert_eq!(
+            tree.take_soft_keyboard_request(),
+            None,
+            "a request is a one-shot; a second take must not re-ask"
+        );
+    }
 
     /// A leaf that records the bounds `place_children` hands it, and how often.
     #[derive(Debug, Clone, Default)]

@@ -12,12 +12,18 @@ It is written alongside the migration, so it grows as the packages land. What is
 here now is what exists now: the pointer model, the clock, the trace switch, and
 the platform translator that turns an OS touch packet into pointer samples.
 
-> **Status.** A mouse behaves exactly as it always has. The tree now routes
-> touch and pen samples end to end — arbitration, pan delivery, cancellation,
-> hit targeting and the press — but the **app event loop** is not yet wired to
-> the multi-sample translator, so a running application still feeds the tree the
-> single-`WidgetEvent` mouse path. Everything below the ingress doors is live
-> and tested; the last hop from the platform layer into the loop is not.
+> **Status.** A mouse behaves exactly as it always has. The path is now
+> connected end to end: the app event loop routes `Touch`, `CursorMoved`,
+> `MouseInput`, `MouseWheel` and the OS gesture family through the platform
+> backend into the tree's sample doors, hands `CursorLeft` straight to the tree
+> (there is no sample for a boundary crossing), drains the pen shim once
+> per event-loop turn, and revokes every live pointer — in the tree and at the
+> translator both — when a window is deactivated or occluded. A window closing
+> drains the translator too, so the process-global pointer identities its
+> contacts held are returned. What a running application does
+> **not** yet do is decide anything differently because a finger arrived rather
+> than a mouse: `DensityPolicy::FollowLastPointer` is stored and honoured by
+> nobody, and the touch text contract is a later package.
 
 ---
 
@@ -504,7 +510,12 @@ a platform fact read out of winit 0.30's source, not a to-do**.
 | `reports_os_pinch` | no | **yes** | no | no |
 | `synthesises_mouse_from_touch` | no | — | no | **yes** |
 | `touch_window_drag` | no | no | **no** | no |
-| `osk` | `ViaAccessibility` | `None` | `None` | `None` |
+| `osk` | `Explicit` | `None` | `None` | `None` |
+
+The `osk` row is the one capability with a whole page behind it — what
+`Explicit` obliges a backend to do, and why three of four platforms answer
+`None` for reasons that are not laziness. See
+[Soft keyboard](soft-keyboard.md).
 
 `BackendCaps::for_platform(PlatformKind, WindowSystem)` is the machine-readable
 form, and it is a *pure function* — so every row above is asserted from any
@@ -768,6 +779,21 @@ libwayland. The multi-queue model buffers events for our objects whenever
 sufficient. The pen thread polls every **4 ms** where the drag backend polls
 every 8: a stylus is a continuous input a user watches ink follow, and 4 ms is a
 quarter of a 60 Hz frame.
+
+**But only while a tool exists.** Binding the protocol says nothing about the
+hardware: a compositor advertises `zwp_tablet_manager_v2` whether or not a
+digitizer is attached — the machine this was written on advertises it at
+version 2 with a touchpad, a keyboard and no tablet at all — so on a modern
+desktop most windows get a shim and most of those will never see a packet. At 4
+ms that is 250 timer wakeups a second per window for the life of the
+application, on a machine with no stylus in the building, which is exactly the
+idle cost the rest of the framework is built to avoid. The protocol answers the
+question itself: a tablet seat announces `tool_added` before any tool can be in
+proximity, so `WaylandPenSource::poll_interval` stands the thread down to **250
+ms** until one is announced and returns it to 4 ms the moment one is — at bind
+time for an already-plugged tablet, within one idle interval for one plugged in
+later, which is well before a hand can reach the pen. Nothing is dropped in that
+window; the events are buffered in our queue and dispatched at the next look.
 
 Motion arrives in **surface-local** coordinates, which on Wayland are already
 logical — the compositor has divided by the buffer scale. So this arm passes
@@ -1208,11 +1234,44 @@ costs and an imperfect one of what the folds alone cost.
 
 ## 9. What is not here yet
 
-Deliberately, and in this order: wiring the app event loop to the multi-sample
-translator (nothing dispatches a touch or pen sample yet — the platform layer
-only *produces* them), the kinetic scrolling core, the density sweep across the
-widget catalogue, and touch text editing. Each has its own package; this file
-grows with them.
+Deliberately, and in this order: touch text editing, and the remaining
+scrollable and menu sweeps. Each has its own package; this file grows with them.
+
+The app event loop **is** wired: a `WindowEvent::Touch` handed to
+`TeksiloAppHandler::window_event` reaches the widget tree as a touch sample.
+What that costs to *state* is worth stating too. Every decision in the input
+half of a loop turn lives in `teksilo-app`'s `input_loop` module, where a
+headless test drives it; the winit callbacks that *call* those decisions need an
+`&ActiveEventLoop`, which nothing in the workspace can construct — so they are
+witnessed instead by `teksilo-app`'s `app::winit_loop_tests`, which builds a
+real event loop off the main thread, pumps it with `run_app_on_demand`, and
+hands the real handler hand-built events from inside a callback. That test is
+`#[ignore]`d (it needs a display server and a wgpu adapter), it is Linux-only
+(it uses winit's X11 extension traits), and CI runs it under Xvfb with openbox,
+beside the X11 protocol tests.
+
+These call sites stay **reviewed rather than tested**. Most carry a platform
+answer that is a constant no Linux host can vary, so a test run there cannot
+tell a right answer from a missing one:
+
+- `create_window`'s first safe-area read — zero on everything but a macOS
+  camera-housing window.
+- the `WindowOps::soft_keyboard_support` override — `None` on every desktop
+  but Windows, which is also the trait's default, so deleting the override
+  changes no value this host can observe.
+- the on-screen-keyboard poll, and its apply — `Explicit` is a Windows-only row.
+- the pen pump's per-turn call — X11 has no pen path, so no shim is ever
+  installed on the host CI runs on.
+- the close path's contact release — what it frees is a process-global identity
+  allocator whose state has no observable side once the window and its tree are
+  gone.
+- the Wayland tablet seat publishing tool presence (`sync_tool_presence` on the
+  `ToolAdded` / `ToolRemoved` arms) — the poll-rate rule it feeds is covered,
+  but the arms that call it need a compositor with a tablet manager, so
+  deleting the call leaves the suite green while a real stylus drops to the
+  idle rate.
+
+These are the lines a hardware sign-off has to look at by hand.
 
 The cancel teardown is complete: the framework press signal clears there
 (§7.1) and a fling this pointer was driving stops there, both at the point the

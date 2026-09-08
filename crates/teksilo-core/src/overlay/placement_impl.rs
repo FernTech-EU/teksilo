@@ -14,26 +14,25 @@
 //! rather than cover the control that raised it, and where it can be shrunk
 //! instead it is shrunk — see [`above_anchor`].
 //!
-//! # The safe area is not plumbed in yet — package P18
+//! # Where the safe area comes from
 //!
-//! Every promise this module makes about a notch, a rounded corner, a home
-//! indicator or a soft keyboard is exercised **only by the tests at the bottom
-//! of this file**. Nothing in production builds an [`OverlayViewport`] that
-//! carries either fact: both production calls to
+//! Both production calls to
 //! [`position_overlays`](OverlayManager::position_overlays) are inside
 //! [`WidgetTree::layout_with_ops`](crate::WidgetTree::layout_with_ops) — which
 //! is what `teksilo-app` calls and what
-//! [`layout`](crate::WidgetTree::layout) delegates to — and both hand it a bare
-//! `(width, height)`, while [`with_safe_area`](OverlayViewport::with_safe_area)
-//! and [`with_occluded`](OverlayViewport::with_occluded) have no caller outside
-//! this crate's tests. Feeding the platform's real insets and the keyboard
-//! rectangle in is package **P18**; until it lands, every window — desktop and
-//! phone alike — reports itself usable to its last pixel, and the arithmetic
-//! here reduces exactly to what it was before [`OverlayViewport`] existed.
+//! [`layout`](crate::WidgetTree::layout) delegates to — and it now builds the
+//! [`OverlayViewport`] from the tree's own
+//! [`safe_area`](crate::WidgetTree::safe_area) and
+//! [`occluded_inset`](crate::WidgetTree::occluded_inset), which `teksilo-app`
+//! reads from the platform after every resize and scale change.
 //!
-//! So read the safe-area behaviour below as the shape the answer will take once
-//! P18 supplies the numbers, not as something a person on a phone is getting
-//! today. The geometry is right and it is tested; it is simply never asked.
+//! On the desktop both are usually nothing, and where they are nothing the
+//! arithmetic below reduces exactly to what it was before [`OverlayViewport`]
+//! existed: only macOS reports a safe area at all, and only Windows has a
+//! findable soft keyboard. So the notch and keyboard behaviour here is reached
+//! in production, on the platforms that have one, and is inert everywhere else
+//! — which is what the tests at the bottom of this file check by supplying the
+//! numbers directly.
 
 use super::*;
 

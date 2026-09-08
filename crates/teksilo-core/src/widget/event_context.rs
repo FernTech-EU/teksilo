@@ -313,6 +313,12 @@ pub struct EventContext<'ops> {
     /// composing widget that restructured its subtree in a way that changes the AT tree
     /// (relayout alone no longer re-walks AT).
     pub(crate) request_a11y_update: bool,
+    /// Set by [`request_soft_keyboard`](EventContext::request_soft_keyboard);
+    /// drained in `collect_from_ctx` onto the tree, from where the app layer
+    /// takes it once per dispatch — after the IME-allowance reconcile, which
+    /// is the only place that knows whether re-asserting would cancel a live
+    /// composition.
+    pub(crate) soft_keyboard_request: Option<bool>,
     /// Messages queued by [`announce`](EventContext::announce) /
     /// [`announce_with`](EventContext::announce_with), drained into the tree's
     /// own live regions by `collect_from_ctx`. See [`crate::announcer`].
@@ -483,6 +489,7 @@ impl<'ops> EventContext<'ops> {
             close_window_requested: false,
             force_close_requested: false,
             request_a11y_update: false,
+            soft_keyboard_request: None,
             announcements: Vec::new(),
             window_ops: None,
             current_window: None,
@@ -1257,6 +1264,51 @@ impl<'ops> EventContext<'ops> {
     /// the build-time path.
     pub fn request_accessibility_update(&mut self) {
         self.request_a11y_update = true;
+    }
+
+    /// Ask the platform to raise its on-screen keyboard.
+    ///
+    /// For the case the desktop convention has no answer for: a *finger*
+    /// landing in a text field, where there is no physical keyboard and no
+    /// focus change the accessibility layer would notice on its own.
+    ///
+    /// The request is honoured **only where it can do no harm**. Where the
+    /// platform's keyboard follows the framework's IME-allowance reconcile
+    /// ([`SoftKeyboardSupport::ViaAccessibility`](crate::window::SoftKeyboardSupport::ViaAccessibility)),
+    /// the request resolves to nothing — always, not merely while a composition
+    /// happens to be live. That reconcile *is* the request, and the only thing
+    /// an explicit ask could add is a re-assertion of IME allowance, which is
+    /// what cancels a composition mid-word. Nothing on this path calls
+    /// `set_ime_allowed`, and that is what makes placing a caret with a finger
+    /// mid-composition safe. Where the framework has no keyboard request to
+    /// send at all the request is dropped; ask
+    /// [`soft_keyboard_support`](Self::soft_keyboard_support) first if the
+    /// widget needs to offer a fallback.
+    pub fn request_soft_keyboard(&mut self) {
+        self.soft_keyboard_request = Some(true);
+    }
+
+    /// Ask the platform to dismiss its on-screen keyboard.
+    ///
+    /// Only a platform reporting
+    /// [`SoftKeyboardSupport::Explicit`](crate::window::SoftKeyboardSupport::Explicit)
+    /// can honour this; elsewhere there is no dismiss request to send, and a
+    /// keyboard that rose on the IME enable goes away on the matching disable
+    /// when focus leaves the text surface.
+    pub fn dismiss_soft_keyboard(&mut self) {
+        self.soft_keyboard_request = Some(false);
+    }
+
+    /// What the host platform can do about an on-screen keyboard.
+    ///
+    /// [`SoftKeyboardSupport::None`](crate::window::SoftKeyboardSupport::None)
+    /// on a standalone tree and on every platform the framework has no keyboard
+    /// request to send on — which, on the desktop, is most of them.
+    pub fn soft_keyboard_support(&self) -> crate::window::SoftKeyboardSupport {
+        self.window_ops
+            .as_deref()
+            .map(|ops| ops.soft_keyboard_support())
+            .unwrap_or_default()
     }
 
     /// Speak `message` to the screen reader, politely.

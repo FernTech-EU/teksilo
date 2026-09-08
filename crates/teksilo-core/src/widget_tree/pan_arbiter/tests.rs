@@ -676,6 +676,10 @@ fn next_input_deadline_folds_a_live_simulation() {
         None,
         "nothing pending, nothing to wake for"
     );
+    // What the tree wanted the loop back for *before* the fling — so that the
+    // equality below is a statement about the fold having gained a term, not
+    // one that some unrelated deadline happened to satisfy.
+    let before = n.tree.next_timer_deadline();
 
     n.tree.start_fling(
         n.inner,
@@ -687,9 +691,13 @@ fn next_input_deadline_folds_a_live_simulation() {
         .tree
         .next_input_deadline()
         .expect("a live simulation wants the loop back");
-    assert!(
-        n.tree.next_timer_deadline() <= Some(deadline),
-        "…and the tree's one `WaitUntil` is at or before it"
+    // `<= Some(deadline)` would not say this: `None < Some(_)`, so a fold that
+    // dropped the input term entirely would satisfy it.
+    assert_eq!(
+        n.tree.next_timer_deadline(),
+        Some(deadline),
+        "…and the tree's one `WaitUntil` IS the input deadline — it was \
+         {before:?} before the fling started"
     );
 
     n.tree.stop_fling(n.inner);

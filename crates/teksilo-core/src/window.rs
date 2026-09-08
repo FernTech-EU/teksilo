@@ -40,6 +40,6 @@ pub use id::TeksiloWindowId;
 pub use menubar_dispatcher::{
     MenubarAction, MenubarDispatcher, MenubarGuard, MenubarKeyEvent, MenubarReveal,
 };
-pub use ops::{NoopWindowOps, WindowOps};
+pub use ops::{NoopWindowOps, SoftKeyboardSupport, WindowOps};
 pub use placement::WindowPlacement;
 pub use state::WindowState;

@@ -361,6 +361,51 @@ impl WidgetTree {
         self.dispatch_with_input_snapshot(event, snapshot, ops);
     }
 
+    /// The pointer left the window.
+    ///
+    /// The third ingress door, and the only one that carries no sample: the OS
+    /// says the cursor crossed the window boundary and nothing else. It exists
+    /// because hover is otherwise cleared *only* by a move that lands
+    /// elsewhere — so a mouse that leaves through an edge would leave the last
+    /// widget hovered for as long as it stays away, with its hover chrome
+    /// painted, its `hover_within` signal true and its tooltip still counting
+    /// down.
+    ///
+    /// Clears hover the way a move to an empty spot does: a `PointerLeave` to
+    /// the hovered widget, the tooltip dwell cancelled, the `hover_within`
+    /// chain updated. It touches nothing else — no pointer is cancelled, no
+    /// capture released, no table entry ended. A mouse that leaves the window
+    /// is still a mouse, and a *captured* pointer is deliberately exempt: a
+    /// drag whose pointer wanders off the window keeps its target, which is
+    /// what makes a drag past the edge (and the OS-drag escalation built on
+    /// it) work at all.
+    ///
+    /// There is no matching `pointer_entered_window`, and that is not an
+    /// omission: the enter carries no position either, and a position only
+    /// ever arrives with a `CursorMoved` — which re-arms hover through the
+    /// ordinary path. A door that could only say "somewhere" would have
+    /// nothing to hit-test.
+    pub fn pointer_left_window(&mut self, ops: &mut dyn crate::window::WindowOps) {
+        // The pointer that owns hover is the one that just left; if it holds a
+        // capture, the interaction it is in the middle of outranks the
+        // boundary crossing.
+        if self
+            .pointers
+            .hover_owner_id()
+            .and_then(|id| self.captured_by(id))
+            .is_some()
+        {
+            return;
+        }
+        let Some(hovered) = self.hovered_id() else {
+            return;
+        };
+        self.dispatch_to_widget(hovered, &WidgetEvent::PointerLeave, &mut *ops);
+        self.tooltip_pointer_leave(hovered, &mut *ops);
+        self.set_hovered(None);
+        self.update_hover_within_signals(Some(hovered), None);
+    }
+
     /// Run one dispatch with `snapshot` installed as the tree's view of the
     /// in-flight sample, restoring the previous value afterwards.
     ///
@@ -2631,6 +2676,9 @@ impl WidgetTree {
         self.apply_tree_mutations(std::mem::take(&mut ctx.tree_mutations));
         if ctx.request_a11y_update {
             self.a11y_dirty = true;
+        }
+        if let Some(visible) = ctx.soft_keyboard_request.take() {
+            self.request_soft_keyboard(visible);
         }
         // Handed to the tree's own live regions, which schedule the two
         // accessibility syncs each message needs. See `crate::announcer`.

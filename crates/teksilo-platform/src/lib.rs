@@ -16,6 +16,8 @@ pub mod native_menu;
 pub mod os_theme;
 pub mod pen;
 pub mod pointer_backend;
+pub mod safe_area;
+pub mod soft_keyboard;
 pub mod title_bar_host;
 pub mod window;
 pub mod window_activation;
@@ -41,6 +43,7 @@ pub use pen::{PenButtons, PenCaps, PenPacket, PenSource, create_pen_source};
 pub use pointer_backend::{
     BackendCaps, BackendEvent, InputSample, PlatformKind, PointerBackend, SoftKeyboardSupport,
 };
+pub use safe_area::{SafeAreaSides, window_safe_area};
 pub use title_bar_host::create_title_bar_host;
 pub use window::{FrameOutcome, PlatformWindow};
 pub use window_system::{

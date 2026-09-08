@@ -11062,6 +11062,7 @@ dependencies = [
  "serde_json",
  "teksilo-canvas",
  "teksilo-core",
+ "teksilo-tokens",
 ]
 
 [[package]]

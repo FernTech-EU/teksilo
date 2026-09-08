@@ -314,6 +314,26 @@ pub trait PenSource: std::fmt::Debug {
         PenCaps::NONE
     }
 
+    /// Whether this source fills its buffer from a thread of its own.
+    ///
+    /// The event loop needs to know, because it decides whether draining once
+    /// per turn is enough. A shim that reads on the **winit thread** — the
+    /// Windows `WM_POINTER` subclass — has already filled its buffer by the
+    /// time the turn that carried the message reaches the pump, so one drain
+    /// per turn sees everything. A shim that reads on its **own** thread — the
+    /// Wayland tablet listener — has not: the compositor event that woke the
+    /// loop and the packet the shim will make of it are up to one of that
+    /// listener's dispatch intervals apart, so the loop has to look again. The
+    /// catch-up look is armed at [`PEN_POLL_INTERVAL`], which is the interval
+    /// that applies once a tool has been announced; a session with none is on
+    /// a slower tier, and cannot deliver a packet at all until `tool_added`
+    /// has moved it to the fast one.
+    ///
+    /// Defaults to `false`, which is the answer for a source with no thread.
+    fn polls_off_thread(&self) -> bool {
+        false
+    }
+
     /// The contact patch most recently reported for an OS touch contact id, in
     /// logical pixels.
     ///
@@ -354,6 +374,18 @@ pub fn create_pen_source(parent: &ParentHandle) -> Box<dyn PenSource> {
     Box::new(null::NullPenSource::new())
 }
 
+/// How often a pen shim that reads on its own thread looks at the digitizer.
+///
+/// The Wayland shim's own sleep interval, published so the event loop can pace
+/// its catch-up look to it rather than guessing. The bound that makes a value
+/// wrong is the velocity tracker's
+/// [`STOP_GAP`](teksilo_core::kinetic::velocity::STOP_GAP): a gap that long
+/// between samples is read as the stroke having paused and clears the history,
+/// so a shim looking that rarely would turn one continuous stroke into a
+/// sequence of standing starts. That relation is asserted in this module's
+/// tests rather than left to this sentence.
+pub const PEN_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(4);
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -382,6 +414,24 @@ mod tests {
         assert!(!caps.reports_tilt);
         PenCaps::FULL_PEN.apply_to(&mut caps);
         assert!(caps.reports_tilt && caps.reports_twist && caps.reports_pen_kind);
+    }
+
+    /// The one property that makes [`PEN_POLL_INTERVAL`] right or wrong.
+    ///
+    /// A shim reading on its own thread hands the translator samples no fresher
+    /// than one interval. If that interval reached the velocity tracker's
+    /// `STOP_GAP`, every sample would look to the tracker like the resumption
+    /// of a stroke that had stopped, and a pen fling would be estimated from
+    /// standing starts. Well under it is the requirement; the exact figure is
+    /// the Wayland shim's sleep.
+    #[test]
+    fn the_poll_interval_stays_under_the_velocity_stop_gap() {
+        use teksilo_core::kinetic::velocity::STOP_GAP;
+        assert!(
+            PEN_POLL_INTERVAL < STOP_GAP,
+            "a poll interval at or past the {STOP_GAP:?} stop gap clears the \
+             velocity history between samples"
+        );
     }
 
     #[test]

@@ -616,7 +616,7 @@ impl WidgetTree {
     ///   *also* driven by the clock, through
     ///   [`expire_sequence_holds`](Self::expire_sequence_holds), so a contact
     ///   that never moves is released on time too;
-    /// * a member armed by [`DragActivation::AfterLongPress`] withdraws once
+    /// * a member armed by [`DragActivation::AfterLongPress`](teksilo_tokens::DragActivation::AfterLongPress) withdraws once
     ///   the press leaves the tap boundary — that travel is a pan, not a
     ///   considered grab;
     /// * the pressed node's **tap family** is revoked, once, when the press
@@ -681,7 +681,7 @@ impl WidgetTree {
     ///   a mouse is at `drag_slop`, the 5.0 it has always been;
     /// * a `Pan` member wins only on an axis the frozen `TouchAction` permits
     ///   and only past `pan_slop`, which a mouse profile does not have;
-    /// * a member deferred by [`DragActivation::AfterLongPress`] cannot win
+    /// * a member deferred by [`DragActivation::AfterLongPress`](teksilo_tokens::DragActivation::AfterLongPress) cannot win
     ///   before its timer and self-rejects once the press leaves the tap
     ///   boundary.
     ///

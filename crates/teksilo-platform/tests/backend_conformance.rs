@@ -17,13 +17,23 @@
 //! # The six
 //!
 //! 1. **Identity is unique across OS id reuse.** winit reuses `Touch::id`; two
-//!    successive contacts on the same raw id must be two `PointerId`s.
-//! 2. **Cancel completeness.** Every `Down` is terminated by exactly one `Up`
-//!    or one `Cancel` — never both, never neither.
+//!    successive contacts on the same raw id must be two `PointerId`s. This
+//!    binds a **coarse** pointer only: a mouse and a pen have one identity that
+//!    outlives any number of presses, which is the whole difference between a
+//!    pointer that hovers and one that is minted when it lands.
+//! 2. **Cancel completeness.** Every `Down` is followed by exactly one
+//!    **completion** — one `Up` or one `Cancel`, never both, never neither —
+//!    before that pointer may go down again. A hovering-capable pointer may
+//!    *additionally* end its proximity session with one `Cancel` while nothing
+//!    is down; that is a session end, not a completion, and a pen emits one
+//!    when it leaves the digitizer's range, however many strokes it made while
+//!    it was in it.
 //! 3. **Time is monotone.** `EventTime` never runs backwards within a stream.
 //! 4. **Primacy and hover.** At most one live pointer *of a kind* is primary
-//!    (W3C `isPrimary`), a mouse sample is always primary, and no direct
-//!    pointer ever hovers.
+//!    (W3C `isPrimary`), a mouse sample is always primary, and no **coarse**
+//!    pointer ever hovers. Coarse, not direct: a pen is direct and hovers, and
+//!    its whole first act is a buttonless move made while the nib is above the
+//!    glass. A finger has nothing to hover with.
 //! 5. **One stream per contact.** A single physical touch produces one pointer
 //!    stream, not a touch stream plus an emulated mouse one.
 //! 6. **Well-formed scroll phases.** `Began → Changed* → Ended`, and
@@ -36,9 +46,10 @@ use teksilo_core::PointerId;
 use teksilo_core::event::ButtonMask;
 use teksilo_core::pointer::{EventTime, PointerPhase, ScrollPhase};
 use teksilo_platform::event_translation::TranslationState;
+use teksilo_platform::pen::{PenPacket, PenSource};
 use teksilo_platform::pointer_backend::{BackendEvent, InputSample, PointerBackend};
 use teksilo_platform::window_system::WindowSystem;
-use teksilo_tokens::{InputTokens, PointerKind};
+use teksilo_tokens::{InputTokens, PenKind, PointerKind};
 
 // ---------------------------------------------------------------------------
 // Recorded vectors
@@ -301,6 +312,67 @@ fn wayland_cancelled_contact() -> Vec<Packet> {
     ]
 }
 
+/// **A pen stroke, from proximity to withdrawal.**
+///
+/// The shape a digitizer actually produces, and the reason invariants 2 and 4
+/// had to be restated. A stylus announces itself by hovering — buttonless
+/// moves, tip up — then touches down, draws, lifts, hovers again and finally
+/// leaves range. One `PointerId` spans the whole of it, the tip's `Up` is the
+/// completion, and the withdrawal is a `Cancel` that completes nothing.
+///
+/// The stroke deliberately contains **two** tip contacts, because that is the
+/// case a per-contact identity rule would reject: two taps inside one
+/// proximity session are two presses of one pointer, not two pointers.
+fn pen_stroke_with_two_taps() -> Vec<PenPacket> {
+    let tool = PenKind::Pen;
+    let at = |x: f32, y: f32| Point::new(x, y);
+    vec![
+        // In range, nib above the glass.
+        PenPacket::hovering(tool, at(100.0, 100.0)),
+        PenPacket::hovering(tool, at(104.0, 103.0)),
+        // First contact.
+        PenPacket::hovering(tool, at(104.0, 103.0)).down_at(0.4),
+        PenPacket::hovering(tool, at(110.0, 108.0)).down_at(0.7),
+        // Lift, still in range.
+        PenPacket::hovering(tool, at(110.0, 108.0)),
+        // Second contact, same session.
+        PenPacket::hovering(tool, at(112.0, 110.0)).down_at(0.5),
+        PenPacket::hovering(tool, at(112.0, 110.0)),
+        // Out of range.
+        PenPacket::out_of_proximity(tool, at(112.0, 110.0)),
+    ]
+}
+
+/// **A pen that hovers and is taken away without ever touching down.**
+///
+/// The reader glancing at a tablet. No `Down` is ever emitted, so the session's
+/// closing `Cancel` has nothing to complete — which is precisely the shape the
+/// old "every terminator closes a Down" reading rejected.
+fn pen_hover_only() -> Vec<PenPacket> {
+    let tool = PenKind::Pen;
+    vec![
+        PenPacket::hovering(tool, Point::new(50.0, 60.0)),
+        PenPacket::hovering(tool, Point::new(58.0, 66.0)),
+        PenPacket::out_of_proximity(tool, Point::new(58.0, 66.0)),
+    ]
+}
+
+/// A [`PenSource`] that hands back a recorded list, so a pen vector goes
+/// through the same `poll_pen` the event loop calls rather than through a
+/// private entry point.
+#[derive(Debug)]
+struct RecordedPenSource(Vec<PenPacket>);
+
+impl PenSource for RecordedPenSource {
+    fn poll(&mut self, out: &mut Vec<PenPacket>) {
+        out.append(&mut self.0);
+    }
+
+    fn capabilities(&self) -> teksilo_platform::PenCaps {
+        teksilo_platform::PenCaps::FULL_PEN
+    }
+}
+
 // ---------------------------------------------------------------------------
 // The harness
 // ---------------------------------------------------------------------------
@@ -321,8 +393,12 @@ struct Conformance {
     live: HashMap<PointerId, LivePointer>,
     /// Every id ever seen down, so a reused OS id cannot resolve to an old one.
     ever_down: HashSet<PointerId>,
-    /// Ids already terminated, so a double termination is caught.
-    terminated: HashSet<PointerId>,
+    /// How many completions each id has had, so a coarse pointer completing
+    /// twice is caught while a mouse or a pen pressing again is not.
+    completions: HashMap<PointerId, usize>,
+    /// Ids whose proximity session has ended, so a second session end is
+    /// caught.
+    session_ended: HashSet<PointerId>,
     /// The last `EventTime` observed, for monotonicity.
     last_time: Option<EventTime>,
     /// The scroll phase machine's last state.
@@ -342,7 +418,8 @@ impl Conformance {
             name,
             live: HashMap::new(),
             ever_down: HashSet::new(),
-            terminated: HashSet::new(),
+            completions: HashMap::new(),
+            session_ended: HashSet::new(),
             last_time: None,
             last_scroll: None,
             contact_positions: Vec::new(),
@@ -360,6 +437,26 @@ impl Conformance {
                 self.samples.push(sample);
             }
         }
+        self
+    }
+
+    /// Drive a recorded pen session through `backend`'s shim, one packet per
+    /// poll so each is timed like the event-loop turn it would have arrived on.
+    ///
+    /// Concrete `TranslationState` rather than `dyn PointerBackend` because the
+    /// digitizer is not a winit event: `PointerBackend::translate` never sees a
+    /// pen packet, and `poll_pen` — the pump the event loop calls once a turn —
+    /// is the shim's whole surface. The invariants checked are the same six.
+    fn run_pen(mut self, backend: &mut TranslationState, packets: &[PenPacket]) -> Self {
+        for (index, packet) in packets.iter().enumerate() {
+            backend.set_pen_source(Box::new(RecordedPenSource(vec![*packet])));
+            let now = EventTime::from_millis(index as u64 * 8);
+            for sample in backend.poll_pen(now) {
+                self.observe(&sample);
+                self.samples.push(sample);
+            }
+        }
+        backend.take_pen_source();
         self
     }
 
@@ -397,8 +494,14 @@ impl Conformance {
                 match p.phase {
                     PointerPhase::Down => {
                         // --- 1. Identity is unique -----------------------
+                        // Coarse only. A pen's tip may touch down, lift and
+                        // touch down again inside one proximity session, and a
+                        // mouse clicks all day on the same id; neither is a
+                        // reused OS contact id resolving to a stale identity,
+                        // which is what this invariant is about.
+                        let fresh = self.ever_down.insert(p.pointer.id);
                         assert!(
-                            self.ever_down.insert(p.pointer.id),
+                            fresh || !p.pointer.kind.is_coarse(),
                             "{}: invariant 1 — {:?} was minted twice; a reused OS \
                              contact id must resolve to a fresh PointerId",
                             self.name,
@@ -421,18 +524,42 @@ impl Conformance {
                         );
                     }
                     PointerPhase::Up | PointerPhase::Cancel => {
-                        assert!(
-                            self.live.remove(&p.pointer.id).is_some(),
-                            "{}: invariant 2 — {:?} terminated without a Down",
-                            self.name,
-                            p.pointer.id
-                        );
-                        assert!(
-                            self.terminated.insert(p.pointer.id),
-                            "{}: invariant 2 — {:?} terminated twice",
-                            self.name,
-                            p.pointer.id
-                        );
+                        if self.live.remove(&p.pointer.id).is_some() {
+                            // A completion: it closes the press that was open.
+                            let seen = self.completions.entry(p.pointer.id).or_default();
+                            *seen += 1;
+                            assert!(
+                                *seen == 1 || !p.pointer.kind.is_coarse(),
+                                "{}: invariant 2 — {:?} completed {seen} times; a \
+                                 contact's identity does not outlive its press",
+                                self.name,
+                                p.pointer.id
+                            );
+                        } else {
+                            // Not live. The only well-formed shape is a
+                            // hovering-capable pointer's proximity session
+                            // ending: the completion, if there was one, was the
+                            // tip's `Up`, which has already been delivered.
+                            assert!(
+                                p.phase == PointerPhase::Cancel,
+                                "{}: invariant 2 — {:?} lifted with no press open",
+                                self.name,
+                                p.pointer.id
+                            );
+                            assert!(
+                                p.pointer.kind.hovers(),
+                                "{}: invariant 2 — {:?} terminated without a Down, \
+                                 and it cannot hover, so there was no session to end",
+                                self.name,
+                                p.pointer.id
+                            );
+                            assert!(
+                                self.session_ended.insert(p.pointer.id),
+                                "{}: invariant 2 — {:?} ended its session twice",
+                                self.name,
+                                p.pointer.id
+                            );
+                        }
                     }
                     PointerPhase::Move => {
                         // A move for a pointer with no buttons is a hover, and
@@ -458,13 +585,15 @@ impl Conformance {
                         self.name
                     );
                 }
-                if p.pointer.is_direct() {
+                if p.pointer.kind.is_coarse() {
                     assert!(
                         p.phase != PointerPhase::Move || !p.pointer.buttons.is_empty(),
-                        "{}: invariant 4 — a direct pointer never hovers, so a \
+                        "{}: invariant 4 — a coarse pointer never hovers, so a \
                          buttonless move is impossible",
                         self.name
                     );
+                }
+                if p.pointer.is_direct() {
                     assert!(
                         p.phase != PointerPhase::Down
                             || p.pointer
@@ -811,4 +940,109 @@ fn the_kill_switch_empties_every_touch_vector() {
             "{name}: touch_enabled = false must yield no contact"
         );
     }
+}
+
+/// A pen stroke satisfies all six, including the two clauses it forced into
+/// their present shape.
+#[test]
+fn a_pen_stroke_is_conformant() {
+    let mut backend = backend_for(WindowSystem::Wayland);
+    let run = Conformance::new("pen/stroke")
+        .run_pen(&mut backend, &pen_stroke_with_two_taps())
+        .finish(&mut backend, 500);
+    run.assert_no_duplicate_streams();
+
+    let samples = run.pointer_samples();
+    assert!(
+        samples
+            .iter()
+            .all(|s| matches!(s.pointer.kind, PointerKind::Pen(_))),
+        "a digitizer produces pen samples and nothing else"
+    );
+
+    // One identity for the whole proximity session, two presses inside it.
+    let ids: HashSet<PointerId> = samples.iter().map(|s| s.pointer.id).collect();
+    assert_eq!(ids.len(), 1, "one proximity session is one pointer");
+    let downs = samples
+        .iter()
+        .filter(|s| s.phase == PointerPhase::Down)
+        .count();
+    let ups = samples
+        .iter()
+        .filter(|s| s.phase == PointerPhase::Up)
+        .count();
+    assert_eq!((downs, ups), (2, 2), "two taps, two completions");
+
+    // The clause invariant 4 had to be restated for: the session opens with a
+    // buttonless move made by a *direct* pointer.
+    let first = samples[0];
+    assert_eq!(first.phase, PointerPhase::Move);
+    assert!(
+        first.pointer.buttons.is_empty(),
+        "the nib is above the glass"
+    );
+    assert!(first.pointer.is_direct(), "a pen is a direct pointer");
+    assert!(first.pointer.kind.hovers(), "and it hovers");
+
+    // The clause invariant 2 had to be restated for: the last sample is a
+    // `Cancel` that completes nothing — every press was already closed.
+    let last = samples[samples.len() - 1];
+    assert_eq!(last.phase, PointerPhase::Cancel);
+    assert_eq!(
+        samples[samples.len() - 2].phase,
+        PointerPhase::Up,
+        "the second tap had already completed when the tool withdrew, so the \
+         Cancel closes the session and not a press"
+    );
+}
+
+/// A hover-only session — in range, never touched down, taken away — is
+/// conformant too. Its closing `Cancel` has no `Down` anywhere behind it.
+#[test]
+fn a_pen_that_never_touches_down_is_conformant() {
+    let mut backend = backend_for(WindowSystem::Wayland);
+    let run = Conformance::new("pen/hover-only")
+        .run_pen(&mut backend, &pen_hover_only())
+        .finish(&mut backend, 500);
+
+    let samples = run.pointer_samples();
+    assert!(
+        samples.iter().all(|s| s.pointer.buttons.is_empty()),
+        "nothing was ever held"
+    );
+    assert_eq!(
+        samples
+            .iter()
+            .filter(|s| s.phase == PointerPhase::Down)
+            .count(),
+        0,
+        "the tip never touched"
+    );
+    assert_eq!(
+        samples[samples.len() - 1].phase,
+        PointerPhase::Cancel,
+        "leaving range ends the session"
+    );
+}
+
+/// `cancel_all` on a pen still in proximity ends its session — and does it
+/// once, so a window closing mid-hover leaves nothing behind.
+#[test]
+fn cancel_all_ends_a_pen_session_exactly_once() {
+    let mut backend = backend_for(WindowSystem::Wayland);
+    // Everything but the withdrawal, so the tool is still in range.
+    let held: Vec<PenPacket> = pen_stroke_with_two_taps()
+        .into_iter()
+        .filter(|p| p.in_proximity)
+        .collect();
+    let run = Conformance::new("pen/interrupted")
+        .run_pen(&mut backend, &held)
+        .finish(&mut backend, 500);
+
+    let cancels = run
+        .pointer_samples()
+        .iter()
+        .filter(|s| s.phase == PointerPhase::Cancel)
+        .count();
+    assert_eq!(cancels, 1, "one session, one end");
 }

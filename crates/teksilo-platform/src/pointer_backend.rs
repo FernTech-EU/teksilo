@@ -119,25 +119,12 @@ impl<'a> From<&'a winit::event::WindowEvent> for BackendEvent<'a> {
 
 /// How a platform can be asked to raise the on-screen keyboard.
 ///
-/// Declared here because it is a *backend* property; the package that raises
-/// the keyboard (P18) populates it per OS and the widget layer reads it to
-/// decide whether a text field may rely on the OS or must offer its own
-/// affordance.
-#[non_exhaustive]
-#[derive(Copy, Clone, PartialEq, Eq, Hash, Debug, Default)]
-pub enum SoftKeyboardSupport {
-    /// No reachable soft keyboard. The desktop default: nothing in winit 0.30
-    /// asks for one, and on X11 and Wayland there is no protocol for a client
-    /// to request one at all.
-    #[default]
-    None,
-    /// The keyboard follows accessibility focus — the platform raises it when
-    /// a text-entry node takes focus in the accessibility tree, with no
-    /// explicit request. Windows' touch keyboard behaves this way.
-    ViaAccessibility,
-    /// The app can ask for the keyboard directly.
-    Explicit,
-}
+/// Re-exported from `teksilo-core`, where it lives so that
+/// [`WindowOps::soft_keyboard_support`](teksilo_core::window::WindowOps::soft_keyboard_support)
+/// can carry it to a widget without the widget layer depending on this crate.
+/// The per-platform values, and the reason behind each, are in
+/// [`crate::soft_keyboard`].
+pub use teksilo_core::window::SoftKeyboardSupport;
 
 /// Which OS a [`BackendCaps`] row describes.
 ///
@@ -257,10 +244,7 @@ impl BackendCaps {
                 // `WM_NCLBUTTONDOWN`-based drag is a mouse path; winit's
                 // `drag_window` sends it and a finger does not reach it.
                 touch_window_drag: false,
-                // The Windows touch keyboard rises for a UIA text pattern
-                // under touch focus. Teksilo publishes an AccessKit tree, so
-                // it is reachable — but never by an explicit request.
-                osk: SoftKeyboardSupport::ViaAccessibility,
+                osk: crate::soft_keyboard::support_for(PlatformKind::Windows),
             },
             // macOS delivers **no touch at all**: `WindowEvent::Touch` is
             // documented "macOS: Unsupported". The trackpad arrives as
@@ -279,7 +263,7 @@ impl BackendCaps {
                 reports_os_pinch: true,
                 synthesises_mouse_from_touch: false,
                 touch_window_drag: false,
-                osk: SoftKeyboardSupport::None,
+                osk: crate::soft_keyboard::support_for(PlatformKind::MacOs),
             },
             PlatformKind::Unix => match window_system {
                 // `wl_touch.cancel` is the only desktop source of a real
@@ -304,7 +288,7 @@ impl BackendCaps {
                     reports_os_pinch: false,
                     synthesises_mouse_from_touch: false,
                     touch_window_drag: false,
-                    osk: SoftKeyboardSupport::None,
+                    osk: crate::soft_keyboard::support_for(PlatformKind::Unix),
                 },
                 // XI2 touch. winit filters *emulated button* events
                 // (`XIPointerEmulated`) but synthesises a `CursorMoved` of its
@@ -326,7 +310,7 @@ impl BackendCaps {
                     reports_os_pinch: false,
                     synthesises_mouse_from_touch: true,
                     touch_window_drag: false,
-                    osk: SoftKeyboardSupport::None,
+                    osk: crate::soft_keyboard::support_for(PlatformKind::Unix),
                 },
                 // A headless or not-yet-created window. Report nothing: an
                 // unknown backend must not be credited with a capability.
@@ -342,7 +326,7 @@ impl BackendCaps {
                     reports_os_pinch: false,
                     synthesises_mouse_from_touch: false,
                     touch_window_drag: false,
-                    osk: SoftKeyboardSupport::None,
+                    osk: crate::soft_keyboard::support_for(PlatformKind::Unix),
                 },
             },
         }
@@ -463,13 +447,20 @@ mod tests {
         );
     }
 
-    /// Windows is the only desktop backend that reaches a soft keyboard, and
-    /// it does so through the accessibility tree rather than a request.
+    /// Windows is the only desktop backend that reaches a soft keyboard.
+    ///
+    /// It was `ViaAccessibility` while nothing could ask for the keyboard: the
+    /// Windows touch keyboard does rise for a UIA text pattern under touch
+    /// focus, and that was the whole of what the framework could claim. It is
+    /// [`SoftKeyboardSupport::Explicit`] now that
+    /// [`crate::soft_keyboard::set_visible`] exists and honours **both**
+    /// directions — which is the bar `Explicit` sets, and why a `Toggle`-only
+    /// COM call needs the visibility probe beside it.
     #[test]
-    fn the_soft_keyboard_is_windows_only_and_implicit() {
+    fn the_soft_keyboard_is_windows_only_and_explicit() {
         assert_eq!(
             BackendCaps::for_platform(PlatformKind::Windows, WindowSystem::Unknown).osk,
-            SoftKeyboardSupport::ViaAccessibility
+            SoftKeyboardSupport::Explicit
         );
         assert_eq!(
             BackendCaps::for_platform(PlatformKind::Unix, WindowSystem::Wayland).osk,
