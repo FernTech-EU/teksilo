@@ -22,6 +22,40 @@ cluster. An optional child widget — typically a centered title — is
 placed at the full region bounds and passes pointer events upward to
 the drag handler when it does not consume them.
 
+# A finger on the title bar
+
+The drag region is deliberately **not** a press-time actor: the window move
+starts from `DragPhase::Started`, after the recognizer has decided the
+press is a drag, which is why a quick press still reaches the double-tap
+recognizer and why a contact that turns out to be a scroll is never stolen.
+Nothing here changes that.
+
+Three routes serve a contact:
+
+* **Double tap → maximise / restore.** The same handler a double click
+  drives; the multi-tap recognizer already tunes its slop per pointer kind,
+  so a finger's looser aim is accounted for without a second code path.
+* **Long press → the window menu.** A mouse reaches it with the secondary
+  button, which a finger does not have. Where the platform owns the menu
+  (Wayland's `xdg_toplevel.show_window_menu`) the long press asks the host
+  for it, and that menu's **Move** entry is a finger's only route to a
+  window move — see below. Where it does not (X11), this widget's
+  `.context_menu(..)` factory is the menu, and it is reached through the
+  framework's own long-press context-menu route rather than through a second
+  copy of the opening machinery here.
+* **Drag → nothing, on purpose.** `BackendCaps::touch_window_drag` is
+  `false` on every platform Teksilo supports, and it is not a to-do:
+  `xdg_toplevel::move` needs a serial from an input event on a toplevel the
+  compositor agrees the client owns, and winit 0.30's `drag_window` harvests
+  a *pointer* serial internally, so a finger cannot reach it however the app
+  asks. Calling it anyway would be a silent no-op — the compositor drops a
+  request whose serial does not match — so the drag handler does not call
+  it for a direct pointer, and the long-press menu is the documented
+  alternative. This is also the WCAG 2.5.7 single-pointer alternative to the
+  dragging operation. A headless test cannot detect the real failure (a fake
+  `PlatformTitleBarHost` will happily record a `begin_drag` that a
+  compositor would have ignored), so this is a hardware-checklist line.
+
 ```ignore
 // Used internally by TitleBar; the snippet shows the construction pattern.
 let region = DragRegion::with_child(host.clone(), TextWidget::new(lit!("My App")));

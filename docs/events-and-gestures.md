@@ -495,10 +495,16 @@ Read it with `WidgetTree::sequence_members(PointerId)` and
      and **self-rejects** the instant the press leaves the tap boundary;
    - `slop_precise` applies **only** to a direct pointer under a frozen
      `TouchAction::NONE`. A precise pointer always uses `profile.drag_slop`.
-   The member that took the press (the `pressed_owner`) is driven by the
-   ordinary capture route and **stops the walk**: nothing above the innermost
-   drag may win, which is the pre-existing "the innermost drag owns the
-   gesture" rule.
+   A **`Gesture`** member that took the press (the `pressed_owner`) is driven
+   by the ordinary capture route and **stops the walk**: nothing above the
+   innermost drag may win, which is the pre-existing "the innermost drag owns
+   the gesture" rule. A `RawDrag` and a `Pan` member of that same node are
+   exempt, because this walk is the only place either is ever evaluated — so
+   stopping there would leave a scroll container that also owns the press
+   arena, which is every text surface, unable ever to pan itself. A
+   `RawPreview` stops the walk with the `Gesture`, and never reaches it in
+   practice: a preview claim decides the sequence as it is enrolled, and a
+   decided sequence yields no candidates.
 8. **On up**: the release sweep. Every member still following the press is fed
    the terminating `Up` so its recognizer clears the origin it recorded — which
    is what stops an ancestor `DragRecognizer` from staying armed and starting a

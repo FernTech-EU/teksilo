@@ -20,6 +20,21 @@ Row heights come in three modes: uniform (`item_height`, default fast path),
 exact per-flat-index callback (`item_height_fn`), and auto-measured
 (`auto_item_height` — height-for-width per row, scroll-anchored).
 
+## Pan to scroll
+
+The view installs `common::scrollable::ScrollableBehavior`,
+which gives it the shared wheel arithmetic, a finger's pan and the
+`PanClaim` that puts it on a pan's claimant chain. A pan scrolls it, the
+release coasts, and a pan it cannot absorb hands the **whole** event to the
+container outside. Vertical only: this view owns no horizontal offset, so a
+horizontal pan is declined and chains outward. A pan that starts on a row
+scrolls rather than activating it, toggling its chevron, or collapsing a
+multi-selection onto it — the three things a *release* on that row commits.
+Activation is a gesture, so the arbitration cancels it; the chevron and the
+deferred collapse are raw `PointerUp` arms the arbitration cannot reach, so
+each asks `data_views::release_completes_the_press` whether the release still
+belongs to the row.
+
 ## Keyboard
 
 Arrows move the cursor; `Home` / `End` reach the first and last **visible**

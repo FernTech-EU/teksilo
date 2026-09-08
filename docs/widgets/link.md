@@ -31,6 +31,19 @@ let _w = Link::new(lit!("Open documentation"))
     .url("https://example.com/docs");
 ```
 
+## Touch and pen
+
+The pressed state is the framework's (`docs/touch-and-pen.md` §7.1), so it
+survives a slide-off and comes back on re-entry, and a pan claimant winning
+the press clears it with no release. Following the link lands on the
+release, as it always did.
+
+A link is text-height, so it can fall under the 24 dp target floor; it is
+reached by the miss-only slop pass, which re-attributes a coarse near miss
+to it whenever nothing nearer takes presses. WCAG 2.2 SC 2.5.8's *inline*
+exception covers a link whose size is constrained by the line height of the
+text around it.
+
 ## Builder methods at a glance
 
 `visited`, `style`, `on_activate_fn`, `url`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`, `get_url`, `enabled`

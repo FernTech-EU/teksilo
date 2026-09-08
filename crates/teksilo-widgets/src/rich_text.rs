@@ -27,6 +27,22 @@
 //!     .max_lines(8)
 //!     .wrap_mode(WrapMode::Word);
 //! ```
+//!
+//! ## Pan to scroll
+//!
+//! The surface installs [`common::scrollable::ScrollableBehavior`](crate::common::scrollable::ScrollableBehavior)
+//! — the shared wheel arithmetic, a finger's pan, and the `PanClaim`. The wheel
+//! path is unchanged: no tween (these offsets are plain signals), 16 dp a line,
+//! `Ignored` at a hard boundary so the page around it takes the rest, and a
+//! repaint asked for exactly when an axis moved.
+//!
+//! **The claim serves this surface even though it also owns the press
+//! arena**, which its double- and triple-tap recognizers give it. The router
+//! stops its arbitration walk at the press owner only for a `Gesture` member,
+//! whose recognizer the capture dispatch is already driving; a `Pan` member is
+//! decided in that walk and nowhere else, so it is exempt. A finger on the
+//! text therefore scrolls the text, and hands the gesture outward only at this
+//! surface's own boundary. See `docs/kinetic-scrolling.md` §10.1.
 
 mod body;
 pub mod caret_highlight;
@@ -3858,11 +3874,6 @@ impl Widget for RichTextEditor {
                     self::mouse::handle_pointer_event(&state, &v_sb, &h_sb, event, ctx)
                 }
             })
-            .on_scroll({
-                let state = self.state.clone();
-                let overscroll = self.overscroll_behavior;
-                move |event, ctx| self::mouse::handle_scroll(&state, overscroll, event, ctx)
-            })
             .on_key({
                 let state = self.state.clone();
                 move |event, ctx| self::keyboard::handle_key(&state, event, ctx)
@@ -3891,6 +3902,35 @@ impl Widget for RichTextEditor {
             self.state.clone(),
         ) {
             handlers = handlers.context_menu(move |pos, ctx| factory(pos, ctx));
+        }
+
+        // Scroll: the wheel path this surface always had, a finger's pan, and
+        // the claim that puts it on a pan's claimant chain — all from
+        // `common::text_scroll`, which the three text surfaces share.
+        {
+            let (x, max_x, y, max_y, scroller) = {
+                let st = self.state.borrow();
+                (
+                    st.scroll_x.clone(),
+                    st.max_scroll_x.clone(),
+                    st.scroll_y.clone(),
+                    st.max_scroll_y.clone(),
+                    st.scroller.clone(),
+                )
+            };
+            let behavior = crate::common::text_scroll::text_surface_behavior(
+                crate::common::text_scroll::TextScrollState {
+                    x,
+                    max_x,
+                    y,
+                    max_y,
+                    scroller,
+                },
+                self.overscroll_behavior,
+                ctx.prefers_reduced_motion(),
+                ctx.theme().input.scroll_physics,
+            );
+            handlers = behavior.install(handlers);
         }
 
         ctx.apply_self_handlers(handlers);

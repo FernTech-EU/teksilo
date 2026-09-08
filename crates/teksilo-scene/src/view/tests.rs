@@ -6475,3 +6475,138 @@ fn lightweight_item_tooltip_dismissed_on_pointer_down() {
         "tooltip must dismiss on pointer-down"
     );
 }
+
+// -- Touch: a finger pans the view ----------------------------
+
+mod touch_pan {
+    use super::*;
+    use teksilo_core::pointer::{
+        BackendDeviceKey, EventTime, PointerId, PointerIdAllocator, PointerInfo, PointerPhase,
+        PointerSample,
+    };
+
+    fn finger() -> PointerId {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static NEXT: AtomicU64 = AtomicU64::new(1);
+        PointerIdAllocator::global().begin(
+            BackendDeviceKey::new(0x5CE0),
+            NEXT.fetch_add(1, Ordering::Relaxed),
+        )
+    }
+
+    fn touch(id: PointerId, phase: PointerPhase, at: Point, ms: u64) -> PointerSample {
+        PointerSample {
+            pointer: PointerInfo::touch(id, EventTime::from_millis(ms)),
+            phase,
+            position: at,
+            button: None,
+            modifiers: Default::default(),
+            coalesced: Vec::new(),
+        }
+    }
+
+    fn pan_slop() -> f32 {
+        teksilo_core::gesture::default_profile(teksilo_tokens::PointerKind::Touch)
+            .pan_slop
+            .expect("a touch profile pans")
+    }
+
+    /// The view declares a `PanClaim`, so a finger's pan reaches its scroll
+    /// handler as a `ScrollSource::TouchPan` sample and moves the camera with
+    /// no tween — a finger is already the animation.
+    ///
+    /// A non-interactive view declares nothing, which is why this one is built
+    /// interactive (the default) and its claim registered beside the handler
+    /// that reads it.
+    #[test]
+    fn a_finger_pans_the_view_without_tweening() {
+        let mut tree = WidgetTree::new();
+        let view_id = tree.add(SceneView::new(Scene::new()));
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+
+        let id = finger();
+        let from = Point::new(400.0, 300.0);
+        tree.dispatch_pointer(touch(id, PointerPhase::Down, from, 0));
+        for (i, dy) in [pan_slop() + 1.0, pan_slop() + 60.0]
+            .into_iter()
+            .enumerate()
+        {
+            tree.dispatch_pointer(touch(
+                id,
+                PointerPhase::Move,
+                Point::new(from.x, from.y - dy),
+                16 + i as u64 * 16,
+            ));
+        }
+
+        let view = view_handle(&tree, view_id);
+        let pan_y = view.pan().y;
+        assert!(
+            pan_y < -50.0,
+            "a finger dragged up must have moved the camera down through the \
+             scene (pan is negated), got pan.y = {pan_y}",
+        );
+        assert_eq!(
+            view.pan_y.animation_target(),
+            None,
+            "a pan must not aim a tween at the camera",
+        );
+    }
+
+    /// With selection on, the view registers its own drag handler — the
+    /// marquee — and that is what the finger meets first.
+    ///
+    /// This is the arbitration working as designed, not a gap: a marquee
+    /// competitor inside a pan claimant is the case `arbitration_matrix.rs`
+    /// pins under "scene marquee in a scroller". What is pinned *here* is
+    /// which of the two the scene itself resolves to when it is both, so a
+    /// later change to the drag registration cannot silently swap a pan for a
+    /// marquee or the other way round.
+    #[test]
+    fn a_selecting_view_gives_the_finger_to_its_marquee_not_its_pan() {
+        use crate::selection::SceneSelectionMode;
+
+        let mut tree = WidgetTree::new();
+        let view_id =
+            tree.add(SceneView::new(Scene::new()).selection_mode(SceneSelectionMode::Multi));
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+
+        let id = finger();
+        let from = Point::new(400.0, 300.0);
+        tree.dispatch_pointer(touch(id, PointerPhase::Down, from, 0));
+        for (i, dy) in [pan_slop() + 1.0, pan_slop() + 60.0]
+            .into_iter()
+            .enumerate()
+        {
+            tree.dispatch_pointer(touch(
+                id,
+                PointerPhase::Move,
+                Point::new(from.x, from.y - dy),
+                16 + i as u64 * 16,
+            ));
+        }
+
+        let view = view_handle(&tree, view_id);
+        assert_eq!(
+            view.pan().y,
+            0.0,
+            "the marquee owns the press, so the camera stays where it was",
+        );
+    }
+
+    /// The wheel path is untouched: it still tweens, and still by the negated
+    /// delta.
+    #[test]
+    fn the_wheel_still_tweens_the_camera() {
+        let mut tree = WidgetTree::new();
+        let view_id = tree.add(SceneView::new(Scene::new()));
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+        tree.pointer_move(Point::new(400.0, 300.0));
+        tree.dispatch_event(WidgetEvent::scroll(
+            ScrollDelta::Pixels { x: 0.0, y: 30.0 },
+            Default::default(),
+        ));
+        let view = view_handle(&tree, view_id);
+        assert_eq!(view.pan_y.animation_target(), Some(-30.0));
+    }
+}

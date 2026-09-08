@@ -81,6 +81,14 @@ let _w = TextInput::new(value)
     );
 ```
 
+## Touch and pen
+
+Shares `build_interaction_handlers` with `Button`, so it
+gets the framework press, release activation and slide-off abort with it —
+see that module's "Touch and pen" section. Every shipped size clears the
+24 dp target floor at Compact (`Compact` and `Default` are both 24 dp) and
+follows the density ladder above it.
+
 ## Builder methods at a glance
 
 `style`, `style_shared`, `size_variant`, `is_embedded`, `share_interaction`, `embedded`, `icon_role`, `focusable`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`, `composite_tooltip_boxed`, `enabled`, `size`, `toolbar`, `large`, `hero`, `on_activate_fn`, `toggle`, `toggle_with_icon`, `has_popup`, `expanded_when`, `browse`, `expand`, `search`, `copy`, `clear`, `add`, `bell`, `menu`, `more`, `visibility_toggle`

@@ -53,6 +53,20 @@ compression with `Shrinkable`.
 let _w = TextWidget::new(lit!("Save document")).single_line();
 ```
 
+## Touch and pen
+
+Inline links are reachable by a plain tap: the handler at `on_tap` follows
+the link run under the press with no modifier of any kind. (The touch
+inventory recorded this file as Ctrl-gated and therefore unreachable by
+touch; that gate is `rich_text/mouse.rs`'s — `modifiers.command() ||
+read_only` — and does not exist here.) The hover cursor over a link run is
+a mouse and pen affordance and costs a finger nothing.
+
+A link run is text-height and its size is constrained by the line height of
+the text around it, which is exactly WCAG 2.2 SC 2.5.8's *inline* exception,
+so it is not raised to the 24 dp floor and is not reported as a target
+region.
+
 ## Builder methods at a glance
 
 `color`, `style`, `overflow`, `single_line`, `min_shrink_width`, `no_shrink`, `max_lines`, `text_backend`, `text`, `resolved_text`, `markup`, `on_link_click`, `on_link_hover`, `a11y_hidden`, `geometry_handle`

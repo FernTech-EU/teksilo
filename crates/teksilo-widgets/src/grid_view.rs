@@ -24,6 +24,32 @@
 //! .spacing(8.0)
 //! .selection(selection_model)
 //! ```
+//!
+//! ## Pan to scroll
+//!
+//! The view installs [`common::scrollable::ScrollableBehavior`](crate::common::scrollable::ScrollableBehavior),
+//! which gives it the shared wheel arithmetic, a finger's pan and the
+//! `PanClaim` that puts it on a pan's claimant chain. A pan scrolls it, the
+//! release coasts, and a pan it cannot absorb hands the **whole** event to the
+//! container outside — never a residual. Vertical only, despite the grid: this
+//! view owns no horizontal offset, so a horizontal pan is declined and chains
+//! outward. A pan that starts on a tile scrolls rather than activating it.
+//!
+//! **Known defect, and it bounds all of the above:** a finger does not scroll
+//! this view at all while its selection is in
+//! [`teksilo_data::SelectionMode::Multi`]. Measured on one 120 dp pan: no
+//! selection or `Single` → 157 dp of a 2808 dp range; `Multi` → 0;
+//! `Multi` + `.marquee_selection(false)` → 157 again. So the rubber-band
+//! marquee is what costs it — in `Multi` mode it puts an `on_drag` on this
+//! view's *own* node, the node that also carries the `PanClaim`. The marquee is
+//! not running instead of the scroll (it declines a press that lands on a tile,
+//! and the selection is untouched) and the claim is not losing the arbitration
+//! (the trace shows the sequence decided for this node); where the synthesised
+//! scroll is lost between the two is undiagnosed. Recorded against
+//! `grid_view/body_pane.rs` in `docs/widget-pointer-inventory.md`;
+//! `a_finger_on_a_multi_select_grid_pans_it` in
+//! `teksilo-widgets/tests/scrollables_touch.rs` is the `#[ignore]`d test
+//! waiting for it.
 
 pub(crate) mod a11y;
 pub(crate) mod body_pane;
@@ -35,7 +61,7 @@ pub(crate) mod selection;
 #[cfg(test)]
 mod tests;
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::collections::BTreeSet;
 use std::rc::Rc;
 
@@ -44,7 +70,9 @@ use teksilo_core::accessibility::{AccessNodeBuilder, widget_id_to_node_id};
 use teksilo_core::binding::BindingLevel;
 use teksilo_core::build_context::BuildContext;
 use teksilo_core::drag_payload::DragPayload;
-use teksilo_core::event::{EventResponse, ScrollDelta, WidgetEvent};
+use teksilo_core::event::{EventResponse, WidgetEvent};
+use teksilo_core::kinetic::KineticScroller;
+use teksilo_core::pointer::touch_action::PanAxes;
 use teksilo_core::signal::{Prop, Signal};
 use teksilo_core::styles::GridViewStyle;
 use teksilo_core::widget::{LayoutContext, PaintContext, Widget, WidgetPlacement};
@@ -53,7 +81,7 @@ use teksilo_core::widget_id::WidgetId;
 use teksilo_data::{
     DataChange, DropPosition, DropResponse, ListModel, SelectionMode, SelectionModel,
 };
-use teksilo_tokens::{Easing, SurfaceRole};
+use teksilo_tokens::{OverscrollStyle, SurfaceRole};
 
 use std::time::Duration;
 
@@ -297,6 +325,12 @@ pub struct GridView<T: 'static> {
     // Geometry (synchronous cells, read within the layout pass)
     viewport_width: Rc<Cell<f32>>,
     viewport_height: Rc<Cell<f32>>,
+    /// This surface's pan physics: the range a finger's pan is clamped to and
+    /// the offset it is currently holding. Owned by the view rather than by
+    /// the [`ScrollableBehavior`](crate::common::scrollable::ScrollableBehavior)
+    /// so it survives a rebuild, and so `place_children` — the only pass that
+    /// knows the viewport extent — can publish into it.
+    scroller: Rc<RefCell<KineticScroller>>,
     /// The grid body pane's absolute (window) origin, published by
     /// `GridBodyPane::place_children` (`None` until laid out). Shared into the
     /// keyboard handler so it can chase the focused tile into any enclosing
@@ -400,6 +434,7 @@ impl<T: 'static> GridView<T> {
             style: None,
             viewport_width: Rc::new(Cell::new(400.0)),
             viewport_height: Rc::new(Cell::new(400.0)),
+            scroller: Rc::new(RefCell::new(KineticScroller::new(OverscrollStyle::Clamp))),
             viewport_origin: Rc::new(Cell::new(None)),
             last_needs_scrollbar: Cell::new(false),
             body_pane_id: None,
@@ -1176,37 +1211,33 @@ impl<T: 'static> Widget for GridView<T> {
         // Self handlers: scroll wheel + keyboard.
         let mut handlers = HandlerSet::new().clips_children(true).focusable(true);
         {
-            let scroll_y = self.scroll_y.clone();
-            let max_scroll = self.max_scroll_y.clone();
-            let line_height = strategy.estimated_row_height().max(1.0);
-            let overscroll = self.overscroll_behavior;
-            let smooth_scrolling = self.smooth_scrolling;
-            let smooth_scroll_duration = self.smooth_scroll_duration;
-            handlers = handlers.on_scroll(move |event, _ctx| match event {
-                WidgetEvent::Scroll { delta, .. } => {
-                    let dy = match delta {
-                        ScrollDelta::Lines { y, .. } => y * line_height,
-                        ScrollDelta::Pixels { y, .. } => *y,
-                    };
-                    // Base off the animation target so successive notches
-                    // accumulate instead of restarting mid-animation.
-                    let base = scroll_y.animation_target().unwrap_or(scroll_y.get());
-                    let (new_y, moved) =
-                        crate::common::scroll::scroll_clamp_axis(base, dy, max_scroll.get());
-                    if moved {
-                        if smooth_scrolling {
-                            scroll_y.animate_to(new_y, smooth_scroll_duration, Easing::EaseOut);
-                        } else {
-                            scroll_y.set(new_y);
-                        }
-                    }
-                    crate::common::scroll::scroll_response(
-                        moved,
-                        overscroll == OverscrollBehavior::Contain,
-                    )
-                }
-                _ => EventResponse::Ignored,
-            });
+            // The wheel arithmetic, the pan and the claim that puts this node
+            // on a finger's claimant chain all come from `common::scrollable`.
+            // A wheel still takes the path it always did —
+            // `handle_scroll_event` branches on the scroll *source*, not the
+            // phase.
+            //
+            // The notch size is snapshotted from the strategy in force at
+            // build, which is what the hand-rolled handler did: a strategy
+            // swapped after mount keeps the notch it was built with until the
+            // next rebuild.
+            let behavior = crate::common::scrollable::ScrollableBehavior::new(
+                crate::common::scrollable::ScrollableAxes::vertical(
+                    self.scroll_y.clone(),
+                    self.max_scroll_y.clone(),
+                ),
+            )
+            .with_scroller(self.scroller.clone())
+            // Vertical only: this view owns no horizontal offset, so a
+            // horizontal pan is declined and chains outward.
+            .axes(PanAxes::Y)
+            .overscroll(self.overscroll_behavior)
+            .smooth(self.smooth_scrolling)
+            .smooth_duration(self.smooth_scroll_duration)
+            .line_height(strategy.estimated_row_height().max(1.0))
+            .reduced_motion(ctx.prefers_reduced_motion())
+            .physics(ctx.theme().input.scroll_physics);
+            handlers = behavior.install(handlers);
         }
         handlers = handlers.on_key(build_grid_key_handler(GridKeyConfig {
             len_fn: self.source.len_fn.clone(),
@@ -1619,6 +1650,12 @@ impl<T: 'static> Widget for GridView<T> {
         };
         let len = self.source.len();
         let vp_h = bounds.height;
+        // The rubber band's resistance is a fraction of the viewport. This
+        // view does not band, but the scroller reads the extent either way and
+        // this is the only pass that knows it.
+        self.scroller
+            .borrow_mut()
+            .set_viewport(teksilo_canvas::Vec2::new(bounds.width, vp_h));
 
         // Query the strategy at a SINGLE, stable body width per frame (using
         // the previous frame's scrollbar decision). Querying at two widths

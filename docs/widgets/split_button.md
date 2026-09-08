@@ -49,10 +49,28 @@ SplitButton design tokens.
 pub const SPLIT_BUTTON_HEIGHT: f32 = 24.0;
 ```
 
+## `pub fn split_button_height(...)`
+
+`SPLIT_BUTTON_HEIGHT` raised to the density's `target_size`
+(24 / 32 / 44 dp). The identity at Compact.
+
+```rust
+pub fn split_button_height(tokens: &InputTokens) -> f32;
+```
+
 ## `pub const SPLIT_BUTTON_MIN_WIDTH`
 
 ```rust
 pub const SPLIT_BUTTON_MIN_WIDTH: f32 = 72.0;
+```
+
+## `pub fn split_button_min_width(...)`
+
+`SPLIT_BUTTON_MIN_WIDTH` raised to the density's `target_size`
+(24 / 32 / 44 dp). The identity at Compact.
+
+```rust
+pub fn split_button_min_width(tokens: &InputTokens) -> f32;
 ```
 
 ## `pub const SPLIT_BUTTON_PADDING_HORIZONTAL`
@@ -61,10 +79,28 @@ pub const SPLIT_BUTTON_MIN_WIDTH: f32 = 72.0;
 pub const SPLIT_BUTTON_PADDING_HORIZONTAL: f32 = 14.0;
 ```
 
+## `pub fn split_button_padding_horizontal(...)`
+
+`SPLIT_BUTTON_PADDING_HORIZONTAL` scaled by the density's `spacing_factor`
+(1.00 / 1.15 / 1.30).
+
+```rust
+pub fn split_button_padding_horizontal(tokens: &InputTokens) -> f32;
+```
+
 ## `pub const SPLIT_BUTTON_PADDING_VERTICAL`
 
 ```rust
 pub const SPLIT_BUTTON_PADDING_VERTICAL: f32 = 0.0;
+```
+
+## `pub fn split_button_padding_vertical(...)`
+
+`SPLIT_BUTTON_PADDING_VERTICAL` scaled by the density's `spacing_factor`
+(1.00 / 1.15 / 1.30).
+
+```rust
+pub fn split_button_padding_vertical(tokens: &InputTokens) -> f32;
 ```
 
 ## `pub const SPLIT_BUTTON_CORNER_RADIUS`
@@ -103,6 +139,15 @@ Gap between an optional main-region leading icon and the label.
 
 ```rust
 pub const SPLIT_BUTTON_ICON_LABEL_GAP: f32 = 6.0;
+```
+
+## `pub fn split_button_icon_label_gap(...)`
+
+`SPLIT_BUTTON_ICON_LABEL_GAP` scaled by the density's `spacing_factor`
+(1.00 / 1.15 / 1.30).
+
+```rust
+pub fn split_button_icon_label_gap(tokens: &InputTokens) -> f32;
 ```
 
 ## `pub struct SplitButton`

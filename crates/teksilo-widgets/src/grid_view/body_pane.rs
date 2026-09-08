@@ -319,7 +319,9 @@ impl<T: 'static> Widget for GridBodyPane<T> {
             // sees the PointerDown (drag-to-reorder / marquee). Deferred
             // collapse: pressing an already-selected tile (no modifiers)
             // keeps the whole (multi-)selection so it can be dragged; the
-            // collapse-to-single happens on release WITHOUT a drag. The
+            // collapse-to-single happens on release WITHOUT a drag, and only
+            // on a release the tile still owns (`release_completes_the_press`).
+            // The
             // press-claimed guard, Ctrl/Shift handling, and the defer rule
             // itself live in the shared `deferred_select` helper (mirrors
             // `ListView` / `TreeView`); only the focus-follows-selection

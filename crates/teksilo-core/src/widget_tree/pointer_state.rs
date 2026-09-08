@@ -685,9 +685,16 @@ impl WidgetTree {
     ///   before its timer and self-rejects once the press leaves the tap
     ///   boundary.
     ///
-    /// The member whose id is the captor is skipped **and stops the walk**: it
-    /// is already being driven by the capture dispatch, and letting an ancestor
-    /// past it is exactly the "innermost drag owns the gesture" rule.
+    /// A `Gesture` member whose id is the press owner is skipped **and stops
+    /// the walk**: its recognizer is already being driven by the capture
+    /// dispatch, and letting an ancestor past it would break the "innermost
+    /// drag owns the gesture" rule. A `RawDrag` and a `Pan` are not, because
+    /// this walk is the *only* place either is ever evaluated — the press owner
+    /// is very often a pan claimant, since an implicit arena capture makes any
+    /// node with a tap handler the owner, and an editing surface has both.
+    /// `RawPreview` rides along in the same match and is dead there: a preview
+    /// claim decides the sequence as it is enrolled, and a decided sequence
+    /// yields no candidates at all.
     pub(super) fn advance_sequence(
         &mut self,
         move_event: &WidgetEvent,
@@ -719,8 +726,21 @@ impl WidgetTree {
         // that stops the walk.
         let owner = self.current_sequence().and_then(|s| s.pressed_owner());
         for (id, role) in candidates {
-            if Some(id) == owner && !matches!(role, MemberRole::RawDrag) {
-                // Driven by the capture dispatch; nothing above it may win.
+            // The stop rule is about the roles the **capture dispatch** drives,
+            // and only those. A `Gesture` member's recognizer is fed through the
+            // ordinary capture bubble, so evaluating it here would double-drive
+            // it, and letting an ancestor past it would break "the innermost
+            // drag owns the gesture" — it stops the walk.
+            //
+            // A `RawDrag` and a `Pan` are both decided *here* and nowhere else:
+            // a raw drag on the sequence's own travel, a pan on
+            // `pan_axis_past_slop`, whose product is a synthesised `Scroll`
+            // rather than a `GestureEvent` fed to an arena. Breaking at either
+            // would mean a member that also owns the press arena could never
+            // win — and for a pan claimant that is every editing surface, which
+            // takes the press for its caret (so the implicit arena capture makes
+            // it the `pressed_owner`) and scrolls itself under a finger.
+            if Some(id) == owner && matches!(role, MemberRole::Gesture | MemberRole::RawPreview) {
                 break;
             }
             let won = match role {
@@ -734,14 +754,25 @@ impl WidgetTree {
                     .is_some(),
                 MemberRole::RawPreview => false,
             };
+            // The `active_drag` half is a **guard**, not a second way in. The
+            // router enters this walk only while no drag is in flight (both
+            // call sites in `pointer_router.rs` test `active_drag.is_none()`),
+            // and the only thing here that can raise one is
+            // `feed_member_arena` on this very candidate — which reports it as
+            // `won` in the same breath. So the `else` winner below is not
+            // reachable on today's call paths, and the winner recorded is
+            // always the member that won. What DOES happen when a surface
+            // raises its own drag from the capture dispatch is that this walk
+            // is not entered at all, leaving the sequence undecided:
+            // `a_drag_raised_by_the_press_owner_takes_the_press_out_of_the_arbitration`
+            // (`pan_arbiter/tests.rs`) pins that.
             if won || self.active_drag.is_some() {
                 let winner = if won { id } else { owner.unwrap_or(id) };
                 self.decide_sequence(winner);
                 // A pan claimant that won owns the rest of the press as a
                 // *scroll*: from here every sample for this contact is
                 // synthesised onto the claimant chain rather than delivered as
-                // a pointer move. Recorded only for a genuine pan win — an
-                // `active_drag` takeover names a different winner entirely.
+                // a pointer move. Recorded only for a genuine pan win.
                 if won && matches!(role, MemberRole::Pan(_)) {
                     let pointer = self.current_pointer_id();
                     self.note_pan_claimed(pointer, winner);

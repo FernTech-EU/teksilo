@@ -21,6 +21,17 @@ deterministic per-row sizes), and **auto-measured** (`auto_item_height` —
 height-for-width measurement with scroll anchoring so content above the
 viewport stays put while estimates converge).
 
+## Pan to scroll
+
+The view installs `common::scrollable::ScrollableBehavior`,
+which gives it the shared wheel arithmetic, a finger's pan and the
+`PanClaim` that puts it on a pan's claimant chain. A pan scrolls it, the
+release coasts, and a pan it cannot absorb hands the **whole** event to the
+container outside — never a residual. Vertical only: this view owns no
+horizontal offset, so a horizontal pan is declined and chains outward. A pan
+that starts on a row scrolls rather than activating it or collapsing a
+multi-selection onto it.
+
 ## When to use
 
 - Large or dynamically-loaded lists (thousands of rows) — use `ListView`.

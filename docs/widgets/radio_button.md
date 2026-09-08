@@ -14,6 +14,13 @@ indices into the caller's choice list. Wrap related buttons in a
 `RadioGroup` to provide the AT "2 of 3"
 positional announcement required by ARIA.
 
+## Touch and pen
+
+Same shape as `Checkbox`: the pressed state is the
+framework's (`docs/touch-and-pen.md` §7.1), selection lands on the release,
+and the 24 dp `MinSize` around the 19 dp dot already clears the conformance
+floor at Compact.
+
 ## Accessibility
 
 Reports `Role::RadioButton` with `set_toggled` mirroring the selected

@@ -18,6 +18,25 @@ creates and manages the bars automatically. Use this type when building a custom
 scroll host (e.g. the `RichTextEditor` manages its own bars to avoid the
 wrap/scrollbar circular dependency).
 
+## Reaching the thumb with a finger
+
+The bar is 8–12 dp wide, and it stays that way at every density: growing it
+would move the content beside it, and a scroll bar is chrome. The thumb is
+reached instead by the two mechanisms built for exactly this — the node
+widens for a coarse pointer through `Widget::hit_outset`, to the 48 dp
+Android reserves for a scrollbar touch target, and the thumb itself is
+published through `Widget::target_regions` so the target-conformance audit
+can see a rectangle that is painted inside one leaf node and would otherwise
+be invisible to it. A precise pointer gets no outset at all: a cursor's
+hot-spot is exact, and widening its targets steals clicks from the content.
+
+Because the outset widens the bar *across* the scroll axis, every decision
+about whether a press is on the thumb is taken **along the axis only** — a
+finger 15 dp inboard of an 8 dp bar is beside the thumb, not past it.
+
+The minimum thumb length follows the density (24 dp Compact, 44 dp Touch),
+so a short thumb on a long document is still something a finger can land on.
+
 ## Accessibility
 
 Hidden from AT via `set_hidden()`. Scroll actions (Up/Down/Left/Right) are
@@ -42,11 +61,52 @@ let _bar = ScrollBar::new(
 
 ## Builder methods at a glance
 
-`thickness`, `min_thumb_length`, `step_size`, `visual`, `variant`, `style`, `thumb_color`
+`thickness`, `min_thumb_length`, `reveal`, `step_size`, `visual`, `variant`, `style`, `thumb_color`
 
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/scroll_bar/index.html)
+
+## `pub const SCROLLBAR_COARSE_TARGET`
+
+The width a scroll bar's thumb must be reachable across for a finger.
+
+Android's `ViewConfiguration.MIN_SCROLLBAR_TOUCH_TARGET` — the bar keeps its
+8–12 dp paint at every density and reaches this through
+`Widget::hit_outset`, which moves nothing and repaints nothing.
+
+```rust
+pub const SCROLLBAR_COARSE_TARGET: f32 = 48.0;
+```
+
+## `pub const SCROLLBAR_MIN_THUMB_LENGTH`
+
+The shipped minimum thumb length, at Compact. Raised to the density's
+`target_size` (44 dp at Touch) at build time; a
+`min_thumb_length` override wins over both.
+
+```rust
+pub const SCROLLBAR_MIN_THUMB_LENGTH: f32 = 24.0;
+```
+
+## `pub const SCROLLBAR_PART_THUMB`
+
+Which part of the bar a `TargetRegion` describes.
+
+Reported so an audit — and a router routing a coarse press — can tell the
+grab affordance from the paging surface around it.
+
+```rust
+pub const SCROLLBAR_PART_THUMB: u16 = 0;
+```
+
+## `pub const SCROLLBAR_PART_TRACK`
+
+The track either side of the thumb: a tap there pages.
+
+```rust
+pub const SCROLLBAR_PART_TRACK: u16 = 1;
+```
 
 ## `pub struct ScrollBar`
 
@@ -75,7 +135,21 @@ Set the bar thickness (width for vertical, height for horizontal).
 
 #### `pub fn min_thumb_length(mut self, len: f32) -> Self`
 
-Set the minimum thumb length in pixels.
+Set the minimum thumb length in pixels, overriding the density.
+
+Left unset the floor is `SCROLLBAR_MIN_THUMB_LENGTH` raised to the
+density's target size — 24 dp at Compact, 44 dp at Touch — so a short
+thumb on a long document stays something a finger can land on.
+
+#### `pub fn reveal(mut self, revealed: Signal<bool>) -> Self`
+
+Show the bar for as long as `revealed` is true, whatever hover says.
+
+An overlay bar is normally revealed by pointer proximity, which a
+contact never produces. `ScrollArea` raises this while a finger's pan is
+in flight; a density whose `RevealPolicy`
+is `Always` seeds it true at build. It only ever adds a reveal — nothing
+here can hide a bar that hover has shown.
 
 #### `pub fn step_size(mut self, step: f32) -> Self`
 

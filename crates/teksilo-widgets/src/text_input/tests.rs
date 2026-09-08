@@ -648,6 +648,113 @@ fn placeholder_is_leading_aligned() {
     );
 }
 
+/// The set of actions the field **advertises** to assistive technology.
+///
+/// An AT client acts on what a node advertises, not on what the widget can in
+/// fact do: `accesskit_consumer` filters by `supports_action`, VoiceOver's
+/// rotor and Narrator's scan build their verb lists from it, and an action
+/// that is serviced but never advertised is an action no screen reader will
+/// ever invoke. So the advertisement is a contract in its own right, and it
+/// was not covered — deleting any of the `builder.add_action(...)` lines in
+/// `primitives/text_input_field/widget_impl.rs` left the whole suite green,
+/// because every existing test drives the *handler* directly.
+///
+/// Asserted once here on the primitive's node rather than four times over the
+/// widgets built on it: `TextInput`, `PasswordField`, `SpinBox` and
+/// `SearchField` all embed the same `TextInputField` and emit this node from
+/// the same `accessibility()`. The two conditional pairs get their own case
+/// below, since it is those conditions the set turns on.
+#[test]
+fn the_field_advertises_the_actions_an_assistive_client_may_invoke() {
+    use teksilo_core::accesskit::Action;
+
+    let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+    tree.add(TextInput::new(Signal::new("hello".to_string())));
+    tree.layout(SizeProposal::exact(300.0, 40.0));
+    let field = tree
+        .find_by_role(teksilo_core::accesskit::Role::TextInput)
+        .expect("the composite builds a Role::TextInput field");
+    let actions = tree.accessibility_node(field).actions().to_vec();
+
+    for action in [
+        Action::Focus,
+        Action::SetValue,
+        Action::ReplaceSelectedText,
+        Action::SetTextSelection,
+    ] {
+        assert!(
+            actions.contains(&action),
+            "an editable field must advertise {action:?}; it advertises {actions:?}",
+        );
+    }
+
+    // `ScrollIntoView` is deliberately absent, and this is the assertion that
+    // keeps the omission a decision rather than a drift. `RichTextEditor` and
+    // `CodeEditor` do advertise it, being scrollable surfaces — though only
+    // `RichTextEditor` services it; `CodeEditor` and `LogView` advertise it and
+    // answer `Ignored`, an open defect recorded in `docs/a11y/a11y_issues.md`
+    // — whereas `handle_access_action` in `primitives/text_input_field.rs`
+    // answers `Ignored` to it, and advertising an action nothing performs is
+    // worse for a client than not advertising it: the verb appears in the
+    // rotor and does nothing when chosen.
+    assert!(
+        !actions.contains(&Action::ScrollIntoView),
+        "a field that does not service ScrollIntoView must not advertise it",
+    );
+}
+
+/// The two conditional pairs, each at the condition that removes it.
+///
+/// A read-only field cannot be written, so `SetValue` and
+/// `ReplaceSelectedText` come off — advertising them would offer a client a
+/// dictation target that silently drops what it inserts. A *protected* field
+/// (a masked `PasswordField`) additionally hides its caret model from AT, so
+/// `SetTextSelection` comes off with it: there are no character positions
+/// published for a client to select between.
+#[test]
+fn a_read_only_or_protected_field_withdraws_the_actions_it_cannot_service() {
+    use teksilo_core::accesskit::Action;
+
+    let read_only = {
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        tree.add(TextInput::new(Signal::new("hello".to_string())).read_only(true));
+        tree.layout(SizeProposal::exact(300.0, 40.0));
+        let field = tree
+            .find_by_role(teksilo_core::accesskit::Role::TextInput)
+            .expect("a read-only TextInput is still a Role::TextInput");
+        tree.accessibility_node(field).actions().to_vec()
+    };
+    assert!(
+        read_only.contains(&Action::Focus),
+        "a read-only field is still focusable; it advertises {read_only:?}",
+    );
+    assert!(
+        !read_only.contains(&Action::SetValue) && !read_only.contains(&Action::ReplaceSelectedText),
+        "a read-only field must not advertise a write; it advertises {read_only:?}",
+    );
+    assert!(
+        read_only.contains(&Action::SetTextSelection),
+        "but its caret model is still published, so selecting stays on offer",
+    );
+
+    let protected = {
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        tree.add(crate::PasswordField::new(Signal::new(
+            "hunter2".to_string(),
+        )));
+        tree.layout(SizeProposal::exact(300.0, 40.0));
+        let field = tree
+            .find_by_role(teksilo_core::accesskit::Role::PasswordInput)
+            .expect("a PasswordField builds a Role::PasswordInput field");
+        tree.accessibility_node(field).actions().to_vec()
+    };
+    assert!(
+        !protected.contains(&Action::SetTextSelection),
+        "a masked field publishes no character positions, so it must not offer \
+         a selection action; it advertises {protected:?}",
+    );
+}
+
 /// `TextInput::label` must name the node a screen reader can actually see.
 ///
 /// The composite's outer node is a `Role::GenericContainer`, and

@@ -11,8 +11,8 @@
 //! `on_*` handler. A pan does not, and deliberately: its product is a
 //! synthesised [`WidgetEvent::Scroll`](crate::event::WidgetEvent::Scroll),
 //! delivered by the router along the claimant chain
-//! (`WidgetTree::deliver_pan`). That is what lets a finger drive the fourteen
-//! surfaces that already implement `on_scroll` without any of them gaining a
+//! (`WidgetTree::deliver_pan`). That is what lets a finger drive every surface
+//! that already implements `on_scroll` without any of them gaining a
 //! second delta path — and it is why there is no `GestureEvent::Pan` and no
 //! `on_pan` handler to add one.
 //!

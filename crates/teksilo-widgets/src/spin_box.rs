@@ -145,18 +145,32 @@
 //! What the box does about panning, it does by omission. It declares no
 //! [`touch_action`] and makes no pan claim, so its subtree keeps the default
 //! [`TouchAction::AUTO`] and a finger that comes to rest on it and then drags
-//! is won by the enclosing scroller rather than changing the value — asserted
-//! by `a_finger_pan_over_the_spin_box_scrolls_its_container` in `spin_box/
-//! tests.rs`. The `on_scroll` handler below is a *wheel* handler and not a pan;
-//! it never sees a finger.
+//! is won by the enclosing scroller rather than changing the value. The
+//! `on_scroll` handler below is a *wheel* handler and not a pan; it never sees
+//! a finger.
 //!
-//! The explicit `touch_action(PAN_Y)` declaration
-//! `docs/widget-pointer-inventory.md` asks this file for is a **narrowing** on
-//! top of that behaviour, not a restatement of it: it would additionally forbid
-//! a horizontal pan and a pinch through the field, which is a change to make
-//! against the pan-claim arbitration rather than on its own. That row is
-//! assigned to **P22**, the scrollables migration, which owns this file's
-//! `on_scroll`; P24 owns `spin_box/step_button.rs`.
+//! Two tests in `spin_box/tests.rs` cover that, and only one of them can see
+//! the second half of it. `a_finger_pan_over_the_spin_box_scrolls_its_container`
+//! shows the pan reaching the scroller, but its box has the default
+//! [`WheelMode::Focused`] and its fixture never focuses the field, so the
+//! `on_scroll` below declines before the pan question is reached — a pan that
+//! DID arrive would leave the value unchanged there anyway.
+//! `a_finger_pan_over_a_hover_wheel_spin_box_scrolls_its_container` is the one
+//! that can observe the claim: with [`WheelMode::Hover`] the handler runs for
+//! every scroll that reaches the box, so a claim would step the value once per
+//! synthesised sample.
+//!
+//! P22, the scrollables migration, looked at the explicit
+//! `touch_action(PAN_Y)` this file was asked for and **decided against it**.
+//! It is a *narrowing* on top of the behaviour above rather than a restatement
+//! of it: it would additionally forbid a horizontal pan and a pinch through
+//! the field — a real cost to a spin box in a horizontally-scrolling toolbar,
+//! or on a pinch-zoomable page — and it would buy nothing the omission does
+//! not already give, because the claimant chain visits only the pan candidates
+//! and never the generic bubble, so a boundary pan cannot reach the `on_scroll`
+//! below however far it travels. The omission is the decision; the
+//! hover-wheel test named above is what can witness it. P24 owns
+//! `spin_box/step_button.rs`.
 //!
 //! [`touch_action`]: teksilo_core::widget_builder::WidgetBuilder::touch_action
 //! [`TouchAction::AUTO`]: teksilo_core::pointer::touch_action::TouchAction::AUTO

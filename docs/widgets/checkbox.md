@@ -22,6 +22,20 @@ Chrome (box shape, fill, focus ring) is driven by the active
 `CheckboxStyle`; three visual variants are available via
 `CheckboxVariant`.
 
+## Touch and pen
+
+The pressed state comes from the framework press
+(`docs/touch-and-pen.md` §7.1) rather than from this widget: sliding off
+abandons it, sliding back on restores it, and a pan claimant winning the
+press clears it with no release. Before the controls sweep `is_pressed`
+could only ever be set by a keyboard `Space`, so a mouse-down showed no
+pressed chrome at all — themes that paint one (IntUI's checked box, Material
+3's state layer) now get it from every pointer.
+
+The 24 dp `MinSize` around the 19 dp glyph already meets the WCAG 2.2
+SC 2.5.8 floor at Compact and follows the density ladder above it, so no
+hit-widening mechanism is involved.
+
 ## Accessibility
 
 Announces as `Role::CheckBox`. A label is required in debug builds

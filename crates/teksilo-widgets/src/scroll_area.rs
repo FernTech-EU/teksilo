@@ -728,7 +728,7 @@ impl Widget for ScrollArea {
 
             let own_arm = move |event: &WidgetEvent,
                                 ctx: &mut teksilo_core::widget::EventContext|
-                  -> EventResponse {
+                  -> Option<EventResponse> {
                 match event {
                     WidgetEvent::Scroll { phase, .. } => {
                         pending_restore_y.set(None);
@@ -747,7 +747,9 @@ impl Widget for ScrollArea {
                         }
                         // Declined on purpose: the delta belongs to the shared
                         // handler, which is the whole point of installing one.
-                        EventResponse::Ignored
+                        // `None`, not `Some(Ignored)`: this arm observed the
+                        // event, it did not consume it.
+                        None
                     }
                     WidgetEvent::ScrollIntoView {
                         target_bounds,
@@ -845,9 +847,9 @@ impl Widget for ScrollArea {
                         {
                             *d = teksilo_canvas::Point::new(new_x - sx, new_y - sy);
                         }
-                        EventResponse::Handled
+                        Some(EventResponse::Handled)
                     }
-                    _ => EventResponse::Ignored,
+                    _ => None,
                 }
             };
 

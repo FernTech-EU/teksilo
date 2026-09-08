@@ -692,7 +692,7 @@ from its *items* — `DockRailItemSize` resolves through `IconButtonRecipe`, whi
 | `crates/teksilo-widgets/src/progress_bar.rs` | 64 | `INDETERMINATE_SWEEP_RATIO` | `0.42` | — not a dimension | fixed — unitless (ratio / alpha / duration / epsilon) |
 | `crates/teksilo-widgets/src/radio_tile.rs` | 64 | `TILE_ROW_GAP` | `10.0` | Spacing | scales with `spacing_factor` — `tile_row_gap(&InputTokens)` |
 | `crates/teksilo-widgets/src/radio_tile.rs` | 66 | `TILE_TITLE_DESC_GAP` | `6.0` | Spacing | scales with `spacing_factor` — `tile_title_desc_gap(&InputTokens)` |
-| `crates/teksilo-widgets/src/rich_text/mouse.rs` | 125 | `TEXT_DRAG_THRESHOLD` | `4.0` | Grab | moves into `GestureProfile.drag_slop` (4 dp mouse / 18 dp touch), not a density scale — P26 owns the switch |
+| `crates/teksilo-widgets/src/rich_text/mouse.rs` | 125 | `TEXT_DRAG_THRESHOLD` | `4.0` | Grab | moves into `GestureProfile.drag_slop` (5 dp mouse / 18 dp touch), not a density scale — P26 owns the switch |
 | `crates/teksilo-widgets/src/rich_text/mouse.rs` | 53 | `RESIZE_MIN_EDGE` | `24.0` | Decoration | fixed — a minimum image edge (a content clamp), not a hit dimension; `dp(24, Grab, ..)` is the identity at every density anyway, and the grip's coarse hit is `Widget::hit_outset` (P26) |
 | `crates/teksilo-widgets/src/rich_text/mouse.rs` | 61 | `RESIZE_HANDLE_SLOP` | `5.0` | Grab | absorbed by `Widget::hit_outset` with `PointerKindMask::ALL` |
 | `crates/teksilo-widgets/src/rich_text/paint.rs` | 156 | `SELECTED_IMAGE_TINT_ALPHA` | `0.28` | — not a dimension | fixed — unitless (ratio / alpha / duration / epsilon) |

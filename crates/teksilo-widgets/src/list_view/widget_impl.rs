@@ -160,43 +160,30 @@ impl<T: 'static> Widget for ListView<T> {
         // scrollbar thumb drag is exactly the one the framework defers.
 
         // --- Set up scroll event handler + DnD handlers on self ---
-        let scroll_y = self.scroll_y.clone();
-        let max_scroll = self.max_scroll_y.clone();
-        let line_height = self.item_height;
-        let overscroll_behavior = self.overscroll_behavior;
-        let smooth_scrolling = self.smooth_scrolling;
-        let smooth_scroll_duration = self.smooth_scroll_duration;
-        let mut handlers = HandlerSet::new()
-            .on_scroll(move |event, _ctx| match event {
-                teksilo_core::event::WidgetEvent::Scroll { delta, .. } => {
-                    let dy = match delta {
-                        teksilo_core::event::ScrollDelta::Lines { y, .. } => y * line_height,
-                        teksilo_core::event::ScrollDelta::Pixels { y, .. } => *y,
-                    };
-                    let current = scroll_y.get();
-                    let max = max_scroll.get();
-                    // Base off the animation target so successive notches
-                    // accumulate instead of restarting mid-animation.
-                    let base = scroll_y.animation_target().unwrap_or(current);
-                    let (new_y, moved) = crate::common::scroll::scroll_clamp_axis(base, dy, max);
-                    if moved {
-                        if smooth_scrolling {
-                            scroll_y.animate_to(new_y, smooth_scroll_duration, Easing::EaseOut);
-                        } else {
-                            scroll_y.set(new_y);
-                        }
-                    }
-                    // Chain to an ancestor scrollable when fully clamped
-                    // (unless Contain), otherwise consume.
-                    crate::common::scroll::scroll_response(
-                        moved,
-                        overscroll_behavior == OverscrollBehavior::Contain,
-                    )
-                }
-                _ => teksilo_core::event::EventResponse::Ignored,
-            })
-            .clips_children(true)
-            .focusable(true);
+        // The wheel arithmetic, the pan and the claim that puts this node on a
+        // finger's claimant chain all come from `common::scrollable`. A wheel
+        // still takes the path it always did — `handle_scroll_event` branches
+        // on the scroll *source*, not the phase.
+        let mut handlers = HandlerSet::new().clips_children(true).focusable(true);
+        {
+            let behavior = crate::common::scrollable::ScrollableBehavior::new(
+                crate::common::scrollable::ScrollableAxes::vertical(
+                    self.scroll_y.clone(),
+                    self.max_scroll_y.clone(),
+                ),
+            )
+            .with_scroller(self.scroller.clone())
+            // Vertical only: this view owns no horizontal offset, so a
+            // horizontal pan is declined and chains outward.
+            .axes(PanAxes::Y)
+            .overscroll(self.overscroll_behavior)
+            .smooth(self.smooth_scrolling)
+            .smooth_duration(self.smooth_scroll_duration)
+            .line_height(self.item_height)
+            .reduced_motion(ctx.prefers_reduced_motion())
+            .physics(ctx.theme().input.scroll_physics);
+            handlers = behavior.install(handlers);
+        }
 
         // --- Keyboard navigation + Alt+Arrow reorder ---
         {
@@ -811,6 +798,12 @@ impl<T: 'static> Widget for ListView<T> {
         // realization window from this, and a stale value there costs a
         // permanent rebuild loop (`common::viewport`).
         crate::common::viewport::record_viewport_height(&self.viewport_height, bounds.height);
+        // The rubber band's resistance is a fraction of the viewport. This
+        // view does not band, but the scroller reads the extent either way and
+        // this is the only pass that knows it.
+        self.scroller
+            .borrow_mut()
+            .set_viewport(teksilo_canvas::Vec2::new(bounds.width, bounds.height));
 
         if children.is_empty() {
             return;

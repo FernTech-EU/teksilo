@@ -9,7 +9,7 @@ use teksilo_core::signal::Signal;
 use teksilo_core::widget_tree::WidgetTree;
 use teksilo_i18n::lit;
 
-use super::{SpinBox, StepType, WrapMode};
+use super::{SpinBox, StepType, WheelMode, WrapMode};
 
 fn tick(tree: &mut WidgetTree) {
     tree.request_frame();
@@ -1471,19 +1471,13 @@ fn a_release_away_from_the_button_stops_the_auto_repeat() {
 
 // ── Touch: what the box does about panning, it does by omission ──────
 
-/// The spin box declares no `touch_action` and makes no pan claim, so its
-/// subtree stays at the default `TouchAction::AUTO` and a finger that comes to
-/// rest on it and then drags belongs to the enclosing scroller.
+/// Press on the spin box's field and drag `up` logical pixels, then lift.
+/// Returns how many scroll events the enclosing container saw.
 ///
-/// This is the behaviour the module header describes. It is asserted here
-/// rather than by reading a declaration off the node, because there is no
-/// declaration to read: the property is that the box gets out of the way, and
-/// the only way to see that is to put a scroller behind it and pan.
-///
-/// The value must not move either. A wheel notch steps the box (`on_scroll`),
-/// and a pan that reached that handler would step it once per sample.
-#[test]
-fn a_finger_pan_over_the_spin_box_scrolls_its_container() {
+/// The container is a real claimant — `scroll_container` + a vertical
+/// `PanClaim` — so the pan has somewhere legitimate to go. Whether it gets
+/// there is the question each caller asks.
+fn pan_over_a_spin_box(spin: SpinBox<i32>, up: f32) -> std::rc::Rc<std::cell::Cell<u32>> {
     use crate::button::press_test_support::{finger, touch};
     use teksilo_canvas::Point;
     use teksilo_core::event::EventResponse;
@@ -1493,9 +1487,8 @@ fn a_finger_pan_over_the_spin_box_scrolls_its_container() {
 
     let scrolled = std::rc::Rc::new(std::cell::Cell::new(0_u32));
     let count = scrolled.clone();
-    let value = Signal::new(50);
     let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
-    let spin = tree.add(SpinBox::new(value.clone(), 0, 100));
+    let spin = tree.add(spin);
     let _page = tree.add(
         crate::primitives::VStack::new()
             .add_child(spin)
@@ -1514,20 +1507,73 @@ fn a_finger_pan_over_the_spin_box_scrolls_its_container() {
     let start = Point::new(bounds.x + bounds.width * 0.25, bounds.center().y);
     let contact = finger();
     tree.dispatch_pointer(touch(contact, PointerPhase::Down, start, 0));
-    for (i, dy) in [40.0_f32, 90.0, 150.0].into_iter().enumerate() {
+    for (i, dy) in [up / 3.0, up * 2.0 / 3.0, up].into_iter().enumerate() {
         let at = Point::new(start.x, start.y - dy);
         tree.dispatch_pointer(touch(contact, PointerPhase::Move, at, 20 + i as u64 * 20));
     }
     tree.dispatch_pointer(touch(
         contact,
         PointerPhase::Up,
-        Point::new(start.x, start.y - 150.0),
+        Point::new(start.x, start.y - up),
         100,
     ));
+    scrolled
+}
+
+/// The spin box declares no `touch_action` and makes no pan claim, so its
+/// subtree stays at the default `TouchAction::AUTO` and a finger that comes to
+/// rest on it and then drags belongs to the enclosing scroller.
+///
+/// This is the behaviour the module header describes. It is asserted here
+/// rather than by reading a declaration off the node, because there is no
+/// declaration to read: the property is that the box gets out of the way, and
+/// the only way to see that is to put a scroller behind it and pan.
+///
+/// The value must not move either. A wheel notch steps the box (`on_scroll`),
+/// and a pan that reached that handler would step it once per sample.
+///
+/// **What this test does and does not see.** The box's default
+/// [`WheelMode::Focused`] makes its `on_scroll` decline before the pan question
+/// is reached, and this fixture never focuses the field — so a pan that DID
+/// reach the handler would still leave the value at 50 here. The value
+/// assertion below is therefore a guard against a regression in the wheel gate,
+/// not evidence about the claim. `a_finger_pan_over_a_hover_wheel_spin_box_
+/// scrolls_its_container` is the one that can see the claim, and it is the one
+/// to read for the module header's argument.
+#[test]
+fn a_finger_pan_over_the_spin_box_scrolls_its_container() {
+    let value = Signal::new(50);
+    let scrolled = pan_over_a_spin_box(SpinBox::new(value.clone(), 0, 100), 150.0);
 
     assert!(
         scrolled.get() > 0,
         "the pan never reached the scroller — the spin box kept the contact",
     );
     assert_eq!(value.get(), 50, "and it stepped nothing on the way past");
+}
+
+/// The same pan over a box whose wheel is **not** gated on focus.
+///
+/// This is the case that can actually observe the claim. With
+/// [`WheelMode::Hover`] the `on_scroll` handler runs for any scroll that
+/// reaches the box, so if the box were on the pan's claimant chain the
+/// synthesised samples would step the value once each — 50 → 47 for the three
+/// samples this fixture sends. It stays at 50 because the box makes no claim
+/// and the claimant walk therefore never visits it, which is exactly what the
+/// module header argues and what adding a `PanClaim` here would break.
+#[test]
+fn a_finger_pan_over_a_hover_wheel_spin_box_scrolls_its_container() {
+    let value = Signal::new(50);
+    let spin = SpinBox::new(value.clone(), 0, 100).wheel_mode(WheelMode::Hover);
+    let scrolled = pan_over_a_spin_box(spin, 150.0);
+
+    assert!(
+        scrolled.get() > 0,
+        "the pan never reached the scroller — the spin box kept the contact",
+    );
+    assert_eq!(
+        value.get(),
+        50,
+        "an ungated wheel handler must still never see a finger's pan",
+    );
 }

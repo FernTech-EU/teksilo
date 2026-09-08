@@ -15,13 +15,12 @@ use std::cell::Cell;
 use std::rc::Rc;
 
 use teksilo_canvas::{Point, Rect};
-use teksilo_core::event::{EventResponse, PointerButton, ScrollDelta, WidgetEvent};
+use teksilo_core::event::{EventResponse, PointerButton, WidgetEvent};
 use teksilo_core::widget::EventContext;
 use teksilo_text::text_document::{MoveMode, SelectionType};
 
 use super::state::{DragState, SharedState};
 use super::sync_cursor_signals;
-use crate::common::scroll::{OverscrollBehavior, scroll_clamp_axis, scroll_response};
 use crate::rich_text::hit_test;
 
 /// Pointer positions arrive **wrapper-local**; the engine wants **body-local**.
@@ -206,43 +205,6 @@ pub(super) fn add_caret_at(st: &mut super::state::CodeEditorState, pos: usize) {
     let c = st.document.cursor();
     c.set_position(pos, MoveMode::MoveAnchor);
     st.extra_carets.push(c);
-}
-
-pub(super) fn handle_scroll(
-    state: &SharedState,
-    overscroll: OverscrollBehavior,
-    event: &WidgetEvent,
-    ctx: &mut EventContext,
-) -> EventResponse {
-    let WidgetEvent::Scroll { delta, .. } = event else {
-        return EventResponse::Ignored;
-    };
-    // 16 px per line matches ScrollArea's default, so the editor scrolls at the
-    // same rate as every other scrollable in the app.
-    let (dx, dy) = match delta {
-        ScrollDelta::Lines { x, y } => (*x * 16.0, *y * 16.0),
-        ScrollDelta::Pixels { x, y } => (*x, *y),
-    };
-    let st = state.borrow();
-    let (new_x, moved_x) = scroll_clamp_axis(st.scroll_x.get(), dx, st.max_scroll_x.get());
-    let (new_y, moved_y) = scroll_clamp_axis(st.scroll_y.get(), dy, st.max_scroll_y.get());
-    if moved_x {
-        st.scroll_x.set(new_x);
-    }
-    if moved_y {
-        st.scroll_y.set(new_y);
-    }
-    drop(st);
-    if moved_x || moved_y {
-        ctx.request_frame();
-    }
-    // Fully clamped on both axes: decline, so the wheel chains to an enclosing
-    // scrollable — an editor inside a scrolling page hands the page its
-    // leftover. Same boundary rule as every other scrollable.
-    scroll_response(
-        moved_x || moved_y,
-        overscroll == OverscrollBehavior::Contain,
-    )
 }
 
 /// Double-click selects the word.

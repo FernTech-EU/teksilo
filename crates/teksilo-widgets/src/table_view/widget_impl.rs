@@ -284,14 +284,7 @@ impl<T: 'static> Widget for TableView<T> {
         *self.display_indices.borrow_mut() = display_indices_now.clone();
 
         // Self handlers: scroll wheel + keyboard + clip + focusable.
-        let scroll_y_for_wheel = self.scroll_y.clone();
-        let max_scroll_for_wheel = self.max_scroll_y.clone();
-        let scroll_x_for_wheel = self.scroll_x.clone();
-        let max_scroll_x_for_wheel = self.max_scroll_x.clone();
         let line_height = row_h;
-        let overscroll_behavior = self.overscroll_behavior;
-        let smooth_scrolling = self.smooth_scrolling;
-        let smooth_scroll_duration = self.smooth_scroll_duration;
 
         // Bind focused_cell at RepaintOnly — its update redraws the
         // focus ring without rebuilding the row tree. Also at
@@ -515,81 +508,49 @@ impl<T: 'static> Widget for TableView<T> {
             shared_key(event, ctx)
         };
 
-        let mut handlers = HandlerSet::new()
-            .on_scroll(move |event, _ctx| match event {
-                teksilo_core::event::WidgetEvent::Scroll {
-                    delta, modifiers, ..
-                } => {
-                    let (raw_dx, raw_dy) = match delta {
-                        teksilo_core::event::ScrollDelta::Lines { x, y } => {
-                            (x * line_height, y * line_height)
-                        }
-                        teksilo_core::event::ScrollDelta::Pixels { x, y } => (*x, *y),
-                    };
-                    // Shift+wheel remaps a vertical-only wheel to horizontal
-                    // scroll (the `TabBar` precedent) — a genuine two-axis
-                    // trackpad delta (both native `dx` and `dy` nonzero)
-                    // passes through unremapped either way.
-                    let (dx, dy) = if modifiers.shift() && raw_dx.abs() < f32::EPSILON {
-                        (raw_dy, 0.0)
-                    } else {
-                        (raw_dx, raw_dy)
-                    };
-
-                    let mut moved_any = false;
-                    if dy.abs() > 0.0 {
-                        let current = scroll_y_for_wheel.get();
-                        let max = max_scroll_for_wheel.get();
-                        // Base off the animation target (not the rendered
-                        // offset) so a mid-fling boundary correctly chains
-                        // and successive notches accumulate instead of
-                        // restarting from the partway-animated position.
-                        let base = scroll_y_for_wheel.animation_target().unwrap_or(current);
-                        let (new_y, moved) =
-                            crate::common::scroll::scroll_clamp_axis(base, dy, max);
-                        if moved {
-                            if smooth_scrolling {
-                                scroll_y_for_wheel.animate_to(
-                                    new_y,
-                                    smooth_scroll_duration,
-                                    Easing::EaseOut,
-                                );
-                            } else {
-                                scroll_y_for_wheel.set(new_y);
-                            }
-                        }
-                        moved_any |= moved;
-                    }
-                    if dx.abs() > 0.0 {
-                        let current = scroll_x_for_wheel.get();
-                        let max = max_scroll_x_for_wheel.get();
-                        let base = scroll_x_for_wheel.animation_target().unwrap_or(current);
-                        let (new_x, moved) =
-                            crate::common::scroll::scroll_clamp_axis(base, dx, max);
-                        if moved {
-                            if smooth_scrolling {
-                                scroll_x_for_wheel.animate_to(
-                                    new_x,
-                                    smooth_scroll_duration,
-                                    Easing::EaseOut,
-                                );
-                            } else {
-                                scroll_x_for_wheel.set(new_x);
-                            }
-                        }
-                        moved_any |= moved;
-                    }
-                    // Chain to an ancestor scrollable when fully clamped on
-                    // every axis touched (unless Contain), otherwise consume.
-                    crate::common::scroll::scroll_response(
-                        moved_any,
-                        overscroll_behavior == OverscrollBehavior::Contain,
-                    )
-                }
-                _ => teksilo_core::event::EventResponse::Ignored,
-            })
-            .clips_children(true)
-            .focusable(true);
+        // The wheel arithmetic, the pan and the claim that puts this node on a
+        // finger's claimant chain all come from `common::scrollable`. A wheel
+        // still takes the path it always did — `handle_scroll_event` branches
+        // on the scroll *source*, not the phase.
+        let mut handlers = HandlerSet::new().clips_children(true).focusable(true);
+        {
+            use crate::common::scrollable::{
+                ScrollableAxes, ScrollableBehavior, handle_scroll_event, shift_wheel_remap,
+            };
+            let axes = ScrollableAxes::new(
+                self.scroll_x.clone(),
+                self.scroll_y.clone(),
+                self.max_scroll_x.clone(),
+                self.max_scroll_y.clone(),
+            );
+            let behavior = ScrollableBehavior::new(axes.clone())
+                .with_scroller(self.scroller.clone())
+                .axes(PanAxes::BOTH)
+                .overscroll(self.overscroll_behavior)
+                .smooth(self.smooth_scrolling)
+                .smooth_duration(self.smooth_scroll_duration)
+                .line_height(line_height)
+                .reduced_motion(ctx.prefers_reduced_motion())
+                .physics(ctx.theme().input.scroll_physics);
+            // Shift+wheel scrolls the columns. The remap is a delta rewrite,
+            // which the shared handler cannot express; the `before` arm builds
+            // the rewritten event and hands it to that same handler, so the
+            // arithmetic is still written once.
+            let scroller = behavior.scroller();
+            let options = behavior.options();
+            // `Some(..)` on both arms of the remap: a remapped event is one
+            // this arm has consumed, so the shared handler must not then run
+            // on the ORIGINAL — a Shift+wheel notch whose horizontal delta the
+            // table cannot absorb (no overflow, or already at the end) would
+            // otherwise fall through and scroll the rows vertically instead.
+            // The `Ignored` inside the `Some` is still the boundary answer, so
+            // the whole original event chains outward as it should.
+            let behavior = behavior.before(move |event, ctx| {
+                shift_wheel_remap(event, ctx)
+                    .map(|remapped| handle_scroll_event(&remapped, &axes, &scroller, &options, ctx))
+            });
+            handlers = behavior.install(handlers);
+        }
 
         handlers = handlers.on_key(key_handler);
 
@@ -982,6 +943,12 @@ impl<T: 'static> Widget for TableView<T> {
         children: &mut [WidgetPlacement],
         ctx: &LayoutContext,
     ) {
+        // The rubber band's resistance is a fraction of the viewport. This
+        // view does not band, but the scroller reads the extent either way and
+        // this is the only pass that knows it.
+        self.scroller
+            .borrow_mut()
+            .set_viewport(teksilo_canvas::Vec2::new(bounds.width, bounds.height));
         if children.is_empty() {
             return;
         }

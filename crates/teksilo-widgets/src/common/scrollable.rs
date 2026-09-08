@@ -3,16 +3,23 @@
 
 //! One scroll handler for every scrollable surface.
 //!
-//! Fourteen widgets in this crate hand-rolled the same `on_scroll` body:
-//! convert a [`ScrollDelta`] to pixels, clamp each axis, animate or set, and
-//! answer `Ignored` at a hard boundary so the event chains to an ancestor. They
-//! agreed on the arithmetic and disagreed on everything around it — which of
-//! them honoured `Contain`, which animated, which read a line height. This
+//! The scrollable widgets in this crate each hand-rolled the same `on_scroll`
+//! body: convert a [`ScrollDelta`] to pixels, clamp each axis, animate or set,
+//! and answer `Ignored` at a hard boundary so the event chains to an ancestor.
+//! They agreed on the arithmetic and disagreed on everything around it — which
+//! of them honoured `Contain`, which animated, which read a line height. This
 //! module is that body written once, plus the two things none of them had: a
 //! finger's pan, and the rubber band that pan needs at the edge.
 //!
-//! [`ScrollArea`](crate::ScrollArea) is the first adopter and the one to copy;
-//! the other thirteen follow in P22.
+//! [`ScrollArea`](crate::ScrollArea) is the reference adopter and the one to
+//! copy. The data views ([`ListView`](crate::ListView),
+//! [`TreeView`](crate::TreeView), [`GridView`](crate::GridView),
+//! [`TableView`](crate::TableView),
+//! [`TreeTableView`](crate::TreeTableView)) and the three text surfaces
+//! ([`RichTextEditor`](crate::rich_text::RichTextEditor), [`CodeEditor`](crate::CodeEditor)
+//! and [`LogView`](crate::LogView)) install it too. A widget that handles a
+//! wheel without owning a scroll offset — `SpinBox` steps a number, `TabBar`
+//! remaps a notch sideways — is not a scrollable and does not appear here.
 //!
 //! # The two paths
 //!
@@ -24,8 +31,8 @@
 //!   trackpad stream, a programmatic scroll — takes the path this crate has
 //!   always taken: clamp against the *animation target* rather than the
 //!   rendered offset (so a mid-tween boundary chains correctly), then either
-//!   tween over [`ScrollHandlingOptions::smooth_duration`] or set outright.
-//!   Byte for byte what `ScrollArea` did before this module existed.
+//!   tween over [`ScrollHandlingOptions::smooth_duration`] or set outright,
+//!   per axis and only where the clamp moved.
 //! * **[`ScrollSource::TouchPan`]** — a pan synthesised from a direct pointer
 //!   by the router, and the coast that follows it — goes through a
 //!   [`KineticScroller`], which is what supplies the rubber band. A pan never
@@ -33,7 +40,13 @@
 //!
 //! Splitting on the source and not the phase is what makes the migration safe.
 //! A legacy [`WidgetEvent::Scroll`] reports [`ScrollSource::Wheel`], so every
-//! existing call site and every existing test keeps the path it had.
+//! existing call site and every existing test keeps the path it had. The
+//! distinction is load-bearing rather than cosmetic, and is pinned by
+//! `a_trackpad_stream_takes_the_wheel_path_and_not_the_kinetic_one`
+//! (`tests/scrollables_touch.rs`): a trackpad stream carries the same
+//! `Began`/`Changed`/`Ended` phases a synthesised pan does, so a phase test
+//! would route a pointing device into the kinetic path and start tracking
+//! velocity for a contact that will never lift.
 //!
 //! # Who owns what
 //!
@@ -108,10 +121,11 @@ pub const SMOOTH_SCROLL_DURATION: Duration = Duration::from_millis(150);
 /// onto the widget's state rather than a second copy of it. Cloning is cloning
 /// handles.
 ///
-/// **Both offsets must be [`Signal::new_animated`]** on a surface that turns
-/// [`ScrollHandlingOptions::smooth`] on. A smooth notch tweens *both* axes —
-/// the unmoved one to where it already is, which is what keeps a cross-axis
-/// tween from being cut short — and `animate_to` on a plain signal panics.
+/// An offset must be [`Signal::new_animated`] on a surface that turns
+/// [`ScrollHandlingOptions::smooth`] on **and gives that axis a range**:
+/// `animate_to` on a plain signal panics. An axis with a permanently zero
+/// range is never written by either path, so a surface that scrolls on one
+/// axis only may leave the other plain.
 #[derive(Clone, Debug)]
 pub struct ScrollableAxes {
     /// Horizontal offset, `0.0` at the leading edge.
@@ -148,15 +162,18 @@ impl ScrollableAxes {
     /// A vertical-only surface: the horizontal axis is pinned at zero with a
     /// zero range, so nothing can ever move it.
     ///
-    /// The pinned axis is animated even though it never moves, because a smooth
-    /// notch aims a tween at both axes and a plain signal would panic under it.
+    /// The pinned axis is a plain signal. Both paths write an axis only when
+    /// its clamp actually moved, and an axis whose range is zero and whose
+    /// offset is already zero never moves — so the tween that would panic on a
+    /// plain signal is unreachable here.
     pub fn vertical(y: Signal<f32>, max_y: Signal<f32>) -> Self {
-        Self::new(Signal::new_animated(0.0), y, Signal::new(0.0), max_y)
+        Self::new(Signal::new(0.0), y, Signal::new(0.0), max_y)
     }
 
-    /// A horizontal-only surface.
+    /// A horizontal-only surface. The pinned axis is plain, for the reason
+    /// given on [`vertical`](Self::vertical).
     pub fn horizontal(x: Signal<f32>, max_x: Signal<f32>) -> Self {
-        Self::new(x, Signal::new_animated(0.0), max_x, Signal::new(0.0))
+        Self::new(x, Signal::new(0.0), max_x, Signal::new(0.0))
     }
 
     /// Write an offset back, notifying only on a real change.
@@ -199,8 +216,15 @@ pub struct ScrollHandlingOptions {
     /// Whether a wheel notch tweens to its target instead of jumping. Never
     /// consulted on the pan path — a finger is already the animation.
     ///
-    /// With this on, both of [`ScrollableAxes`]' offsets must be
-    /// [`Signal::new_animated`].
+    /// With this on, every [`ScrollableAxes`] offset **that has a range** must
+    /// be [`Signal::new_animated`] — `animate_to` panics on a plain signal.
+    /// The qualifier is load-bearing, not a caveat: an axis whose maximum is
+    /// permanently zero is never written by either path, which is exactly why
+    /// [`ScrollableAxes::vertical`] and [`ScrollableAxes::horizontal`] pin
+    /// their unused axis with a plain `Signal::new(0.0)` and why `ListView`,
+    /// `TreeView` and `GridView` each pair `ScrollableAxes::vertical` with a
+    /// `smooth_scrolling` that defaults to `true`. The rule is stated once on
+    /// [`ScrollableAxes`] itself; this is the same rule.
     pub smooth: bool,
     /// How long that tween lasts.
     pub smooth_duration: Duration,
@@ -338,15 +362,26 @@ fn wheel_step(
     let (target_x, moved_x) = scroll_clamp_axis(base_x, dx, max_x);
     let (target_y, moved_y) = scroll_clamp_axis(base_y, dy, max_y);
 
-    if moved_x || moved_y {
+    // Per axis, and only when that axis' clamp actually moved. Writing an
+    // unmoved axis costs a notification for a value that did not change —
+    // which every scrollable in this crate but `ScrollArea` guarded against by
+    // hand, two of them with the guard's reason written at the site. It would
+    // also put a tween on an axis a surface may legitimately keep as a plain
+    // signal, where `animate_to` panics.
+    if moved_x {
         if options.smooth {
-            axes.y
-                .animate_to(target_y, options.smooth_duration, Easing::EaseOut);
             axes.x
                 .animate_to(target_x, options.smooth_duration, Easing::EaseOut);
         } else {
-            axes.y.set(target_y);
             axes.x.set(target_x);
+        }
+    }
+    if moved_y {
+        if options.smooth {
+            axes.y
+                .animate_to(target_y, options.smooth_duration, Easing::EaseOut);
+        } else {
+            axes.y.set(target_y);
         }
     }
 
@@ -442,6 +477,58 @@ fn pan_step(
     }
 }
 
+/// Rewrite a Shift+wheel notch into a horizontal one, or decline.
+///
+/// A vertical-only wheel held with Shift scrolls a horizontally-scrollable
+/// surface sideways — the convention `TabBar` established in this crate and
+/// every desktop toolkit shares. The transform is a *delta* rewrite, which
+/// [`handle_scroll_event`] cannot express because it reads the delta off the
+/// event; a surface that wants it builds the rewritten event here and hands
+/// that to the shared handler from its [`ScrollableBehavior::before`] arm, so
+/// the arithmetic is still written once.
+///
+/// Declines — returning `None`, meaning "no remap, treat this event as it
+/// came" — for anything but a wheel-family [`WidgetEvent::Scroll`] held with
+/// Shift whose horizontal component is zero. Two of those clauses carry the
+/// rule rather than the example:
+///
+/// * A delta with a real horizontal component is a trackpad's own two-axis
+///   stream, and rewriting it would throw the axis the user actually moved.
+/// * A [`ScrollSource::TouchPan`] is never remapped. A finger has no Shift
+///   key, so the modifier could only arrive from a keyboard held during a
+///   pan, and turning that pan sideways is not what the hand asked for.
+pub fn shift_wheel_remap(event: &WidgetEvent, ctx: &EventContext) -> Option<WidgetEvent> {
+    let WidgetEvent::Scroll {
+        delta,
+        modifiers,
+        position,
+        phase,
+        pointer,
+    } = event
+    else {
+        return None;
+    };
+    if !modifiers.shift() || ctx.scroll_source() == ScrollSource::TouchPan {
+        return None;
+    }
+    let remapped = match delta {
+        ScrollDelta::Lines { x, y } if x.abs() < f32::EPSILON => {
+            ScrollDelta::Lines { x: *y, y: 0.0 }
+        }
+        ScrollDelta::Pixels { x, y } if x.abs() < f32::EPSILON => {
+            ScrollDelta::Pixels { x: *y, y: 0.0 }
+        }
+        _ => return None,
+    };
+    Some(WidgetEvent::Scroll {
+        delta: remapped,
+        modifiers: *modifiers,
+        position: *position,
+        phase: *phase,
+        pointer: *pointer,
+    })
+}
+
 // ---------------------------------------------------------------------------
 // ScrollableBehavior
 // ---------------------------------------------------------------------------
@@ -459,7 +546,9 @@ pub struct ScrollableBehavior {
     scroller: Rc<RefCell<KineticScroller>>,
     options: ScrollHandlingOptions,
     #[allow(clippy::type_complexity)]
-    before: Option<Rc<dyn Fn(&WidgetEvent, &mut EventContext) -> EventResponse>>,
+    before: Option<Rc<dyn Fn(&WidgetEvent, &mut EventContext) -> Option<EventResponse>>>,
+    #[allow(clippy::type_complexity)]
+    after: Option<Rc<dyn Fn(&WidgetEvent, EventResponse, &mut EventContext)>>,
 }
 
 impl std::fmt::Debug for ScrollableBehavior {
@@ -467,6 +556,7 @@ impl std::fmt::Debug for ScrollableBehavior {
         f.debug_struct("ScrollableBehavior")
             .field("options", &self.options)
             .field("has_before", &self.before.is_some())
+            .field("has_after", &self.after.is_some())
             .finish()
     }
 }
@@ -485,6 +575,7 @@ impl ScrollableBehavior {
             scroller: Rc::new(RefCell::new(KineticScroller::new(OverscrollStyle::Clamp))),
             options: ScrollHandlingOptions::default(),
             before: None,
+            after: None,
         }
     }
 
@@ -557,16 +648,52 @@ impl ScrollableBehavior {
 
     /// An arm the installed handler runs **first**, for every event.
     ///
-    /// `Handled` short-circuits; `Ignored` falls through to the shared
-    /// treatment. It is both the place for a surface's own scroll-adjacent
-    /// events — `ScrollIntoView` is the usual one — and the place for
-    /// per-scroll bookkeeping a surface wants to run before the delta lands,
-    /// which it does by observing and then declining.
+    /// The answer is an `Option`, and the two halves of it are different
+    /// questions:
+    ///
+    /// * `None` — "not mine". The shared treatment then runs on the **same,
+    ///   unmodified** event. This is what an observing arm returns: a surface
+    ///   doing per-scroll bookkeeping before the delta lands looks, records,
+    ///   and declines.
+    /// * `Some(r)` — "this event is mine, and `r` is the surface's answer to
+    ///   it". The shared treatment does not run at all. Both a surface's own
+    ///   scroll-adjacent events (`ScrollIntoView` is the usual one) and an arm
+    ///   that *rewrote* the event and fed the rewrite to
+    ///   [`handle_scroll_event`] itself take this branch — including when the
+    ///   rewrite could not move, where the answer is `Some(Ignored)` so the
+    ///   whole original event chains outward.
+    ///
+    /// That last case is why this is an `Option` and not an [`EventResponse`].
+    /// A `Handled`-means-short-circuit rule cannot express "I consumed this
+    /// event and the answer is `Ignored`", so a remapping arm — the tables'
+    /// Shift+wheel — would fall through and have the shared handler apply the
+    /// *original* delta on top of the remapped one it just declined.
     pub fn before(
         mut self,
-        arm: impl Fn(&WidgetEvent, &mut EventContext) -> EventResponse + 'static,
+        arm: impl Fn(&WidgetEvent, &mut EventContext) -> Option<EventResponse> + 'static,
     ) -> Self {
         self.before = Some(Rc::new(arm));
+        self
+    }
+
+    /// An arm the installed handler runs **last**, once the delta has landed.
+    ///
+    /// It sees the event and the answer the surface is about to give, and can
+    /// change neither: contradicting the boundary answer is how a chain stops
+    /// working. It is for the bookkeeping a surface can only do *after* the
+    /// offset moved — asking for a repaint being the one that matters, on a
+    /// surface whose offset signals are read at paint rather than bound to the
+    /// node.
+    ///
+    /// It runs on every path, including the one where a
+    /// [`before`](Self::before) arm claimed the event — a `before` arm that
+    /// answers `Handled` has moved the offset itself, which is exactly the
+    /// case this arm exists to notice.
+    pub fn after(
+        mut self,
+        arm: impl Fn(&WidgetEvent, EventResponse, &mut EventContext) + 'static,
+    ) -> Self {
+        self.after = Some(Rc::new(arm));
         self
     }
 
@@ -590,6 +717,7 @@ impl ScrollableBehavior {
             scroller,
             options,
             before,
+            after,
         } = self;
 
         // A scroller is built around its style, so the resolved style is
@@ -615,12 +743,22 @@ impl ScrollableBehavior {
         };
 
         handlers.on_scroll(move |event, ctx| {
-            if let Some(before) = &before
-                && before(event, ctx) == EventResponse::Handled
-            {
-                return EventResponse::Handled;
+            // `before` answering `Some` means it OWNS this event: the shared
+            // treatment is skipped whatever the answer is. Skipping only on
+            // `Handled` would run the shared handler on the original event
+            // after a remapping arm had already consumed it — which is how a
+            // Shift+wheel notch a `Chain` table could not absorb sideways
+            // ended up scrolling its rows vertically as well. (`Ignored` is
+            // the boundary answer only under `Chain`; a `Contain` surface
+            // answered `Handled` and short-circuited even before this.)
+            let response = match before.as_ref().and_then(|before| before(event, ctx)) {
+                Some(response) => response,
+                None => handle_scroll_event(event, &axes, &scroller, &options, ctx),
+            };
+            if let Some(after) = &after {
+                after(event, response, ctx);
             }
-            handle_scroll_event(event, &axes, &scroller, &options, ctx)
+            response
         })
     }
 }
@@ -1119,7 +1257,9 @@ mod tests {
                         if matches!(event, WidgetEvent::Scroll { .. }) {
                             seen.set(seen.get() + 1);
                         }
-                        EventResponse::Ignored
+                        // Observes and declines, so the shared handler still
+                        // runs on this event.
+                        None
                     });
                 ctx.apply_self_handlers(behavior.install(HandlerSet::new()));
                 Vec::new()

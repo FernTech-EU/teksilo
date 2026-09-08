@@ -17,6 +17,22 @@ body) and the matched-bracket cells behind the text.
 `PlainTextEditor` is the same machinery with the code affordances off and
 wrapping on — a notes field, a commit message — so the two never drift.
 
+## Pan to scroll
+
+The surface installs `common::scrollable::ScrollableBehavior`
+— the shared wheel arithmetic, a finger's pan, and the `PanClaim`. The wheel
+path is unchanged: no tween (these offsets are plain signals), 16 dp a line,
+`Ignored` at a hard boundary so the page around it takes the rest, and a
+repaint asked for exactly when an axis moved.
+
+**The claim serves this surface even though it also owns the press
+arena**, which its double- and triple-tap recognizers give it. The router
+stops its arbitration walk at the press owner only for a `Gesture` member,
+whose recognizer the capture dispatch is already driving; a `Pan` member is
+decided in that walk and nowhere else, so it is exempt. A finger on the
+text therefore scrolls the text, and hands the gesture outward only at this
+surface's own boundary. See `docs/kinetic-scrolling.md` §10.1.
+
 ## Builder methods at a glance
 
 `read_only`, `wrap_mode`, `v_scroll_policy`, `h_scroll_policy`, `overscroll_behavior`, `window_to_clip`, `min_lines`, `max_lines`, `font_family`, `font_size_scale`, `follow_text_scale`, `on_change`, `background`, `text_color`, `caret_color`, `selection_color`, `gutter`, `current_line_highlight`, `indent_style`, `tab_width`, `use_soft_tabs`, `auto_indent`, `bracket_pairs`, `auto_close_brackets`, `bracket_matching`, `line_comment`, `completion_provider`, `auto_complete`, `handle`

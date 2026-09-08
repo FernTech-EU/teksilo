@@ -17,6 +17,17 @@
 //! height-for-width measurement with scroll anchoring so content above the
 //! viewport stays put while estimates converge).
 //!
+//! ## Pan to scroll
+//!
+//! The view installs [`common::scrollable::ScrollableBehavior`](crate::common::scrollable::ScrollableBehavior),
+//! which gives it the shared wheel arithmetic, a finger's pan and the
+//! `PanClaim` that puts it on a pan's claimant chain. A pan scrolls it, the
+//! release coasts, and a pan it cannot absorb hands the **whole** event to the
+//! container outside — never a residual. Vertical only: this view owns no
+//! horizontal offset, so a horizontal pan is declined and chains outward. A pan
+//! that starts on a row scrolls rather than activating it or collapsing a
+//! multi-selection onto it.
+//!
 //! ## When to use
 //!
 //! - Large or dynamically-loaded lists (thousands of rows) — use `ListView`.
@@ -73,12 +84,14 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use teksilo_canvas::{Point, Rect, Size, SizeProposal};
-use teksilo_tokens::{BorderRole, Easing, InputTokens, TargetRole};
+use teksilo_tokens::{BorderRole, InputTokens, OverscrollStyle, TargetRole};
 
 use teksilo_core::DropFeedback;
 use teksilo_core::accessibility::AccessNodeBuilder;
 use teksilo_core::binding::BindingLevel;
 use teksilo_core::drag_payload::DragPayload;
+use teksilo_core::kinetic::KineticScroller;
+use teksilo_core::pointer::touch_action::PanAxes;
 use teksilo_core::signal::{Prop, Signal};
 use teksilo_core::widget::{LayoutContext, Widget, WidgetPlacement};
 use teksilo_core::widget_builder::HandlerSet;
@@ -252,6 +265,13 @@ pub struct ListView<T: 'static> {
     /// outer scroller — this closes that gap.
     viewport_bounds: Rc<Cell<Rect>>,
 
+    /// This surface's pan physics: the range a finger's pan is clamped to and
+    /// the offset it is currently holding. Owned by the view rather than by
+    /// the [`ScrollableBehavior`](crate::common::scrollable::ScrollableBehavior)
+    /// so it survives a rebuild, and so `place_children` — the only pass that
+    /// knows the viewport extent — can publish into it.
+    scroller: Rc<RefCell<KineticScroller>>,
+
     /// Stable, kind-tagged ID for this ListView instance (identifies its own
     /// reorder vs. a foreign drop, even across widget kinds / windows).
     model_id: ViewId,
@@ -387,6 +407,7 @@ impl<T: 'static> ListView<T> {
             scrollbar_id: None,
             viewport_height: Rc::new(Cell::new(600.0)),
             viewport_bounds: Rc::new(Cell::new(Rect::ZERO)),
+            scroller: Rc::new(RefCell::new(KineticScroller::new(OverscrollStyle::Clamp))),
             enabled: Prop::Static(true),
         }
     }

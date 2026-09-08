@@ -13,6 +13,8 @@
 //! scene and view state through `Signal` captures; none hold `&mut` to
 //! `SceneView` at call time.
 
+use teksilo_core::pointer::ScrollPhase;
+
 use super::magnetism::{PortDragState, build_connection, handle_connect_key};
 use super::*;
 
@@ -401,14 +403,19 @@ impl SceneView {
             let scene_pan_bounds_sig = self.scene().pan_bounds_signal();
             let view_pan_bounds_sig = self.pan_bounds_override.clone();
             let adopt_scene_size = self.adopt_scene_size;
-            handlers = handlers.on_scroll(move |event, _ctx| {
+            handlers = handlers.on_scroll(move |event, ctx| {
                 use crate::scene::PanAxes;
                 let WidgetEvent::Scroll {
-                    delta, modifiers, ..
+                    delta,
+                    modifiers,
+                    phase,
+                    ..
                 } = event
                 else {
                     return EventResponse::Ignored;
                 };
+                let touch_pan =
+                    ctx.scroll_source() == teksilo_core::pointer::ScrollSource::TouchPan;
                 let (mut dx, mut dy) = match delta {
                     ScrollDelta::Pixels { x, y } => (*x, *y),
                     ScrollDelta::Lines { x, y } => (*x * line_height, *y * line_height),
@@ -428,6 +435,28 @@ impl SceneView {
                     PanAxes::Vertical => {
                         dx = 0.0;
                     }
+                }
+                // A finger's pan is a pan, whatever a keyboard is doing at
+                // the same time: the zoom branch below is a *wheel* gesture
+                // (Ctrl held, one notch at a time), and a pinch — the touch
+                // gesture that zooms — arrives as a `PinchChanged`, not here.
+                // Testing the source before the modifier is what keeps a
+                // stray Ctrl from turning a drag into a zoom.
+                if touch_pan {
+                    return pan_by_touch(
+                        &PanByTouch {
+                            pan_x: &pan_x,
+                            pan_y: &pan_y,
+                            zoom: &zoom,
+                            scene_pan_bounds: &scene_pan_bounds_sig,
+                            view_pan_bounds: &view_pan_bounds_sig,
+                            viewport: &last_viewport_for_scroll,
+                        },
+                        *phase,
+                        dx,
+                        dy,
+                        overscroll,
+                    );
                 }
                 let zoomable = zoomable_sig.get() && !adopt_scene_size;
                 // Ctrl+wheel = zoom about the viewport center.
@@ -1179,4 +1208,83 @@ impl SceneView {
         });
         handlers
     }
+}
+
+/// The signals [`pan_by_touch`] moves, borrowed rather than cloned: it is
+/// called from inside the scroll handler that already owns them.
+pub(super) struct PanByTouch<'a> {
+    pub pan_x: &'a Signal<f32>,
+    pub pan_y: &'a Signal<f32>,
+    pub zoom: &'a Signal<f32>,
+    pub scene_pan_bounds: &'a Signal<Option<Rect>>,
+    pub view_pan_bounds: &'a Signal<Option<Rect>>,
+    pub viewport: &'a Signal<Size>,
+}
+
+/// Move the view by one sample of a finger's pan, or of the coast that
+/// follows it.
+///
+/// The scene deliberately does **not** go through
+/// `teksilo_widgets::common::scrollable`, and the reason is the pan itself
+/// rather than a preference. That helper models a surface as an offset in
+/// `[0, max]` per axis; a scene's `pan` is neither. It is *added* by the view
+/// transform rather than subtracted (so the delta is negated here, exactly as
+/// on the wheel path), its legal region is an arbitrary rectangle that moves
+/// with the zoom, and where that rectangle is smaller than the viewport on an
+/// axis the rule is not a clamp at all but a centring pin — which no
+/// `[min, max]` range can express. An unbounded scene has no range whatever.
+/// So the geometry stays in [`clamp_pan`], and only the *policy* — no tween
+/// under a finger, hard clamp on a coast, decline at the boundary and at the
+/// end of the stream — is written out here.
+///
+/// Three differences from the wheel path above, each one the touch contract:
+///
+/// * **No tween.** A finger is already the animation, and a coast is already
+///   integrated by the tree's fling driver; either one aimed at a 150 ms
+///   ease-out would lag behind the hand.
+/// * **The end of the stream is declined.** `Ended` / `MomentumEnded` /
+///   `Cancelled` are bookkeeping every claimant outward must see, so this
+///   surface never claims one — not even under
+///   [`OverscrollBehavior::Contain`], which has no movement to contain.
+/// * **A coast is hard-clamped.** The driver integrates an unbounded
+///   simulation, so stopping it at the scene's bound is this surface's job.
+///   That falls out of [`clamp_pan`] and the boundary answer below.
+pub(super) fn pan_by_touch(
+    signals: &PanByTouch<'_>,
+    phase: ScrollPhase,
+    dx: f32,
+    dy: f32,
+    overscroll: OverscrollBehavior,
+) -> EventResponse {
+    if matches!(
+        phase,
+        ScrollPhase::Ended | ScrollPhase::MomentumEnded | ScrollPhase::Cancelled
+    ) {
+        return EventResponse::Ignored;
+    }
+    if dx == 0.0 && dy == 0.0 {
+        return EventResponse::Ignored;
+    }
+    // The live pan, not an animation target: a finger takes over from whatever
+    // tween was in flight rather than accumulating onto its destination.
+    let base_x = signals.pan_x.get();
+    let base_y = signals.pan_y.get();
+    let clamped = clamp_pan(
+        Vec2::new(base_x - dx, base_y - dy),
+        signals.scene_pan_bounds.get(),
+        signals.view_pan_bounds.get(),
+        signals.viewport.get(),
+        signals.zoom.get(),
+    );
+    let moved_x = (clamped.x - base_x).abs() > teksilo_core::overscroll::SCROLL_MOVE_EPSILON;
+    let moved_y = (clamped.y - base_y).abs() > teksilo_core::overscroll::SCROLL_MOVE_EPSILON;
+    if !moved_x && !moved_y {
+        return match overscroll {
+            OverscrollBehavior::Contain => EventResponse::Handled,
+            OverscrollBehavior::Chain => EventResponse::Ignored,
+        };
+    }
+    signals.pan_x.set(clamped.x);
+    signals.pan_y.set(clamped.y);
+    EventResponse::Handled
 }

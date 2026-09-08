@@ -63,6 +63,10 @@ let _w = DateTimeEdit::new(datetime.clone())
     .on_value_changed(|dt, _ctx| println!("{dt:?}"));
 ```
 
+## Touch and pen
+
+See `DateEdit`'s "Touch and pen" section.
+
 ## Builder methods at a glance
 
 `style`, `required`, `date_format_pattern`, `time_format`, `seconds`, `min`, `max`, `step_minutes`, `first_day_of_week`, `show_calendar_button`, `separator`, `placeholder`, `enabled`, `read_only`, `label`, `validation_behavior`, `time_width_policy`, `validation_feedback_signal`, `on_value_changed`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`, `value`

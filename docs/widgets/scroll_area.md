@@ -5,8 +5,8 @@
 
 ![ScrollArea preview](img/scroll_area.png)
 
-ScrollArea — a clipping viewport that scrolls its content on wheel, touch,
-and assistive-technology actions.
+ScrollArea — a clipping viewport that scrolls its content on wheel, on a
+finger's pan, and on assistive-technology actions.
 
 Wrap any widget in `ScrollArea` to make it scrollable. The scroll position
 is stored in reactive `Signal<f32>` signals (one per axis), shared with the
@@ -14,6 +14,21 @@ built-in `ScrollBar` children. Two display
 modes cover most use cases: `Overlay` (the default, macOS-style thin-at-rest
 indicator that expands on hover) and `Permanent` (a layout-consuming gutter
 always on screen). Use `ScrollBarPolicy` to control when each axis shows.
+
+## Pan to scroll
+
+`ScrollArea` is the reference adopter of [`ScrollableBehavior`]: it
+declares a both-axis pan claim, so a direct pointer dragging its content is
+synthesised by the router into a positioned `Scroll` and delivered along the
+claimant chain. A release hands its velocity to the tree's fling driver,
+whose coast arrives back here as ordinary scroll deltas and stops — and
+chains outward — at the boundary, exactly as a wheel notch does. A mouse
+never pans: the wheel is its scroll device, and its behaviour here is
+unchanged in every particular.
+
+Following the finger *past* the end is off by default
+(`ScrollArea::rubber_band`); a nested area that banded at its own end could
+never hand the gesture to the container around it.
 
 ## Accessibility
 
@@ -33,7 +48,7 @@ let _w = ScrollArea::new()
 
 ## Builder methods at a glance
 
-`child`, `from_id`, `scroll_bar_style`, `scroll_bar_thumb_color`, `vertical_scroll_bar_policy`, `horizontal_scroll_bar_policy`, `line_height`, `scroll_bar_thickness`, `widget_resizable`, `smooth_scrolling`, `smooth_scroll_duration`, `scroll_past_end`, `preferred_size`, `preferred_height`, `overscroll_behavior`, `restore_scroll_y`, `scroll_y_signal`, `scroll_x_signal`, `max_scroll_y_signal`, `viewport_ratio_y_signal`, `max_scroll_x_signal`
+`rubber_band`, `overscroll_signal`, `child`, `from_id`, `scroll_bar_style`, `scroll_bar_thumb_color`, `vertical_scroll_bar_policy`, `horizontal_scroll_bar_policy`, `line_height`, `scroll_bar_thickness`, `widget_resizable`, `smooth_scrolling`, `smooth_scroll_duration`, `scroll_past_end`, `preferred_size`, `preferred_height`, `overscroll_behavior`, `restore_scroll_y`, `scroll_y_signal`, `scroll_x_signal`, `max_scroll_y_signal`, `viewport_ratio_y_signal`, `max_scroll_x_signal`
 
 ## API reference
 
@@ -65,7 +80,7 @@ pub enum ScrollBarPolicy { /* variants */ }
 
 - **`AsNeeded`** — Show the scroll bar only when content exceeds the viewport size (default).
 - **`AlwaysOn`** — Always show the scroll bar, even when content fits without scrolling.
-- **`AlwaysOff`** — Never show the scroll bar; content is still scrollable via wheel and touch.
+- **`AlwaysOff`** — Never show the scroll bar; the content still scrolls on a wheel, on a finger's pan, and from the keyboard and AT actions.
 
 ## `pub struct ScrollArea`
 
@@ -84,6 +99,26 @@ pub struct ScrollArea { /* fields */ }
 #### `pub fn new() -> Self`
 
 Create a new `ScrollArea` with overlay scroll bars, smooth scrolling, and no content yet.
+
+#### `pub fn rubber_band(mut self, enabled: bool) -> Self`
+
+Let a finger drag the content past its end, with decreasing gain, and
+release it on the lift — the iOS / Flutter `BouncingScrollPhysics` feel.
+
+**Off by default, and the default is load-bearing.** A surface that
+follows the finger past its end has absorbed the movement, so a nested
+area that banded could never hand the gesture to the container around
+it. The band belongs to the outermost area of a scroll chain.
+
+`prefers-reduced-motion` hard-clamps it whatever this says.
+
+#### `pub fn overscroll_signal(&self) -> Signal<Vec2>`
+
+How far past its range the content is currently being held, per axis,
+after the band. Always `ZERO` with `Self::rubber_band` off.
+
+The scroll offset itself never leaves the range, so this is the signal
+a surface binds to draw a stretch or a glow; ignoring it is correct.
 
 #### `pub fn child(mut self, child: impl Widget + 'static) -> Self`
 

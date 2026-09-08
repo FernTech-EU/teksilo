@@ -301,7 +301,9 @@ impl<T: 'static> Widget for ListBodyPane<T> {
                     let fi_click = self.focused_index.clone();
                     // Deferred collapse: pressing an already-selected row keeps
                     // the whole (multi-)selection so it can be dragged; the
-                    // collapse-to-single happens on release WITHOUT a drag.
+                    // collapse-to-single happens on release WITHOUT a drag,
+                    // and only on a release the row still owns (see
+                    // `release_completes_the_press`).
                     let pending_collapse = Rc::new(Cell::new(false));
                     ctx.apply_handlers(
                         child_id,

@@ -595,7 +595,8 @@ impl<T: 'static> Widget for TreeBodyPane<T> {
                 // Deferred collapse: pressing an ALREADY-selected row (no
                 // modifiers) keeps the whole (multi-)selection so it can be
                 // dragged; the collapse-to-single happens on release WITHOUT
-                // a drag (mirrors `ListView`).
+                // a drag, and only on a release the row still owns (see
+                // `release_completes_the_press`) — mirrors `ListView`.
                 let pending_collapse = Rc::new(Cell::new(false));
                 row_handlers = row_handlers.on_pointer_event(move |event, ctx| match event {
                     WidgetEvent::PointerDown {
@@ -656,9 +657,19 @@ impl<T: 'static> Widget for TreeBodyPane<T> {
                         if ctx.press_claimed_by_interactive_child() {
                             return EventResponse::Ignored;
                         }
-                        // Reached only on a click WITHOUT a drag (an active
-                        // drag consumes PointerUp). Collapse the deferred
-                        // multi-selection to the clicked row.
+                        // Collapse the deferred multi-selection to the
+                        // clicked row — but only if the release still
+                        // belongs to this row. An `active_drag` is not the
+                        // only way it stops doing so: a finger's pan claim
+                        // wins the arbitration without raising a drag, so
+                        // the `PointerUp` is not routed to
+                        // `handle_drag_drop` and does arrive here. See
+                        // `data_views::release_completes_the_press`.
+                        if !crate::data_views::release_completes_the_press(ctx) {
+                            // Abandoned, not postponed — see the helper.
+                            pending_collapse.set(false);
+                            return EventResponse::Ignored;
+                        }
                         if pending_collapse.replace(false)
                             && let Some(row) = click_anchor.index()
                         {

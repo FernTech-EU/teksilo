@@ -22,6 +22,22 @@
 //! - **Severity colour.** An injected classifier paints a line by what it is (an
 //!   error line red). Language-agnostic: the view colours a line, the
 //!   application decides what an error looks like.
+//!
+//! ## Pan to scroll
+//!
+//! The surface installs [`common::scrollable::ScrollableBehavior`](crate::common::scrollable::ScrollableBehavior)
+//! — the shared wheel arithmetic, a finger's pan, and the `PanClaim`. The wheel
+//! path is unchanged: no tween (these offsets are plain signals), 16 dp a line,
+//! `Ignored` at a hard boundary so the page around it takes the rest, and a
+//! repaint asked for exactly when an axis moved.
+//!
+//! **The claim serves this surface even though it also owns the press
+//! arena**, which its double- and triple-tap recognizers give it. The router
+//! stops its arbitration walk at the press owner only for a `Gesture` member,
+//! whose recognizer the capture dispatch is already driving; a `Pan` member is
+//! decided in that walk and nowhere else, so it is exempt. A finger on the
+//! text therefore scrolls the text, and hands the gesture outward only at this
+//! surface's own boundary. See `docs/kinetic-scrolling.md` §10.1.
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -288,7 +304,7 @@ impl Widget for LogView {
         // pointer / scroll / tap handlers (drag-select works: as the drag
         // auto-scrolls, freshly-scrolled rows shape and the hit-test resolves
         // them), and a scroll-based keyboard of its own.
-        let handlers = HandlerSet::new()
+        let mut handlers = HandlerSet::new()
             .focusable(true)
             .cursor(CursorIcon::Text)
             .on_focus({
@@ -306,11 +322,6 @@ impl Widget for LogView {
                 move |event, ctx| {
                     super::mouse::handle_pointer_event(&state, &v_sb, &h_sb, event, ctx)
                 }
-            })
-            .on_scroll({
-                let state = self.state.clone();
-                let overscroll = self.overscroll_behavior;
-                move |event, ctx| super::mouse::handle_scroll(&state, overscroll, event, ctx)
             })
             .on_key({
                 let state = self.state.clone();
@@ -330,6 +341,35 @@ impl Widget for LogView {
                     super::a11y::handle_access_action(&state, action, target, data, ctx)
                 }
             });
+        // Scroll: the wheel path this surface always had, a finger's pan, and
+        // the claim that puts it on a pan's claimant chain — all from
+        // `common::text_scroll`, which the three text surfaces share.
+        {
+            let (x, max_x, y, max_y, scroller) = {
+                let st = self.state.borrow();
+                (
+                    st.scroll_x.clone(),
+                    st.max_scroll_x.clone(),
+                    st.scroll_y.clone(),
+                    st.max_scroll_y.clone(),
+                    st.scroller.clone(),
+                )
+            };
+            let behavior = crate::common::text_scroll::text_surface_behavior(
+                crate::common::text_scroll::TextScrollState {
+                    x,
+                    max_x,
+                    y,
+                    max_y,
+                    scroller,
+                },
+                self.overscroll_behavior,
+                ctx.prefers_reduced_motion(),
+                ctx.theme().input.scroll_physics,
+            );
+            handlers = behavior.install(handlers);
+        }
+
         ctx.apply_self_handlers(handlers);
 
         let body = log_body_for(&self.state);

@@ -32,6 +32,13 @@ let _w = Toggle::new(dark_mode)
     .label(lit!("Dark mode"));
 ```
 
+## Touch and pen
+
+The pressed state is the framework's (`docs/touch-and-pen.md` §7.1) — a
+Material 3 thumb that grows on press must not stay grown after the finger
+has slid off the switch, nor grow under a finger that turns out to be
+scrolling the list the switch sits in. The flip lands on the release.
+
 ## Builder methods at a glance
 
 `label`, `labelled_externally`, `enabled`, `variant`, `style`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`

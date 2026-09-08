@@ -62,6 +62,10 @@ let _w = DateRangeEdit::new(range.clone())
     .on_value_changed(|r, _ctx| println!("{r:?}"));
 ```
 
+## Touch and pen
+
+See `DateEdit`'s "Touch and pen" section.
+
 ## Builder methods at a glance
 
 `style`, `min_date`, `max_date`, `format_pattern`, `placeholder_start`, `placeholder_end`, `first_day_of_week`, `enabled`, `read_only`, `label`, `validation_behavior`, `end_width_policy`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`, `validation_feedback_signal`, `on_value_changed`, `value`

@@ -289,7 +289,9 @@ impl<T: 'static> Widget for TreeViewBodyPane<T> {
                     let has_children = item_has_children && self.row_click_expands;
                     // Deferred collapse: pressing an already-selected row keeps
                     // the whole (multi-)selection so it can be dragged; the
-                    // collapse-to-single happens on release WITHOUT a drag.
+                    // collapse-to-single happens on release WITHOUT a drag,
+                    // and only on a release the row still owns (see
+                    // `release_completes_the_press`).
                     let pending_collapse = Rc::new(Cell::new(false));
 
                     ctx.apply_handlers(
@@ -357,9 +359,9 @@ impl<T: 'static> Widget for TreeViewBodyPane<T> {
                                 if ctx.press_claimed_by_interactive_child() {
                                     return teksilo_core::event::EventResponse::Ignored;
                                 }
-                                // Reached only on a click WITHOUT a drag (an
-                                // active drag consumes PointerUp). Collapse the
-                                // deferred multi-selection to the clicked row.
+                                // Collapse the deferred multi-selection to the
+                                // clicked row. The helper asks
+                                // `release_completes_the_press` for itself.
                                 if let Some(ref sel) = sel_click {
                                     crate::data_views::deferred_select::on_up(
                                         sel,
@@ -368,10 +370,19 @@ impl<T: 'static> Widget for TreeViewBodyPane<T> {
                                         ctx,
                                     );
                                 }
-                                // Expand/collapse fires on release so a drag
-                                // gesture pre-empts it (once active_drag is
-                                // set, PointerUp is routed to handle_drag_drop
-                                // and never reaches this widget).
+                                // Expand/collapse fires on release, so the
+                                // release has to still belong to this row. An
+                                // `active_drag` is not the only way it stops
+                                // doing so: a finger's **pan claim** wins the
+                                // arbitration without ever raising a drag, so
+                                // the `PointerUp` is not routed to
+                                // `handle_drag_drop` and does arrive here — and
+                                // toggling from it expanded whatever branch row
+                                // the finger happened to start its scroll on.
+                                // See `release_completes_the_press`.
+                                if !crate::data_views::release_completes_the_press(ctx) {
+                                    return teksilo_core::event::EventResponse::Ignored;
+                                }
                                 // Anchored: rows above may have shifted since
                                 // this handler was built, so resolve the row's
                                 // current position rather than trusting the

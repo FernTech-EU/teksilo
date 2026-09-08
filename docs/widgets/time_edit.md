@@ -45,6 +45,12 @@ let _field = TimeEdit::new(value)
     .seconds(SecondsMode::Hidden);
 ```
 
+## Touch and pen
+
+See `DateEdit`'s "Touch and pen" section: the whole
+date/time family carries `focus_within` and `on_key_preview` only, and its
+pointer surface is the embedded field, the trigger button and the popover.
+
 ## Builder methods at a glance
 
 `style`, `required`, `format`, `seconds`, `format_pattern`, `min_time`, `max_time`, `step_minutes`, `placeholder`, `enabled`, `read_only`, `validation_behavior`, `width_policy`, `validation_feedback_signal`, `label`, `on_value_changed`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`, `value`

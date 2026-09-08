@@ -163,16 +163,43 @@ ToolBox design tokens.
 pub const TOOL_BOX_HEADER_MIN_HEIGHT: f32 = 28.0;
 ```
 
+## `pub fn tool_box_header_min_height(...)`
+
+`TOOL_BOX_HEADER_MIN_HEIGHT` raised to the density's `target_size`
+(24 / 32 / 44 dp). The identity at Compact.
+
+```rust
+pub fn tool_box_header_min_height(tokens: &InputTokens) -> f32;
+```
+
 ## `pub const TOOL_BOX_HEADER_PADDING_HORIZONTAL`
 
 ```rust
 pub const TOOL_BOX_HEADER_PADDING_HORIZONTAL: f32 = 12.0;
 ```
 
+## `pub fn tool_box_header_padding_horizontal(...)`
+
+`TOOL_BOX_HEADER_PADDING_HORIZONTAL` scaled by the density's `spacing_factor`
+(1.00 / 1.15 / 1.30).
+
+```rust
+pub fn tool_box_header_padding_horizontal(tokens: &InputTokens) -> f32;
+```
+
 ## `pub const TOOL_BOX_ICON_TEXT_SPACING`
 
 ```rust
 pub const TOOL_BOX_ICON_TEXT_SPACING: f32 = 8.0;
+```
+
+## `pub fn tool_box_icon_text_spacing(...)`
+
+`TOOL_BOX_ICON_TEXT_SPACING` scaled by the density's `spacing_factor`
+(1.00 / 1.15 / 1.30).
+
+```rust
+pub fn tool_box_icon_text_spacing(tokens: &InputTokens) -> f32;
 ```
 
 ## `pub const TOOL_BOX_CHEVRON_SIZE`

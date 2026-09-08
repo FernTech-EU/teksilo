@@ -5585,6 +5585,162 @@ mod affinity_tests {
         );
     }
 
+    /// The nested fixture again, but tall enough for a finger.
+    ///
+    /// A touch pan only arms past `pan_slop` — 36 dp at the coarse profile —
+    /// so the 48 dp editor the wheel tests use is shorter than the gesture
+    /// that has to start inside it. Same shape, room to move: a 160 dp editor
+    /// over a 600 dp filler in a 400 dp window.
+    fn tall_nested_rich_text_fixture(
+        inner: crate::OverscrollBehavior,
+    ) -> (
+        WidgetTree,
+        teksilo_core::signal::Signal<f32>,
+        teksilo_core::signal::Signal<f32>,
+    ) {
+        use crate::ScrollArea;
+        use crate::primitives::{FixedSize, TextWidget, VStack};
+
+        let doc = TextDocument::new();
+        let text: String = (0..60)
+            .map(|i| format!("line {i}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        doc.set_plain_text(&text).unwrap();
+
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let editor = RichTextEditor::editor(doc).overscroll_behavior(inner);
+        let editor_y = editor.scroll_y();
+        // Seed the engine viewport the way a real paint pass would — see the
+        // sibling fixture for why a headless editor needs this.
+        {
+            let handle = editor.state_handle();
+            let mut st = handle.borrow_mut();
+            st.viewport_width = 208.0;
+            st.viewport_height = 160.0;
+            st.engine.set_viewport(208.0, 160.0);
+            st.needs_full_layout = true;
+        }
+        let editor_id = tree.add(editor);
+        let editor_box = tree.add(
+            FixedSize::new()
+                .width(220.0)
+                .height(160.0)
+                .child_id(editor_id),
+        );
+        let filler = tree.add(
+            FixedSize::new()
+                .width(220.0)
+                .height(600.0)
+                .child(TextWidget::new(lit!(""))),
+        );
+        let outer_content = tree.add(VStack::new().add_child(editor_box).add_child(filler));
+        let outer = ScrollArea::from_id(outer_content).smooth_scrolling(false);
+        let outer_y = outer.scroll_y_signal().clone();
+        let _outer = tree.add(outer);
+        tree.layout(SizeProposal::exact(220.0, 400.0));
+        pump(&mut tree, 220.0, 400.0);
+        (tree, editor_y, outer_y)
+    }
+
+    /// The editor's scroll offsets are read at paint and bound to nothing, so
+    /// moving one repaints only if the surface asks. It asks exactly when an
+    /// axis moved — which is what the shared behaviour's `after` arm is for,
+    /// and what a boundary notch must not trigger.
+    #[test]
+    fn a_wheel_that_moves_the_editor_asks_for_a_frame_and_one_that_does_not_does_not() {
+        use teksilo_core::event::{Modifiers, ScrollDelta, WidgetEvent};
+
+        let (mut tree, editor_y, _outer_y) =
+            tall_nested_rich_text_fixture(crate::OverscrollBehavior::Contain);
+
+        tree.pointer_move(Point::new(50.0, 20.0));
+        let _ = tree.frame_requested();
+        tree.dispatch_event(WidgetEvent::scroll(
+            ScrollDelta::Pixels { x: 0.0, y: 40.0 },
+            Modifiers::NONE,
+        ));
+        assert!(editor_y.get() > 0.0, "the notch moved the editor");
+        assert!(
+            tree.frame_requested(),
+            "a moved offset must ask for the repaint nothing else will",
+        );
+
+        // Park it at the top, where an upward notch can absorb nothing.
+        editor_y.set(0.0);
+        tree.layout(SizeProposal::exact(220.0, 400.0));
+        let _ = tree.frame_requested();
+        tree.pointer_move(Point::new(50.0, 20.0));
+        tree.dispatch_event(WidgetEvent::scroll(
+            ScrollDelta::Pixels { x: 0.0, y: -40.0 },
+            Modifiers::NONE,
+        ));
+        assert_eq!(editor_y.get(), 0.0, "and this one moved nothing");
+        assert!(
+            !tree.frame_requested(),
+            "a notch that moved nothing must not cost a frame",
+        );
+    }
+
+    /// A finger pans the editor itself.
+    ///
+    /// The editor installs the shared scroll behaviour, claim included — its
+    /// wheel path, its boundary chaining and its pan arithmetic are the ones
+    /// every other scrollable uses — and the claim serves it even though the
+    /// editor also owns the press arena, which its double- and triple-tap
+    /// recognizers give it. `advance_sequence` (`pointer_state.rs`, the
+    /// `Some(id) == owner` arm) stops its walk at the press owner only for a
+    /// `Gesture` member, whose recognizer the capture dispatch is already
+    /// driving; a `Pan` member is decided in that walk and nowhere else.
+    ///
+    /// **Triage note.** This test previously asserted the opposite — that the
+    /// claim is inert here and that the walk stops, so nothing scrolls at all
+    /// — and said in as many words that the day the rule changed was the day
+    /// its assertions had to be rewritten into "the finger scrolled it". That
+    /// day is this one.
+    #[test]
+    fn a_finger_pans_the_rich_text_editor() {
+        use crate::button::press_test_support::{finger, touch};
+        use teksilo_core::pointer::PointerPhase;
+
+        let (mut tree, editor_y, outer_y) =
+            tall_nested_rich_text_fixture(crate::OverscrollBehavior::Chain);
+        let slop = teksilo_core::gesture::default_profile(teksilo_tokens::PointerKind::Touch)
+            .pan_slop
+            .expect("a touch profile pans");
+
+        let id = finger();
+        let from = Point::new(50.0, 140.0);
+        tree.dispatch_pointer(touch(id, PointerPhase::Down, from, 0));
+        for (i, dy) in [slop + 1.0, slop + 60.0].into_iter().enumerate() {
+            tree.dispatch_pointer(touch(
+                id,
+                PointerPhase::Move,
+                Point::new(from.x, from.y - dy),
+                16 + i as u64 * 16,
+            ));
+        }
+        tree.dispatch_pointer(touch(
+            id,
+            PointerPhase::Up,
+            Point::new(from.x, from.y - slop - 60.0),
+            48,
+        ));
+
+        assert!(
+            editor_y.get() > 0.0,
+            "the editor's own claim serves it while it owns the press arena; \
+             it is at {}",
+            editor_y.get(),
+        );
+        assert_eq!(
+            outer_y.get(),
+            0.0,
+            "and the claim stays with the editor for the whole gesture, so \
+             the page behind it is not offered what the editor absorbed",
+        );
+    }
+
     #[test]
     fn nested_rich_text_contain_blocks_chaining() {
         use teksilo_core::event::{Modifiers, ScrollDelta, WidgetEvent};

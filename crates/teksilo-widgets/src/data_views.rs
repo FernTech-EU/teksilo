@@ -1061,11 +1061,50 @@ impl<T: 'static> RowExport<T> {
     }
 }
 
+/// Whether the primary release being dispatched still completes the press it
+/// began — the question every **release-time commitment** in a data view's row
+/// body has to ask before committing.
+///
+/// A row body commits two things on release: the deferred collapse of a
+/// multi-selection ([`deferred_select::on_up`]), and — in `TreeView` — the
+/// expansion toggle of a branch row. Both are correct for a click and wrong for
+/// a finger that was scrolling, so both are gated on this.
+///
+/// It answers `false` in the two ways a row loses the press without a cancel it
+/// can see:
+///
+/// * **a peer claimed the contact.** The scrollable above the row won the
+///   arbitration with its `PanClaim` and the press is now a scroll. The row
+///   cannot rely on being told: it is enrolled as a sequence member only when
+///   it carries a drag (`reorderable` / `exportable`), and even then the
+///   loser's `CancelReason::PeerClaimed` is *member*-level — deliberately
+///   leaving the pointer alive so its winner can finish — so the `PointerUp`
+///   still arrives here either way. `WidgetTree::update_press` ends the press
+///   record on that claim, which is the fact this reads.
+/// * **the pointer left the press's tap boundary.** The same predicate that
+///   fails the tap and fires `cancel_taps`, so a release-time commit is
+///   abandoned exactly when the activation is.
+///
+/// It stays `true` through a press-feedback delay — a finger that lands and
+/// lifts before the delay elapses has still clicked — because the delay
+/// withholds the *visual*, not the press.
+///
+/// The older reasoning at these sites, that "an active drag consumes
+/// `PointerUp`", covers only a **drag**: a won pan claim is not an
+/// `active_drag`, so the release is not routed to `handle_drag_drop` and does
+/// reach the row.
+pub(crate) fn release_completes_the_press(ctx: &teksilo_core::widget::EventContext) -> bool {
+    ctx.press_is_inside()
+}
+
 /// Shared deferred-selection press logic for a data-view row (the drift a code
 /// review caught: the `press_claimed` guard was missing in one view). Pressing
-/// an already-selected row DEFERS the collapse-to-single to a release WITHOUT a
-/// drag (an active drag consumes `PointerUp`), so grabbing a multi-selection
-/// drags the whole set. `pending` is a per-row cell shared by the two calls.
+/// an already-selected row DEFERS the collapse-to-single to a release that still
+/// belongs to that row, so grabbing a multi-selection drags the whole set — a
+/// drag consumes the `PointerUp` outright, and a release the row has otherwise
+/// lost (a won pan claim, a press that wandered off) is refused by
+/// [`release_completes_the_press`]. `pending` is a per-row cell shared by the
+/// two calls.
 pub(crate) mod deferred_select {
     use std::cell::Cell;
     use std::rc::Rc;
@@ -1108,9 +1147,10 @@ pub(crate) mod deferred_select {
         true
     }
 
-    /// Handle a primary `PointerUp` on row `index` — reached only on a click
-    /// WITHOUT a drag. Collapses the deferred multi-selection, unless the
-    /// release belongs to an interactive child.
+    /// Handle a primary `PointerUp` on row `index`. Collapses the deferred
+    /// multi-selection, unless the release belongs to an interactive child or
+    /// the press it would complete is no longer this row's
+    /// ([`release_completes_the_press`](super::release_completes_the_press)).
     pub(crate) fn on_up(
         sel: &RowSelection,
         index: usize,
@@ -1118,6 +1158,12 @@ pub(crate) mod deferred_select {
         ctx: &mut EventContext,
     ) {
         if ctx.press_claimed_by_interactive_child() {
+            return;
+        }
+        if !super::release_completes_the_press(ctx) {
+            // The deferred decision is abandoned, not postponed: clear the flag
+            // so it cannot fire on some later release this row does own.
+            pending.set(false);
             return;
         }
         if pending.replace(false) {

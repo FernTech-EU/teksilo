@@ -188,6 +188,7 @@ impl<T: 'static> TreeView<T> {
             scrollbar_id: None,
             viewport_height: Rc::new(Cell::new(600.0)),
             viewport_bounds: Rc::new(Cell::new(Rect::ZERO)),
+            scroller: Rc::new(RefCell::new(KineticScroller::new(OverscrollStyle::Clamp))),
             placed_content_width: Rc::new(Cell::new(0.0)),
             tree_id: view_id,
             enabled: Prop::Static(true),

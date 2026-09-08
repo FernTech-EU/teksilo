@@ -47,10 +47,28 @@ pub const STATUS_BAR_HEIGHT: f32 = 22.0;
 pub const STATUS_BAR_PADDING_HORIZONTAL: f32 = 8.0;
 ```
 
+## `pub fn status_bar_padding_horizontal(...)`
+
+`STATUS_BAR_PADDING_HORIZONTAL` scaled by the density's `spacing_factor`
+(1.00 / 1.15 / 1.30).
+
+```rust
+pub fn status_bar_padding_horizontal(tokens: &InputTokens) -> f32;
+```
+
 ## `pub const STATUS_BAR_ITEM_GAP`
 
 ```rust
 pub const STATUS_BAR_ITEM_GAP: f32 = 2.0;
+```
+
+## `pub fn status_bar_item_gap(...)`
+
+`STATUS_BAR_ITEM_GAP` scaled by the density's `spacing_factor`
+(1.00 / 1.15 / 1.30).
+
+```rust
+pub fn status_bar_item_gap(tokens: &InputTokens) -> f32;
 ```
 
 ## `pub struct StatusBar`

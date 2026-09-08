@@ -42,6 +42,19 @@
 //!     .alternating_rows(true)
 //!     .row_height(32.0);
 //! ```
+//!
+//! ## Pan to scroll
+//!
+//! The view installs [`common::scrollable::ScrollableBehavior`](crate::common::scrollable::ScrollableBehavior),
+//! which gives it the shared wheel arithmetic, a finger's pan and the
+//! `PanClaim` that puts it on a pan's claimant chain. A pan scrolls it, the
+//! release coasts, and a pan it cannot absorb hands the **whole** event to the
+//! container outside — never a residual. A pan that starts on a row scrolls
+//! rather than activating it or collapsing a multi-selection onto it. Both axes
+//! are claimed. Shift+wheel still
+//! scrolls the columns, and a finger's pan is never remapped by a held Shift:
+//! the remap is a wheel convention, and turning a drag sideways is not what
+//! the hand asked for.
 
 pub mod a11y;
 pub mod body;
@@ -70,6 +83,8 @@ use teksilo_core::ObserverHandle;
 use teksilo_core::accessibility::{AccessNodeBuilder, widget_id_to_node_id};
 use teksilo_core::binding::BindingLevel;
 use teksilo_core::build_context::BuildContext;
+use teksilo_core::kinetic::KineticScroller;
+use teksilo_core::pointer::touch_action::PanAxes;
 use teksilo_core::signal::{Prop, Signal};
 use teksilo_core::widget::{LayoutContext, PaintContext, Widget, WidgetPlacement};
 use teksilo_core::widget_builder::HandlerSet;
@@ -79,7 +94,7 @@ use teksilo_data::{
     ListModel, SelectionModel,
 };
 use teksilo_i18n::LocalizedString;
-use teksilo_tokens::{BorderRole, Easing, SurfaceRole};
+use teksilo_tokens::{BorderRole, OverscrollStyle, SurfaceRole};
 
 use crate::styles::recipe_table_style as cp;
 
@@ -261,6 +276,12 @@ pub struct TableView<T: 'static> {
     /// Middle-pane viewport-to-content width ratio, for the horizontal
     /// scroll bar's thumb.
     viewport_ratio_x: Signal<f32>,
+    /// This surface's pan physics: the range a finger's pan is clamped to and
+    /// the offset it is currently holding. Owned by the view rather than by
+    /// the [`ScrollableBehavior`](crate::common::scrollable::ScrollableBehavior)
+    /// so it survives a rebuild, and so `place_children` — the only pass that
+    /// knows the viewport extent — can publish into it.
+    scroller: Rc<RefCell<KineticScroller>>,
     sort_signal: Signal<Option<(String, SortDirection)>>,
     column_widths_signal: Signal<HashMap<String, f32>>,
     /// Column ids in display order. Empty means "use declaration order".
@@ -572,6 +593,7 @@ impl<T: 'static> TableView<T> {
             scroll_x: Signal::new_animated(0.0),
             max_scroll_x: Signal::new(0.0),
             viewport_ratio_x: Signal::new(1.0),
+            scroller: Rc::new(RefCell::new(KineticScroller::new(OverscrollStyle::Clamp))),
             sort_signal: Signal::new(None),
             column_widths_signal: Signal::new(HashMap::new()),
             column_order_signal: Signal::new(Vec::new()),
@@ -808,7 +830,13 @@ impl<T: 'static> TableView<T> {
         self
     }
 
-    /// Hook fired when the user presses Enter on the focused row.
+    /// Callback invoked when a row is activated: a click or a double click per
+    /// [`activate_on`](Self::activate_on), or Enter on the focused row.
+    /// Receives the flat row index.
+    ///
+    /// The pointer half is a **gesture**, so it arbitrates against a pan and
+    /// against the reorder drag through the gesture arena: a click activates,
+    /// a drag does not.
     pub fn on_row_activate(
         mut self,
         f: impl Fn(usize, &mut teksilo_core::widget::EventContext) + 'static,

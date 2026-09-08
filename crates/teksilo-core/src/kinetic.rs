@@ -3,13 +3,16 @@
 
 //! Kinetic scrolling: velocity, fling physics, rubber band — computed once.
 //!
-//! Fourteen surfaces in this workspace hand-roll the same boundary clamp
-//! followed by the same 150 ms ease-out tween, with no velocity behind it, no
-//! fling, and no rubber band. Adding real physics to each of them would mean
-//! fourteen integrators, fourteen tolerance constants, and fourteen places to
-//! forget `prefers-reduced-motion` — a failure mode this codebase already
+//! Every pixel-offset scrollable in this workspace hand-rolled the same
+//! boundary clamp followed by the same 150 ms ease-out tween, with no velocity
+//! behind it, no fling, and no rubber band. Adding real physics to each would
+//! have meant one integrator, one tolerance constant and one place to forget
+//! `prefers-reduced-motion` per surface — a failure mode this codebase already
 //! demonstrates, with `EDGE = 32` and `MAX_VELOCITY = 12` copied across five
-//! widgets that have since drifted apart.
+//! widgets that have since drifted apart. They share one behaviour now; see
+//! `docs/kinetic-scrolling.md` for which surfaces, and for the one that does
+//! not (a terminal scrolls a scrollback ring by whole lines, not a pixel
+//! offset with a maximum).
 //!
 //! So the physics lives here, once, as pure computation. Nothing in this module
 //! owns a widget, reads a clock or touches the arena; time arrives as an

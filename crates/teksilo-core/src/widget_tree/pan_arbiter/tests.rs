@@ -87,14 +87,54 @@ fn scrollable_with(
     children: Vec<WidgetId>,
     overscroll: OverscrollBehavior,
 ) -> impl crate::widget::Widget + 'static {
+    scrollable_options(log, max, children, overscroll, PanAxes::Y, false)
+}
+
+/// [`scrollable`], declaring its claimed axes and whether it also carries a
+/// **tap handler**.
+///
+/// The tap handler is what makes the node an editing surface rather than a
+/// plain list: a node with a gesture arena takes an implicit pointer capture on
+/// `PointerDown`, which makes it the sequence's `pressed_owner`. Every text
+/// surface in `teksilo-widgets` is shaped this way — it places a caret on a tap
+/// *and* scrolls itself under a finger.
+fn scrollable_options(
+    log: Shared,
+    max: f32,
+    children: Vec<WidgetId>,
+    overscroll: OverscrollBehavior,
+    axes: PanAxes,
+    takes_press: bool,
+) -> impl crate::widget::Widget + 'static {
+    scrollable_full(log, max, children, overscroll, axes, takes_press, None)
+}
+
+/// [`scrollable_options`], optionally also raising a **drag** from its own
+/// `PointerMove` handler the first time the contact moves.
+///
+/// The `RichTextEditor` shape: a press inside an existing selection that has
+/// travelled far enough hands the selected passage to the drag pipeline
+/// (`rich_text/mouse.rs`), from the very handler the capture dispatch delivers
+/// the move to. `drags` carries the source id, which the caller can only know
+/// after `tree.add`, hence the cell.
+#[allow(clippy::too_many_arguments)]
+fn scrollable_full(
+    log: Shared,
+    max: f32,
+    children: Vec<WidgetId>,
+    overscroll: OverscrollBehavior,
+    axes: PanAxes,
+    takes_press: bool,
+    drags: Option<Rc<std::cell::Cell<Option<WidgetId>>>>,
+) -> impl crate::widget::Widget + 'static {
     let scroll_log = log.clone();
     let cancel_log = log;
     let mut stack = StackWidget::new();
     for child in children {
         stack = stack.add_child(child);
     }
-    stack
-        .scroll_container(PanAxes::Y)
+    let widget = stack
+        .scroll_container(axes)
         .overscroll_behavior(overscroll)
         .on_scroll(move |event, _ctx| {
             let WidgetEvent::Scroll { delta, phase, .. } = event else {
@@ -119,8 +159,37 @@ fn scrollable_with(
         })
         .on_pointer_cancel(move |_info, reason, _ctx| {
             cancel_log.borrow_mut().cancels.push(reason);
-        })
+        });
+    // Chained on the wrapper itself, never on the `impl Widget` it is returned
+    // as: a `WidgetBuilder` call on an already-wrapped widget re-wraps rather
+    // than merging, and every handler above would be lost.
+    let widget = if takes_press {
+        widget.on_tap(|_event, _ctx| {})
+    } else {
+        widget
+    };
+    match drags {
+        None => widget,
+        Some(source) => {
+            let raised = std::cell::Cell::new(false);
+            widget.on_pointer_event(move |event, ctx| {
+                if matches!(event, WidgetEvent::PointerMove { .. })
+                    && !raised.get()
+                    && let Some(id) = source.get()
+                {
+                    raised.set(true);
+                    ctx.start_drag(id, crate::drag_payload::DragPayload::typed(RaisedDrag));
+                }
+                EventResponse::Ignored
+            })
+        }
+    }
 }
+
+/// The payload [`scrollable_full`]'s drag carries. A distinct type so nothing
+/// else in the suite can be mistaken for it.
+#[derive(Debug)]
+struct RaisedDrag;
 
 /// A tree of `outer { inner }`, both scrollables, filling 200 × 200.
 struct Nested {
@@ -132,10 +201,51 @@ struct Nested {
 }
 
 fn nested(inner_max: f32, outer_max: f32) -> Nested {
+    nested_inner_takes_press(inner_max, outer_max, false)
+}
+
+/// [`nested`], with the inner scrollable optionally carrying the tap handler
+/// that makes it the press owner — the editing-surface shape.
+fn nested_inner_takes_press(inner_max: f32, outer_max: f32, takes_press: bool) -> Nested {
     let inner_log = Shared::default();
     let outer_log = Shared::default();
     let mut tree = WidgetTree::new();
-    let inner = tree.add(scrollable(inner_log.clone(), inner_max, vec![]));
+    let inner = tree.add(scrollable_options(
+        inner_log.clone(),
+        inner_max,
+        vec![],
+        OverscrollBehavior::Chain,
+        PanAxes::Y,
+        takes_press,
+    ));
+    let outer = tree.add(scrollable(outer_log.clone(), outer_max, vec![inner]));
+    tree.layout(SizeProposal::exact(200.0, 200.0));
+    Nested {
+        tree,
+        inner,
+        outer,
+        inner_log,
+        outer_log,
+    }
+}
+
+/// [`nested_inner_takes_press`], with the inner surface also **raising a drag**
+/// from its own `PointerMove` handler on the first move of the contact.
+fn nested_inner_drags(inner_max: f32, outer_max: f32) -> Nested {
+    let inner_log = Shared::default();
+    let outer_log = Shared::default();
+    let mut tree = WidgetTree::new();
+    let source = Rc::new(std::cell::Cell::new(None));
+    let inner = tree.add(scrollable_full(
+        inner_log.clone(),
+        inner_max,
+        vec![],
+        OverscrollBehavior::Chain,
+        PanAxes::Y,
+        true,
+        Some(source.clone()),
+    ));
+    source.set(Some(inner));
     let outer = tree.add(scrollable(outer_log.clone(), outer_max, vec![inner]));
     tree.layout(SizeProposal::exact(200.0, 200.0));
     Nested {
@@ -413,6 +523,127 @@ fn a_mouse_wheel_still_reaches_a_non_claimant_on_scroll_handler() {
         Modifiers::NONE,
     ));
     assert_eq!(*value.borrow(), 1, "the wheel bubbles, unchanged");
+}
+
+/// A pan claimant that **owns the press arena** pans itself.
+///
+/// The three text surfaces are shaped this way: each places a caret on a tap,
+/// so its gesture arena takes the implicit capture on `PointerDown` and it
+/// becomes the sequence's `pressed_owner`, and each declares a `PanClaim` so a
+/// finger scrolls it. The arbitration walk stops at a `Gesture` member that is
+/// the owner — the capture dispatch is already driving that recognizer — but a
+/// `Pan` member is evaluated in that walk and nowhere else, so stopping there
+/// too would leave the surface unable ever to win. Worse, the walk stops: the
+/// container behind it would not be offered the gesture either, and a finger
+/// inside the surface would scroll **nothing at all**.
+#[test]
+fn a_pan_claimant_that_owns_the_press_arena_pans_itself() {
+    let mut n = nested_inner_takes_press(1000.0, 1000.0, true);
+    let finger = contact_id(20);
+    drag(&mut n.tree, finger, Point::new(100.0, 100.0), -60.0);
+
+    assert_eq!(
+        n.tree.sequence_winner(finger),
+        Some(n.inner),
+        "the press owner's own pan claim wins the arbitration"
+    );
+    assert!(
+        n.inner_log.borrow().offset > 0.0,
+        "…and the surface scrolls itself: {:?}",
+        n.inner_log.borrow()
+    );
+    // The normative boundary rule, unchanged by the owner exemption: the claim
+    // stays with the inner container for the whole gesture.
+    assert_eq!(
+        n.outer_log.borrow().phases.len(),
+        0,
+        "the container behind it is never offered an event the surface absorbed"
+    );
+}
+
+/// The same surface **at its boundary** hands the whole pan outward, so the
+/// page behind a scrolled-out editor scrolls under the finger.
+///
+/// This is the user-visible half of the rule above: an editing surface that
+/// cannot move stops nothing.
+#[test]
+fn an_editing_surface_at_its_boundary_still_hands_the_pan_outward() {
+    let mut n = nested_inner_takes_press(0.0, 1000.0, true);
+    let finger = contact_id(21);
+    drag(&mut n.tree, finger, Point::new(100.0, 100.0), -60.0);
+
+    let inner = n.inner_log.borrow();
+    let outer = n.outer_log.borrow();
+    assert!(
+        !inner.declined.is_empty(),
+        "the surface declined at its boundary"
+    );
+    assert_eq!(
+        inner.declined, outer.absorbed,
+        "and the container behind it took the same whole deltas"
+    );
+}
+
+/// The same surface **raising a drag** takes the press away from the pan
+/// arbitration entirely — and the sequence is left undecided, not decided for
+/// the owner.
+///
+/// This is the third shape the exempted press owner can be in, and the one the
+/// exemption was suspected of changing. `RichTextEditor` reaches it: a press
+/// inside an existing selection that travels far enough calls
+/// `ctx.start_drag` from the very `PointerMove` handler the capture dispatch
+/// delivers (`rich_text/mouse.rs`), and since the touch work that surface is
+/// both a `Pan` claimant and the sequence's `pressed_owner`.
+///
+/// **What the exemption did NOT change.** `advance_sequence`'s
+/// `won || self.active_drag.is_some()` arm looks as though a drag raised
+/// during such a press would now name the owner the winner, since the old stop
+/// rule short-circuited the walk before that line. It cannot: the router calls
+/// `advance_sequence` only while `active_drag.is_none()`
+/// (`pointer_router.rs`, both call sites), and `start_drag` is applied
+/// synchronously when the handler returns — so a drag raised in the capture
+/// dispatch closes the door on the walk for this sample and every later one.
+/// Nobody wins, nobody is rejected, nobody is cancelled: the drag owns the
+/// contact, which is what the hand asked for.
+#[test]
+fn a_drag_raised_by_the_press_owner_takes_the_press_out_of_the_arbitration() {
+    use crate::gesture::MemberState;
+
+    let mut n = nested_inner_drags(1000.0, 1000.0);
+    let finger = contact_id(22);
+    drag(&mut n.tree, finger, Point::new(100.0, 100.0), -60.0);
+
+    assert!(
+        n.tree
+            .active_drag
+            .as_ref()
+            .is_some_and(|d| d.payload.has_typed::<RaisedDrag>()),
+        "the surface's own drag is the one in flight"
+    );
+    assert_eq!(
+        n.tree.sequence_winner(finger),
+        None,
+        "and it left the arbitration undecided rather than winning it"
+    );
+    assert!(
+        n.tree
+            .sequence_members(finger)
+            .iter()
+            .all(|(_, _, state)| *state == MemberState::Possible),
+        "no member was decided against: {:?}",
+        n.tree.sequence_members(finger)
+    );
+    assert_eq!(
+        n.outer_log.borrow().cancels.len(),
+        0,
+        "so the container behind it was never cancelled"
+    );
+    assert_eq!(
+        n.inner_log.borrow().phases.len(),
+        0,
+        "and nothing scrolled — the contact is dragging, not panning"
+    );
+    assert_eq!(n.outer_log.borrow().phases.len(), 0, "on either node");
 }
 
 /// A mouse wheel at a boundary still chains through the *bubble*, ancestor by

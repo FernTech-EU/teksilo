@@ -11,9 +11,9 @@
 //! through [`dispatch_scroll`](WidgetTree::dispatch_scroll), the same ingress
 //! door a backend uses, with
 //! [`ScrollSource::TouchPan`] on it. No
-//! widget gains an `on_pan`, no widget gains a second delta path, and the
-//! fourteen surfaces that already implement `on_scroll` scroll under a finger
-//! without being touched.
+//! widget gains an `on_pan`, no widget gains a second delta path, and every
+//! surface that already implements `on_scroll` scrolls under a finger without
+//! being touched.
 //!
 //! What the source changes is only the **route**: [`ScrollDelivery::for_source`]
 //! answers [`ClaimantChain`](ScrollDelivery::ClaimantChain) for a pan and
@@ -32,7 +32,7 @@
 //! and both are wrong here. [`EventResponse`](crate::event::EventResponse) is
 //! binary — it carries no "I took 30 of your 50 pixels" — so a residual would
 //! mean a new return type on every scroll handler in the workspace, i.e. a
-//! delta-path change in fourteen scrollables, to buy a difference the user sees
+//! delta-path change in every scrollable, to buy a difference the user sees
 //! for one frame of one gesture. The chain hands over events, never remainders.
 //!
 //! Three consequences follow, and each is a test:

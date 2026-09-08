@@ -29,6 +29,32 @@ GridView::new(model, |tc| {
 .selection(selection_model)
 ```
 
+## Pan to scroll
+
+The view installs `common::scrollable::ScrollableBehavior`,
+which gives it the shared wheel arithmetic, a finger's pan and the
+`PanClaim` that puts it on a pan's claimant chain. A pan scrolls it, the
+release coasts, and a pan it cannot absorb hands the **whole** event to the
+container outside — never a residual. Vertical only, despite the grid: this
+view owns no horizontal offset, so a horizontal pan is declined and chains
+outward. A pan that starts on a tile scrolls rather than activating it.
+
+**Known defect, and it bounds all of the above:** a finger does not scroll
+this view at all while its selection is in
+`teksilo_data::SelectionMode::Multi`. Measured on one 120 dp pan: no
+selection or `Single` → 157 dp of a 2808 dp range; `Multi` → 0;
+`Multi` + `.marquee_selection(false)` → 157 again. So the rubber-band
+marquee is what costs it — in `Multi` mode it puts an `on_drag` on this
+view's *own* node, the node that also carries the `PanClaim`. The marquee is
+not running instead of the scroll (it declines a press that lands on a tile,
+and the selection is untouched) and the claim is not losing the arbitration
+(the trace shows the sequence decided for this node); where the synthesised
+scroll is lost between the two is undiagnosed. Recorded against
+`grid_view/body_pane.rs` in `docs/widget-pointer-inventory.md`;
+`a_finger_on_a_multi_select_grid_pans_it` in
+`teksilo-widgets/tests/scrollables_touch.rs` is the `#[ignore]`d test
+waiting for it.
+
 ## Builder methods at a glance
 
 `from_source`, `enabled`, `sizing`, `tile_size`, `column_count`, `variable_row_heights`, `item_height`, `waterfall`, `column_spacing`, `row_spacing`, `spacing`, `content_inset`, `selection`, `on_selection_changed`, `marquee_selection`, `wrap_navigation`, `tab_traversal`, `show_scrollbar`, `overscroll_behavior`, `smooth_scrolling`, `smooth_scroll_duration`, `scroll_bar_style`, `scroll_y_signal`, `max_scroll_y_signal`, `viewport_ratio_y_signal`, `ensure_index_visible`, `scroll_to_index`, `sections`, `section_header_delegate`, `section_header_height`, `pinned_section_headers`, `a11y_label`, `style`, `empty_view`, `loading_view`, `is_loading`, `reorderable`, `exportable`, `export_external`, `on_rows_transferred_out`, `accept_foreign_rows`, `on_rows_received`, `on_item_drop`, `on_tile_activate`, `activate_on`, `tile_context_menu`, `type_ahead_label`, `tile_a11y_label`, `type_ahead_timeout`

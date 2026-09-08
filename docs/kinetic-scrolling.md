@@ -6,16 +6,25 @@
 Velocity tracking, fling physics and the rubber band, implemented once in
 [`teksilo-core::kinetic`](../crates/teksilo-core/src/kinetic.rs).
 
-Fourteen surfaces in this workspace hand-rolled the same boundary clamp followed
-by the same 150 ms ease-out tween. None of them tracked velocity, so none could
-fling, and none had a rubber band. Adding physics to each would mean
-fourteen integrators, fourteen tolerance constants, and fourteen places to
-forget `prefers-reduced-motion` — a failure mode this codebase already
+Every pixel-offset scrollable in this workspace hand-rolled the same boundary
+clamp followed by the same 150 ms ease-out tween. None of them tracked velocity, so
+none could fling, and none had a rubber band. Adding physics to each would mean
+one integrator, one tolerance constant and one place to forget
+`prefers-reduced-motion` **per surface** — a failure mode this codebase already
 demonstrates, with `EDGE = 32` and `MAX_VELOCITY = 12` copied across five
 widgets that have since drifted apart. So the physics lives in one module, as
 pure computation, and the surfaces drive it — through
 [`ScrollableBehavior`](../crates/teksilo-widgets/src/common/scrollable.rs), which
 is the one `on_scroll` body they now share. §10 is the adoption recipe.
+
+Nine surfaces install it — `ScrollArea`, the five data views (`ListView`,
+`TreeView`, `GridView`, `TableView`, `TreeTableView`) and the three text
+surfaces (`RichTextEditor`, `CodeEditor`, `LogView`) — and `SceneView` takes
+the claim from it while keeping its own handler, for the reason in §10.1. No
+number here counts the *pre*-migration hand-rollers: the inventory that
+produced the original count included `MenuList` and the `TabBar` strip, and
+§9 records what the migration found about those two — neither owns an
+`on_scroll` at all.
 
 Nothing here owns a widget, reads a clock, or touches the arena. Time arrives as
 an [`EventTime`](../crates/teksilo-core/src/pointer.rs) from the tree's single
@@ -355,7 +364,7 @@ both are wrong here:
 
 - `EventResponse` is binary. It cannot carry "I took 30 of your 50 pixels", so a
   residual would mean a new return type on every scroll handler in the
-  workspace — a delta-path change in fourteen scrollables.
+  workspace — a delta-path change in every scrollable at once.
 - What it would buy is invisible. The difference between handing the ancestor
   the whole 50 and handing it the leftover 20 is one frame of one gesture, at a
   boundary the user is already crossing.
@@ -453,7 +462,7 @@ dependent generator inputs must be coupled with `prop_flat_map`, so an extent of
 ## 9. Status
 
 The physics is wired at the tree level and, since P21, at the widget level too —
-for `ScrollArea`. The remaining scrollables adopt it in P22.
+first for `ScrollArea`, and since P22 for every other scrollable in the crate.
 
 Landed:
 
@@ -467,22 +476,109 @@ Landed:
   along the claimant chain, with the release handing its velocity to the driver;
 - `teksilo-widgets`'
   [`common::scrollable`](../crates/teksilo-widgets/src/common/scrollable.rs)
-  folds the fourteen hand-rolled `on_scroll` bodies into one, and **`ScrollArea`
+  folds the hand-rolled `on_scroll` bodies into one, and **`ScrollArea`
   owns a `KineticScroller`** — the rubber band, the boundary answer and the
   offset a pan is holding all come from it;
+- every other scrollable in the crate installs it too: the five data views
+  (`ListView`, `TreeView`, `GridView`, `TableView`, `TreeTableView`) and the
+  three text surfaces (`RichTextEditor`, `CodeEditor`, `LogView`). `SceneView`
+  keeps its own handler and gains a claim and a `TouchPan` branch — its camera
+  is not an offset in `[0, max]` (§10.1);
 - `ScrollBar` reaches its thumb with a finger: a 48 dp `hit_outset` over an
   unchanged 8–12 dp paint, a density-following minimum thumb length, the thumb
   and its paging track published through `target_regions`, and a reveal an
   overlay bar can be shown by while a pan runs.
 
+What the migration found, which is not what was expected of it:
+
+- **`MenuList` and the `TabBar` strip own no `on_scroll` at all.** Each wraps
+  its scrollable region in a `ScrollArea` and inherits everything from it, as
+  every other widget with a scrollable region does — through a `ScrollArea`, a
+  `MenuList` or a data view, none of which owns an `on_scroll` of its own. The tab strip's wheel remap is an `on_pointer_event` **preview**
+  arm, which a synthesised pan cannot reach — the claimant walk is a direct
+  dispatch per claimant with no preview pass — so a vertical finger pan over a
+  horizontal strip goes to the container around it rather than being turned
+  sideways, which is the behaviour wanted and it is free.
+- **`SpinBox` needs no `touch_action(PAN_Y)`.** Its correct behaviour already
+  holds by omission: the claimant chain visits only `pan_candidates` and never
+  the generic bubble, so a boundary pan cannot reach its wheel handler. Adding
+  `PAN_Y` would be a *narrowing* — it would additionally forbid a horizontal
+  pan and a pinch through the field — for a guarantee that is already
+  structural. Witnessed by
+  `a_finger_pan_over_a_hover_wheel_spin_box_scrolls_its_container` in
+  `spin_box/tests.rs`, which sets `WheelMode::Hover` so the box's `on_scroll`
+  actually runs for anything that reaches it; its older sibling
+  `a_finger_pan_over_the_spin_box_scrolls_its_container` shows the pan
+  arriving at the scroller but cannot see the claim, because the default
+  `WheelMode::Focused` declines first in a fixture that never focuses the
+  field.
+- **A `before` arm that *rewrote* an event could not say so.** `install` ran
+  the shared handler whenever the arm answered anything but `Handled`, so the
+  tables' Shift+wheel remap — which builds a horizontal event and feeds it to
+  `handle_scroll_event` itself — fell through and had the shared handler apply
+  the **original** vertical notch on top, on any `Chain` table (the default)
+  whose columns fit or which was already at its horizontal end — `Ignored` is
+  the boundary answer only under `Chain`, so a `Contain` table was never
+  exposed. `before` now answers
+  `Option<EventResponse>`: `None` is "not mine, run the shared treatment on
+  this same event", `Some(r)` is "mine, and `r` is the answer" — including
+  `Some(Ignored)`, which is what chains the whole original notch outward.
+  Pinned by `a_shift_notch_a_table_cannot_take_sideways_does_not_scroll_its_rows`
+  in `teksilo-widgets/tests/scrollables_touch.rs`.
+- **A claim on the node that owns the press arena did not win.** The router's
+  stop rule broke its candidate walk at the press owner whatever the member's
+  role, so a text surface — which owns the arena through its tap recognizers
+  *and* carries the claim — scrolled neither itself nor the page behind it.
+  Fixed in `advance_sequence` by exempting a `Pan` member from the stop; see
+  §10.1.
+- **A pan committed what a release on the row would have committed.** The five
+  data views' row bodies act on `PointerUp` from a **raw** `on_pointer_event`
+  arm — `TreeView`'s chevron toggle, and the deferred collapse of a
+  multi-selection in all five — and each carried the same premise in a comment:
+  that a drag pre-empts it, because "once `active_drag` is set, `PointerUp` is
+  routed to `handle_drag_drop` and never reaches this widget". True of a drag,
+  false of a **won pan claim**, which raises no `active_drag`: a 120 dp finger
+  pan over 200 collapsed branch rows scrolled the tree *and* expanded the row it
+  started on (`visible_count` 200 → 201), and a short pan on a fully-selected
+  view collapsed the selection to whichever row the finger began on. Nor can the
+  row rely on being told: it is enrolled as a sequence member only when it
+  carries a drag, and the loser's `CancelReason::PeerClaimed` is *member*-level
+  by design (the pointer stays alive so its winner can finish), so the release
+  arrives either way. Fixed in the widgets, not the router — a framework-wide
+  swallow of the release would strand the *teardown* other raw `PointerUp` arms
+  do there — with one predicate, `data_views::release_completes_the_press` over
+  `EventContext::press_is_inside`. Question 5 of
+  `teksilo-widgets/tests/scrollables_touch.rs`.
+- **A multi-select `GridView` does not pan at all.** One 120 dp pan over the
+  same grid: no selection model or one in `Single` mode → offset 157 of a 2808
+  range; `Multi` → 0; `Multi` plus `.marquee_selection(false)` → 157 again. The
+  rubber-band marquee is what costs it — in `Multi` mode it puts an `on_drag` on
+  the view's *own* node, the node that also carries the `PanClaim`, so that node
+  is both a pan claimant and a drag owner and takes the implicit press capture.
+  Not the marquee running instead (it declines a press on a tile, and the
+  selection is untouched) and not the claim losing (`TEKSILO_TRACE_INPUT=all`
+  shows the sequence decided for that node); where the synthesised scroll is
+  lost between the two is undiagnosed. Left open: it belongs with
+  `grid_view/body_pane.rs`, which the plan assigns to the data-view package.
+  `a_finger_on_a_multi_select_grid_pans_it` is the `#[ignore]`d test waiting for
+  it; recorded in [the pointer inventory](widget-pointer-inventory.md).
+
 Still to come:
 
-- the other thirteen scrollables (P22): `ListView`, `TreeView`, `TableView`,
-  `TreeTableView`, `GridView`, `MenuList`, `RichTextEditor`, `CodeEditor`,
-  `LogView`, `Terminal`, `SceneView` and the `TabBar` strip. `SpinBox` is the
-  one surface in that sweep that gets a `touch_action(PAN_Y)` and **no** claim:
-  a finger dragging over it must scroll the list it sits in, never change the
-  value;
+- `CodeEditor` and `LogView` have no finger-pan test of their own. All three
+  text surfaces install one `common::text_scroll::text_surface_behavior`, and
+  `a_finger_pans_the_rich_text_editor` (`rich_text/tests.rs`) covers that
+  helper — but a build site that dropped the call, or passed
+  `PanAxes::NONE`, would be caught for the rich editor and for neither of the
+  other two. The obstacle is the fixture, not the assertion: a headless text
+  surface needs its engine viewport seeded and a pump before it has anything to
+  scroll, and that scaffolding exists only in `rich_text/tests.rs` today;
+- `Terminal` (`teksilo-terminal`) still hand-rolls its scroll. It is a
+  different shape from every surface here — its offset is a scrollback ring
+  position quantised to whole lines rather than a pixel offset with a maximum,
+  it forwards the wheel to the child process under mouse reporting, and it
+  always answers `Handled` so it never chains — so it is deferred rather than
+  forced through `ScrollableAxes`;
 - the platform layer does not yet produce `ScrollSource::TouchPan` samples of
   its own; the core door (`dispatch_scroll` with that source, which derives its
   own chain from the sample's position) is open and waiting for it;
@@ -535,16 +631,25 @@ ctx.apply_self_handlers(behavior.install(HandlerSet::new()));
 ```
 
 **4. Keep your own scroll-adjacent arms in `.before(..)`.** It runs first for
-every event: return `Handled` to claim one outright (a `ScrollIntoView` reveal),
-or observe and return `Ignored` to run bookkeeping ahead of a delta the shared
-handler will then apply.
+every event and answers an `Option`, which is the difference between owning an
+event and merely watching one. Return `None` to observe and fall through — the
+shared handler then runs on that same event, which is how a surface does
+bookkeeping ahead of a delta it still wants applied. Return `Some(response)` to
+claim the event: the shared handler does not run at all, and `response` is the
+surface's answer. `Some(Handled)` is the usual claim (a `ScrollIntoView`
+reveal); `Some(Ignored)` is for an arm that consumed the event and could not
+move — the tables' Shift+wheel remap at its horizontal end — where the whole
+original event must chain outward and must **not** be applied a second time on
+the way past.
 
 ### The four rules that are easy to get wrong
 
-**Both offsets must be `Signal::new_animated`** on a surface with `smooth` on. A
-smooth notch aims a tween at *both* axes — the unmoved one at where it already
-is, which is what keeps a cross-axis tween from being cut short — and
-`animate_to` on a plain `Signal<f32>` panics.
+**An offset must be `Signal::new_animated`** on a surface with `smooth` on *and
+a range on that axis*: `animate_to` on a plain `Signal<f32>` panics. Both paths
+write an axis only when its clamp actually moved, so an axis whose range is
+permanently zero is never written and may stay plain — which is what lets a
+vertical-only view pin its horizontal axis, and what lets the three text
+surfaces keep the plain signals they have always had.
 
 **The claim is not optional.** `install` attaches it, but a surface that hand-
 rolls the handler and forgets `.scroll_container(..)` / `.pan_claim(..)` scrolls
@@ -572,3 +677,51 @@ chains the coast outward, is the surface's job.
 
 It also does not read a clock, subscribe to frame ticks, or animate. Everything
 it does happens inside an event.
+
+## 10.1. One surface the helper does not fit, and the rule that nearly cost three more
+
+**A claim on the node that owns the press arena wins.**
+`advance_sequence` (`teksilo-core`, `widget_tree/pointer_state.rs`) stops its
+candidate walk at the node whose arena took the press — but only for a
+`Gesture` member, whose recognizer the ordinary capture dispatch is already
+driving and above which nothing may win, which is the "innermost drag owns the
+gesture" rule. A `Pan` member is exempt, as `RawDrag` already was, because that
+walk is the *only* place either is ever evaluated: a pan's product is a
+synthesised `Scroll`, not a `GestureEvent` fed to an arena. Stopping at it
+would have left the claim permanently inert on any node that is both the press
+owner and the claimant — and, because the walk stops rather than continuing,
+nothing outside it would be offered the gesture either. The five data views
+were never exposed (their claim sits on the container and the press on a row);
+the three text surfaces are exactly that shape, since their double- and
+triple-tap recognizers put the arena on the very node that carries the claim,
+and for one package a finger on them scrolled nothing at all. Pinned by
+`a_pan_claimant_that_owns_the_press_arena_pans_itself` and
+`an_editing_surface_at_its_boundary_still_hands_the_pan_outward`
+(`teksilo-core`, `widget_tree/pan_arbiter/tests.rs`), by
+`a_claim_on_the_node_that_owns_the_press_wins`
+(`teksilo-widgets/tests/scrollables_touch.rs`) and by
+`a_finger_pans_the_rich_text_editor`.
+
+What the exemption did **not** change is the third shape that same press owner
+can be in: raising a **drag** of its own. `RichTextEditor` does exactly that
+for a press inside an existing selection that travels far enough
+(`ctx.start_drag` from its `PointerMove` handler, `rich_text/mouse.rs`). The
+walk looks as though it would now name the owner the winner — that is what its
+`won || active_drag.is_some()` arm reads like once the stop is gone — but the
+router enters the walk only while no drag is in flight, and `start_drag` is
+applied the moment the handler returns. So the drag closes the door on the
+arbitration instead of deciding it: nobody wins, nobody is rejected, nobody is
+cancelled, and nothing scrolls. Pinned by
+`a_drag_raised_by_the_press_owner_takes_the_press_out_of_the_arbitration`
+(`teksilo-core`, `widget_tree/pan_arbiter/tests.rs`).
+
+**`SceneView`'s camera is not an offset.** It keeps its own handler with a
+`ScrollSource::TouchPan` branch beside the wheel one, and takes only the claim
+from this module. `ScrollableAxes` models a surface as an offset in `[0, max]`
+per axis; a scene's `pan` is *added* by the view transform rather than
+subtracted (so its delta is negated), its legal region is an arbitrary
+rectangle that moves with the zoom, and where that rectangle is smaller than
+the viewport on an axis the rule is a centring pin rather than a clamp — which
+no `[min, max]` range can express. An unbounded scene has no range at all. The
+policy is still this module's: no tween under a finger, a hard clamp on a
+coast, and `Ignored` at the boundary and at the end of the stream.

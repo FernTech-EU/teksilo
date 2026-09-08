@@ -55,6 +55,15 @@ Horizontal indent of the content area below the title (dp).
 pub const GROUP_BOX_CONTENT_INDENT: f32 = 24.0;
 ```
 
+## `pub fn group_box_content_indent(...)`
+
+`GROUP_BOX_CONTENT_INDENT` scaled by the density's `spacing_factor`
+(1.00 / 1.15 / 1.30).
+
+```rust
+pub fn group_box_content_indent(tokens: &InputTokens) -> f32;
+```
+
 ## `pub const GROUP_BOX_TITLE_CONTENT_SPACING`
 
 Vertical gap between the title row and the content area (dp).
@@ -63,12 +72,30 @@ Vertical gap between the title row and the content area (dp).
 pub const GROUP_BOX_TITLE_CONTENT_SPACING: f32 = 8.0;
 ```
 
+## `pub fn group_box_title_content_spacing(...)`
+
+`GROUP_BOX_TITLE_CONTENT_SPACING` scaled by the density's `spacing_factor`
+(1.00 / 1.15 / 1.30).
+
+```rust
+pub fn group_box_title_content_spacing(tokens: &InputTokens) -> f32;
+```
+
 ## `pub const GROUP_BOX_CHECKBOX_GAP`
 
 Gap between the checkbox and the adjacent title label in checkable mode (dp).
 
 ```rust
 pub const GROUP_BOX_CHECKBOX_GAP: f32 = 6.0;
+```
+
+## `pub fn group_box_checkbox_gap(...)`
+
+`GROUP_BOX_CHECKBOX_GAP` scaled by the density's `spacing_factor`
+(1.00 / 1.15 / 1.30).
+
+```rust
+pub fn group_box_checkbox_gap(tokens: &InputTokens) -> f32;
 ```
 
 ## `pub struct GroupBox`

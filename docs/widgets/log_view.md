@@ -27,6 +27,22 @@ What it adds over the read-only code viewer:
   error line red). Language-agnostic: the view colours a line, the
   application decides what an error looks like.
 
+## Pan to scroll
+
+The surface installs `common::scrollable::ScrollableBehavior`
+— the shared wheel arithmetic, a finger's pan, and the `PanClaim`. The wheel
+path is unchanged: no tween (these offsets are plain signals), 16 dp a line,
+`Ignored` at a hard boundary so the page around it takes the rest, and a
+repaint asked for exactly when an axis moved.
+
+**The claim serves this surface even though it also owns the press
+arena**, which its double- and triple-tap recognizers give it. The router
+stops its arbitration walk at the press owner only for a `Gesture` member,
+whose recognizer the capture dispatch is already driving; a `Pan` member is
+decided in that walk and nowhere else, so it is exempt. A finger on the
+text therefore scrolls the text, and hands the gesture outward only at this
+surface's own boundary. See `docs/kinetic-scrolling.md` §10.1.
+
 ## Builder methods at a glance
 
 `follow_tail`, `scrollback_limit`, `severity_highlighter`, `announce_appends`, `font_family`, `follow_text_scale`, `v_scroll_policy`, `h_scroll_policy`, `background`, `text_color`, `selection_color`, `handle`
