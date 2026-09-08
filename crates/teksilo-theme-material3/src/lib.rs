@@ -85,7 +85,7 @@ pub fn light() -> Theme {
 
 /// Re-derive a Material 3 theme for another density.
 ///
-/// Registered as the theme's [`DensityProjection`], so
+/// Registered as the theme's [`DensityProjection`](teksilo_core::styles::DensityProjection), so
 /// `WidgetTree::set_input_density` (and `Theme::with_density`) rebuild the
 /// Tier-3 slots this preset installs instead of carrying their Compact
 /// dimensions across. Colours, id, the [`Material3Palette`] extension and any

@@ -169,7 +169,7 @@ fn build(appearance: ThemeAppearance, palette: FluentPalette) -> Theme {
 
 /// Re-derive a Fluent theme for another density.
 ///
-/// Registered as the theme's [`DensityProjection`], so
+/// Registered as the theme's [`DensityProjection`](teksilo_core::styles::DensityProjection), so
 /// `WidgetTree::set_input_density` (and `Theme::with_density`) rebuild the
 /// Tier-3 slots this preset installs instead of carrying their Compact
 /// dimensions across — a Fluent button is 32 dp at Compact and reaches the

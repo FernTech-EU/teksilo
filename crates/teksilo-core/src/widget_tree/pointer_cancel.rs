@@ -41,7 +41,7 @@
 //! A cancel raised from inside a handler must not unwind the sample that
 //! handler is standing on. It therefore rides the same
 //! [`pending_dispatch`](WidgetTree::pending_dispatch) queue P07 built for
-//! nested dispatch, as a [`QueuedDispatch::Cancel`] entry rather than a second
+//! nested dispatch, as a [`QueuedDispatch::Cancel`](super::pointer_router::QueuedDispatch::Cancel) entry rather than a second
 //! queue of its own: one queue means one order, and the cancel a handler
 //! raised lands after the event that provoked it rather than in the middle of
 //! it. At depth zero the queue is drained immediately, so a caller outside a

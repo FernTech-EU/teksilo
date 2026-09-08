@@ -203,7 +203,7 @@ fn build(appearance: ThemeAppearance, palette: MacOsPalette) -> Theme {
 
 /// Re-derive a macOS theme for another density.
 ///
-/// Registered as the theme's [`DensityProjection`], so
+/// Registered as the theme's [`DensityProjection`](teksilo_core::styles::DensityProjection), so
 /// `WidgetTree::set_input_density` (and `Theme::with_density`) rebuild the
 /// Tier-3 slots this preset installs instead of carrying their Compact
 /// dimensions across. Colours, id, the [`MacOsPalette`] extension and any slot

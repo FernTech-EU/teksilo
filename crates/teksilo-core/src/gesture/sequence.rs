@@ -15,7 +15,7 @@
 //!
 //! A [`PointerSequence`] is the same idea made explicit and made plural: one
 //! per live [`PointerId`](crate::pointer::PointerId), stored on that pointer's
-//! [`PointerEntry`](crate::pointer::PointerEntry), carrying the frozen hit
+//! [`PointerEntry`](crate::pointer::table::PointerEntry), carrying the frozen hit
 //! path, the frozen [`TouchAction`], every enrolled [`SequenceMember`], and the
 //! winner once one is decided.
 //!

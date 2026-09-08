@@ -16,7 +16,7 @@
 //! second delta path — and it is why there is no `GestureEvent::Pan` and no
 //! `on_pan` handler to add one.
 //!
-//! So [`GestureRecognizer::process`](super::GestureRecognizer::process) here
+//! So [`GestureRecognizer::process`] here
 //! never returns `Recognized`: it feeds the tracker, reports `Pending` while
 //! the press could still become a pan, and `Failed` once it cannot. A caller
 //! learns that the pan armed from [`PanRecognizer::past_slop`] and drives the
