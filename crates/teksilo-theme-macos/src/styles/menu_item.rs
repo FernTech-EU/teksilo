@@ -68,7 +68,7 @@ pub fn macos_menu_item_recipe() -> MenuItemRecipe {
 
 /// [`macos_menu_item_recipe`] resolved against a density's [`InputTokens`].
 ///
-/// `[measured]` values throughout. [`ITEM_HEIGHT`] is deliberately **not**
+/// `[measured]` values throughout. `ITEM_HEIGHT` is deliberately **not**
 /// raised: 22 dp is AppKit's own menu row, below the 24 dp WCAG floor, and
 /// growing it would falsify a preset whose whole purpose is to reproduce
 /// Apple's metrics. The coarse hit area a finger needs comes from the hit
