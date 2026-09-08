@@ -1503,6 +1503,58 @@ mod tests {
         );
     }
 
+    /// A mark's AT node reports the mark's **own** rectangle, unscaled.
+    ///
+    /// AccessKit answers `AXBoundsForRange` / UIA `GetBoundingRectangles` and
+    /// resolves its own hit tests from these numbers, so a magnifier tracks
+    /// them and touch-explore routes a probe by them. Any transform applied on
+    /// the way out — a scale "to make a mark easier to hit", a padding outset —
+    /// is a lie an AT client cannot detect and cannot correct: it draws its
+    /// focus rectangle somewhere the mark is not.
+    ///
+    /// The rule had no enforcement in this crate at all. Doubling the emitted
+    /// rect in `hit::emit_mark_node` left every chart test passing, because
+    /// nothing compared an emitted rect against the geometry it came from.
+    /// This does, for a real laid-out chart's real first mark.
+    #[test]
+    fn a_mark_emits_its_own_rectangle_and_not_a_scaled_one() {
+        use teksilo_core::accessibility::AccessNodeBuilder;
+
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let chart = BarChart::new(sample_model());
+        let marks_handle = chart.marks.clone();
+        let id = tree.add(chart);
+        tree.layout(SizeProposal::exact(400.0, 200.0));
+        let _ = tree.render();
+
+        let marks = marks_handle.borrow();
+        let mark = marks.first().expect("a laid-out bar chart has marks");
+        let expected = mark.shape.bounding_rect();
+
+        let mut builder = AccessNodeBuilder::for_widget(id);
+        crate::hit::emit_mark_node(&mut builder, mark);
+        let (_self_id, _self_node, children) = builder.build(id);
+        let (_child_id, node) = children
+            .first()
+            .expect("emit_mark_node pushes exactly one synthetic child");
+        let bounds = node
+            .bounds()
+            .expect("a mark node without bounds is invisible to every AT hit test");
+
+        assert_eq!(bounds.x0, expected.x as f64, "left edge");
+        assert_eq!(bounds.y0, expected.y as f64, "top edge");
+        assert_eq!(
+            bounds.x1,
+            (expected.x + expected.width) as f64,
+            "right edge",
+        );
+        assert_eq!(
+            bounds.y1,
+            (expected.y + expected.height) as f64,
+            "bottom edge",
+        );
+    }
+
     #[test]
     fn single_pass_geometry_matches_between_paint_and_accessibility() {
         let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());

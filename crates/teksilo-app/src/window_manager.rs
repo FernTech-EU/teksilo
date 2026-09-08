@@ -881,6 +881,7 @@ impl WindowManager {
             self.a11y_prefs.reduced_motion,
             self.a11y_prefs.text_scale_factor,
         );
+        tree.set_screen_reader_state(self.a11y_prefs.screen_reader);
         if (self.user_text_scale - 1.0).abs() > f32::EPSILON {
             tree.set_user_text_scale(self.user_text_scale);
         }
@@ -1555,8 +1556,13 @@ impl WindowManager {
     }
 
     /// Re-query the OS accessibility preferences ("increase contrast", "reduce
-    /// motion", text scale) and, if they changed since startup / the last
-    /// refresh, apply them to every open window's tree. Lets a runtime toggle
+    /// motion", text scale, screen reader) and, if they changed since startup /
+    /// the last refresh, apply them to every open window's tree.
+    ///
+    /// Cost note: on Linux each of these is a subprocess (`busctl`,
+    /// `gsettings`), and the screen-reader flag adds one more `busctl` to the
+    /// handful this already runs. It is on the window-focus path, not an idle
+    /// poll, so it costs a fraction of a focus change and nothing at rest. Lets a runtime toggle
     /// of these settings take effect without restarting the app (WCAG / EN
     /// 301 549 §11.7). Driven event-first — from `WindowEvent::Focused` when a
     /// window gains focus — so there is no idle polling wakeup. Returns `true`
@@ -1569,9 +1575,14 @@ impl WindowManager {
         let hc = fresh.high_contrast;
         let rm = fresh.reduced_motion;
         let ts = fresh.text_scale_factor;
+        let sr = fresh.screen_reader;
         self.a11y_prefs = fresh;
         for managed in self.windows.values_mut() {
             managed.tree.set_accessibility_preferences(hc, rm, ts);
+            // A screen reader starting or stopping while the app runs is the
+            // case this refresh exists for: `AccessibilityPreferences` compares
+            // on the field, so the early return above no longer swallows it.
+            managed.tree.set_screen_reader_state(sr);
         }
         true
     }

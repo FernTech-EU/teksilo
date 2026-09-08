@@ -52,6 +52,80 @@ pub struct PlatformWindow {
     a11y_needs_full_tree: Arc<AtomicBool>,
     /// Receiver for accessibility action requests from the adapter.
     a11y_action_rx: mpsc::Receiver<ActionRequest>,
+    /// The accessibility state the adapter's off-thread handlers share with
+    /// the UI thread. See [`AccessibilityBridge`].
+    a11y_bridge: Arc<AccessibilityBridge>,
+}
+
+/// The state an AccessKit adapter's handlers share with the UI thread.
+///
+/// `accesskit_winit::Adapter::with_direct_handlers` requires every handler to
+/// be `Send` and calls it from whatever thread the platform's accessibility
+/// stack happens to use — the UIA provider thread on Windows, an AT-SPI task on
+/// Linux. A [`teksilo_core::WidgetTree`] is `!Send`, so no handler can reach
+/// one. Everything they need to say to the UI thread therefore goes through
+/// this, and everything they need to read from it is a snapshot the UI thread
+/// leaves here.
+/// The whole policy lives here rather than in the three handler types,
+/// because a handler owns an `Arc<Window>` and so cannot be built in a test
+/// without an event loop, while this can.
+#[derive(Debug, Default)]
+pub(crate) struct AccessibilityBridge {
+    /// The most recent `TreeUpdate` the UI thread published, kept so that
+    /// `request_initial_tree` can answer with the real tree instead of a
+    /// placeholder. `None` before the first frame.
+    snapshot: Mutex<Option<accesskit::TreeUpdate>>,
+    /// Whether an AccessKit client is attached right now. Set on activation,
+    /// cleared on deactivation.
+    active: std::sync::atomic::AtomicBool,
+}
+
+impl AccessibilityBridge {
+    /// Leave a tree where the activation handler can find it. Called from the
+    /// UI thread on every published update.
+    ///
+    /// A no-op while a client is attached, and that is the point: the snapshot
+    /// is read by `request_initial_tree` alone, which by definition runs while
+    /// nothing is attached — an attached client already has the live tree
+    /// through `update_if_active`. Skipping the clone there keeps the cost off
+    /// the frame path exactly when a screen reader is running and frames matter
+    /// most. The window between a detach and the next frame leaves the snapshot
+    /// one frame stale, which is a frame-old application rather than an empty
+    /// one; the deactivation handler asks for that frame.
+    pub(crate) fn publish(&self, update: &accesskit::TreeUpdate) {
+        if self.is_active() {
+            return;
+        }
+        if let Ok(mut slot) = self.snapshot.lock() {
+            *slot = Some(update.clone());
+        }
+    }
+
+    /// A client attached: record it and answer with the best tree available.
+    ///
+    /// The last published one if there is one — an assistive technology
+    /// attaching to an idle window must not be shown an empty application —
+    /// and the bare window node only before this window has ever drawn.
+    pub(crate) fn on_activate(&self) -> accesskit::TreeUpdate {
+        self.active
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+        self.snapshot
+            .lock()
+            .ok()
+            .and_then(|slot| slot.clone())
+            .unwrap_or_else(empty_initial_tree)
+    }
+
+    /// The last client detached.
+    pub(crate) fn on_deactivate(&self) {
+        self.active
+            .store(false, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Whether a client is attached right now.
+    pub(crate) fn is_active(&self) -> bool {
+        self.active.load(std::sync::atomic::Ordering::Relaxed)
+    }
 }
 
 /// The wgpu objects every window in the process shares.
@@ -213,14 +287,32 @@ impl PlatformWindow {
         let (action_tx, action_rx) = mpsc::channel();
 
         let a11y_needs_full_tree = Arc::new(AtomicBool::new(true));
+        let a11y_bridge = Arc::new(AccessibilityBridge::default());
+
+        // Every handler below runs off the UI thread and ends by asking winit
+        // to redraw this window. That request is the *only* thing that wakes
+        // the event loop: `handle_accessibility_actions` — the sole drain of
+        // the action channel — runs from `window_event`, so without a wakeup an
+        // action issued by Narrator or Orca would sit in the channel until some
+        // unrelated window event happened to arrive. `Window::request_redraw`
+        // is thread-safe, which is why an `Arc<Window>` clone is all a handler
+        // needs.
         let a11y_adapter = accesskit_winit::Adapter::with_direct_handlers(
             event_loop,
             &window,
             TeksiloActivationHandler {
                 needs_full_tree: a11y_needs_full_tree.clone(),
+                bridge: Arc::clone(&a11y_bridge),
+                window: Arc::clone(&window),
             },
-            TeksiloActionHandler { tx: action_tx },
-            TeksiloDeactivationHandler,
+            TeksiloActionHandler {
+                tx: action_tx,
+                window: Arc::clone(&window),
+            },
+            TeksiloDeactivationHandler {
+                bridge: Arc::clone(&a11y_bridge),
+                window: Arc::clone(&window),
+            },
         );
 
         // Show the window now that the adapter is created
@@ -235,6 +327,7 @@ impl PlatformWindow {
             a11y_adapter: Some(a11y_adapter),
             a11y_action_rx: action_rx,
             a11y_needs_full_tree,
+            a11y_bridge,
         }
     }
 
@@ -254,6 +347,7 @@ impl PlatformWindow {
             a11y_adapter: None,
             a11y_action_rx: action_rx,
             a11y_needs_full_tree: Arc::new(AtomicBool::new(false)),
+            a11y_bridge: Arc::new(AccessibilityBridge::default()),
         }
     }
 
@@ -447,7 +541,15 @@ impl PlatformWindow {
     }
 
     /// Push an AccessKit TreeUpdate to the adapter (called after layout).
+    /// Publish a freshly built `TreeUpdate` to the adapter, and leave a copy
+    /// where the activation handler can find it.
+    ///
+    /// The copy is what lets an assistive technology that attaches to an *idle*
+    /// window see the application instead of an empty window node: the handler
+    /// runs off the UI thread and cannot build a tree, so the last one the UI
+    /// thread built is the best answer available synchronously.
     pub fn update_accessibility(&mut self, update: accesskit::TreeUpdate) {
+        self.a11y_bridge.publish(&update);
         if let Some(adapter) = &mut self.a11y_adapter {
             adapter.update_if_active(|| update);
         }
@@ -492,6 +594,20 @@ impl PlatformWindow {
         self.a11y_needs_full_tree.swap(false, Ordering::Relaxed)
     }
 
+    /// Whether an AccessKit client is attached to this window's adapter.
+    ///
+    /// True from the moment the platform accessibility stack asks for an
+    /// initial tree until it says it has gone away. Read once per frame by
+    /// `teksilo-app` and pushed into the window's tree; see
+    /// [`WidgetTree::set_at_client_attached`](teksilo_core::WidgetTree::set_at_client_attached)
+    /// for why attaching and detaching are read asymmetrically.
+    ///
+    /// Always `false` for a window built without an adapter
+    /// ([`PlatformWindow::new`]).
+    pub fn accessibility_active(&self) -> bool {
+        self.a11y_bridge.is_active()
+    }
+
     /// Forward a winit WindowEvent to the AccessKit adapter.
     pub fn process_accessibility_event(&mut self, event: &WindowEvent) {
         if let Some(adapter) = &mut self.a11y_adapter {
@@ -511,47 +627,169 @@ impl PlatformWindow {
 
 // --- AccessKit handler implementations ---
 
-/// Activation handler — returns an empty initial tree.
-/// The real tree is sent via `update_if_active` on the next frame.
+/// Activation handler — answers with the last tree the UI thread built.
 ///
-/// The flag is what makes that next frame send a *full* tree: deliveries
-/// are otherwise throttled to the moves-only rate, and a reader that
-/// attaches mid-session would be handed a geometry patch onto a tree
-/// consisting of one empty window.
+/// An assistive technology attaching to a window that is sitting idle used to
+/// be shown a bare `Role::Window` node with no children, and stayed shown it
+/// until something unrelated caused a frame. Answering from the published
+/// snapshot fixes the common case; the redraw request covers the rest, since
+/// the adapter is active from here on and the next
+/// [`PlatformWindow::update_accessibility`] reaches it.
+/// `needs_full_tree` is what makes the delivery that follows a *full*
+/// tree rather than a geometry patch: updates are otherwise throttled to
+/// the moves-only rate, and a reader that attaches mid-session has never
+/// seen the tree such a patch would be applied to.
 struct TeksiloActivationHandler {
     needs_full_tree: Arc<AtomicBool>,
+    bridge: Arc<AccessibilityBridge>,
+    window: Arc<Window>,
+}
+
+/// The tree handed to a client that attached before this window ever drew.
+///
+/// A window node with no children — the same placeholder as before — because
+/// there is genuinely nothing else to say yet. The accompanying redraw request
+/// is what makes it short-lived.
+fn empty_initial_tree() -> accesskit::TreeUpdate {
+    let root = accesskit::Node::new(accesskit::Role::Window);
+    let root_id = teksilo_core::accessibility::root_node_id();
+    accesskit::TreeUpdate {
+        nodes: vec![(root_id, root)],
+        tree: Some(accesskit::TreeInfo::new(root_id)),
+        tree_id: accesskit::TreeId::ROOT,
+        focus: root_id,
+    }
 }
 
 impl accesskit::ActivationHandler for TeksiloActivationHandler {
     fn request_initial_tree(&mut self) -> Option<accesskit::TreeUpdate> {
         self.needs_full_tree.store(true, Ordering::Relaxed);
-        // Return a minimal tree; the real one arrives on the next frame
-        let root = accesskit::Node::new(accesskit::Role::Window);
-        Some(accesskit::TreeUpdate {
-            nodes: vec![(accesskit::NodeId(0), root)],
-            tree: Some(accesskit::TreeInfo::new(accesskit::NodeId(0))),
-            tree_id: accesskit::TreeId::ROOT,
-            focus: accesskit::NodeId(0),
-        })
+        let update = self.bridge.on_activate();
+        // Whether or not we could answer with a real tree, ask for a frame: it
+        // is what carries the *next* update to the now-active adapter, and it
+        // is also how the UI thread learns that a client attached.
+        self.window.request_redraw();
+        Some(update)
     }
 }
 
-/// Action handler — forwards action requests to the main thread via a channel.
+/// Action handler — forwards action requests to the main thread via a channel,
+/// then wakes the loop so the channel is actually drained.
 struct TeksiloActionHandler {
     tx: mpsc::Sender<ActionRequest>,
+    window: Arc<Window>,
 }
 
 impl accesskit::ActionHandler for TeksiloActionHandler {
     fn do_action(&mut self, request: ActionRequest) {
         let _ = self.tx.send(request);
+        self.window.request_redraw();
     }
 }
 
-/// Deactivation handler — no-op.
-struct TeksiloDeactivationHandler;
+/// Deactivation handler — records that the last client detached.
+///
+/// Unlike activation, this *is* evidence about screen readers: when no client
+/// is attached, none of them is reading the tree either.
+struct TeksiloDeactivationHandler {
+    bridge: Arc<AccessibilityBridge>,
+    window: Arc<Window>,
+}
 
 impl accesskit::DeactivationHandler for TeksiloDeactivationHandler {
     fn deactivate_accessibility(&mut self) {
-        // Nothing to clean up
+        self.bridge.on_deactivate();
+        // The UI thread reads the flag once per frame, so it needs a frame.
+        self.window.request_redraw();
+    }
+}
+
+#[cfg(test)]
+mod accessibility_bridge_tests {
+    use super::{AccessibilityBridge, empty_initial_tree};
+
+    /// A recognisable tree that is not the placeholder.
+    fn published_tree() -> accesskit::TreeUpdate {
+        let root_id = teksilo_core::accessibility::root_node_id();
+        let child_id = accesskit::NodeId(4242);
+        let mut root = accesskit::Node::new(accesskit::Role::Window);
+        root.push_child(child_id);
+        let mut child = accesskit::Node::new(accesskit::Role::Button);
+        child.set_label("Save");
+        accesskit::TreeUpdate {
+            nodes: vec![(root_id, root), (child_id, child)],
+            tree: Some(accesskit::TreeInfo::new(root_id)),
+            tree_id: accesskit::TreeId::ROOT,
+            focus: root_id,
+        }
+    }
+
+    #[test]
+    fn a_fresh_bridge_reports_no_client() {
+        assert!(!AccessibilityBridge::default().is_active());
+    }
+
+    #[test]
+    fn activation_before_the_first_frame_answers_with_the_placeholder() {
+        let bridge = AccessibilityBridge::default();
+        let update = bridge.on_activate();
+        assert_eq!(update.nodes.len(), empty_initial_tree().nodes.len());
+        assert_eq!(update.nodes[0].1.children().len(), 0);
+        assert!(bridge.is_active());
+    }
+
+    #[test]
+    fn activation_after_a_frame_answers_with_the_real_tree() {
+        // The defect this pins: an assistive technology attaching to an idle
+        // window was shown a childless window node and nothing scheduled a
+        // frame to replace it.
+        let bridge = AccessibilityBridge::default();
+        bridge.publish(&published_tree());
+        let update = bridge.on_activate();
+        assert_eq!(
+            update.nodes.len(),
+            2,
+            "the published tree, not a placeholder"
+        );
+        assert_eq!(update.nodes[0].1.children().len(), 1);
+    }
+
+    #[test]
+    fn the_snapshot_is_the_latest_published_tree() {
+        let bridge = AccessibilityBridge::default();
+        bridge.publish(&empty_initial_tree());
+        bridge.publish(&published_tree());
+        assert_eq!(bridge.on_activate().nodes.len(), 2);
+    }
+
+    #[test]
+    fn publishing_while_a_client_is_attached_is_skipped() {
+        // Not a behaviour change anyone can observe through `on_activate` —
+        // an attached client cannot ask for an initial tree — but it is what
+        // keeps a per-frame `TreeUpdate` clone off the frame path while a
+        // screen reader is running.
+        let bridge = AccessibilityBridge::default();
+        bridge.publish(&published_tree());
+        let _ = bridge.on_activate();
+        bridge.publish(&empty_initial_tree());
+        bridge.on_deactivate();
+        assert_eq!(
+            bridge.on_activate().nodes.len(),
+            2,
+            "the tree published while attached must not have replaced the snapshot"
+        );
+    }
+
+    #[test]
+    fn deactivation_clears_the_attached_flag() {
+        let bridge = AccessibilityBridge::default();
+        let _ = bridge.on_activate();
+        assert!(bridge.is_active());
+        bridge.on_deactivate();
+        assert!(!bridge.is_active());
+        // And the tree it published is still there for a client that comes back.
+        bridge.publish(&published_tree());
+        assert_eq!(bridge.on_activate().nodes.len(), 2);
+        assert!(bridge.is_active());
     }
 }

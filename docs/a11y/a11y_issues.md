@@ -103,3 +103,56 @@ Teksilo does not yet emit them. Tracked as §5.9 of the internal audit — a
 Teksilo omission, not an upstream block.
 
 _Last reviewed: 2026-09-06._
+## Two AT actions deliberately not advertised (decisions, not gaps)
+
+An AccessKit client acts on what a node **advertises**: `accesskit_consumer`
+filters by `supports_action`, and VoiceOver's rotor and Narrator's scan build
+their verb lists from it. Advertising an action the widget does not service is
+therefore worse for a user than not advertising it — the verb appears and does
+nothing when chosen. Two omissions were raised as possible defects and are
+recorded here as decisions.
+
+**`TextInputField` does not advertise `Action::ScrollIntoView`.** Its
+`handle_access_action` (`primitives/text_input_field.rs`) answers `Ignored` to
+that action, and nothing else would pick it up: `ScrollIntoView` is inert in the
+top-level event router and reaches a container only through the
+clipping-ancestor walk from `EventContext::ensure_visible`, never through the AT
+action path. Revealing a field is the enclosing `ScrollArea`'s job and already
+works. What the field does advertise — `Focus`, and, when it can service them,
+`SetValue`, `ReplaceSelectedText` and `SetTextSelection` — is pinned by
+`the_field_advertises_the_actions_an_assistive_client_may_invoke` and
+`a_read_only_or_protected_field_withdraws_the_actions_it_cannot_service` in
+`text_input/tests.rs`.
+
+`RichTextEditor` does advertise `ScrollIntoView` and services it, by revealing
+its caret (`rich_text.rs`, the `(Action::ScrollIntoView, _)` arm).
+
+**`TextWidget` advertises no actions at all.** It is a leaf label: it has no
+`on_access_action` handler, takes no focus, and holds no value a client could
+set. Every action AccessKit defines for it would be unserviced. Its
+accessibility contribution is its name and its `Role::TextRun` children (see
+the text-ranges work), which is what a screen reader reviews it by; a client
+that wants it brought on screen goes through the scroll container around it, as
+above.
+
+## `CodeEditor` and `LogView` advertise `ScrollIntoView` and do not service it
+
+**Status: open defect, not a limit.** `code_editor/a11y.rs`'s `finish` adds
+`Action::ScrollIntoView` to the node for **both** wrappers, but the shared
+`handle_access_action` in the same file has no arm for it — it falls through to
+`_ => EventResponse::Ignored`. So a screen reader offers the verb on a code
+editor and on a log view, and choosing it does nothing. This is the same
+mistake as advertising an unserviced action anywhere else, and it is the
+opposite of the `TextInputField` decision above.
+
+Fixing the `CodeEditor` half is small: `keyboard::ensure_caret_visible(state)`
+already exists and does exactly what `RichTextEditor`'s arm does. The `LogView`
+half needs a decision first — a log view follows its tail, so "reveal the
+caret" may fight `follow_tail`, and it is not obvious whether an AT reveal
+should suspend tail-following the way a user scroll does. Left unfixed rather
+than guessed at, because a log that silently stops following its tail is a
+worse bug than a verb that does nothing.
+
+_Added 2026-09-08 alongside the touch programme's scrollables review._
+
+_Last reviewed: 2026-07-02._

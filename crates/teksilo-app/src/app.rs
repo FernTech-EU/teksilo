@@ -2136,6 +2136,17 @@ impl TeksiloAppHandler {
             }
         }
 
+        // Whether an assistive technology is attached to this window's adapter.
+        // The adapter's handlers run off the UI thread and can only leave a
+        // flag, so this is where the tree learns of it; both handlers request a
+        // redraw, so a change never waits for unrelated activity. Attaching
+        // proves nothing about screen readers (a magnifier or an automation
+        // harness activates the adapter too) — detaching does, and
+        // `set_at_client_attached` is where that asymmetry lives.
+        current
+            .tree
+            .set_at_client_attached(current.platform_window.accessibility_active());
+
         // Kept unconditional: `sync_accessibility` is not a pure builder —
         // it steps the framework's live-region announcers, fills the
         // automation announcement ring and maintains `at_version` — and all

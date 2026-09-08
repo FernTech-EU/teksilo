@@ -38,6 +38,10 @@ impl WidgetTree {
             std::collections::HashMap::new();
 
         let mut root = accesskit::Node::new(accesskit::Role::Window);
+        // Every rectangle below is logical; AccessKit wants physical. One
+        // transform here converts the whole tree, synthetic children included.
+        // See [`super::accessibility_impl::emit_root_transform`].
+        super::accessibility_impl::emit_root_transform(&mut root, self.device_scale_factor());
         // Tag the root with the app's current locale (BCP-47, e.g. "fr-FR").
         // AccessKit nodes inherit `language` from their ancestors, so setting
         // it once on the Window node propagates to the whole tree. Without it,

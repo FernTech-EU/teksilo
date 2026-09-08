@@ -465,6 +465,38 @@ impl WidgetTree {
     }
 }
 
+/// Put the window's HiDPI scale on the root node, so every rectangle in the
+/// tree can stay logical.
+///
+/// AccessKit reads a node's `bounds` in the coordinate space of the nearest
+/// ancestor carrying a `transform`, and expects the *transformed* result to be
+/// in physical pixels relative to the window origin. Teksilo lays out, paints,
+/// hit-tests and drives automation in logical pixels throughout, so every
+/// emitter — this crate's walker, `teksilo-charts`' marks, `teksilo-scene`'s
+/// items and magnets — writes a logical rectangle and none of them knows the
+/// display scale.
+///
+/// One transform on the root reconciles the two. `accesskit_consumer`
+/// accumulates a node's transform with every ancestor's up to the root, so a
+/// single scale here reaches every descendant, **including synthetic children**
+/// (text runs, chart marks, scene items) that hang off a widget with no
+/// transform of its own. It also scales the per-character positions and widths
+/// a text run carries, which live in the same node space and which a
+/// per-rectangle fix-up would silently miss.
+///
+/// The corollary is a rule for every emitter: **never multiply an emitted
+/// rectangle by a scale factor**. Doing so double-scales it here. The walker's
+/// own conformance to that rule is pinned by
+/// `emitted_bounds_stay_logical_at_scale_two`.
+///
+/// The translation term in `accesskit_winit`'s own example is an iOS-only
+/// outer-versus-inner window offset and is zero on every desktop platform;
+/// Teksilo's [`WidgetTree::safe_area`] is a *content* inset and is emphatically
+/// not the same quantity, so it does not belong here.
+pub(crate) fn emit_root_transform(root: &mut accesskit::Node, device_scale_factor: f32) {
+    root.set_transform(accesskit::Affine::scale(device_scale_factor as f64));
+}
+
 #[cfg(test)]
 pub(crate) mod test_helpers {
     /// Feed a `TreeUpdate` into `accesskit_consumer::Tree`, which runs the
@@ -2588,5 +2620,475 @@ mod tests {
             pb < pa,
             "accessibility_children() must set AT order B-before-A; got {kids:?}"
         );
+    }
+
+    // ── the root transform: logical rectangles, physical coordinates ──────
+    //
+    // These set `device_scale_factor` to 2.0 explicitly. CI runs at 1.0, where
+    // a missing or wrong scale is invisible — which is how a whole tree of
+    // half-size AT rectangles survived this long.
+
+    /// The rectangle `accesskit_consumer` computes for the node labelled
+    /// `label` — the same accumulate-every-ancestor-transform walk every
+    /// platform adapter performs, so this is literally what an assistive
+    /// technology is told.
+    ///
+    /// Found by label rather than by id because `FullNodeId` cannot be built
+    /// from outside the consumer crate.
+    fn consumer_bounding_box(update: &accesskit::TreeUpdate, label: &str) -> accesskit::Rect {
+        let consumer = accesskit_consumer::Tree::new(update.clone(), false);
+        let state = consumer.state();
+        let mut stack = vec![state.root()];
+        while let Some(node) = stack.pop() {
+            // A `Role::Label`'s text lives in `value` — `label_comes_from_value`
+            // is true for exactly that role — so look in both.
+            let text = node.value().or_else(|| node.label());
+            if text.as_deref() == Some(label) {
+                return node.bounding_box().expect("node has bounds");
+            }
+            for child in node.children() {
+                stack.push(child);
+            }
+        }
+        panic!("no node labelled {label:?} in the consumer tree");
+    }
+
+    fn tree_at_scale(scale: f32) -> (WidgetTree, WidgetId) {
+        let mut tree = WidgetTree::new();
+        let id = tree.add(FillWidget::new().label("content"));
+        tree.set_device_scale_factor(scale);
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+        (tree, id)
+    }
+
+    #[test]
+    fn the_root_carries_the_device_scale_as_its_transform() {
+        let (mut tree, _) = tree_at_scale(2.0);
+        let update = tree.sync_accessibility();
+        let root = update
+            .nodes
+            .iter()
+            .find(|(id, _)| *id == crate::accessibility::root_node_id())
+            .map(|(_, n)| n)
+            .expect("root node present");
+        assert_eq!(
+            root.transform().copied(),
+            Some(accesskit::Affine::scale(2.0)),
+            "AccessKit wants physical coordinates; the tree emits logical ones"
+        );
+        assert_a11y_tree_valid(&update);
+    }
+
+    #[test]
+    fn emitted_bounds_stay_logical_at_scale_two() {
+        // The rule every emitter in the workspace has to obey — this crate's
+        // walker, teksilo-charts' marks, teksilo-scene's items — is that a
+        // rectangle handed to AccessKit is the same logical rectangle the
+        // layout produced. Multiplying by the scale at the emitter would
+        // double-scale it once the root transform is applied. This is the
+        // fence for the sites this crate owns; the other two crates' emitters
+        // are unreachable from here (the dependency runs the other way) and
+        // are covered by the same statement in `emit_root_transform`'s doc.
+        let (mut tree, id) = tree_at_scale(2.0);
+        let update = tree.sync_accessibility();
+        let layout = tree.bounds(id);
+        let nid = crate::accessibility::widget_id_to_node_id(id);
+        let raw = update
+            .nodes
+            .iter()
+            .find(|(n, _)| *n == nid)
+            .and_then(|(_, n)| n.bounds())
+            .expect("widget node has bounds");
+        assert_eq!(
+            (raw.x0, raw.y0, raw.x1, raw.y1),
+            (
+                layout.x as f64,
+                layout.y as f64,
+                (layout.x + layout.width) as f64,
+                (layout.y + layout.height) as f64,
+            ),
+            "an emitted rectangle must be the logical layout rectangle, unscaled"
+        );
+    }
+
+    /// The same fence for an **interactive** node — the one a touch-target
+    /// change actually reaches.
+    ///
+    /// The AccessKit hit test stays exact and is never slop-expanded. A
+    /// finger's grip outsets belong to the pointer hit path
+    /// (`WidgetTree::widget_hit_outset` and the miss-only slop pass), not to
+    /// the AT tree: an assistive technology is told where the control *is*, so
+    /// inflating that rectangle would put VoiceOver's cursor and Narrator's
+    /// highlight over ground the control does not own and would overlap its
+    /// neighbours — and, since AccessKit resolves its own hit tests from these
+    /// rectangles, would hand a touch-explore probe the wrong control near
+    /// every edge.
+    ///
+    /// A sibling of `emitted_bounds_stay_logical_at_scale_two` rather than an
+    /// extra assertion in it, because that test's fixture is a bare
+    /// `FillWidget` advertising no action at all: the natural shape of this
+    /// mistake — "inflate every node that advertises `Action::Click` so touch
+    /// targets are easier to hit" — passes it untouched.
+    #[test]
+    fn an_interactive_node_emits_its_exact_layout_rectangle() {
+        let mut tree = WidgetTree::new();
+        let id = tree.add(ActionWidget);
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+        let update = tree.sync_accessibility();
+        let nid = crate::accessibility::widget_id_to_node_id(id);
+        let node = update
+            .nodes
+            .iter()
+            .find(|(n, _)| *n == nid)
+            .map(|(_, n)| n)
+            .expect("the interactive node is in the update");
+        assert!(
+            node.supports_action(accesskit::Action::Click),
+            "the fixture has to be the clickable shape the rule is about, \
+             or this test guards nothing"
+        );
+        let layout = tree.bounds(id);
+        assert!(
+            layout.width > 0.0 && layout.height > 0.0,
+            "a real, non-degenerate rectangle to compare against: {layout:?}"
+        );
+        let raw = node.bounds().expect("the interactive node has bounds");
+        assert_eq!(
+            (raw.x0, raw.y0, raw.x1, raw.y1),
+            (
+                layout.x as f64,
+                layout.y as f64,
+                (layout.x + layout.width) as f64,
+                (layout.y + layout.height) as f64,
+            ),
+            "a clickable node's emitted rectangle is its layout rectangle, \
+             not an outset one"
+        );
+    }
+
+    #[test]
+    fn what_an_assistive_technology_reads_is_the_physical_rectangle() {
+        // Same widget, two scales: the rectangle the consumer computes — which
+        // is the one VoiceOver / Narrator / Orca get — doubles, while the
+        // emitted rectangle above did not.
+        let (mut one, _) = tree_at_scale(1.0);
+        let at_one = consumer_bounding_box(&one.sync_accessibility(), "content");
+        let (mut two, _) = tree_at_scale(2.0);
+        let at_two = consumer_bounding_box(&two.sync_accessibility(), "content");
+        assert_eq!(at_two.x0, at_one.x0 * 2.0);
+        assert_eq!(at_two.y0, at_one.y0 * 2.0);
+        assert_eq!(at_two.x1, at_one.x1 * 2.0);
+        assert_eq!(at_two.y1, at_one.y1 * 2.0);
+        assert!(at_two.x1 > at_two.x0, "a real, non-degenerate rectangle");
+    }
+
+    #[test]
+    fn a_scale_change_invalidates_the_accessibility_cache() {
+        // Dragging a window from a 1x to a 2x monitor. A plain relayout does
+        // not dirty the AT cache, so without the guard in
+        // `set_device_scale_factor` the second sync would return the cached
+        // update and report every rectangle at the old display's scale
+        // for the rest of the window's life.
+        let (mut tree, _) = tree_at_scale(1.0);
+        let _ = tree.sync_accessibility();
+        tree.set_device_scale_factor(2.0);
+        let update = tree.sync_accessibility();
+        let root = update
+            .nodes
+            .iter()
+            .find(|(id, _)| *id == crate::accessibility::root_node_id())
+            .map(|(_, n)| n)
+            .expect("root node present");
+        assert_eq!(
+            root.transform().copied(),
+            Some(accesskit::Affine::scale(2.0))
+        );
+    }
+
+    #[test]
+    fn setting_the_same_scale_does_not_dirty_the_tree() {
+        // The dirty-mark is behind an equality check, so a set that changes
+        // nothing costs nothing and — more to the point — cannot make the
+        // "content changed" version signal move when the content did not.
+        let (mut tree, _) = tree_at_scale(2.0);
+        let first = tree.sync_accessibility();
+        tree.set_device_scale_factor(2.0);
+        let second = tree.sync_accessibility();
+        assert_eq!(first, second);
+    }
+
+    // ── the explore-by-touch gate ─────────────────────────────────────────
+
+    #[test]
+    fn explore_by_touch_is_off_by_default() {
+        let tree = WidgetTree::new();
+        assert_eq!(tree.explore_by_touch(), crate::ExploreByTouch::Off);
+        assert_eq!(
+            tree.screen_reader_state(),
+            crate::ScreenReaderState::Unknown
+        );
+        assert!(!tree.explore_by_touch_active());
+    }
+
+    #[test]
+    fn auto_follows_the_operating_systems_screen_reader_flag() {
+        let mut tree = WidgetTree::new();
+        tree.set_explore_by_touch(crate::ExploreByTouch::Auto);
+        assert!(!tree.explore_by_touch_active(), "Unknown is not a yes");
+        tree.set_screen_reader_state(crate::ScreenReaderState::Inactive);
+        assert!(!tree.explore_by_touch_active());
+        tree.set_screen_reader_state(crate::ScreenReaderState::Active);
+        assert!(tree.explore_by_touch_active());
+    }
+
+    #[test]
+    fn on_ignores_the_screen_reader_flag_and_off_ignores_everything() {
+        let mut tree = WidgetTree::new();
+        tree.set_explore_by_touch(crate::ExploreByTouch::On);
+        assert!(tree.explore_by_touch_active(), "On is the app's own choice");
+        tree.set_explore_by_touch(crate::ExploreByTouch::Off);
+        tree.set_screen_reader_state(crate::ScreenReaderState::Active);
+        assert!(!tree.explore_by_touch_active());
+    }
+
+    #[test]
+    fn an_attached_accesskit_client_does_not_switch_exploring_on() {
+        // The whole point of the gate. A magnifier, a voice-control front end,
+        // a UI-automation inspector and this repository's own automation
+        // harness all activate an AccessKit adapter. If activation implied a
+        // screen reader, attaching any of them would turn every touch into a
+        // probe and make the application untouchable.
+        let mut tree = WidgetTree::new();
+        tree.set_explore_by_touch(crate::ExploreByTouch::Auto);
+        tree.set_at_client_attached(true);
+        assert!(tree.at_client_attached());
+        assert_eq!(
+            tree.screen_reader_state(),
+            crate::ScreenReaderState::Unknown,
+            "attaching says nothing about screen readers"
+        );
+        assert!(!tree.explore_by_touch_active());
+    }
+
+    #[test]
+    fn touch_still_reaches_a_handler_with_an_accesskit_client_attached() {
+        // The acceptance criterion, as a behaviour rather than a flag: a tap
+        // must arrive at its handler at the `Off` default with an assistive
+        // technology attached. Nothing gates the pointer path on
+        // `explore_by_touch_active()` today; this is the fence for whoever
+        // wires touch-as-probe later.
+        use crate::Modifiers;
+        use crate::pointer::{
+            BackendDeviceKey, EventTime, PointerIdAllocator, PointerInfo, PointerPhase,
+            PointerSample,
+        };
+        use crate::widget_builder::WidgetBuilder;
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        let taps = Rc::new(Cell::new(0u32));
+        let seen = Rc::clone(&taps);
+        let mut tree = WidgetTree::new();
+        let id = tree.add(
+            FillWidget::new()
+                .label("target")
+                .on_tap(move |_e, _ctx| seen.set(seen.get() + 1)),
+        );
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+        tree.set_at_client_attached(true);
+        assert!(!tree.explore_by_touch_active());
+
+        let at = Point::new(50.0, 50.0);
+        let pid = PointerIdAllocator::global().begin(BackendDeviceKey::new(0x0A11), 1);
+        let contact = |phase| PointerSample {
+            pointer: PointerInfo::touch(pid, EventTime::ZERO),
+            phase,
+            position: at,
+            button: None,
+            modifiers: Modifiers::NONE,
+            coalesced: Vec::new(),
+        };
+        tree.dispatch_pointer(contact(PointerPhase::Down));
+        tree.dispatch_pointer(contact(PointerPhase::Up));
+        assert!(tree.bounds(id).width > 0.0);
+        assert_eq!(taps.get(), 1, "a touch tap must still activate its handler");
+    }
+
+    #[test]
+    fn a_detaching_client_is_evidence_that_no_screen_reader_is_reading() {
+        // The asymmetry: attaching proves nothing, detaching proves something.
+        // An `Auto` window stops exploring the moment the last client goes,
+        // without waiting for the next OS query.
+        let mut tree = WidgetTree::new();
+        tree.set_explore_by_touch(crate::ExploreByTouch::Auto);
+        tree.set_screen_reader_state(crate::ScreenReaderState::Active);
+        tree.set_at_client_attached(true);
+        assert!(tree.explore_by_touch_active());
+        tree.set_at_client_attached(false);
+        assert_eq!(
+            tree.screen_reader_state(),
+            crate::ScreenReaderState::Inactive
+        );
+        assert!(!tree.explore_by_touch_active());
+    }
+
+    #[test]
+    fn a_repeated_detach_notice_does_not_clobber_a_fresh_os_reading() {
+        // `teksilo-app` pushes the attachment flag every frame. Only the
+        // true→false edge counts: if every `false` forced `Inactive`, an OS
+        // query that found a screen reader would be undone on the next frame.
+        let mut tree = WidgetTree::new();
+        tree.set_at_client_attached(false);
+        tree.set_screen_reader_state(crate::ScreenReaderState::Active);
+        tree.set_at_client_attached(false);
+        assert_eq!(tree.screen_reader_state(), crate::ScreenReaderState::Active);
+    }
+
+    // ── announcements ─────────────────────────────────────────────────────
+
+    #[test]
+    fn a_density_switch_announces_once_in_the_applications_own_words() {
+        use teksilo_tokens::TargetDensity;
+        let mut tree = tree_with_one_widget();
+        tree.set_density_announcement(Some(std::rc::Rc::new(|d: TargetDensity| {
+            format!("layout {d:?}")
+        })));
+        let _ = tree.sync_accessibility();
+
+        tree.set_input_density(TargetDensity::Comfortable);
+        let update = tree.sync_accessibility();
+        assert_eq!(
+            announced_by_consumer(&update),
+            vec![("layout Comfortable".to_string(), accesskit::Live::Polite)]
+        );
+
+        // Once per *switch*: setting the density it already has says nothing.
+        let _ = tree.sync_accessibility(); // let the announcer retract
+        tree.set_input_density(TargetDensity::Comfortable);
+        let update = tree.sync_accessibility();
+        assert_eq!(announced_by_consumer(&update), Vec::new());
+    }
+
+    #[test]
+    fn a_density_switch_is_silent_without_a_registered_wording() {
+        // The framework cannot word this itself: `teksilo-i18n` depends on this
+        // crate, so an English sentence is all core could hardcode, and an
+        // English sentence spoken into a French screen reader is worse than
+        // silence.
+        use teksilo_tokens::TargetDensity;
+        let mut tree = tree_with_one_widget();
+        let _ = tree.sync_accessibility();
+        tree.set_input_density(TargetDensity::Comfortable);
+        let update = tree.sync_accessibility();
+        assert_eq!(announced_by_consumer(&update), Vec::new());
+    }
+
+    #[test]
+    fn an_announcement_stays_quiet_when_the_widget_already_speaks() {
+        let mut tree = WidgetTree::new();
+        use crate::widget_builder::WidgetBuilder;
+        let widget = tree.add(
+            FillWidget::new()
+                .label("Saved")
+                .access_live(accesskit::Live::Polite),
+        );
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+        // Build the tree the check reads.
+        let _ = tree.sync_accessibility();
+
+        assert!(
+            !tree.announce_unless_widget_speaks(widget, "Saved"),
+            "a widget with its own live region must not be doubled"
+        );
+        let update = tree.sync_accessibility();
+        // One live node in the filtered tree — the widget's own. If the
+        // framework had queued its copy, its announcer node would have entered
+        // the filtered tree beside it and the user would hear "Saved" twice.
+        let live = live_nodes_in_filtered_tree(&update);
+        assert_eq!(live.len(), 1, "exactly one voice, not two: {live:?}");
+    }
+
+    #[test]
+    fn an_announcement_goes_ahead_when_the_widget_is_silent() {
+        let mut tree = WidgetTree::new();
+        let widget = tree.add(FillWidget::new().label("Row"));
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+        let _ = tree.sync_accessibility();
+
+        assert!(tree.announce_unless_widget_speaks(widget, "Moved to 3 of 12"));
+        let update = tree.sync_accessibility();
+        assert_eq!(
+            announced_by_consumer(&update),
+            vec![("Moved to 3 of 12".to_string(), accesskit::Live::Polite)]
+        );
+    }
+
+    #[test]
+    fn a_live_region_with_no_text_does_not_count_as_speaking() {
+        // A live region that is present but empty announces nothing on any
+        // platform, so it must not silence the framework's message.
+        let mut tree = WidgetTree::new();
+        use crate::widget_builder::WidgetBuilder;
+        let widget = tree.add(FillWidget::new().access_live(accesskit::Live::Polite));
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+        let _ = tree.sync_accessibility();
+        assert!(tree.announce_unless_widget_speaks(widget, "Something happened"));
+    }
+
+    /// A widget that emits a live-region **synthetic** child, the way
+    /// `teksilo-scene` marks a scene item as a live region.
+    #[derive(Debug)]
+    struct SpeakingSynthetic;
+
+    impl crate::widget::Widget for SpeakingSynthetic {
+        fn layout_response(
+            &self,
+            proposal: SizeProposal,
+            _ctx: &crate::widget::LayoutContext,
+        ) -> crate::widget::LayoutResponse {
+            proposal.resolve(0.0, 0.0).into()
+        }
+
+        fn accessibility(&self, builder: &mut AccessNodeBuilder) {
+            builder.set_role(accesskit::Role::Group);
+            let child = builder.push_annotation_child(1, "2 items selected");
+            builder.with_collected_node(child, |node| node.set_live(accesskit::Live::Polite));
+        }
+    }
+
+    #[test]
+    fn a_live_synthetic_child_counts_as_the_widget_speaking() {
+        // A scene can mark one of its lightweight items as a live region. The
+        // item has no widget of its own, so the check has to resolve it back
+        // to its owner through the synthetic-parent map — the same map the
+        // AccessKit action router uses.
+        let mut tree = WidgetTree::new();
+        let widget = tree.add(SpeakingSynthetic);
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+        let update = tree.sync_accessibility();
+        assert!(
+            update
+                .nodes
+                .iter()
+                .any(|(id, _)| crate::accessibility::is_synthetic(*id)),
+            "the fixture must actually emit a synthetic child"
+        );
+        assert!(!tree.announce_unless_widget_speaks(widget, "2 items selected"));
+    }
+
+    #[test]
+    fn a_descendants_live_region_silences_its_ancestor_too() {
+        // The check is over the whole subtree: a composite whose inner status
+        // line speaks is a composite that speaks.
+        let mut tree = WidgetTree::new();
+        let container = tree.add(StackWidget::new());
+        use crate::widget_builder::WidgetBuilder;
+        let inner = FillWidget::new()
+            .label("3 results")
+            .access_live(accesskit::Live::Polite);
+        tree.add_child(container, inner);
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+        let _ = tree.sync_accessibility();
+        assert!(!tree.announce_unless_widget_speaks(container, "3 results"));
     }
 }

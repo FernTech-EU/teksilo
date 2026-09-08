@@ -120,3 +120,83 @@ pub(crate) fn detect_desktop() -> Desktop {
         Desktop::Other(xdg)
     }
 }
+
+/// Parse the stdout of `busctl get-property` for a `b` (boolean) property.
+///
+/// `busctl` prints a boolean property as the type code and the value on one
+/// line: `b true` or `b false`. Anything else — a different type code, an error
+/// string, an empty read — is `None` rather than a guess, because every caller
+/// treats "cannot tell" and "no" differently.
+///
+/// Split out from [`read_dbus_bool_property`] so the format this depends on can
+/// be pinned by a test without a session bus.
+pub(crate) fn parse_busctl_bool(stdout: &str) -> Option<bool> {
+    let mut tokens = stdout.split_whitespace();
+    if tokens.next()? != "b" {
+        return None;
+    }
+    let value = match tokens.next()? {
+        "true" => true,
+        "false" => false,
+        _ => return None,
+    };
+    // A well-formed boolean reply is exactly two tokens. More means the reply
+    // was something else that happens to start `b true`.
+    if tokens.next().is_some() {
+        return None;
+    }
+    Some(value)
+}
+
+/// Read a boolean D-Bus property from the session bus via `busctl`.
+///
+/// A different verb from [`read_portal_u32`], which *calls*
+/// `org.freedesktop.portal.Settings.ReadOne`; this reads a property directly
+/// off an interface, which is how the AT-SPI status object exposes its flags.
+///
+/// `None` when `busctl` is absent, the service is not running, the sandbox
+/// cannot reach the session bus, or the reply is not a boolean. Never panics.
+pub(crate) fn read_dbus_bool_property(
+    service: &str,
+    path: &str,
+    interface: &str,
+    property: &str,
+) -> Option<bool> {
+    let output = std::process::Command::new("busctl")
+        .args(["--user", "get-property", service, path, interface, property])
+        .output()
+        .ok()?;
+
+    if !output.status.success() {
+        return None;
+    }
+
+    parse_busctl_bool(&String::from_utf8_lossy(&output.stdout))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_busctl_bool;
+
+    #[test]
+    fn busctl_bool_replies_parse() {
+        assert_eq!(parse_busctl_bool("b true\n"), Some(true));
+        assert_eq!(parse_busctl_bool("b false\n"), Some(false));
+        // Leading/trailing whitespace is `busctl`'s, not ours.
+        assert_eq!(parse_busctl_bool("  b   true  "), Some(true));
+    }
+
+    #[test]
+    fn non_boolean_replies_are_unknown_not_false() {
+        // A different type code: the property exists but is not a boolean.
+        assert_eq!(parse_busctl_bool("u 1\n"), None);
+        assert_eq!(parse_busctl_bool("s \"true\"\n"), None);
+        // An empty or truncated read.
+        assert_eq!(parse_busctl_bool(""), None);
+        assert_eq!(parse_busctl_bool("b\n"), None);
+        // A value that is neither of D-Bus's two boolean spellings.
+        assert_eq!(parse_busctl_bool("b 1\n"), None);
+        // A longer reply that merely begins like a boolean one.
+        assert_eq!(parse_busctl_bool("b true extra\n"), None);
+    }
+}

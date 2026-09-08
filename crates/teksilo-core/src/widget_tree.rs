@@ -484,6 +484,20 @@ pub struct WidgetTree {
     prefers_high_contrast: bool,
     prefers_reduced_motion: bool,
     text_scale_factor: f64,
+    /// Whether an assistive technology is reading the tree, as reported by the
+    /// *operating system* — not by AccessKit. See
+    /// [`Self::set_screen_reader_state`] for why the distinction matters.
+    screen_reader: crate::environment::ScreenReaderState,
+    /// The app's explore-by-touch policy. See [`Self::set_explore_by_touch`].
+    explore_by_touch: crate::environment::ExploreByTouch,
+    /// Whether an AccessKit client is currently attached to this window's
+    /// adapter. Written by `teksilo-app` from the platform adapter's
+    /// activation / deactivation handlers.
+    at_client_attached: bool,
+    /// How a density switch should be worded to a screen reader, if the
+    /// application wants one announced. See
+    /// [`Self::set_density_announcement`].
+    density_announcement: Option<std::rc::Rc<dyn Fn(teksilo_tokens::TargetDensity) -> String>>,
     /// Host window HiDPI device scale (physical px per logical px), fed by
     /// `teksilo-app` before each layout. Surfaced to widgets via
     /// `LayoutContext::scale_factor`. The widget tree is otherwise fully
@@ -895,6 +909,10 @@ impl WidgetTree {
             prefers_high_contrast: false,
             prefers_reduced_motion: false,
             text_scale_factor: 1.0,
+            screen_reader: crate::environment::ScreenReaderState::default(),
+            explore_by_touch: crate::environment::ExploreByTouch::default(),
+            at_client_attached: false,
+            density_announcement: None,
             device_scale_factor: 1.0,
             safe_area: teksilo_canvas::EdgeInsets::ZERO,
             occluded_inset: None,
@@ -2075,6 +2093,13 @@ impl WidgetTree {
         if self.theme.input.density == density {
             return;
         }
+        // Exactly one utterance per switch, guaranteed by the guard above:
+        // every widget id in the tree is about to be thrown away, so a screen
+        // reader that was reading one is about to lose its place and needs to
+        // be told what happened.
+        if let Some(wording) = self.density_announcement.clone() {
+            self.announce(wording(density));
+        }
         self.set_theme(self.theme.with_density(density));
         // The `BindingLevel::Rebuild` arm of `apply_binding_dirty`
         // (`widget_tree/layout_impl.rs`), applied at every root.
@@ -2082,6 +2107,101 @@ impl WidgetTree {
             self.arena.mark_needs_rebuild(root);
             self.arena.mark_ancestors_need_layout(root);
         }
+    }
+
+    /// Announce density switches to a screen reader, in the application's own
+    /// words.
+    ///
+    /// A density switch rebuilds the entire tree, so a screen reader loses its
+    /// place and the user hears no explanation for it. Registering a wording
+    /// makes [`Self::set_input_density`] speak once — and only once — per real
+    /// switch, through the same [`Self::announce`] path everything else uses.
+    ///
+    /// The wording is the application's because it cannot be the framework's:
+    /// `teksilo-i18n` depends on this crate, so nothing here can name
+    /// `LocalizedString` or reach a translation bundle, and a hardcoded English
+    /// sentence spoken into a French screen reader is worse than silence. Pass
+    /// a closure that resolves `tr!(…)`:
+    ///
+    /// ```ignore
+    /// tree.set_density_announcement(Some(std::rc::Rc::new(|d| match d {
+    ///     TargetDensity::Compact => tr!(layout_compact()).into(),
+    ///     TargetDensity::Comfortable => tr!(layout_comfortable()).into(),
+    ///     TargetDensity::Spacious => tr!(layout_spacious()).into(),
+    /// })));
+    /// ```
+    ///
+    /// `None` — the default — announces nothing.
+    pub fn set_density_announcement(
+        &mut self,
+        wording: Option<std::rc::Rc<dyn Fn(teksilo_tokens::TargetDensity) -> String>>,
+    ) {
+        self.density_announcement = wording;
+    }
+
+    /// Speak `message`, unless `widget` already speaks for itself.
+    ///
+    /// A framework announcement that lands beside a widget's own live region
+    /// says everything twice — the failure mode [`crate::announcer`] warns
+    /// about for `Toast`. This is the check that avoids it: if the last
+    /// accessibility tree carried a live region *inside* `widget`'s subtree
+    /// with text in it, the widget is already talking and this stays quiet.
+    /// Returns whether the message was queued.
+    ///
+    /// It necessarily reads **one tree behind**. An announcement is queued
+    /// during event dispatch; the live-region text it would duplicate is
+    /// whatever the *last* built update carried, because the next one has not
+    /// been built yet. A widget that speaks for the first time in the same
+    /// dispatch is therefore not yet visible here — which is the right bias:
+    /// it errs toward saying something rather than toward silence.
+    pub fn announce_unless_widget_speaks(
+        &mut self,
+        widget: WidgetId,
+        message: impl Into<String>,
+    ) -> bool {
+        if self.widget_subtree_speaks(widget) {
+            return false;
+        }
+        self.announce(message);
+        true
+    }
+
+    /// Whether the last built accessibility tree carried a non-empty live
+    /// region anywhere in `widget`'s subtree.
+    ///
+    /// Synthetic children count too, resolved to their owning widget through
+    /// the same parent map the AccessKit action router uses. `teksilo-scene`
+    /// can mark a scene item as a live region, and a live region is a live
+    /// region wherever it was emitted from.
+    fn widget_subtree_speaks(&self, widget: WidgetId) -> bool {
+        use accesskit::Live;
+        let Some(update) = &self.cached_a11y else {
+            return false;
+        };
+        let mut wanted: std::collections::HashSet<accesskit::NodeId> =
+            std::collections::HashSet::new();
+        let mut stack = vec![widget];
+        while let Some(id) = stack.pop() {
+            if self.arena.get(id).is_none() {
+                continue;
+            }
+            wanted.insert(crate::accessibility::widget_id_to_node_id(id));
+            stack.extend_from_slice(self.arena.children(id));
+        }
+        update.nodes.iter().any(|(node_id, node)| {
+            let owned_by_subtree = wanted.contains(node_id)
+                || self.synthetic_parent_map.get(node_id).is_some_and(|owner| {
+                    wanted.contains(&crate::accessibility::widget_id_to_node_id(*owner))
+                });
+            owned_by_subtree
+                && matches!(node.live(), Some(Live::Polite) | Some(Live::Assertive))
+                && !node
+                    .value()
+                    .or_else(|| node.label())
+                    .unwrap_or("")
+                    .trim()
+                    .is_empty()
+        })
     }
 
     /// How the active density is chosen. See [`DensityPolicy`].
@@ -2695,13 +2815,119 @@ impl WidgetTree {
         self.text_scale_factor
     }
 
+    /// Report whether the *operating system* says an assistive technology is
+    /// reading the screen.
+    ///
+    /// Fed by `teksilo-app` from `teksilo_platform::AccessibilityPreferences`,
+    /// which asks Windows for `SPI_GETSCREENREADER`, AT-SPI for
+    /// `org.a11y.Status.ScreenReaderEnabled`, and macOS for
+    /// `NSWorkspace::isVoiceOverEnabled`. A platform that cannot answer leaves
+    /// it [`ScreenReaderState::Unknown`], which behaves as "no".
+    ///
+    /// [`ScreenReaderState::Unknown`]: crate::environment::ScreenReaderState::Unknown
+    ///
+    /// **Not** AccessKit activation. An AccessKit adapter activates for
+    /// anything that walks the tree — a screen magnifier, a voice-control front
+    /// end, a UI-automation inspector, a tree browser like Accerciser — none of
+    /// which want a touch to become a probe. Treating activation as evidence of
+    /// a screen reader is how explore-by-touch gets switched on under an
+    /// inspector and makes the app untouchable.
+    ///
+    /// [`ScreenReaderState`]: crate::environment::ScreenReaderState
+    pub fn set_screen_reader_state(&mut self, state: crate::environment::ScreenReaderState) {
+        self.screen_reader = state;
+    }
+
+    /// The screen-reader state most recently reported by the platform.
+    ///
+    /// [`ScreenReaderState::Unknown`] until something reports one.
+    ///
+    /// [`ScreenReaderState::Unknown`]: crate::environment::ScreenReaderState::Unknown
+    pub fn screen_reader_state(&self) -> crate::environment::ScreenReaderState {
+        self.screen_reader
+    }
+
+    /// Choose how explore-by-touch is decided for this window.
+    ///
+    /// [`ExploreByTouch::Off`] is the default and today's behaviour;
+    /// [`ExploreByTouch::Auto`] follows [`Self::screen_reader_state`];
+    /// [`ExploreByTouch::On`] forces it regardless. Read the resolved answer
+    /// with [`Self::explore_by_touch_active`].
+    ///
+    /// [`ExploreByTouch::Off`]: crate::environment::ExploreByTouch::Off
+    /// [`ExploreByTouch::Auto`]: crate::environment::ExploreByTouch::Auto
+    /// [`ExploreByTouch::On`]: crate::environment::ExploreByTouch::On
+    pub fn set_explore_by_touch(&mut self, mode: crate::environment::ExploreByTouch) {
+        self.explore_by_touch = mode;
+    }
+
+    /// The explore-by-touch policy most recently set.
+    pub fn explore_by_touch(&self) -> crate::environment::ExploreByTouch {
+        self.explore_by_touch
+    }
+
+    /// Whether explore-by-touch is in force right now.
+    ///
+    /// `On` is unconditional; `Auto` requires the platform to have reported an
+    /// active screen reader; `Off` is never in force. Nothing in the framework
+    /// consumes this yet — the touch-as-probe interaction it gates has no
+    /// owner — so it is a supply, a policy and a query, and no pointer path
+    /// branches on it.
+    pub fn explore_by_touch_active(&self) -> bool {
+        use crate::environment::{ExploreByTouch, ScreenReaderState};
+        match self.explore_by_touch {
+            ExploreByTouch::Off => false,
+            ExploreByTouch::On => true,
+            ExploreByTouch::Auto => self.screen_reader == ScreenReaderState::Active,
+        }
+    }
+
+    /// Report whether an AccessKit client is attached to this window.
+    ///
+    /// Written by `teksilo-app` from the platform adapter's activation and
+    /// deactivation handlers, and used **asymmetrically** on purpose:
+    ///
+    /// * Attaching proves nothing. Magnifier, Voice Access and a UI-automation
+    ///   inspector all activate the adapter, so this never sets
+    ///   [`ScreenReaderState::Active`].
+    /// * Detaching proves something. When the last client goes away there is
+    ///   no screen reader either, so a `true` → `false` transition forces
+    ///   [`ScreenReaderState::Inactive`] and an
+    ///   [`ExploreByTouch::Auto`](crate::environment::ExploreByTouch::Auto)
+    ///   window stops exploring immediately, without waiting for the next OS
+    ///   query. A later OS query is free to say `Active` again.
+    ///
+    /// [`ScreenReaderState::Active`]: crate::environment::ScreenReaderState::Active
+    /// [`ScreenReaderState::Inactive`]: crate::environment::ScreenReaderState::Inactive
+    pub fn set_at_client_attached(&mut self, attached: bool) {
+        if self.at_client_attached && !attached {
+            self.screen_reader = crate::environment::ScreenReaderState::Inactive;
+        }
+        self.at_client_attached = attached;
+    }
+
+    /// Whether an AccessKit client is currently attached to this window.
+    pub fn at_client_attached(&self) -> bool {
+        self.at_client_attached
+    }
+
     /// Set the host window HiDPI device scale (physical px per logical px).
-    /// Called by `teksilo-app` before each layout from
-    /// `platform_window.scale_factor()`. Surfaced to widgets via
-    /// `LayoutContext::scale_factor`. No dirty-marking: it rides the layout
-    /// pass that follows, and a scale change already triggers a relayout.
+    /// Written by `teksilo-app` when the window is created and again on
+    /// `WindowEvent::ScaleFactorChanged`. Surfaced to widgets via
+    /// `LayoutContext::scale_factor`.
+    ///
+    /// Layout needs no dirty-marking here: it rides the layout pass that
+    /// follows, and a scale change already triggers a relayout. The
+    /// accessibility tree does, because the scale is the root node's
+    /// transform (AccessKit wants physical coordinates, the tree emits
+    /// logical ones) and a plain relayout does not invalidate the AT cache —
+    /// so dragging a window between a 1x and a 2x monitor would otherwise
+    /// leave every reported rectangle at the old display's scale.
     pub fn set_device_scale_factor(&mut self, scale_factor: f32) {
-        self.device_scale_factor = scale_factor;
+        if self.device_scale_factor != scale_factor {
+            self.device_scale_factor = scale_factor;
+            self.a11y_dirty = true;
+        }
     }
 
     /// The host window HiDPI device scale most recently set (1.0 by default).
