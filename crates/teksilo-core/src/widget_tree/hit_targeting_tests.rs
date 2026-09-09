@@ -36,6 +36,10 @@ struct Cell {
     slop: Option<HitSlop>,
     /// Report a disc rather than the rectangle from `hit_distance`.
     round: bool,
+    /// Refuse a press outside an inscribed disc from `Widget::hit_shape`. No
+    /// shipped widget implements that hook, which is exactly why its
+    /// forwarding through `WidgetWithHandlers` went unnoticed for a package.
+    shaped_disc: bool,
     /// Withdraw from the slop pass entirely at the shape level.
     no_distance: bool,
     /// Carry an `on_tap`, which is what makes a node "eligible".
@@ -79,6 +83,10 @@ impl Cell {
     }
     fn round(mut self) -> Self {
         self.round = true;
+        self
+    }
+    fn shaped_disc(mut self) -> Self {
+        self.shaped_disc = true;
         self
     }
     fn widget_slop(mut self, slop: HitSlop) -> Self {
@@ -190,6 +198,14 @@ impl Widget for Cell {
         _tokens: &InputTokens,
     ) -> Option<HitSlop> {
         self.slop
+    }
+
+    fn hit_shape(&self, local: Point, bounds: Rect) -> bool {
+        if !self.shaped_disc {
+            return true;
+        }
+        let radius = bounds.width.min(bounds.height) / 2.0;
+        circle_distance(bounds.center(), radius, local) <= 0.0
     }
 
     fn hit_distance(&self, local: Point, bounds: Rect) -> Option<f32> {
@@ -829,6 +845,59 @@ fn a_round_control_measures_to_its_disc() {
     let corner = at(113.0, 113.0);
     assert_eq!(square.hit_test_for(corner, &finger), Some(dot_square));
     assert_ne!(round.hit_test_for(corner, &finger), Some(dot_round));
+}
+
+/// The two shape hooks, reached the way an application reaches them: through a
+/// `WidgetBuilder` method, which wraps the widget in `WidgetWithHandlers`.
+///
+/// That wrapper forwards a **hand-maintained** list of trait methods, and
+/// `hit_shape` was once missing from it — so a widget that declared a shape and
+/// also took an attached handler silently stopped being that shape. It was
+/// latent because no shipped widget implements `hit_shape`, and it stayed
+/// untested afterwards because every other test in this file calls the hooks on
+/// a bare `Cell`: `Cell::tappable` is an inherent builder setting a flag, so no
+/// wrapper is ever constructed. These two are the only tests that go through
+/// one, and deleting either forward from `widget_builder.rs` reddens them.
+fn wrapped_dot(cell: Cell) -> (WidgetTree, WidgetId) {
+    use crate::widget_builder::WidgetBuilder;
+    let mut tree = WidgetTree::new();
+    tree.set_input_density(TargetDensity::Touch);
+    // `on_tap` through the trait, not `Cell::tappable`: this is what puts a
+    // `WidgetWithHandlers` in the arena, and it makes the node eligible too.
+    let dot = tree.add(cell.on_tap(|_e, _ctx| {}));
+    let back = tree.add(Cell::new());
+    tree.add(
+        Board::new()
+            .at(back, Rect::new(0.0, 0.0, 200.0, 200.0))
+            .at(dot, Rect::new(92.0, 92.0, 16.0, 16.0)),
+    );
+    tree.layout(SizeProposal::exact(200.0, 200.0));
+    (tree, dot)
+}
+
+#[test]
+fn a_wrapped_widgets_hit_distance_still_measures_to_its_disc() {
+    let (round, dot) = wrapped_dot(Cell::new().round());
+    let finger = touch_pointer();
+    // Straight out from the edge the disc and the box agree, so this half only
+    // says the wrapper is reachable at all.
+    assert_eq!(round.hit_test_for(at(113.0, 100.0), &finger), Some(dot));
+    // Diagonally past the corner they disagree: 7.07 dp from the box, ~12 dp
+    // from the disc. A wrapper that dropped `hit_distance` would answer with
+    // the default rectangle and take this press.
+    assert_ne!(round.hit_test_for(at(113.0, 113.0), &finger), Some(dot));
+}
+
+#[test]
+fn a_wrapped_widgets_hit_shape_still_refuses_a_press_outside_it() {
+    let (shaped, dot) = wrapped_dot(Cell::new().shaped_disc());
+    let mouse = crate::pointer::PointerInfo::mouse(crate::pointer::EventTime::ZERO);
+    // Inside the box and inside the disc.
+    assert_eq!(shaped.hit_test_for(at(100.0, 100.0), &mouse), Some(dot));
+    // Inside the box, outside the disc: the shape refuses it, so the exact pass
+    // falls through to the backdrop rather than answering with this node. A
+    // wrapper that dropped `hit_shape` would answer with the rectangle.
+    assert_ne!(shaped.hit_test_for(at(93.0, 93.0), &mouse), Some(dot));
 }
 
 /// A widget may withdraw from the pass at the shape level by answering `None`.
