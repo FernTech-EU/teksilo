@@ -312,6 +312,10 @@ pub struct HandlerSet {
     /// drag/swipe on any ancestor above it (a *gesture dead zone*). See
     /// [`super::arena::WidgetNode::gesture_dead_zone`].
     pub(crate) gesture_dead_zone: Option<bool>,
+    /// When `Some(..)`, selects what a **hold** on this node's subtree means for
+    /// the tree-owned long-press route. See
+    /// [`super::arena::WidgetNode::long_press_role`].
+    pub(crate) long_press_role: Option<crate::widget_tree::touch_route::LongPressRole>,
     /// When `Some(..)`, overrides what a direct pointer may do to this
     /// node's subtree. See [`super::arena::WidgetNode::touch_action`].
     pub(crate) touch_action: Option<TouchAction>,
@@ -381,6 +385,7 @@ impl HandlerSet {
             ime: None,
             event_pass_through: None,
             gesture_dead_zone: None,
+            long_press_role: None,
             drag_activation: None,
             touch_action: None,
             pan_claim: None,
@@ -642,6 +647,18 @@ impl HandlerSet {
     /// `PointerSequence` member enrolment; see the `DeadZone` wrapper widget.
     pub fn gesture_dead_zone(mut self, dead_zone: bool) -> Self {
         self.gesture_dead_zone = Some(dead_zone);
+        self
+    }
+
+    /// Select what a **hold** on this widget's subtree means, for the
+    /// tree-owned long-press route.
+    ///
+    /// Only ever consulted for a pointer that cannot hover, and only where the
+    /// widget installs no `on_long_press` of its own — that always wins. See
+    /// [`crate::widget_tree::touch_route`] for the precedence and for what each
+    /// variant selects.
+    pub fn long_press_role(mut self, role: crate::widget_tree::touch_route::LongPressRole) -> Self {
+        self.long_press_role = Some(role);
         self
     }
 
@@ -1130,6 +1147,13 @@ impl<W: Widget> WidgetWithHandlers<W> {
     /// [`HandlerSet::gesture_dead_zone`].
     pub fn gesture_dead_zone(mut self, dead_zone: bool) -> Self {
         self.handler_set.gesture_dead_zone = Some(dead_zone);
+        self
+    }
+
+    /// Select what a hold on this widget's subtree means. See
+    /// [`HandlerSet::long_press_role`].
+    pub fn long_press_role(mut self, role: crate::widget_tree::touch_route::LongPressRole) -> Self {
+        self.handler_set.long_press_role = Some(role);
         self
     }
 
@@ -1895,6 +1919,15 @@ pub trait WidgetBuilder: Widget + Sized + 'static {
     /// [`HandlerSet::gesture_dead_zone`].
     fn gesture_dead_zone(self, dead_zone: bool) -> WidgetWithHandlers<Self> {
         WidgetWithHandlers::new(self).gesture_dead_zone(dead_zone)
+    }
+
+    /// Select what a hold on this widget's subtree means. See
+    /// [`HandlerSet::long_press_role`].
+    fn long_press_role(
+        self,
+        role: crate::widget_tree::touch_route::LongPressRole,
+    ) -> WidgetWithHandlers<Self> {
+        WidgetWithHandlers::new(self).long_press_role(role)
     }
 
     /// Override what a direct pointer may do to this widget's subtree. See

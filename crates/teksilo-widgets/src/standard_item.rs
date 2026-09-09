@@ -79,7 +79,7 @@ use teksilo_data::{CheckState, FlatEntry};
 use teksilo_canvas::TextOverflow;
 use teksilo_core::styles::{SharedStandardItemStyle, StandardItemStyleConfig};
 use teksilo_i18n::LocalizedString;
-use teksilo_tokens::{HAlignment, TextRole, TextStyleRole, VAlignment};
+use teksilo_tokens::{HAlignment, RevealPolicy, TextRole, TextStyleRole, VAlignment};
 
 use crate::button::InteractionState;
 use crate::checkbox::Checkbox;
@@ -130,6 +130,9 @@ pub struct StandardListItem {
     /// (`TextOverflow::Wrap`).
     subtitle_overflow: Option<TextOverflow>,
     interaction: Signal<InteractionState>,
+    /// Optional sink for [`Self::reveal_signal`] — "should this row's
+    /// hover-revealed controls be reachable right now".
+    reveal: Option<Signal<bool>>,
     style_override: Option<SharedStandardItemStyle>,
     root_child_id: Option<WidgetId>,
     /// Optional plain tooltip text shown after a hover delay. Mutually exclusive
@@ -165,6 +168,7 @@ impl StandardListItem {
             label_slot: None,
             subtitle_overflow: None,
             interaction: Signal::new(InteractionState::Idle),
+            reveal: None,
             style_override: None,
             root_child_id: None,
             tooltip_text: None,
@@ -324,19 +328,39 @@ impl StandardListItem {
     /// [`trailing_slot`](Self::trailing_slot) is pushed past the row's edge.
     /// Set `TextOverflow::Ellipsis(..)` on rows whose trailing actions must
     /// stay reachable: the label then shrinks and truncates within the row.
-    /// **Share the row's interaction state**, so a caller can reveal controls on
-    /// hover.
+    /// **Share the row's interaction state** — idle, hovered, pressed.
     ///
     /// A row that shows its actions only while the pointer is over it is a standard
     /// pattern — a search result offering *replace* and *dismiss*, a list offering
     /// *remove* — and it cannot be built from outside without knowing when the row
     /// is hovered. The row already tracks that; this is the handle on it.
     ///
-    /// The signal is written by the row, not read: pass one in, watch it, and gate
-    /// a trailing slot on it. Reserve the space the controls will take, or the row
-    /// reflows under the pointer that is trying to hit them.
+    /// The signal is written by the row, not read: pass one in and watch it.
+    ///
+    /// **To gate revealed controls, use [`reveal_signal`](Self::reveal_signal)
+    /// instead.** This one reports hover, and hover is a mouse's alone — a
+    /// trailing slot gated on `Hovered` is a slot a finger can never reach.
     pub fn interaction_signal(mut self, signal: Signal<InteractionState>) -> Self {
         self.interaction = signal;
+        self
+    }
+
+    /// **Whether this row's revealed controls should be reachable**, which is
+    /// not the same question as whether the row is hovered.
+    ///
+    /// [`interaction_signal`](Self::interaction_signal) reports the row's
+    /// interaction state, and a caller gating a trailing slot on `Hovered` has
+    /// built something a finger can never reach: a contact produces no hover,
+    /// ever, so the controls never appear. This signal is the same intent
+    /// stated as intent, and the row answers it per density — hover while the
+    /// density reveals on hover, and **permanently `true`** at a density whose
+    /// [`RevealPolicy`] is `Always`, where nothing is going to hover.
+    ///
+    /// Gate the slot on this, not on the interaction state, and reserve the
+    /// space the controls take — the row reflows otherwise, under the pointer
+    /// trying to hit them.
+    pub fn reveal_signal(mut self, signal: Signal<bool>) -> Self {
+        self.reveal = Some(signal);
         self
     }
 
@@ -722,13 +746,27 @@ impl StandardListItem {
         // track hover but the recipe's bg cascade short-circuits to
         // Transparent.
         use teksilo_core::widget_builder::HandlerSet;
+        // A density that reveals every affordance pins the reveal signal on and
+        // never writes it again: there is no hover to follow, and a row whose
+        // actions blink out when the finger lifts is a row whose actions cannot
+        // be used. The *interaction* signal is untouched by this — it still
+        // reports hover, so the row's tint is not permanently lit.
+        let reveal_always = ctx.theme().input.reveal == RevealPolicy::Always;
+        if let Some(reveal) = self.reveal.as_ref() {
+            reveal
+                .set(reveal_always || matches!(self.interaction.get(), InteractionState::Hovered));
+        }
         let interaction_for_hover = self.interaction.clone();
+        let reveal_for_hover = (!reveal_always).then(|| self.reveal.clone()).flatten();
         let handlers = HandlerSet::new().on_hover(move |entered: bool, _ctx: &mut EventContext| {
             interaction_for_hover.set(if entered {
                 InteractionState::Hovered
             } else {
                 InteractionState::Idle
             });
+            if let Some(reveal) = reveal_for_hover.as_ref() {
+                reveal.set(entered);
+            }
         });
         ctx.apply_self_handlers(handlers);
 
@@ -886,9 +924,17 @@ impl StandardTreeItem {
     /// Forwarded to the inner [`StandardListItem`] — see its
     /// [`subtitle`](StandardListItem::subtitle).
     /// See [`StandardListItem::interaction_signal`]: the row's own hover/press
-    /// state, for a caller revealing controls on hover.
+    /// state. To gate revealed controls use
+    /// [`reveal_signal`](Self::reveal_signal).
     pub fn interaction_signal(mut self, signal: Signal<InteractionState>) -> Self {
         self.inner = self.inner.interaction_signal(signal);
+        self
+    }
+
+    /// See [`StandardListItem::reveal_signal`]: whether this row's revealed
+    /// controls should be reachable, answered per density.
+    pub fn reveal_signal(mut self, signal: Signal<bool>) -> Self {
+        self.inner = self.inner.reveal_signal(signal);
         self
     }
 

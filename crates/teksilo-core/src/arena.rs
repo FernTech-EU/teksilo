@@ -211,6 +211,12 @@ pub struct WidgetNode {
     /// `-webkit-app-region: no-drag`. Default `false`. See the `DeadZone`
     /// wrapper widget.
     pub gesture_dead_zone: bool,
+    /// What a **hold** on this node's subtree means when the widget itself does
+    /// not say — the selector for the tree-owned long-press route. Default
+    /// `LongPressRole::Auto`. Set via `.long_press_role(..)`. A node's own
+    /// `on_long_press` always takes precedence over this, and a mouse never
+    /// consults it. See [`crate::widget_tree::touch_route`].
+    pub long_press_role: crate::widget_tree::touch_route::LongPressRole,
     /// What a direct pointer (touch, pen) is permitted to do to this node's
     /// subtree. Intersected with every ancestor's on the way down by
     /// `WidgetTree::effective_touch_action` — an ancestor can only narrow
@@ -502,6 +508,7 @@ impl WidgetNode {
             ime: None,
             event_pass_through: false,
             gesture_dead_zone: false,
+            long_press_role: crate::widget_tree::touch_route::LongPressRole::Auto,
             touch_action: TouchAction::AUTO,
             pan_claim: None,
             overscroll_behavior: crate::OverscrollBehavior::Chain,
@@ -1985,6 +1992,9 @@ impl WidgetArena {
             }
             if let Some(dead_zone) = handler_set.gesture_dead_zone {
                 node.gesture_dead_zone = dead_zone;
+            }
+            if let Some(role) = handler_set.long_press_role {
+                node.long_press_role = role;
             }
             if let Some(action) = handler_set.touch_action {
                 node.touch_action = action;

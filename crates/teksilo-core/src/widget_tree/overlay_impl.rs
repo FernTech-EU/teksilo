@@ -219,6 +219,7 @@ impl WidgetTree {
             shown_at_sink,
             promoted_by_focus: false,
             armed_by_focus: false,
+            armed_by_hold: false,
             suppressed_until_focus_leaves: false,
             placement,
         });
@@ -394,6 +395,7 @@ impl WidgetTree {
             e.overlay_id = None;
             e.is_sticky = false;
             e.promoted_by_focus = false;
+            e.armed_by_hold = false;
             e.shown_at_sim = None;
             e.shown_at_real = None;
             e.hover_origin = None;
@@ -474,6 +476,7 @@ impl WidgetTree {
                 entry.content_id,
                 entry.placement,
                 entry.armed_by_focus,
+                entry.armed_by_hold,
             ));
             entry.hover_start = None;
             entry.real_hover_start = None;
@@ -492,20 +495,24 @@ impl WidgetTree {
         } else {
             Some(self.theme.motion.duration_fast)
         };
-        for (anchor_id, content_id, placement, by_focus) in to_show {
+        for (anchor_id, content_id, placement, by_focus, by_hold) in to_show {
             self.arena.activate(content_id);
             // A tip the keyboard summoned has no pointer to leave, so the
             // pointer-leave grace would never fire and it would hang on screen.
             // It ends the way a keyboard user ends things: Escape, a click
-            // outside, or focus moving off the anchor.
-            let dismiss = if by_focus {
+            // outside, or focus moving off the anchor. A tip a **hold**
+            // summoned is in the same position — the finger has lifted by the
+            // time it appears — with one difference: nothing moves focus off it
+            // either, so it also carries its own expiry (see
+            // `super::touch_route::TOUCH_TOOLTIP_DISMISS`).
+            let dismiss = if by_focus || by_hold {
                 crate::overlay::DismissBehavior::EscapeOrClickOutside
             } else {
                 crate::overlay::DismissBehavior::PointerLeave {
                     delay: std::time::Duration::from_millis(100),
                 }
             };
-            let oid = self.show_overlay(crate::overlay::OverlayRequest {
+            let request = crate::overlay::OverlayRequest {
                 content_id,
                 anchor: anchor_id,
                 placement: Self::tooltip_overlay_placement(placement),
@@ -514,7 +521,12 @@ impl WidgetTree {
                 parent_overlay: None,
                 on_dismiss: None,
                 fade_duration,
-            });
+            };
+            let oid = if by_hold {
+                self.show_overlay_for(request, super::touch_route::TOUCH_TOOLTIP_DISMISS)
+            } else {
+                self.show_overlay(request)
+            };
             if by_focus && let Some(focused) = self.focused {
                 self.overlay_manager.set_top_focus_restore(focused);
             }
@@ -1220,6 +1232,7 @@ impl WidgetTree {
                 entry.real_hover_start = Some(real_now);
                 entry.hover_origin = None;
                 entry.armed_by_focus = true;
+                entry.armed_by_hold = false;
             }
         }
     }
@@ -1437,9 +1450,14 @@ impl WidgetTree {
     /// "Innermost" is measured by arena depth from the hovered widget, so
     /// nesting order — not the order the anchors happened to be attached in —
     /// decides the winner.
-    pub(super) fn tooltip_pointer_enter(&mut self, widget_id: WidgetId) {
-        let innermost: Option<usize> = self
-            .tooltips
+    /// The tooltip entry a pointer over `widget_id` should surface: the
+    /// **innermost** one whose anchor is `widget_id` or an ancestor of it.
+    ///
+    /// Shared by the hover arm and by the tree-owned hold route
+    /// ([`super::touch_route`]) so a hold and a hover cannot pick different
+    /// tips for the same node.
+    pub(super) fn tooltip_index_for(&self, widget_id: WidgetId) -> Option<usize> {
+        self.tooltips
             .iter()
             .enumerate()
             .filter(|(_, entry)| self.tooltip_hover_targets_anchor(widget_id, entry.anchor_id))
@@ -1448,8 +1466,11 @@ impl WidgetTree {
                     .map(|depth| (depth, index))
             })
             .min()
-            .map(|(_, index)| index);
-        let Some(index) = innermost else {
+            .map(|(_, index)| index)
+    }
+
+    pub(super) fn tooltip_pointer_enter(&mut self, widget_id: WidgetId) {
+        let Some(index) = self.tooltip_index_for(widget_id) else {
             return;
         };
         // Don't restart a timer for a tip that is already showing.
@@ -1460,6 +1481,7 @@ impl WidgetTree {
         self.tooltips[index].real_hover_start = Some(std::time::Instant::now());
         self.tooltips[index].hover_origin = self.hover_owner_position();
         self.tooltips[index].armed_by_focus = false;
+        self.tooltips[index].armed_by_hold = false;
         self.arena.mark_needs_paint(self.tooltips[index].anchor_id);
     }
 
@@ -2072,6 +2094,7 @@ impl WidgetTree {
                 entry.shown_at_real = None;
                 entry.promoted_by_focus = false;
                 entry.armed_by_focus = false;
+                entry.armed_by_hold = false;
                 if let Some(sink) = entry.shown_at_sink.as_ref() {
                     sink.set(None);
                 }

@@ -851,7 +851,21 @@ impl WidgetTree {
                 // …and after that, so the press visual answers to a claim taken
                 // on this very sample rather than surviving it by one move.
                 self.update_press(*position);
-                self.update_pointer_leave_overlays(*position, &mut *ops);
+                // A tree-owned hold survives only while the contact holds
+                // still; past the tap boundary this is a pan or a drag.
+                self.touch_route_moved(self.current_pointer_id());
+                // Hover-owner-only, exactly as `handle_pointer_move` is. The
+                // `DismissBehavior::PointerLeave` grace is a *hover* dismissal:
+                // it asks "has the pointer left this overlay and its trigger",
+                // a question only a pointer that hovers is entitled to answer.
+                // Ungated, any contact's move anywhere started the 150 ms grace
+                // on every such overlay — so a submenu a finger had just tapped
+                // open was closed by the frame pass with no further input, and
+                // no mouse test could see it because a mouse *is* the hover
+                // owner.
+                if self.pointers.hover_owner_id() == Some(self.current_pointer_id()) {
+                    self.update_pointer_leave_overlays(*position, &mut *ops);
+                }
             }
             WidgetEvent::PointerDown {
                 position, button, ..
@@ -926,6 +940,11 @@ impl WidgetTree {
                     // visual this record drives is known — and whether the
                     // button that opened it is one that node can act on.
                     self.adopt_press_owner(*button);
+                    // Last: the tree-owned hold. It has to see the enrolment
+                    // (a deferred grab spends the hold) and it has to see the
+                    // handlers a press-time build may have installed, so it is
+                    // resolved after both. See `super::touch_route`.
+                    self.arm_touch_route(target, *position);
                 }
             }
             WidgetEvent::PointerUp { position, .. } => {
@@ -935,6 +954,10 @@ impl WidgetTree {
                 // would hand it back an interaction the system took away. Drop
                 // it, and forget the cancel: the pointer is free again.
                 let released = self.current_pointer_id();
+                // The hold is over whatever else this release does, and it is
+                // cleared before any of it so a handler that runs below cannot
+                // see a route that will never fire.
+                self.cancel_touch_route(released);
                 if let Some(index) = self.cancelled_pointers.iter().position(|p| *p == released) {
                     self.cancelled_pointers.swap_remove(index);
                     crate::trace_input!(
@@ -1218,7 +1241,7 @@ impl WidgetTree {
         self.show_context_menu_for(target, anchor, ops)
     }
 
-    fn show_context_menu_for(
+    pub(super) fn show_context_menu_for(
         &mut self,
         target: WidgetId,
         position: Point,

@@ -518,6 +518,23 @@ impl PointerSequence {
         }
     }
 
+    /// Whether any live member's activation was **deferred to the long-press
+    /// deadline** — i.e. the hold is what arms that member's grab.
+    ///
+    /// Only [`enrol_drag`](Self::enrol_drag) sets a member's `eligible_at`, and
+    /// only when [`resolve_activation`](Self::resolve_activation) answered
+    /// [`DragActivation::AfterLongPress`], so this is exactly "a grab on this
+    /// sequence is waiting out the hold". A mouse never has one: the resolution
+    /// needs an eligible pan competitor and a mouse enrols none.
+    ///
+    /// Read by the framework to keep one hold from meaning two things — see
+    /// [`WidgetTree::long_press_is_a_grab`](crate::WidgetTree).
+    pub fn has_deferred_grab(&self) -> bool {
+        self.members
+            .iter()
+            .any(|m| m.is_live() && m.eligible_at.is_some())
+    }
+
     /// Whether any live member is a pan claimant. A mouse never has one:
     /// [`GestureProfile::pan_slop`] is `None` for it and [`PanClaim::devices`]
     /// admits only direct pointers.

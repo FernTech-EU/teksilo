@@ -113,8 +113,10 @@ OverlayPlacement::at_pointer_for(point, &pointer)
 This decision lives in `at_pointer_for`, not at the call sites. A menu that
 forgot to ask opens under the finger, and there is no way to notice that from a
 mouse. In core the single point-anchored menu route is
-`WidgetTree::show_context_menu_for`, which every `.context_menu(..)` factory,
-the `ShowContextMenu` AT action and the context-menu key all pass through.
+`WidgetTree::show_context_menu_for`, which every `.context_menu(..)` factory
+passes through — reached by a secondary press, by the `ShowContextMenu` AT
+action, by the context-menu key, and by a **hold** on a pointer that cannot
+hover ([`touch_route`](../crates/teksilo-core/src/widget_tree/touch_route.rs)).
 
 **Quadrant preference.** Four candidates, in order: inline-start of the
 contact, inline-end, below it, above it. The first two clear on the horizontal

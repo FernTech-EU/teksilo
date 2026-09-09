@@ -314,6 +314,55 @@ impl Widget for ToastSurface {
             hover_count.set(next);
         });
 
+        // Hold-pause: the touch twin of the hover pause. A finger produces no
+        // hover, so pressing and holding the surface is how a touch user says
+        // "wait". Driven from the **framework's** press signal rather than from
+        // a `PointerDown`/`PointerUp` pair of our own, because the framework is
+        // the only thing that also clears it for a contact the system revokes —
+        // and a hold that is never released would stop every toast in the
+        // application from ever expiring.
+        //
+        // Kind-agnostic on purpose: a mouse press is already hovering, so the
+        // pause it adds changes nothing a mouse could observe.
+        {
+            let pressed = ctx.pressed_signal();
+            let registry_for_hold = registry.clone();
+            registry_for_hold.set_entry_held(entry_id, pressed.get());
+            let registry_for_effect = registry.clone();
+            ctx.effect(&pressed, move |held| {
+                registry_for_effect.set_entry_held(entry_id, *held);
+            });
+        }
+
+        // Swipe-to-dismiss. The close button is small hover-adjacent chrome;
+        // a swipe is the whole surface and needs no aim, which is why every
+        // touch platform ships it. Horizontal only — a vertical swipe on a
+        // toast stack would fight whatever the stack is sitting over.
+        //
+        // **Named side effect on the mouse:** installing an `on_swipe` makes
+        // `ArenaRecognizers::accepted_buttons` return `ButtonMask::ALL` for this
+        // node, so a secondary or middle press now raises the framework press
+        // here where only a primary did before. On this surface that press
+        // drives nothing but the hold-pause above, so the visible consequence is
+        // that a right-press pauses the toast — which is what a pointer resting
+        // on it does anyway.
+        {
+            let registry_for_swipe = registry.clone();
+            handlers = handlers.on_swipe(move |direction, _velocity, ctx| {
+                use teksilo_core::gesture::SwipeDirection;
+                // Coarse pointers only — the affordance answers the absence of
+                // hover, and a mouse that happens to drag fast across a toast
+                // has not asked for anything. `is_coarse`, not `is_direct`: a
+                // pen is precise, hovers, and keeps its drag.
+                if ctx.pointer_kind().is_coarse()
+                    && matches!(direction, SwipeDirection::Left | SwipeDirection::Right)
+                {
+                    registry_for_swipe
+                        .dismiss_entry_deferred(entry_id, ToastDismissCause::SwipeDismissed);
+                }
+            });
+        }
+
         // Optional click-through-body callback.
         if let Some(on_click) = self.data.on_click.clone() {
             handlers = handlers

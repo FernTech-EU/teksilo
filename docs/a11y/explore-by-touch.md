@@ -148,14 +148,17 @@ application registers.
 | Announcement | Producer | State |
 | --- | --- | --- |
 | Density switched | `WidgetTree::set_input_density`, via the wording registered with `set_density_announcement` | **implemented.** Fires once per real switch (the no-op guard on a repeated set is what makes it once), and is silent if no wording is registered. |
-| Long-press opened a context menu | the long-press → context-menu route | not implemented: no such route exists. `show_context_menu_for` is reached only from a secondary-button press, the keyboard, and the AccessKit `ShowContextMenu` action. |
+| Long-press opened a context menu | the tree-owned long-press route ([`touch_route`](../../crates/teksilo-core/src/widget_tree/touch_route.rs)), via the wording registered with `set_context_menu_announcement` | **implemented.** The route is the fourth caller of `show_context_menu_for`, beside a secondary-button press, the keyboard chord and the AccessKit `ShowContextMenu` action; it announces once, only when a menu actually opened, and is silent if no wording is registered. |
 | Selection changed by a drag handle | the touch-text controller | not implemented: the controller does not exist yet. |
 | Fling settled, naming the new first visible item | the scrollable data views | not implemented: "first visible item" is `teksilo-widgets` state that `teksilo-core` cannot name. |
 | Each committed text-editing command | the touch text-editing commands | not implemented: the commands do not exist yet. |
 
-Every unimplemented row is unimplemented because its *producer* does not exist,
-not because the announcement machinery is missing. Each will call
-`announce_unless_widget_speaks` at its gesture's terminal edge.
+Every remaining unimplemented row is unimplemented because its *producer* does
+not exist, not because the announcement machinery is missing. Each will speak at
+its gesture's terminal edge, through `announce_unless_widget_speaks` — the
+quieter of the two doors, which the long-press route already uses. The density
+switch does not: it is not about any one widget, so it has none whose live
+region could be duplicating it, and it goes through the plain `announce`.
 
 ## 4. Reviewed rather than tested
 

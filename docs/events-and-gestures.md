@@ -190,7 +190,7 @@ Plus a handful of flag-like attachments that don't take event-data closures:
 
 ### 3.1.4 Context-menu factory — `Fn(Point, &mut EventContext) -> Option<Box<dyn Widget>>`
 
-Right-click handling lives at a different tier from the four tap-family hooks. Instead of a recognizer-driven callback, the framework wires a single **factory** that produces the menu widget on demand. When the user right-clicks, the framework's `show_context_menu_for` walks up the parent chain looking for the nearest ancestor with a factory installed, calls it with the click position (widget-local) plus a full `EventContext`, and:
+Context menus live at a different tier from the four tap-family hooks. Instead of a recognizer-driven callback, the framework wires a single **factory** that produces the menu widget on demand. Four things reach it — a secondary press, the `Shift+F10` / Menu chord, the AccessKit `ShowContextMenu` action, and a **hold** on a pointer that cannot hover (a finger has no secondary button; see [`touch_route`](../crates/teksilo-core/src/widget_tree/touch_route.rs)) — and all four go through one `show_context_menu_for`, which walks up the parent chain looking for the nearest ancestor with a factory installed, calls it with the click position (widget-local) plus a full `EventContext`, and:
 
 - Mounts the returned widget as an `OverlayLayer::InTree` overlay anchored at the factory-owning widget, placed at the click position.
 - Dismisses pre-existing overlays first.

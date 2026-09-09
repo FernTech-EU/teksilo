@@ -999,36 +999,25 @@ fn a_finger_marquee_auto_scrolls_from_further_out_than_a_mouse_marquee() {
     );
 }
 
-/// **Triage: bug, not test.** A reorderable row's hold fires the row's own
-/// `on_long_press` *as well as* arming the reorder.
+/// One hold cannot mean two things: on a reorderable row the hold arms the
+/// reorder, so the row's own `on_long_press` does not also fire.
 ///
 /// A19's ruling is that where a row has both a reorder and a context menu the
 /// reorder wins the hold, and the menu moves to an overflow affordance plus
-/// Secondary / Shift+F10 / `ShowContextMenu`. Measured on a `ListView` with
-/// `.reorderable(true)` whose delegate carries an `on_long_press`, holding past
-/// the profile's `long_press`:
+/// Secondary / `Shift+F10` / `ShowContextMenu`. It used to fire both: the
+/// deferral makes the drag member *eligible* at the hold's deadline but cancels
+/// nothing, so the row's own recognizer reached its own deadline and nothing had
+/// silenced it.
 ///
-/// | gesture | the row's `on_long_press` | reordered |
-/// | --- | --- | --- |
-/// | hold, then lift | fires | no |
-/// | hold, then drag | **fires** | yes |
-///
-/// The second row is the collision. The deferral makes the drag member
-/// *eligible* at the hold's deadline; it does not make it the winner, because a
-/// drag is won on movement — so the row's own recognizer reaches its own deadline
-/// first and nothing has cancelled it.
-///
-/// **Not reachable from this crate**, and not because it is hard: the handler
-/// belongs to the *application's* row delegate, so no data view can remove or
-/// gate it. A19 names the mechanism — a `LongPressRole` on `WidgetNode` and a
-/// tree-owned fallback order, with a widget's own `on_long_press` taking
-/// precedence — and that is the touch-route package's to build. What it must
-/// add is in this package's hand-off notes.
-///
-/// Until then the first row of that table is the useful behaviour (hold opens a
-/// menu, hold-and-drag reorders) and the second is a double fire.
+/// The predicate that silences it is **the deferral itself** — a live sequence
+/// member whose activation was put off to the long-press deadline — so the rule
+/// needs no cooperation from the row, whose handler belongs to the application's
+/// delegate and which no data view could gate. A mouse is unaffected by
+/// construction: it enrols no pan competitor, so nothing on its sequence is ever
+/// deferred. See `teksilo_core::widget_tree::touch_route` and
+/// `LongPressRole::DragHandle`, which declares the same thing for a grab the
+/// deferral cannot see.
 #[test]
-#[ignore = "known defect: a reorderable row's hold fires its own long press too"]
 fn a_reorderable_rows_hold_does_not_also_fire_its_own_long_press() {
     let fired = std::rc::Rc::new(std::cell::Cell::new(false));
     let model = ListModel::from_vec((0..ITEMS).collect::<Vec<usize>>());

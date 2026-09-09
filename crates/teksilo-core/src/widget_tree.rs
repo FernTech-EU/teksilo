@@ -28,6 +28,7 @@ mod pointer_state;
 mod query_impl;
 mod rendering_impl;
 mod test_api;
+pub mod touch_route;
 
 /// The main widget tree orchestrating arena, layout, events, accessibility, and paint.
 /// Provides both the runtime API and the headless test API.
@@ -498,6 +499,16 @@ pub struct WidgetTree {
     /// application wants one announced. See
     /// [`Self::set_density_announcement`].
     density_announcement: Option<std::rc::Rc<dyn Fn(teksilo_tokens::TargetDensity) -> String>>,
+    /// How "a context menu opened" should be worded to a screen reader when a
+    /// **hold** opened it, if the application wants one announced. See
+    /// [`Self::set_context_menu_announcement`].
+    context_menu_announcement: Option<std::rc::Rc<dyn Fn() -> String>>,
+    /// The tree-owned long press the router is waiting out, if any. One at a
+    /// time: two fingers holding two different controls is not a gesture any
+    /// desktop idiom assigns a meaning to, and the second contact's arrival
+    /// replaces the first's route rather than racing it. See
+    /// [`touch_route`].
+    pending_touch_route: Option<touch_route::PendingTouchRoute>,
     /// Host window HiDPI device scale (physical px per logical px), fed by
     /// `teksilo-app` before each layout. Surfaced to widgets via
     /// `LayoutContext::scale_factor`. The widget tree is otherwise fully
@@ -784,6 +795,15 @@ struct TooltipEntry {
     /// dismisses on `Escape`/click-outside rather than on pointer-leave (there
     /// is no pointer in the story), and that it counts as focus-shown.
     armed_by_focus: bool,
+    /// Set while this entry's pending delay was started by a **hold** — the
+    /// tree-owned long-press route in [`touch_route`].
+    ///
+    /// Decides two things at show time that neither the hover nor the focus arm
+    /// wants: the surface dismisses on `Escape` / a press outside (a finger has
+    /// already lifted, so there is no pointer left to leave), and it carries an
+    /// auto-dismiss of [`touch_route::TOUCH_TOOLTIP_DISMISS`] — because with no
+    /// pointer to leave and no focus to move, nothing else would ever retire it.
+    armed_by_hold: bool,
     /// Set when the tip was dismissed while the focus that summoned it is
     /// still inside its anchor — i.e. Escape on a focus-promoted tooltip.
     ///
@@ -913,6 +933,8 @@ impl WidgetTree {
             explore_by_touch: crate::environment::ExploreByTouch::default(),
             at_client_attached: false,
             density_announcement: None,
+            context_menu_announcement: None,
+            pending_touch_route: None,
             device_scale_factor: 1.0,
             safe_area: teksilo_canvas::EdgeInsets::ZERO,
             occluded_inset: None,
@@ -2137,6 +2159,40 @@ impl WidgetTree {
         wording: Option<std::rc::Rc<dyn Fn(teksilo_tokens::TargetDensity) -> String>>,
     ) {
         self.density_announcement = wording;
+    }
+
+    /// How to word "a context menu opened" for a screen reader, when the menu
+    /// was opened by a **hold**.
+    ///
+    /// The other three routes need nothing: a secondary press, `Shift+F10` and
+    /// the AccessKit `ShowContextMenu` action are all deliberate, and the menu
+    /// takes focus, which is announcement enough. A hold is the one route whose
+    /// user cannot see the menu appear — a finger is on top of where it opens —
+    /// and which they may not have meant.
+    ///
+    /// The wording is the application's for the same reason
+    /// [`Self::set_density_announcement`]'s is: `teksilo-i18n` depends on this
+    /// crate, so nothing here can name a `LocalizedString`, and a hardcoded
+    /// English sentence spoken into a French screen reader is worse than
+    /// silence.
+    ///
+    /// ```ignore
+    /// tree.set_context_menu_announcement(Some(std::rc::Rc::new(|| {
+    ///     tr!(context_menu_opened()).into()
+    /// })));
+    /// ```
+    ///
+    /// `None` — the default — announces nothing. Where it is set, the
+    /// announcement is still suppressed if the **pressed node's** own subtree
+    /// already carries a live region — the widget speaking for itself, so the
+    /// framework does not speak over it — through
+    /// [`Self::announce_unless_widget_speaks`]. The menu's own subtree is not
+    /// consulted: it is raised by this very call and has not been walked yet.
+    pub fn set_context_menu_announcement(
+        &mut self,
+        wording: Option<std::rc::Rc<dyn Fn() -> String>>,
+    ) {
+        self.context_menu_announcement = wording;
     }
 
     /// Speak `message`, unless `widget` already speaks for itself.
@@ -3608,6 +3664,9 @@ impl WidgetTree {
                         if let Some(dead_zone) = handler_set.gesture_dead_zone {
                             node.gesture_dead_zone = dead_zone;
                         }
+                        if let Some(role) = handler_set.long_press_role {
+                            node.long_press_role = role;
+                        }
                         if let Some(action) = handler_set.touch_action {
                             node.touch_action = action;
                         }
@@ -3785,6 +3844,9 @@ impl WidgetTree {
                         }
                         if let Some(dead_zone) = handler_set.gesture_dead_zone {
                             node.gesture_dead_zone = dead_zone;
+                        }
+                        if let Some(role) = handler_set.long_press_role {
+                            node.long_press_role = role;
                         }
                         if let Some(action) = handler_set.touch_action {
                             node.touch_action = action;

@@ -1373,6 +1373,12 @@ impl WidgetTree {
         // `max_hold` — not that it stops trusting one after `max_hold` *and* a
         // move. See `expire_sequence_holds`.
         self.expire_sequence_holds(self.event_time_for(now));
+        // …and so does the tree-owned long press, for the fourth time for the
+        // same reason. It is not a recognizer: the affordances it reaches (a
+        // context-menu factory the router walks up to, a tooltip on a node that
+        // may be **disabled** and so has no arena at all) are the tree's, not a
+        // widget's. See `super::touch_route`.
+        self.resolve_touch_routes(self.event_time_for(now), &mut *ops);
 
         let mut ids = std::mem::take(&mut self.active_ids_scratch);
         ids.clear();
@@ -1418,6 +1424,16 @@ impl WidgetTree {
                 // released in this same pass (`expire_sequence_holds`, above)
                 // once it reaches `max_hold`.
                 if self.sequence_blocks_arena_for(pointer, id, now) {
+                    continue;
+                }
+                // One hold cannot mean two things. Where the hold is what arms
+                // a grab — a reorderable row under a finger, whose drag member
+                // was deferred to this very deadline — the row's own long press
+                // does not also fire. A mouse is untouched: it enrols no pan
+                // competitor, so nothing on its sequence is ever deferred.
+                if matches!(gesture, crate::gesture::GestureEvent::LongPress(_))
+                    && self.long_press_is_a_grab(pointer, id)
+                {
                     continue;
                 }
                 let mut ctx = self.make_event_context(&mut *ops);

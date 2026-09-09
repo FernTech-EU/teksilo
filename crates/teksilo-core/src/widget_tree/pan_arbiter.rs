@@ -809,7 +809,8 @@ impl WidgetTree {
     /// The earliest wall-clock instant at which the **input** layer wants the
     /// event loop back: a pending gesture deadline (a long press), a press
     /// whose feedback delay has not elapsed, a standing hold about to reach
-    /// `max_hold`, or a live fling simulation.
+    /// `max_hold`, a tree-owned long-press route waiting out its hold
+    /// ([`super::touch_route`]), or a live fling simulation.
     ///
     /// Folded into [`next_timer_deadline`](Self::next_timer_deadline) beside
     /// the tooltip, overlay and animation terms, so there is one
@@ -824,10 +825,14 @@ impl WidgetTree {
         let hold = self
             .next_sequence_hold_deadline()
             .map(|t| self.instant_for(t));
+        let touch_route = self
+            .next_touch_route_deadline()
+            .map(|t| self.instant_for(t));
         [
             self.next_gesture_deadline(),
             fling,
             hold,
+            touch_route,
             self.next_press_deadline(),
         ]
         .into_iter()

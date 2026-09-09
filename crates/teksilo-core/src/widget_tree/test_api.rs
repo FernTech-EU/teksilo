@@ -487,7 +487,13 @@ impl WidgetTree {
     }
 
     /// One direct-pointer sample, stamped on this tree's input timeline.
-    fn direct_sample(
+    ///
+    /// `pub(super)` so a sibling module's tests can dispatch a contact of a kind
+    /// the A21 helpers do not name — `touch_down` and `pen_down` cover the two
+    /// kinds an application sees, and a gate that must refuse
+    /// [`PointerKind::Unknown`](teksilo_tokens::PointerKind::Unknown) can only be
+    /// tested by asking for one.
+    pub(super) fn direct_sample(
         &self,
         id: crate::pointer::PointerId,
         kind: teksilo_tokens::PointerKind,

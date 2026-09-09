@@ -115,6 +115,49 @@ enum MenuItemState {
 const DEFAULT_SUBMENU_OPEN_DELAY: Duration = Duration::from_millis(400);
 const DEFAULT_SUBMENU_CLOSE_DELAY: Duration = Duration::from_millis(150);
 
+/// Which route opened a submenu, and therefore how it must be dismissed.
+///
+/// A `DismissBehavior::PointerLeave` grace asks "has the pointer left this
+/// panel and the row that opened it?" — a question only a pointer that hovers
+/// can answer. Every other route leaves it unanswerable, and an overlay whose
+/// dismissal never fires hangs on screen until something else takes it down.
+///
+/// So the behaviour is chosen per route rather than shared, and
+/// [`Self::dismiss`] is the one place it is chosen. The hover route keeps the
+/// grace; every other route ends the way a keyboard user ends things —
+/// `Escape`, or a press outside — which a finger produces too.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SubmenuOpenRoute {
+    /// A hover dwell matured. The only route with a pointer that can leave.
+    Hover,
+    /// A tap or click on the trigger row.
+    Tap(teksilo_tokens::PointerKind),
+    /// `Enter` / `Space` / the inline-forward arrow, or an assistive
+    /// technology's `Click`.
+    KeyboardOrAt,
+}
+
+impl SubmenuOpenRoute {
+    /// The dismissal a submenu opened by this route must carry.
+    fn dismiss(self) -> DismissBehavior {
+        let leaves = match self {
+            Self::Hover => true,
+            // A pen taps and then genuinely hovers away, so its tap-opened
+            // submenu still has a pointer that can leave it. A finger does not:
+            // the contact is gone the instant it lifts.
+            Self::Tap(kind) => kind.hovers(),
+            Self::KeyboardOrAt => false,
+        };
+        if leaves {
+            DismissBehavior::PointerLeave {
+                delay: DEFAULT_SUBMENU_CLOSE_DELAY,
+            }
+        } else {
+            DismissBehavior::EscapeOrClickOutside
+        }
+    }
+}
+
 /// Glyph size for the check / dash / radio-dot rendered in the leading
 /// slot, whose width is the active style's
 /// [`MenuItemMetrics::icon_column_width`](teksilo_core::styles::MenuItemMetrics).

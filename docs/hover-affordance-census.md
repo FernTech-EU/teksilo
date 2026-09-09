@@ -12,7 +12,10 @@ and every hover signal are hover-owner-only, and a contact is never a hover owne
 A finger produces no hover, ever. So every row below is functionality that simply
 does not exist under touch unless package **P29** gives it another route.
 
-Measured against `wt-touch` @ `89c7a03c`. Every line number was read.
+Measured against `wt-touch` @ `89c7a03c`. Every line number was read **at that
+commit** — before the core and widget mega-file splits and the packages that
+followed, so the coordinates below no longer resolve. Trust the content, re-derive
+the coordinates. The **Resolution** section at the end records what each row got.
 
 A hover *tint* is not a census row. Roughly forty widgets swap a `SurfaceRole` on
 hover; that is decoration, and losing it on touch costs nothing. A row qualifies only
@@ -30,13 +33,15 @@ control at all.
 | 5 | `crates/teksilo-widgets/src/tab_widget/header.rs` | 547-548 (`visible_when` on the close button) | **Tab close `×` button** — hidden entirely while the header is Idle. `visible_when` culls it from paint *and* from the AT tree. | `on_hover` at `header.rs:709`, **no dwell** (instant) | **partial.** `Delete` on the focused tab header (`header.rs:781-788`) and middle-click on `PointerUp` (`header.rs:915-917`). The button itself is `.focusable(false)` (`header.rs:539`), and the tab's AT custom actions are reorder-only (`header.rs:1090-1104`) — there is **no** AT "Close". | **always-visible at Touch density** (`RevealPolicy::Always`), plus an AT "Close" custom action |
 | 6 | `crates/teksilo-widgets/src/styles/recipe_scroll_bar_style.rs` | 216 (`set_opacity(full_id, revealed)`; effects at 174 and 183); hover source `crates/teksilo-widgets/src/scroll_bar.rs:466` | **The overlay scroll bar's full interactive track** — at rest only the 4 dp passive indicator is painted (`recipe_scroll_bar_style.rs:37-38`); the 8 dp thumb and track fade in on hover | `on_hover` or `is_dragging`; `duration_fast` 120 ms, **no dwell** | **press works blind.** The hit slot is the full `scroll_bar_thickness` (12 dp default, `scroll_area.rs:204`), so a drag or track-click lands even while invisible. Keyboard is dead: `ScrollBar` is `.focusable(false)` (`scroll_bar.rs:372`) despite its `on_key` at `:477`. `ScrollBarMode::Overlay` is the **default** (`scroll_area.rs:55`). | **always-visible at Touch density** — render the full thickness rather than the thin indicator |
 | 7 | `crates/teksilo-widgets/src/toast/surface.rs` | 303 (`on_hover` bumps `hover_count`); consumed at `crates/teksilo-widgets/src/toast/host.rs:215` and `:354` | **Toast auto-dismiss pause** — the only way to hold a toast open long enough to read or act on it | `on_hover`, **no dwell**; ref-counted and group-wide by default (`host.rs:112`) | **none.** Focus does not pause, despite the comment at `toast/registry.rs:668` — `hover_count` has exactly one writer. Escape dismisses (`surface.rs:316-321`); the persistent `NotificationLog` is the durable read-later route. | **exempt — no touch analogue for "a pointer resting".** Give Touch density a longer toast-duration token and lean on `NotificationLog`. If a route is wanted, press-and-hold can bump the same refcount. |
-| 8 | `crates/teksilo-charts/src/bar_chart.rs` | 316 (`PointerMove` → `hover.set`), painted 627-641 | **Bar datum tooltip card + hover mark** (cross-crate) | `PointerMove` + `rect_hit`, **no dwell** | **AT only** — a per-datum synthetic node with `set_numeric_value` (`crates/teksilo-charts/src/hit.rs:243-246`). `on_tap` (`bar_chart.rs:355`) drives *selection*, not the readout. | **tap** — reuse the existing `on_tap` to also set `hover` |
-| 9 | `crates/teksilo-charts/src/line_chart.rs` | 290 (`PointerMove` → `hover.set`), painted 631-652 | **Line nearest-point tooltip + marker** (cross-crate) | `PointerMove` + `nearest_point`, **no dwell** | AT only (`hit.rs:243-246`); `on_tap` at :334 is selection | **tap** |
-| 10 | `crates/teksilo-charts/src/pie_chart.rs` | 338 (`PointerMove` → `hover.set`), painted 603-633 | **Slice tooltip card** (cross-crate) | `PointerMove` + `slice_hit`, **no dwell** | AT only (`hit.rs:243-246`); `on_tap` at :390 is selection | **tap** |
+| 8 | `crates/teksilo-charts/src/bar_chart.rs` | 316 (`PointerMove` → `hover.set`), painted 627-641 | **Bar datum tooltip card + hover mark** (cross-crate) | **not `on_hover`** — `on_pointer_event` matching `WidgetEvent::PointerMove`, **no dwell** | **AT only** — a per-datum synthetic node with `set_numeric_value` (`crates/teksilo-charts/src/hit.rs:243-246`). `on_tap` (`bar_chart.rs:355`) drives *selection*, not the readout. | see the mechanism correction below |
+| 9 | `crates/teksilo-charts/src/line_chart.rs` | 290 (`PointerMove` → `hover.set`), painted 631-652 | **Line nearest-point tooltip + marker** (cross-crate) | **not `on_hover`** — `on_pointer_event` / `PointerMove` + `nearest_point`, **no dwell** | AT only (`hit.rs:243-246`); `on_tap` at :334 is selection | see the mechanism correction below |
+| 10 | `crates/teksilo-charts/src/pie_chart.rs` | 338 (`PointerMove` → `hover.set`), painted 603-633 | **Slice tooltip card** (cross-crate) | **not `on_hover`** — `on_pointer_event` / `PointerMove` + `slice_hit`, **no dwell** | AT only (`hit.rs:243-246`); `on_tap` at :390 is selection | see the mechanism correction below |
 | 11 | `crates/teksilo-widgets/src/standard_item.rs` | 338 (`StandardListItem::interaction_signal`), 886 (`StandardTreeItem` forward); written by `on_hover` at 722 | **The API contract for hover-revealed row actions** — the framework's blessed handle for "a row that shows its actions only while the pointer is over it" (documented at :327-337) | row `on_hover`, **no dwell** | **none.** It is a raw `Signal<InteractionState>` with no focus or AT contribution, so every app built on it is hover-only by construction. | **always-visible at Touch density** — the signal must read as permanently revealed at Touch, or the documented contract has to say it is mouse-only |
 
-Eleven rows: **nine** need a touch route, **one** is exempt (row 7), and **one** is an
-API contract rather than a widget (row 11) but has to be settled the same way.
+Eleven rows as first counted: **nine** wanting a touch route, **one** called exempt
+(row 7), and **one** an API contract rather than a widget (row 11). Two of those
+readings were wrong and are corrected below; what each row actually got is in
+**Resolution**.
 
 ## Corrections — named in the audit, verified NOT hover-only
 
@@ -83,6 +88,63 @@ Swept with zero hover-reveal hits: `crates/teksilo-preview-ui/src` (no `on_hover
 all), `crates/teksilo-webview/src`, `crates/teksilo-terminal/src`,
 `crates/teksilo-widgets/src/code_editor/`, `log_view`, `rich_text/`, `accordion.rs`,
 `grid_view.rs`, `docking/activity_bar.rs`, `notification/`.
+
+## Resolution
+
+Every row ends here with a route, an owner, or a written exemption. Rows 1-3, 5, 7
+and 11 were closed by **P29**; the rest name who owns them and why.
+
+| # | Affordance | What it got |
+| ---: | --- | --- |
+| 1 | Plain tooltip | **Long press**, through the tree-owned route in [`teksilo_core::widget_tree::touch_route`](../crates/teksilo-core/src/widget_tree/touch_route.rs). The hold backdates the entry's dwell, so the ordinary tooltip pass shows it — same content and blank-body checks as a hover. Retires on Escape, on the next press anywhere else, or on its own expiry (`TOUCH_TOOLTIP_DISMISS`), because with no pointer to leave and no focus to move nothing else ever would. |
+| 2 | Composite tooltip with `.sticky(false)` | Same route. The `sticky_after == None` gate that excludes it from the focus arm does not apply to the hold. |
+| 3 | Tooltip on a **disabled** control | Same route, and this is the row the route exists for. It could not be a gesture recognizer: a disabled node's events stop at the enabled gate inside `dispatch_to_widget`, and a gesture arena is only ever installed past that gate — so a disabled node has none and can recognise nothing. The hold is a deadline the *tree* keeps, hung off the press record, resolved in the same pass as the press-feedback delay and a standing hold's expiry. |
+| 4 | Lightweight `SceneItem` tooltip | **Owned by P32** (`teksilo-scene`), whose clause already reads "item menus and tooltips reachable by long press". Not P29's: the file is in P32's set, and a lightweight item has no `WidgetId`, so the tree-owned route — which is keyed by node — cannot reach it. |
+| 5 | Tab close `×` | **Always visible at a density whose `RevealPolicy` is `Always`** (the gate is simply not installed there, so the button is neither culled from paint nor from the accessibility tree), **plus an AT `Close` custom action**. The action's id is an explicit `2`: the header's custom-action list is built conditionally — a tab at index 0 advertises no "Move Left" — so a position in the vector says nothing about which action it is. |
+| 6 | Overlay scroll bar's interactive track | **Already done by P21**, before this census was acted on: `ScrollBar` seeds its `revealed` signal when `RevealPolicy::Always`, `ScrollArea` folds the same into its pan-in-flight reveal, and both directions are pinned by `a_touch_density_reveals_the_bar_at_rest` / `a_compact_density_leaves_the_bar_at_rest`. Struck. |
+| 7 | Toast auto-dismiss pause | **Press-and-hold**, which is what this row proposed as the fallback. Implemented as a flag on the live entry rather than as a second refcount, and driven from the **framework's** press signal: a count whose decrement a revoked contact missed would pin every toast in the application open for the rest of its run, whereas a flag on the entry dies with the entry and the framework clears the press on release and on cancel alike. A **horizontal swipe** dismisses as well — coarse pointers only, so a fast mouse drag across a toast is not a dismissal request. |
+| 8 | Bar datum readout | **Owned by P33** (`teksilo-charts`), whose clause reads "hover-only datum disclosure becomes kind-aware". `teksilo-charts` is in no other package's file set, and not in P29's. |
+| 9 | Line datum readout | P33, as above. |
+| 10 | Slice readout | P33, as above. |
+| 11 | Row-action reveal contract | A **new signal**, `StandardListItem::reveal_signal` (forwarded by `StandardTreeItem`), answering "should this row's revealed controls be reachable" rather than "is the row hovered". It follows hover while the density reveals on hover and reads permanently `true` where `RevealPolicy` is `Always`. The interaction signal is left alone on purpose: forcing it to `Hovered` at Touch would have lit every row's hover tint permanently. `interaction_signal`'s own documentation now points callers here. |
+
+### Mechanism correction — rows 8, 9 and 10
+
+The census recorded the three chart readouts as hover-gated. They are not: all
+three read `WidgetEvent::PointerMove` through `on_pointer_event`, and a contact's
+bare `Move` **is** dispatched to its hit target. So a finger sliding across a
+chart already sets the readout today.
+
+What a finger cannot do is retire it. The only clearing paths are a `Move` that
+misses and `WidgetEvent::PointerLeave` — and **a contact never receives a
+`PointerLeave`** anywhere in the workspace: the three dispatch sites are all
+reached only for the hover owner, which a contact can never be. So the defect is a
+readout that sticks after the lift, not one that never appears, and the route P33
+needs is a retire path as much as a set path.
+
+That is a general hazard for any touch route, not a chart one: a route that shows
+something must own the way it goes away.
+
+### The Snackbar — not a census row, and its pause is exempt
+
+The `Snackbar` is not in the census because it has no hover-gated affordance:
+there is no pause of any kind, for any input kind. `pause_overlay_auto_dismiss`
+exists on `EventContext` and has no production caller. So "Snackbar
+pause-on-touch" would be a new feature for the mouse as much as for touch, not a
+touch route for something a mouse already has, and it is **exempt** on that
+ground.
+
+What the Snackbar did lack was any exit a finger could take without aiming: its
+routes were `Escape` (which needs focus the surface never takes) and a press
+outside (which under a finger means aiming at whatever is behind it). It now
+dismisses on a **horizontal swipe** across the surface, coarse pointers only.
+
+### Correction — row 7's exemption
+
+The census called the toast pause "exempt — no touch analogue for a pointer
+resting", then named the route anyway ("press-and-hold can bump the same
+refcount"). The route was taken. The refcount was not — see the Resolution row.
+
 
 ## Cross-references
 

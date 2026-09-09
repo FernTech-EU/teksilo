@@ -255,6 +255,11 @@ impl WidgetTree {
             return;
         }
         crate::trace_input!(Samples, "cancel queued for {pointer:?}: {reason:?}");
+        // A revoked contact holds nothing, so its tree-owned hold is over. Done
+        // at *enqueue* rather than at dispatch: the queue can be drained a
+        // frame later, and a route that fires in between would be answering a
+        // press the system has already taken away.
+        self.cancel_touch_route(pointer);
         self.pending_dispatch
             .push_back(pointer_router::QueuedDispatch::Cancel {
                 pointer,

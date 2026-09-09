@@ -53,7 +53,7 @@ use teksilo_core::widget::{
 use teksilo_core::widget_builder::HandlerSet;
 use teksilo_core::widget_id::WidgetId;
 use teksilo_i18n::LocalizedString;
-use teksilo_tokens::{InputTokens, TargetRole, TextRole};
+use teksilo_tokens::{InputTokens, RevealPolicy, TargetRole, TextRole};
 
 use crate::primitives::{Expand, RectWidget, ZStack};
 use crate::{HStack, IconButton, IconButtonSize, IconWidget, TextWidget};
@@ -578,12 +578,18 @@ impl Widget for TabHeader {
                     .tooltip(teksilo_i18n::tr_widget!(tab_close_tooltip()))
                     .on_activate_fn(move |ctx| (close_fn)(ctx));
                 let close_id = ctx.add(close_button);
-                // Hover-only: the button is hidden when the
-                // surrounding tab header is in the Idle interaction
-                // state. The interaction signal flips to Hovered
-                // via the `on_hover` handler installed below.
-                let visible_when = interaction.map(|s| matches!(*s, TabHeaderInteraction::Hovered));
-                ctx.visible_when(close_id, visible_when);
+                // Hover-revealed, except at a density that reveals every
+                // affordance. `visible_when` culls the button from paint AND
+                // from the accessibility tree, so under a finger — which
+                // produces no hover, ever — a hidden close button is not a
+                // button that is hard to find, it is one that does not exist.
+                // At `RevealPolicy::Always` no gate is installed at all, so the
+                // `×` is simply there.
+                if ctx.theme().input.reveal != RevealPolicy::Always {
+                    let visible_when =
+                        interaction.map(|s| matches!(*s, TabHeaderInteraction::Hovered));
+                    ctx.visible_when(close_id, visible_when);
+                }
                 row = row.add_child(close_id);
             }
         }
@@ -864,6 +870,7 @@ impl Widget for TabHeader {
             .on_access_action_request({
                 let selected = self.selected.clone();
                 let on_reorder_to = self.on_reorder_to.clone();
+                let on_close_for_action = self.on_close.clone();
                 let header_ids_for_action = self.shared.header_ids.clone();
                 move |action, _node, data, ctx: &mut EventContext| -> EventResponse {
                     use teksilo_core::accesskit::{Action, ActionData};
@@ -882,13 +889,23 @@ impl Widget for TabHeader {
                             EventResponse::Handled
                         }
                         Action::CustomAction => {
-                            let Some(reorder) = on_reorder_to.as_ref() else {
-                                return EventResponse::Ignored;
-                            };
-                            // Custom action indices we advertise:
+                            // Custom action ids we advertise:
                             //   0 = Move Left  (index → index - 1)
                             //   1 = Move Right (index → index + 1)
+                            //   2 = Close
                             let Some(ActionData::CustomAction(idx)) = data else {
+                                return EventResponse::Ignored;
+                            };
+                            if idx == 2 {
+                                return match on_close_for_action.as_ref() {
+                                    Some(close) => {
+                                        close(ctx);
+                                        EventResponse::Handled
+                                    }
+                                    None => EventResponse::Ignored,
+                                };
+                            }
+                            let Some(reorder) = on_reorder_to.as_ref() else {
                                 return EventResponse::Ignored;
                             };
                             let total = header_ids_for_action.borrow().len();
@@ -1109,10 +1126,14 @@ impl Widget for TabHeader {
             builder.push_controlled(teksilo_core::accessibility::widget_id_to_node_id(panel_id));
         }
 
-        // Advertise reorder custom actions for AT users who can't drag.
-        // Order matters: index 0 = "Move Left/Up", index 1 = "Move
-        // Right/Down" — `on_access_action_request` reads the index
-        // from `ActionData::CustomAction(idx)` and routes accordingly.
+        // Custom actions for AT users who cannot drag or hover. The ids are
+        // **explicit and fixed** — 0 = Move Left/Up, 1 = Move Right/Down,
+        // 2 = Close — because the list is built conditionally and
+        // `on_access_action_request` routes on the id, not on the position:
+        // a tab at index 0 advertises no "Move Left", so an action's place in
+        // the vector says nothing about which action it is.
+        let mut actions: Vec<teksilo_core::accesskit::CustomAction> = Vec::new();
+
         // Suppressed for pinned tabs (whose order is conceptually fixed
         // by the pinned-strip layout — Firefox convention).
         if self.on_reorder_to.is_some() && self.initial_enabled && !self.pinned {
@@ -1131,7 +1152,6 @@ impl Widget for TabHeader {
                     lit!("Move Down").resolve_now(),
                 ),
             };
-            let mut actions = Vec::with_capacity(2);
             if self.index > 0 {
                 actions.push(teksilo_core::accesskit::CustomAction {
                     id: 0,
@@ -1144,10 +1164,23 @@ impl Widget for TabHeader {
                     description: next_label,
                 });
             }
-            if !actions.is_empty() {
-                builder.add_action(teksilo_core::accesskit::Action::CustomAction);
-                builder.set_custom_actions(actions);
-            }
+        }
+
+        // Close. The `×` is hover-revealed and deliberately not focusable, so
+        // the only routes to it were a pointer that hovers and a middle-click —
+        // neither available to an assistive technology, and the first not
+        // available to a finger. `Delete` on the focused header exists but is
+        // a keyboard route, not an AT action.
+        if self.on_close.is_some() && self.initial_enabled {
+            actions.push(teksilo_core::accesskit::CustomAction {
+                id: 2,
+                description: lit!("Close").resolve_now(),
+            });
+        }
+
+        if !actions.is_empty() {
+            builder.add_action(teksilo_core::accesskit::Action::CustomAction);
+            builder.set_custom_actions(actions);
         }
     }
 

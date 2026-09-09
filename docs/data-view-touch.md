@@ -136,22 +136,23 @@ affordance the application places in the row, the secondary button, and
 Shift+F10 / the AccessKit `ShowContextMenu` action — the last of which is not a
 pointer gesture at all and so cannot collide with anything.
 
-**Two halves of that ruling are not delivered, and both are measured rather than
-asserted.** The hold *arms* the reorder, which is why a reorderable row can no
-longer offer it for anything else — but it does not yet *take* it:
+**Both halves of that ruling are now delivered**, by the tree-owned touch route
+([`touch_route`](../crates/teksilo-core/src/widget_tree/touch_route.rs)):
 
-- a reorderable row whose delegate carries an `on_long_press` fires that handler
-  on the hold **as well as** starting the reorder. The deferral makes the drag
-  member eligible at the deadline; a drag is still won on movement, so the row's
-  own recognizer reaches its own deadline unopposed. The handler belongs to the
-  application's delegate, so no data view can gate it.
-- a row with **no** reorder does not open a menu on a hold at all. That fallback
-  is tree-owned (`LongPressRole`) and does not exist yet.
+- a reorderable row's hold no longer fires the row's own `on_long_press` as well.
+  The predicate is the **deferral itself** — a live sequence member whose
+  activation was put off to the long-press deadline — so it needs no cooperation
+  from the row, whose handler belongs to the application's delegate and which no
+  data view could gate. `LongPressRole::DragHandle` declares the same thing for a
+  grab the deferral cannot see (one taken by an explicit `capture_pointer`).
+- a row with **no** reorder opens its context menu on a hold, through the same
+  `show_context_menu_for` a secondary press reaches.
 
-Both belong with the package that owns the touch route.
+A mouse is unaffected by construction: it enrols no pan competitor, so nothing on
+its sequence is ever deferred.
 `a_reorderable_rows_hold_does_not_also_fire_its_own_long_press` in
-[`data_view_drag.rs`](../crates/teksilo-widgets/tests/data_view_drag.rs) is
-`#[ignore]`d against the first.
+[`data_view_drag.rs`](../crates/teksilo-widgets/tests/data_view_drag.rs) is no
+longer `#[ignore]`d.
 
 ## 3. The column-header strip is a pan surface
 
