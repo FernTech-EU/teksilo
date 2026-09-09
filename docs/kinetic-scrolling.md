@@ -19,10 +19,11 @@ is the one `on_scroll` body they now share. §10 is the adoption recipe.
 
 Nine surfaces install it — `ScrollArea`, the five data views (`ListView`,
 `TreeView`, `GridView`, `TableView`, `TreeTableView`) and the three text
-surfaces (`RichTextEditor`, `CodeEditor`, `LogView`) — and `SceneView` takes
-the claim from it while keeping its own handler, for the reason in §10.1. No
-number here counts the *pre*-migration hand-rollers: the inventory that
-produced the original count included `MenuList` and the `TabBar` strip, and
+surfaces (`RichTextEditor`, `CodeEditor`, `LogView`) — and two more,
+`SceneView` and `Terminal`, take the claim while keeping handlers of their own,
+for the reasons in §10.1. No number here counts the *pre*-migration
+hand-rollers: the inventory that produced the original count included
+`MenuList` and the `TabBar` strip, and
 §9 records what the migration found about those two — neither owns an
 `on_scroll` at all.
 
@@ -607,6 +608,10 @@ What the migration found, which is not what was expected of it:
   `DragActivation` to resolve, so the cell now reads a `long_press` recognizer
   instead: a swipe pans, a held contact reorders.
 
+`Terminal` (`teksilo-terminal`) pans under a finger **without** adopting
+`ScrollableBehavior`: it declares its own `PanClaim` and turns the synthesised
+`Scroll` into whole-line ring steps. §10.1 has the why.
+
 Still to come:
 
 - `CodeEditor` and `LogView` have no finger-pan test of their own. All three
@@ -617,12 +622,6 @@ Still to come:
   other two. The obstacle is the fixture, not the assertion: a headless text
   surface needs its engine viewport seeded and a pump before it has anything to
   scroll, and that scaffolding exists only in `rich_text/tests.rs` today;
-- `Terminal` (`teksilo-terminal`) still hand-rolls its scroll. It is a
-  different shape from every surface here — its offset is a scrollback ring
-  position quantised to whole lines rather than a pixel offset with a maximum,
-  it forwards the wheel to the child process under mouse reporting, and it
-  always answers `Handled` so it never chains — so it is deferred rather than
-  forced through `ScrollableAxes`;
 - the platform layer does not yet produce `ScrollSource::TouchPan` samples of
   its own; the core door (`dispatch_scroll` with that source, which derives its
   own chain from the sample's position) is open and waiting for it;
@@ -722,7 +721,7 @@ chains the coast outward, is the surface's job.
 It also does not read a clock, subscribe to frame ticks, or animate. Everything
 it does happens inside an event.
 
-## 10.1. One surface the helper does not fit, and the rule that nearly cost three more
+## 10.1. Two surfaces the helper does not fit, and the rule that nearly cost three more
 
 **A claim on the node that owns the press arena wins.**
 `advance_sequence` (`teksilo-core`, `widget_tree/pointer_state.rs`) stops its
@@ -769,3 +768,18 @@ the viewport on an axis the rule is a centring pin rather than a clamp — which
 no `[min, max]` range can express. An unbounded scene has no range at all. The
 policy is still this module's: no tween under a finger, a hard clamp on a
 coast, and `Ignored` at the boundary and at the end of the stream.
+
+**`Terminal`'s offset is not a number of pixels.** It is a scrollback ring
+position quantised to **whole lines**, so there is no fractional position to
+rubber-band and nothing for a coast to settle onto. It keeps its own `on_scroll`
+with a `ScrollSource::TouchPan` branch beside the wheel one and takes only the
+claim from this module: a pan sample worth less than a line is *banked* until it
+adds up to one (dropping it, which is what a hardcoded `/ 16.0` plus a `round()`
+did, made every slow finger and every precise trackpad move nothing at all), and
+a kinetic pan there means line steps arriving from this module's fling pump until
+the simulation stops or the ring ends. The finger's pan answers `Ignored` at the
+end of the ring and chains outward; the **wheel** deliberately keeps absorbing
+unconditionally, which is what every terminal does. The crate could not reach
+`common::scrollable` in any case — it does not depend on `teksilo-widgets`, which
+is also why its touch text selection goes through `teksilo-core::text_touch`
+directly. Full reasoning: [terminal.md](terminal.md) "Touch".

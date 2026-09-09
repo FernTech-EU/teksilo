@@ -12,7 +12,7 @@ use std::io::Read;
 use std::rc::Rc;
 
 use crate::engine::{
-    GridSnapshot, PtyGeom, Scroll, SelectionKind, SpawnedEngine, TermEvent, TermMode,
+    CellSide, GridSnapshot, PtyGeom, Scroll, SelectionKind, SpawnedEngine, TermEvent, TermMode,
     TerminalCommand, TerminalEngine, TerminalEngineFactory, TerminalExit,
 };
 
@@ -46,6 +46,15 @@ pub struct MemoryShared {
     pub history_len: usize,
     /// Recorded selection anchors (`(line, column, kind)`).
     pub selections: Vec<(usize, usize, SelectionKind)>,
+    /// Recorded selection heads (`(line, column, side)`) from
+    /// [`TerminalEngine::selection_update`].
+    pub selection_updates: Vec<(usize, usize, CellSide)>,
+    /// Every scrollback movement the view asked for, in order.
+    pub scrolls: Vec<Scroll>,
+    /// How many times the view asked to select the whole buffer.
+    pub select_all_calls: usize,
+    /// How many times the view asked to clear the visible screen.
+    pub clear_screen_calls: usize,
 }
 
 /// The in-memory engine (see the module docs).
@@ -93,7 +102,25 @@ impl TerminalEngine for MemoryEngine {
             .clone()
             .unwrap_or_else(|| self.blank_snapshot())
     }
-    fn scroll(&mut self, _scroll: Scroll) {}
+    /// Records the request **and** models the ring position, so a test can
+    /// watch the viewport move: `display_offset` walks between 0 (the live
+    /// prompt) and `history_len` (the oldest scrollback line) exactly as a real
+    /// engine's does. Without the model, every scroll answered "nothing moved"
+    /// and no test could tell a working scroll from a dropped one.
+    fn scroll(&mut self, scroll: Scroll) {
+        let mut shared = self.shared.borrow_mut();
+        shared.scrolls.push(scroll);
+        let history = shared.history_len as i64;
+        let current = shared.display_offset as i64;
+        let next = match scroll {
+            Scroll::Delta(n) => current + n as i64,
+            Scroll::PageUp => current + self.geom.rows as i64,
+            Scroll::PageDown => current - self.geom.rows as i64,
+            Scroll::Top => history,
+            Scroll::Bottom => 0,
+        };
+        shared.display_offset = next.clamp(0, history) as usize;
+    }
     fn mode(&self) -> TermMode {
         self.shared.borrow().mode
     }
@@ -103,6 +130,14 @@ impl TerminalEngine for MemoryEngine {
     fn display_offset(&self) -> usize {
         self.shared.borrow().display_offset
     }
+    /// Records the anchor, and — for a `Word` or `Line` selection — reports some
+    /// selected text.
+    ///
+    /// The second half is not decoration. A real engine's word or line selection
+    /// covers cells the moment it is anchored, so a view that asks "is anything
+    /// selected?" straight after a double-click is told yes. Without it every
+    /// such check answered no here, and a test that turned on what the answer
+    /// gates could not fail.
     fn selection_start(
         &mut self,
         line: usize,
@@ -110,20 +145,34 @@ impl TerminalEngine for MemoryEngine {
         _side: crate::engine::CellSide,
         kind: SelectionKind,
     ) {
+        let mut shared = self.shared.borrow_mut();
+        shared.selections.push((line, column, kind));
+        if matches!(kind, SelectionKind::Word | SelectionKind::Line) {
+            shared.selection_text = Some("selected".to_string());
+        }
+    }
+    fn selection_update(&mut self, line: usize, column: usize, side: CellSide) {
         self.shared
             .borrow_mut()
-            .selections
-            .push((line, column, kind));
+            .selection_updates
+            .push((line, column, side));
     }
-    fn selection_update(&mut self, _line: usize, _column: usize, _side: crate::engine::CellSide) {}
-    fn select_all(&mut self) {}
+    fn select_all(&mut self) {
+        self.shared.borrow_mut().select_all_calls += 1;
+    }
     fn selection_clear(&mut self) {
-        self.shared.borrow_mut().selection_text = None;
+        let mut shared = self.shared.borrow_mut();
+        shared.selection_text = None;
+        if let Some(snapshot) = shared.snapshot.as_mut() {
+            snapshot.selection = None;
+        }
     }
     fn selection_text(&self) -> Option<String> {
         self.shared.borrow().selection_text.clone()
     }
-    fn clear_screen(&mut self) {}
+    fn clear_screen(&mut self) {
+        self.shared.borrow_mut().clear_screen_calls += 1;
+    }
     fn reset(&mut self) {}
     fn drain_events(&mut self) -> Vec<TermEvent> {
         std::mem::take(&mut self.shared.borrow_mut().events)

@@ -21,11 +21,13 @@ pub mod color_scheme;
 pub mod engine;
 mod input;
 pub mod memory;
+mod menu;
 mod mouse;
 mod render;
 mod state;
 pub mod style;
 mod terminal;
+mod touch;
 
 #[cfg(feature = "alacritty")]
 mod pty;
@@ -40,6 +42,8 @@ pub use engine::{
     TerminalEngineFactory, TerminalExit,
 };
 pub use memory::{MemoryEngine, MemoryEngineFactory, MemoryShared};
+pub use menu::TerminalMenuCommand;
+pub use mouse::TouchReporting;
 pub use render::CellMetrics;
 pub use style::{RecipeTerminalStyle, TerminalChrome, TerminalStyle};
 pub use terminal::{BellStyle, CursorStyle, Terminal, TerminalClosePolicy, TerminalController};

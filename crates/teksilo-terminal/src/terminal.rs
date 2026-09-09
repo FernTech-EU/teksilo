@@ -15,6 +15,8 @@ use teksilo_core::build_context::BuildContext;
 use teksilo_core::event::{EventResponse, Key, Modifiers, PointerButton, WidgetEvent};
 use teksilo_core::gesture::TapEvent;
 use teksilo_core::ime::ImeContext;
+use teksilo_core::pointer::touch_action::{PanAxes, PanClaim};
+use teksilo_core::pointer::{ScrollPhase, ScrollSource};
 use teksilo_core::signal::Signal;
 use teksilo_core::styles::Theme;
 use teksilo_core::widget::{
@@ -23,7 +25,7 @@ use teksilo_core::widget::{
 use teksilo_core::widget_builder::HandlerSet;
 use teksilo_core::widget_id::WidgetId;
 use teksilo_platform::ClipboardHandle;
-use teksilo_tokens::TextStyle;
+use teksilo_tokens::{PointerKind, TextStyle};
 
 use crate::a11y::{self, LiveAnnouncer};
 use crate::color_scheme::ColorScheme;
@@ -32,12 +34,14 @@ use crate::engine::{
     TerminalEngineFactory, TerminalExit,
 };
 use crate::input::{self, InputConfig};
-use crate::mouse::{self, MouseButton, MouseKind};
+use crate::menu::{self, TerminalMenuCommand};
+use crate::mouse::{self, MouseButton, MouseKind, TouchReporting};
 use crate::render::{self, CellMetrics, RenderParams};
 use crate::state::{
     self, DragState, DrainResult, TerminalState, blank_snapshot, compute_layout, drain_and_advance,
 };
 use crate::style::{RecipeTerminalStyle, TerminalChrome, TerminalStyle};
+use crate::touch::{self, MagnifierPainter, TerminalTouch};
 
 /// The preferred cursor shape.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -279,6 +283,7 @@ pub struct Terminal {
     label: String,
     mount_queued: Cell<bool>,
     announcer_id: Option<WidgetId>,
+    touch: Rc<TerminalTouch>,
 }
 
 impl std::fmt::Debug for Terminal {
@@ -308,6 +313,7 @@ impl Terminal {
             label: "Terminal".to_string(),
             mount_queued: Cell::new(false),
             announcer_id: None,
+            touch: TerminalTouch::new(),
         }
     }
 
@@ -426,6 +432,21 @@ impl Terminal {
         self.state.borrow_mut().mouse_reporting = enable;
         self
     }
+
+    /// What a **direct** pointer (a finger, a pen tip) is reported to the child
+    /// program as while it has mouse tracking on. Default
+    /// [`TouchReporting::Off`] — a finger is never reported.
+    ///
+    /// Turning it to [`TouchReporting::AsButton1`] hands a single contact to the
+    /// child as mouse button 1 and, with it, the only gesture the view had for
+    /// selecting and for opening its menu. Two contacts are never reported, so a
+    /// two-finger pan still reaches the scrollback; that is the way back.
+    /// See [`TouchReporting`] for the bytes.
+    pub fn touch_mouse_reporting(self, reporting: TouchReporting) -> Self {
+        self.state.borrow_mut().touch_reporting = reporting;
+        self
+    }
+
     /// Whether `Alt+<key>` is sent as an ESC prefix ("Option as Meta").
     pub fn alt_sends_escape(self, enable: bool) -> Self {
         self.state.borrow_mut().alt_sends_escape = enable;
@@ -476,6 +497,52 @@ impl Terminal {
             }
             None => theme.typography.mono.clone(),
         }
+    }
+
+    /// The closure that fills the magnifier lens: **only** the grid layer,
+    /// re-emitted in window coordinates.
+    ///
+    /// It is re-entered during the same frame inside the lens's transform-and-
+    /// clip scope, so it deliberately does none of what
+    /// [`Terminal::paint`](Widget::paint) does around the same call: no chrome,
+    /// no drain (a second drain in one frame would feed the engine bytes the
+    /// first one already consumed), no clip of its own (`replay` installs the
+    /// lens clip and a `clear_clip` here would destroy it) and no visual bell.
+    /// What is left — repainting an already-computed snapshot — produces the same
+    /// display list twice, which is what the contract asks for.
+    fn magnifier_painter(&self) -> MagnifierPainter {
+        let state = self.state.clone();
+        let font = self.font.clone();
+        let follow_text_scale = self.follow_text_scale;
+        Rc::new(move |canvas, ctx: &PaintContext<'_>| {
+            let st = state.borrow();
+            let base = match &font {
+                Some(font) if follow_text_scale => TextStyle {
+                    size: font.size * ctx.text_scale,
+                    ..font.clone()
+                },
+                Some(font) => font.clone(),
+                None => ctx.theme.typography.mono.clone(),
+            };
+            render::paint_grid(
+                canvas,
+                &RenderParams {
+                    snapshot: &st.snapshot,
+                    scheme: &st.scheme,
+                    metrics: st.metrics,
+                    origin: st.origin,
+                    base_font: &base,
+                    focused: st.focused && ctx.window_active,
+                    // The lens is a still: a caret caught mid-blink would blink
+                    // inside it on a rhythm of its own.
+                    cursor_on: true,
+                    cursor_shape: effective_cursor_shape(
+                        st.cursor_style_pref,
+                        st.snapshot.cursor.shape,
+                    ),
+                },
+            );
+        })
     }
 
     /// React to a completed drain: fire callbacks + update reactive signals.
@@ -626,47 +693,121 @@ impl Widget for Terminal {
         });
         self.announcer_id = Some(announcer);
 
+        // Touch selection: the controller, and the overlay content that paints
+        // its handles. Built here because `prefers_reduced_motion` has no
+        // accessor on `EventContext` — the preference has to be read while a
+        // `BuildContext` is in hand.
+        let theme = ctx.theme_signal().get();
+        let (affordances, handle_recipe, lens_recipe) =
+            touch::configure_controller(&self.touch, &theme, ctx.prefers_reduced_motion());
+        let layer = ctx.add_detached(touch::AffordanceHost::new(
+            affordances,
+            handle_recipe,
+            lens_recipe,
+            touch::delegate(&self.touch, &self.state),
+            Some(self.magnifier_painter()),
+            Rc::downgrade(&self.touch),
+        ));
+        ctx.set_dormant(layer);
+        touch::attach(&self.touch, self_id, layer);
+
         // Handlers.
         let read_only = self.state.borrow().read_only;
         let mut handlers = HandlerSet::new()
             .focusable(true)
             .keyboard_capture(true)
-            .cursor(CursorIcon::Text);
+            .cursor(CursorIcon::Text)
+            // A finger pans the scrollback vertically, with a kinetic hand-off
+            // on release. Direct pointers only, which is `PanClaim`'s default:
+            // a wheel keeps the route it has always had (`ScrollDelivery`
+            // sends only a `TouchPan` along the claimant chain).
+            .pan_claim(PanClaim {
+                axes: PanAxes::Y,
+                kinetic: true,
+                ..PanClaim::default()
+            });
         if !read_only {
             handlers = handlers.ime_input(ImeContext::text());
         }
 
         let st = self.state.clone();
+        let tch = self.touch.clone();
         handlers = handlers.on_focus(move |gained, _ctx| {
-            let mut st = st.borrow_mut();
-            st.focused = gained;
-            st.blink_on = true;
-            st.blink_last = None;
+            {
+                let mut st = st.borrow_mut();
+                st.focused = gained;
+                st.blink_on = true;
+                st.blink_last = None;
+            }
+            if !gained {
+                // One of the four retirement paths the host owns; the affordance
+                // band takes nothing down by itself.
+                tch.dismiss();
+            }
         });
 
         let st = self.state.clone();
-        handlers = handlers.on_key(move |event, ctx| keyboard_handler(&st, event, ctx));
+        let tch = self.touch.clone();
+        handlers = handlers.on_key(move |event, ctx| keyboard_handler(&st, &tch, event, ctx));
 
         let st = self.state.clone();
         let sig = self.signals.clone();
-        handlers =
-            handlers.on_pointer_event(move |event, ctx| pointer_handler(&st, &sig, event, ctx));
+        let tch = self.touch.clone();
+        handlers = handlers
+            .on_pointer_event(move |event, ctx| pointer_handler(&st, &sig, &tch, event, ctx));
 
         let st = self.state.clone();
-        handlers = handlers.on_scroll(move |event, ctx| scroll_handler(&st, event, ctx));
+        let tch = self.touch.clone();
+        handlers = handlers.on_scroll(move |event, ctx| scroll_handler(&st, &tch, event, ctx));
 
         let st = self.state.clone();
         let sig = self.signals.clone();
+        let tch = self.touch.clone();
         handlers = handlers.on_double_tap(move |tap, ctx| {
-            select_at(&st, &sig, tap, SelectionKind::Word);
-            ctx.request_frame();
+            select_at(&st, &sig, &tch, tap, SelectionKind::Word, ctx);
         });
 
         let st = self.state.clone();
         let sig = self.signals.clone();
+        let tch = self.touch.clone();
         handlers = handlers.on_triple_tap(move |tap, ctx| {
-            select_at(&st, &sig, tap, SelectionKind::Line);
-            ctx.request_frame();
+            select_at(&st, &sig, &tch, tap, SelectionKind::Line, ctx);
+        });
+
+        // The two `ScrollUp` / `ScrollDown` actions the `Role::Terminal` node
+        // has advertised since it was written, and which nothing implemented.
+        let st = self.state.clone();
+        let tch = self.touch.clone();
+        handlers = handlers.on_access_action(move |action, ctx| match action {
+            accesskit::Action::ScrollUp => {
+                access_scroll(&st, &tch, Scroll::PageUp, ctx);
+                EventResponse::Handled
+            }
+            accesskit::Action::ScrollDown => {
+                access_scroll(&st, &tch, Scroll::PageDown, ctx);
+                EventResponse::Handled
+            }
+            _ => EventResponse::Ignored,
+        });
+
+        // The context menu — Copy / Paste / Select all / Clear. Reached three
+        // ways, and only the first is new to touch: the tree-owned long-press
+        // route (a hold, which resolves to this factory because the node
+        // installs one and no `on_long_press` handler is on the path), a
+        // right-click, and an assistive client's `ShowContextMenu`.
+        let st = self.state.clone();
+        let sig = self.signals.clone();
+        let tch = self.touch.clone();
+        handlers = handlers.context_menu(move |_position, _ctx| {
+            let run_state = st.clone();
+            let run_signals = sig.clone();
+            let _ = &tch;
+            Some(menu::build_menu(
+                &st,
+                Rc::new(move |command, ctx| {
+                    run_command(&run_state, &run_signals, command, ctx);
+                }),
+            ))
         });
 
         ctx.apply_self_handlers(handlers);
@@ -678,9 +819,13 @@ impl Widget for Terminal {
 
         // Mirror window-active state (drives caret hiding / desaturation).
         let st = self.state.clone();
+        let tch = self.touch.clone();
         let wa = ctx.window_active_signal();
         ctx.effect(&wa, move |active| {
             st.borrow_mut().window_active = *active;
+            if !*active {
+                tch.dismiss();
+            }
         });
 
         // Spawn the engine + reader thread after mount (first build only).
@@ -717,7 +862,7 @@ impl Widget for Terminal {
         bounds: Rect,
         _proposal: SizeProposal,
         children: &mut [WidgetPlacement],
-        _ctx: &LayoutContext,
+        ctx: &LayoutContext,
     ) {
         let inset = self.style.content_inset();
         let dims_changed;
@@ -730,7 +875,7 @@ impl Widget for Terminal {
             origin = o;
             let mut st = self.state.borrow_mut();
             st.origin = origin;
-            st.bounds_origin = bounds.origin();
+            st.bounds = bounds;
             dims_changed = (cols, rows) != (st.cols, st.rows);
             if dims_changed {
                 st.cols = cols;
@@ -747,6 +892,16 @@ impl Widget for Terminal {
         if dims_changed {
             self.signals.columns.set(cols);
             self.signals.rows.set(rows);
+        }
+        // The one place the published affordance geometry is re-derived from the
+        // widget's own: it runs after `origin` and `bounds` are settled and
+        // *before* the layer's children are placed, so a handle never lags the
+        // grid it marks by a frame. A no-op until a finger has raised something
+        // (`TouchSelection::refresh` returns early), and `TextAffordances::publish`
+        // drops an unchanged state, so a steady terminal pays one comparison.
+        {
+            let mut st = self.state.borrow_mut();
+            self.touch.refresh(&mut st, ctx.layout_direction);
         }
         // The announcer is a zero-size child.
         for placement in children.iter_mut() {
@@ -774,7 +929,24 @@ impl Widget for Terminal {
             st.window_active = ctx.window_active;
             drain_and_advance(&mut st)
         };
+        let content_changed = drain.content_changed;
         self.apply_drain(drain);
+        if content_changed {
+            // New output keeps the engine's selection (it is in buffer
+            // coordinates) but re-projects it into the viewport, so the handles
+            // move with the text rather than being retired by it. A repaint-only
+            // frame runs no layout, which is why this cannot be left to
+            // `place_children` alone.
+            //
+            // **Reviewed, not tested.** `content_changed` is true only when the
+            // PTY reader thread has queued bytes, and the `MemoryEngine`'s reader
+            // is at end-of-file by construction — a headless tree can reach this
+            // branch by no route at all. The `place_children` twin above carries
+            // the same call and is pinned by
+            // `the_handles_follow_a_selection_change_across_a_layout`.
+            let mut st = self.state.borrow_mut();
+            self.touch.refresh(&mut st, ctx.layout_direction);
+        }
 
         // Render the grid. Hold the state borrow across paint_grid (it only
         // reads the snapshot) rather than cloning the whole grid every frame.
@@ -835,8 +1007,8 @@ impl Widget for Terminal {
         // translates the emitted rects into window space itself, once the walker
         // has written the terminal's own box.
         let origin = Point::new(
-            st.origin.x - st.bounds_origin.x,
-            st.origin.y - st.bounds_origin.y,
+            st.origin.x - st.bounds.x,
+            st.origin.y - st.bounds.y,
         );
         a11y::build_terminal_a11y(builder, &st.snapshot, st.metrics, origin, &self.label);
     }
@@ -1029,6 +1201,7 @@ fn tick_frame(state: &Rc<RefCell<TerminalState>>) {
 
 fn keyboard_handler(
     state: &Rc<RefCell<TerminalState>>,
+    touch: &Rc<TerminalTouch>,
     event: &WidgetEvent,
     ctx: &mut EventContext,
 ) -> EventResponse {
@@ -1048,13 +1221,17 @@ fn keyboard_handler(
                 paste_clipboard(state, ctx);
                 return EventResponse::Handled;
             }
-            // Shift+PageUp/Down scrolls the scrollback.
+            // Shift+PageUp/Down scrolls the scrollback. Either one moves the
+            // viewport under the touch affordances, whose offsets are viewport
+            // cells, so they are retired rather than left naming other text.
             if *key == Key::PageUp && modifiers.shift() {
                 scroll_view(state, Scroll::PageUp, ctx);
+                touch.dismiss();
                 return EventResponse::Handled;
             }
             if *key == Key::PageDown && modifiers.shift() {
                 scroll_view(state, Scroll::PageDown, ctx);
+                touch.dismiss();
                 return EventResponse::Handled;
             }
 
@@ -1092,12 +1269,16 @@ fn keyboard_handler(
                 )
             };
             if let Some(bytes) = input::encode_key(*key, *modifiers, text.as_deref(), mode, cfg) {
-                let mut st = state.borrow_mut();
-                if let Some(engine) = st.engine.as_mut() {
-                    // A keystroke returns to the live prompt.
-                    engine.scroll(Scroll::Bottom);
-                    engine.write(&bytes);
+                {
+                    let mut st = state.borrow_mut();
+                    if let Some(engine) = st.engine.as_mut() {
+                        // A keystroke returns to the live prompt.
+                        engine.scroll(Scroll::Bottom);
+                        engine.write(&bytes);
+                    }
                 }
+                // …which moves the viewport, so the affordances go.
+                touch.dismiss();
             }
             ctx.request_frame();
             // A keyboard-capture surface consumes every key.
@@ -1157,27 +1338,92 @@ fn report_mouse(
     }
 }
 
+/// Whether a pointer of `kind` is reported to the child right now.
+///
+/// Two independent gates, and they answer for different devices. The child's
+/// own tracking mode plus the widget's `mouse_reporting` opt-out decide whether
+/// *anything* is reported; [`TouchReporting`] decides whether a **direct**
+/// pointer is one of the things that is. A mouse never consults the second.
+///
+/// The two-contact clause is the "two-finger pan always local" rule at its
+/// source: with a second finger down, neither contact is reported, so the pan
+/// the two of them make reaches the scrollback instead of the child.
+fn reports_pointer(st: &TerminalState, kind: PointerKind) -> bool {
+    if !mouse_reporting_active(st) {
+        return false;
+    }
+    if !kind.is_direct() {
+        return true;
+    }
+    st.touch_reporting == TouchReporting::AsButton1 && st.contacts <= 1
+}
+
+/// One direct contact has left the surface — lifted or revoked.
+///
+/// The pan bookkeeping is cleared on the **last** contact rather than on the
+/// owner's own `Ended`, because a revoked gesture never delivers one: a
+/// `PointerCancel` closes the pan session with no `Ended` phase, and a
+/// `pan_owner` left behind by that would silently absorb every later pan from a
+/// different contact.
+fn release_contact(st: &mut TerminalState) {
+    st.contacts = st.contacts.saturating_sub(1);
+    if st.contacts == 0 {
+        st.pan_owner = None;
+        st.scroll_residue = 0.0;
+    }
+}
+
 fn pointer_handler(
     state: &Rc<RefCell<TerminalState>>,
     signals: &TerminalSignals,
+    touch: &Rc<TerminalTouch>,
     event: &WidgetEvent,
     ctx: &mut EventContext,
 ) -> EventResponse {
+    let kind = ctx.pointer_kind();
     match event {
         WidgetEvent::PointerDown {
             position,
             button,
             modifiers,
         } => {
+            if kind.is_direct() {
+                state.borrow_mut().contacts += 1;
+            } else {
+                // A cursor arriving retires whatever a finger left standing.
+                // The affordance band is exempt from outside-press dismissal —
+                // every cell a press lands on is "outside" a handle — so this
+                // is the rule's only home. Free when nothing is raised.
+                touch.dismiss();
+            }
             let cell = cell_at_position(state, *position);
-            let report = { mouse_reporting_active(&state.borrow()) && !modifiers.shift() };
+            let report = { reports_pointer(&state.borrow(), kind) && !modifiers.shift() };
             if report {
-                if let (Some(mb), Some((col, row, _))) = (to_mouse_button(*button), cell) {
+                let button = match kind.is_direct() {
+                    // A finger has no buttons; `AsButton1` says which one it
+                    // stands in for, and there is no VT encoding that could say
+                    // it was a finger.
+                    true => Some(MouseButton::Left),
+                    false => to_mouse_button(*button),
+                };
+                if let (Some(mb), Some((col, row, _))) = (button, cell) {
                     let mut st = state.borrow_mut();
                     report_mouse(&mut st, MouseKind::Press, mb, col, row, *modifiers);
                     st.mouse_button_held = Some(mb);
                 }
+                // The child owns this press outright: no local selection, and
+                // no gesture arena either, so nothing can double-tap a word out
+                // from under a full-screen program.
                 return EventResponse::Handled;
+            }
+            if kind.is_direct() {
+                // A finger starts no selection drag. Its press is still
+                // undecided between a pan (the claim below), a tap, and the
+                // tree-owned hold that opens the context menu — and a drag
+                // begun here would take the contact away from all three.
+                // Touch selects by double- or triple-tap and adjusts with the
+                // handles.
+                return EventResponse::Ignored;
             }
             if *button == PointerButton::Primary {
                 if let Some((col, row, side)) = cell {
@@ -1194,7 +1440,17 @@ fn pointer_handler(
                     st.refresh_snapshot();
                 }
                 ctx.request_frame();
-                return EventResponse::Handled;
+                // **Ignored, not Handled** — and this is a behaviour change.
+                // `on_pointer_event` runs *before* the gesture arena and a
+                // `Handled` skips it, so answering `Handled` here meant the
+                // arena never saw a press: the widget's own `on_double_tap` and
+                // `on_triple_tap` could not fire, and the documented word- and
+                // line-selection did nothing. The selection anchor is already
+                // set above; declining the event only lets the arena run, and
+                // the arena answers `Handled` in this widget's stead (it takes
+                // the implicit Down..Up capture with it, which is what keeps a
+                // selection drag alive past the widget's own edge).
+                return EventResponse::Ignored;
             }
             EventResponse::Ignored
         }
@@ -1204,7 +1460,7 @@ fn pointer_handler(
             if let Some(mb) = held {
                 if let Some((col, row, _)) = cell {
                     let mut st = state.borrow_mut();
-                    if mouse_reporting_active(&st) {
+                    if reports_pointer(&st, kind) {
                         report_mouse(&mut st, MouseKind::Drag, mb, col, row, Modifiers::NONE);
                     }
                 }
@@ -1213,7 +1469,7 @@ fn pointer_handler(
             // Any-motion reporting (mode 1003).
             let motion = {
                 let st = state.borrow();
-                mouse_reporting_active(&st)
+                reports_pointer(&st, kind)
                     && st
                         .engine
                         .as_ref()
@@ -1247,7 +1503,9 @@ fn pointer_handler(
                     st.refresh_snapshot();
                 }
                 ctx.request_frame();
-                return EventResponse::Handled;
+                // Declined for the same reason the press is: the multi-tap
+                // recognizers need the moves to know the contact wandered.
+                return EventResponse::Ignored;
             }
             EventResponse::Ignored
         }
@@ -1256,6 +1514,9 @@ fn pointer_handler(
             button,
             modifiers,
         } => {
+            if kind.is_direct() {
+                release_contact(&mut state.borrow_mut());
+            }
             let held = state.borrow().mouse_button_held;
             if let Some(mb) = held {
                 let (col, row) = cell_at_position(state, *position)
@@ -1290,8 +1551,16 @@ fn pointer_handler(
                     drop(st);
                     signals.has_selection.set(has_sel);
                     ctx.request_frame();
-                    return EventResponse::Handled;
+                    // Declined so the arena sees the release: a double- or
+                    // triple-tap streak is counted on the *ups*.
+                    return EventResponse::Ignored;
                 }
+            }
+            EventResponse::Ignored
+        }
+        WidgetEvent::PointerCancel { .. } => {
+            if kind.is_direct() {
+                release_contact(&mut state.borrow_mut());
             }
             EventResponse::Ignored
         }
@@ -1299,30 +1568,96 @@ fn pointer_handler(
     }
 }
 
+/// The scrollback is a **ring position quantised to whole lines**, not a pixel
+/// offset with a maximum — so this is where a pixel stream becomes line steps.
+///
+/// Three things follow from the quantisation, and all three are why the
+/// terminal does not adopt `ScrollableBehavior`:
+///
+/// * there is no fractional position to hold, so a sample worth less than a
+///   line has to be **banked** (`scroll_residue`) rather than applied or
+///   dropped. The old code divided pixels by a hardcoded `16.0` and rounded,
+///   which made every trackpad sample under half a line — and every slow finger
+///   — move nothing at all, permanently;
+/// * there is no offset to rubber-band, so a pan past either end of the ring
+///   has nowhere to go. What a kinetic pan means here is therefore exactly:
+///   line steps arrive at frame rate from the fling pump and stop when the
+///   simulation stops or the ring ends. There is no overscroll and no settle
+///   because there is no continuum to settle onto;
+/// * a fling that runs out of scrollback should hand the rest outward, so the
+///   pan path answers `Ignored` at the boundary. The wheel keeps answering
+///   `Handled` unconditionally — a terminal absorbs the wheel the way every
+///   terminal does, and that is the byte-for-byte mouse behaviour.
+///
+/// Sign: [`ScrollDelta`](teksilo_core::event::ScrollDelta) is positive when the
+/// scroll **offset grows**, i.e. toward the end of the content — the platform
+/// layer negates winit's natural sign to get there
+/// (`event_translation::scroll_delta`). [`Scroll::Delta`] is positive toward
+/// **older** output, which is the other direction. Hence the negation below,
+/// and hence the wheel used to scroll backwards.
 fn scroll_handler(
     state: &Rc<RefCell<TerminalState>>,
+    touch: &Rc<TerminalTouch>,
     event: &WidgetEvent,
     ctx: &mut EventContext,
 ) -> EventResponse {
     let WidgetEvent::Scroll {
-        delta, modifiers, ..
+        delta,
+        modifiers,
+        phase,
+        pointer,
+        ..
     } = event
     else {
         return EventResponse::Ignored;
     };
-    let lines = match delta {
-        teksilo_core::event::ScrollDelta::Lines { y, .. } => *y,
-        teksilo_core::event::ScrollDelta::Pixels { y, .. } => y / 16.0,
+    let is_pan = ctx.scroll_source() == ScrollSource::TouchPan;
+
+    if is_pan {
+        // A finger the child owns is not scrolling anything local. With one
+        // contact under `AsButton1` the press was already reported and its
+        // moves are going out as drag reports; absorbing the synthesised pan
+        // keeps an enclosing scrollable from moving under the same finger.
+        if reports_pointer(&state.borrow(), pointer.kind) {
+            return EventResponse::Handled;
+        }
+        // Pan sessions are per contact, so two fingers deliver two streams.
+        // Honour one of them; the other is absorbed, not chained, because the
+        // gesture is this surface's either way.
+        {
+            let mut st = state.borrow_mut();
+            match st.pan_owner {
+                Some(owner) if owner != pointer.id => return EventResponse::Handled,
+                Some(_) => {}
+                None => st.pan_owner = Some(pointer.id),
+            }
+            if *phase == ScrollPhase::Ended {
+                st.pan_owner = None;
+                st.scroll_residue = 0.0;
+                return EventResponse::Handled;
+            }
+        }
+    }
+
+    // Lines, in the framework's sign (positive = toward the end of the
+    // content = toward newer output).
+    let lines = {
+        let st = state.borrow();
+        match delta {
+            teksilo_core::event::ScrollDelta::Lines { y, .. } => *y,
+            teksilo_core::event::ScrollDelta::Pixels { y, .. } => y / st.metrics.height.max(1.0),
+        }
     };
     if lines == 0.0 {
         return EventResponse::Handled;
     }
 
     // Report the wheel to the child if it enabled mouse reporting (Shift forces
-    // local scrollback).
-    let report = mouse_reporting_active(&state.borrow()) && !modifiers.shift();
+    // local scrollback). A pan is never reported: a finger's scroll is the
+    // view's, and `AsButton1` has already been given its chance above.
+    let report = !is_pan && reports_pointer(&state.borrow(), pointer.kind) && !modifiers.shift();
     if report {
-        let button = if lines > 0.0 {
+        let button = if lines < 0.0 {
             MouseButton::WheelUp
         } else {
             MouseButton::WheelDown
@@ -1337,12 +1672,47 @@ fn scroll_handler(
         return EventResponse::Handled;
     }
 
-    // Otherwise scroll the local scrollback (positive delta = older lines).
-    let n = lines.round() as i32;
-    if n != 0 {
-        scroll_view(state, Scroll::Delta(n), ctx);
+    // Otherwise scroll the local scrollback. `Scroll::Delta` counts toward
+    // older output, so the sign flips here.
+    let older = -lines;
+    let (steps, before, room) = {
+        let mut st = state.borrow_mut();
+        st.scroll_residue += older;
+        let steps = st.scroll_residue.trunc();
+        st.scroll_residue -= steps;
+        let (offset, history) = st
+            .engine
+            .as_ref()
+            .map(|e| (e.display_offset(), e.history_len()))
+            .unwrap_or((0, 0));
+        let room = if older > 0.0 {
+            offset < history
+        } else {
+            offset > 0
+        };
+        (steps as i32, offset, room)
+    };
+    if steps != 0 {
+        scroll_view(state, Scroll::Delta(steps), ctx);
+        // The viewport moved under the affordances, so their cell coordinates
+        // no longer name the same text.
+        touch.dismiss();
     }
-    EventResponse::Handled
+    let moved = state
+        .borrow()
+        .engine
+        .as_ref()
+        .map(|e| e.display_offset())
+        .unwrap_or(0)
+        != before;
+
+    if is_pan && !moved && !room {
+        // The ring has nothing left in that direction, so the rest of the
+        // gesture belongs to whatever encloses this terminal.
+        EventResponse::Ignored
+    } else {
+        EventResponse::Handled
+    }
 }
 
 fn scroll_view(state: &Rc<RefCell<TerminalState>>, scroll: Scroll, ctx: &mut EventContext) {
@@ -1355,12 +1725,27 @@ fn scroll_view(state: &Rc<RefCell<TerminalState>>, scroll: Scroll, ctx: &mut Eve
     ctx.request_frame();
 }
 
+/// Select the word or line under a multi-tap, and — for a **finger** — raise the
+/// handles that adjust it.
+///
+/// A cursor gets no touch chrome: it has a drag for adjusting a selection and
+/// two handles hanging off the grid would be in its way. The word and line
+/// semantics themselves are the engine's for both devices, so the two can never
+/// disagree about what a "word" is.
 fn select_at(
     state: &Rc<RefCell<TerminalState>>,
     signals: &TerminalSignals,
+    touch: &Rc<TerminalTouch>,
     tap: &TapEvent,
     kind: SelectionKind,
+    ctx: &mut EventContext,
 ) {
+    // While the child owns the pointer its taps are already going out as button
+    // reports; selecting locally on top of that would highlight text under a
+    // full-screen program that never asked for it.
+    if reports_pointer(&state.borrow(), tap.pointer.kind) {
+        return;
+    }
     let cell = cell_at_position(state, tap.position);
     let mut st = state.borrow_mut();
     if let Some((col, row, side)) = cell {
@@ -1379,6 +1764,77 @@ fn select_at(
         .is_some();
     drop(st);
     signals.has_selection.set(has_sel);
+    if tap.pointer.kind.is_direct() && has_sel {
+        touch.raise(state, ctx);
+    }
+    ctx.request_frame();
+}
+
+/// Run one context-menu command.
+fn run_command(
+    state: &Rc<RefCell<TerminalState>>,
+    signals: &TerminalSignals,
+    command: TerminalMenuCommand,
+    ctx: &mut EventContext,
+) {
+    match command {
+        TerminalMenuCommand::Copy => copy_selection(state, ctx),
+        TerminalMenuCommand::Paste => paste_clipboard(state, ctx),
+        TerminalMenuCommand::SelectAll => {
+            {
+                let mut st = state.borrow_mut();
+                if let Some(engine) = st.engine.as_mut() {
+                    engine.select_all();
+                }
+                st.refresh_snapshot();
+            }
+            let has_sel = state
+                .borrow()
+                .engine
+                .as_ref()
+                .and_then(|e| e.selection_text())
+                .is_some();
+            signals.has_selection.set(has_sel);
+        }
+        TerminalMenuCommand::Clear => {
+            {
+                let mut st = state.borrow_mut();
+                if let Some(engine) = st.engine.as_mut() {
+                    engine.clear_screen();
+                }
+                st.refresh_snapshot();
+            }
+            signals.has_selection.set(false);
+        }
+    }
+    // No affordance bookkeeping here, and the reason is worth recording because
+    // the obvious code is dead code. Two of these commands move the selection, so
+    // an explicit `dismiss()` or `refresh()` looks called for — but the only route
+    // into this function is the context menu, and mounting that menu already took
+    // the affordance band down (`show_context_menu_for` → `dismiss_except`, which
+    // keeps only overlays containing the clicked widget). Measured: a `dismiss()`
+    // in either arm could be deleted with every test green. What the selection
+    // change does need is the geometry re-derived, and `place_children` does that
+    // on the layout this frame's `request_frame` brings — which is also why this
+    // function takes no affordance handle at all.
+    ctx.request_frame();
+}
+
+/// One page of scrollback, from an assistive client's `ScrollUp` / `ScrollDown`.
+///
+/// A page rather than a line because that is what the two AccessKit actions mean
+/// everywhere else in the framework, and because a screen reader driving a
+/// terminal a line at a time would need one action per line of a 10 000-line
+/// buffer.
+fn access_scroll(
+    state: &Rc<RefCell<TerminalState>>,
+    touch: &Rc<TerminalTouch>,
+    scroll: Scroll,
+    ctx: &mut EventContext,
+) {
+    scroll_view(state, scroll, ctx);
+    touch.dismiss();
+    ctx.request_accessibility_update();
 }
 
 /// Map a pointer position to `(column, row, cell-side)`. The side is which half
@@ -1389,8 +1845,21 @@ fn cell_at_position(
     position: Point,
 ) -> Option<(usize, usize, CellSide)> {
     let st = state.borrow();
-    let x = position.x - st.origin.x;
-    let y = position.y - st.origin.y;
+    // `position` is **widget-local**: `WidgetTree::localize_event` rewrites
+    // every pointer position and every `TapEvent` through
+    // `WidgetArena::local_pointer_position`, which subtracts the node's bounds
+    // origin, before a handler sees it. `origin` is in **window** space (it is
+    // `bounds.origin` plus the chrome inset), so the offset between the two is
+    // the inset alone.
+    //
+    // Subtracting the whole of `origin` was a defect: for a terminal anywhere
+    // but the window's top-left corner it moved every press left and up by the
+    // widget's own position, so a press at the terminal's first cell resolved
+    // to a negative coordinate and the function answered `None` — no
+    // selection, no cell under the pointer, and no mouse report, for a mouse
+    // as much as for a finger.
+    let x = position.x - (st.origin.x - st.bounds.x);
+    let y = position.y - (st.origin.y - st.bounds.y);
     if x < 0.0 || y < 0.0 {
         return None;
     }
