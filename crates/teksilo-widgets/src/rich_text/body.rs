@@ -511,6 +511,16 @@ impl Widget for RichTextEditorBody {
             }
         }
 
+        // The viewport got smaller since the last frame — a window resize, a
+        // pane opening, the on-screen keyboard rising under a focused editor —
+        // and the caret may now be outside it. `sync_viewport` recorded the
+        // shrink (it is the only place that sees both sizes); here, with the
+        // relayout it forced already run, is the earliest point the reveal can
+        // be computed against real geometry.
+        if std::mem::take(&mut st.pending_caret_reveal) {
+            crate::rich_text::keyboard::ensure_caret_visible_locked(&mut st);
+        }
+
         // Update the cursor display every paint so selection
         // highlights follow the caret without needing a frame tick.
         // The caret is suppressed in an inactive window for every policy — the

@@ -60,9 +60,13 @@ mod mouse;
 pub(crate) mod paint;
 mod policy;
 mod state;
+pub(crate) mod touch;
+pub(crate) mod touch_mount;
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod touch_tests;
 #[cfg(test)]
 mod window_tests;
 
@@ -231,6 +235,14 @@ pub struct RichTextEditor {
     /// `ListView` / `TableView` / `GridView`. See
     /// [`overscroll_behavior`](Self::overscroll_behavior).
     overscroll_behavior: OverscrollBehavior,
+    /// The touch-selection mount: the controller, its two overlays, and the
+    /// host intent behind the selection toolbar.
+    ///
+    /// Minted with the widget rather than in `build()` so the ids and the
+    /// toolbar intent survive a rebuild, exactly as the single-line stack's
+    /// does. Inert for a mouse: every entry point begins by asking whether the
+    /// pointer is direct.
+    touch: Rc<touch_mount::EditorTouch>,
 }
 
 impl std::fmt::Debug for RichTextEditor {
@@ -277,6 +289,7 @@ impl RichTextEditor {
         // widgets (e.g. TextInputField) deliberately don't enable this.
         engine.set_hyphenate_justified(true);
         let state = EditorState::new(document, engine, policy, WrapMode::Word);
+        let touch = touch::mount_for(state.clone());
         Self {
             state,
             v_scroll_policy: ScrollPolicy::Auto,
@@ -293,6 +306,7 @@ impl RichTextEditor {
             h_scrollbar_bounds: Rc::new(Cell::new(Rect::ZERO)),
             content_padding: None,
             overscroll_behavior: OverscrollBehavior::default(),
+            touch,
         }
     }
 
@@ -3558,6 +3572,11 @@ impl Widget for RichTextEditor {
             // Remember this build's wrapper id — the `.focusable(true)` node — so a
             // held handle can request focus back onto the editor.
             st.self_id = Some(ctx.self_id());
+            // The density ladder the pointer geometry reads. A snapshot, not a
+            // per-event read: `EventContext` exposes no theme, and
+            // `set_input_density` marks at `BindingLevel::Rebuild`, so this
+            // refreshes with the density.
+            st.input_tokens = ctx.theme().input;
         }
 
         // Kick off the first frame so the initial layout/paint runs
@@ -3834,6 +3853,7 @@ impl Widget for RichTextEditor {
             .cursor(CursorIcon::Text)
             .on_focus({
                 let state = self.state.clone();
+                let touch = self.touch.clone();
                 move |gained, ctx| {
                     let mut st = state.borrow_mut();
                     st.has_focus = gained;
@@ -3858,6 +3878,10 @@ impl Widget for RichTextEditor {
                         // re-seed it (the dedup must not swallow that re-seed).
                         // Clearing `last_chase_pos` lets a refocus re-reveal the
                         // caret even if it has not moved since we lost focus.
+                        // The affordance band is exempt from outside-press
+                        // dismissal — every caret-moving tap is outside a
+                        // handle — so retirement on focus loss is the host's.
+                        touch.dismiss();
                         self::keyboard::clear_ime_preedit(&state);
                         let mut st = state.borrow_mut();
                         st.last_ime_area = None;
@@ -3868,28 +3892,73 @@ impl Widget for RichTextEditor {
             })
             .on_pointer_event({
                 let state = self.state.clone();
+                let touch = self.touch.clone();
                 let v_sb = self.v_scrollbar_bounds.clone();
                 let h_sb = self.h_scrollbar_bounds.clone();
                 move |event, ctx| {
-                    self::mouse::handle_pointer_event(&state, &v_sb, &h_sb, event, ctx)
+                    self::mouse::handle_pointer_event(&state, &touch, &v_sb, &h_sb, event, ctx)
+                }
+            })
+            // A hold selects the word under the finger. Attaching this
+            // **withdraws** the tree-owned long-press route (`touch_route`
+            // rule 1: a widget's own `on_long_press` wins), which is what used
+            // to open this editor's context menu for a coarse pointer — the
+            // selection toolbar the mount raises is its replacement, and offers
+            // the same commands from the same rows.
+            .on_long_press({
+                let state = self.state.clone();
+                let touch = self.touch.clone();
+                move |event, ctx| {
+                    self::mouse::handle_long_press(&state, &touch, event, ctx);
                 }
             })
             .on_key({
                 let state = self.state.clone();
-                move |event, ctx| self::keyboard::handle_key(&state, event, ctx)
+                let touch = self.touch.clone();
+                move |event, ctx| {
+                    let response = self::keyboard::handle_key(&state, event, ctx);
+                    // A keystroke moves the caret and edits the text, neither of
+                    // which the controller made — so the handles it published
+                    // are pointing at where the text used to be. `refresh` is a
+                    // no-op until something has been raised.
+                    touch.refresh(ctx, touch_mount::ToolbarIntent::Hide);
+                    response
+                }
             })
             .on_double_tap({
                 let state = self.state.clone();
-                move |event, ctx| self::mouse::handle_double_tap(&state, event.position, ctx)
+                let touch = self.touch.clone();
+                move |event, ctx| {
+                    self::mouse::handle_double_tap(&state, event.position, ctx);
+                    // A finger can double-tap too, and the selection it just
+                    // made is one the controller did not make.
+                    if event.pointer.kind.is_direct() {
+                        touch.raise(ctx, touch_mount::ToolbarIntent::Show);
+                    }
+                }
             })
             .on_triple_tap({
                 let state = self.state.clone();
-                move |event, ctx| self::mouse::handle_triple_tap(&state, event.position, ctx)
+                let touch = self.touch.clone();
+                move |event, ctx| {
+                    self::mouse::handle_triple_tap(&state, event.position, ctx);
+                    if event.pointer.kind.is_direct() {
+                        touch.raise(ctx, touch_mount::ToolbarIntent::Show);
+                    }
+                }
             })
             .on_access_action_request({
                 let state = self.state.clone();
+                let touch = self.touch.clone();
                 move |action, target_node, data, ctx| {
-                    handle_access_action_request(&state, action, target_node, data, ctx)
+                    let response =
+                        handle_access_action_request(&state, action, target_node, data, ctx);
+                    // An assistive client's `SetTextSelection` / `SetValue` /
+                    // `ReplaceSelectedText` moves the selection without going
+                    // through the controller, so raised handles would be left
+                    // marking the old range.
+                    touch.refresh(ctx, touch_mount::ToolbarIntent::Keep);
+                    response
                 }
             });
 
@@ -3934,6 +4003,12 @@ impl Widget for RichTextEditor {
         }
 
         ctx.apply_self_handlers(handlers);
+
+        // The touch-selection overlays: the affordance layer (handles + lens)
+        // and the selection toolbar, both detached content owned by this build.
+        // Inert until a finger raises them.
+        let self_id = ctx.self_id();
+        self.touch.build(ctx, self_id);
 
         // Build the pure-paint leaf body. The body carries
         // layout/paint/accessibility (using its own `self_id()` for

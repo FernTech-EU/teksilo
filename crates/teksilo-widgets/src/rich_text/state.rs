@@ -130,6 +130,32 @@ pub(crate) struct EditorState {
     // origins differ.
     pub node_origin: teksilo_canvas::Point,
 
+    /// The live input tokens — the density ladder the widened image-resize grip
+    /// and the kind-derived text-drag threshold read.
+    ///
+    /// Snapshotted in `build()` rather than read per event, because
+    /// `EventContext` exposes no theme. `set_input_density` marks the tree at
+    /// `BindingLevel::Rebuild`, so a density change re-runs `build()` and
+    /// refreshes this — which is what makes a snapshot correct rather than
+    /// merely convenient.
+    pub input_tokens: teksilo_tokens::InputTokens,
+
+    /// The body's viewport got **smaller** on the last `sync_viewport`, and the
+    /// caret has not been re-revealed for it yet.
+    ///
+    /// Set by [`sync_viewport`](Self::sync_viewport) — the single writer of the
+    /// viewport, and so the only place that can see the two sizes at once — and
+    /// consumed by the body's paint *after* the relayout the shrink forces,
+    /// because a caret cannot be revealed against a layout that has not run.
+    /// `sync_viewport`'s `bool` return cannot carry this on its own: the body
+    /// calls it from `place_children` first, so by paint time the change has
+    /// already been absorbed and the return is `false`.
+    ///
+    /// A **shrink** only. Growing reveals more text and never pushes the caret
+    /// out, and re-revealing on every resize would drag a reader's scroll
+    /// position back to the caret every time a window edge moved.
+    pub pending_caret_reveal: bool,
+
     // Layout strategy state.
     pub needs_full_layout: bool,
     pub last_relayout_block_id: Option<usize>,
@@ -804,6 +830,8 @@ impl EditorState {
             viewport_height: 0.0,
             viewport_origin: teksilo_canvas::Point::ZERO,
             node_origin: teksilo_canvas::Point::ZERO,
+            input_tokens: teksilo_tokens::InputTokens::default(),
+            pending_caret_reveal: false,
             needs_full_layout: true,
             last_relayout_block_id: None,
             content_dirty: true,
@@ -911,6 +939,13 @@ impl EditorState {
         let changed = (self.viewport_width - bounds.width).abs() > 0.5
             || (self.viewport_height - bounds.height).abs() > 0.5;
         if changed {
+            // A viewport that got smaller can leave the caret outside it — the
+            // on-screen keyboard opening under a focused editor is the case that
+            // makes this a correctness matter rather than a nicety. Recorded
+            // rather than acted on: the shrink forces a relayout, and the caret
+            // cannot be revealed against a layout that has not run yet.
+            self.pending_caret_reveal |= bounds.width < self.viewport_width - 0.5
+                || bounds.height < self.viewport_height - 0.5;
             self.viewport_width = bounds.width;
             self.viewport_height = bounds.height;
             self.engine.set_viewport(bounds.width, bounds.height);

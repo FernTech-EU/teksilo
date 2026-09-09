@@ -10,6 +10,30 @@
 //! Simpler than the rich text editor's equivalent in one respect — a source
 //! document has no links or inline images, so there is no hit-region dispatch,
 //! only text. It is richer in another: Alt-click adds a caret.
+//!
+//! Shared by all three faces: [`CodeEditor`](super::CodeEditor),
+//! [`PlainTextEditor`](super::PlainTextEditor) and
+//! [`LogView`](super::LogView) install the same three entry points, so one
+//! adoption of the touch contract here reaches all of them.
+//!
+//! # Two devices, two commit points
+//!
+//! A **precise** pointer commits on the press, exactly as it always has.
+//!
+//! A **direct** pointer — a finger, a pen — defers the whole decision to the
+//! release, because the same contact is the opening sample of a *pan* and a
+//! panning finger must leave the caret and the selection exactly as it found
+//! them. No release-time predicate can rescue a caret already written on
+//! `PointerDown`, so the write itself moves to the release, gated on
+//! [`release_completes_the_press`](crate::data_views::release_completes_the_press)
+//! — the same rule, and the same predicate, the five data views adopted for
+//! their row selection and the single-line stack for its caret.
+//!
+//! Two press-time commitments therefore have no direct-pointer form, and both
+//! are deliberate: **drag-select** (a finger's drag pans; the range is chosen
+//! with the selection handles the hold raises) and **Alt-click's extra caret**
+//! (there is no Alt on a touch screen, and multi-caret editing is a keyboard
+//! and mouse affordance — `Ctrl+Alt+↑/↓` remains the route).
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -22,6 +46,7 @@ use teksilo_text::text_document::{MoveMode, SelectionType};
 use super::state::{DragState, SharedState};
 use super::sync_cursor_signals;
 use crate::rich_text::hit_test;
+use crate::rich_text::touch_mount::{EditorTouch, ToolbarIntent};
 
 /// Pointer positions arrive **wrapper-local**; the engine wants **body-local**.
 /// The body is inset within the wrapper, so reconstruct the window point
@@ -36,11 +61,22 @@ fn to_engine_local(state: &SharedState, position: &Point) -> Point {
 
 pub(super) fn handle_pointer_event(
     state: &SharedState,
+    touch: &Rc<EditorTouch>,
     v_scrollbar_bounds: &Rc<Cell<Rect>>,
     h_scrollbar_bounds: &Rc<Cell<Rect>>,
     event: &WidgetEvent,
     ctx: &mut EventContext,
 ) -> EventResponse {
+    if ctx.pointer_kind().is_direct() {
+        return handle_direct_pointer_event(
+            state,
+            touch,
+            v_scrollbar_bounds,
+            h_scrollbar_bounds,
+            event,
+            ctx,
+        );
+    }
     match event {
         WidgetEvent::PointerDown {
             position,
@@ -51,6 +87,12 @@ pub(super) fn handle_pointer_event(
                 // Secondary / middle belong to the context menu; let them bubble.
                 return EventResponse::Ignored;
             }
+            // A cursor has taken over. Touch chrome — handles, the selection
+            // toolbar — is standing on the text it is trying to reach, and the
+            // affordance band is exempt from outside-press dismissal, so nothing
+            // else on a hybrid machine would ever remove it. Free when there is
+            // nothing raised; see `EditorTouch::dismiss`.
+            touch.dismiss();
             // This handler runs in the preview pass for every event aimed at a
             // descendant, including the overlay scroll bars. Without this a
             // press on the bar would latch a drag-select against the text
@@ -100,6 +142,13 @@ pub(super) fn handle_pointer_event(
             }
             sync_cursor_signals(state);
             super::keyboard::ensure_caret_visible(state);
+            // The caret moved, so the OS IME candidate window has to move with
+            // it — every *keyboard* caret move already reports this and a
+            // pointer placement did not, which left the candidate list beside
+            // wherever the caret was last typed to. The surface's own reporter,
+            // never the controller's: this one holds the focus / read-only /
+            // layout guard and the ibus-feedback-loop dedup.
+            super::keyboard::report_ime_cursor_area(state, ctx);
             ctx.request_frame();
             // Ignored so the arena still sees the press — returning Handled
             // would consume it and double/triple tap would never fire.
@@ -164,6 +213,142 @@ pub(super) fn handle_pointer_event(
 
         _ => EventResponse::Ignored,
     }
+}
+
+/// A finger or a pen: nothing on the press, everything on a release that still
+/// belongs to it.
+///
+/// `drag_state` is deliberately never armed here, so the precise-pointer
+/// `PointerMove` arm above stays inert for a direct pointer without needing a
+/// second guard of its own — which also means the edge auto-scroll ramp is
+/// unreachable for a finger, as its own comment says it should be.
+///
+/// Every arm answers `Ignored`: the press has to keep reaching the gesture arena
+/// (the hold that selects a word, the double and triple taps), the release has
+/// to keep reaching the tap recognizer, and the whole contact has to stay
+/// available to the pan claim the surface installs.
+fn handle_direct_pointer_event(
+    state: &SharedState,
+    touch: &Rc<EditorTouch>,
+    v_scrollbar_bounds: &Rc<Cell<Rect>>,
+    h_scrollbar_bounds: &Rc<Cell<Rect>>,
+    event: &WidgetEvent,
+    ctx: &mut EventContext,
+) -> EventResponse {
+    match event {
+        WidgetEvent::PointerDown { position, .. } => {
+            // The overlay scroll bars run their own drags; a press on one is
+            // theirs, and must not clear this contact's hold record.
+            if v_scrollbar_bounds.get().contains(*position)
+                || h_scrollbar_bounds.get().contains(*position)
+            {
+                return EventResponse::Ignored;
+            }
+            // A fresh press: forget any hold this contact's id carried from a
+            // previous gesture, so a stale record can never eat a real tap.
+            touch.take_hold_consumed(ctx.pointer().id);
+            // …and remember where it landed, so the release can tell a tap from
+            // a pan. See `EditorTouch::press_is_still_a_tap` for why the
+            // framework's coarse tap boundary cannot answer that here.
+            touch.mark_press(ctx.pointer().id, ctx.pointer_position());
+            // …and take the toolbar down now rather than on the release. Its
+            // commands are aimed at a selection this press is about to replace,
+            // and a menu that lingers under the finger through the whole press
+            // reads as the press having missed.
+            touch.hide_toolbar();
+            EventResponse::Ignored
+        }
+        WidgetEvent::PointerUp { button, .. } => {
+            if *button != PointerButton::Primary {
+                return EventResponse::Ignored;
+            }
+            // A hold fires from the gesture timer, so its release arrives here
+            // after the word is already selected. Placing a caret now would
+            // collapse it.
+            if touch.take_hold_consumed(ctx.pointer().id) {
+                return EventResponse::Ignored;
+            }
+            // A contact whose press a scrollable above claimed was panning.
+            // Nothing it did is a caret placement.
+            if !crate::data_views::release_completes_the_press(ctx) {
+                return EventResponse::Ignored;
+            }
+            let Some(window) = ctx.pointer_position() else {
+                return EventResponse::Ignored;
+            };
+            // …and a contact that travelled further than a tap of its kind may
+            // was panning *this* surface, which the predicate above cannot see:
+            // the surface is both the press's owner and the pan's claimant, so
+            // nothing was claimed elsewhere, and a coarse pointer's tap boundary
+            // is the node's whole rectangle.
+            let tap_slop = {
+                let st = state.borrow();
+                st.input_tokens.profile(ctx.pointer_kind()).tap_slop
+            };
+            if !touch.press_is_still_a_tap(ctx.pointer().id, window, tap_slop) {
+                return EventResponse::Ignored;
+            }
+            let hit = {
+                let st = state.borrow();
+                let local = super::touch::window_to_engine_local(&st, window);
+                hit_test::hit_test_at(&st.engine, local, 0.0, 0.0)
+            };
+            let Some(hit) = hit else {
+                return EventResponse::Ignored;
+            };
+            {
+                let mut st = state.borrow_mut();
+                st.clear_extra_carets();
+                st.cursor.set_position(hit.position, MoveMode::MoveAnchor);
+                st.cursor_affinity = hit.affinity;
+                st.preferred_x = None;
+            }
+            sync_cursor_signals(state);
+            super::keyboard::ensure_caret_visible(state);
+            super::keyboard::report_ime_cursor_area(state, ctx);
+            // A tap places a caret; it does not ask for a menu. The toolbar
+            // belongs to a deliberate selection — a hold, a multi-tap, or the
+            // end of a handle drag.
+            touch.raise(ctx, ToolbarIntent::Hide);
+            ctx.request_frame();
+            EventResponse::Ignored
+        }
+        _ => EventResponse::Ignored,
+    }
+}
+
+/// Select the word under `event` and raise the affordances — the touch hold.
+///
+/// The mouse refusal is
+/// [`TouchSelection::on_long_press`](teksilo_core::text_touch::TouchSelection::on_long_press)'s,
+/// not a second copy here: the gesture's own pointer is handed to it and it
+/// guards on that rather than on the context, which on a timer-recognised
+/// gesture used to answer for the wrong device entirely.
+///
+/// What stays here is the part core cannot do: the coordinate conversion. No
+/// sample is being dispatched, so `pointer_position` is `None`; the tap's own
+/// position is wrapper-local and the *surface* does not move mid-press, so
+/// `local + node_origin` is exact — the same arithmetic
+/// [`to_engine_local`] already does in the other direction.
+pub(super) fn handle_long_press(
+    state: &SharedState,
+    touch: &Rc<EditorTouch>,
+    event: &teksilo_core::gesture::TapEvent,
+    ctx: &mut EventContext,
+) -> EventResponse {
+    let window = {
+        let st = state.borrow();
+        Point::new(
+            event.position.x + st.node_origin.x,
+            event.position.y + st.node_origin.y,
+        )
+    };
+    if !touch.select_word_at(event.pointer, window, ctx) {
+        return EventResponse::Ignored;
+    }
+    touch.mark_hold_consumed(event.pointer.id);
+    ctx.request_frame();
+    EventResponse::Handled
 }
 
 /// Edge-proximity scroll velocity in px/s, ramped over a 20 px margin.

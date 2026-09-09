@@ -63,7 +63,9 @@ let handle = editor.handle();           // drive it from a toolbar / status bar
 ```
 
 `CodeEditor::read_only(doc)` is the same, minus the caret: navigation, selection,
-and copy only, `Role::Document`.
+and copy only, `Role::Document`. Its right-click menu and its touch selection
+toolbar therefore offer Copy and Select All and nothing that would change the
+text — see [Pointer input](#pointer-input-two-devices).
 
 ## Builders
 
@@ -101,7 +103,8 @@ is driven by injected configuration and is a single atomic undo step:
 - **Smart Tab / Shift+Tab** — soft or hard tabs; with a selection, indent /
   dedent every touched line.
 - **Ctrl+/** toggles the configured line comment on the caret's line or selection.
-- **Ctrl+D** duplicates the line; **Alt+↑ / Alt+↓** move it.
+- **Ctrl+D** duplicates the selection, or the caret's whole line when there is
+  none; **Alt+↑ / Alt+↓** move the line.
 - **Auto-close, type-over, and pair-backspace** for configured brackets;
   **bracket matching** publishes the caret's bracket and its partner as a
   reactive `Signal<Option<(usize, usize)>>` (via `handle.bracket_match()`) and
@@ -135,6 +138,107 @@ delete rather than removing more than was asked for.
 `Shift` extends the selection over any of them, and the policy filter is asked
 about the motion that actually runs — a `MoveWordLeft` veto bites on `⌥←`
 exactly as it bites on `Ctrl+←`.
+
+## Pointer input: two devices
+
+A **precise** pointer edits exactly as it always has, and that is a property this
+package tests rather than assumes: a press places the caret at the press, a drag
+selects what it crosses, `Alt`-click adds a caret, and a double or triple click
+selects the word or the line. Nothing a mouse does reaches any of the machinery
+below.
+
+A **direct** pointer — a finger, a pen — commits nothing on the press. The same
+contact is the opening sample of a *pan*, and a panning finger has to leave the
+caret and the selection exactly as it found them; no release-time test can rescue
+a caret already written on `PointerDown`, so the write itself moved to the
+release. Two conditions gate it, and both are needed:
+
+* the press was not claimed by a scrollable above
+  (`release_completes_the_press`), and
+* it travelled no further than a tap of its own kind may (18 dp for a finger).
+
+The second exists because the framework's tap boundary for a coarse pointer is
+the pressed node's **rectangle** — the right rule for a control, where the whole
+node is one target and a finger covers it, and the wrong one for a text surface,
+whose target is a character. An editor is also both the press's owner *and* the
+pan's claimant, so nothing is ever "claimed elsewhere": without the radius check
+a finger could pan a tall editor from the first line to the last and land a caret
+wherever it stopped.
+
+Two press-time commitments therefore have no direct-pointer form, each
+deliberately:
+
+| commitment | why not, and what replaces it |
+| --- | --- |
+| drag-select | a finger's drag pans; the range is chosen with the selection handles below |
+| `Alt`-click's extra caret | there is no `Alt` on a touch screen. `Ctrl+Alt+↑/↓` stays the route, and a hold **collapses** a multi-caret set, because a touch selection is one range |
+
+(The rich text editor gives up two more — picking selected text up to drag it, and
+grabbing a picture's resize grip. A source document has neither.)
+
+### Selecting with a finger
+
+A **hold** selects the word under the contact and raises the touch chrome:
+two 24 dp handles inside 44 dp targets, and a selection toolbar. Dragging a
+handle adjusts that end; dragging one past the other grows the range on the far
+side rather than collapsing it. Two details of the drag are worth knowing:
+
+* The sample is translated onto the **caret the handle marks**, not taken raw.
+  A handle's disc hangs off the line on purpose, so the fingertip does not cover
+  the character it is pointing at — and hit-testing the fingertip would resolve
+  onto the *next* line.
+* Dragging into the viewport's edge band **auto-scrolls**, so a selection can
+  grow past the visible text. The band is the shared
+  [`common::drag_autoscroll`](../crates/teksilo-widgets/src/common/drag_autoscroll.rs)
+  one every dragging view uses, which for a finger is 64 dp. It scrolls as the
+  contact *moves* through the band; a finger held perfectly still there does not
+  keep scrolling.
+
+The **toolbar** is the right-click menu's own rows — one builder, so a command
+cannot be offered by one surface and refused by the other. A command the surface
+will not honour is **omitted** rather than greyed, which is what every platform's
+touch toolbar does, and the offer also narrows with the *state*: Cut and Copy need
+a selection, Paste needs an editable surface, and Select All is offered only while
+nothing is selected. So a hold on an editable surface puts up Cut / Copy / Paste,
+and a hold on a read-only one — a viewer, a `LogView` — puts up Copy alone. A tap
+on a read-only surface raises **no** handle at all: there is no caret to place.
+
+The chrome is retired by a cursor's press anywhere in the surface, by focus
+leaving, and by a keystroke that moves the caret. The affordance band is exempt
+from the framework's outside-press dismissal — every caret-moving tap is outside
+a handle — so those are the surface's own job.
+
+Full contract, including the magnifier and the accessibility of a handle:
+[Touch text editing](text-touch-editing.md).
+
+### The right-click menu
+
+Cut / Copy / Paste / Select All, built fresh on each right-click so every row's
+enabled state reflects the live selection and the live policy. All three faces
+gained it in the same package that gave them a finger: they had **none** before,
+so the only route to the clipboard was a chord — and `LogView`, where copying is
+the only thing a reader can do at all, had only `Ctrl+C`.
+
+Each row asks the predicate the surface's own chord asks, so the menu can neither
+offer a Cut the editor refuses nor refuse a Copy it allows. Cut is offered with no
+selection, because it takes the caret's whole line — the convention `Ctrl+X`
+already followed here. Replace the menu with `context_menu(factory)` or suppress
+it with `default_context_menu(false)`; neither touches the touch toolbar, which is
+raised by a selection rather than by a button a finger does not have.
+
+### The on-screen keyboard
+
+Two things follow a caret placed by a **pointer**, and neither did before:
+
+* The **IME candidate area** is reported, as it already was for every caret move
+  made by a key. Without it the candidate list — and the suggestion strip an
+  on-screen keyboard draws — stays beside wherever the caret was last typed to.
+* A viewport that gets **smaller** re-reveals the caret. The keyboard rising under
+  a focused editor is the case that makes this a correctness matter rather than a
+  nicety. Growing the viewport deliberately does *not* chase the caret: growth
+  reveals more text and never pushes it out, and a reader scrolled away would
+  otherwise be yanked back every time a window edge moved. A `LogView` is exempt
+  — it has no caret, and pulling its offset would fight its own follow-tail rule.
 
 ## Completion
 
@@ -185,8 +289,11 @@ navigation on every platform, and in the gutter, which is hidden from AT.
 
 Editable surfaces report `Role::MultilineTextInput` and advertise `SetValue` /
 `ReplaceSelectedText` / `SetTextSelection`; read-only ones report `Role::Document`
-(not `Role::Code`, which `accesskit_consumer` excludes from text-range support,
-so a caret could not be tracked through it) and advertise `SetTextSelection` only.
+(not `Role::Code`, which `accesskit_consumer` excludes from text-range support, so
+a caret could not be tracked through it) and advertise, of those three,
+`SetTextSelection` alone. Both also advertise `Focus` and `ScrollIntoView`, which
+are not text edits and are offered whatever the policy — the contrast above is
+about the actions that *write*.
 An AT-initiated `SetTextSelection` resolves back to a document cursor position
 through a per-run synthetic-node map. The editor walks the whole bounded document
 (cached); the log walks only its visible window — see [Log view](log-view.md).
@@ -208,7 +315,9 @@ The core is fully headless — no GPU, no display. Tests run against the private
 engine's fixed metrics and verify the editor's own logic (viewport adoption,
 caret bookkeeping, event classification, policy gating, the a11y walk), not
 shaping, which is `text-typeset`'s own suite's job. See
-[`code_editor/tests.rs`](../crates/teksilo-widgets/src/code_editor/tests.rs).
+[`code_editor/tests.rs`](../crates/teksilo-widgets/src/code_editor/tests.rs) and,
+for the pointer / menu / touch behaviour above — both devices, all three faces —
+[`code_editor/touch_tests.rs`](../crates/teksilo-widgets/src/code_editor/touch_tests.rs).
 
 ## Demos
 

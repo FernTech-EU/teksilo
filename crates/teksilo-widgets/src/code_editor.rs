@@ -40,6 +40,7 @@ mod a11y;
 mod clipboard;
 mod completion;
 mod config;
+mod context_menu;
 mod frame_loop;
 mod gutter;
 mod keyboard;
@@ -49,10 +50,13 @@ mod mouse;
 mod policy;
 mod semantics;
 mod state;
+mod touch;
 mod widget;
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod touch_tests;
 
 pub use completion::{CompletionContext, CompletionItem, CompletionKind};
 pub use config::{BracketPair, COMMON_BRACKETS, CodeConfig, IndentStyle};
@@ -269,6 +273,16 @@ impl Widget for CodeEditorBody {
             st.engine.layout_full(&flow);
             st.needs_full_layout = false;
             st.content_dirty = true;
+        }
+
+        // The viewport got smaller since the last frame — a window resize, a
+        // pane opening, the on-screen keyboard rising under a focused editor —
+        // and the caret may now be outside it. `sync_viewport` recorded the
+        // shrink (it is the only place that sees both sizes); here, with the
+        // relayout it forced already run, is the earliest point the reveal can
+        // be computed against real geometry.
+        if std::mem::take(&mut st.pending_caret_reveal) {
+            super::code_editor::keyboard::ensure_caret_visible_locked(&mut st);
         }
 
         let caret_on = match st.policy.caret_policy {

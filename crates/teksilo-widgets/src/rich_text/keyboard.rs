@@ -1168,6 +1168,13 @@ fn push_pending_chars(state: &SharedState, ctx: &mut EventContext, text: &str) -
 /// caret would be undone on the next tick.
 fn ensure_caret_visible(state: &SharedState) {
     let mut st = state.borrow_mut();
+    ensure_caret_visible_locked(&mut st);
+}
+
+/// [`ensure_caret_visible`] for a caller that already holds the borrow — the
+/// body's paint, which reveals the caret again after a viewport **shrink** and
+/// has the state open around the relayout that shrink forced.
+pub(super) fn ensure_caret_visible_locked(st: &mut EditorState) {
     if !st.engine.has_full_layout() {
         return;
     }
@@ -1189,7 +1196,7 @@ fn ensure_caret_visible(state: &SharedState) {
     // Horizontal caret visibility — matches godot's `ensure_caret_h_visible`.
     // Margin is 20 logical pixels on each side so the caret doesn't sit flush
     // against the viewport edge.
-    ensure_caret_h_visible_locked(&mut st);
+    ensure_caret_h_visible_locked(st);
 }
 
 /// Horizontal caret-visibility. Factored out so code paths that

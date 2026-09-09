@@ -55,6 +55,7 @@ use super::{CodeEditorHandle, adopt_shared_typesetter, body_for, construct};
 use crate::common::editor_runtime::CaretPolicy;
 use crate::common::scroll::OverscrollBehavior;
 use crate::rich_text::ScrollPolicy;
+use crate::rich_text::touch_mount::ToolbarIntent;
 use crate::scroll_bar::{ScrollBar, ScrollBarOrientation, ScrollBarVariant};
 
 /// Overlay scrollbar thickness, matching the rich-text editor and `ScrollArea`.
@@ -67,7 +68,7 @@ const SCROLLBAR_THICKNESS: f32 = 12.0;
 /// (view + select + copy). Every code affordance is injected configuration, not
 /// a built-in language — see [`CodeConfig`].
 pub struct CodeEditor {
-    state: SharedState,
+    pub(super) state: SharedState,
     v_scroll_policy: ScrollPolicy,
     h_scroll_policy: ScrollPolicy,
     overscroll_behavior: OverscrollBehavior,
@@ -87,6 +88,19 @@ pub struct CodeEditor {
     // Gutter width, published by `place_children` so `paint` can offset the
     // bracket cells into body space.
     gutter_width: Rc<Cell<f32>>,
+    /// The touch-selection mount: the controller, its two overlays, and the
+    /// host intent behind the selection toolbar.
+    ///
+    /// Minted with the widget rather than in `build()` so the ids and the
+    /// toolbar intent survive a rebuild. Inert for a mouse: every entry point
+    /// begins by asking whether the pointer is direct.
+    pub(super) touch: Rc<crate::rich_text::touch_mount::EditorTouch>,
+    /// Install the built-in right-click menu during `build()`. Default `true`;
+    /// [`default_context_menu`](CodeEditor::default_context_menu) turns it off.
+    default_context_menu_enabled: bool,
+    /// A replacement factory, taken (`Option::take`) during `build()` because a
+    /// `Box<dyn Fn>` is not `Clone`.
+    custom_context_menu: Option<super::context_menu::CodeContextMenuFactory>,
 }
 
 impl std::fmt::Debug for CodeEditor {
@@ -126,6 +140,7 @@ impl CodeEditor {
     }
 
     fn from_state(state: SharedState) -> Self {
+        let touch = super::touch::mount_for(state.clone());
         Self {
             state,
             v_scroll_policy: ScrollPolicy::Auto,
@@ -141,10 +156,46 @@ impl CodeEditor {
             v_scrollbar_bounds: Rc::new(Cell::new(Rect::ZERO)),
             h_scrollbar_bounds: Rc::new(Cell::new(Rect::ZERO)),
             gutter_width: Rc::new(Cell::new(0.0)),
+            touch,
+            default_context_menu_enabled: true,
+            custom_context_menu: None,
         }
     }
 
     // --- Shared builder methods ------------------------------------------
+
+    /// Replace the built-in right-click menu with `factory`, called on each
+    /// right-click with the **window** position of the click. Returning `None`
+    /// shows no menu.
+    ///
+    /// A replacement is responsible for repositioning the caret if it wants the
+    /// platform convention — the built-in menu does it through
+    /// `context_menu::factory`.
+    pub fn context_menu(
+        mut self,
+        factory: impl Fn(
+            teksilo_canvas::Point,
+            &mut teksilo_core::widget::EventContext,
+        ) -> Option<Box<dyn teksilo_core::widget::Widget>>
+        + 'static,
+    ) -> Self {
+        self.custom_context_menu = Some(Box::new(factory));
+        self
+    }
+
+    /// Whether to install the built-in Cut / Copy / Paste / Select All menu
+    /// (default `true`). `false` lets a right-click bubble past the editor, so an
+    /// application can render its own menu from outside; a factory installed with
+    /// [`context_menu`](Self::context_menu) wins over this either way.
+    ///
+    /// The **touch** selection toolbar is *not* affected. It is raised by the
+    /// controller rather than by a right-click, its rows are the same four
+    /// commands, and a surface with no menu still has to be usable by a finger —
+    /// which has no second button and no chord.
+    pub fn default_context_menu(mut self, enabled: bool) -> Self {
+        self.default_context_menu_enabled = enabled;
+        self
+    }
 
     /// Set the line-wrap mode. `CodeEditor` defaults to `WrapMode::None` (source
     /// lines must not fold, or the gutter's one-number-per-line correspondence
@@ -412,6 +463,11 @@ impl Widget for CodeEditor {
             st.frame_request = Some(ctx.frame_request_handle());
             st.frame_wake_at = Some(ctx.wake_at_handle());
             st.self_id = Some(ctx.self_id());
+            // The density ladder the pointer geometry reads. A snapshot, not a
+            // per-event read: `EventContext` exposes no theme, and
+            // `set_input_density` marks at `BindingLevel::Rebuild`, so this
+            // refreshes with the density.
+            st.input_tokens = ctx.theme().input;
         }
         // Same dormancy discipline as `RichTextEditor` / `TextInputField`: a
         // code or plain-text editor parked in a non-selected Switcher branch
@@ -513,6 +569,7 @@ impl Widget for CodeEditor {
             .cursor(CursorIcon::Text)
             .on_focus({
                 let state = self.state.clone();
+                let touch = self.touch.clone();
                 move |gained, ctx| {
                     {
                         let mut st = state.borrow_mut();
@@ -530,6 +587,10 @@ impl Widget for CodeEditor {
                         // A popup that outlived its editor's focus would float
                         // detached — close it on blur.
                         completion::close(&state, ctx);
+                        // The affordance band is exempt from outside-press
+                        // dismissal — every caret-moving tap is outside a handle
+                        // — so retirement on focus loss is the host's.
+                        touch.dismiss();
                         let mut st = state.borrow_mut();
                         st.last_ime_area = None;
                         st.last_chase_pos = None;
@@ -539,30 +600,83 @@ impl Widget for CodeEditor {
             })
             .on_pointer_event({
                 let state = self.state.clone();
+                let touch = self.touch.clone();
                 let v_sb = self.v_scrollbar_bounds.clone();
                 let h_sb = self.h_scrollbar_bounds.clone();
                 move |event, ctx| {
-                    super::mouse::handle_pointer_event(&state, &v_sb, &h_sb, event, ctx)
+                    super::mouse::handle_pointer_event(&state, &touch, &v_sb, &h_sb, event, ctx)
+                }
+            })
+            // A hold selects the word under the finger. Attaching this
+            // **withdraws** the tree-owned long-press route (`touch_route`
+            // rule 1: a widget's own `on_long_press` wins), and the selection
+            // toolbar the mount raises is what replaces it — offering the same
+            // commands, from the same rows, as the right-click menu below.
+            .on_long_press({
+                let state = self.state.clone();
+                let touch = self.touch.clone();
+                move |event, ctx| {
+                    super::mouse::handle_long_press(&state, &touch, event, ctx);
                 }
             })
             .on_key({
                 let state = self.state.clone();
-                move |event, ctx| super::keyboard::handle_key(&state, event, ctx)
+                let touch = self.touch.clone();
+                move |event, ctx| {
+                    let response = super::keyboard::handle_key(&state, event, ctx);
+                    // A keystroke moves the caret and edits the text, neither of
+                    // which the controller made — so the handles it published
+                    // are pointing at where the text used to be. `refresh` is a
+                    // no-op until something has been raised.
+                    touch.refresh(ctx, ToolbarIntent::Hide);
+                    response
+                }
             })
             .on_double_tap({
                 let state = self.state.clone();
-                move |event, ctx| super::mouse::handle_double_tap(&state, event.position, ctx)
+                let touch = self.touch.clone();
+                move |event, ctx| {
+                    super::mouse::handle_double_tap(&state, event.position, ctx);
+                    // A finger can double-tap too, and the selection it just
+                    // made is one the controller did not make.
+                    if event.pointer.kind.is_direct() {
+                        touch.raise(ctx, ToolbarIntent::Show);
+                    }
+                }
             })
             .on_triple_tap({
                 let state = self.state.clone();
-                move |event, ctx| super::mouse::handle_triple_tap(&state, event.position, ctx)
+                let touch = self.touch.clone();
+                move |event, ctx| {
+                    super::mouse::handle_triple_tap(&state, event.position, ctx);
+                    if event.pointer.kind.is_direct() {
+                        touch.raise(ctx, ToolbarIntent::Show);
+                    }
+                }
             })
             .on_access_action_request({
                 let state = self.state.clone();
+                let touch = self.touch.clone();
                 move |action, target, data, ctx| {
-                    super::a11y::handle_access_action(&state, action, target, data, ctx)
+                    let response =
+                        super::a11y::handle_access_action(&state, action, target, data, ctx);
+                    // An assistive client's `SetTextSelection` / `SetValue` /
+                    // `ReplaceSelectedText` moves the selection without going
+                    // through the controller, so raised handles would be left
+                    // marking the old range.
+                    touch.refresh(ctx, ToolbarIntent::Keep);
+                    response
                 }
             });
+        // The right-click menu this editor never had. Built fresh per click so
+        // each row's enabled state reflects the live selection and policy.
+        if let Some(factory) = super::context_menu::resolve_factory(
+            self.custom_context_menu.take(),
+            self.default_context_menu_enabled,
+            self.state.clone(),
+        ) {
+            handlers = handlers.context_menu(move |pos, ctx| factory(pos, ctx));
+        }
         // Scroll: the wheel path this surface always had, a finger's pan, and
         // the claim that puts it on a pan's claimant chain — all from
         // `common::text_scroll`, which the three text surfaces share.
@@ -593,6 +707,12 @@ impl Widget for CodeEditor {
         }
 
         ctx.apply_self_handlers(handlers);
+
+        // The touch-selection overlays: the affordance layer (handles + lens)
+        // and the selection toolbar, both detached content owned by this build.
+        // Inert until a finger raises them.
+        let self_id = ctx.self_id();
+        self.touch.build(ctx, self_id);
 
         // Body — the pure-paint leaf. Always greedy: the wrapper does intrinsic
         // sizing (min/max_lines) and hands the body its final rect.
@@ -899,7 +1019,7 @@ impl Widget for CodeEditor {
 /// drift. Construct with [`PlainTextEditor::new`] / [`PlainTextEditor::read_only`].
 #[derive(Debug)]
 pub struct PlainTextEditor {
-    inner: Option<CodeEditor>,
+    pub(super) inner: Option<CodeEditor>,
     inner_id: Option<WidgetId>,
 }
 

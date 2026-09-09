@@ -60,6 +60,7 @@ use super::state::{CodeEditorState, SharedState};
 use super::{adopt_shared_typesetter, construct};
 use crate::common::scroll::OverscrollBehavior;
 use crate::rich_text::ScrollPolicy;
+use crate::rich_text::touch_mount::ToolbarIntent;
 use crate::scroll_bar::{ScrollBar, ScrollBarOrientation, ScrollBarVariant};
 
 /// Overlay scrollbar thickness, matching the code editor and `ScrollArea`.
@@ -71,7 +72,7 @@ const SCROLLBAR_THICKNESS: f32 = 12.0;
 /// [`handle`](LogView::handle), and add it to the tree. It owns an internal
 /// document; the application never touches one directly, it only appends lines.
 pub struct LogView {
-    state: SharedState,
+    pub(super) state: SharedState,
     v_scroll_policy: ScrollPolicy,
     h_scroll_policy: ScrollPolicy,
     overscroll_behavior: OverscrollBehavior,
@@ -81,6 +82,14 @@ pub struct LogView {
     h_scrollbar_id: Option<WidgetId>,
     v_scrollbar_bounds: Rc<Cell<Rect>>,
     h_scrollbar_bounds: Rc<Cell<Rect>>,
+    /// The touch-selection mount. A read-only surface, so its toolbar is Copy
+    /// and Select All — which until now had no route at all but `Ctrl+C` on a
+    /// device that has no `Ctrl`.
+    pub(super) touch: Rc<crate::rich_text::touch_mount::EditorTouch>,
+    /// Install the built-in right-click menu during `build()`. Default `true`.
+    default_context_menu_enabled: bool,
+    /// A replacement factory, taken during `build()`.
+    custom_context_menu: Option<super::context_menu::CodeContextMenuFactory>,
 }
 
 impl std::fmt::Debug for LogView {
@@ -106,6 +115,7 @@ impl LogView {
             teksilo_text::WrapMode::None,
         );
         state.borrow_mut().log = Some(LogStreamState::new());
+        let touch = super::touch::mount_for(state.clone());
         Self {
             state,
             v_scroll_policy: ScrollPolicy::Auto,
@@ -116,7 +126,36 @@ impl LogView {
             h_scrollbar_id: None,
             v_scrollbar_bounds: Rc::new(Cell::new(Rect::ZERO)),
             h_scrollbar_bounds: Rc::new(Cell::new(Rect::ZERO)),
+            touch,
+            default_context_menu_enabled: true,
+            custom_context_menu: None,
         }
+    }
+
+    /// Replace the built-in right-click menu with `factory`, called on each
+    /// right-click with the **window** position of the click. Returning `None`
+    /// shows no menu.
+    pub fn context_menu(
+        mut self,
+        factory: impl Fn(
+            teksilo_canvas::Point,
+            &mut teksilo_core::widget::EventContext,
+        ) -> Option<Box<dyn teksilo_core::widget::Widget>>
+        + 'static,
+    ) -> Self {
+        self.custom_context_menu = Some(Box::new(factory));
+        self
+    }
+
+    /// Whether to install the built-in Copy / Select All menu (default `true`).
+    /// `false` lets a right-click bubble past the view.
+    ///
+    /// The **touch** selection toolbar is *not* affected: it is raised by the
+    /// controller rather than by a right-click, and a log a finger cannot copy
+    /// from is a log a finger cannot use.
+    pub fn default_context_menu(mut self, enabled: bool) -> Self {
+        self.default_context_menu_enabled = enabled;
+        self
     }
 
     /// Whether new lines stick the view to the bottom when it is already there
@@ -309,38 +348,87 @@ impl Widget for LogView {
             .cursor(CursorIcon::Text)
             .on_focus({
                 let state = self.state.clone();
+                let touch = self.touch.clone();
                 move |gained, ctx| {
                     state.borrow_mut().focus_signal.set_if_changed(gained);
                     state.borrow_mut().has_focus = gained;
+                    if !gained {
+                        // The affordance band is exempt from outside-press
+                        // dismissal, so retirement on focus loss is the host's.
+                        touch.dismiss();
+                    }
                     ctx.request_frame();
                 }
             })
             .on_pointer_event({
                 let state = self.state.clone();
+                let touch = self.touch.clone();
                 let v_sb = self.v_scrollbar_bounds.clone();
                 let h_sb = self.h_scrollbar_bounds.clone();
                 move |event, ctx| {
-                    super::mouse::handle_pointer_event(&state, &v_sb, &h_sb, event, ctx)
+                    super::mouse::handle_pointer_event(&state, &touch, &v_sb, &h_sb, event, ctx)
+                }
+            })
+            // A hold selects the word under the finger and raises the toolbar —
+            // which on a read-only log is Copy and Select All. Attaching this
+            // withdraws the tree-owned long-press route, and the toolbar is what
+            // replaces it.
+            .on_long_press({
+                let state = self.state.clone();
+                let touch = self.touch.clone();
+                move |event, ctx| {
+                    super::mouse::handle_long_press(&state, &touch, event, ctx);
                 }
             })
             .on_key({
                 let state = self.state.clone();
-                move |event, ctx| log_stream::handle_log_key(&state, event, ctx)
+                let touch = self.touch.clone();
+                move |event, ctx| {
+                    let response = log_stream::handle_log_key(&state, event, ctx);
+                    // Select All and the scroll keys both move what the handles
+                    // were marking.
+                    touch.refresh(ctx, ToolbarIntent::Keep);
+                    response
+                }
             })
             .on_double_tap({
                 let state = self.state.clone();
-                move |event, ctx| super::mouse::handle_double_tap(&state, event.position, ctx)
+                let touch = self.touch.clone();
+                move |event, ctx| {
+                    super::mouse::handle_double_tap(&state, event.position, ctx);
+                    if event.pointer.kind.is_direct() {
+                        touch.raise(ctx, ToolbarIntent::Show);
+                    }
+                }
             })
             .on_triple_tap({
                 let state = self.state.clone();
-                move |event, ctx| super::mouse::handle_triple_tap(&state, event.position, ctx)
+                let touch = self.touch.clone();
+                move |event, ctx| {
+                    super::mouse::handle_triple_tap(&state, event.position, ctx);
+                    if event.pointer.kind.is_direct() {
+                        touch.raise(ctx, ToolbarIntent::Show);
+                    }
+                }
             })
             .on_access_action_request({
                 let state = self.state.clone();
+                let touch = self.touch.clone();
                 move |action, target, data, ctx| {
-                    super::a11y::handle_access_action(&state, action, target, data, ctx)
+                    let response =
+                        super::a11y::handle_access_action(&state, action, target, data, ctx);
+                    touch.refresh(ctx, ToolbarIntent::Keep);
+                    response
                 }
             });
+        // The right-click menu this view never had — Copy and Select All.
+        if let Some(factory) = super::context_menu::resolve_factory(
+            self.custom_context_menu.take(),
+            self.default_context_menu_enabled,
+            self.state.clone(),
+        ) {
+            handlers = handlers.context_menu(move |pos, ctx| factory(pos, ctx));
+        }
         // Scroll: the wheel path this surface always had, a finger's pan, and
         // the claim that puts it on a pan's claimant chain — all from
         // `common::text_scroll`, which the three text surfaces share.
@@ -371,6 +459,12 @@ impl Widget for LogView {
         }
 
         ctx.apply_self_handlers(handlers);
+
+        // The touch-selection overlays: the affordance layer (handles + lens)
+        // and the selection toolbar, both detached content owned by this build.
+        // Inert until a finger raises them.
+        let self_id = ctx.self_id();
+        self.touch.build(ctx, self_id);
 
         let body = log_body_for(&self.state);
         let body_id = ctx.add(body);

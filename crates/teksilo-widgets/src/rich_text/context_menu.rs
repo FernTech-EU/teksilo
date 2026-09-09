@@ -149,37 +149,11 @@ fn build_menu(state: SharedState) -> MenuList {
     // policy would leave a working Cut in the menu of an editor whose Ctrl+X is
     // blocked.
     if policy.clipboard_policy.allows_cut() && policy.command_filter.accepts(EditCommandKind::Cut) {
-        let state_for_cut = state.clone();
-        list = list.item(
-            MenuItem::new(tr_widget!(menu_cut()))
-                .shortcut_label(format_keystroke(KeyStroke::command(Key::X)))
-                .enabled(has_selection)
-                .on_activate_fn(move |evt_ctx| {
-                    let mut st = state_for_cut.borrow_mut();
-                    rt_clipboard::cut(&mut st, evt_ctx);
-                    drop(st);
-                    super::sync_cursor_signals(&state_for_cut);
-                    evt_ctx.request_frame();
-                    evt_ctx.send_intent(Intent::new(INTENT_CUT));
-                }),
-        );
+        list = list.item(row_cut(&state).enabled(has_selection));
     }
 
     // --- Copy ----------------------------------------------------
-    {
-        let state_for_copy = state.clone();
-        list = list.item(
-            MenuItem::new(tr_widget!(menu_copy()))
-                .shortcut_label(format_keystroke(KeyStroke::command(Key::C)))
-                .enabled(has_selection)
-                .on_activate_fn(move |evt_ctx| {
-                    let mut st = state_for_copy.borrow_mut();
-                    rt_clipboard::copy(&mut st, evt_ctx);
-                    drop(st);
-                    evt_ctx.send_intent(Intent::new(INTENT_COPY));
-                }),
-        );
-    }
+    list = list.item(row_copy(&state).enabled(has_selection));
 
     // --- Paste ---------------------------------------------------
     // Availability: at factory-call time, probe the clipboard handle
@@ -190,19 +164,7 @@ fn build_menu(state: SharedState) -> MenuList {
     // itself silently no-ops if the clipboard is empty (matches the
     // existing Ctrl+V behaviour).
     if policy.clipboard_policy.allows_paste() {
-        let state_for_paste = state.clone();
-        list = list.item(
-            MenuItem::new(tr_widget!(menu_paste()))
-                .shortcut_label(format_keystroke(KeyStroke::command(Key::V)))
-                .on_activate_fn(move |evt_ctx| {
-                    let mut st = state_for_paste.borrow_mut();
-                    rt_clipboard::paste(&mut st, evt_ctx);
-                    drop(st);
-                    super::sync_cursor_signals(&state_for_paste);
-                    evt_ctx.request_frame();
-                    evt_ctx.send_intent(Intent::new(INTENT_PASTE));
-                }),
-        );
+        list = list.item(row_paste(&state));
     }
 
     // --- Paste Unformatted ---------------------------------------
@@ -259,28 +221,135 @@ fn build_menu(state: SharedState) -> MenuList {
     }
 
     // --- Select All ----------------------------------------------
-    {
-        let state_for_sa = state.clone();
-        list = list.item(
-            MenuItem::new(tr_widget!(menu_select_all()))
-                .shortcut_label(format_keystroke(KeyStroke::command(Key::A)))
-                .enabled(doc_non_empty)
-                .on_activate_fn(move |evt_ctx| {
-                    {
-                        let mut st = state_for_sa.borrow_mut();
-                        st.cursor
-                            .select(teksilo_text::text_document::SelectionType::Document);
-                        st.select_all_level = 0;
-                        st.select_all_anchor_cell = None;
-                    }
-                    super::sync_cursor_signals(&state_for_sa);
-                    evt_ctx.request_frame();
-                    evt_ctx.send_intent(Intent::new(INTENT_SELECT_ALL));
-                }),
-        );
-    }
+    list = list.item(row_select_all(&state).enabled(doc_non_empty));
 
     list
+}
+
+// ---------------------------------------------------------------------------
+// The four rows, built once and used twice
+// ---------------------------------------------------------------------------
+//
+// The right-click menu and the touch **selection toolbar** offer the same four
+// commands, so they are the same four rows. Each builder returns the row without
+// an `enabled` gate: the menu adds one (a greyed row is the desktop convention),
+// while the toolbar *omits* a command it cannot offer (which is what every
+// platform's touch toolbar does) through `MenuList::item_when`. See
+// `docs/text-touch-editing.md`.
+
+/// Cut the selection.
+fn row_cut(state: &SharedState) -> MenuItem {
+    let state = state.clone();
+    MenuItem::new(tr_widget!(menu_cut()))
+        .shortcut_label(format_keystroke(KeyStroke::command(Key::X)))
+        .on_activate_fn(move |evt_ctx| {
+            let mut st = state.borrow_mut();
+            rt_clipboard::cut(&mut st, evt_ctx);
+            drop(st);
+            super::sync_cursor_signals(&state);
+            evt_ctx.request_frame();
+            evt_ctx.send_intent(Intent::new(INTENT_CUT));
+        })
+}
+
+/// Copy the selection.
+fn row_copy(state: &SharedState) -> MenuItem {
+    let state = state.clone();
+    MenuItem::new(tr_widget!(menu_copy()))
+        .shortcut_label(format_keystroke(KeyStroke::command(Key::C)))
+        .on_activate_fn(move |evt_ctx| {
+            let mut st = state.borrow_mut();
+            rt_clipboard::copy(&mut st, evt_ctx);
+            drop(st);
+            evt_ctx.send_intent(Intent::new(INTENT_COPY));
+        })
+}
+
+/// Paste at the caret.
+fn row_paste(state: &SharedState) -> MenuItem {
+    let state = state.clone();
+    MenuItem::new(tr_widget!(menu_paste()))
+        .shortcut_label(format_keystroke(KeyStroke::command(Key::V)))
+        .on_activate_fn(move |evt_ctx| {
+            let mut st = state.borrow_mut();
+            rt_clipboard::paste(&mut st, evt_ctx);
+            drop(st);
+            super::sync_cursor_signals(&state);
+            evt_ctx.request_frame();
+            evt_ctx.send_intent(Intent::new(INTENT_PASTE));
+        })
+}
+
+/// Select the whole document.
+fn row_select_all(state: &SharedState) -> MenuItem {
+    let state = state.clone();
+    MenuItem::new(tr_widget!(menu_select_all()))
+        .shortcut_label(format_keystroke(KeyStroke::command(Key::A)))
+        .on_activate_fn(move |evt_ctx| {
+            {
+                let mut st = state.borrow_mut();
+                st.cursor
+                    .select(teksilo_text::text_document::SelectionType::Document);
+                st.select_all_level = 0;
+                st.select_all_anchor_cell = None;
+            }
+            super::sync_cursor_signals(&state);
+            evt_ctx.request_frame();
+            evt_ctx.send_intent(Intent::new(INTENT_SELECT_ALL));
+        })
+}
+
+/// The selection toolbar a finger raises: the same four rows, each shown only
+/// while the controller says the surface will honour it **and** this editor's
+/// own policy allows it.
+///
+/// Built once per `build()` rather than per raise, because it is overlay content
+/// and an `EventContext` cannot add widgets. Reactive visibility does the work a
+/// fresh build would: the rows are gated on the controller's published
+/// [`ClipboardActions`](teksilo_core::text_touch::ClipboardActions) — derived
+/// from the surface's own `is_editable` / `allows_copy` / selection — **and** on
+/// the live `PolicyBundle`, which a host may swap on a mounted editor. The
+/// controller cannot see the second: `TextHitSource` reports whether copying is
+/// allowed, but not whether *this* editor's command filter has vetoed Cut or its
+/// clipboard policy has withdrawn Paste.
+pub(super) fn selection_toolbar(
+    state: SharedState,
+    affordances: teksilo_core::text_touch::TextAffordances,
+) -> Box<dyn Widget> {
+    use teksilo_core::text_touch::TextAction;
+    let offers = |action: TextAction, allowed: fn(&PolicyBundle) -> bool| {
+        let aff = affordances.clone();
+        let state = state.clone();
+        affordances.version_signal().map(move |_| {
+            allowed(&state.borrow().policy)
+                && aff.toolbar().is_some_and(|t| t.actions.contains(&action))
+        })
+    };
+    Box::new(
+        MenuList::new()
+            .item_when(
+                row_cut(&state),
+                offers(TextAction::Cut, |p| {
+                    p.clipboard_policy.allows_cut()
+                        && p.command_filter.accepts(EditCommandKind::Cut)
+                }),
+            )
+            .item_when(
+                row_copy(&state),
+                offers(TextAction::Copy, |p| {
+                    p.clipboard_policy.allows_copy()
+                        && p.command_filter.accepts(EditCommandKind::Copy)
+                }),
+            )
+            .item_when(
+                row_paste(&state),
+                offers(TextAction::Paste, |p| p.clipboard_policy.allows_paste()),
+            )
+            .item_when(
+                row_select_all(&state),
+                offers(TextAction::SelectAll, |_| true),
+            ),
+    )
 }
 
 /// Resolve which factory (if any) the editor should install for its

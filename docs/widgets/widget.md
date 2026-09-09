@@ -35,7 +35,7 @@ surface's own boundary. See `docs/kinetic-scrolling.md` §10.1.
 
 ## Builder methods at a glance
 
-`read_only`, `wrap_mode`, `v_scroll_policy`, `h_scroll_policy`, `overscroll_behavior`, `window_to_clip`, `min_lines`, `max_lines`, `font_family`, `font_size_scale`, `follow_text_scale`, `on_change`, `background`, `text_color`, `caret_color`, `selection_color`, `gutter`, `current_line_highlight`, `indent_style`, `tab_width`, `use_soft_tabs`, `auto_indent`, `bracket_pairs`, `auto_close_brackets`, `bracket_matching`, `line_comment`, `completion_provider`, `auto_complete`, `handle`
+`read_only`, `context_menu`, `default_context_menu`, `wrap_mode`, `v_scroll_policy`, `h_scroll_policy`, `overscroll_behavior`, `window_to_clip`, `min_lines`, `max_lines`, `font_family`, `font_size_scale`, `follow_text_scale`, `on_change`, `background`, `text_color`, `caret_color`, `selection_color`, `gutter`, `current_line_highlight`, `indent_style`, `tab_width`, `use_soft_tabs`, `auto_indent`, `bracket_pairs`, `auto_close_brackets`, `bracket_matching`, `line_comment`, `completion_provider`, `auto_complete`, `handle`
 
 ## API reference
 
@@ -67,6 +67,28 @@ guesses a language.
 
 A read-only code viewer bound to `document`: no caret, navigation and
 copy only, `Role::Document`. Still gets the gutter and syntax colours.
+
+#### `pub fn context_menu( mut self, factory: impl Fn( teksilo_canvas::Point, &mut teksilo_core::widget::EventContext, ) -> Option<Box<dyn teksilo_core::widget::Widget>> + 'static, ) -> Self`
+
+Replace the built-in right-click menu with `factory`, called on each
+right-click with the **window** position of the click. Returning `None`
+shows no menu.
+
+A replacement is responsible for repositioning the caret if it wants the
+platform convention — the built-in menu does it through
+`context_menu::factory`.
+
+#### `pub fn default_context_menu(mut self, enabled: bool) -> Self`
+
+Whether to install the built-in Cut / Copy / Paste / Select All menu
+(default `true`). `false` lets a right-click bubble past the editor, so an
+application can render its own menu from outside; a factory installed with
+`context_menu` wins over this either way.
+
+The **touch** selection toolbar is *not* affected. It is raised by the
+controller rather than by a right-click, its rows are the same four
+commands, and a surface with no menu still has to be usable by a finger —
+which has no second button and no chord.
 
 #### `pub fn wrap_mode(self, mode: WrapMode) -> Self`
 

@@ -193,19 +193,29 @@ impl Widget for CodeGutter {
         // from the line each labels.
         let right_edge = bounds.x + bounds.width - gutter_pad_trailing(&ctx.theme.input);
 
+        // The measuring backend, resolved **before** the clip is pushed.
+        //
+        // This used to be a per-line `match` with a bare `return` in its `None`
+        // arm — an early return from inside the clip scope, which left the frame
+        // carrying a `SetClip` with no `ClearClip` after it. Every draw the rest
+        // of the tree emitted afterwards was then clipped to the gutter, and
+        // `RenderFrame::debug_validate_stacks` panics on the imbalance. It went
+        // unnoticed because a windowed app always has a backend and the arm is
+        // unreachable there; a headless render has none, and the *first* frame
+        // with a visible line reached it.
+        let Some(backend) = canvas.text_backend().cloned() else {
+            return;
+        };
+
         canvas.set_clip(bounds);
         for line in first..last {
             let y = line as f32 * line_h - scroll_y + bounds.y;
             let label = (line + 1).to_string();
 
-            let text_w = match canvas.text_backend() {
-                Some(b) => {
-                    b.borrow_mut()
-                        .layout_single_line(&label, &style, None)
-                        .width
-                }
-                None => return,
-            };
+            let text_w = backend
+                .borrow_mut()
+                .layout_single_line(&label, &style, None)
+                .width;
             let slot = Rect::new(right_edge - text_w, y, text_w, line_h);
 
             canvas.draw_text(

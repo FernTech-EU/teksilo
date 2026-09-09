@@ -136,6 +136,33 @@ pub(crate) struct CodeEditorState {
     /// the wrapper, so the two origins differ.
     pub node_origin: teksilo_canvas::Point,
 
+    /// The live input tokens — the density ladder the kind-derived pointer
+    /// geometry reads.
+    ///
+    /// Snapshotted in `build()` rather than read per event, because
+    /// `EventContext` exposes no theme. `set_input_density` marks the tree at
+    /// `BindingLevel::Rebuild`, so a density change re-runs `build()` and
+    /// refreshes this.
+    pub input_tokens: teksilo_tokens::InputTokens,
+
+    /// The body's viewport got **smaller** on the last `sync_viewport`, and the
+    /// caret has not been re-revealed for it yet.
+    ///
+    /// Set by [`sync_viewport`](Self::sync_viewport) — the single writer of the
+    /// viewport, and so the only place that can see the two sizes at once — and
+    /// consumed by the body's paint *after* the relayout the shrink forces,
+    /// because a caret cannot be revealed against a layout that has not run.
+    /// `sync_viewport`'s `bool` return cannot carry this on its own: the body
+    /// calls it from `place_children` first, so by paint time the change has
+    /// already been absorbed and the return is `false`.
+    ///
+    /// A **shrink** only. Growing reveals more text and never pushes the caret
+    /// out, and re-revealing on every resize would drag a reader's scroll
+    /// position back to the caret every time a window edge moved. The
+    /// [`LogView`](super::LogView) never sets it — it has no caret, and pulling
+    /// its scroll offset anywhere would fight its own follow-tail rule.
+    pub pending_caret_reveal: bool,
+
     // --- Layout strategy ---------------------------------------------------
     pub needs_full_layout: bool,
     pub last_relayout_block_id: Option<usize>,
@@ -307,6 +334,8 @@ impl CodeEditorState {
             viewport_height: 0.0,
             viewport_origin: teksilo_canvas::Point::ZERO,
             node_origin: teksilo_canvas::Point::ZERO,
+            input_tokens: teksilo_tokens::InputTokens::default(),
+            pending_caret_reveal: false,
             needs_full_layout: true,
             last_relayout_block_id: None,
             content_dirty: true,
@@ -381,6 +410,15 @@ impl CodeEditorState {
         let changed = (self.viewport_width - bounds.width).abs() > 0.5
             || (self.viewport_height - bounds.height).abs() > 0.5;
         if changed {
+            // A viewport that got smaller can leave the caret outside it — the
+            // on-screen keyboard opening under a focused editor is the case that
+            // makes this a correctness matter rather than a nicety. Recorded
+            // rather than acted on: the shrink forces a relayout, and the caret
+            // cannot be revealed against a layout that has not run yet. A log
+            // view has no caret, so `is_streaming` is exempt.
+            self.pending_caret_reveal |= !self.is_streaming()
+                && (bounds.width < self.viewport_width - 0.5
+                    || bounds.height < self.viewport_height - 0.5);
             self.viewport_width = bounds.width;
             self.viewport_height = bounds.height;
             self.engine.set_viewport(bounds.width, bounds.height);

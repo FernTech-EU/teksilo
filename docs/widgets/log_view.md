@@ -45,7 +45,7 @@ surface's own boundary. See `docs/kinetic-scrolling.md` §10.1.
 
 ## Builder methods at a glance
 
-`follow_tail`, `scrollback_limit`, `severity_highlighter`, `announce_appends`, `font_family`, `follow_text_scale`, `v_scroll_policy`, `h_scroll_policy`, `background`, `text_color`, `selection_color`, `handle`
+`context_menu`, `default_context_menu`, `follow_tail`, `scrollback_limit`, `severity_highlighter`, `announce_appends`, `font_family`, `follow_text_scale`, `v_scroll_policy`, `h_scroll_policy`, `background`, `text_color`, `selection_color`, `handle`
 
 ## API reference
 
@@ -69,6 +69,21 @@ pub struct LogView { /* fields */ }
 
 A fresh, empty log view: read-only, no caret, no wrapping, following the
 tail, unbounded. Attach a `handle` and append to it.
+
+#### `pub fn context_menu( mut self, factory: impl Fn( teksilo_canvas::Point, &mut teksilo_core::widget::EventContext, ) -> Option<Box<dyn teksilo_core::widget::Widget>> + 'static, ) -> Self`
+
+Replace the built-in right-click menu with `factory`, called on each
+right-click with the **window** position of the click. Returning `None`
+shows no menu.
+
+#### `pub fn default_context_menu(mut self, enabled: bool) -> Self`
+
+Whether to install the built-in Copy / Select All menu (default `true`).
+`false` lets a right-click bubble past the view.
+
+The **touch** selection toolbar is *not* affected: it is raised by the
+controller rather than by a right-click, and a log a finger cannot copy
+from is a log a finger cannot use.
 
 #### `pub fn follow_tail(self, follow: bool) -> Self`
 
