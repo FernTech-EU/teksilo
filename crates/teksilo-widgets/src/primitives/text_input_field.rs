@@ -56,6 +56,7 @@ mod keyboard;
 pub mod mask;
 mod mouse;
 pub(crate) mod state;
+pub(crate) mod touch;
 pub mod validator;
 mod widget_impl;
 
@@ -276,6 +277,11 @@ pub struct TextInputField {
     /// Minted with the widget, not with its state, so a [`TextFieldHandle`]
     /// taken before `build` observes the signal the built widget writes.
     focus_signal: Signal<bool>,
+    /// Touch selection: the controller, and the ids of the two overlays it
+    /// raises. Minted with the widget rather than in `build` so the handle
+    /// survives a rebuild even though the controller inside it is replaced.
+    /// See [`touch`].
+    pub(crate) touch: Rc<touch::FieldTouch>,
     /// Natural intrinsic width in logical pixels, cached at the end
     /// of `build()`. When an [`InputMask`] is set, this measures the
     /// mask's empty template (e.g. `__/__/____`) in the theme body
@@ -310,6 +316,8 @@ impl std::fmt::Debug for TextInputField {
 impl TextInputField {
     /// Construct a new field bound to `text`.
     pub fn new(text: Signal<String>) -> Self {
+        let state_slot: std::rc::Rc<std::cell::RefCell<Option<SharedState>>> =
+            std::rc::Rc::new(std::cell::RefCell::new(None));
         Self {
             text,
             enabled: Prop::Static(true),
@@ -339,8 +347,9 @@ impl TextInputField {
             state: None,
             interaction: Signal::new(InteractionState::Idle),
             caret_position: Signal::new(0),
-            state_slot: std::rc::Rc::new(std::cell::RefCell::new(None)),
+            state_slot: state_slot.clone(),
             focus_signal: Signal::new(false),
+            touch: touch::FieldTouch::new(state_slot),
             natural_width: 200.0,
             retained: Rc::new(std::cell::RefCell::new(None)),
         }
@@ -1056,62 +1065,72 @@ fn build_context_menu_widget(state: &SharedState) -> Box<dyn Widget> {
     let copy_allowed = st.copy_allowed();
     drop(st);
 
-    let state_cut = state.clone();
-    let state_copy = state.clone();
-    let state_paste = state.clone();
-    let state_select_all = state.clone();
-
     Box::new(
         MenuList::new()
-            .item(
-                MenuItem::new(tr_widget!(menu_cut()))
-                    .shortcut_label(format_keystroke(KeyStroke::command(Key::X)))
-                    .enabled(has_selection && copy_allowed)
-                    .on_activate_fn(move |ctx| {
-                        {
-                            let mut st = state_cut.borrow_mut();
-                            keyboard::clipboard_cut(&mut st, ctx);
-                        }
-                        sync_cursor_signals(&state_cut);
-                        ctx.request_frame();
-                    }),
-            )
-            .item(
-                MenuItem::new(tr_widget!(menu_copy()))
-                    .shortcut_label(format_keystroke(KeyStroke::command(Key::C)))
-                    .enabled(has_selection && copy_allowed)
-                    .on_activate_fn(move |ctx| {
-                        let mut st = state_copy.borrow_mut();
-                        keyboard::clipboard_copy(&mut st, ctx);
-                    }),
-            )
-            .item(
-                MenuItem::new(tr_widget!(menu_paste()))
-                    .shortcut_label(format_keystroke(KeyStroke::command(Key::V)))
-                    .on_activate_fn(move |ctx| {
-                        {
-                            let mut st = state_paste.borrow_mut();
-                            keyboard::clipboard_paste(&mut st, ctx);
-                        }
-                        sync_cursor_signals(&state_paste);
-                        ctx.request_frame();
-                    }),
-            )
+            .item(menu_row_cut(state).enabled(has_selection && copy_allowed))
+            .item(menu_row_copy(state).enabled(has_selection && copy_allowed))
+            .item(menu_row_paste(state))
             .item(MenuSeparator)
-            .item(
-                MenuItem::new(tr_widget!(menu_select_all()))
-                    .shortcut_label(format_keystroke(KeyStroke::command(Key::A)))
-                    .enabled(doc_non_empty)
-                    .on_activate_fn(move |ctx| {
-                        {
-                            let st = state_select_all.borrow();
-                            st.cursor.select(SelectionType::Document);
-                        }
-                        sync_cursor_signals(&state_select_all);
-                        ctx.request_frame();
-                    }),
-            ),
+            .item(menu_row_select_all(state).enabled(doc_non_empty)),
     )
+}
+
+// The four command rows, shared by the right-click menu above and the touch
+// selection toolbar in `touch.rs`. One implementation of each command, reached
+// two ways — the menu decides enablement from a snapshot taken as it opens, the
+// toolbar decides *visibility* from the controller's derived
+// `ClipboardActions`, and neither owns the command itself.
+
+pub(crate) fn menu_row_cut(state: &SharedState) -> MenuItem {
+    let state = state.clone();
+    MenuItem::new(tr_widget!(menu_cut()))
+        .shortcut_label(format_keystroke(KeyStroke::command(Key::X)))
+        .on_activate_fn(move |ctx| {
+            {
+                let mut st = state.borrow_mut();
+                keyboard::clipboard_cut(&mut st, ctx);
+            }
+            sync_cursor_signals(&state);
+            ctx.request_frame();
+        })
+}
+
+pub(crate) fn menu_row_copy(state: &SharedState) -> MenuItem {
+    let state = state.clone();
+    MenuItem::new(tr_widget!(menu_copy()))
+        .shortcut_label(format_keystroke(KeyStroke::command(Key::C)))
+        .on_activate_fn(move |ctx| {
+            let mut st = state.borrow_mut();
+            keyboard::clipboard_copy(&mut st, ctx);
+        })
+}
+
+pub(crate) fn menu_row_paste(state: &SharedState) -> MenuItem {
+    let state = state.clone();
+    MenuItem::new(tr_widget!(menu_paste()))
+        .shortcut_label(format_keystroke(KeyStroke::command(Key::V)))
+        .on_activate_fn(move |ctx| {
+            {
+                let mut st = state.borrow_mut();
+                keyboard::clipboard_paste(&mut st, ctx);
+            }
+            sync_cursor_signals(&state);
+            ctx.request_frame();
+        })
+}
+
+pub(crate) fn menu_row_select_all(state: &SharedState) -> MenuItem {
+    let state = state.clone();
+    MenuItem::new(tr_widget!(menu_select_all()))
+        .shortcut_label(format_keystroke(KeyStroke::command(Key::A)))
+        .on_activate_fn(move |ctx| {
+            {
+                let st = state.borrow();
+                st.cursor.select(SelectionType::Document);
+            }
+            sync_cursor_signals(&state);
+            ctx.request_frame();
+        })
 }
 
 /// Run the validator on the bound text and update the feedback signal.
@@ -1310,6 +1329,13 @@ mod text_run_tests {
 
 #[cfg(test)]
 mod window_active_tests;
+
+/// **Pointer editing, both devices.** The mouse half is a baseline the touch
+/// work needed before it could change `mouse.rs`: nothing in this stack
+/// dispatched a press-move-release pair or a multi-click at a field, so
+/// "the suite still passes" was satisfiable with drag-select broken.
+#[cfg(test)]
+mod pointer_tests;
 
 /// **A key the platform decorates with control text must still bubble.**
 ///

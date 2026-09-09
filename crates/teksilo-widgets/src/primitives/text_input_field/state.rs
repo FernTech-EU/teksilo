@@ -84,6 +84,13 @@ pub(crate) struct TextInputState {
     /// the viewport width. Managed by `ensure_caret_visible_h`.
     pub scroll_x: f32,
     pub viewport_width: f32,
+    /// Height of the field's own box. Written by [`sync_viewport`](Self::sync_viewport)
+    /// alongside the origin, and needed because the touch affordances are
+    /// clamped into the surface's *rectangle*: a handle placed against a
+    /// zero-height viewport is nudged out of existence.
+    ///
+    /// [`sync_viewport`]: Self::sync_viewport
+    pub viewport_height: f32,
     pub viewport_origin: Point,
 
     // ── Pending chars (batched per frame) ────────────────────────────
@@ -327,6 +334,7 @@ impl TextInputState {
             blink: CaretBlink::new(),
             scroll_x: 0.0,
             viewport_width: 0.0,
+            viewport_height: 0.0,
             viewport_origin: Point::ZERO,
             pending_chars: String::new(),
             pending_text_changed: false,
@@ -401,6 +409,19 @@ impl TextInputState {
         !self.secure || self.allow_copy || self.reveal_active()
     }
 
+    /// Whether this surface's caret geometry means anything.
+    ///
+    /// `false` for exactly one state: a secure field masking with
+    /// [`EchoMode::NoEcho`], where [`layout_full_masked`](Self::layout_full_masked)
+    /// lays out an **empty** source so that not even the length shows. Every
+    /// offset then hit-tests to zero and every caret rectangle is the same
+    /// rectangle, so an affordance hung off one marks nothing — which is why
+    /// the touch controller raises none at all on such a field rather than
+    /// stacking three handles at the start of an empty line.
+    pub fn caret_geometry_is_meaningful(&self) -> bool {
+        !(self.echo_mode == EchoMode::NoEcho && self.should_mask())
+    }
+
     /// Run a full layout, applying secure masking. Installs the echo
     /// char on the engine (or clears it), and for `NoEcho` while masked
     /// lays out an empty source so nothing — not even length — is
@@ -445,6 +466,10 @@ impl TextInputState {
     /// Returns `true` if the width actually changed.
     pub fn sync_viewport(&mut self, bounds: teksilo_canvas::Rect) -> bool {
         self.viewport_origin = teksilo_canvas::Point::new(bounds.x, bounds.y);
+        // Not welded to the width: nothing re-layouts on a height change (the
+        // field is one line tall and the engine is told its own viewport
+        // separately), and the touch affordances only need to read it back.
+        self.viewport_height = bounds.height;
         let changed = (self.viewport_width - bounds.width).abs() > 0.5;
         if changed {
             self.viewport_width = bounds.width;
@@ -526,7 +551,33 @@ impl TextInputState {
 /// cursor state. Called after any keyboard or mouse action that moves
 /// the caret.
 pub(crate) fn sync_cursor_signals(state: &SharedState) {
-    let st = state.borrow();
+    // The signal writes run under a **shared** borrow, deliberately: an
+    // observer downstream of `cursor_position` may read this state back (a
+    // composite's caret mirror does), and a mutable borrow held across the
+    // notification would turn that read into a panic.
+    {
+        let st = state.borrow();
+        publish_cursor_signals(&st);
+    }
+    // Reset blink phase so the caret pops on immediately after movement.
+    let mut st = state.borrow_mut();
+    st.blink.restart();
+    st.caret_visible.set(true);
+}
+
+/// [`sync_cursor_signals`] for a caller that already holds the borrow.
+///
+/// The touch controller reaches this surface through a `&mut TextInputState` —
+/// its [`TextHitSource`](teksilo_core::text_touch::TextHitSource) is
+/// implemented over the state itself, not over the `Rc` — so every selection it
+/// writes has to publish from inside the borrow it is already holding.
+pub(crate) fn sync_cursor_signals_in(st: &mut TextInputState) {
+    publish_cursor_signals(st);
+    st.blink.restart();
+    st.caret_visible.set(true);
+}
+
+fn publish_cursor_signals(st: &TextInputState) {
     let pos = st.cursor.position();
     let anchor = st.cursor.anchor();
     let has_sel = st.cursor.has_selection();
@@ -539,11 +590,6 @@ pub(crate) fn sync_cursor_signals(state: &SharedState) {
     if st.has_selection.get() != has_sel {
         st.has_selection.set(has_sel);
     }
-    // Reset blink phase so the caret pops on immediately after movement.
-    drop(st);
-    let mut st = state.borrow_mut();
-    st.blink.restart();
-    st.caret_visible.set(true);
 }
 
 #[cfg(test)]

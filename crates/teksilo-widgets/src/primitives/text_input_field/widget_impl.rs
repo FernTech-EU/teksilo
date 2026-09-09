@@ -275,6 +275,7 @@ impl Widget for TextInputField {
         {
             let ext = self.text.clone();
             let state_for_sync = shared_state.clone();
+            let touch_for_sync = self.touch.clone();
             ctx.effect(&ext, move |new_text| {
                 let st = state_for_sync.borrow();
                 let current = st.document.to_plain_text().unwrap_or_default();
@@ -284,6 +285,12 @@ impl Widget for TextInputField {
                     if let Some(handle) = &st.frame_request {
                         handle.set(true);
                     }
+                    drop(st);
+                    // The content the affordances marked is gone. This effect has
+                    // no `EventContext`, which is why retirement is the
+                    // controller publishing empty geometry rather than an overlay
+                    // dismissal — see `FieldTouch::dismiss`.
+                    touch_for_sync.dismiss();
                 }
             });
         }
@@ -482,6 +489,8 @@ impl Widget for TextInputField {
             st.field_widget_id = Some(ctx.self_id());
         }
 
+        self.mount_touch_selection(ctx);
+
         // Same dormancy discipline as `RichTextEditor`: a field parked in a
         // non-selected `Switcher` / `visible_when(false)` branch must not
         // keep the event loop awake (caret `wake_at`, frame-tick work,
@@ -578,6 +587,7 @@ impl Widget for TextInputField {
             let active = activation.clone();
             let wa_signal = ctx.window_active_signal();
             let theme_for_sel = theme_signal.clone();
+            let touch_for_window = self.touch.clone();
             ctx.effect(&wa_signal, move |&window_active| {
                 let mut st = state.borrow_mut();
                 st.window_active = window_active;
@@ -599,6 +609,9 @@ impl Widget for TextInputField {
                         st.caret_visible.set(false);
                     }
                     st.blink.reset();
+                    // …and retire the touch affordances with it. Handles over an
+                    // inactive window's text are as wrong as a caret in it.
+                    touch_for_window.dismiss();
                 }
                 if active.get()
                     && let Some(handle) = &st.frame_request
@@ -624,15 +637,23 @@ impl Widget for TextInputField {
         let hovered_for_hover = hovered.clone();
 
         let state_for_focus = self.state().clone();
+        let touch_for_focus = self.touch.clone();
         let interaction_for_focus = self.interaction.clone();
         // The selection band's tint depends on focus, so the focus handler has
         // to re-apply it — and needs the live theme to do so.
         let theme_for_focus = theme_signal.clone();
         let state_for_pointer = self.state().clone();
+        let state_for_hold = self.state().clone();
+        let touch_for_pointer = self.touch.clone();
+        let touch_for_hold = self.touch.clone();
         let state_for_key = self.state().clone();
+        let touch_for_key = self.touch.clone();
         let state_for_double = self.state().clone();
         let state_for_triple = self.state().clone();
+        let touch_for_double = self.touch.clone();
+        let touch_for_triple = self.touch.clone();
         let state_for_access = self.state().clone();
+        let touch_for_access = self.touch.clone();
         let state_for_menu = self.state().clone();
 
         let handlers = HandlerSet::new()
@@ -711,6 +732,20 @@ impl Widget for TextInputField {
                     st.last_ime_area = None;
                     blur_callback = st.on_blur.clone();
                     drop(st);
+                    // The band is exempt from outside-press dismissal, so the
+                    // host owns this.
+                    //
+                    // Measured, and worth saying: deleting this line reddens
+                    // nothing, because the framework retires an overlay when
+                    // focus leaves the widget it is anchored on
+                    // (`dismiss_overlays_left_by_focus`), and the affordance
+                    // overlays are anchored on this field — so their `on_dismiss`
+                    // callbacks reach the same conclusion. That rule walks *one*
+                    // overlay's parent chain, though, and a field inside a dialog
+                    // anchors two sibling overlays rather than a cascade, which
+                    // is not a shape the host can verify from here. The call is
+                    // what makes the answer the host's own.
+                    touch_for_focus.dismiss();
                     // Abandon any in-progress composition on blur — remove
                     // the tentative preedit text from the document.
                     keyboard::clear_ime_preedit(&state_for_focus);
@@ -722,17 +757,44 @@ impl Widget for TextInputField {
                 ctx.request_frame();
             })
             .on_pointer_event(move |event, ctx| {
-                mouse::handle_pointer_event(&state_for_pointer, event, ctx)
+                mouse::handle_pointer_event(&state_for_pointer, &touch_for_pointer, event, ctx)
             })
-            .on_key(move |event, ctx| keyboard::handle_key(&state_for_key, event, ctx))
+            // A hold selects the word under the finger. Attaching this
+            // **withdraws** the tree-owned long-press route (`touch_route`
+            // rule 1: a widget's own `on_long_press` wins), which is what used
+            // to open this field's context menu for a coarse pointer — the
+            // selection toolbar `FieldTouch::raise` puts up is its replacement,
+            // and offers the same commands.
+            .on_long_press(move |event, ctx| {
+                mouse::handle_long_press(&state_for_hold, &touch_for_hold, event, ctx);
+            })
+            .on_key(move |event, ctx| {
+                let response = keyboard::handle_key(&state_for_key, event, ctx);
+                // A keystroke moves the caret and edits the text, neither of
+                // which the controller made — so the handles it published are
+                // pointing at where the text used to be. `refresh` is a no-op
+                // until something has been raised.
+                touch_for_key.refresh(ctx, touch::ToolbarIntent::Hide);
+                response
+            })
             .on_double_tap(move |event, ctx| {
-                mouse::handle_double_tap(&state_for_double, event.position, ctx)
+                mouse::handle_double_tap(&state_for_double, event.position, ctx);
+                // A finger can double-tap too, and the selection it just made is
+                // one the controller did not make.
+                if event.pointer.kind.is_direct() {
+                    touch_for_double.raise(ctx, touch::ToolbarIntent::Show);
+                }
             })
             .on_triple_tap(move |event, ctx| {
-                mouse::handle_triple_tap(&state_for_triple, event.position, ctx)
+                mouse::handle_triple_tap(&state_for_triple, event.position, ctx);
+                if event.pointer.kind.is_direct() {
+                    touch_for_triple.raise(ctx, touch::ToolbarIntent::Show);
+                }
             })
             .on_access_action_request(move |action, _target_node, data, ctx| {
-                handle_access_action(&state_for_access, action, data, ctx)
+                let response = handle_access_action(&state_for_access, action, data, ctx);
+                touch_for_access.refresh(ctx, touch::ToolbarIntent::Keep);
+                response
             })
             // Right-click context menu — built fresh per click so the
             // enabled state of each item reflects the live selection /
