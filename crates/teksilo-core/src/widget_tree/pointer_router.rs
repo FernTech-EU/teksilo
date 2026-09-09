@@ -3214,12 +3214,37 @@ impl WidgetTree {
                 // Scoped to the overlay's content: this is what restricts the
                 // slop pass's candidates to the topmost layer the exact pass
                 // entered.
-                return self.arena.hit_test_in_subtree_with_slop(
-                    overlay.content_id,
-                    point,
-                    exclude_widget,
-                    hit,
-                );
+                let content_id = overlay.content_id;
+                if let Some(found) =
+                    self.arena
+                        .hit_test_in_subtree_with_slop(content_id, point, exclude_widget, hit)
+                {
+                    return Some(found);
+                }
+                // The overlay was chosen by its **bounds** and its content
+                // claimed nothing at this point. For every ordinary overlay
+                // that is the end of the search — answering `None` is what
+                // keeps the slop pass inside the one layer the exact pass
+                // entered, so a near-miss on a menu row cannot be beaten by a
+                // control behind the menu.
+                //
+                // An overlay whose content root declares `event_pass_through`
+                // is the exception, because that flag already means "what I did
+                // not claim belongs to whatever is behind me": the tree's
+                // walker honours it for an ordinary node *after* its children
+                // miss, and an overlay root is not an exception to it. Without
+                // this, a viewport-sized pass-through layer — the placement the
+                // text-affordance band was written for — stops the surface
+                // under it taking presses at all. The widening is confined to
+                // that flag: an overlay that does not set it still returns
+                // here, so no ordinary overlay's candidate set changes.
+                if !self
+                    .arena
+                    .get(content_id)
+                    .is_some_and(|node| node.event_pass_through)
+                {
+                    return None;
+                }
             }
         }
 
@@ -7971,5 +7996,220 @@ mod overlay_release_dismissal_tests {
             (at.x, at.y),
             "a mouse menu still opens with its corner on the pointer"
         );
+    }
+}
+
+/// An overlay is chosen by its **bounds**, and what happens when its content
+/// then claims nothing at the point.
+///
+/// Two answers, and the flag on the content root is what picks between them.
+/// An ordinary overlay ends the search inside itself — that is what keeps the
+/// miss-only slop pass confined to the one layer the exact pass entered, so a
+/// near-miss on a menu row can never be re-attributed to a control on the page
+/// behind the menu. An overlay whose content root declares `event_pass_through`
+/// is the exception: the flag already means "what I did not claim belongs to
+/// whatever is behind me", and an overlay root is not an exception to it.
+///
+/// This is not a hypothetical. The touch text affordances were specified as a
+/// viewport-sized pass-through layer, and under the first answer applied to
+/// both, mounting one made the editor beneath stop taking presses entirely —
+/// measured, as `hit_test` returning `None` at a point inside the field.
+#[cfg(test)]
+mod pass_through_overlay_tests {
+    use teksilo_canvas::{Point, Rect, SizeProposal};
+
+    use crate::WidgetId;
+    use crate::overlay::{DismissBehavior, OverlayLayer, OverlayPlacement, OverlayRequest};
+    use crate::test_widgets::FillWidget;
+    use crate::widget::{LayoutContext, LayoutResponse, Widget};
+    use crate::widget_builder::WidgetBuilder;
+    use crate::widget_tree::WidgetTree;
+
+    /// The affordance layer's shape: fills whatever it is given, and puts its
+    /// one child — a selection handle — on a fixed rectangle inside it.
+    #[derive(Debug)]
+    struct HandleLayer {
+        handle: WidgetId,
+        at: Rect,
+    }
+
+    impl Widget for HandleLayer {
+        fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> LayoutResponse {
+            proposal.resolve(0.0, 0.0).into()
+        }
+
+        fn place_children(
+            &self,
+            _bounds: Rect,
+            _proposal: SizeProposal,
+            children: &mut [crate::widget::WidgetPlacement],
+            _ctx: &LayoutContext,
+        ) {
+            if let Some(child) = children.get_mut(0) {
+                child.origin = self.at.origin();
+                child.size = self.at.size();
+            }
+        }
+
+        fn children(&self) -> Vec<WidgetId> {
+            vec![self.handle]
+        }
+    }
+
+    const HANDLE: Rect = Rect {
+        x: 10.0,
+        y: 10.0,
+        width: 20.0,
+        height: 20.0,
+    };
+
+    /// Which flag the overlay's content root carries.
+    #[derive(Clone, Copy, PartialEq)]
+    enum RootFlag {
+        /// The affordance layer's: not a target itself, children are.
+        PassThrough,
+        /// Neither the root nor its children are targets. Stronger, and
+        /// deliberately **not** what the fall-through is gated on.
+        HitTransparent,
+    }
+
+    /// A field under a viewport-sized overlay carrying one handle.
+    ///
+    /// Both flags make the subtree answer `None` for a point no handle covers,
+    /// which is the state the fall-through decides — so the two arms differ in
+    /// nothing but the flag the router reads.
+    fn field_under_a_layer(flag: RootFlag) -> (WidgetTree, WidgetId, WidgetId) {
+        let mut tree = WidgetTree::new();
+        let field = tree.add(FillWidget::new());
+        let handle = tree.add(FillWidget::new());
+        let layer = HandleLayer { handle, at: HANDLE };
+        let layer = match flag {
+            RootFlag::PassThrough => tree.add(layer.event_pass_through(true)),
+            RootFlag::HitTransparent => tree.add(layer.hit_transparent(true)),
+        };
+        tree.show_overlay(OverlayRequest {
+            content_id: layer,
+            anchor: field,
+            placement: OverlayPlacement::FullViewport,
+            dismiss: DismissBehavior::Manual,
+            layer: OverlayLayer::InTree,
+            parent_overlay: None,
+            on_dismiss: None,
+            fade_duration: None,
+        });
+        tree.layout(SizeProposal::exact(400.0, 200.0));
+        assert_eq!(tree.active_overlays().len(), 1, "the layer is up");
+        (tree, field, handle)
+    }
+
+    /// The door: the surface under a pass-through layer goes on taking presses.
+    #[test]
+    fn a_pass_through_layer_hands_back_what_it_did_not_claim() {
+        let (tree, field, handle) = field_under_a_layer(RootFlag::PassThrough);
+
+        assert_eq!(
+            tree.hit_test(Point::new(15.0, 15.0)),
+            Some(handle),
+            "the layer must still win the point its own child covers"
+        );
+        assert_eq!(
+            tree.hit_test(Point::new(200.0, 100.0)),
+            Some(field),
+            "a press the layer did not claim must reach the surface beneath it"
+        );
+    }
+
+    /// `event_pass_through` removes a node from **hit-testing**, not from the
+    /// **bubble path** of a descendant that was hit.
+    ///
+    /// The distinction is what lets a host mount its affordances at the full
+    /// viewport and still answer the one press neither the layer nor the surface
+    /// beneath can: the pass-through root is skipped when a point belongs to
+    /// nobody in its subtree, and is still told about a press that landed on one
+    /// of its children. The single-line text stack's `AffordanceHost` is exactly
+    /// this — a cursor's click on a selection handle, which the handle refuses and
+    /// the editor never sees.
+    #[test]
+    fn a_pass_through_root_still_hears_a_press_that_landed_on_its_child() {
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        let seen = Rc::new(Cell::new(0u32));
+        let counter = seen.clone();
+        let mut tree = WidgetTree::new();
+        let field = tree.add(FillWidget::new());
+        let handle = tree.add(FillWidget::new().on_tap(|_e, _c| {}));
+        let layer = tree.add(
+            HandleLayer { handle, at: HANDLE }
+                .event_pass_through(true)
+                .on_pointer_event(move |_event, _ctx| {
+                    counter.set(counter.get() + 1);
+                    crate::event::EventResponse::Ignored
+                }),
+        );
+        tree.show_overlay(OverlayRequest {
+            content_id: layer,
+            anchor: field,
+            placement: OverlayPlacement::FullViewport,
+            dismiss: DismissBehavior::Manual,
+            layer: OverlayLayer::InTree,
+            parent_overlay: None,
+            on_dismiss: None,
+            fade_duration: None,
+        });
+        tree.layout(SizeProposal::exact(400.0, 200.0));
+
+        tree.pointer_down_button(Point::new(15.0, 15.0), crate::event::PointerButton::Primary);
+        assert!(
+            seen.get() > 0,
+            "a pass-through root heard nothing about a press on its own child"
+        );
+
+        let after_child = seen.get();
+        tree.pointer_up_button(Point::new(15.0, 15.0), crate::event::PointerButton::Primary);
+        // …and a press it did not contain a target for never arrives, because it
+        // was never the hit.
+        tree.pointer_down_button(
+            Point::new(200.0, 100.0),
+            crate::event::PointerButton::Primary,
+        );
+        assert_eq!(
+            seen.get(),
+            after_child + 1,
+            "the press-and-lift on the child accounts for the count, and the \
+             press on the surface beneath added nothing"
+        );
+    }
+
+    /// …and the widening stops at that one flag.
+    ///
+    /// `hit_transparent` is the discriminating case, and the only one available:
+    /// it is the other way for an overlay's content to claim nothing at a point,
+    /// so it is the fixture in which the gate — rather than the subtree's own
+    /// answer — is what decides. A gate that read "the subtree claimed nothing"
+    /// alone would fall through here too, and with it past every overlay whose
+    /// content happens to miss, which is what confines the miss-only slop pass to
+    /// the layer the exact pass entered.
+    ///
+    /// The exclusion is deliberate rather than an oversight: the one overlay that
+    /// must be seen past regardless is the drag preview, and the hit-test already
+    /// takes an explicit `exclude_overlay` for it.
+    #[test]
+    fn a_hit_transparent_root_does_not_get_the_fall_through() {
+        let (tree, field, _handle) = field_under_a_layer(RootFlag::HitTransparent);
+
+        // Nothing in the overlay is a target, not even the handle.
+        assert_eq!(
+            tree.hit_test(Point::new(15.0, 15.0)),
+            None,
+            "hit_transparent must exclude the subtree, or this fixture is not \
+             testing the gate"
+        );
+        assert_eq!(
+            tree.hit_test(Point::new(200.0, 100.0)),
+            None,
+            "the fall-through reached past an overlay that did not ask for it"
+        );
+        let _ = field;
     }
 }

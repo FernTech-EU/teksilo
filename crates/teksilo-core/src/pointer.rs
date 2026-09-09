@@ -657,10 +657,16 @@ pub enum CancelReason {
 ///
 /// Snapshotted onto every [`EventContext`](crate::widget::EventContext) so a
 /// handler can ask which pointer it is serving without the answer having to be
-/// threaded through every handler signature. Outside a pointer or scroll
-/// dispatch this holds its [`Default`] — a mouse at the epoch — which is
-/// exactly what a handler run from a timer or an accessibility action should
-/// see.
+/// threaded through every handler signature.
+///
+/// Three producers, and the third is the one a reader is most likely to get
+/// wrong: a pointer sample ([`from_pointer_sample`](Self::from_pointer_sample)),
+/// a scroll sample ([`from_scroll_sample`](Self::from_scroll_sample)), and a
+/// gesture the **timer** recognised
+/// ([`for_recognized_gesture`](Self::for_recognized_gesture)) — a hold, which
+/// has a contact behind it but no sample. Everything else — an accessibility
+/// action, a drag tick fired from a layout pass, a hand-built test context —
+/// holds the [`Default`], a mouse at the epoch.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct InputSnapshot {
     pub(crate) pointer: PointerInfo,
@@ -701,6 +707,26 @@ impl InputSnapshot {
                 .iter()
                 .map(|&(time, point, _)| (time, point))
                 .collect(),
+            ..Self::default()
+        }
+    }
+
+    /// The snapshot a gesture recognised by the **timer** implies.
+    ///
+    /// A hold is not a sample: nothing arrived, a deadline came due. But it is
+    /// still one contact's gesture, and a handler reached from it must not be
+    /// told it is serving the mouse — which is what it was told for as long as
+    /// this constructor did not exist, because `current_input` is
+    /// saved-and-restored around every dispatch and so holds the
+    /// [`Default`](Self::default) by the time a timer runs.
+    ///
+    /// [`position`](Self::position) stays `None` on purpose. The gesture
+    /// carries its own position, in **widget-local** coordinates, on the event
+    /// the handler is given; publishing a window position here as well would
+    /// offer a handler two answers that do not agree.
+    pub(crate) fn for_recognized_gesture(pointer: PointerInfo) -> Self {
+        Self {
+            pointer,
             ..Self::default()
         }
     }

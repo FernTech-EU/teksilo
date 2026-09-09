@@ -14,11 +14,10 @@ in [`teksilo_core::text_touch`](../crates/teksilo-core/src/text_touch.rs).
 The mouse path is untouched. Every **pointer** entry point begins by asking
 `PointerKind::is_direct()` and returns `Ignored` without reading or writing any
 state when the answer is no, so an editor that installs the controller edits
-byte for byte as it did before. `on_long_press` asks the same question and
-reaches the wrong answer, for a reason that has nothing to do with the mouse and
-everything to do with where a long press comes from — see checklist step 3, where
-the guard the host has to write instead is set out. A **stylus is direct** and
-gets the whole affordance set: a pen selects text the way a finger does.
+byte for byte as it did before. `on_long_press` asks the same question of the
+**gesture** rather than of the context, because a hold is recognised by a timer
+and not by a sample — see checklist step 3. A **stylus is direct** and gets the
+whole affordance set: a pen selects text the way a finger does.
 
 ## Where the pieces live
 
@@ -140,22 +139,25 @@ Where a step is a correction, it says what it used to say.
    from the style's, and a theme that resizes the lens gets two different
    rectangles.
 
-3. **Wire the host's own pointer arms, and read the pointer kind off the
-   gesture.** This step used to say "forward `handle_pointer` from the editor's
-   own `on_pointer_event`, and `on_long_press` from its `on_long_press`. Both are
-   inert for an indirect pointer, so neither needs a guard of its own." Both
-   halves are wrong.
+3. **Wire the host's own pointer arms.** Forward `handle_pointer` from the
+   editor's own `on_pointer_event`, and `on_long_press` from its `on_long_press`
+   — passing the gesture's own `event.pointer` and a **window** point, since
+   `TapEvent::position` is widget-local (see *Coordinates* above). Neither needs
+   a pointer-kind guard of its own: `handle_pointer` reads the sample's device off
+   the context and `on_long_press` reads the gesture's off its `pointer`
+   argument, and both are inert for an indirect one.
 
-   `TouchSelection::on_long_press` gates on `EventContext::pointer_kind`, and on
-   the long-press path that answer is **the mouse whatever the device was**: a
-   long press is recognised by the gesture timer rather than by a pointer sample,
-   and the tree's in-flight input snapshot is saved and restored around every
-   dispatch, so by the time the timer runs it is back to its default — the mouse
-   at the tree epoch, which `EventContext::pointer_kind`'s own documentation
-   says. The truth arrives on `TapEvent::pointer`, which no `on_long_press`
-   signature in core can see. So the host reads `event.pointer.kind.is_direct()`
-   and drives `TouchSelection::raise`, which has no guard of its own, and
-   `on_long_press` is unreachable from such a host.
+   That signature is why the argument exists. A hold is recognised by the gesture
+   timer, not by a pointer sample, and the tree's in-flight input snapshot is
+   saved and restored around every dispatch — so an entry point reading
+   `EventContext::pointer_kind` there was told **the mouse whatever the device
+   was**, and refused every finger. Two fixes, and a host should know both: the
+   tree now installs the holding contact for the length of a timer dispatch
+   (`InputSnapshot::for_recognized_gesture`), so anything a hold handler asks the
+   context about — the device, the pointer id, the captor, the frozen
+   `TouchAction` — is now answered for the contact that held; and the controller's
+   guard reads the gesture, so it holds for a host driving it from somewhere with
+   no snapshot behind it at all (an assistive-technology action, its own timer).
 
    `handle_pointer`'s release arm raises unconditionally for a direct pointer,
    and a finger's press has to be able to end as a *scroll* — which the
@@ -175,25 +177,35 @@ Where a step is a correction, it says what it used to say.
    `BuildContext::add_detached` — never a bare `add`, which hands back a node
    nothing owns and strands another copy on every rebuild.
 
-   **Not** with `FullViewport`, though that is the placement this band was
-   written for. An overlay is chosen by its *bounds*: `OverlayManager::hit_test`
-   picks the topmost overlay whose rectangle contains the press, and the router
-   then searches that overlay's content **and nothing else** — so a
-   viewport-sized affordance overlay whose content misses the point answers
-   "nothing here" rather than falling through, and the editor under a raised
-   affordance stops taking presses at all. The `event_pass_through` on the layer
-   cannot help: it is honoured inside the subtree walk, below the point at which
-   the overlay was already chosen.
+   Place it with **`FullViewport`**, which is the placement this band was written
+   for, and give the content root `event_pass_through(true)`. The layer positions
+   each handle in **window** coordinates, so the overlay only has to *contain*
+   them for the hit-test walk to descend, and it does not have to be re-placed as
+   a handle moves.
 
-   So wrap the layer in a content root sized to the affordances themselves — the
-   union of the handles' hit rectangles and the lens — and place it with
-   `AtPointer(union.origin)`, re-placed on every publish. Presses outside that
-   rectangle then reach the tree exactly as they did. Presses *inside* it that
-   are on neither handle reach the wrapper, which is the right place to answer
-   them the way the editor would have; the wrapper must first ask
-   `TouchSelection::handle_at` (and `is_dragging`) whether a handle took the
-   press, because a handle's `Handled` does not stop the press reaching an
-   ancestor on the same bubble path.
+   This is the step that was wrong, and the shape of the correction matters
+   because it is what the router now guarantees. An overlay is chosen by its
+   *bounds* — `OverlayManager::hit_test` picks the topmost overlay whose rectangle
+   contains the press — and `hit_test_with` used to return whatever that overlay's
+   content answered, `None` included. A viewport-sized affordance overlay
+   therefore made the editor under it stop taking presses altogether, which is why
+   this step used to prescribe a content root sized to the union of the handles'
+   hit rectangles. `hit_test_with` now falls through to the tree when the chosen
+   overlay's content root declares `event_pass_through` **and** its subtree
+   claimed nothing; every other overlay still ends the search inside itself, which
+   is what keeps the miss-only slop pass confined to one layer. So a press on a
+   handle reaches the handle, and a press anywhere else reaches the editor.
+
+   One press still belongs to the wrapper, and it is the reason to keep one at
+   all: a **cursor's** click on a handle. The handle refuses an indirect pointer,
+   and the editor never sees the press because a handle is a different root — so
+   without a wrapper that click is swallowed and the touch chrome stands with
+   nothing able to remove it. `event_pass_through` removes a node from
+   hit-testing, not from the **bubble path** of a descendant that was hit, so a
+   pass-through content root is told about presses on its own children and about
+   nothing else. Answer that one by placing the caret and dismissing. A cursor's
+   click anywhere *else* in the editor should dismiss too, and that arm belongs in
+   the editor's own mouse path.
 
    Nothing needs reclaiming on rebuild: the detached content dies with the build
    that made it, and `gc_orphaned_overlays` dismisses, at the next layout, every
@@ -406,12 +418,14 @@ empty line would be visible nonsense.
 ## Limits
 
 * The lens clip is rectangular, so the shipped lens frame is too. See above.
-* **An `event_pass_through` overlay does not fall through.** `hit_test_with`
-  returns whatever the chosen overlay's subtree answers, including nothing, so
-  the band cannot be used at viewport size and every host has to size its
-  affordance overlay to its affordances (checklist step 4). Letting the router
-  continue past an overlay whose content root is `event_pass_through` would remove
-  that constraint; it is a change to the hit-test, so no host can make it.
+* **A pass-through overlay falls through; nothing else does.** `hit_test_with`
+  continues to the tree only when the chosen overlay's content root declares
+  `event_pass_through` and its subtree claimed nothing. An overlay content root
+  marked `hit_transparent` — stronger, and claiming nothing by construction — is
+  deliberately **not** included: the one overlay that needs to be seen past
+  regardless is the drag preview, and the hit-test already takes an explicit
+  exclusion for it, so widening two flags at once would be one behaviour tested
+  and one merely hoped for.
 * The two coordinate conversions carry **no transform term**, so an editor under
   a scene or zoom transform reports affordance geometry in the untransformed
   space. The shipped single-line stack's two existing window-space paths — the OS

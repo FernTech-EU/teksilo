@@ -50,6 +50,12 @@ pub(crate) fn handle_pointer_event(
                 return EventResponse::Ignored;
             }
             let shift = modifiers.shift();
+            // A cursor has taken over. Touch chrome — handles, the selection
+            // toolbar — is standing on the text it is trying to reach, and the
+            // affordance band is exempt from outside-press dismissal, so nothing
+            // else on a hybrid machine would ever remove it. Free when there is
+            // nothing raised; see `FieldTouch::dismiss`.
+            touch.dismiss();
             let hit = hit_test(state, position);
             let Some(hit_pos) = hit else {
                 return EventResponse::Ignored;
@@ -166,28 +172,23 @@ fn handle_direct_pointer_event(
 
 /// Select the word under `point` and raise the affordances — the touch hold.
 ///
-/// # Why the guard is here and not in the controller
+/// The mouse refusal is
+/// [`TouchSelection::on_long_press`](teksilo_core::text_touch::TouchSelection::on_long_press)'s,
+/// not a second copy here: the gesture's own pointer is passed to it and it
+/// guards on that. Its first signature asked `EventContext::pointer_kind`
+/// instead, which on this path answered **the mouse whatever the device was** —
+/// a hold is recognised by the gesture timer rather than by a sample — so this
+/// host carried the guard itself and drove `raise`, and core's entry point was
+/// dead code. Both halves of that are fixed: the tree installs the holding
+/// contact for a timer dispatch, and the guard reads the gesture.
 ///
-/// [`TouchSelection::on_long_press`](teksilo_core::text_touch::TouchSelection::on_long_press)
-/// gates on `EventContext::pointer_kind`, and on the long-press path that
-/// answer is **the mouse whatever the device was**: a long press is recognised
-/// by the gesture timer, not by a pointer sample, and the tree's in-flight input
-/// snapshot is saved and restored around every dispatch, so by the time the
-/// timer runs it is back to the default — `PointerInfo::mouse`. The truth
-/// arrives on `TapEvent::pointer` instead, which no `on_long_press` signature in
-/// core can see. So the host reads it and drives
-/// [`TouchSelection::raise`](teksilo_core::text_touch::TouchSelection::raise),
-/// which has no guard, and core's `on_long_press` is unreachable from this
-/// surface.
+/// What stays here is the part core cannot do: the coordinate conversion.
 pub(crate) fn handle_long_press(
     state: &SharedState,
     touch: &std::rc::Rc<FieldTouch>,
     event: &teksilo_core::gesture::TapEvent,
     ctx: &mut EventContext,
 ) -> EventResponse {
-    if !event.pointer.kind.is_direct() {
-        return EventResponse::Ignored;
-    }
     // No sample is being dispatched, so `pointer_position` is `None` here; the
     // tap's own position is field-local and the field does not move mid-press.
     let window = {
@@ -197,7 +198,7 @@ pub(crate) fn handle_long_press(
             event.position.y + st.viewport_origin.y,
         )
     };
-    if !touch.select_word_at(window, ctx) {
+    if !touch.select_word_at(event.pointer, window, ctx) {
         return EventResponse::Ignored;
     }
     touch.mark_hold_consumed(event.pointer.id);

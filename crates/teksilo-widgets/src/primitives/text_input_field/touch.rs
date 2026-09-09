@@ -361,10 +361,17 @@ impl FieldTouch {
     }
 
     /// Select the word at a window point and raise the affordances — the
-    /// hold. Returns `false` when this surface has no geometry to select
-    /// against, so the caller can leave the gesture unhandled.
+    /// hold. Returns `false` when the controller declined, either because
+    /// `pointer` is not a direct one or because this surface has no geometry to
+    /// select against, so the caller can leave the gesture unhandled.
+    ///
+    /// The word selection itself is the controller's
+    /// ([`TouchSelection::on_long_press`]), not a second copy of it here: the
+    /// host contributes the two things core cannot know — the window point (the
+    /// gesture's own position is widget-local) and the overlay mount.
     pub(crate) fn select_word_at(
         self: &Rc<Self>,
+        pointer: teksilo_core::pointer::PointerInfo,
         point: Point,
         ctx: &mut EventContext<'_>,
     ) -> bool {
@@ -372,12 +379,12 @@ impl FieldTouch {
             self.dismiss();
             return false;
         }
-        let direction = ctx.layout_direction();
-        self.with_source(|controller, source| {
-            let word = source.word_range_at(source.offset_at(point));
-            source.set_selection(word);
-            controller.raise(direction, source);
+        let handled = self.with_source(|controller, source| {
+            controller.on_long_press(pointer, point, ctx, source)
         });
+        if handled != Some(teksilo_core::event::EventResponse::Handled) {
+            return false;
+        }
         self.mount(ctx, ToolbarIntent::Show);
         true
     }
@@ -404,20 +411,22 @@ impl FieldTouch {
     /// overlay, which is what lets the ctx-less paths (the window-active effect,
     /// the external text sync) retire the chrome at all.
     pub(crate) fn dismiss(&self) {
-        self.toolbar_wanted.set(false);
+        // Guarded, like `hide_toolbar`: this is now reached from every mouse
+        // press in the field, and a `Signal::set` notifies whether or not the
+        // value moved. `TextAffordances::publish` already early-returns on an
+        // unchanged state, so with this the whole call is free for a field that
+        // has nothing raised.
+        if self.toolbar_wanted.get() {
+            self.toolbar_wanted.set(false);
+        }
         self.controller.borrow_mut().dismiss();
-    }
-
-    /// The top-left corner of everything the controller currently wants shown.
-    fn affordance_origin(&self) -> Point {
-        affordance_bounds(&self.controller.borrow().affordances()).origin()
     }
 
     /// Place the caret at a window point, as a press on the text does.
     ///
-    /// Shared by the field's own release arm and by [`AffordanceHost`], which
-    /// takes the presses that land inside the affordances' rectangle but on
-    /// neither handle.
+    /// [`AffordanceHost`]'s alone: it is what answers a **cursor's** click on a
+    /// selection handle, which the field itself never sees (the handle is the
+    /// hit target, and the field is not on its bubble path).
     pub(crate) fn place_caret_at(&self, window: Point, ctx: &mut EventContext<'_>) -> bool {
         let Some(state) = self.state() else {
             return false;
@@ -441,19 +450,6 @@ impl FieldTouch {
         super::state::sync_cursor_signals(&state);
         super::keyboard::report_ime_cursor_area(&state, ctx);
         true
-    }
-
-    /// Whether a press at this window point belongs to a handle rather than to
-    /// the text under it — including mid-drag, when the finger has left the
-    /// handle's rectangle but still holds it.
-    ///
-    /// [`AffordanceHost`] needs this because a handle's `Handled` does not stop
-    /// the press reaching it: the two nodes are on one bubble path, and without
-    /// the question the host would overwrite, with a caret, the very selection
-    /// the handle had just adjusted.
-    pub(crate) fn press_belongs_to_a_handle(&self, window: Point) -> bool {
-        let controller = self.controller.borrow();
-        controller.is_dragging() || controller.handle_at(window).is_some()
     }
 
     /// Take the toolbar down without touching the handles.
@@ -496,28 +492,27 @@ impl FieldTouch {
             return;
         };
         if let Some(layer) = self.layer.get() {
-            // **Not** `FullViewport`, though that is the placement the affordance
-            // band was written for. An overlay is chosen by its *bounds*:
-            // `OverlayManager::hit_test` picks the topmost overlay whose
-            // rectangle contains the point and the router then searches that
-            // overlay's content **and nothing else** — so a viewport-sized
-            // overlay whose content misses the point answers "nothing here"
-            // rather than falling through to the tree beneath, and the field
-            // under a raised affordance stops taking presses at all. The
-            // `event_pass_through` on the layer cannot help: it is honoured
-            // inside the subtree walk, below the point where the overlay was
-            // already chosen.
+            // `FullViewport`, which is the placement the affordance band was
+            // written for: the layer positions each handle in window
+            // coordinates, so the overlay it lives in only has to *contain*
+            // them for the hit-test walk to descend, and the viewport contains
+            // every position the text can be at.
             //
-            // So the overlay is only as large as the affordances it holds — see
-            // [`AffordanceHost`] — and everything outside that rectangle reaches
-            // the tree exactly as it did. `AtPointer` is the placement for that:
-            // it takes an origin and sizes itself from its content, and unlike
-            // `AtPointerAvoiding` it adds no quadrant preference of its own.
+            // This shape needed a fix in `WidgetTree::hit_test_with` before it
+            // was usable, and it is worth knowing which: an overlay is chosen by
+            // its **bounds**, and the router used to return whatever that
+            // overlay's content answered — `None` included. A viewport-sized
+            // overlay therefore made the field beneath stop taking presses
+            // altogether. The router now falls through to the tree when the
+            // chosen overlay's content root declares `event_pass_through` and
+            // its subtree claimed nothing, which both this layer and
+            // [`AffordanceHost`] do. Hence no `update_overlay_placement_by_content`
+            // per publish either: the viewport does not move when a handle does.
             ctx.show_overlay_in_band(
                 OverlayRequest {
                     content_id: layer,
                     anchor,
-                    placement: OverlayPlacement::AtPointer(self.affordance_origin()),
+                    placement: OverlayPlacement::FullViewport,
                     // The band is exempt from outside-press dismissal — every
                     // caret-moving tap is outside a handle — so the lifetime is
                     // the controller's published state, above.
@@ -528,12 +523,6 @@ impl FieldTouch {
                     fade_duration: None,
                 },
                 OverlayBand::TextAffordance,
-            );
-            // The affordances move with the finger, so the overlay has to be
-            // re-placed on every publish, not only when it is first raised.
-            ctx.update_overlay_placement_by_content(
-                layer,
-                OverlayPlacement::AtPointer(self.affordance_origin()),
             );
         }
         let wanted = match toolbar {
@@ -838,8 +827,11 @@ fn build_selection_toolbar_widget(
 
 /// The bounding rectangle of everything `affordances` currently wants shown.
 ///
-/// Empty when nothing is raised, which is what keeps an idle field's overlay out
-/// of every hit-test.
+/// Nothing in the mount uses it any more — the overlay is the whole viewport and
+/// the layer places each handle in window coordinates inside it. It survives as
+/// the tests' way of naming a point that is clear of every affordance, which is
+/// what the fall-through assertions are about.
+#[cfg(test)]
 pub(crate) fn affordance_bounds(affordances: &teksilo_core::text_touch::TextAffordances) -> Rect {
     let mut union: Option<Rect> = None;
     let mut add = |rect: Rect| {
@@ -866,26 +858,36 @@ pub(crate) fn affordance_bounds(affordances: &teksilo_core::text_touch::TextAffo
     union.unwrap_or(Rect::ZERO)
 }
 
-/// The affordance layer, wrapped in an overlay content root no larger than the
-/// affordances themselves.
+/// The affordance layer, wrapped in a viewport-sized, pass-through overlay
+/// content root that answers one thing: a **cursor's** click on a handle.
 ///
 /// # Why the wrapper exists
 ///
-/// An overlay is selected by its rectangle and searched in isolation: the router
-/// picks the topmost overlay whose bounds contain the press and looks for a
-/// target **inside that overlay only**, so a viewport-sized affordance overlay
-/// answers "nothing here" for every press that is not on a handle instead of
-/// letting it reach the editor. Sizing the overlay to the affordances is what
-/// keeps the rest of the window behaving normally.
+/// It used to exist to be *small*. An overlay is chosen by its bounds, and the
+/// router returned whatever the chosen overlay's content answered — `None`
+/// included — so a viewport-sized affordance overlay made the field beneath stop
+/// taking presses altogether. Sizing the overlay to the affordances was the
+/// workaround. `WidgetTree::hit_test_with` now falls through to the tree when
+/// the chosen overlay's content root declares `event_pass_through` and its
+/// subtree claimed nothing, so the sizing is gone and the layer is mounted at
+/// the placement it was designed for.
 ///
-/// # What it does with the presses it does take
+/// What is left is the one press neither the layer nor the field can answer.
+/// `event_pass_through` removes a node from **hit-testing**, not from the
+/// **bubble path** of a descendant that was hit — so a press on a handle still
+/// arrives here on its way up, while a press that lands on no handle never
+/// reaches this node at all and goes to the field instead.
 ///
-/// The rectangle is a bounding box, so it also covers the text *between* two
-/// handles. Those presses reach this node rather than the field, and it answers
-/// them the way the field would have: a finger places the caret on its release,
-/// and a **mouse** places it on the press and retires the affordances outright —
-/// touch chrome standing over the text is exactly what is in a cursor's way, and
-/// nothing else would ever take it down on a hybrid machine.
+/// A handle refuses an indirect pointer (its own guard, in `teksilo-core`), and
+/// the field never sees the press because a handle is a different root: without
+/// this node a cursor's click on touch chrome would be swallowed, leaving the
+/// chrome standing with nothing able to remove it. So here it places the caret
+/// it was asking for and retires the affordances. A cursor's click anywhere
+/// *else* in the field retires them too — that is the field's own mouse arm, in
+/// [`super::mouse`].
+///
+/// A finger's press is refused outright: on a handle it belongs to the handle,
+/// and anywhere else it never arrives.
 pub(crate) struct AffordanceHost {
     affordances: teksilo_core::text_touch::TextAffordances,
     handle_recipe: teksilo_core::styles::TextSelectionHandleRecipe,
@@ -926,10 +928,6 @@ impl AffordanceHost {
             layer: None,
         }
     }
-
-    fn bounds_wanted(&self) -> Rect {
-        affordance_bounds(&self.affordances)
-    }
 }
 
 impl teksilo_core::widget::Widget for AffordanceHost {
@@ -948,52 +946,34 @@ impl teksilo_core::widget::Widget for AffordanceHost {
         self.layer = Some(id);
 
         let touch = self.touch.clone();
-        let handlers =
-            teksilo_core::widget_builder::HandlerSet::new().on_pointer_event(move |event, ctx| {
+        let handlers = teksilo_core::widget_builder::HandlerSet::new()
+            // Not a hit-test candidate: a press that lands on no handle must go
+            // to the field beneath, which is what the router's fall-through
+            // does with an overlay content root carrying this flag. Bubbled
+            // presses from the handles still arrive — the flag governs
+            // targeting, not dispatch — which is the one thing this node is for.
+            .event_pass_through(true)
+            .on_pointer_event(move |event, ctx| {
+                if ctx.pointer_kind().is_direct() {
+                    // On a handle it is the handle's; anywhere else it never got
+                    // here.
+                    return teksilo_core::event::EventResponse::Ignored;
+                }
+                if !matches!(event, teksilo_core::event::WidgetEvent::PointerDown { .. }) {
+                    return teksilo_core::event::EventResponse::Ignored;
+                }
                 let Some(touch) = touch.upgrade() else {
                     return teksilo_core::event::EventResponse::Ignored;
                 };
                 let Some(window) = ctx.pointer_position() else {
                     return teksilo_core::event::EventResponse::Ignored;
                 };
-                if !ctx.pointer_kind().is_direct() {
-                    // A cursor has arrived over touch chrome. Place the caret
-                    // where it clicked, exactly as the field would, and take the
-                    // affordances down: nothing else on a hybrid machine ever
-                    // would, and they are standing on the text. Deliberately
-                    // *including* a click on a handle — the handle refuses an
-                    // indirect pointer, so refusing it here too would leave the
-                    // chrome up with nothing able to remove it.
-                    if matches!(event, teksilo_core::event::WidgetEvent::PointerDown { .. }) {
-                        touch.place_caret_at(window, ctx);
-                        touch.dismiss();
-                        ctx.request_frame();
-                        return teksilo_core::event::EventResponse::Handled;
-                    }
-                    return teksilo_core::event::EventResponse::Ignored;
-                }
-                // A handle took this press, and it is on the same bubble path as
-                // this node: without the question the caret placement below would
-                // undo the adjustment the handle just made.
-                if touch.press_belongs_to_a_handle(window) {
-                    return teksilo_core::event::EventResponse::Ignored;
-                }
-                match event {
-                    teksilo_core::event::WidgetEvent::PointerDown { .. } => {
-                        touch.hide_toolbar();
-                        teksilo_core::event::EventResponse::Handled
-                    }
-                    teksilo_core::event::WidgetEvent::PointerUp { .. } => {
-                        if crate::data_views::release_completes_the_press(ctx)
-                            && touch.place_caret_at(window, ctx)
-                        {
-                            touch.raise(ctx, ToolbarIntent::Hide);
-                        }
-                        ctx.request_frame();
-                        teksilo_core::event::EventResponse::Handled
-                    }
-                    _ => teksilo_core::event::EventResponse::Ignored,
-                }
+                // A cursor has clicked touch chrome. Place the caret it asked
+                // for and take the chrome down.
+                touch.place_caret_at(window, ctx);
+                touch.dismiss();
+                ctx.request_frame();
+                teksilo_core::event::EventResponse::Handled
             });
         ctx.apply_self_handlers(handlers);
         self.children()
@@ -1004,26 +984,24 @@ impl teksilo_core::widget::Widget for AffordanceHost {
         proposal: teksilo_canvas::SizeProposal,
         _ctx: &teksilo_core::widget::LayoutContext,
     ) -> teksilo_core::widget::LayoutResponse {
-        let _ = proposal;
-        let wanted = self.bounds_wanted();
-        teksilo_canvas::Size::new(wanted.width, wanted.height).into()
+        // Whatever the overlay gives it, which is the viewport.
+        proposal.resolve(0.0, 0.0).into()
     }
 
     fn place_children(
         &self,
-        _bounds: Rect,
-        proposal: teksilo_canvas::SizeProposal,
+        bounds: Rect,
+        _proposal: teksilo_canvas::SizeProposal,
         children: &mut [teksilo_core::widget::WidgetPlacement],
         _ctx: &teksilo_core::widget::LayoutContext,
     ) {
         // The layer positions its own children in window coordinates, so its own
-        // rectangle only has to *contain* them for the hit-test walk to descend.
-        let wanted = self.bounds_wanted();
+        // rectangle only has to *contain* them for the hit-test walk to descend
+        // — and the viewport contains every position the text can be at.
         for placement in children.iter_mut() {
-            placement.origin = wanted.origin();
-            placement.size = wanted.size();
+            placement.origin = bounds.origin();
+            placement.size = bounds.size();
         }
-        let _ = proposal;
     }
 
     fn children(&self) -> Vec<WidgetId> {

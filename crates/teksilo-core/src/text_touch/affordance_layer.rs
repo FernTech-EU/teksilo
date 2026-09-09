@@ -134,12 +134,19 @@ impl Widget for SelectionHandle {
         let action_delegate = Rc::clone(&self.delegate);
         let handlers = crate::widget_builder::HandlerSet::new()
             .on_pointer_event(move |event, ctx| {
-                // A mouse must fall through to the editor beneath. Handles are
-                // only ever raised by a direct pointer, but on a hybrid machine
-                // a mouse can arrive afterwards and click one — and swallowing
-                // that press would cost the caret placement it was asking for.
-                // The controller would refuse the drag anyway; without this the
-                // press is consumed before it gets there.
+                // A mouse's click is not this node's. Handles are only ever
+                // raised by a direct pointer, but on a hybrid machine a mouse can
+                // arrive afterwards and click one — and swallowing that press
+                // would cost the caret placement it was asking for. The
+                // controller would refuse the drag anyway; without this the press
+                // is consumed before it gets there.
+                //
+                // `Ignored` sends it up this node's own bubble path, not to the
+                // editor: a handle is a node in the overlay's content, and the
+                // editor is a different root. So a host that wants a cursor's
+                // click on a handle answered puts that arm on the content root
+                // above these nodes — see the checklist in
+                // `docs/text-touch-editing.md`.
                 if !ctx.pointer_kind().is_direct() {
                     return EventResponse::Ignored;
                 }

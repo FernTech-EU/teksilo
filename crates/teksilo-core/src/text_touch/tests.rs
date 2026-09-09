@@ -181,6 +181,23 @@ fn ctx_for<'a>(kind: teksilo_tokens::PointerKind, direction: LayoutDirection) ->
         .with_layout_direction(direction)
 }
 
+/// The device a gesture names — what `TapEvent::pointer` carries, and what the
+/// long-press entry point now takes rather than asking a context that, on the
+/// timer path, cannot know.
+fn pointer_of(kind: teksilo_tokens::PointerKind) -> PointerInfo {
+    let mut pointer = PointerInfo::mouse(EventTime::ZERO);
+    pointer.kind = kind;
+    pointer
+}
+
+fn finger() -> PointerInfo {
+    pointer_of(teksilo_tokens::PointerKind::Touch)
+}
+
+fn mouse() -> PointerInfo {
+    PointerInfo::mouse(EventTime::ZERO)
+}
+
 /// A context whose pointer is a finger. Touch tests drive this.
 fn touch_ctx<'a>(direction: LayoutDirection) -> EventContext<'a> {
     ctx_for(teksilo_tokens::PointerKind::Touch, direction)
@@ -223,7 +240,7 @@ fn a_mouse_long_press_selects_nothing_and_raises_nothing() {
     let mut controller = TouchSelection::new();
     let mut ctx = mouse_ctx();
 
-    let response = controller.on_long_press(source.point_of(7), &mut ctx, &mut source);
+    let response = controller.on_long_press(mouse(), source.point_of(7), &mut ctx, &mut source);
 
     assert_eq!(response, EventResponse::Ignored);
     assert_eq!(source.selection(), 0..0, "a mouse hold moved the selection");
@@ -235,6 +252,48 @@ fn a_mouse_long_press_selects_nothing_and_raises_nothing() {
         controller.toolbar().is_none(),
         "a mouse hold raised a toolbar"
     );
+}
+
+/// The gesture names the device, and the context does not get a vote.
+///
+/// This is the shape the long-press entry point failed at for its whole first
+/// life. A hold is recognised by the gesture timer, not by a sample, and the
+/// tree's in-flight snapshot is saved-and-restored around every dispatch — so
+/// the context a hold handler is handed reported **the mouse** whatever the
+/// finger was, and a guard reading it refused every caller the entry point
+/// exists for. The tree now installs the holding contact (pinned separately, in
+/// `pointer_state`), but the guard reads the gesture's own pointer, so the two
+/// halves below hold even where no tree installed anything at all: a context
+/// built by hand, an assistive-technology action, a host driving its own timer.
+#[test]
+fn the_long_press_guard_reads_the_gesture_and_not_the_context() {
+    // A finger, under a context that says "mouse" — which is exactly what the
+    // timer path used to hand every hold.
+    let mut source = FakeText::new();
+    let mut controller = TouchSelection::new();
+    let mut ctx = mouse_ctx();
+
+    let response = controller.on_long_press(finger(), source.point_of(7), &mut ctx, &mut source);
+
+    assert_eq!(
+        response,
+        EventResponse::Handled,
+        "a finger's hold was refused because the context reported a mouse"
+    );
+    assert_eq!(source.selection(), 5..10, "the word under offset 7");
+    assert_eq!(controller.handles().len(), 2);
+
+    // …and the converse, so the guard cannot be passing by ignoring its
+    // argument: a mouse, under a context that says "touch".
+    let mut source = FakeText::new();
+    let mut controller = TouchSelection::new();
+    let mut ctx = touch_ctx(LTR);
+
+    let response = controller.on_long_press(mouse(), source.point_of(7), &mut ctx, &mut source);
+
+    assert_eq!(response, EventResponse::Ignored);
+    assert_eq!(source.selection(), 0..0, "a mouse hold moved the selection");
+    assert!(controller.handles().is_empty());
 }
 
 /// The same guard on the pointer route: a mouse press, move and release leave
@@ -321,7 +380,14 @@ fn a_pen_gets_the_same_affordances_as_a_finger() {
         LTR,
     );
 
-    let response = controller.on_long_press(source.point_of(7), &mut ctx, &mut source);
+    let response = controller.on_long_press(
+        pointer_of(teksilo_tokens::PointerKind::Pen(
+            teksilo_tokens::PenKind::default(),
+        )),
+        source.point_of(7),
+        &mut ctx,
+        &mut source,
+    );
 
     assert_eq!(response, EventResponse::Handled);
     assert_eq!(source.selection(), 5..10);
@@ -338,7 +404,7 @@ fn a_long_press_selects_the_word_under_the_finger_and_raises_two_handles() {
     let mut controller = TouchSelection::new();
     let mut ctx = touch_ctx(LTR);
 
-    let response = controller.on_long_press(source.point_of(7), &mut ctx, &mut source);
+    let response = controller.on_long_press(finger(), source.point_of(7), &mut ctx, &mut source);
 
     assert_eq!(response, EventResponse::Handled);
     assert_eq!(source.selection(), 5..10, "the word under offset 7");

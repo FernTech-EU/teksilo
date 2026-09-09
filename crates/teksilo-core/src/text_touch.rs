@@ -626,13 +626,38 @@ impl TouchSelection {
     /// long-press recognizer on the presence of the handler alone, with no
     /// pointer-kind condition, so without it a half-second mouse hold inside an
     /// editor would select a word.
+    ///
+    /// # Why the device is a parameter here and not read off `ctx`
+    ///
+    /// [`handle_pointer`](Self::handle_pointer) and
+    /// [`drag_handle`](Self::drag_handle) ask `ctx.pointer_kind()`, and they are
+    /// right to: both serve a **sample**, and the tree installs that sample's
+    /// pointer for the length of the dispatch. A hold serves no sample — it is a
+    /// deadline coming due — and the answer a context can give for it is only as
+    /// good as the tree's bookkeeping at tick time. It was wrong for the whole
+    /// of this method's first life: `current_input` is saved-and-restored around
+    /// every dispatch, so the timer path read back `InputSnapshot::default()`
+    /// and this guard refused **every** genuine touch hold, which made the entry
+    /// point dead code and cost its first host a duplicate guard of its own.
+    /// The tree now installs the holding contact
+    /// (`InputSnapshot::for_recognized_gesture`), so `ctx` answers correctly
+    /// too — but the gesture already carries the truth on
+    /// [`TapEvent::pointer`](crate::gesture::TapEvent::pointer), and a host that
+    /// drives this from anywhere else — an assistive-technology action, its own
+    /// hold timer — has no snapshot behind it at all. So the caller names the
+    /// device.
+    ///
+    /// `point` is in **window** coordinates, like every other point this type
+    /// takes — deliberately *not* `TapEvent::position`, which the router has
+    /// already rewritten into the target's local space.
     pub fn on_long_press(
         &mut self,
+        pointer: crate::pointer::PointerInfo,
         point: Point,
         ctx: &mut EventContext<'_>,
         source: &mut dyn TextHitSource,
     ) -> EventResponse {
-        if !ctx.pointer_kind().is_direct() {
+        if !pointer.kind.is_direct() {
             return EventResponse::Ignored;
         }
         let offset = source.offset_at(point);

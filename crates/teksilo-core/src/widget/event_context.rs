@@ -587,10 +587,13 @@ impl<'ops> EventContext<'ops> {
 
     /// The pointer that produced the event being handled.
     ///
-    /// Outside a pointer or scroll dispatch — a gesture timer, an assistive
-    /// technology action, a hand-constructed test context — this is the mouse
-    /// at the tree epoch, which is the same answer every such handler got
-    /// before pointers were distinguishable.
+    /// A gesture the timer recognised — a hold — reports the **contact that
+    /// held**: it has no sample behind it, but it has a pointer, and it used to
+    /// report the mouse whatever the device was. Outside any pointer, scroll or
+    /// gesture dispatch — an assistive-technology action, a drag tick fired from
+    /// a layout pass, a hand-constructed test context — this is the mouse at the
+    /// tree epoch, which is the same answer every such handler got before
+    /// pointers were distinguishable.
     pub fn pointer(&self) -> crate::pointer::PointerInfo {
         self.input.pointer
     }

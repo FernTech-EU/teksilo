@@ -1436,11 +1436,39 @@ impl WidgetTree {
                 {
                     continue;
                 }
+                // Install the contact this gesture belongs to for the length
+                // of the dispatch. A hold is recognised here, by a deadline,
+                // not by a sample — and `current_input` is saved-and-restored
+                // around every dispatch (`run_one_dispatch`), so without this
+                // it holds `InputSnapshot::default()` and every handler reached
+                // from a hold is told it is serving **the mouse**, whatever the
+                // device was. That answer reaches more than
+                // `EventContext::pointer_kind`: the captor, the press snapshot
+                // and the frozen `TouchAction` are all resolved from
+                // `current_input.pointer.id`, so all four answered for a mouse
+                // that was not there. The fling pump resolves its pointer from
+                // the table the same way (`dispatch_chained_scroll`).
+                let installed = self
+                    .pointers
+                    .get(pointer)
+                    .map(|entry| entry.info)
+                    .unwrap_or(self.current_input.pointer);
+                let previous_input = std::mem::replace(
+                    &mut self.current_input,
+                    crate::pointer::InputSnapshot::for_recognized_gesture(installed),
+                );
                 let mut ctx = self.make_event_context(&mut *ops);
                 if let Some(node) = self.arena.get_mut(id) {
                     Self::dispatch_recognized_gesture(node, gesture, &mut ctx);
                 }
+                // `collect_from_ctx` **after** the restore would be wrong:
+                // it resolves a handler's `capture_pointer()` and
+                // `cancel_pointer()` against `current_pointer_id()`, so a hold
+                // that captured would have captured for the mouse. The sample
+                // path has the same order — `run_one_dispatch` restores only
+                // once `dispatch_event_impl`, collection included, has returned.
                 self.collect_from_ctx(ctx, id);
+                self.current_input = previous_input;
             }
             self.arena.mark_needs_paint(id);
         }
@@ -2307,6 +2335,68 @@ mod clock_tests {
             after > at_pause,
             "the deactivation cost the animation its phase: {at_pause} -> {after}"
         );
+    }
+
+    /// A gesture the **timer** recognised is dispatched under its own contact.
+    ///
+    /// The whole class of defect this pins: a hold is not a sample, so nothing
+    /// on the sample path installs a snapshot for it, and `current_input` is
+    /// saved-and-restored around every dispatch — so a handler reached from a
+    /// hold used to be told, unconditionally, that it was serving the mouse.
+    /// It was measured that way (a probe on a real `long_press_at(Touch, ..)`
+    /// printed `Mouse`), and it cost the first host of the touch-text contract
+    /// a duplicate guard: `TouchSelection::on_long_press` refused every finger.
+    ///
+    /// Four answers ride on `current_input.pointer`, not one, and all four were
+    /// wrong here: the device (`pointer_kind`), the id, the captor and the press
+    /// snapshot, which resolve through `current_pointer_id()`.
+    ///
+    /// The mouse half is not decoration: it is what proves the fix installs the
+    /// *holding contact* rather than hard-coding a finger.
+    #[test]
+    fn a_hold_is_dispatched_under_the_contact_that_held() {
+        use crate::test_widgets::FillWidget;
+        use crate::widget_builder::WidgetBuilder;
+
+        for (kind, expected) in [
+            (
+                teksilo_tokens::PointerKind::Touch,
+                teksilo_tokens::PointerKind::Touch,
+            ),
+            (
+                teksilo_tokens::PointerKind::Mouse,
+                teksilo_tokens::PointerKind::Mouse,
+            ),
+        ] {
+            let seen: std::rc::Rc<std::cell::Cell<Option<teksilo_tokens::PointerKind>>> =
+                Default::default();
+            let seen_id: std::rc::Rc<std::cell::Cell<Option<crate::pointer::PointerId>>> =
+                Default::default();
+            let mut tree = WidgetTree::new();
+            {
+                let seen = seen.clone();
+                let seen_id = seen_id.clone();
+                tree.add(FillWidget::new().on_long_press(move |_e, ctx| {
+                    seen.set(Some(ctx.pointer_kind()));
+                    seen_id.set(Some(ctx.pointer().id));
+                }));
+            }
+            tree.layout(SizeProposal::exact(100.0, 100.0));
+
+            let held = tree.long_press_at(kind, Point::new(50.0, 50.0));
+
+            assert_eq!(
+                seen.get(),
+                Some(expected),
+                "a {kind:?} hold was dispatched as {:?}",
+                seen.get()
+            );
+            assert_eq!(
+                seen_id.get(),
+                Some(held),
+                "a hold must carry the identity of the contact that held"
+            );
+        }
     }
 
     /// A deadline armed after the hand-back is reported to the event loop as a

@@ -596,15 +596,25 @@ fn a_tap_inside_a_handles_target_adjusts_the_selection_instead() {
     );
 }
 
-/// The affordance overlay is **no larger than the affordances it holds**.
+/// The affordance overlay covers the **whole viewport**, and that is now safe.
 ///
-/// An overlay is chosen by its rectangle and then searched alone: the router
-/// picks the topmost overlay containing the press and looks for a target inside
-/// that overlay only, so a viewport-sized affordance overlay answers "nothing
-/// here" for every press that is not on a handle. The size is therefore a
-/// correctness property, not a tidiness one.
+/// This test asserted the opposite until the router learned to fall through, and
+/// the reason is worth keeping: an overlay is chosen by its rectangle and then
+/// searched alone, and the router returned whatever that search answered — `None`
+/// included — so a viewport-sized affordance overlay answered "nothing here" for
+/// every press that was not on a handle and the field stopped taking presses.
+/// Sizing the overlay to the affordances was the way round it, and the size was
+/// therefore a correctness property.
+///
+/// `WidgetTree::hit_test_with` now falls through to the tree when the chosen
+/// overlay's content root declares `event_pass_through` and its subtree claimed
+/// nothing, so the placement the affordance band was designed for is usable and
+/// the geometry the layer needs — a rectangle containing every position the text
+/// can be at — is the plain one. The behaviour that made the size load-bearing is
+/// pinned by `a_tap_beyond_the_affordances_reaches_the_field_itself` below, which
+/// did not change and reddens if the fall-through is reverted.
 #[test]
-fn the_affordance_overlay_is_no_larger_than_the_affordances_it_holds() {
+fn the_affordance_overlay_covers_the_viewport_and_passes_presses_through() {
     let mut h = Harness::focused("hello world");
     h.tree.long_press_at(PointerKind::Touch, h.at(2));
     h.render();
@@ -616,37 +626,40 @@ fn the_affordance_overlay_is_no_larger_than_the_affordances_it_holds() {
         .expect("the overlay is up");
     let wanted = super::touch::affordance_bounds(&h.touch.controller.borrow().affordances());
     assert!(
-        (bounds.width - wanted.width).abs() < 0.5 && (bounds.height - wanted.height).abs() < 0.5,
-        "overlay {bounds:?} against the affordances' own {wanted:?}"
+        bounds.width >= 400.0 && bounds.height >= 400.0,
+        "the layer must be given the whole viewport: {bounds:?}"
     );
     assert!(
-        bounds.width < 200.0,
-        "…and nowhere near the 400 dp viewport: {bounds:?}"
+        bounds.contains(wanted.origin())
+            && bounds.contains(Point::new(wanted.right(), wanted.bottom())),
+        "…and it must contain the affordances it holds, or the hit-test walk \
+         never descends to them: {bounds:?} against {wanted:?}"
     );
 }
 
 /// A tap **beyond** the affordances' rectangle reaches the field, and the field
 /// answers it.
 ///
-/// The other half of the size property above: with a viewport-sized overlay this
-/// press would be routed into the affordance layer, find no handle there, and be
-/// dropped — the field would stop taking presses at all for as long as a
-/// selection was up.
+/// The host-level proof of the router's fall-through, and the one assertion in
+/// this file that reddens if it is reverted: the overlay above this press is the
+/// whole viewport, so a router that returned what the affordance layer answered
+/// would drop the press and the field would stop taking presses for as long as a
+/// selection was up. Measured that way before the fix, as `hit_test` returning
+/// `None` at a point inside the field.
+///
+/// The fixture reads the **affordances'** rectangle rather than the overlay's,
+/// which is what it always meant; the two were the same thing only while the
+/// overlay was sized to them.
 #[test]
 fn a_tap_beyond_the_affordances_reaches_the_field_itself() {
     let mut h = Harness::focused("hello world");
     h.tree.long_press_at(PointerKind::Touch, h.at(2));
     h.render();
-    let host = h.touch.layer.get().expect("the affordance host was built");
-    let over = h
-        .tree
-        .overlay_manager()
-        .bounds_for_content(host)
-        .expect("the overlay is up");
+    let over = super::touch::affordance_bounds(&h.touch.controller.borrow().affordances());
     let target = h.at(11);
     assert!(
         target.x > over.right(),
-        "the fixture assumes the end of the text is clear of {over:?}"
+        "the fixture assumes the end of the text is clear of the affordances {over:?}"
     );
     let id = finger();
     h.finger_down(id, target, 0);
@@ -775,6 +788,42 @@ fn a_mouse_click_over_the_affordances_places_a_caret_and_retires_them() {
         h.handles().is_empty(),
         "the touch chrome outlived the cursor's arrival"
     );
+}
+
+/// A cursor's click **anywhere in the field** retires the touch chrome.
+///
+/// The companion to the test above, and a deliberate widening. While the
+/// affordance overlay was sized to the affordances, this behaviour reached only
+/// the presses inside that rectangle — a mouse click on the text a few dp away
+/// left the handles and the toolbar standing. The overlay is the viewport now and
+/// its content root passes presses through, so those presses arrive at the field
+/// itself and the field is where the answer belongs: a cursor has taken over, and
+/// the affordance band is exempt from outside-press dismissal, so nothing else on
+/// a hybrid machine would ever remove them.
+#[test]
+fn a_mouse_click_in_the_field_away_from_the_chrome_retires_it() {
+    let mut h = Harness::focused("hello world");
+    h.tree.long_press_at(PointerKind::Touch, h.at(2));
+    h.render();
+    assert!(!h.handles().is_empty(), "the hold raised handles");
+
+    // Clear of every affordance, and inside the field.
+    let over = super::touch::affordance_bounds(&h.touch.controller.borrow().affordances());
+    let at = h.at(11);
+    assert!(
+        at.x > over.right(),
+        "the fixture assumes {at:?} is clear of the affordances {over:?}"
+    );
+    h.mouse_press(at);
+    h.mouse_release(at);
+    h.render();
+
+    assert!(
+        h.handles().is_empty(),
+        "the touch chrome outlived the cursor's arrival: {:?}",
+        h.handles()
+    );
+    assert_eq!(h.caret(), 11, "…and the click still placed its caret");
 }
 
 /// A finger's double tap selects a word and raises its handles, like a hold.
@@ -996,15 +1045,13 @@ fn a_right_click_retires_the_affordances_the_framework_tore_down() {
     // Clear of the affordances, so the right-click reaches the field and its
     // context-menu factory rather than a handle (which has none, and would open
     // no menu at all).
-    let over = h
-        .tree
-        .overlay_manager()
-        .bounds_for_content(host)
-        .expect("the overlay is up");
+    // The **affordances'** rectangle, not the overlay's: the overlay is the whole
+    // viewport now, and what this fixture needs is a point no handle covers.
+    let over = super::touch::affordance_bounds(&h.touch.controller.borrow().affordances());
     let at = h.at(0);
     assert!(
         at.x < over.x,
-        "the fixture assumes {at:?} is clear of {over:?}"
+        "the fixture assumes {at:?} is clear of the affordances {over:?}"
     );
     h.tree.pointer_down_button(at, PointerButton::Secondary);
     h.tree.pointer_up_button(at, PointerButton::Secondary);
