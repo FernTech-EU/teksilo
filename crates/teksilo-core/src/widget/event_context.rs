@@ -73,6 +73,19 @@ pub struct EventContext<'ops> {
     /// reusable tooltip surface) — the symmetric companion to
     /// [`cancel_delayed_overlay`](EventContext::cancel_delayed_overlay).
     pub(crate) overlay_content_dismissals: Vec<crate::widget_id::WidgetId>,
+    /// Overlay requests that name a z-band other than the default. Kept apart
+    /// from [`overlay_requests`](Self::overlay_requests) rather than carried on
+    /// `OverlayRequest` itself: the band is a property of the *show*, not of
+    /// the request, and every existing construction site of the struct would
+    /// otherwise have to name it.
+    pub(crate) overlay_band_requests:
+        Vec<(crate::overlay::OverlayRequest, crate::overlay::OverlayBand)>,
+    /// New placements for overlays named by their content root. A
+    /// caret-anchored overlay has to be re-placed as the caret moves, and
+    /// `position_overlays` re-reads the placement it was shown with — so
+    /// without this an affordance follows nothing.
+    pub(crate) overlay_placement_updates:
+        Vec<(crate::widget_id::WidgetId, crate::overlay::OverlayPlacement)>,
     /// Overlay ids whose `auto_dismiss_after` timer should be paused
     /// or resumed after the handler returns (`true` = pause, `false`
     /// = resume). Drained by `WidgetTree::collect_from_ctx` against
@@ -454,6 +467,8 @@ impl<'ops> EventContext<'ops> {
             overlay_requests: Vec::new(),
             overlay_dismissals: Vec::new(),
             overlay_content_dismissals: Vec::new(),
+            overlay_band_requests: Vec::new(),
+            overlay_placement_updates: Vec::new(),
             overlay_pause_requests: Vec::new(),
             dismiss_scope: None,
             pointer_capture: None,
@@ -1353,6 +1368,41 @@ impl<'ops> EventContext<'ops> {
     /// Show an overlay (tooltip, menu, popover).
     pub fn show_overlay(&mut self, request: crate::overlay::OverlayRequest) {
         self.overlay_requests.push(request);
+    }
+
+    /// Show an overlay in an explicit z-band.
+    ///
+    /// [`show_overlay`](Self::show_overlay) is this with
+    /// [`Standard`](crate::overlay::OverlayBand::Standard). The other band is
+    /// for the touch text affordances, which must render above the editor's
+    /// `clips_children` ancestor, below every menu, and outside the
+    /// outside-press dismissal that every caret-moving tap would otherwise
+    /// trigger. Their lifetime is the controller's — see
+    /// [`TouchSelection::dismiss`](crate::text_touch::TouchSelection::dismiss).
+    ///
+    /// Showing content that is already up is a no-op, so a host may call this
+    /// on every raise without tracking whether it has.
+    pub fn show_overlay_in_band(
+        &mut self,
+        request: crate::overlay::OverlayRequest,
+        band: crate::overlay::OverlayBand,
+    ) {
+        self.overlay_band_requests.push((request, band));
+    }
+
+    /// Re-place the currently-shown overlay whose content root is `content_id`.
+    ///
+    /// Content-keyed for the same reason
+    /// [`dismiss_overlay_by_content`](Self::dismiss_overlay_by_content) is:
+    /// [`show_overlay`](Self::show_overlay) returns nothing, so a handler
+    /// cannot learn the [`OverlayId`](crate::overlay::OverlayId) it created. A
+    /// no-op when no overlay is showing that content.
+    pub fn update_overlay_placement_by_content(
+        &mut self,
+        content_id: crate::widget_id::WidgetId,
+        placement: crate::overlay::OverlayPlacement,
+    ) {
+        self.overlay_placement_updates.push((content_id, placement));
     }
 
     /// Show an overlay whose reveal/dismiss is animated by a

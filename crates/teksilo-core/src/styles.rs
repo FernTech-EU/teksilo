@@ -87,6 +87,8 @@ mod tab_style;
 mod table_style;
 #[path = "styles/text_input_style.rs"]
 mod text_input_style;
+#[path = "styles/text_selection_style.rs"]
+mod text_selection_style;
 #[path = "styles/theme.rs"]
 mod theme;
 #[path = "styles/theme_appearance.rs"]
@@ -197,6 +199,9 @@ pub use table_style::{
 pub use text_input_style::{
     SharedTextInputStyle, TextInputStyle, TextInputStyleConfig, TextInputValidationLevel,
     TextInputVariant,
+};
+pub use text_selection_style::{
+    SharedTextSelectionStyle, TextMagnifierRecipe, TextSelectionHandleRecipe, TextSelectionStyle,
 };
 pub use theme::{DensityProjection, Theme, ThemeId};
 pub use theme_appearance::ThemeAppearance;

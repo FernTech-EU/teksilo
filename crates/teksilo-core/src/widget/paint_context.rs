@@ -72,6 +72,49 @@ pub struct PaintContext<'a> {
     pub clip_bounds: Option<Rect>,
 }
 
+impl PaintContext<'_> {
+    /// Emit `painter` a second time inside a transform-and-clip scope.
+    ///
+    /// The mechanism behind the touch magnifier (see
+    /// [`crate::text_touch::magnifier`]): `RenderFrame` is a display list, so
+    /// content can be drawn again under a different transform instead of being
+    /// read back from a framebuffer. `clip` is in the same space as the
+    /// widget's own `bounds`; `transform` is composed **beneath** whatever
+    /// scope encloses the caller, so a replay inside a scene's view transform
+    /// still lands where that scene puts it.
+    ///
+    /// Three things this deliberately is not:
+    ///
+    /// * It is not `&mut self`. `Widget::paint` receives a shared
+    ///   `&PaintContext`, so a replay a widget could not call from its own
+    ///   paint would be useless.
+    /// * The clip is a **rectangle**. The renderer realises `SetClip` as a
+    ///   scissor rectangle and the pipeline has no path clip or mask pass, so a
+    ///   rounded lens is painted as a rounded frame over a rectangular clip —
+    ///   see [`crate::text_touch::magnifier`] for what shows in the corners.
+    /// * It does not check `painter`. The closure is re-entered during the same
+    ///   frame; whether that is safe is the caller's contract, stated at the
+    ///   call site in [`crate::text_touch::magnifier`].
+    pub fn replay(
+        &self,
+        canvas: &mut teksilo_canvas::Canvas,
+        painter: &dyn Fn(&mut teksilo_canvas::Canvas, &PaintContext<'_>),
+        transform: teksilo_canvas::Transform2D,
+        clip: Rect,
+    ) {
+        canvas.save();
+        // Clip first, transform second: the renderer maps a clip rect through
+        // the transform stack as it stands when the command is emitted, so
+        // emitting it before the magnification keeps the lens fixed on screen
+        // instead of being magnified along with its contents.
+        canvas.set_clip(clip);
+        canvas.apply_transform(transform);
+        painter(canvas, self);
+        canvas.clear_clip();
+        canvas.restore();
+    }
+}
+
 /// Read-only view of the widget tree's geometry passed to
 /// [`Widget::after_paint`](super::Widget::after_paint). Wraps a borrow of
 /// the arena so a parent widget can read the layout-resolved bounds of

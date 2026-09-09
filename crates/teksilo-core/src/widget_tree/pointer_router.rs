@@ -2706,6 +2706,32 @@ impl WidgetTree {
                 self.overlay_manager.set_top_focus_restore(focus_id);
             }
         }
+        for (mut req, band) in ctx.overlay_band_requests {
+            if req.parent_overlay.is_none() {
+                req.parent_overlay = self.overlay_ancestor_for_widget(source_widget);
+            }
+            if self
+                .overlay_manager
+                .find_by_content(req.content_id)
+                .is_some()
+            {
+                continue;
+            }
+            let content_id = req.content_id;
+            self.overlay_manager.show_in_band(req, band);
+            self.arena.activate(content_id);
+            self.a11y_dirty = true;
+            // Deliberately no `set_top_focus_restore`: the text-affordance band
+            // never takes focus from the anchor, so there is nothing to give
+            // back when it goes.
+        }
+        // After the shows, so a handler may raise an overlay and place it in
+        // the same dispatch.
+        for (content_id, placement) in ctx.overlay_placement_updates {
+            if let Some(overlay_id) = self.overlay_manager.find_by_content(content_id) {
+                self.overlay_manager.update_placement(overlay_id, placement);
+            }
+        }
         for (mut req, duration) in ctx.timed_overlay_requests {
             if req.parent_overlay.is_none() {
                 req.parent_overlay = self.overlay_ancestor_for_widget(source_widget);

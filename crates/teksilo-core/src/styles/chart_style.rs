@@ -2,8 +2,11 @@
 // SPDX-FileCopyrightText: 2026 FernTech
 
 //! Tier-3 style protocol for `BarChart` / `LineChart` / `PieChart` (teksilo-charts).
-//! Unlike every other Tier-3 trait, `ChartStyle` returns pure-data recipes only —
-//! no `make_*(cfg, ctx) -> WidgetId` methods (charts are batched-paint). `RecipeChartStyle`,
+//! One of the few Tier-3 traits that returns pure-data recipes only — no
+//! `make_*(cfg, ctx) -> WidgetId` methods, because charts are batched-paint.
+//! [`GridViewStyle`](crate::styles::GridViewStyle) and
+//! [`TextSelectionStyle`](crate::styles::TextSelectionStyle) have the same
+//! shape, for the same reason. `RecipeChartStyle`,
 //! the shipped default, lives in teksilo-charts itself (NOT teksilo-widgets), because
 //! teksilo-charts does not depend on teksilo-widgets. teksilo-core only holds the trait
 //! + the `Rc<dyn ChartStyle>` slot type.

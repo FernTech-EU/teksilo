@@ -660,9 +660,10 @@ pub trait ChartStyle: 'static {
 }
 ```
 
-Unlike every other Tier-3 trait, `ChartStyle` is **all-recipe** — four
+`ChartStyle` is one of the few **all-recipe** Tier-3 traits — four
 methods returning plain-data `FillRecipe` / `BorderRecipe` (Tier 2),
-none returning `WidgetId`. Charts paint via `Canvas` calls inside their
+none returning `WidgetId`. `GridViewStyle` and `TextSelectionStyle`
+have the same shape, for the same reason. Charts paint via `Canvas` calls inside their
 own `paint()` rather than composing child widgets, so there's no
 `make_*(cfg, ctx) -> WidgetId` step to hook into; the recipe is
 resolved once per fill/stroke and painted directly. This is a

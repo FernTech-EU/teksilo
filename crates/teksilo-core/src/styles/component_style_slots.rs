@@ -37,7 +37,8 @@ use crate::styles::{
     SharedScrollBarStyle, SharedSearchFieldStyle, SharedSegmentedControlStyle, SharedSliderStyle,
     SharedSnackbarStyle, SharedSpinBoxStyle, SharedSplitButtonStyle, SharedSplitterStyle,
     SharedStandardItemStyle, SharedTabStyle, SharedTableStyle, SharedTextInputStyle,
-    SharedToastStyle, SharedToggleStyle, SharedTooltipStyle, SharedWebViewStyle,
+    SharedTextSelectionStyle, SharedToastStyle, SharedToggleStyle, SharedTooltipStyle,
+    SharedWebViewStyle,
 };
 
 /// Typed slot bag living on [`crate::styles::Theme`]. One slot per
@@ -86,6 +87,9 @@ pub struct ComponentStyleSlots {
     pub drop_target: Option<SharedDropTargetStyle>,
     pub grid_view: Option<SharedGridViewStyle>,
     pub web_view: Option<SharedWebViewStyle>,
+    /// Touch text-selection chrome — the selection handles and the magnifier.
+    /// See [`TextSelectionStyle`](crate::styles::TextSelectionStyle).
+    pub text_selection: Option<SharedTextSelectionStyle>,
 }
 
 impl std::fmt::Debug for ComponentStyleSlots {
@@ -135,6 +139,7 @@ impl std::fmt::Debug for ComponentStyleSlots {
             .field("drop_target", &self.drop_target.is_some())
             .field("grid_view", &self.grid_view.is_some())
             .field("web_view", &self.web_view.is_some())
+            .field("text_selection", &self.text_selection.is_some())
             .finish()
     }
 }
@@ -192,5 +197,6 @@ impl PartialEq for ComponentStyleSlots {
             && rc_eq(&self.drop_target, &other.drop_target)
             && rc_eq(&self.grid_view, &other.grid_view)
             && rc_eq(&self.web_view, &other.web_view)
+            && rc_eq(&self.text_selection, &other.text_selection)
     }
 }
