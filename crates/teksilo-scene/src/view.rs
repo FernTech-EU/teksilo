@@ -43,10 +43,15 @@
 //!   arrive as further `Pixels` deltas; the existing animation
 //!   pipeline turns this into smooth inertial fling without a custom
 //!   recognizer.
-//! - **`on_pinch`** — OS trackpad pinch (`PinchPhase::Changed`) feeds
-//!   `scale` into the zoom signal and `rotation` into the rotation
-//!   signal, anchored around the gesture center so the scene point
-//!   under the user's fingers stays put.
+//! - **`on_pinch`** — a pinch (`PinchPhase::Changed`) feeds `scale` into
+//!   the zoom signal and `rotation` into the rotation signal, anchored
+//!   around the gesture center so the scene point under the user's
+//!   fingers stays put. Two producers reach the one handler: the OS
+//!   trackpad stream and the two-contact touch recognizer. `scale` is
+//!   read as the factor **since the previous sample** and `rotation` as
+//!   the radian delta since the previous sample — see the two
+//!   `#[ignore]`d tests in `view::tests::touch_camera` for the producers
+//!   that do not yet agree with that.
 //! - **Reduced-motion** — at build time, captures
 //!   [`BuildContext::prefers_reduced_motion`](teksilo_core::build_context::BuildContext::prefers_reduced_motion).
 //!   When set, scroll handlers `set` the signals directly instead of
@@ -128,9 +133,68 @@ const DEFAULT_ZOOM_DURATION: Duration = Duration::from_millis(180);
 const DEFAULT_MIN_ZOOM: f32 = 0.1;
 const DEFAULT_MAX_ZOOM: f32 = 10.0;
 
-/// Maximum movement (scene-coord pixels) between PointerDown and
-/// PointerUp for the gesture to count as a tap rather than a drag.
+/// Maximum movement, in **view pixels**, between PointerDown and PointerUp for
+/// the gesture to count as a tap rather than a drag — the floor a precise
+/// pointer gets.
+///
+/// Measured on screen rather than in scene units because the same hand movement
+/// has to mean the same thing at every zoom. A scene-unit comparison divides
+/// the tolerance by the zoom, so the tolerance shrinks as the view zooms out
+/// and grows as it zooms in: far enough out, an ordinary click carries more
+/// jitter than the tolerance allows and no item can be tapped at all; far
+/// enough in, a deliberate small drag is reported as a tap. See
+/// [`tap_tolerance_px`].
 const TAP_MOVEMENT_THRESHOLD: f32 = 4.0;
+
+/// The tap-versus-drag movement tolerance for `kind`, in view pixels.
+///
+/// A precise pointer keeps the view's own floor. A coarse one is allowed the
+/// travel its gesture profile already calls a tap: a contact patch rolls as it
+/// lifts, and the profile is where the framework states how much of that is
+/// still one tap. Reads a build-time [`InputTokens`](teksilo_tokens::InputTokens)
+/// snapshot, which cannot go
+/// stale — a density change marks the tree for rebuild.
+fn tap_tolerance_px(
+    tokens: &teksilo_tokens::InputTokens,
+    kind: teksilo_tokens::PointerKind,
+) -> f32 {
+    if kind.is_coarse() {
+        TAP_MOVEMENT_THRESHOLD.max(tokens.profile(kind).tap_slop)
+    } else {
+        TAP_MOVEMENT_THRESHOLD
+    }
+}
+
+/// How far a *missed* grab may be re-attributed to scene content of
+/// `screen_size`, in view pixels.
+///
+/// Delegates to [`HitSlop::for_pointer`](teksilo_core::pointer::hit_slop::HitSlop::for_pointer),
+/// which is the framework's one answer to this question, so the scene inherits
+/// its two properties rather than restating them: the offer is zero for a mouse
+/// at every density (the mouse profile's radius is `0.0`, and a pen's is small),
+/// and it is zero for content already at least the density's target size on its
+/// smaller axis. A
+/// scene's content is mostly large, so in practice this widens exactly the
+/// small items — a connector stroke, a port dot, a pin — that a finger cannot
+/// otherwise land on.
+fn grab_slop_px(
+    tokens: &teksilo_tokens::InputTokens,
+    kind: teksilo_tokens::PointerKind,
+    screen_size: Size,
+) -> f32 {
+    teksilo_core::pointer::hit_slop::HitSlop::for_pointer(kind, tokens).outset_for(screen_size)
+}
+
+/// Distance from `p` to the nearest point of `r`; `0.0` when `p` is inside.
+///
+/// The slop pass settles overlapping candidates by distance rather than by
+/// z-order, so a stroke 3 px away wins over a box whose *inflated* rectangle
+/// the press also fell inside 8 px away.
+fn distance_to_rect(p: Point, r: Rect) -> f32 {
+    let dx = (r.x - p.x).max(p.x - (r.x + r.width)).max(0.0);
+    let dy = (r.y - p.y).max(p.y - (r.y + r.height)).max(0.0);
+    dx.hypot(dy)
+}
 /// Take the tightening intersection of two optional zoom ranges:
 /// `(max(lo), min(hi))`. `None` on either side leaves the other
 /// untouched; `None` on both returns `None`. Used to compose
@@ -350,10 +414,14 @@ struct HandlerSnapshotEntry {
 /// layout pass for the `on_drag` drag-start hit-test and the grab-cursor hover
 /// check. Carries the narrow-phase `shape_contains` predicate + transform (the
 /// same data `HandlerSnapshotEntry` holds for tap/hover) so a press targets the
-/// item only when it lands on the item's **actual shape**, not merely its AABB
-/// — important for thin draggable items (e.g. a connector path) whose bounding
-/// box is much larger than the drawn stroke. z-sorted descending so the first
-/// shape match is the topmost.
+/// item on the item's **actual shape**, not merely its AABB — important for thin
+/// draggable items (e.g. a connector path) whose bounding box is much larger than
+/// the drawn stroke. z-sorted descending so the first shape match is the topmost.
+///
+/// A press that lands on no shape at all is offered to a *coarse* pointer's
+/// bounded slop pass ([`GrabSlop`]), which widens each item's box rather than its
+/// shape — but only by what a small target earns, so the middle of a large AABB
+/// is still not a hit.
 #[derive(Clone)]
 struct DraggableSnapshotEntry {
     id: ItemId,
@@ -377,15 +445,19 @@ impl std::fmt::Debug for DraggableSnapshotEntry {
 }
 
 /// The topmost draggable item whose **shape** contains the pointer (narrow
-/// phase), or `None`. Mirrors the `hit_handler_item` logic used for tap/hover
-/// dispatch: AABB broad-phase, then inverse-project to local and consult
-/// `shape_contains`, with a screen-space branch for `IGNORES_TRANSFORMATIONS`
-/// items. `snap` must be z-sorted descending (topmost first).
+/// phase), or the nearest one this pointer's slop reaches, or `None`.
+///
+/// Mirrors the `hit_handler_item` logic used for tap/hover dispatch: AABB
+/// broad-phase, then inverse-project to local and consult `shape_contains`, with
+/// a screen-space branch for `IGNORES_TRANSFORMATIONS` items. `snap` must be
+/// z-sorted descending (topmost first). A total miss falls through to `slop`'s
+/// miss-only pass, which is inert for a mouse.
 fn hit_draggable_item(
     snap: &[DraggableSnapshotEntry],
     screen_pt: Point,
     scene_pt: Point,
     view_xform: teksilo_canvas::Transform2D,
+    slop: GrabSlop,
 ) -> Option<ItemId> {
     let view_scale = view_xform.m[0].hypot(view_xform.m[1]);
     for entry in snap.iter() {
@@ -419,7 +491,230 @@ fn hit_draggable_item(
             return Some(entry.id);
         }
     }
-    None
+    slop.nearest_draggable(snap, screen_pt, scene_pt, view_xform)
+}
+
+/// The topmost item under the pointer whose **shape** contains it, out of a
+/// handler snapshot, or `None`.
+///
+/// Two hit spaces, one per item kind. A normal item is broad-phased against its
+/// scene-coord AABB and narrow-phased by inverse-projecting the pointer into
+/// item-local coordinates; an `IGNORES_TRANSFORMATIONS` item is pinned at a
+/// screen position, so it is broad-phased against its projected screen rect and
+/// narrow-phased at unit scale. `snap` must be z-sorted descending, so the first
+/// containing entry is the topmost one.
+///
+/// A total miss falls through to `slop`'s miss-only pass, which is inert for a
+/// mouse.
+fn hit_handler_item(
+    snap: &[HandlerSnapshotEntry],
+    screen_pt: Point,
+    scene_pt: Point,
+    view_xform: teksilo_canvas::Transform2D,
+    slop: GrabSlop,
+) -> Option<HandlerSnapshotEntry> {
+    // Logical view zoom (uniform scale of the linear part) — passed to each
+    // item's shape test so a cosmetic (device-pixel) stroke's clickable band is
+    // converted to scene coordinates at the current zoom.
+    let view_scale = view_xform.m[0].hypot(view_xform.m[1]);
+    for entry in snap.iter() {
+        if entry.ignores_xform {
+            let screen_anchor = view_xform.apply_point(entry.scene_anchor);
+            let screen_rect = Rect::new(
+                screen_anchor.x + entry.local_bounds.x,
+                screen_anchor.y + entry.local_bounds.y,
+                entry.local_bounds.width,
+                entry.local_bounds.height,
+            );
+            if !screen_rect.contains(screen_pt) {
+                continue;
+            }
+            let local_pt = Point::new(screen_pt.x - screen_anchor.x, screen_pt.y - screen_anchor.y);
+            if (entry.shape_contains)(local_pt, 1.0) {
+                return Some(entry.clone());
+            }
+            continue;
+        }
+        if !entry.scene_rect.contains(scene_pt) {
+            continue;
+        }
+        let local_pt = entry
+            .scene_transform
+            .inverse()
+            .map(|inv| inv.apply_point(scene_pt))
+            .unwrap_or(Point::ZERO);
+        if (entry.shape_contains)(local_pt, view_scale) {
+            return Some(entry.clone());
+        }
+    }
+    slop.nearest_handler_item(snap, screen_pt, scene_pt, view_xform)
+}
+
+/// The pointer-kind half of the grab hit test: a build-time
+/// [`InputTokens`](teksilo_tokens::InputTokens)
+/// snapshot plus the kind of the pointer the event being handled came from.
+///
+/// Carried as one value so the exact-pass hit tests take one extra argument
+/// rather than two, and so the *miss-only* rule has a single place to live:
+/// every method here runs after an exact pass has already missed, and none of
+/// them can report a hit an exact pass had found.
+#[derive(Debug, Clone, Copy)]
+struct GrabSlop {
+    tokens: teksilo_tokens::InputTokens,
+    kind: teksilo_tokens::PointerKind,
+}
+
+impl GrabSlop {
+    /// The slop a pointer of `kind` earns against `tokens`.
+    fn new(tokens: teksilo_tokens::InputTokens, kind: teksilo_tokens::PointerKind) -> Self {
+        Self { tokens, kind }
+    }
+
+    /// Whether this pointer can earn no widening at all — `true` for a mouse at
+    /// every density, since the mouse profile's slop radius is `0.0`. Asked
+    /// first in each pass, so a mouse never walks the snapshot.
+    fn offers_nothing(&self) -> bool {
+        teksilo_core::pointer::hit_slop::HitSlop::for_pointer(self.kind, &self.tokens).is_none()
+    }
+
+    /// The tap-versus-drag movement tolerance for this pointer, in view pixels.
+    fn tap_tolerance_px(&self) -> f32 {
+        tap_tolerance_px(&self.tokens, self.kind)
+    }
+
+    /// The nearest draggable item whose *inflated* bounds contain the press.
+    ///
+    /// Deliberately the inflated **box**, not the shape: an item whose shape is
+    /// narrower than its box — a connector stroke, a diagonal path — is exactly
+    /// the case this pass exists for, and re-testing the shape against a widened
+    /// point would answer the same "no" the exact pass just did.
+    fn nearest_draggable(
+        &self,
+        snap: &[DraggableSnapshotEntry],
+        screen_pt: Point,
+        scene_pt: Point,
+        view_xform: teksilo_canvas::Transform2D,
+    ) -> Option<ItemId> {
+        if self.offers_nothing() {
+            return None;
+        }
+        let view_scale = view_xform.m[0].hypot(view_xform.m[1]);
+        let mut best: Option<(f32, ItemId)> = None;
+        for entry in snap.iter() {
+            let Some(distance) = self.miss_distance(
+                entry.ignores_xform,
+                entry.scene_rect,
+                entry.local_bounds,
+                entry.scene_anchor,
+                screen_pt,
+                scene_pt,
+                view_xform,
+                view_scale,
+            ) else {
+                continue;
+            };
+            if best.is_none_or(|(best_d, _)| distance < best_d) {
+                best = Some((distance, entry.id));
+            }
+        }
+        best.map(|(_, id)| id)
+    }
+
+    /// Distance from the press to `entry`'s bounds, in the space the comparison
+    /// runs in, or `None` when the press is further away than the slop this
+    /// entry earns.
+    ///
+    /// A screen-anchored item is measured in view pixels at unit scale; every
+    /// other item is measured in **scene** units against its scene-space box,
+    /// with the earned slop converted by the live zoom — so a rotated view needs
+    /// no transformed-box arithmetic and the tolerance is still the same number
+    /// of view pixels at every zoom.
+    #[allow(clippy::too_many_arguments)]
+    fn miss_distance(
+        &self,
+        ignores_xform: bool,
+        scene_rect: Rect,
+        local_bounds: Rect,
+        scene_anchor: Point,
+        screen_pt: Point,
+        scene_pt: Point,
+        view_xform: teksilo_canvas::Transform2D,
+        view_scale: f32,
+    ) -> Option<f32> {
+        if ignores_xform {
+            let anchor = view_xform.apply_point(scene_anchor);
+            let screen_rect = Rect::new(
+                anchor.x + local_bounds.x,
+                anchor.y + local_bounds.y,
+                local_bounds.width,
+                local_bounds.height,
+            );
+            let slop = grab_slop_px(&self.tokens, self.kind, screen_rect.size());
+            let distance = distance_to_rect(screen_pt, screen_rect);
+            return (slop > 0.0 && distance <= slop).then_some(distance);
+        }
+        if !(view_scale.is_finite() && view_scale > 1e-6) {
+            return None;
+        }
+        let screen_size = Size::new(
+            scene_rect.width * view_scale,
+            scene_rect.height * view_scale,
+        );
+        let slop_scene = grab_slop_px(&self.tokens, self.kind, screen_size) / view_scale;
+        let distance = distance_to_rect(scene_pt, scene_rect);
+        (slop_scene > 0.0 && distance <= slop_scene).then_some(distance)
+    }
+
+    /// The nearest item whose *inflated* bounds contain the press, out of a
+    /// handler snapshot. The tap/hover twin of
+    /// [`nearest_draggable`](Self::nearest_draggable), with the same miss-only
+    /// and inflated-box rules.
+    fn nearest_handler_item(
+        &self,
+        snap: &[HandlerSnapshotEntry],
+        screen_pt: Point,
+        scene_pt: Point,
+        view_xform: teksilo_canvas::Transform2D,
+    ) -> Option<HandlerSnapshotEntry> {
+        if self.offers_nothing() {
+            return None;
+        }
+        let view_scale = view_xform.m[0].hypot(view_xform.m[1]);
+        let mut best: Option<(f32, &HandlerSnapshotEntry)> = None;
+        for entry in snap.iter() {
+            let Some(distance) = self.miss_distance(
+                entry.ignores_xform,
+                entry.scene_rect,
+                entry.local_bounds,
+                entry.scene_anchor,
+                screen_pt,
+                scene_pt,
+                view_xform,
+                view_scale,
+            ) else {
+                continue;
+            };
+            if best.is_none_or(|(best_d, _)| distance < best_d) {
+                best = Some((distance, entry));
+            }
+        }
+        best.map(|(_, entry)| entry.clone())
+    }
+
+    /// The scene-unit radius within which a magnet handle may be grabbed.
+    ///
+    /// The declared [`MagnetismConfig::capture_px`](crate::MagnetismConfig::capture_px)
+    /// is the whole radius for a mouse; every other pointer adds what a disc of
+    /// that diameter earns from its own profile — nothing for a mouse, a pen's
+    /// small allowance for a pen, the full offer for a finger — so a port dot
+    /// stays grabbable without any app-side number. The four *snap-arrival* radii
+    /// are left alone: they are how close a dragged thing has to come before it
+    /// snaps, which is feel, not reach.
+    fn magnet_grab_scene_radius(&self, capture_px: f32, zoom: f32) -> f32 {
+        let diameter = (capture_px * 2.0).max(0.0);
+        let px = capture_px + grab_slop_px(&self.tokens, self.kind, Size::new(diameter, diameter));
+        px / zoom
+    }
 }
 
 /// Visual debug overlays painted on top of normal scene rendering.
@@ -559,8 +854,13 @@ pub struct SceneView {
     /// Currently-hovered item id, used to dispatch `on_hover(false)`
     /// when the pointer leaves it.
     hovered_item: Rc<Cell<Option<crate::item::ItemId>>>,
-    /// Last press recorded for tap detection: (scene_pt, item_id).
-    /// Cleared on PointerUp / PointerLeave.
+    /// Last press recorded for tap detection: `(press point in VIEW pixels,
+    /// item_id, button)`. Cleared on PointerUp / PointerLeave.
+    ///
+    /// View pixels rather than scene units so the tap-versus-drag tolerance is
+    /// the same physical distance at every zoom, and so a zoom that changes
+    /// between the press and the release cannot make the two points
+    /// incomparable — see [`TAP_MOVEMENT_THRESHOLD`].
     pending_tap: Rc<
         Cell<
             Option<(

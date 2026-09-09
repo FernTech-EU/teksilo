@@ -42,6 +42,7 @@ impl SceneView {
         mut handlers: HandlerSet,
         self_id: WidgetId,
         tooltip: TooltipWiring,
+        input_tokens: teksilo_tokens::InputTokens,
     ) -> HandlerSet {
         let TooltipWiring {
             content_id: tooltip_content_id,
@@ -50,6 +51,11 @@ impl SceneView {
             fade: tooltip_fade,
             delay: tooltip_delay,
         } = tooltip;
+        // Where the contact that is currently holding went down, in view pixels.
+        // The hold route below arms a delayed tooltip at the press and disarms it
+        // the moment the contact travels far enough to be a pan or a drag; the
+        // press point is what "far enough" is measured from.
+        let hold_origin: Rc<Cell<Option<Point>>> = Rc::new(Cell::new(None));
         // Track the latest pointer position so Ctrl+wheel can
         // zoom-about-pointer (the scene point under the cursor
         // stays put). Updated even when not interactive — the
@@ -86,11 +92,20 @@ impl SceneView {
             let hovered_item = self.hovered_item.clone();
             let pending_tap = self.pending_tap.clone();
             let tooltip_text = tooltip_text.clone();
+            let tooltip_shown = tooltip_shown.clone();
             let tooltip_anchor_id = self_id;
+            let hold_origin = hold_origin.clone();
             handlers = handlers.on_pointer_event(move |ev, ctx| {
                 use teksilo_core::event::PointerButton;
                 use teksilo_core::event::WidgetEvent as Ev;
                 use teksilo_core::widget::CursorIcon;
+
+                // The kind half of every grab tolerance below, resolved per
+                // event: the same view serves a mouse and a finger, so the
+                // tolerance cannot be decided at build time. The token half is
+                // the build-time snapshot, which a density change invalidates by
+                // marking the tree for rebuild.
+                let slop = super::GrabSlop::new(input_tokens, ctx.pointer_kind());
 
                 // Project a screen point to scene coords for
                 // hit-testing. Returns `Point::ZERO` when the view
@@ -103,80 +118,55 @@ impl SceneView {
                         .unwrap_or(Point::ZERO)
                 };
 
-                // Hit-test the handler-snapshot for the topmost
-                // item under the pointer. Snapshot is z-sorted desc.
-                //
-                // Normal items: broad-phase tests `scene_pt` against
-                // `scene_rect`, narrow-phase inverse-projects to
-                // local and calls `shape_contains`.
-                //
-                // IGNORES_TRANSFORMATIONS items: pin at a fixed
-                // screen position with their natural local-pixel
-                // size, so we project `scene_anchor` through the
-                // CURRENT view transform (snapshot stores the
-                // pan/zoom-invariant scene_anchor; the snapshot
-                // doesn't rebuild on pan/zoom). Broad-phase tests
-                // `screen_pt` against the projected screen rect;
-                // narrow-phase passes `(screen_pt - screen_anchor)`
-                // as the item-local point.
+                // Hit-test the handler snapshot for the topmost item under
+                // the pointer. Shared with the long-press handler below, so
+                // both routes agree on what "the item under the finger" means.
                 let hit_handler_item =
-                    |screen_pt: Point, scene_pt: Point| -> Option<HandlerSnapshotEntry> {
-                        let snap = handler_snapshot.borrow();
-                        let view_xform = view_xform_signal.get();
-                        // Logical view zoom (uniform scale of the linear part) —
-                        // passed to each item's shape-test so a cosmetic
-                        // (device-pixel) stroke's clickable band is converted to
-                        // scene coordinates at the current zoom.
-                        let view_scale = view_xform.m[0].hypot(view_xform.m[1]);
-                        for entry in snap.iter() {
-                            if entry.ignores_xform {
-                                let screen_anchor = view_xform.apply_point(entry.scene_anchor);
-                                let screen_rect = Rect::new(
-                                    screen_anchor.x + entry.local_bounds.x,
-                                    screen_anchor.y + entry.local_bounds.y,
-                                    entry.local_bounds.width,
-                                    entry.local_bounds.height,
-                                );
-                                if !screen_rect.contains(screen_pt) {
-                                    continue;
-                                }
-                                let local_pt = Point::new(
-                                    screen_pt.x - screen_anchor.x,
-                                    screen_pt.y - screen_anchor.y,
-                                );
-                                // Screen-anchored items ignore the view transform,
-                                // so their hit-test runs at unit scale.
-                                if (entry.shape_contains)(local_pt, 1.0) {
-                                    return Some(entry.clone());
-                                }
-                                continue;
-                            }
-                            if !entry.scene_rect.contains(scene_pt) {
-                                continue;
-                            }
-                            // Inverse-project to local for narrow-phase.
-                            let local_pt = entry
-                                .scene_transform
-                                .inverse()
-                                .map(|inv| inv.apply_point(scene_pt))
-                                .unwrap_or(Point::ZERO);
-                            if (entry.shape_contains)(local_pt, view_scale) {
-                                return Some(entry.clone());
-                            }
-                        }
-                        None
+                    |screen_pt: Point, scene_pt: Point, slop: super::GrabSlop| {
+                        super::hit_handler_item(
+                            &handler_snapshot.borrow(),
+                            screen_pt,
+                            scene_pt,
+                            view_xform_signal.get(),
+                            slop,
+                        )
                     };
 
                 match ev {
                     Ev::PointerMove { position, .. } => {
                         cursor_pos.set(Some(*position));
+                        // Disarm the hold as soon as the contact has travelled far
+                        // enough to be something else. Runs before the hover gate
+                        // below, because a contact never reaches that.
+                        if let Some(origin) = hold_origin.get() {
+                            let dx = position.x - origin.x;
+                            let dy = position.y - origin.y;
+                            if (dx * dx + dy * dy).sqrt() > slop.tap_tolerance_px() {
+                                hold_origin.set(None);
+                                ctx.cancel_delayed_overlay(tooltip_content_id);
+                            }
+                        }
+                        // Hover, item tooltips and the cursor shape are all one
+                        // seam and it belongs to a pointer that hovers. A contact
+                        // is dispatched moves like any other pointer, but it has
+                        // no hover to give — the tree refuses it the hover-owner
+                        // role — and running the seam for one has two visible
+                        // costs: a finger dragging across items schedules item
+                        // tooltips it never asked for, and since a lift produces
+                        // no `PointerLeave` the only retract path never runs, so
+                        // the tip outlives the gesture. A finger reaches an
+                        // item's tip by holding still on it instead; see the
+                        // long-press handler.
+                        if !ctx.pointer_kind().hovers() {
+                            return EventResponse::Ignored;
+                        }
                         let scene_pt = to_scene(*position);
 
                         // Hover transitions: compare current hit
                         // with previously-hovered item; fire
                         // on_hover(false) on the old, on_hover(true)
                         // on the new.
-                        let new_hit = hit_handler_item(*position, scene_pt);
+                        let new_hit = hit_handler_item(*position, scene_pt, slop);
                         let new_id = new_hit.as_ref().map(|e| e.id);
                         let prev_id = hovered_item.get();
                         if prev_id != new_id {
@@ -260,6 +250,7 @@ impl SceneView {
                                 *position,
                                 scene_pt,
                                 view_xform_signal.get(),
+                                slop,
                             )
                             .is_some()
                         };
@@ -280,12 +271,26 @@ impl SceneView {
                         modifiers,
                     } => {
                         cursor_pos.set(Some(*position));
-                        // Any press retracts a hover tooltip (shown or
-                        // pending) — the user has committed to an action.
-                        ctx.cancel_delayed_overlay(tooltip_content_id);
-                        ctx.dismiss_overlay_by_content(tooltip_content_id);
                         let scene_pt = to_scene(*position);
-                        let hit = hit_handler_item(*position, scene_pt);
+                        let hit = hit_handler_item(*position, scene_pt, slop);
+                        // Any press retracts a hover tooltip — the user has
+                        // committed to an action. The shown one always goes; the
+                        // *pending* one is cancelled only when this press is not
+                        // itself arming a hold, because the router applies the
+                        // whole handler's delayed-show requests before its cancels
+                        // and a cancel issued here would take the hold's own show
+                        // down with it. Nothing is lost by skipping it: a
+                        // `show_overlay_after` already replaces a pending show for
+                        // the same content.
+                        ctx.dismiss_overlay_by_content(tooltip_content_id);
+                        let arming_hold = !ctx.pointer_kind().hovers()
+                            && hit
+                                .as_ref()
+                                .and_then(|e| e.handlers.as_deref())
+                                .is_some_and(|h| h.tooltip.is_some());
+                        if !arming_hold {
+                            ctx.cancel_delayed_overlay(tooltip_content_id);
+                        }
                         match button {
                             PointerButton::Secondary => {
                                 if let Some(entry) = hit.as_ref()
@@ -311,7 +316,15 @@ impl SceneView {
                                         .map(|h| h.accept_tap_buttons)
                                         .unwrap_or(teksilo_core::event::ButtonMask::PRIMARY);
                                     if accept.contains(*button) {
-                                        pending_tap.set(Some((scene_pt, entry.id, *button)));
+                                        // The press point is recorded in VIEW
+                                        // pixels, not scene units: the release
+                                        // compares the two on screen, and a scene
+                                        // comparison would both scale the
+                                        // tolerance with the zoom and measure the
+                                        // press through a transform the release no
+                                        // longer projects through when the zoom
+                                        // changed mid-gesture.
+                                        pending_tap.set(Some((*position, entry.id, *button)));
                                     } else {
                                         pending_tap.set(None);
                                     }
@@ -320,23 +333,76 @@ impl SceneView {
                                 }
                             }
                         }
+
+                        // --- The hold: a contact's route to an item's tip
+                        //
+                        // A scene item is not a widget, so the framework's own
+                        // hold route cannot reach it: the item has no `WidgetId`
+                        // to carry an attached tooltip for the tree to find. The
+                        // view holds the one tooltip surface every item shares, so
+                        // the view is where a hold on an item has to be answered.
+                        //
+                        // Armed as a *delayed overlay* rather than through an
+                        // `on_long_press` handler, because installing one would
+                        // put a `LongPressRecognizer` in this node's arena, and a
+                        // recognizer that wins resets its peers — a mouse press
+                        // held past the deadline would lose the marquee its drag
+                        // recognizer was waiting to start. See
+                        // `a_mouse_press_held_past_the_hold_deadline_still_marquees`.
+                        hold_origin.set(None);
+                        if arming_hold
+                            && let Some(ls) = hit
+                                .as_ref()
+                                .and_then(|e| e.handlers.as_deref())
+                                .and_then(|h| h.tooltip.as_ref())
+                        {
+                            hold_origin.set(Some(*position));
+                            tooltip_text.set(ls.resolve_now());
+                            tooltip_shown.set(true);
+                            ctx.materialize_now(tooltip_content_id);
+                            ctx.show_overlay_after(
+                                teksilo_core::overlay::OverlayRequest {
+                                    content_id: tooltip_content_id,
+                                    anchor: tooltip_anchor_id,
+                                    placement: teksilo_core::overlay::OverlayPlacement::AtPointer(
+                                        Point::new(position.x + 12.0, position.y + 16.0),
+                                    ),
+                                    dismiss: teksilo_core::overlay::DismissBehavior::Manual,
+                                    layer: teksilo_core::overlay::OverlayLayer::InTree,
+                                    parent_overlay: None,
+                                    on_dismiss: None,
+                                    fade_duration: tooltip_fade,
+                                },
+                                // The wait is the pointer's own long-press
+                                // duration, read from its gesture profile rather
+                                // than being a second number the scene invents.
+                                input_tokens.profile(ctx.pointer_kind()).long_press,
+                            );
+                        }
                     }
                     Ev::PointerUp {
                         position,
                         button,
                         modifiers,
                     } => {
+                        // A lift before the deadline is a tap, not a hold, so the
+                        // pending tip is dropped. A lift *after* it finds nothing
+                        // pending — the tip is already up — and is left alone, so a
+                        // finger can read what it uncovered.
+                        if hold_origin.take().is_some() {
+                            ctx.cancel_delayed_overlay(tooltip_content_id);
+                        }
                         // Tap dispatch only fires when the button that
                         // came back up matches the one we recorded on
                         // the press. Mixed-button down/up sequences
                         // discard the pending tap.
-                        if let Some((press_scene, item_id, press_button)) = pending_tap.take()
+                        if let Some((press_screen, item_id, press_button)) = pending_tap.take()
                             && press_button == *button
                         {
                             let scene_pt = to_scene(*position);
-                            let dx = scene_pt.x - press_scene.x;
-                            let dy = scene_pt.y - press_scene.y;
-                            if (dx * dx + dy * dy).sqrt() <= TAP_MOVEMENT_THRESHOLD {
+                            let dx = position.x - press_screen.x;
+                            let dy = position.y - press_screen.y;
+                            if (dx * dx + dy * dy).sqrt() <= slop.tap_tolerance_px() {
                                 // Genuine tap — dispatch if the
                                 // pressed item still has a tap
                                 // handler installed.
@@ -377,6 +443,7 @@ impl SceneView {
                 EventResponse::Ignored
             });
         }
+
         handlers
     }
 
@@ -872,7 +939,11 @@ impl SceneView {
         handlers
     }
 
-    pub(super) fn register_drag_handlers(&self, mut handlers: HandlerSet) -> HandlerSet {
+    pub(super) fn register_drag_handlers(
+        &self,
+        mut handlers: HandlerSet,
+        input_tokens: teksilo_tokens::InputTokens,
+    ) -> HandlerSet {
         let marquee = self.marquee.clone();
         let pending_marquee_commit = self.pending_marquee_commit.clone();
         let drag_target = self.drag_target.clone();
@@ -899,6 +970,10 @@ impl SceneView {
         let port_drag = self.port_drag.clone();
         let item_snap = self.item_snap.clone();
         handlers = handlers.on_drag(move |phase, ctx| {
+            // Per-event grab tolerance: see the twin in
+            // `register_pointer_handlers`. Zero for a mouse by arithmetic, so
+            // the two grab hit tests below are byte-identical for one.
+            let slop = super::GrabSlop::new(input_tokens, ctx.pointer_kind());
             // Read drag mode live so a toolbar can flip
             // between Select / Hand / NoDrag at runtime.
             let drag_mode_inner = drag_mode_sig.get();
@@ -968,7 +1043,7 @@ impl SceneView {
                     // heavyweight widget is consumed by that widget.
                     if let Some(cfg) = magnetism_for_drag.as_ref().filter(|c| c.enabled.get()) {
                         let zoom = xform.geometric_scale().max(1e-3);
-                        let grab = cfg.capture_px / zoom;
+                        let grab = slop.magnet_grab_scene_radius(cfg.capture_px, zoom);
                         if let Some(mid) = model_for_drag.nearest_magnet(scene_press, grab)
                             && let Some(src) = model_for_drag.magnet_scene_pos(mid)
                         {
@@ -988,7 +1063,7 @@ impl SceneView {
                     // and refreshed each layout pass — see `place_children`.
                     let hit = {
                         let snap = bounds_snapshot.borrow();
-                        super::hit_draggable_item(&snap, position, scene_press, xform)
+                        super::hit_draggable_item(&snap, position, scene_press, xform, slop)
                     };
                     if let Some(item_id) = hit {
                         // Drag-to-move: enter that mode,

@@ -13,6 +13,8 @@ mod nested;
 mod raster_scale_tests;
 mod runtime_mutation;
 mod text_runs;
+mod touch_camera;
+mod touch_grabs;
 
 use super::*;
 use teksilo_core::widget_tree::WidgetTree;

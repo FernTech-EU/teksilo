@@ -425,6 +425,11 @@ impl SceneView {
         // (longer) tooltip dwell to avoid flashing during that sweep.
         let tooltip_delay = ctx.theme().motion.tooltip_delay_heavy;
 
+        // Every grab tolerance in the view reads this snapshot. Safe to snapshot
+        // because a density change marks the tree for rebuild, so a stale copy
+        // cannot outlive the density it came from.
+        let input_tokens = ctx.theme().input;
+
         let mut handlers = HandlerSet::new();
         handlers = self.register_pointer_handlers(
             handlers,
@@ -436,6 +441,7 @@ impl SceneView {
                 fade: tooltip_fade,
                 delay: tooltip_delay,
             },
+            input_tokens,
         );
 
         if self.interactive {
@@ -470,7 +476,7 @@ impl SceneView {
             crate::selection::SceneSelectionMode::None
         ) || self.magnetism.is_some()
         {
-            handlers = self.register_drag_handlers(handlers);
+            handlers = self.register_drag_handlers(handlers, input_tokens);
         }
 
         ctx.apply_self_handlers(handlers);
