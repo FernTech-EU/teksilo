@@ -86,6 +86,22 @@ const ROWS: usize = 200;
 
 fn tree_with(root: impl teksilo_core::widget::Widget + 'static) -> (WidgetTree, WidgetId) {
     let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+    // A `ManualClock`, because `touch(..)` below stamps each sample with an
+    // explicit `EventTime` and the fling is started at the *sample's* time
+    // (`end_pan` reads `sequence_now()`) while it is ticked at the tree's input
+    // axis. On the default monotonic clock those two have different origins: the
+    // samples run 0..48 ms while the axis is anchored to however much real time
+    // the test has taken, so the coast's first tick can compute an elapsed of
+    // zero — or of whatever the machine's load made it. That is not a
+    // hypothetical: `a_finger_pans_a_list_view_and_the_fling_keeps_it_going`
+    // failed 2 runs in 6 of the full parallel suite, in two different ways (the
+    // offset going backwards, and the coast producing nothing), while passing
+    // 27/27 in isolation and under CPU load. A manual clock has no wall-clock
+    // anchor, so `input_now()` reads it directly and `advance_time` moves it:
+    // sample times and tick times then share one origin by construction.
+    tree.set_input_clock(std::rc::Rc::new(
+        teksilo_core::pointer::clock::ManualClock::new(teksilo_core::pointer::EventTime::ZERO),
+    ));
     let id = tree.add(root);
     tree.layout(SizeProposal::exact(VIEWPORT, VIEWPORT));
     (tree, id)
