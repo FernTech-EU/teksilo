@@ -5,7 +5,7 @@
 //!
 //! Lines, optional point markers, axes, grid, and legend, plus optional
 //! area fill (`area_fill` / `area_fill_opacity`) and an interactive
-//! hover tooltip (`hover_tooltip`) with a nearest-point marker and
+//! readout tooltip (`hover_tooltip`) with a nearest-point marker and
 //! edge-flip placement so the tooltip never clips the plot rect.
 
 use std::cell::{Cell, RefCell};
@@ -18,7 +18,7 @@ use teksilo_core::accessibility::AccessNodeBuilder;
 use teksilo_core::binding::BindingLevel;
 use teksilo_core::build_context::BuildContext;
 use teksilo_core::color_prop::ColorProp;
-use teksilo_core::event::{EventResponse, WidgetEvent};
+use teksilo_core::event::WidgetEvent;
 use teksilo_core::gesture::TapEvent;
 use teksilo_core::paint_prop::PaintProp;
 use teksilo_core::signal::{Prop, Signal};
@@ -46,6 +46,12 @@ use crate::text::measure_text_width;
 struct GeometryKey {
     bounds: Rect,
     structure_version: u64,
+    /// The density the legend band was reserved at. An interactive legend's
+    /// rows are sized from `InputTokens::target_size`, and a density switch
+    /// changes neither the bounds nor the model version — so without this
+    /// the memoized geometry would keep the band the previous density
+    /// reserved.
+    density: teksilo_tokens::TargetDensity,
 }
 
 /// Text-measurement context stashed during `paint()` so `accessibility()`
@@ -81,8 +87,19 @@ pub struct LineChart<T: Clone + 'static> {
 
     /// Live hover state; bound at `RepaintOnly` so hovering doesn't relayout.
     hover: Signal<Option<(SeriesId, usize)>>,
+    /// The datum keyboard traversal is sitting on — see `BarChart`'s own
+    /// field for why the focus position and the readout value are separate
+    /// signals.
+    focus_mark: Signal<Option<(SeriesId, usize)>>,
+    /// Whether the chart itself holds keyboard focus.
+    focused: Signal<bool>,
+    readout: hit::ReadoutState,
     marks: Rc<RefCell<Vec<MarkGeometry>>>,
     bounds: Rc<Cell<Rect>>,
+    /// The density tokens in force, captured in `build()` — the only place
+    /// a widget can read them — so `accessibility()`, which has no theme,
+    /// reserves the same legend band `paint()` does.
+    input: teksilo_tokens::InputTokens,
     geometry_cache: Rc<RefCell<Option<(GeometryKey, PlotGeometry)>>>,
     paint_snapshot: Rc<RefCell<Option<PaintSnapshot>>>,
     legend_id: Option<WidgetId>,
@@ -110,8 +127,12 @@ impl<T: Clone + std::fmt::Display + 'static> LineChart<T> {
             selection: None,
             reference_lines: Vec::new(),
             hover: Signal::new(None),
+            focus_mark: Signal::new(None),
+            focused: Signal::new(false),
+            readout: hit::ReadoutState::new(),
             marks: Rc::new(RefCell::new(Vec::new())),
             bounds: Rc::new(Cell::new(Rect::ZERO)),
+            input: teksilo_tokens::InputTokens::default(),
             geometry_cache: Rc::new(RefCell::new(None)),
             paint_snapshot: Rc::new(RefCell::new(None)),
             legend_id: None,
@@ -234,8 +255,10 @@ impl<T: Clone + std::fmt::Display + 'static> LineChart<T> {
         self
     }
 
-    /// A clone of the live hover signal — the `(series, point)` key
-    /// currently under the pointer, or `None`. Lets an app observe
+    /// A clone of the live readout signal — the `(series, point)` key the
+    /// readout currently names, or `None`. Whichever route set it: a pointer
+    /// hover or press, keyboard traversal, or an assistive technology's
+    /// `Click`. Lets an app observe
     /// hover state from outside the chart (a synced detail panel, a
     /// custom tooltip) without re-implementing hit-testing.
     pub fn hover_signal(&self) -> Signal<Option<(SeriesId, usize)>> {
@@ -255,6 +278,7 @@ impl<T: Clone + 'static> std::fmt::Debug for LineChart<T> {
 impl<T: Clone + std::fmt::Display + 'static> Widget for LineChart<T> {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let id = ctx.self_id();
+        self.input = ctx.theme().input;
         {
             let registry = ctx.binding_registry();
             self.model
@@ -270,6 +294,15 @@ impl<T: Clone + std::fmt::Display + 'static> Widget for LineChart<T> {
                 .register_if_bound(id, registry, BindingLevel::RepaintOnly);
             // Hover repaints the chart but never relayouts.
             self.hover.bind_to(id, registry, BindingLevel::RepaintOnly);
+            self.readout
+                .contact
+                .bind_to(id, registry, BindingLevel::RepaintOnly);
+            self.focused
+                .bind_to(id, registry, BindingLevel::RepaintOnly);
+            self.focus_mark
+                .bind_to(id, registry, BindingLevel::RepaintOnly);
+            self.focus_mark
+                .bind_to(id, registry, BindingLevel::AccessibilityOnly);
             if let Some(selection) = &self.selection {
                 selection
                     .selection_signal()
@@ -285,59 +318,54 @@ impl<T: Clone + std::fmt::Display + 'static> Widget for LineChart<T> {
                 let bounds = self.bounds.clone();
                 let geometry_cache = self.geometry_cache.clone();
                 let hover = self.hover.clone();
-                handlers =
-                    handlers.on_pointer_event(move |event, _ctx: &mut EventContext| match event {
-                        WidgetEvent::PointerMove { position } => {
-                            let b = bounds.get();
-                            let window_pos = Point::new(position.x + b.x, position.y + b.y);
-                            let plot = geometry_cache.borrow().as_ref().map(|(_, g)| g.plot);
-                            let Some(plot) = plot else {
-                                return EventResponse::Ignored;
-                            };
-                            if !plot.contains(window_pos) {
-                                if hover.get().is_some() {
-                                    hover.set(None);
-                                }
-                                return EventResponse::Ignored;
-                            }
-                            let hit = hit::nearest_point(&marks.borrow(), window_pos);
-                            match hit.and_then(|idx| {
-                                marks.borrow().get(idx).map(|m| (m.series_id, m.point_idx))
-                            }) {
-                                Some(key) => {
-                                    if hover.get() != Some(key) {
-                                        hover.set(Some(key));
-                                    }
-                                }
-                                None => {
-                                    if hover.get().is_some() {
-                                        hover.set(None);
-                                    }
-                                }
-                            }
-                            EventResponse::Ignored
+                let readout = self.readout.clone();
+                let tokens = ctx.theme().input;
+                handlers = handlers.on_pointer_event(move |event, ctx: &mut EventContext| {
+                    // A line chart picks the *nearest* point with no radius
+                    // cutoff, so its marks need no tolerance of their own —
+                    // inside the plot every press already reaches one. What
+                    // a coarse pointer gains is the plot boundary: a press
+                    // a few dp outside it, next to the first or last point,
+                    // now reads as an inspection of that point instead of
+                    // as a miss. Zero for a precise pointer.
+                    let tolerance = hit::mark_tolerance(ctx.pointer_kind(), &tokens);
+                    let b = bounds.get();
+                    let plot = geometry_cache.borrow().as_ref().map(|(_, g)| g.plot);
+                    let resolve = |local: Point| -> Option<hit::MarkKey> {
+                        let plot = plot?;
+                        let window_pos = Point::new(local.x + b.x, local.y + b.y);
+                        if !plot.expand(tolerance).contains(window_pos) {
+                            return None;
                         }
-                        WidgetEvent::PointerLeave => {
-                            if hover.get().is_some() {
-                                hover.set(None);
-                            }
-                            EventResponse::Ignored
-                        }
-                        _ => EventResponse::Ignored,
-                    });
+                        let marks = marks.borrow();
+                        hit::nearest_point(&marks, window_pos)
+                            .and_then(|idx| marks.get(idx).map(|m| (m.series_id, m.point_idx)))
+                    };
+                    let describe = |key: hit::MarkKey| {
+                        let marks = marks.borrow();
+                        hit::mark_index_of(&marks, key)
+                            .and_then(|idx| marks.get(idx))
+                            .map(hit::mark_description)
+                    };
+                    hit::drive_readout(event, ctx, &hover, &readout, resolve, describe)
+                });
             }
 
             if let Some(selection) = self.selection.clone() {
                 let marks = self.marks.clone();
                 let bounds = self.bounds.clone();
                 let geometry_cache = self.geometry_cache.clone();
-                handlers = handlers.on_tap(move |tap: &TapEvent, _ctx: &mut EventContext| {
+                let tap_tokens = ctx.theme().input;
+                handlers = handlers.on_tap(move |tap: &TapEvent, ctx: &mut EventContext| {
                     let b = bounds.get();
                     let window_pos = Point::new(tap.position.x + b.x, tap.position.y + b.y);
                     let Some(plot) = geometry_cache.borrow().as_ref().map(|(_, g)| g.plot) else {
                         return;
                     };
-                    if !plot.contains(window_pos) {
+                    if !plot
+                        .expand(hit::mark_tolerance(ctx.pointer_kind(), &tap_tokens))
+                        .contains(window_pos)
+                    {
                         selection.clear();
                         return;
                     }
@@ -359,6 +387,64 @@ impl<T: Clone + std::fmt::Display + 'static> Widget for LineChart<T> {
                         None => selection.clear(),
                     }
                 });
+            }
+
+            // Keyboard datum traversal — see `BarChart::build`.
+            {
+                let marks = self.marks.clone();
+                let hover = self.hover.clone();
+                let focus_mark = self.focus_mark.clone();
+                let readout = self.readout.clone();
+                let selection = self.selection.clone();
+                handlers = handlers.focusable(true).on_key(
+                    move |event: &WidgetEvent, ctx: &mut EventContext| {
+                        let marks = marks.borrow();
+                        hit::drive_readout_keys(
+                            event,
+                            ctx,
+                            &marks,
+                            &hover,
+                            &focus_mark,
+                            &readout,
+                            selection.as_ref(),
+                        )
+                    },
+                );
+            }
+            {
+                let focused = self.focused.clone();
+                let hover = self.hover.clone();
+                let focus_mark = self.focus_mark.clone();
+                let readout = self.readout.clone();
+                handlers = handlers.on_focus(move |has_focus, _ctx: &mut EventContext| {
+                    focused.set(has_focus);
+                    if !has_focus {
+                        hit::clear_readout_focus(&hover, &focus_mark, &readout);
+                    }
+                });
+            }
+            {
+                let marks = self.marks.clone();
+                let hover = self.hover.clone();
+                let focus_mark = self.focus_mark.clone();
+                let readout = self.readout.clone();
+                let selection = self.selection.clone();
+                handlers = handlers.on_access_action_request(
+                    move |action, node, _data, ctx: &mut EventContext| {
+                        let marks = marks.borrow();
+                        hit::handle_mark_action(
+                            action,
+                            node,
+                            id,
+                            ctx,
+                            &marks,
+                            &hover,
+                            &focus_mark,
+                            &readout,
+                            selection.as_ref(),
+                        )
+                    },
+                );
             }
 
             ctx.apply_self_handlers(handlers);
@@ -584,6 +670,22 @@ impl<T: Clone + std::fmt::Display + 'static> Widget for LineChart<T> {
             }
         }
 
+        // ─── Keyboard focus ring ────────────────────────────────────────
+        // Outside the selection ring, so a point that is both focused and
+        // selected shows two rings rather than one ambiguous one.
+        if self.focused.get()
+            && let Some(key) = self.focus_mark.get()
+            && let Some(m) = marks.iter().find(|m| (m.series_id, m.point_idx) == key)
+            && let MarkShape::Point { center, .. } = m.shape
+        {
+            canvas.stroke_circle(
+                center,
+                cs::SELECTION_POINT_RING_RADIUS + cs::SELECTION_STROKE_WIDTH,
+                theme.colors.focus_ring,
+                cs::SELECTION_STROKE_WIDTH,
+            );
+        }
+
         // ─── Reference lines ────────────────────────────────────────────
         // Over the series, because a constant the data is judged against has to stay
         // readable where the data crosses it.
@@ -649,7 +751,15 @@ impl<T: Clone + std::fmt::Display + 'static> Widget for LineChart<T> {
                 m.category_label,
                 self.axis_y.format(m.value)
             );
-            hit::draw_mark_tooltip(canvas, theme, plot, center, &text, &label_style);
+            hit::draw_mark_tooltip(
+                canvas,
+                theme,
+                plot,
+                center,
+                self.readout.contact.get(),
+                &text,
+                &label_style,
+            );
         }
     }
 
@@ -679,8 +789,16 @@ impl<T: Clone + std::fmt::Display + 'static> Widget for LineChart<T> {
         };
         let geometry = self.ensure_geometry(bounds, backend.as_ref(), &label_style);
         let marks = self.compute_marks(&geometry);
+        let focused_mark = self.focus_mark.get();
+        let mut active = None;
         for m in &marks {
-            hit::emit_mark_node(builder, m);
+            let node = hit::emit_mark_node(builder, m);
+            if focused_mark == Some((m.series_id, m.point_idx)) {
+                active = Some(node);
+            }
+        }
+        if let Some(node) = active {
+            builder.set_active_descendant(node);
         }
     }
 
@@ -700,6 +818,7 @@ impl<T: Clone + std::fmt::Display + 'static> LineChart<T> {
         let key = GeometryKey {
             bounds,
             structure_version: self.model.structure_version().get(),
+            density: self.input.density,
         };
         if let Some((cached_key, geometry)) = self.geometry_cache.borrow().as_ref()
             && *cached_key == key
@@ -709,7 +828,14 @@ impl<T: Clone + std::fmt::Display + 'static> LineChart<T> {
 
         let legend_orientation = orientation_for_position(self.legend_position);
         let legend_size = if self.show_legend {
-            legend_main_axis_size(backend, &self.model, label_style, legend_orientation)
+            legend_main_axis_size(
+                backend,
+                &self.model,
+                label_style,
+                legend_orientation,
+                self.legend_interactive,
+                &self.input,
+            )
         } else {
             0.0
         };
@@ -758,6 +884,8 @@ impl<T: Clone + std::fmt::Display + 'static> LineChart<T> {
                 &self.model,
                 &label_style,
                 legend_orientation,
+                self.legend_interactive,
+                &ctx.theme.input,
             )
         } else {
             0.0
@@ -1025,6 +1153,149 @@ mod tests {
             ChartDatum::new("C".to_string(), 8.0),
             ChartDatum::new("D".to_string(), 20.0),
         ])])
+    }
+
+    // ── The readout: who raises it, and who retires it ────────────────────
+    //
+    // Census row 9. The retire path is the point: a contact never receives a
+    // `PointerLeave`, so before this a readout a finger raised stayed up.
+
+    struct Fixture {
+        tree: WidgetTree,
+        chart: WidgetId,
+        marks: Rc<RefCell<Vec<MarkGeometry>>>,
+        hover: Signal<Option<(SeriesId, usize)>>,
+        readout: hit::ReadoutState,
+        focus: Signal<Option<(SeriesId, usize)>>,
+        geometry: Rc<RefCell<Option<(GeometryKey, PlotGeometry)>>>,
+    }
+
+    impl Fixture {
+        fn plot(&self) -> Rect {
+            self.geometry
+                .borrow()
+                .as_ref()
+                .map(|(_, g)| g.plot)
+                .expect("painted at least once")
+        }
+    }
+
+    fn fixture(chart: LineChart<String>) -> Fixture {
+        let marks = chart.marks.clone();
+        let hover = chart.hover.clone();
+        let readout = chart.readout.clone();
+        let focus = chart.focus_mark.clone();
+        let geometry = chart.geometry_cache.clone();
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let id = tree.add(chart);
+        tree.layout(SizeProposal::exact(400.0, 200.0));
+        let _ = tree.render();
+        Fixture {
+            tree,
+            chart: id,
+            marks,
+            hover,
+            readout,
+            focus,
+            geometry,
+        }
+    }
+
+    fn point_at(marks: &Rc<RefCell<Vec<MarkGeometry>>>, idx: usize) -> (Point, (SeriesId, usize)) {
+        let marks = marks.borrow();
+        let m = marks.get(idx).expect("mark");
+        let MarkShape::Point { center, .. } = m.shape else {
+            panic!("expected a line point")
+        };
+        (center, (m.series_id, m.point_idx))
+    }
+
+    #[test]
+    fn a_finger_lifting_after_a_scrub_retires_the_readout() {
+        let f = fixture(LineChart::new(one_series()));
+        let (first, _) = point_at(&f.marks, 0);
+        let (third, third_key) = point_at(&f.marks, 2);
+        let mut tree = f.tree;
+        let c = tree.new_contact();
+        tree.touch_down(c, first);
+        tree.touch_move(c, third);
+        assert_eq!(f.hover.get(), Some(third_key));
+        tree.touch_up(c, third);
+        assert_eq!(f.hover.get(), None);
+        assert_eq!(f.readout.contact.get(), None);
+    }
+
+    #[test]
+    fn a_finger_tap_on_a_point_pins_the_readout_and_announces_it() {
+        let f = fixture(LineChart::new(one_series()));
+        let (target, key) = point_at(&f.marks, 1);
+        let expected = {
+            let marks = f.marks.borrow();
+            hit::mark_description(&marks[1])
+        };
+        let mut tree = f.tree;
+        let c = tree.new_contact();
+        tree.touch_down(c, target);
+        tree.touch_up(c, target);
+        assert_eq!(f.hover.get(), Some(key));
+        assert_eq!(f.readout.contact.get(), None);
+        let _ = tree.sync_accessibility();
+        let spoken: Vec<String> = tree
+            .announcements_since(0)
+            .into_iter()
+            .map(|a| a.text)
+            .collect();
+        assert_eq!(spoken, vec![expected]);
+    }
+
+    #[test]
+    fn a_mouse_release_leaves_its_readout_standing_and_says_nothing() {
+        let f = fixture(LineChart::new(one_series()));
+        let (target, key) = point_at(&f.marks, 1);
+        let mut tree = f.tree;
+        tree.pointer_move(target);
+        assert_eq!(f.hover.get(), Some(key));
+        assert_eq!(f.readout.contact.get(), None);
+        tree.pointer_down_button(target, teksilo_core::event::PointerButton::Primary);
+        tree.pointer_up_button(target, teksilo_core::event::PointerButton::Primary);
+        assert_eq!(f.hover.get(), Some(key));
+        let _ = tree.sync_accessibility();
+        assert!(tree.announcements_since(0).is_empty());
+    }
+
+    #[test]
+    fn arrowing_a_focused_chart_moves_the_readout() {
+        use teksilo_core::event::{Key, Modifiers};
+        let f = fixture(LineChart::new(one_series()));
+        let (_, last_key) = point_at(&f.marks, f.marks.borrow().len() - 1);
+        let mut tree = f.tree;
+        tree.focus(f.chart);
+        tree.press_key(Key::End, Modifiers::NONE);
+        assert_eq!(f.focus.get(), Some(last_key));
+        assert_eq!(f.hover.get(), Some(last_key));
+    }
+
+    #[test]
+    fn a_finger_just_outside_the_plot_still_reads_the_nearest_point_and_a_mouse_does_not() {
+        // A line chart picks the nearest point with no radius cutoff, so its
+        // marks need no tolerance of their own — what a coarse pointer gains
+        // is the plot boundary.
+        let f = fixture(LineChart::new(one_series()));
+        let plot = f.plot();
+        let just_outside = Point::new(plot.x - 3.0, plot.y + plot.height * 0.5);
+        let mut tree = f.tree;
+        tree.pointer_move(just_outside);
+        assert_eq!(
+            f.hover.get(),
+            None,
+            "the mouse's plot gate is unchanged: outside is outside"
+        );
+        let c = tree.new_contact();
+        tree.touch_down(c, just_outside);
+        assert!(
+            f.hover.get().is_some(),
+            "a finger 3 dp outside the plot reads the point it nearly hit"
+        );
     }
 
     // ── The non-colour series channel (WCAG 1.4.1) ──────────────────────

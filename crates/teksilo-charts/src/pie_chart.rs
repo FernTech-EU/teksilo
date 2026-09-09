@@ -27,7 +27,7 @@ use teksilo_core::accessibility::AccessNodeBuilder;
 use teksilo_core::binding::BindingLevel;
 use teksilo_core::build_context::BuildContext;
 use teksilo_core::color_prop::ColorProp;
-use teksilo_core::event::{EventResponse, WidgetEvent};
+use teksilo_core::event::WidgetEvent;
 use teksilo_core::gesture::TapEvent;
 use teksilo_core::paint_prop::PaintProp;
 use teksilo_core::signal::{Prop, Signal};
@@ -107,6 +107,13 @@ pub struct PieChart<T: Clone + 'static> {
     selection: Option<ChartSelection>,
 
     hover: Signal<Option<(SeriesId, usize)>>,
+    /// The slice keyboard traversal is sitting on — see `BarChart`'s own
+    /// field for why the focus position and the readout value are separate
+    /// signals.
+    focus_mark: Signal<Option<(SeriesId, usize)>>,
+    /// Whether the chart itself holds keyboard focus.
+    focused: Signal<bool>,
+    readout: hit::ReadoutState,
     marks: Rc<RefCell<Vec<MarkGeometry>>>,
     bounds: Rc<Cell<Rect>>,
     geometry_cache: Rc<RefCell<Option<(GeometryKey, PieGeometry)>>>,
@@ -136,6 +143,9 @@ impl<T: Clone + std::fmt::Display + 'static> PieChart<T> {
             style_override: None,
             selection: None,
             hover: Signal::new(None),
+            focus_mark: Signal::new(None),
+            focused: Signal::new(false),
+            readout: hit::ReadoutState::new(),
             marks: Rc::new(RefCell::new(Vec::new())),
             bounds: Rc::new(Cell::new(Rect::ZERO)),
             geometry_cache: Rc::new(RefCell::new(None)),
@@ -267,8 +277,10 @@ impl<T: Clone + std::fmt::Display + 'static> PieChart<T> {
         self
     }
 
-    /// A clone of the live hover signal — the `(series, point)` key
-    /// currently under the pointer, or `None`. Lets an app observe
+    /// A clone of the live readout signal — the `(series, point)` key the
+    /// readout currently names, or `None`. Whichever route set it: a pointer
+    /// hover or press, keyboard traversal, or an assistive technology's
+    /// `Click`. Lets an app observe
     /// hover state from outside the chart (a synced detail panel, a
     /// custom tooltip) without re-implementing hit-testing.
     pub fn hover_signal(&self) -> Signal<Option<(SeriesId, usize)>> {
@@ -306,6 +318,15 @@ impl<T: Clone + std::fmt::Display + 'static> Widget for PieChart<T> {
             self.palette
                 .register_if_bound(id, registry, BindingLevel::RepaintOnly);
             self.hover.bind_to(id, registry, BindingLevel::RepaintOnly);
+            self.readout
+                .contact
+                .bind_to(id, registry, BindingLevel::RepaintOnly);
+            self.focused
+                .bind_to(id, registry, BindingLevel::RepaintOnly);
+            self.focus_mark
+                .bind_to(id, registry, BindingLevel::RepaintOnly);
+            self.focus_mark
+                .bind_to(id, registry, BindingLevel::AccessibilityOnly);
             if let Some(selection) = &self.selection {
                 selection
                     .selection_signal()
@@ -333,61 +354,38 @@ impl<T: Clone + std::fmt::Display + 'static> Widget for PieChart<T> {
                 let bounds = self.bounds.clone();
                 let geometry_cache = self.geometry_cache.clone();
                 let hover = self.hover.clone();
-                handlers =
-                    handlers.on_pointer_event(move |event, _ctx: &mut EventContext| match event {
-                        WidgetEvent::PointerMove { position } => {
-                            let b = bounds.get();
-                            let window_pos = Point::new(position.x + b.x, position.y + b.y);
-                            let (center, outer, inner) = geometry_cache
-                                .borrow()
-                                .as_ref()
-                                .map(|(_, g)| (g.center, g.outer_radius, g.inner_radius))
-                                .unwrap_or((Point::ZERO, 0.0, 0.0));
-                            if outer <= 0.0 {
-                                return EventResponse::Ignored;
-                            }
-                            let dx = window_pos.x - center.x;
-                            let dy = window_pos.y - center.y;
-                            let dist = (dx * dx + dy * dy).sqrt();
-                            if dist < inner || dist > outer {
-                                if hover.get().is_some() {
-                                    hover.set(None);
-                                }
-                                return EventResponse::Ignored;
-                            }
-                            let raw = dy.atan2(dx);
-                            let hit = hit::slice_hit(&marks.borrow(), raw);
-                            match hit.and_then(|idx| {
-                                marks.borrow().get(idx).map(|m| (m.series_id, m.point_idx))
-                            }) {
-                                Some(key) => {
-                                    if hover.get() != Some(key) {
-                                        hover.set(Some(key));
-                                    }
-                                }
-                                None => {
-                                    if hover.get().is_some() {
-                                        hover.set(None);
-                                    }
-                                }
-                            }
-                            EventResponse::Ignored
-                        }
-                        WidgetEvent::PointerLeave => {
-                            if hover.get().is_some() {
-                                hover.set(None);
-                            }
-                            EventResponse::Ignored
-                        }
-                        _ => EventResponse::Ignored,
-                    });
+                let readout = self.readout.clone();
+                let tokens = ctx.theme().input;
+                handlers = handlers.on_pointer_event(move |event, ctx: &mut EventContext| {
+                    let tolerance = hit::mark_tolerance(ctx.pointer_kind(), &tokens);
+                    let b = bounds.get();
+                    let disc = geometry_cache
+                        .borrow()
+                        .as_ref()
+                        .map(|(_, g)| (g.center, g.outer_radius, g.inner_radius));
+                    let resolve = |local: Point| -> Option<hit::MarkKey> {
+                        let (center, outer, inner) = disc?;
+                        let window_pos = Point::new(local.x + b.x, local.y + b.y);
+                        let marks = marks.borrow();
+                        hit::slice_hit_within(&marks, center, inner, outer, window_pos, tolerance)
+                            .and_then(|idx| marks.get(idx).map(|m| (m.series_id, m.point_idx)))
+                    };
+                    let describe = |key: hit::MarkKey| {
+                        let marks = marks.borrow();
+                        hit::mark_index_of(&marks, key)
+                            .and_then(|idx| marks.get(idx))
+                            .map(hit::mark_description)
+                    };
+                    hit::drive_readout(event, ctx, &hover, &readout, resolve, describe)
+                });
             }
 
             if let Some(selection) = self.selection.clone() {
                 let marks = self.marks.clone();
                 let bounds = self.bounds.clone();
                 let geometry_cache = self.geometry_cache.clone();
-                handlers = handlers.on_tap(move |tap: &TapEvent, _ctx: &mut EventContext| {
+                let tap_tokens = ctx.theme().input;
+                handlers = handlers.on_tap(move |tap: &TapEvent, ctx: &mut EventContext| {
                     let b = bounds.get();
                     let window_pos = Point::new(tap.position.x + b.x, tap.position.y + b.y);
                     let (center, outer, inner) = geometry_cache
@@ -398,15 +396,17 @@ impl<T: Clone + std::fmt::Display + 'static> Widget for PieChart<T> {
                     if outer <= 0.0 {
                         return;
                     }
-                    let dx = window_pos.x - center.x;
-                    let dy = window_pos.y - center.y;
-                    let dist = (dx * dx + dy * dy).sqrt();
-                    if dist < inner || dist > outer {
-                        selection.clear();
-                        return;
-                    }
-                    let raw = dy.atan2(dx);
-                    let hit = hit::slice_hit(&marks.borrow(), raw);
+                    // One radial gate, shared with the readout above: a
+                    // wedge that highlights near its edge but refuses to
+                    // select there would be two hit tests wearing one name.
+                    let hit = hit::slice_hit_within(
+                        &marks.borrow(),
+                        center,
+                        inner,
+                        outer,
+                        window_pos,
+                        hit::mark_tolerance(ctx.pointer_kind(), &tap_tokens),
+                    );
                     match hit
                         .and_then(|idx| marks.borrow().get(idx).map(|m| (m.series_id, m.point_idx)))
                     {
@@ -424,6 +424,64 @@ impl<T: Clone + std::fmt::Display + 'static> Widget for PieChart<T> {
                         None => selection.clear(),
                     }
                 });
+            }
+
+            // Keyboard datum traversal — see `BarChart::build`.
+            {
+                let marks = self.marks.clone();
+                let hover = self.hover.clone();
+                let focus_mark = self.focus_mark.clone();
+                let readout = self.readout.clone();
+                let selection = self.selection.clone();
+                handlers = handlers.focusable(true).on_key(
+                    move |event: &WidgetEvent, ctx: &mut EventContext| {
+                        let marks = marks.borrow();
+                        hit::drive_readout_keys(
+                            event,
+                            ctx,
+                            &marks,
+                            &hover,
+                            &focus_mark,
+                            &readout,
+                            selection.as_ref(),
+                        )
+                    },
+                );
+            }
+            {
+                let focused = self.focused.clone();
+                let hover = self.hover.clone();
+                let focus_mark = self.focus_mark.clone();
+                let readout = self.readout.clone();
+                handlers = handlers.on_focus(move |has_focus, _ctx: &mut EventContext| {
+                    focused.set(has_focus);
+                    if !has_focus {
+                        hit::clear_readout_focus(&hover, &focus_mark, &readout);
+                    }
+                });
+            }
+            {
+                let marks = self.marks.clone();
+                let hover = self.hover.clone();
+                let focus_mark = self.focus_mark.clone();
+                let readout = self.readout.clone();
+                let selection = self.selection.clone();
+                handlers = handlers.on_access_action_request(
+                    move |action, node, _data, ctx: &mut EventContext| {
+                        let marks = marks.borrow();
+                        hit::handle_mark_action(
+                            action,
+                            node,
+                            id,
+                            ctx,
+                            &marks,
+                            &hover,
+                            &focus_mark,
+                            &readout,
+                            selection.as_ref(),
+                        )
+                    },
+                );
             }
 
             ctx.apply_self_handlers(handlers);
@@ -552,6 +610,14 @@ impl<T: Clone + std::fmt::Display + 'static> Widget for PieChart<T> {
                 canvas.stroke_path(&path, theme.colors.accent, SELECTION_STROKE_WIDTH);
             }
 
+            // Keyboard focus ring — the same wedge outline in the focus
+            // colour, drawn heavier so a slice that is both focused and
+            // selected reads as both.
+            if self.focused.get() && self.focus_mark.get() == Some((m.series_id, m.point_idx)) {
+                use crate::style::SELECTION_STROKE_WIDTH;
+                canvas.stroke_path(&path, theme.colors.focus_ring, SELECTION_STROKE_WIDTH * 2.0);
+            }
+
             let bisector = start_rad + sweep_rad * 0.5;
 
             // The non-colour channel. A wedge cannot be hatched (the canvas
@@ -630,7 +696,15 @@ impl<T: Clone + std::fmt::Display + 'static> Widget for PieChart<T> {
                 format_pie_value(m.value),
                 percent
             );
-            hit::draw_mark_tooltip(canvas, theme, geometry.plot, anchor, &text, &label_style);
+            hit::draw_mark_tooltip(
+                canvas,
+                theme,
+                geometry.plot,
+                anchor,
+                self.readout.contact.get(),
+                &text,
+                &label_style,
+            );
         }
     }
 
@@ -655,8 +729,16 @@ impl<T: Clone + std::fmt::Display + 'static> Widget for PieChart<T> {
         };
         let geometry = self.ensure_geometry(bounds, backend.as_ref(), &label_style);
         let marks = self.compute_marks(&geometry);
+        let focused_mark = self.focus_mark.get();
+        let mut active = None;
         for m in &marks {
-            hit::emit_mark_node(builder, m);
+            let node = hit::emit_mark_node(builder, m);
+            if focused_mark == Some((m.series_id, m.point_idx)) {
+                active = Some(node);
+            }
+        }
+        if let Some(node) = active {
+            builder.set_active_descendant(node);
         }
     }
 
@@ -1177,6 +1259,212 @@ mod tests {
             ChartDatum::new("B".to_string(), 50.0),
             ChartDatum::new("C".to_string(), 20.0),
         ])
+    }
+
+    // ── The readout and the wedge tolerance ───────────────────────────────
+    //
+    // Census row 10, plus P33's wedge clause. What is testable about a wedge
+    // is the chart's own polar hit test: `Widget::hit_distance` cannot speak
+    // for a wedge (all the wedges live in one node, and the slop pass's
+    // product is a node id), and a `hit_shape` restricted to the annulus
+    // would make the corner press in `tap_outside_ring_clears_selection`
+    // miss the chart entirely — see docs/charts.md §9.
+
+    struct Fixture {
+        tree: WidgetTree,
+        chart: WidgetId,
+        marks: Rc<RefCell<Vec<MarkGeometry>>>,
+        hover: Signal<Option<(SeriesId, usize)>>,
+        readout: hit::ReadoutState,
+        focus: Signal<Option<(SeriesId, usize)>>,
+    }
+
+    fn fixture(chart: PieChart<String>) -> Fixture {
+        let marks = chart.marks.clone();
+        let hover = chart.hover.clone();
+        let readout = chart.readout.clone();
+        let focus = chart.focus_mark.clone();
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let id = tree.add(chart);
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        let _ = tree.render();
+        Fixture {
+            tree,
+            chart: id,
+            marks,
+            hover,
+            readout,
+            focus,
+        }
+    }
+
+    /// The slice at `idx`, as `(centre, inner, outer, bisector bearing, key)`.
+    fn slice_at(
+        marks: &Rc<RefCell<Vec<MarkGeometry>>>,
+        idx: usize,
+    ) -> (Point, f32, f32, f32, (SeriesId, usize)) {
+        let marks = marks.borrow();
+        let m = marks.get(idx).expect("slice");
+        let MarkShape::Slice {
+            center,
+            inner_radius,
+            outer_radius,
+            start_rad,
+            sweep_rad,
+        } = m.shape
+        else {
+            panic!("expected a slice")
+        };
+        (
+            center,
+            inner_radius,
+            outer_radius,
+            start_rad + sweep_rad * 0.5,
+            (m.series_id, m.point_idx),
+        )
+    }
+
+    fn polar(center: Point, r: f32, bearing: f32) -> Point {
+        Point::new(center.x + r * bearing.cos(), center.y + r * bearing.sin())
+    }
+
+    #[test]
+    fn a_finger_just_past_a_wedges_arc_reads_it_and_a_mouse_does_not() {
+        let f = fixture(PieChart::new(three_slices_model()));
+        let (center, _, outer, bisector, key) = slice_at(&f.marks, 1);
+        let just_outside = polar(center, outer + 3.0, bisector);
+        let mut tree = f.tree;
+        tree.pointer_move(just_outside);
+        assert_eq!(
+            f.hover.get(),
+            None,
+            "a mouse still has to be inside the ring"
+        );
+        let c = tree.new_contact();
+        tree.touch_down(c, just_outside);
+        assert_eq!(f.hover.get(), Some(key));
+    }
+
+    #[test]
+    fn a_finger_just_past_a_wedges_arc_selects_it_and_a_mouse_clears_instead() {
+        use teksilo_core::event::PointerButton;
+        use teksilo_data::SelectionMode;
+        let sel = ChartSelection::new(SelectionMode::Single);
+        let f = fixture(PieChart::new(three_slices_model()).selection(sel.clone()));
+        let (center, _, outer, bisector, key) = slice_at(&f.marks, 1);
+        let just_outside = polar(center, outer + 3.0, bisector);
+        let mut tree = f.tree;
+        let c = tree.new_contact();
+        tree.touch_down(c, just_outside);
+        tree.touch_up(c, just_outside);
+        assert!(
+            sel.is_selected(key.0, key.1),
+            "the readout and the tap share one radial gate — a wedge that \
+             highlights near its edge but refuses to select there would be \
+             two hit tests wearing one name"
+        );
+        tree.pointer_down_button(just_outside, PointerButton::Primary);
+        tree.pointer_up_button(just_outside, PointerButton::Primary);
+        assert_eq!(sel.count(), 0, "and the mouse's ring is unchanged");
+    }
+
+    #[test]
+    fn a_tolerated_finger_press_never_crosses_the_slice_boundary() {
+        let f = fixture(PieChart::new(three_slices_model()));
+        let (center, _, outer, _, first_key) = slice_at(&f.marks, 0);
+        let (_, _, _, _, second_key) = slice_at(&f.marks, 1);
+        // The boundary the first two slices share, read off the marks.
+        let boundary = {
+            let marks = f.marks.borrow();
+            let MarkShape::Slice {
+                start_rad,
+                sweep_rad,
+                ..
+            } = marks[0].shape
+            else {
+                panic!("expected a slice")
+            };
+            start_rad + sweep_rad
+        };
+        let mut tree = f.tree;
+        // Both presses are 3 dp beyond the outer arc — inside the radial
+        // tolerance — a hair either side of the shared boundary.
+        let inside_first = polar(center, outer + 3.0, boundary - 0.03);
+        let inside_second = polar(center, outer + 3.0, boundary + 0.03);
+        let c = tree.new_contact();
+        tree.touch_down(c, inside_first);
+        assert_eq!(f.hover.get(), Some(first_key));
+        tree.touch_move(c, inside_second);
+        assert_eq!(
+            f.hover.get(),
+            Some(second_key),
+            "the tolerance is radial only: crossing the boundary crosses it"
+        );
+    }
+
+    #[test]
+    fn a_finger_lifting_after_a_scrub_retires_the_readout() {
+        let f = fixture(PieChart::new(three_slices_model()));
+        let (center, _, outer, bisector, key) = slice_at(&f.marks, 1);
+        let inside = polar(center, outer * 0.5, bisector);
+        let mut tree = f.tree;
+        let c = tree.new_contact();
+        tree.touch_down(c, inside);
+        tree.touch_move(c, inside);
+        assert_eq!(f.hover.get(), Some(key));
+        tree.touch_up(c, inside);
+        assert_eq!(f.hover.get(), None);
+    }
+
+    #[test]
+    fn a_mouse_release_over_a_slice_leaves_its_readout_standing() {
+        let f = fixture(PieChart::new(three_slices_model()));
+        let (center, _, outer, bisector, key) = slice_at(&f.marks, 1);
+        let inside = polar(center, outer * 0.5, bisector);
+        let mut tree = f.tree;
+        tree.pointer_move(inside);
+        assert_eq!(f.hover.get(), Some(key));
+        assert_eq!(
+            f.readout.contact.get(),
+            None,
+            "a mouse anchors the card on the mark, never on the cursor"
+        );
+        tree.pointer_down_button(inside, teksilo_core::event::PointerButton::Primary);
+        tree.pointer_up_button(inside, teksilo_core::event::PointerButton::Primary);
+        assert_eq!(f.hover.get(), Some(key));
+        let _ = tree.sync_accessibility();
+        assert!(tree.announcements_since(0).is_empty());
+    }
+
+    #[test]
+    fn arrowing_a_focused_pie_walks_its_slices() {
+        use teksilo_core::event::{Key, Modifiers};
+        let f = fixture(PieChart::new(three_slices_model()));
+        let (_, _, _, _, first_key) = slice_at(&f.marks, 0);
+        let (_, _, _, _, last_key) = slice_at(&f.marks, 2);
+        let mut tree = f.tree;
+        tree.focus(f.chart);
+        tree.press_key(Key::ArrowRight, Modifiers::NONE);
+        assert_eq!(f.focus.get(), Some(first_key));
+        tree.press_key(Key::End, Modifiers::NONE);
+        assert_eq!(f.focus.get(), Some(last_key));
+        assert_eq!(f.hover.get(), Some(last_key));
+    }
+
+    #[test]
+    fn a_focused_slice_paints_a_ring_the_unfocused_chart_does_not() {
+        use teksilo_core::event::{Key, Modifiers};
+        let f = fixture(PieChart::new(three_slices_model()));
+        let mut tree = f.tree;
+        let baseline = tree.render().paths.len();
+        tree.focus(f.chart);
+        tree.press_key(Key::ArrowRight, Modifiers::NONE);
+        let focused = tree.render().paths.len();
+        assert!(
+            focused > baseline,
+            "a keyboard stop with no visible indicator is a 2.4.7 failure \
+             (baseline {baseline}, focused {focused})"
+        );
     }
 
     // ── The non-colour slice channel (WCAG 1.4.1) ───────────────────────

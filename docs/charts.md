@@ -30,7 +30,7 @@ teksilo-tokens → teksilo-canvas → teksilo-core ── teksilo-data ─┬→
 ```
 
 `teksilo-charts` deliberately does **not** depend on `teksilo-widgets`. The
-hover tooltip, the legend, the donut center placeholder all live inside
+readout card, the legend, the donut center placeholder all live inside
 `teksilo-charts` and use only `teksilo-core` + `teksilo-canvas` primitives.
 Tests reach for `teksilo-widgets::TextWidget` as a *dev-dependency* to
 populate the donut center slot, but no production code path crosses
@@ -92,8 +92,8 @@ identical to a 0→2 series on a [0, 100] axis. Override with
 
 ### 2.2 LineChart
 
-Polyline per series with optional area fill, hover tooltips, and
-embedded legend. PR-3 / PR-4 territory.
+Polyline per series with optional area fill, the shared datum readout
+(§9), and an embedded legend. PR-3 / PR-4 territory.
 
 ```rust
 use teksilo_charts::{AxisConfig, ChartModel, ChartSeries, LineChart};
@@ -466,6 +466,30 @@ Embedded legend orientation is auto-derived from position: `Top` and
 `Bottom` get horizontal, `Leading` and `Trailing` get vertical.
 Override with the standalone widget if you need something different.
 
+**Interactive rows as targets.** A row *paints* a 10 dp swatch beside an
+11 pt label — about 13 dp tall — and it paints that at every density.
+An interactive row is also a real target, and 13 dp is under the 24 dp
+WCAG 2.2 SC 2.5.8 floor, so `legend_row_extent` gives an interactive
+legend's rows the density's `target_size` at `Comfortable` (32 dp) and
+`Touch` (44 dp), reserving the band at the same extent so the rows are
+not clipped by their own container. A non-interactive legend has no
+target and is never grown.
+
+At `Compact` the row stays at what it paints, and **that is a recorded
+shortfall rather than a fixed one**: giving it 24 dp would be a Compact
+layout change, which the density work does not make. Neither of the
+framework's two hit-widening mechanisms can reach it where it sits —
+`Widget::hit_outset` never escapes its parent, and the parent is a band
+reserved at exactly one row's extent (in a vertical legend the rows are
+contiguous besides, so an outset could only take space from a
+neighbour); and the miss-only slop pass returns the exact hit as soon as
+the bubble path has an owner at distance zero, which a chart with a
+readout always provides. So the only mechanism is more room, and more
+room at Compact is a layout change. An app that needs the floor at
+Compact raises the whole UI to `Comfortable`, or places a standalone
+legend outside the chart where it is not inside a pointer-handling
+ancestor.
+
 ## 7. Layout — proposal-driven plot-area carve
 
 All three charts are **proposal-driven**: `layout_response` returns
@@ -550,68 +574,237 @@ triggers a repaint without a full relayout — same effect as
 `set_series_color`, driven from outside the model. This is the right
 path for "pulsing" / "highlighted" colors that don't change geometry.
 
-## 9. Hover tooltips
+## 9. The datum readout
 
-All three charts — `BarChart`, `LineChart`, `PieChart` — draw their
-hover tooltips **inline inside their own `paint()`**, clipped to the
-plot rect. This is deliberately different from
+All three charts — `BarChart`, `LineChart`, `PieChart` — draw the same
+**readout**: a tooltip card plus a highlight on the datum it describes,
+painted **inline inside their own `paint()`** and clipped to the plot
+rect. This is deliberately different from
 [`TooltipWidget`](../crates/teksilo-widgets/src/tooltip.rs):
 
-- Chart tooltips track the cursor across the plot to the **nearest
-  data point**, snapping per-pixel. `TooltipWidget` is anchored to a
-  widget bounds box.
-- Chart tooltips appear instantly. `TooltipWidget` waits ~700 ms for
-  dwell.
-- The content depends on which point is nearest, which can change
-  within the same widget without an enter/leave event.
+- The readout tracks the pointer across the plot to the datum under or
+  nearest to it, changing content without an enter/leave event.
+  `TooltipWidget` is anchored to a widget's bounds box.
+- The readout appears with the pointer. A plain `TooltipWidget` waits
+  `motion.tooltip_delay` (500 ms; the rich and composite tiers wait
+  `motion.tooltip_delay_heavy`, 700 ms).
+- It is not hover-gated. All three charts read
+  `WidgetEvent::PointerMove` through `on_pointer_event` rather than
+  `on_hover`, and a contact's bare move is dispatched to its hit target
+  like any other — which is why a finger could always *raise* the
+  readout, and why what it could not do was retire it.
 
-The implementation is straightforward:
+The pieces, all in [`hit.rs`](../crates/teksilo-charts/src/hit.rs):
 
-1. The chart owns a private hover signal —
-   `Signal<Option<(SeriesId, usize)>>`, the same `(series, point
-   index)` shape across all three chart kinds — bound at
-   `BindingLevel::RepaintOnly`.
-2. An `on_pointer_event` handler attached via `HandlerSet` reads the
-   pointer position, finds the nearest hit in a `Vec<…Hit>` snapshot
-   the chart wrote during paint, and updates the signal.
-3. `paint()` reads the signal — if `Some`, it draws a marker (a
-   small ring + filled circle for line charts, the wedge stroke for
-   pie) and a tooltip rect above the marker.
-4. **Edge-flip** placement: if the tooltip would clip the plot
-   rect's top edge, it flips below the marker; if it would clip
-   leading/trailing, it shifts inward.
+1. One `Signal<Option<MarkKey>>` per chart — `MarkKey` is
+   `(SeriesId, usize)`, the same shape across all three kinds — bound at
+   `BindingLevel::RepaintOnly`. Every input route writes that one
+   signal, so the pointer, the keyboard and an assistive technology
+   cannot disagree about what is being read.
+2. `drive_readout` owns the pointer routes and `drive_readout_keys` the
+   keyboard ones. The three chart kinds differ only in how a point
+   resolves to a mark: `rect_hit_within` for bars, `nearest_point` for a
+   line, `slice_hit_within` for a pie.
+3. `paint()` reads the signal and draws the highlight (a ring plus a
+   filled dot for a line point, the wedge stroke for a slice, nothing
+   extra for a bar) plus the card.
+4. `mark_tooltip_rect` places the card: centred over its anchor, above
+   it by a gap, **flipped below** rather than clipping the plot's top
+   edge, then clamped inside the plot on both axes. It is a pure
+   function, so the placement is tested without a canvas.
 
-The hit snapshot is keyed by paint epoch (replaced, not appended,
-each paint), so a data change shrinks the index correctly. Hit-test
-cost is O(N×S) per pointer move for N points across S series —
-acceptable up to ~10k points without optimization.
+The mark snapshot is replaced, not appended, each paint, so a data
+change shrinks the index correctly. Hit-test cost is O(N×S) per pointer
+sample for N points across S series — acceptable up to ~10k points
+without optimisation.
 
-For pie/donut, the hit-test is polar: convert pointer position to
-`(angle, distance)` from disc center, accept the hit only if
-`inner_radius ≤ distance ≤ outer_radius`, then locate the slice
-whose angular range covers the pointer. The angle conversion has to
-subtract `start_angle_degrees` and flip for non-clockwise charts —
-both are easy to forget; the
-[`pie_hit_test_uses_logical_angle_space`](../crates/teksilo-charts/src/pie_chart.rs)
-test locks this.
+### Kind-aware rules, and who retires the readout
 
-Disable with `.hover_tooltip(false)` if you'd rather the chart not
-react to hover at all (e.g. embedded in a tooltip itself, or behind
-a busy overlay). A clone of the hover signal is also public via
-`.hover_signal() -> Signal<Option<(SeriesId, usize)>>` on each chart,
-for apps that want to observe hover from outside without
-re-implementing the hit-test.
+A finger has no way to leave. A precise pointer sets the readout as it
+moves and clears it by moving off the plot or leaving the widget, which
+is what `PointerLeave` is for — and **a contact never receives a
+`PointerLeave`** anywhere in the framework: the dispatch sites are all
+reached only for the hover owner, which a contact can never be. So a
+readout a finger raised would have stayed up for the rest of the
+program's life. That is the defect rows 8-10 of
+[the hover-affordance census](hover-affordance-census.md) record, and it
+is a defect in the retire path, not in the set path.
+
+A coarse pointer therefore gets two modes, and both of them end:
+
+| gesture | what the readout does |
+| --- | --- |
+| press | appears at once on the datum under the contact — a still finger produces no move, so the press has to raise it |
+| press, then travel | follows the contact, and the **lift retires it** |
+| press and release without travelling | **pins** on the datum under the release, re-anchored on the mark now the finger has gone, and announced once |
+| a later press away from the data | retires a pinned readout |
+| cancel | retires it |
+
+A precise pointer keeps the behaviour it had: it neither pins nor
+announces, its card stays anchored on the mark rather than on the
+cursor, and a click over a datum leaves the readout exactly as the move
+left it. **One deliberate change reaches every kind**: a
+`WidgetEvent::PointerCancel` now retires the readout, where the raw
+handler used to ignore it. A revoked interaction is not an inspection,
+and the framework's cancel taxonomy asks for state to be unwound rather
+than left standing; a mouse would have cleared it on its next move
+anyway, so the change costs a mouse nothing and is what gives a contact
+its third retire path.
+
+While a coarse pointer owns the readout the card is anchored on the
+**contact** rather than on the mark, and the gap grows by half of
+`teksilo_core::overlay::ASSUMED_CONTACT_PATCH` — the card is painted
+inline by the chart, so it never passes through the overlay layer's own
+contact avoidance and has to clear the finger itself.
+
+Two things the readout deliberately does **not** do:
+
+- **No timeout.** Nothing on `EventContext` reports the clock and a
+  chart runs no timer of its own; with press, release and cancel all
+  owning a retire path, a timeout could only ever fire against a
+  readout the user is still reading.
+- **No `on_long_press`.** A hold is not needed to raise the readout, and
+  installing a widget-level long press would take the tree-owned hold
+  route away from the chart *and its whole subtree* — precedence rule 1
+  in [`touch_route`](../crates/teksilo-core/src/widget_tree/touch_route.rs)
+  is that a widget's own `on_long_press` wins — so an app's
+  `.tooltip(..)` on a chart would stop answering to a hold.
+
+**One known limitation.** A cancel is routed to the pointer's captor,
+or failing that to a widget that answered `Handled` to one of its
+positional events. The readout claims nothing on purpose — it returns
+`Ignored` so a pan claim or a tap above the chart still works — so a
+**read-only** chart (no `.selection(..)`) is never told about a cancel,
+and its readout survives the revoked press until the next one. A
+selectable chart's own tap recognizer holds the pointer, so it is told.
+Both halves are pinned by tests in `bar_chart.rs`.
+
+### Coarse hit tolerance
+
+A press that misses a mark by a few dp is a miss a finger cannot avoid,
+so each chart's own hit test admits one — sized by
+`hit::mark_tolerance`, which is the pointer's hit-slop radius from
+`HitSlop::for_pointer`: **0 dp for a mouse**, 2 for a pen, 8 for a
+finger (capped by the density's `slop_budget`). Because the mouse's is
+zero by arithmetic rather than by a branch, every tolerance-aware hit
+test below is the identity for a mouse.
+
+- **Bars** (`rect_hit_within`) test containment first, so a press inside
+  a bar answers exactly what a zero tolerance answers. Only on a miss
+  does the **nearest** bar within the tolerance take it — nearest rather
+  than first, because inflating every bar makes adjacent inflated
+  rectangles overlap, and a first-match scan through an overlap resolves
+  by position in the mark vector (i.e. by series and category order)
+  regardless of which bar the press was closer to.
+- **A line chart** already picks the nearest point with no radius
+  cutoff, so its marks need no tolerance. What a coarse pointer gains is
+  the plot boundary: a press a few dp outside it, beside the first or
+  last point, reads as an inspection rather than as a miss.
+- **Pie and donut wedges** (`slice_hit_within`) grow a **radial**
+  tolerance only, so a press just past the outer arc — or just inside a
+  donut hole — reaches the wedge whose bearing it falls in. There is no
+  angular tolerance, and that is not an omission: inside the disc some
+  slice owns every bearing already, so an angular tolerance would widen
+  nothing and would make two adjacent slices both claim their shared
+  boundary, with the first in paint order winning it at every radius.
+  A press whose bearing lies in a neighbour's sweep reaches the
+  neighbour however close to the boundary it falls.
+
+The same tolerance is spent by the readout and by the selecting tap, in
+one shared call — a wedge that highlighted near its edge but refused to
+select there would be two hit tests wearing one name.
+
+**Why not `Widget::hit_distance` or `Widget::hit_shape` on a wedge.**
+Neither hook can speak for a wedge, and one of them would break a
+working mouse behaviour:
+
+- A wedge has no `WidgetId`. All of a chart's marks are paint regions
+  inside the one chart node, recomputed each paint, and the framework's
+  miss-only slop pass produces a *node* id — so it can never name a
+  wedge.
+- The slop pass would not run over a chart in any case. A node earns an
+  outset of `((target_size − min(w, h)) / 2)`, which is exactly zero for
+  a chart at any realistic size (a pie's default ideal is 320×220), and
+  a press *inside* the chart's rectangle is not a miss: the pass returns
+  the exact hit as soon as the bubble path has an owner at distance
+  zero, and a chart with a readout always installs a pointer handler.
+- A `hit_shape` restricted to the annulus would make the corner press in
+  `tap_outside_ring_clears_selection` — a **mouse** test — miss the chart
+  altogether, so the handler that clears the selection would never run.
+  It would also remove the only pointer route for clearing a chart
+  selection.
+
+So the wedge's tolerance lives in the chart's own polar code, which is
+where the geometry is.
+
+### Keyboard and assistive technology
+
+A chart is **focusable** exactly when it has something for the keyboard
+to do — a readout to move (`hover_tooltip`, on by default) or a
+selection to commit. A chart with neither adds no tab stop. While
+focused:
+
+| key | effect |
+| --- | --- |
+| `→` / `↓` | next datum |
+| `←` / `↑` | previous datum |
+| `Home` / `End` | first / last datum |
+| `Enter` / `Space` | select the focused datum, where the chart has a `ChartSelection` |
+
+Both axes step one sequence — the paint-order mark vector, series-major
+and point-minor — because a chart's marks are not a grid: a pie has one
+ring, a grouped bar chart one bar per (series, category) pair, a line
+chart points per series. That is the only ordering all three share, and
+it is the order the AT tree publishes its per-datum nodes in, so the
+keyboard and a screen reader's own review agree. Traversal clamps at
+both ends rather than wrapping. A chord carrying any modifier is left
+alone, so nothing here can shadow a registered shortcut.
+
+Each step moves the readout to the focused datum and announces it, and
+the chart paints a **focus ring** on it — outside the selection
+highlight, so a datum that is both focused and selected reads as both.
+The ring is why the tab stop is not a WCAG 2.4.7 failure, and it is
+painted only while the chart actually holds focus.
+
+The focused datum is published as the chart node's
+`active_descendant` (roving virtual focus, the same pattern
+`teksilo-scene` uses), which is what lets a screen reader follow the
+traversal without the marks needing arena nodes of their own.
+
+Every per-datum AT node advertises the two actions a datum can answer,
+and the chart implements both — see §12.
+
+### touch-action
+
+Charts stay at `TouchAction::AUTO`. A chart consumes no drag: it taps,
+it reads moves and it holds. Declaring `NONE` would make a 400×200 tile
+a dead zone for a page scroll, and would additionally resolve
+`DragActivation::Auto` to `Immediate` for everything on the press's
+path — destroying the hold-then-scrub behaviour the readout depends on.
+A test pins the decision.
+
+### Turning it off, and observing it
+
+`.hover_tooltip(false)` stops the chart raising a readout (embedded inside
+a tooltip itself, or behind a busy overlay). It does not stop
+`.selection(..)`'s tap: the two are gated independently, so a chart with a
+selection still selects on a click. On a chart with no selection it does
+remove the last thing the keyboard could do, and so also takes the chart
+out of the tab order. A clone of the
+readout signal is public as `.hover_signal() -> Signal<Option<(SeriesId,
+usize)>>` on each chart, for apps that want to observe it without
+re-implementing the hit test. Note what it now reports: the readout key,
+whichever route set it — pointer, keyboard, or an assistive-technology
+click.
 
 `ChartSelection` ([teksilo-data](../crates/teksilo-data/src/chart_selection.rs),
-keyed by `(SeriesId, usize)`) is consumed by all three charts the
-same way: `.selection(ChartSelection)` reuses the exact hit-test the
-hover handler uses (`hit::rect_hit` / `hit::nearest_point` /
-`hit::slice_hit`) to add click-to-select — a tap on a mark selects it
-(Ctrl/Cmd-click toggles it in `SelectionMode::Multi`), a tap on empty
-space clears the selection — and every selected mark paints an
-accent-colored highlight (a bar's outline, a line point's ring, a
-slice's outline) on top of its normal fill; see
-[data-models.md §15.4](data-models.md).
+keyed by `(SeriesId, usize)`) is consumed by all three charts the same
+way: `.selection(ChartSelection)` reuses the exact hit test the readout
+uses to add click-to-select — a tap on a mark selects it (Ctrl/Cmd-click
+toggles it in `SelectionMode::Multi`), a tap on empty space clears the
+selection — and every selected mark paints an accent-coloured highlight
+(a bar's outline, a line point's ring, a slice's outline) on top of its
+normal fill; see [data-models.md §15.4](data-models.md).
 
 ## 10. Theming — chart style constants
 
@@ -745,6 +938,31 @@ chart with a `TreeView` / `TableView` next to it — the per-datum marks
 give a screen reader a way to inspect individual values, not a
 substitute for tabular navigation.
 
+**Actions on a datum.** Each mark advertises exactly the two actions the
+chart implements, because an advertised action nothing implements is
+worse than a missing one — the only way to discover it does nothing is
+to invoke it.
+
+| action | what the chart does |
+| --- | --- |
+| `Click` | moves the readout and the focused datum to that mark, and selects it where the chart has a `ChartSelection`. It is the assistive-technology equivalent of tapping the mark, which no screen-reader user can aim at otherwise — all the marks are one node to the hit test. |
+| `ScrollIntoView` | moves the readout to that mark and asks any scroll container **above** the chart to reveal the mark's own rectangle. Meaningful because a chart is often a tile on a scrolling page, even though nothing scrolls inside the plot. |
+
+Routing needs no new plumbing: the framework resolves a synthetic node
+to its owning widget, and the chart recovers which mark the node named
+by recomputing the ids over its live mark vector
+(`hit::mark_for_node` — `mark_element_id` hashes its inputs, so the map
+is only invertible that way).
+
+**Roving virtual focus.** The chart keeps the real arena focus and
+publishes the keyboard-focused datum as its `active_descendant`, so a
+screen reader follows arrow-key traversal (§9) without the marks needing
+arena nodes of their own.
+
+**Emitted bounds are logical.** The device scale factor is applied once,
+by the root window node's transform, so no chart multiplies a rect by
+it — a test in `bar_chart.rs` fails if one starts to.
+
 ## 13. Limits and explicit follow-ups
 
 Closed since the initial five-PR cycle: BarChart hover tooltips,
@@ -774,6 +992,16 @@ Still genuinely open:
 - **Pie / donut hover for BarChart-style "follow the cursor across
   multiple slices."** The handler exists but the visual treatment
   matches Excel's "highlight one slice" — no slice-pull-on-hover yet.
+- **An interactive legend row is under the 24 dp target floor at
+  `Compact`** — see §6 for the measurement and for why neither
+  hit-widening mechanism reaches it. Fixing it at Compact means changing
+  Compact layout, which is a decision this crate does not get to take
+  alone.
+- **A cancel does not reach a read-only chart**, so a revoked press
+  leaves its readout up until the next press — see §9. Closing it needs
+  either a way for a widget to observe a pointer's end without claiming
+  its events, or a chart claiming events it has no other reason to
+  claim.
 - **Linear gradient on a donut is a documented edge, not a bug.** See
   §11 — reach for a radial gradient on a donut; a linear gradient
   reads correctly per-wedge but has a visible seam across wedge
@@ -821,8 +1049,9 @@ What it shows, end to end:
 - **Interactive legend (§6).** Both the Bar and Line panels embed a
   `.legend_interactive(true)` legend — clicking (or pressing Space on
   a focused) row toggles that series' visibility live.
-- **BarChart hover (§9, §4).** Hovering a bar shows the shared
-  tooltip card, snapping to the nearest bar.
+- **BarChart readout (§9, §4).** Pointing at a bar shows the shared
+  readout card, snapping to the nearest bar; a finger presses, scrubs and
+  pins, and the keyboard arrows through the data.
 - **Click-to-select (§9, §2, [data-models.md §15.4](data-models.md)).**
   All three charts are wired with `.selection(ChartSelection)`:
   clicking a bar, line point, or donut slice paints an accent

@@ -5,8 +5,9 @@
 //!
 //! Bound to a [`ChartModel`]. Supports grouped multi-series, horizontal
 //! orientation, value labels, grid lines, axis titles, an embedded
-//! interactive legend, per-datum pointer hover with a shared tooltip
-//! card, and per-datum accessibility marks.
+//! interactive legend, a per-datum readout with a shared tooltip card —
+//! raised by a hover, a held finger, keyboard traversal or an assistive
+//! technology — and per-datum accessibility marks.
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
@@ -18,7 +19,7 @@ use teksilo_core::accessibility::AccessNodeBuilder;
 use teksilo_core::binding::BindingLevel;
 use teksilo_core::build_context::BuildContext;
 use teksilo_core::color_prop::ColorProp;
-use teksilo_core::event::{EventResponse, WidgetEvent};
+use teksilo_core::event::WidgetEvent;
 use teksilo_core::gesture::TapEvent;
 use teksilo_core::paint_prop::PaintProp;
 use teksilo_core::signal::{Prop, Signal};
@@ -58,6 +59,12 @@ pub enum BarGrouping {
 struct GeometryKey {
     bounds: Rect,
     structure_version: u64,
+    /// The density the legend band was reserved at. An interactive legend's
+    /// rows are sized from `InputTokens::target_size`, and a density switch
+    /// changes neither the bounds nor the model version — so without this
+    /// the memoized geometry would keep the band the previous density
+    /// reserved.
+    density: teksilo_tokens::TargetDensity,
 }
 
 /// Text-measurement context stashed during `paint()` so `accessibility()`
@@ -93,8 +100,23 @@ pub struct BarChart<T: Clone + 'static> {
     reference_lines: Vec<ReferenceLine>,
 
     hover: Signal<Option<(SeriesId, usize)>>,
+    /// The datum keyboard traversal is sitting on, and the ring the chart
+    /// paints while it has focus. Separate from `hover` because the
+    /// readout is a *value* the reader is looking at and the focus is a
+    /// *position* they are moving from: an assistive-technology Click, or
+    /// a pointer, can move the readout without moving the keyboard
+    /// position, and vice versa.
+    focus_mark: Signal<Option<(SeriesId, usize)>>,
+    /// Whether the chart itself holds keyboard focus, so the focus ring is
+    /// not painted on a chart that has lost it.
+    focused: Signal<bool>,
+    readout: hit::ReadoutState,
     marks: Rc<RefCell<Vec<MarkGeometry>>>,
     bounds: Rc<Cell<Rect>>,
+    /// The density tokens in force, captured in `build()` — the only place
+    /// a widget can read them — so `accessibility()`, which has no theme,
+    /// reserves the same legend band `paint()` does.
+    input: teksilo_tokens::InputTokens,
     geometry_cache: Rc<RefCell<Option<(GeometryKey, PlotGeometry)>>>,
     paint_snapshot: Rc<RefCell<Option<PaintSnapshot>>>,
     legend_id: Option<WidgetId>,
@@ -123,8 +145,12 @@ impl<T: Clone + std::fmt::Display + 'static> BarChart<T> {
             selection: None,
             reference_lines: Vec::new(),
             hover: Signal::new(None),
+            focus_mark: Signal::new(None),
+            focused: Signal::new(false),
+            readout: hit::ReadoutState::new(),
             marks: Rc::new(RefCell::new(Vec::new())),
             bounds: Rc::new(Cell::new(Rect::ZERO)),
+            input: teksilo_tokens::InputTokens::default(),
             geometry_cache: Rc::new(RefCell::new(None)),
             paint_snapshot: Rc::new(RefCell::new(None)),
             legend_id: None,
@@ -239,8 +265,12 @@ impl<T: Clone + std::fmt::Display + 'static> BarChart<T> {
         self
     }
 
-    /// Whether hovering a bar shows a tooltip card + updates the
-    /// hover-driven state (also observable via `hover_signal`). Default `true`.
+    /// Whether consulting a bar raises a tooltip card and updates the readout
+    /// state (also observable via `hover_signal`) — by a hover, a held finger,
+    /// keyboard traversal or an assistive technology's `Click`. Default `true`.
+    ///
+    /// It does not govern `selection`: the tap that selects is gated
+    /// separately, so a chart with a selection still selects with this off.
     pub fn hover_tooltip(mut self, on: bool) -> Self {
         self.show_hover_tooltip = on;
         self
@@ -258,8 +288,10 @@ impl<T: Clone + std::fmt::Display + 'static> BarChart<T> {
         self
     }
 
-    /// A clone of the live hover signal — the `(series, point)` key
-    /// currently under the pointer, or `None`. Lets an app observe
+    /// A clone of the live readout signal — the `(series, point)` key the
+    /// readout currently names, or `None`. Whichever route set it: a pointer
+    /// hover or press, keyboard traversal, or an assistive technology's
+    /// `Click`. Lets an app observe
     /// hover state from outside the chart (a synced detail panel, a
     /// custom tooltip) without re-implementing hit-testing.
     pub fn hover_signal(&self) -> Signal<Option<(SeriesId, usize)>> {
@@ -279,6 +311,7 @@ impl<T: Clone + 'static> std::fmt::Debug for BarChart<T> {
 impl<T: Clone + std::fmt::Display + 'static> Widget for BarChart<T> {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let id = ctx.self_id();
+        self.input = ctx.theme().input;
         {
             let registry = ctx.binding_registry();
             // Data swap → relayout (y-domain might shift) AND the AT mark
@@ -296,6 +329,19 @@ impl<T: Clone + std::fmt::Display + 'static> Widget for BarChart<T> {
             self.palette
                 .register_if_bound(id, registry, BindingLevel::RepaintOnly);
             self.hover.bind_to(id, registry, BindingLevel::RepaintOnly);
+            self.readout
+                .contact
+                .bind_to(id, registry, BindingLevel::RepaintOnly);
+            self.focused
+                .bind_to(id, registry, BindingLevel::RepaintOnly);
+            self.focus_mark
+                .bind_to(id, registry, BindingLevel::RepaintOnly);
+            // The focused datum is published as the chart's
+            // `active_descendant`, so the AT tree has to be rebuilt when it
+            // moves — a repaint alone leaves a screen reader on the datum
+            // the user has arrowed away from.
+            self.focus_mark
+                .bind_to(id, registry, BindingLevel::AccessibilityOnly);
             if let Some(selection) = &self.selection {
                 selection
                     .selection_signal()
@@ -311,63 +357,63 @@ impl<T: Clone + std::fmt::Display + 'static> Widget for BarChart<T> {
                 let bounds = self.bounds.clone();
                 let geometry_cache = self.geometry_cache.clone();
                 let hover = self.hover.clone();
-                handlers =
-                    handlers.on_pointer_event(move |event, _ctx: &mut EventContext| match event {
-                        WidgetEvent::PointerMove { position } => {
-                            let b = bounds.get();
-                            let window_pos = Point::new(position.x + b.x, position.y + b.y);
-                            let plot = geometry_cache.borrow().as_ref().map(|(_, g)| g.plot);
-                            let Some(plot) = plot else {
-                                return EventResponse::Ignored;
-                            };
-                            if !plot.contains(window_pos) {
-                                if hover.get().is_some() {
-                                    hover.set(None);
-                                }
-                                return EventResponse::Ignored;
-                            }
-                            let hit = hit::rect_hit(&marks.borrow(), window_pos);
-                            match hit.and_then(|idx| {
-                                marks.borrow().get(idx).map(|m| (m.series_id, m.point_idx))
-                            }) {
-                                Some(key) => {
-                                    if hover.get() != Some(key) {
-                                        hover.set(Some(key));
-                                    }
-                                }
-                                None => {
-                                    if hover.get().is_some() {
-                                        hover.set(None);
-                                    }
-                                }
-                            }
-                            EventResponse::Ignored
+                let readout = self.readout.clone();
+                // The density's tokens, read where every recipe reads
+                // them: at build time, in the crate that owns the
+                // dimension. `set_input_density` rebuilds the tree, so a
+                // density switch re-enters this closure's construction.
+                let tokens = ctx.theme().input;
+                handlers = handlers.on_pointer_event(move |event, ctx: &mut EventContext| {
+                    let tolerance = hit::mark_tolerance(ctx.pointer_kind(), &tokens);
+                    let b = bounds.get();
+                    let plot = geometry_cache.borrow().as_ref().map(|(_, g)| g.plot);
+                    let resolve = |local: Point| -> Option<hit::MarkKey> {
+                        let plot = plot?;
+                        let window_pos = Point::new(local.x + b.x, local.y + b.y);
+                        // The plot gate grows with the tolerance too, or a
+                        // coarse near-miss at the plot's own edge would be
+                        // refused before any bar was consulted. Zero for a
+                        // precise pointer, so the gate is unchanged there.
+                        if !plot.expand(tolerance).contains(window_pos) {
+                            return None;
                         }
-                        WidgetEvent::PointerLeave => {
-                            if hover.get().is_some() {
-                                hover.set(None);
-                            }
-                            EventResponse::Ignored
-                        }
-                        _ => EventResponse::Ignored,
-                    });
+                        let marks = marks.borrow();
+                        hit::rect_hit_within(&marks, window_pos, tolerance)
+                            .and_then(|idx| marks.get(idx).map(|m| (m.series_id, m.point_idx)))
+                    };
+                    let describe = |key: hit::MarkKey| {
+                        let marks = marks.borrow();
+                        hit::mark_index_of(&marks, key)
+                            .and_then(|idx| marks.get(idx))
+                            .map(hit::mark_description)
+                    };
+                    hit::drive_readout(event, ctx, &hover, &readout, resolve, describe)
+                });
             }
 
             if let Some(selection) = self.selection.clone() {
                 let marks = self.marks.clone();
                 let bounds = self.bounds.clone();
                 let geometry_cache = self.geometry_cache.clone();
-                handlers = handlers.on_tap(move |tap: &TapEvent, _ctx: &mut EventContext| {
+                let tap_tokens = ctx.theme().input;
+                handlers = handlers.on_tap(move |tap: &TapEvent, ctx: &mut EventContext| {
                     let b = bounds.get();
                     let window_pos = Point::new(tap.position.x + b.x, tap.position.y + b.y);
                     let Some(plot) = geometry_cache.borrow().as_ref().map(|(_, g)| g.plot) else {
                         return;
                     };
-                    if !plot.contains(window_pos) {
+                    if !plot
+                        .expand(hit::mark_tolerance(ctx.pointer_kind(), &tap_tokens))
+                        .contains(window_pos)
+                    {
                         selection.clear();
                         return;
                     }
-                    let hit = hit::rect_hit(&marks.borrow(), window_pos);
+                    let hit = hit::rect_hit_within(
+                        &marks.borrow(),
+                        window_pos,
+                        hit::mark_tolerance(ctx.pointer_kind(), &tap_tokens),
+                    );
                     match hit
                         .and_then(|idx| marks.borrow().get(idx).map(|m| (m.series_id, m.point_idx)))
                     {
@@ -385,6 +431,68 @@ impl<T: Clone + std::fmt::Display + 'static> Widget for BarChart<T> {
                         None => selection.clear(),
                     }
                 });
+            }
+
+            // Keyboard datum traversal. A chart is a tab stop exactly
+            // when it has something for the keyboard to do — a readout to
+            // move or a selection to commit — so a decorative chart with
+            // neither adds no stop. The focus ring the chart paints is
+            // what keeps that stop visible (WCAG 2.4.7).
+            {
+                let marks = self.marks.clone();
+                let hover = self.hover.clone();
+                let focus_mark = self.focus_mark.clone();
+                let readout = self.readout.clone();
+                let selection = self.selection.clone();
+                handlers = handlers.focusable(true).on_key(
+                    move |event: &WidgetEvent, ctx: &mut EventContext| {
+                        let marks = marks.borrow();
+                        hit::drive_readout_keys(
+                            event,
+                            ctx,
+                            &marks,
+                            &hover,
+                            &focus_mark,
+                            &readout,
+                            selection.as_ref(),
+                        )
+                    },
+                );
+            }
+            {
+                let focused = self.focused.clone();
+                let hover = self.hover.clone();
+                let focus_mark = self.focus_mark.clone();
+                let readout = self.readout.clone();
+                handlers = handlers.on_focus(move |has_focus, _ctx: &mut EventContext| {
+                    focused.set(has_focus);
+                    if !has_focus {
+                        hit::clear_readout_focus(&hover, &focus_mark, &readout);
+                    }
+                });
+            }
+            {
+                let marks = self.marks.clone();
+                let hover = self.hover.clone();
+                let focus_mark = self.focus_mark.clone();
+                let readout = self.readout.clone();
+                let selection = self.selection.clone();
+                handlers = handlers.on_access_action_request(
+                    move |action, node, _data, ctx: &mut EventContext| {
+                        let marks = marks.borrow();
+                        hit::handle_mark_action(
+                            action,
+                            node,
+                            id,
+                            ctx,
+                            &marks,
+                            &hover,
+                            &focus_mark,
+                            &readout,
+                            selection.as_ref(),
+                        )
+                    },
+                );
             }
 
             ctx.apply_self_handlers(handlers);
@@ -570,6 +678,20 @@ impl<T: Clone + std::fmt::Display + 'static> Widget for BarChart<T> {
                     SELECTION_STROKE_WIDTH,
                 );
             }
+
+            // Keyboard focus ring, drawn outside the selection outline so a
+            // datum that is both focused and selected shows two rings
+            // rather than one ambiguous one.
+            if self.focused.get() && self.focus_mark.get() == Some((m.series_id, m.point_idx)) {
+                use crate::style::{SELECTION_BAR_OUTLINE_PAD, SELECTION_STROKE_WIDTH};
+                let pad = SELECTION_BAR_OUTLINE_PAD + SELECTION_STROKE_WIDTH;
+                canvas.stroke_rounded_rect(
+                    rect.expand(pad),
+                    CornerRadius::uniform(self.bar_corner_radius.unwrap_or(0.0) + pad),
+                    theme.colors.focus_ring,
+                    SELECTION_STROKE_WIDTH,
+                );
+            }
         }
 
         // ─── Reference lines ────────────────────────────────────────────
@@ -638,7 +760,15 @@ impl<T: Clone + std::fmt::Display + 'static> Widget for BarChart<T> {
                 m.category_label,
                 self.axis_y.format(m.value)
             );
-            hit::draw_mark_tooltip(canvas, theme, plot, anchor, &text, &label_style);
+            hit::draw_mark_tooltip(
+                canvas,
+                theme,
+                plot,
+                anchor,
+                self.readout.contact.get(),
+                &text,
+                &label_style,
+            );
         }
     }
 
@@ -668,8 +798,20 @@ impl<T: Clone + std::fmt::Display + 'static> Widget for BarChart<T> {
         };
         let geometry = self.ensure_geometry(bounds, backend.as_ref(), &label_style);
         let marks = self.compute_marks(&geometry);
+        let focused_mark = self.focus_mark.get();
+        let mut active = None;
         for m in &marks {
-            hit::emit_mark_node(builder, m);
+            let node = hit::emit_mark_node(builder, m);
+            if focused_mark == Some((m.series_id, m.point_idx)) {
+                active = Some(node);
+            }
+        }
+        // Roving virtual focus: the chart keeps the real arena focus and
+        // points at the datum the arrows have reached, so a screen reader
+        // follows the traversal without the marks needing arena nodes of
+        // their own.
+        if let Some(node) = active {
+            builder.set_active_descendant(node);
         }
     }
 
@@ -693,6 +835,7 @@ impl<T: Clone + std::fmt::Display + 'static> BarChart<T> {
         let key = GeometryKey {
             bounds,
             structure_version: self.model.structure_version().get(),
+            density: self.input.density,
         };
         if let Some((cached_key, geometry)) = self.geometry_cache.borrow().as_ref()
             && *cached_key == key
@@ -702,7 +845,14 @@ impl<T: Clone + std::fmt::Display + 'static> BarChart<T> {
 
         let legend_orientation = orientation_for_position(self.legend_position);
         let legend_size = if self.show_legend {
-            legend_main_axis_size(backend, &self.model, label_style, legend_orientation)
+            legend_main_axis_size(
+                backend,
+                &self.model,
+                label_style,
+                legend_orientation,
+                self.legend_interactive,
+                &self.input,
+            )
         } else {
             0.0
         };
@@ -752,6 +902,8 @@ impl<T: Clone + std::fmt::Display + 'static> BarChart<T> {
                 &self.model,
                 &label_style,
                 legend_orientation,
+                self.legend_interactive,
+                &ctx.theme.input,
             )
         } else {
             0.0
@@ -1185,6 +1337,577 @@ mod tests {
             ChartDatum::new("Q3".to_string(), 18.0),
             ChartDatum::new("Q4".to_string(), 30.0),
         ])])
+    }
+
+    // ── The readout: who raises it, and who retires it ────────────────────
+    //
+    // These are the tests for census rows 8-10 in
+    // `docs/hover-affordance-census.md`. The defect they close is not that a
+    // finger cannot raise the readout — a contact's `PointerMove` always
+    // could — but that nothing retired it: a contact never receives a
+    // `PointerLeave`, so a readout a finger raised stayed up for the rest of
+    // the program's life.
+
+    struct Fixture {
+        tree: WidgetTree,
+        chart: WidgetId,
+        marks: Rc<RefCell<Vec<MarkGeometry>>>,
+        hover: Signal<Option<(SeriesId, usize)>>,
+        readout: hit::ReadoutState,
+        focus: Signal<Option<(SeriesId, usize)>>,
+    }
+
+    /// Mount `chart`, lay it out at 400×200 and paint once so the mark
+    /// vector every hit test reads is populated.
+    fn fixture(chart: BarChart<String>) -> Fixture {
+        let marks = chart.marks.clone();
+        let hover = chart.hover.clone();
+        let readout = chart.readout.clone();
+        let focus = chart.focus_mark.clone();
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let id = tree.add(chart);
+        tree.layout(SizeProposal::exact(400.0, 200.0));
+        let _ = tree.render();
+        Fixture {
+            tree,
+            chart: id,
+            marks,
+            hover,
+            readout,
+            focus,
+        }
+    }
+
+    /// Window-space centre of the mark at `idx`, and its key.
+    fn bar_center(
+        marks: &Rc<RefCell<Vec<MarkGeometry>>>,
+        idx: usize,
+    ) -> (Point, (SeriesId, usize)) {
+        let marks = marks.borrow();
+        let m = marks.get(idx).expect("mark");
+        let MarkShape::Rect(r) = m.shape else {
+            panic!("expected a bar")
+        };
+        (
+            Point::new(r.x + r.width * 0.5, r.y + r.height * 0.5),
+            (m.series_id, m.point_idx),
+        )
+    }
+
+    #[test]
+    fn a_finger_press_raises_the_readout_before_it_moves() {
+        let f = fixture(BarChart::new(sample_model()));
+        let (target, key) = bar_center(&f.marks, 1);
+        let mut tree = f.tree;
+        let c = tree.new_contact();
+        tree.touch_down(c, target);
+        assert_eq!(
+            f.hover.get(),
+            Some(key),
+            "a still finger produces no move, so the press has to raise it"
+        );
+        assert_eq!(
+            f.readout.contact.get(),
+            Some(target),
+            "and the card is held clear of the contact, not of the mark"
+        );
+    }
+
+    #[test]
+    fn a_finger_tap_on_a_bar_pins_the_readout_and_anchors_it_on_the_mark() {
+        let f = fixture(BarChart::new(sample_model()));
+        let (target, key) = bar_center(&f.marks, 1);
+        let mut tree = f.tree;
+        let c = tree.new_contact();
+        tree.touch_down(c, target);
+        tree.touch_up(c, target);
+        assert_eq!(f.hover.get(), Some(key), "a tap pins the datum it named");
+        assert_eq!(
+            f.readout.contact.get(),
+            None,
+            "the finger has gone, so the card returns to the mark"
+        );
+    }
+
+    #[test]
+    fn a_finger_lifting_after_a_scrub_retires_the_readout() {
+        let f = fixture(BarChart::new(sample_model()));
+        let (first, _) = bar_center(&f.marks, 0);
+        let (second, second_key) = bar_center(&f.marks, 2);
+        let mut tree = f.tree;
+        let c = tree.new_contact();
+        tree.touch_down(c, first);
+        tree.touch_move(c, second);
+        assert_eq!(
+            f.hover.get(),
+            Some(second_key),
+            "the readout follows the contact while it is down"
+        );
+        tree.touch_up(c, second);
+        assert_eq!(
+            f.hover.get(),
+            None,
+            "and the lift ends the scrub — this is the retire path a contact \
+             never had, because it receives no PointerLeave"
+        );
+        assert_eq!(f.readout.contact.get(), None);
+    }
+
+    #[test]
+    fn a_finger_tapping_away_from_the_data_retires_a_pinned_readout() {
+        let f = fixture(BarChart::new(sample_model()));
+        let (target, key) = bar_center(&f.marks, 1);
+        let mut tree = f.tree;
+        let c = tree.new_contact();
+        tree.touch_down(c, target);
+        tree.touch_up(c, target);
+        assert_eq!(f.hover.get(), Some(key));
+        // Top-left corner: inside the widget, outside the plot.
+        let away = Point::new(1.0, 1.0);
+        let c2 = tree.new_contact();
+        tree.touch_down(c2, away);
+        tree.touch_up(c2, away);
+        assert_eq!(f.hover.get(), None);
+    }
+
+    /// A cancel is routed to the pointer's **captor**, or failing that to a
+    /// widget that answered `Handled` to one of its positional events
+    /// (`cancel_recipient` in `teksilo-core`'s cancel funnel). A chart's
+    /// readout claims nothing — it observes the pointer stream and returns
+    /// `Ignored` so a pan claim or a tap above it still works — so the chart
+    /// is told about a cancel only when something else on it holds the
+    /// pointer. A selectable chart's own tap recognizer is exactly that.
+    #[test]
+    fn a_cancelled_contact_retires_the_readout_of_a_selectable_chart() {
+        use teksilo_data::SelectionMode;
+        let f = fixture(
+            BarChart::new(sample_model()).selection(ChartSelection::new(SelectionMode::Single)),
+        );
+        let (target, key) = bar_center(&f.marks, 1);
+        let mut tree = f.tree;
+        let c = tree.new_contact();
+        tree.touch_down(c, target);
+        assert_eq!(f.hover.get(), Some(key));
+        tree.touch_cancel(c, target);
+        assert_eq!(
+            f.hover.get(),
+            None,
+            "a revoked interaction is not an inspection"
+        );
+    }
+
+    /// The one readout rule that is NOT kind-aware, and the one deliberate
+    /// change to what a mouse does: a cancel retires the readout for every
+    /// pointer kind, where the raw handler used to ignore `PointerCancel`
+    /// entirely. A revoked interaction is not an inspection. Listed for the
+    /// CHANGELOG and recorded in docs/charts.md §9.
+    #[test]
+    fn a_cancel_retires_a_mouses_readout_too() {
+        use teksilo_core::event::PointerButton;
+        use teksilo_data::SelectionMode;
+        let f = fixture(
+            BarChart::new(sample_model()).selection(ChartSelection::new(SelectionMode::Single)),
+        );
+        let (target, key) = bar_center(&f.marks, 1);
+        let mut tree = f.tree;
+        tree.pointer_move(target);
+        // Pressed, so the chart's own tap recognizer holds the pointer and the
+        // cancel funnel has somebody to address.
+        tree.pointer_down_button(target, PointerButton::Primary);
+        assert_eq!(f.hover.get(), Some(key));
+        let mut ops = teksilo_core::window::NoopWindowOps;
+        tree.cancel_all_pointers(
+            teksilo_core::pointer::CancelReason::WindowDeactivated,
+            &mut ops,
+        );
+        assert_eq!(f.hover.get(), None);
+    }
+
+    /// The other side of that, stated rather than hidden: a read-only chart
+    /// holds no pointer, so a cancel does not reach it and its readout
+    /// survives the revoked press. The next press is what retires it. This is
+    /// a bounded staleness, not a leak — but it is a real limitation and it is
+    /// recorded in docs/charts.md §9.
+    #[test]
+    fn a_cancel_a_read_only_chart_never_hears_is_retired_by_the_next_press() {
+        let f = fixture(BarChart::new(sample_model()));
+        let (target, key) = bar_center(&f.marks, 1);
+        let mut tree = f.tree;
+        let c = tree.new_contact();
+        tree.touch_down(c, target);
+        tree.touch_cancel(c, target);
+        assert_eq!(
+            f.hover.get(),
+            Some(key),
+            "the framework addressed the cancel to nobody"
+        );
+        let away = Point::new(1.0, 1.0);
+        let c2 = tree.new_contact();
+        tree.touch_down(c2, away);
+        assert_eq!(f.hover.get(), None);
+    }
+
+    #[test]
+    fn a_finger_tap_announces_the_datum_once() {
+        let f = fixture(BarChart::new(sample_model()));
+        let (target, _) = bar_center(&f.marks, 1);
+        let expected = {
+            let marks = f.marks.borrow();
+            hit::mark_description(&marks[1])
+        };
+        let mut tree = f.tree;
+        let c = tree.new_contact();
+        tree.touch_down(c, target);
+        tree.touch_up(c, target);
+        let _ = tree.sync_accessibility();
+        let spoken: Vec<String> = tree
+            .announcements_since(0)
+            .into_iter()
+            .map(|a| a.text)
+            .collect();
+        assert_eq!(
+            spoken,
+            vec![expected],
+            "a pinned readout announces the datum, exactly once"
+        );
+    }
+
+    #[test]
+    fn a_mouse_release_leaves_its_readout_standing_and_says_nothing() {
+        let f = fixture(BarChart::new(sample_model()));
+        let (target, key) = bar_center(&f.marks, 1);
+        let mut tree = f.tree;
+        tree.pointer_move(target);
+        assert_eq!(f.hover.get(), Some(key));
+        assert_eq!(
+            f.readout.contact.get(),
+            None,
+            "a mouse anchors the card on the mark, never on the cursor"
+        );
+        tree.pointer_down_button(target, teksilo_core::event::PointerButton::Primary);
+        tree.pointer_up_button(target, teksilo_core::event::PointerButton::Primary);
+        assert_eq!(
+            f.hover.get(),
+            Some(key),
+            "the cursor is still over the bar, so the readout stays"
+        );
+        let _ = tree.sync_accessibility();
+        assert!(
+            tree.announcements_since(0).is_empty(),
+            "and a mouse click is not a pinning gesture, so nothing is spoken"
+        );
+    }
+
+    #[test]
+    fn a_mouse_leaving_the_plot_still_retires_its_readout() {
+        let f = fixture(BarChart::new(sample_model()));
+        let (target, _) = bar_center(&f.marks, 1);
+        let mut tree = f.tree;
+        tree.pointer_move(target);
+        assert!(f.hover.get().is_some());
+        tree.pointer_move(Point::new(1.0, 1.0));
+        assert_eq!(f.hover.get(), None);
+    }
+
+    // ── kind-aware tolerance, end to end ──────────────────────────────────
+
+    /// A point in the gap between two adjacent bars, closer to the second.
+    fn point_in_gap(marks: &Rc<RefCell<Vec<MarkGeometry>>>) -> (Point, (SeriesId, usize)) {
+        let marks = marks.borrow();
+        let (MarkShape::Rect(a), MarkShape::Rect(b)) = (marks[0].shape, marks[1].shape) else {
+            panic!("expected bars")
+        };
+        let gap = b.x - a.right();
+        assert!(
+            gap > 4.0,
+            "fixture needs a gap wide enough that the nearer bar is unambiguous, got {gap}"
+        );
+        (
+            Point::new(b.x - 2.0, b.y + b.height * 0.5),
+            (marks[1].series_id, marks[1].point_idx),
+        )
+    }
+
+    #[test]
+    fn a_finger_just_past_a_bars_edge_still_reads_it_and_a_mouse_does_not() {
+        let f = fixture(BarChart::new(sample_model()));
+        let (target, key) = point_in_gap(&f.marks);
+        let mut tree = f.tree;
+        // The mouse: strictly inside or nothing, exactly as before.
+        tree.pointer_move(target);
+        assert_eq!(f.hover.get(), None);
+        // The finger: the same point reaches the bar it nearly landed on.
+        let c = tree.new_contact();
+        tree.touch_down(c, target);
+        assert_eq!(f.hover.get(), Some(key));
+    }
+
+    #[test]
+    fn a_finger_just_past_a_bars_edge_selects_it_and_a_mouse_clears_instead() {
+        use teksilo_core::event::PointerButton;
+        use teksilo_data::SelectionMode;
+        let sel = ChartSelection::new(SelectionMode::Single);
+        let f = fixture(BarChart::new(sample_model()).selection(sel.clone()));
+        let (target, key) = point_in_gap(&f.marks);
+        let mut tree = f.tree;
+        let c = tree.new_contact();
+        tree.touch_down(c, target);
+        tree.touch_up(c, target);
+        assert!(
+            sel.is_selected(key.0, key.1),
+            "the tap and the readout share one hit test, tolerance included"
+        );
+        // A mouse in the same gap is a press on nothing, which clears.
+        tree.pointer_down_button(target, PointerButton::Primary);
+        tree.pointer_up_button(target, PointerButton::Primary);
+        assert_eq!(sel.count(), 0);
+    }
+
+    // ── keyboard traversal ────────────────────────────────────────────────
+
+    #[test]
+    fn arrowing_a_focused_chart_moves_the_readout_and_announces_each_datum() {
+        use teksilo_core::event::{Key, Modifiers};
+        let f = fixture(BarChart::new(sample_model()));
+        let mut tree = f.tree;
+        let chart = f.chart;
+        tree.focus(chart);
+        tree.press_key(Key::ArrowRight, Modifiers::NONE);
+        let first = f.focus.get().expect("arrow right lands on the first datum");
+        assert_eq!(
+            f.hover.get(),
+            Some(first),
+            "the focused datum is the readout"
+        );
+        // Two syncs per message: the framework's announcer exposes a live
+        // region carrying the text, then retracts it, because retracting is
+        // what makes the next message a re-entry into the filtered tree (the
+        // only thing AT-SPI announces at all). See `teksilo_core::announcer`.
+        let _ = tree.sync_accessibility();
+        let _ = tree.sync_accessibility();
+        tree.press_key(Key::ArrowRight, Modifiers::NONE);
+        let second = f.focus.get().expect("and moves on");
+        assert_ne!(first, second);
+        let _ = tree.sync_accessibility();
+        let _ = tree.sync_accessibility();
+        let spoken: Vec<String> = tree
+            .announcements_since(0)
+            .into_iter()
+            .map(|a| a.text)
+            .collect();
+        assert_eq!(
+            spoken.len(),
+            2,
+            "one utterance per traversal step: {spoken:?}"
+        );
+        let expected_second = {
+            let marks = f.marks.borrow();
+            hit::mark_index_of(&marks, second)
+                .and_then(|i| marks.get(i))
+                .map(hit::mark_description)
+                .expect("the datum arrowed to")
+        };
+        assert_eq!(spoken[1], expected_second);
+    }
+
+    #[test]
+    fn home_and_end_reach_the_first_and_last_datum() {
+        use teksilo_core::event::{Key, Modifiers};
+        let f = fixture(BarChart::new(sample_model()));
+        let (_, first_key) = bar_center(&f.marks, 0);
+        let last = f.marks.borrow().len() - 1;
+        let (_, last_key) = bar_center(&f.marks, last);
+        let mut tree = f.tree;
+        tree.focus(f.chart);
+        tree.press_key(Key::End, Modifiers::NONE);
+        assert_eq!(f.focus.get(), Some(last_key));
+        tree.press_key(Key::Home, Modifiers::NONE);
+        assert_eq!(f.focus.get(), Some(first_key));
+    }
+
+    #[test]
+    fn enter_commits_the_focused_datum_to_the_selection() {
+        use teksilo_core::event::{Key, Modifiers};
+        use teksilo_data::SelectionMode;
+        let sel = ChartSelection::new(SelectionMode::Single);
+        let f = fixture(BarChart::new(sample_model()).selection(sel.clone()));
+        let mut tree = f.tree;
+        tree.focus(f.chart);
+        tree.press_key(Key::ArrowRight, Modifiers::NONE);
+        let key = f.focus.get().expect("focused datum");
+        tree.press_key(Key::Enter, Modifiers::NONE);
+        assert!(sel.is_selected(key.0, key.1));
+    }
+
+    #[test]
+    fn losing_focus_forgets_the_focused_datum_and_its_readout() {
+        use teksilo_core::event::{Key, Modifiers};
+        let f = fixture(BarChart::new(sample_model()));
+        let mut tree = f.tree;
+        // A second chart, so focus has somewhere else to go.
+        let elsewhere = tree.add(BarChart::new(sample_model()));
+        tree.layout(SizeProposal::exact(400.0, 200.0));
+        tree.focus(f.chart);
+        tree.press_key(Key::ArrowRight, Modifiers::NONE);
+        assert!(f.focus.get().is_some());
+        tree.focus(elsewhere);
+        assert_eq!(f.focus.get(), None, "no focus ring on an unfocused chart");
+        assert_eq!(
+            f.hover.get(),
+            None,
+            "and the keyboard's readout goes with it"
+        );
+    }
+
+    #[test]
+    fn a_chart_with_nothing_to_inspect_is_not_a_tab_stop() {
+        let interactive = fixture(BarChart::new(sample_model()));
+        assert!(
+            interactive
+                .tree
+                .tab_stops_within(interactive.chart)
+                .contains(&interactive.chart),
+            "a chart with a readout is reachable by keyboard"
+        );
+        let inert = fixture(BarChart::new(sample_model()).hover_tooltip(false));
+        assert!(
+            !inert
+                .tree
+                .tab_stops_within(inert.chart)
+                .contains(&inert.chart),
+            "a chart with no readout and no selection adds no stop"
+        );
+    }
+
+    // ── assistive-technology actions on a datum ───────────────────────────
+
+    #[test]
+    fn every_mark_advertises_click_and_scroll_into_view() {
+        let f = fixture(BarChart::new(sample_model()));
+        let snapshot = f.tree.accessibility_tree_snapshot();
+        let mut marks_seen = 0;
+        for (_, node) in snapshot.nodes.iter() {
+            if node.role() == teksilo_core::accesskit::Role::GraphicsObject {
+                marks_seen += 1;
+                assert!(
+                    node.supports_action(teksilo_core::accesskit::Action::Click),
+                    "a datum a screen reader cannot click is a datum it cannot inspect"
+                );
+                assert!(node.supports_action(teksilo_core::accesskit::Action::ScrollIntoView));
+            }
+        }
+        assert_eq!(marks_seen, 4, "one node per datum");
+    }
+
+    #[test]
+    fn an_assistive_click_on_a_datum_selects_it_and_moves_the_readout() {
+        use teksilo_data::SelectionMode;
+        let sel = ChartSelection::new(SelectionMode::Single);
+        let f = fixture(BarChart::new(sample_model()).selection(sel.clone()));
+        let (_, key) = bar_center(&f.marks, 2);
+        let node = teksilo_core::accessibility::synthetic_node_id(
+            f.chart,
+            hit::mark_element_id(key.0, key.1),
+            teksilo_core::accessibility::SyntheticKind::ChartMark,
+        );
+        let mut tree = f.tree;
+        // The synthetic-node → owner map is built by the accessibility walk,
+        // which is how the platform adapter routes an action back to us.
+        let _ = tree.sync_accessibility();
+        let mut ops = teksilo_core::window::NoopWindowOps;
+        let handled = tree.dispatch_access_action(
+            node,
+            teksilo_core::accesskit::Action::Click,
+            None,
+            &mut ops,
+        );
+        assert!(handled, "the chart owns its marks' actions");
+        assert!(sel.is_selected(key.0, key.1));
+        assert_eq!(f.hover.get(), Some(key));
+        assert_eq!(f.focus.get(), Some(key));
+    }
+
+    #[test]
+    fn the_focused_datum_is_published_as_the_active_descendant() {
+        use teksilo_core::event::{Key, Modifiers};
+        let f = fixture(BarChart::new(sample_model()));
+        let mut tree = f.tree;
+        let chart = f.chart;
+        assert!(
+            active_descendant_of(&mut tree, chart).is_none(),
+            "nothing is focused yet"
+        );
+        tree.focus(chart);
+        tree.press_key(Key::ArrowRight, Modifiers::NONE);
+        let key = f.focus.get().expect("focused datum");
+        let expected = teksilo_core::accessibility::synthetic_node_id(
+            chart,
+            hit::mark_element_id(key.0, key.1),
+            teksilo_core::accessibility::SyntheticKind::ChartMark,
+        );
+        assert_eq!(
+            active_descendant_of(&mut tree, chart),
+            Some(expected),
+            "roving virtual focus: the marks have no arena nodes of their own"
+        );
+    }
+
+    fn active_descendant_of(
+        tree: &mut WidgetTree,
+        chart: WidgetId,
+    ) -> Option<teksilo_core::accesskit::NodeId> {
+        let snapshot = tree.accessibility_tree_snapshot();
+        let chart_node = teksilo_core::accessibility::widget_id_to_node_id(chart);
+        snapshot
+            .nodes
+            .iter()
+            .find(|(id, _)| *id == chart_node)
+            .and_then(|(_, node)| node.active_descendant())
+    }
+
+    // ── the touch-action decision, pinned ─────────────────────────────────
+
+    #[test]
+    fn a_chart_does_not_forbid_a_finger_scrolling_the_page_over_it() {
+        use teksilo_core::pointer::touch_action::TouchAction;
+        let f = fixture(BarChart::new(sample_model()));
+        assert_eq!(
+            f.tree.touch_action_for(f.chart),
+            TouchAction::AUTO,
+            "a chart consumes no drag: it taps, it reads moves and it holds. \
+             Declaring NONE would make a 400x200 tile a dead zone for a page \
+             scroll, and would additionally resolve DragActivation::Auto to \
+             Immediate — destroying the hold-then-scrub the readout depends on."
+        );
+    }
+
+    #[test]
+    fn an_embedded_interactive_legend_gets_the_band_its_rows_need() {
+        // The third of the three sites that must agree — what the CHART
+        // reserves. A band reserved at the painted line height would clip
+        // rows the legend has grown to target size.
+        use teksilo_tokens::{InputTokens, TargetDensity};
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        tree.set_input_density(TargetDensity::Touch);
+        let id = tree.add(
+            BarChart::new(sample_model())
+                .legend(true)
+                .legend_interactive(true),
+        );
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        let legend = tree.children(id)[0];
+        let row = tree.children(legend)[0];
+        let want = InputTokens::for_density(TargetDensity::Touch).target_size;
+        assert!(
+            tree.bounds(legend).height >= want,
+            "reserved band {} < {want}",
+            tree.bounds(legend).height
+        );
+        assert!(
+            tree.bounds(row).height >= want,
+            "row {} < {want}",
+            tree.bounds(row).height
+        );
     }
 
     #[test]

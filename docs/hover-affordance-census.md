@@ -92,7 +92,8 @@ all), `crates/teksilo-webview/src`, `crates/teksilo-terminal/src`,
 ## Resolution
 
 Every row ends here with a route, an owner, or a written exemption. Rows 1-3, 5, 7
-and 11 were closed by **P29**; the rest name who owns them and why.
+and 11 were closed by **P29**, rows 8-10 by **P33**, and row 6 was already done by
+P21; row 4 names its owner and why.
 
 | # | Affordance | What it got |
 | ---: | --- | --- |
@@ -103,9 +104,9 @@ and 11 were closed by **P29**; the rest name who owns them and why.
 | 5 | Tab close `×` | **Always visible at a density whose `RevealPolicy` is `Always`** (the gate is simply not installed there, so the button is neither culled from paint nor from the accessibility tree), **plus an AT `Close` custom action**. The action's id is an explicit `2`: the header's custom-action list is built conditionally — a tab at index 0 advertises no "Move Left" — so a position in the vector says nothing about which action it is. |
 | 6 | Overlay scroll bar's interactive track | **Already done by P21**, before this census was acted on: `ScrollBar` seeds its `revealed` signal when `RevealPolicy::Always`, `ScrollArea` folds the same into its pan-in-flight reveal, and both directions are pinned by `a_touch_density_reveals_the_bar_at_rest` / `a_compact_density_leaves_the_bar_at_rest`. Struck. |
 | 7 | Toast auto-dismiss pause | **Press-and-hold**, which is what this row proposed as the fallback. Implemented as a flag on the live entry rather than as a second refcount, and driven from the **framework's** press signal: a count whose decrement a revoked contact missed would pin every toast in the application open for the rest of its run, whereas a flag on the entry dies with the entry and the framework clears the press on release and on cancel alike. A **horizontal swipe** dismisses as well — coarse pointers only, so a fast mouse drag across a toast is not a dismissal request. |
-| 8 | Bar datum readout | **Owned by P33** (`teksilo-charts`), whose clause reads "hover-only datum disclosure becomes kind-aware". `teksilo-charts` is in no other package's file set, and not in P29's. |
-| 9 | Line datum readout | P33, as above. |
-| 10 | Slice readout | P33, as above. |
+| 8 | Bar datum readout | **A retire path, by P33** — see the mechanism correction below for why that, and not a set path, was what was missing. A coarse pointer's press raises the readout on the datum under the contact, travel makes it follow the contact, and the **lift retires it**; a press and release without travel **pins** it on the datum instead, re-anchored on the mark and announced once, and a later press away from the data retires that. A precise pointer is unchanged in every respect — it neither pins nor announces, and its card stays anchored on the mark. The card clears `ASSUMED_CONTACT_PATCH` while a finger owns it, because a chart paints it inline and it never reaches the overlay layer's own contact avoidance. Two deliberate omissions and one limitation are recorded in [charts.md §9](charts.md): no timeout (nothing on `EventContext` reports the clock, and press / release / cancel already own retire paths), no `on_long_press` (it would take the tree-owned hold route from the chart and its whole subtree), and a **read-only** chart is never told about a cancel — it claims no event, so `cancel_recipient` addresses nobody — so a revoked press leaves the readout up until the next press. A selectable chart's tap recognizer holds the pointer and is told. |
+| 9 | Line datum readout | Same route, same file (`hit::drive_readout` serves all three kinds). A line chart already picked the nearest point with no radius cutoff, so its marks needed no hit tolerance; what a coarse pointer gained is the plot boundary. |
+| 10 | Slice readout | Same route. The wedge additionally grew a **radial** hit tolerance in the chart's own polar code — not `Widget::hit_distance`, which cannot speak for a wedge (the marks are all one node and the slop pass produces a node id), and not `hit_shape`, which would have made a mouse press in the widget's corner miss the chart and so broken `tap_outside_ring_clears_selection`. Reasoning and measurements in [charts.md §9](charts.md). |
 | 11 | Row-action reveal contract | A **new signal**, `StandardListItem::reveal_signal` (forwarded by `StandardTreeItem`), answering "should this row's revealed controls be reachable" rather than "is the row hovered". It follows hover while the density reveals on hover and reads permanently `true` where `RevealPolicy` is `Always`. The interaction signal is left alone on purpose: forcing it to `Hovered` at Touch would have lit every row's hover tint permanently. `interaction_signal`'s own documentation now points callers here. |
 
 ### Mechanism correction — rows 8, 9 and 10
@@ -124,6 +125,19 @@ needs is a retire path as much as a set path.
 
 That is a general hazard for any touch route, not a chart one: a route that shows
 something must own the way it goes away.
+
+**Closed by P33.** All three readouts now retire on the lift and on a cancel the
+chart is told about, and a tap pins rather than flashes. Two things came with it
+that the census did not ask for and that the same reasoning demanded: the readout
+is now reachable by **keyboard** (a chart is a tab stop exactly when it has a
+readout to move or a selection to commit, with arrow / Home / End traversal, a
+painted focus ring and one announcement per step) and by **assistive
+technology** (each per-datum node advertises `Click` and `ScrollIntoView`, and the
+chart implements both). Those matter because the census's "AT only" column for
+these three rows was generous: a per-datum node carrying a name and a numeric
+value can be *read*, but before P33 nothing could be *invoked* on it — all the
+marks are one node to the hit test, so a screen-reader user had no way to inspect
+one datum at all.
 
 ### The Snackbar — not a census row, and its pause is exempt
 
