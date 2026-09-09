@@ -44,6 +44,13 @@
 //!    cannot stop them and each has to ask
 //!    `data_views::release_completes_the_press` for itself.
 //!
+//! What a pan must not commit on the **press** is a separate file:
+//! `data_view_selection.rs`, because no release-time predicate can reach a
+//! selection already written on `PointerDown` and the answer there is to move
+//! the write to the release for a direct pointer. What a finger's *drag* does
+//! instead of scrolling — the deferred marquee and the reorder behind a hold —
+//! is `data_view_drag.rs`.
+//!
 //! Plus two questions asked once each, for the same "shared machinery" reason: the
 //! realized row window at an offset a finger reached is the same window the wheel
 //! reaches there (`ListView`), and a trackpad stream takes the wheel path rather
@@ -1021,36 +1028,33 @@ fn a_pan_off_a_selected_tree_table_row_keeps_the_selection() {
     assert_a_pan_off_a_selected_row_keeps_the_selection(view, offset, sel, "the tree table");
 }
 
-// `GridView` is deliberately absent from the four above. Its release-time
-// commit is the shared `deferred_select::on_up`, so it is guarded by the same
-// line the other four are — but in `Multi` mode a finger cannot *reach* a pan
-// there at all, so the guard has nothing to be asked by. Measured below.
+// `GridView`'s release-time commit is the shared `deferred_select::on_up`, so it
+// is guarded by the same line the other four are. It also used not to *reach* a
+// pan at all in `Multi` mode, which left the guard nothing to be asked by; the
+// test below is what that measurement became.
 
-/// **Triage: bug, not test.** A finger does not scroll a `GridView` whose
-/// selection is in `SelectionMode::Multi`.
+/// A finger scrolls a `GridView` whose selection is in `SelectionMode::Multi`.
 ///
-/// Measured, on the same 120 dp pan over the same grid: no selection model, or
-/// one in `Single` mode → offset 157 against a `max_scroll_y` of 2808;
-/// `Multi` → offset **0**; `Multi` plus `.marquee_selection(false)` → 157
-/// again. So it is the rubber-band marquee that costs the scroll — in `Multi`
-/// mode it puts an `on_drag` on the `GridView`'s *own* node, the node that also
-/// carries the `PanClaim`, which gives that node a gesture arena and so the
-/// implicit press capture as well.
+/// This was a shipped defect, and the cause turned out to be neither the claim
+/// losing the arbitration nor the marquee running instead. In `Multi` mode the
+/// rubber-band marquee's `on_drag` sat on the `GridView`'s **own** node — the
+/// node that also carries the `PanClaim`. That gave it a gesture arena, hence
+/// the implicit press capture, and the capture dispatch runs before the
+/// arbitration advances: its `DragRecognizer` latched at `drag_slop` (18 dp) on
+/// the first move and *decided the sequence*, so the claim was never evaluated
+/// at 36 dp and no scroll was ever synthesised. The marquee then declined the
+/// press because it had landed on a tile. The drag won and did nothing — which
+/// is why the trace showed the grid deciding while the selection stayed
+/// untouched and the offset stayed 0.
 ///
-/// It is **not** the marquee running instead: the marquee declines a press that
-/// lands on a tile, and the selection is untouched afterwards. And it is not
-/// the claim losing the arbitration either —
-/// `TEKSILO_TRACE_INPUT=all` shows `sequence for … decided: WidgetId(1v1)`, the
-/// grid itself. The synthesised scroll is lost somewhere between that claim and
-/// the offset, and this test does not diagnose where.
-///
-/// Found while guarding the five body panes' release-time commitments — that
-/// half is fixed and covered above. This half is a gesture / delivery question
-/// about a node that is both a pan claimant and a drag owner, in a file the
-/// plan assigns to the data-view package, so it is left failing rather than
-/// deleted. Recorded in `docs/widget-pointer-inventory.md`.
+/// The fix is structural and has two halves, each with its own test in
+/// `data_view_drag.rs`: the body pane gets a gesture arena of its own
+/// (`data_views::press_absorber`) so the press is captured *inside* the
+/// claimant rather than by it, and the marquee's drag moves onto a
+/// `data_views::DragSurface` that strictly encloses that pane — the one shape
+/// the tree arms `DragActivation` for, so a finger's marquee now waits for a
+/// long press while a mouse still latches at 5 dp.
 #[test]
-#[ignore = "known defect: the marquee drag beats the pan claim on a multi-select grid"]
 fn a_finger_on_a_multi_select_grid_pans_it() {
     let sel = teksilo_data::SelectionModel::new(teksilo_data::SelectionMode::Multi);
     let view = grid_view().selection(sel.clone());

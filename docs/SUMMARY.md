@@ -40,6 +40,7 @@
 - [Shortcuts, intents & actions](shortcut-intent-action.md)
 - [Data-view keyboard navigation](data-view-keyboard.md)
 - [Bounded-scalar keyboard navigation](range-keyboard.md)
+- [Data views under a finger](data-view-touch.md)
 - [Tooltips](tooltips.md)
 - [Overlays](overlays.md)
 - [Native menus](native-menu.md)

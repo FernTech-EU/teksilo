@@ -39,14 +39,14 @@ Those eight are listed at the end under "Prose-only mentions".)
 
 ## Result
 
-**78 files** carry real pointer code. **67** are claimed by a migration package;
-**11** are not:
+**78 files** carry real pointer code. **71** are claimed by a migration package;
+**7** are not:
 
 | Verdict | Files |
 | --- | ---: |
 | `P21` (scrollables reference) — done | 2 |
 | `P22` (scrollable migration) — done | 10 |
-| `pending P23` (data-view press/reorder) | 4 |
+| `P23` (data-view press/reorder) — done | 8 |
 | `pending P24` (controls sweep) | 18 |
 | `pending P25` (composite / partitioned / docking) | 17 |
 | `pending P27` (single-line text) | 5 |
@@ -54,7 +54,7 @@ Those eight are listed at the end under "Prose-only mentions".)
 | `pending P29` (menus, tooltips, toasts) | 5 |
 | `pending P30` (window chrome) | 4 |
 | `no change needed` | 2 |
-| **UNCLAIMED — GAP** | **9** |
+| **UNCLAIMED — GAP** | **5** |
 | **Total** | **78** |
 
 `pending P31` claims no file in this crate: its two named files are
@@ -69,18 +69,19 @@ latch — belongs to P30, so that is its verdict; the dwell reveal is row 2 of
 
 ## The unclaimed files
 
-Nine files carry real pointer code that the work breakdown assigns to nobody. Four of
-them are the largest single omission in the plan: **`list_view/body_pane.rs` is
-claimed by P23, but its four siblings are not**, and all five implement the same
+Nine files carried real pointer code that the work breakdown assigned to nobody. Four
+of them were the largest single omission in the plan: **`list_view/body_pane.rs` was
+claimed by P23, but its four siblings were not**, and all five implement the same
 press-time row selection, tap/double-tap activation and `start_drag` reorder that P23
-exists to convert.
+exists to convert. P23 took all four, so four rows below are settled and five remain
+— each of those five with a suggested owner, none of them formally claimed.
 
-| File | Why it matters | Suggested owner |
+| File | Why it matters | Owner |
 | --- | --- | --- |
-| `grid_view/body_pane.rs` | press-time tile selection + `start_drag` reorder | P23 |
-| `table_view/body_pane.rs` | press-time row selection + `start_drag` reorder | P23 |
-| `tree_table_view/body_pane.rs` | press-time row selection + `start_drag` reorder | P23 |
-| `tree_view/body_pane.rs` | press-time row selection + `start_drag` reorder | P23 (P23 names `tree_view`, but `tree_view.rs` itself has only prose mentions) |
+| `grid_view/body_pane.rs` | press-time tile selection + `start_drag` reorder | P23 — done |
+| `table_view/body_pane.rs` | press-time row selection + `start_drag` reorder | P23 — done |
+| `tree_table_view/body_pane.rs` | press-time row selection + `start_drag` reorder | P23 — done |
+| `tree_view/body_pane.rs` | press-time row selection + `start_drag` reorder | P23 — done (P23 names `tree_view`, but `tree_view.rs` itself has only prose mentions) |
 | `combo_box.rs` | the closed-box trigger tap and field hover; P25 claims only `combo_box/item.rs` | P25 |
 | `primitives/text_widget.rs` | inline-link hover cursor + Ctrl-gated tap-to-follow — unreachable on touch | P24 or P29 |
 | `avatar.rs` | a tappable control with no target floor | P24 |
@@ -107,20 +108,28 @@ selection to that one row. Each commit now asks
 `data_views::release_completes_the_press` (which reads `EventContext::press_is_inside`).
 Covered by question 5 of `crates/teksilo-widgets/tests/scrollables_touch.rs`.
 
-**Still open, against `grid_view/body_pane.rs`:** a finger does not scroll a
-`GridView` whose selection is in `SelectionMode::Multi`. Measured on one 120 dp
-pan over the same grid — no selection or `Single` → offset 157 of a 2808 range;
-`Multi` → 0; `Multi` + `.marquee_selection(false)` → 157 again — so the
-rubber-band marquee is what costs it: in `Multi` mode it puts an `on_drag` on
-the `GridView`'s *own* node, the one that also carries the `PanClaim`. It is not
-the marquee running instead (it declines a press that lands on a tile, and the
-selection is untouched afterwards) and it is not the claim losing the
-arbitration (`TEKSILO_TRACE_INPUT=all` shows the sequence decided for that
-node); where the synthesised scroll is lost between the claim and the offset is
-undiagnosed. A gesture / delivery question about a node that is both a pan
-claimant and a drag owner, not a release-time commit, so it stays with the
-package that owns this file. `a_finger_on_a_multi_select_grid_pans_it` in
-`scrollables_touch.rs` is the `#[ignore]`d test waiting for it.
+**Closed since, against `grid_view.rs`:** a finger did not scroll a `GridView`
+whose selection is in `SelectionMode::Multi`. The cause was neither the claim
+losing the arbitration nor the marquee running instead — both had been ruled
+out, and an early draft that blamed a slop race was wrong. It was the
+**capture** dispatch: in `Multi` mode the rubber-band marquee's `on_drag` sat on
+the `GridView`'s own node, the one carrying the `PanClaim`, which gave that node
+a gesture arena and so the implicit press capture. The router dispatches a move
+to the captor *before* it advances the arbitration, so the marquee's
+`DragRecognizer` latched at `drag_slop` (18 dp) and decided the sequence on the
+first sample — after which the candidate walk yields nothing, the claim is never
+evaluated at `pan_slop` (36 dp), and no `Scroll` is synthesised at all. The
+marquee then declined the press for landing on a tile. The drag won and did
+nothing, which is exactly what the trace showed.
+
+The fix has two halves, each with its own test in
+`crates/teksilo-widgets/tests/data_view_drag.rs`: the body pane takes a no-op
+tap (`data_views::press_absorber`) so the press is captured *inside* the
+claimant rather than by it, and the marquee's drag moves onto a
+`data_views::DragSurface` that strictly encloses the pane — the only shape the
+tree arms `DragActivation` for, so a finger's marquee now waits for a long press
+while a mouse still latches at 5 dp. `a_finger_on_a_multi_select_grid_pans_it`
+in `scrollables_touch.rs` is no longer `#[ignore]`d.
 
 Two further files were swept in by the marker set but genuinely need no change:
 `list_source.rs` and `tree_source.rs`, whose `on_drag_out(k)` is a data-source policy
@@ -148,20 +157,20 @@ callback with no pointer plumbing behind it.
 | `crates/teksilo-widgets/src/color_picker/swatch.rs` | `on_tap` | Tap a 22 dp swatch to pick its colour. | pending P24 |
 | `crates/teksilo-widgets/src/combo_box.rs` | `on_tap`, `on_hover` | Tap the closed box opens the dropdown overlay; `on_hover` drives the field tint. | **UNCLAIMED — GAP**; suggested owner P25 (P25 claims `combo_box/item.rs` but not the closed-box trigger) |
 | `crates/teksilo-widgets/src/combo_box/item.rs` | `on_tap`, `on_hover` | Tap a dropdown row to commit; hover highlights the active row. | pending P25 |
-| `crates/teksilo-widgets/src/data_views.rs` | `on_drag` | Shared row drag-and-drop substrate: `RowExport<T>`, drag payload construction and the reorder/foreign-drop verdicts for all five views. | pending P23 |
+| `crates/teksilo-widgets/src/data_views.rs` | `on_drag` | Shared row drag-and-drop substrate: `RowExport<T>`, drag payload construction and the reorder/foreign-drop verdicts for all five views, plus `deferred_select`, `DragSurface` and `press_absorber`. | P23 done |
 | `crates/teksilo-widgets/src/dialog.rs` | `on_tap` | Tap the trigger to present; scrim tap dismisses; footer button taps. | pending P25 |
 | `crates/teksilo-widgets/src/docking/activity_bar.rs` | `on_tap`, `on_drag`, `start_drag`, *DragPhase* | Tap a rail item to select or hide its side; `start_drag` reorders rail items and transfers activities between sides. | pending P25 |
 | `crates/teksilo-widgets/src/docking/panel.rs` | `on_drag`, `start_drag` | Accordion-header `on_drag` starts a dock drag; the five-zone drop overlay routes the drop to stack/split. | pending P25 |
 | `crates/teksilo-widgets/src/docking/resize_handle.rs` | `on_pointer_event`, `PointerDown`, `PointerUp`, `PointerMove`, `on_double_tap`, `on_hover`, `capture_pointer` | Press captures the pointer and resizes the side band; double tap snaps to hide; hover shows the grip. 6 dp gutter. | pending P30 |
 | `crates/teksilo-widgets/src/drop_target.rs` | `on_drag` | `on_drag_hover` / `on_drop` over the wrapped child, optionally partitioned into five `DropRegion` zones. | pending P25 |
 | `crates/teksilo-widgets/src/drop_zone.rs` | `on_drag` | `on_drag_hover` / `on_drop` for external (OS) file, text and URL drops. | pending P25 |
-| `crates/teksilo-widgets/src/grid_view.rs` | `on_pointer_event`, `PointerDown`, `on_drag`, `on_scroll` | Scroll (wheel + pan) now comes from `common::scrollable`; container `on_pointer_event` records the additive modifier at press; `on_drag` hosts the marquee. | P22 done (scroll); marquee still P23/P25 |
-| `crates/teksilo-widgets/src/grid_view/body_pane.rs` | `on_pointer_event`, `PointerDown`, `PointerUp`, `on_tap`, `on_double_tap`, `on_drag`, `start_drag`, *DragPhase* | Press-time tile selection, tap / double-tap activation, and `start_drag` tile reorder — the GridView twin of `list_view/body_pane.rs`. | **UNCLAIMED — GAP**; suggested owner P23 (parallel to the claimed `list_view/body_pane.rs`) |
-| `crates/teksilo-widgets/src/grid_view/selection.rs` | *DragPhase* | Rubber-band marquee: a `DragPhase` handler that skips a press landing on a tile, then paints and auto-scrolls the band. | pending P23 |
+| `crates/teksilo-widgets/src/grid_view.rs` | `on_pointer_event`, `PointerDown`, `on_drag`, `on_scroll` | Scroll (wheel + pan) now comes from `common::scrollable`; container `on_pointer_event` records the additive modifier at press; `on_drag` hosts the marquee, on a `DragSurface` enclosing the body pane. | P22 done (scroll); P23 done (marquee) |
+| `crates/teksilo-widgets/src/grid_view/body_pane.rs` | `on_pointer_event`, `PointerDown`, `PointerUp`, `on_tap`, `on_double_tap`, `on_drag`, `start_drag`, *DragPhase* | Press-time tile selection, tap / double-tap activation, and `start_drag` tile reorder — the GridView twin of `list_view/body_pane.rs`. | P23 done |
+| `crates/teksilo-widgets/src/grid_view/selection.rs` | *DragPhase* | Rubber-band marquee: a `DragPhase` handler that skips a press landing on a tile, then paints and auto-scrolls the band at a pointer-kind-aware edge. | P23 done |
 | `crates/teksilo-widgets/src/link.rs` | `on_tap`, `on_hover` | Tap follows the link; hover underlines and switches the cursor. | pending P24 |
 | `crates/teksilo-widgets/src/list_source.rs` | `on_drag` | `on_drag_out(k)` is a `ListDataSource` policy callback, not a pointer handler — no pointer plumbing to migrate. | no change needed — no pointer plumbing to migrate. |
 | `crates/teksilo-widgets/src/list_view/widget_impl.rs` | `on_drag`, `on_scroll` | Scroll (wheel + pan) now comes from `common::scrollable`; owns the drop-indicator signals the body pane writes. | P22 done (scroll) |
-| `crates/teksilo-widgets/src/list_view/body_pane.rs` | `on_pointer_event`, `PointerDown`, `PointerUp`, `on_tap`, `on_double_tap`, `on_drag`, `start_drag`, *DragPhase* | Row selection on `PointerDown`, tap / double-tap activation, `capture_pointer` for the reorder drag, `start_drag` row export. | pending P23 |
+| `crates/teksilo-widgets/src/list_view/body_pane.rs` | `on_pointer_event`, `PointerDown`, `PointerUp`, `on_tap`, `on_double_tap`, `on_drag`, `start_drag`, *DragPhase* | Selection on press for a mouse and on release for a finger, tap / double-tap activation, `start_drag` row export from an enclosing `DragSurface`. | P23 done |
 | `crates/teksilo-widgets/src/menu_bar.rs` | `on_tap`, `on_hover` | Tap a trigger opens its dropdown; hover switches between open menus with no click. | pending P29 |
 | `crates/teksilo-widgets/src/menu_item.rs` | `PointerLeave`, `on_tap`, `on_hover` | Tap activates; hover opens a submenu after a dwell; `PointerLeave` starts the dismissal grace (safe triangle). | pending P29 |
 | `crates/teksilo-widgets/src/notification/log.rs` | `on_tap` | Tap a log row replays its action. | pending P25 |
@@ -193,8 +202,8 @@ callback with no pointer plumbing behind it.
 | `crates/teksilo-widgets/src/tab_widget/bar.rs` | `on_pointer_event`, `on_drag` | `on_pointer_event` remaps the wheel to horizontal strip scrolling; `on_drag` runs tab reorder with edge auto-scroll. P22 made **no change**: the strip owns no `on_scroll` and its remap is a *preview* arm, which a synthesised pan cannot reach (the claimant walk is a direct dispatch per claimant, no preview pass) — so a vertical pan over a horizontal strip already goes to the container around it, which is what is wanted. | P22 done (no change, reasoned) |
 | `crates/teksilo-widgets/src/tab_widget/header.rs` | `on_pointer_event`, `PointerUp`, `on_tap`, `on_drag`, `on_hover`, *DragPhase* | Tap selects the tab, middle-click on `PointerUp` closes it, hover reveals the close button, `on_drag` starts the tab drag. Label vs close button is an in-node split. | pending P29 |
 | `crates/teksilo-widgets/src/table_view/widget_impl.rs` | `on_drag`, `on_scroll` | Scroll (wheel + pan + the Shift remap) now comes from `common::scrollable`; owns the drop-indicator and column-drag signals. | P22 done (scroll) |
-| `crates/teksilo-widgets/src/table_view/body_pane.rs` | `on_pointer_event`, `PointerDown`, `PointerUp`, `on_tap`, `on_double_tap`, `on_drag`, `start_drag`, *DragPhase* | Row selection on `PointerDown`, tap / double-tap activation and `start_drag` row reorder — the TableView twin of `list_view/body_pane.rs`. | **UNCLAIMED — GAP**; suggested owner P23 (parallel to the claimed `list_view/body_pane.rs`) |
-| `crates/teksilo-widgets/src/table_view/header.rs` | `on_pointer_event`, `PointerDown`, `PointerUp`, `PointerMove`, `on_drag`, `on_hover`, `capture_pointer`, `start_drag` | Column resize by `capture_pointer` off a 4 dp grip, column reorder by `on_drag`, sort on tap; the cell is split by coordinate into a label zone and a filter zone. | pending P23 |
+| `crates/teksilo-widgets/src/table_view/body_pane.rs` | `on_pointer_event`, `PointerDown`, `PointerUp`, `on_tap`, `on_double_tap`, `on_drag`, `start_drag`, *DragPhase* | Row selection on `PointerDown`, tap / double-tap activation and `start_drag` row reorder — the TableView twin of `list_view/body_pane.rs`, plus the per-cell selection. | P23 done |
+| `crates/teksilo-widgets/src/table_view/header.rs` | `on_pointer_event`, `PointerDown`, `PointerUp`, `PointerMove`, `on_drag`, `on_hover`, `capture_pointer`, `start_drag` | Column resize by `capture_pointer` off a 4 dp grip, column reorder by `on_drag`, sort on tap; the cell is split by coordinate into a label zone and a filter zone. The plain press answers `Ignored` so the strip is a pan surface, and a coarse pointer's reorder waits for a `long_press`. | P23 done |
 | `crates/teksilo-widgets/src/text_input.rs` | `on_tap` | Tap the 16 dp clear button. | pending P27 |
 | `crates/teksilo-widgets/src/title_bar/controls.rs` | `on_tap`, `on_hover` | Tap minimise / maximise / close; hover tint per button. | pending P25 |
 | `crates/teksilo-widgets/src/title_bar/drag_region.rs` | `on_pointer_event`, `PointerDown`, `on_double_tap`, `on_drag`, *DragPhase* | `on_drag` from `DragPhase::Started` hands the window move to the OS; double tap maximises; `PointerDown` is recorded but is not the actuation. | pending P30 |
@@ -205,8 +214,8 @@ callback with no pointer plumbing behind it.
 | `crates/teksilo-widgets/src/tool_box.rs` | `on_tap`, `on_drag`, `on_hover`, *DragPhase* | Tap a section header expands it; `on_drag` + `start_drag` move a section; hover tint on the rotated header strip. | pending P25 |
 | `crates/teksilo-widgets/src/tree_source.rs` | `on_drag` | `on_drag_out(k)` is a `TreeDataSource` policy callback, not a pointer handler — no pointer plumbing to migrate. | no change needed — no pointer plumbing to migrate. |
 | `crates/teksilo-widgets/src/tree_table_view/widget_impl.rs` | `on_drag`, `on_scroll` | Scroll (wheel + pan + the Shift remap) now comes from `common::scrollable`; owns the drop-indicator and column-drag signals. | P22 done (scroll) |
-| `crates/teksilo-widgets/src/tree_table_view/body_pane.rs` | `on_pointer_event`, `PointerDown`, `PointerUp`, `on_tap`, `on_double_tap`, `on_drag`, `start_drag`, *DragPhase* | Row selection on `PointerDown`, tap / double-tap activation, expand-collapse on the twist arrow and `start_drag` row reorder. | **UNCLAIMED — GAP**; suggested owner P23 (parallel to the claimed `list_view/body_pane.rs`) |
-| `crates/teksilo-widgets/src/tree_view/body_pane.rs` | `on_pointer_event`, `PointerDown`, `PointerUp`, `on_tap`, `on_double_tap`, `on_drag`, `start_drag`, *DragPhase* | Row selection on `PointerDown`, tap / double-tap activation, chevron toggle and `start_drag` subtree reorder. | **UNCLAIMED — GAP**; suggested owner P23 (P23 names `tree_view`, but `tree_view.rs` itself has no pointer code) |
+| `crates/teksilo-widgets/src/tree_table_view/body_pane.rs` | `on_pointer_event`, `PointerDown`, `PointerUp`, `on_tap`, `on_double_tap`, `on_drag`, `start_drag`, *DragPhase* | Row selection on `PointerDown`, tap / double-tap activation, expand-collapse on the twist arrow and `start_drag` row reorder. | P23 done |
+| `crates/teksilo-widgets/src/tree_view/body_pane.rs` | `on_pointer_event`, `PointerDown`, `PointerUp`, `on_tap`, `on_double_tap`, `on_drag`, `start_drag`, *DragPhase* | Row selection on `PointerDown`, tap / double-tap activation, chevron toggle and `start_drag` subtree reorder. | P23 done |
 | `crates/teksilo-widgets/src/tree_view/widget_impl.rs` | `on_drag`, `on_scroll` | Scroll (wheel + pan) now comes from `common::scrollable`; `on_drag`/`start_drag` wiring and the drop-third computation for the tree. | P22 done (scroll) |
 
 ## Prose-only mentions

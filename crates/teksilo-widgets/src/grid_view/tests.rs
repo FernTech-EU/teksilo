@@ -35,11 +35,18 @@ fn make_grid(count: usize) -> (WidgetTree, WidgetId, ListModel<usize>) {
     (tree, id, model)
 }
 
-/// The body pane is the first child; its children are the tile wrappers.
+/// The body pane. The grid's first child is the `DragSurface` that hosts the
+/// marquee's drag — it has to strictly enclose whatever captures the press, or
+/// the drag beats the view's own `PanClaim`; see `GridView`'s module docs — and
+/// the pane is its single child.
+fn body_pane(tree: &WidgetTree, grid_id: WidgetId) -> WidgetId {
+    let surface = tree.children(grid_id)[0];
+    tree.children(surface)[0]
+}
+
+/// The tile wrappers, in body order.
 fn tiles(tree: &WidgetTree, grid_id: WidgetId) -> Vec<WidgetId> {
-    let children = tree.children(grid_id);
-    let body = children[0];
-    tree.children(body)
+    tree.children(body_pane(tree, grid_id))
 }
 
 #[test]
@@ -825,9 +832,7 @@ fn sections_offset_tiles_below_headers() {
             .sections(TwoSections),
     );
     tree.layout(SizeProposal::exact(300.0, 600.0));
-    let kids = tree.children(id);
-    let body = kids[0];
-    let body_kids = tree.children(body);
+    let body_kids = tiles(&tree, id);
     // First 6 body children are tiles (flat order), then 2 headers.
     let tile0 = tree.bounds(body_kids[0]);
     let tile3 = tree.bounds(body_kids[3]);
@@ -861,9 +866,7 @@ fn sections_report_section_local_aria_row_col() {
             .sections(TwoSections),
     );
     tree.layout(SizeProposal::exact(300.0, 600.0));
-    let kids = tree.children(id);
-    let body = kids[0];
-    let body_kids = tree.children(body);
+    let body_kids = tiles(&tree, id);
     let item3_id = body_kids[3];
 
     let update = tree.sync_accessibility();

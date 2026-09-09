@@ -526,6 +526,11 @@ impl Widget for HeaderCell {
         let cell_window_h = self.cell_window_h.clone();
         let filter_zone_w = self.filter_zone_width;
         let is_hovered = self.is_hovered.clone();
+        // A coarse pointer's column reorder waits for a hold; see the escalation
+        // arm in `PointerMove` for why the raw path cannot read
+        // `DragActivation` and what this stands in for.
+        let hold_armed: Rc<Cell<bool>> = Rc::new(Cell::new(false));
+        let hold_for_press = hold_armed.clone();
 
         let handlers = HandlerSet::new()
             .on_hover({
@@ -533,6 +538,24 @@ impl Widget for HeaderCell {
                 move |entered, _ctx| {
                     is_hovered.set(entered);
                 }
+            })
+            // Arms the coarse-pointer reorder. A `long_press` recognizer is the
+            // hold source this cell has: the reorder is a raw `start_drag` out
+            // of `PointerMove` rather than an `on_drag` member of the pointer
+            // sequence, so the tree resolves no `DragActivation` for it and
+            // nothing defers it on the cell's behalf, and nothing on
+            // `EventContext` hands a handler the input clock to time a hold
+            // itself.
+            //
+            // Two consequences, both load-bearing. Installing it gives the cell
+            // a gesture arena and so the implicit press capture, which is why
+            // the escalation arm below must refuse a coarse pointer that has not
+            // held — the cell now receives the moves of a pan that has left the
+            // strip entirely. And it makes the hold this cell's: a header cell
+            // has no context menu today, but anything that wants one has to
+            // share a gesture the column reorder has already claimed.
+            .on_long_press(move |_event, _ctx| {
+                hold_for_press.set(true);
             })
             .on_pointer_event(move |event, ctx: &mut EventContext| {
                 // Pointer events now deliver `position` in cell-local
@@ -669,7 +692,20 @@ impl Widget for HeaderCell {
                         // 2. Press state set, no resize: if movement
                         //    crosses the threshold, escalate to a
                         //    reorder drag.
-                        if reorderable && let Some(p) = press_state.get() {
+                        //    A coarse pointer must have held first: a
+                        //    horizontal swipe along the strip is a horizontal
+                        //    pan, and at 5 dp the reorder used to take it
+                        //    (measured: `max_scroll_x` 512, `scroll_x` 0, and
+                        //    the columns swapped). A held contact is picking the
+                        //    column up, which is the same ruling the row reorder
+                        //    settles with `DragActivation` — reached here by a
+                        //    `long_press` recognizer, because a raw `start_drag`
+                        //    is not a sequence member and has no activation to
+                        //    resolve.
+                        if reorderable
+                            && (hold_armed.get() || !ctx.pointer_kind().is_coarse())
+                            && let Some(p) = press_state.get()
+                        {
                             let dx = local_x - p.pointer_x;
                             let dy = position.y - p.pointer_y;
                             if (dx * dx + dy * dy).sqrt() > DRAG_REORDER_THRESHOLD {
@@ -770,12 +806,36 @@ impl Widget for HeaderCell {
                         }
                         // Record press: PointerUp without movement →
                         // sort cycle; PointerMove past threshold →
-                        // reorder drag.
+                        // reorder drag. A fresh press has not held yet,
+                        // whatever the last one did.
+                        hold_armed.set(false);
                         press_state.set(Some(PressState {
                             pointer_x: local_x,
                             pointer_y: position.y,
                         }));
-                        EventResponse::Handled
+                        // **`Ignored`, deliberately, and it is what lets a
+                        // finger scroll the table from its header strip.**
+                        //
+                        // This handler runs in the root-first preview pass for
+                        // every press that lands on one of the cell's own
+                        // children (its label, its indicators), and the first
+                        // `Handled` there is step 1 of the decision procedure:
+                        // the router reads it as a preview claim and *decides
+                        // the sequence* for this cell. A decided sequence yields
+                        // no candidates, so the table's own `PanClaim` was never
+                        // evaluated and neither axis moved — measured, on the
+                        // same 120 dp pan from the header of a table scrolled to
+                        // 400: offset stayed 400 with `Handled`, reached 557
+                        // with `Ignored`. It was not the reorder drag: the same
+                        // 0 was measured with every column `reorderable(false)`.
+                        //
+                        // Nothing needed the claim. The two things this cell
+                        // commits are the sort (which rides `press_state` and
+                        // the framework's own press record) and the reorder
+                        // (which escalates from `PointerMove`); the resize grip
+                        // above still answers `Handled` and takes an explicit
+                        // capture of its own.
+                        EventResponse::Ignored
                     }
                     WidgetEvent::PointerUp { position, .. } => {
                         // Resize commit / release. Delta is window-space
@@ -812,9 +872,38 @@ impl Widget for HeaderCell {
                             resize_target.set(None);
                             resize_preview_x.set(None);
                         }
-                        // Click without significant movement → sort
-                        // cycle.
-                        if press_state.replace(None).is_some() && sortable {
+                        // Click without significant movement → sort cycle,
+                        // and the `Down` arm's comment promises exactly that.
+                        //
+                        // Both halves come from
+                        // [`release_completes_the_press`]. A press is closed
+                        // when a peer claim takes it — which is how a header
+                        // press that a scrollable's `PanClaim` won stops sorting
+                        // the table it just scrolled — *and* when the pointer
+                        // leaves the press's `TapBoundary`, which is the
+                        // movement check, sized for the pointer holding it: a
+                        // `tap_slop` radius for a mouse (5 dp — the same figure
+                        // this cell's reorder threshold uses), the pressed
+                        // node's own bounds for a finger. Measuring it here as
+                        // well, against `PressState`, would be a second
+                        // hardcoded radius for the framework's own question, and
+                        // no case in the suite can tell the two apart.
+                        //
+                        // That delegation needs the press to *have* an owner,
+                        // which it has because the `long_press` recognizer above
+                        // gives this cell a gesture arena. Removing that
+                        // recognizer without restoring a local distance check
+                        // would leave the sort firing on a press dragged across
+                        // the window;
+                        // `a_mouse_click_on_a_column_header_sorts_it_and_a_wander_off_does_not`
+                        // is what fails if anyone does.
+                        //
+                        // [`release_completes_the_press`]: crate::data_views::release_completes_the_press
+                        let recorded_press = press_state.replace(None).is_some();
+                        if recorded_press
+                            && sortable
+                            && crate::data_views::release_completes_the_press(ctx)
+                        {
                             let next = match sort_signal.get() {
                                 None => Some((col_id.clone(), SortDirection::Ascending)),
                                 Some((id, SortDirection::Ascending)) if id == col_id => {

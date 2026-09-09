@@ -598,6 +598,20 @@ impl<T: 'static> TreeView<T> {
         )
     }
 
+    /// Test-only accessor: the reactive drop-feedback signal — `Line` for a
+    /// between-rows insertion, `Rect` for the drop-into-this-row highlight,
+    /// `None` once the drag leaves or ends.
+    ///
+    /// The affordance and the drop itself resolve the row's bands separately
+    /// (`on_drag_hover` and `on_drop` each call
+    /// [`crate::common::drop_bands`]), so a test that only watches the outcome
+    /// cannot see the two disagreeing. The `ListView` twin is
+    /// `ListView::drop_feedback_signal`.
+    #[cfg(test)]
+    pub(crate) fn drop_feedback_signal(&self) -> &teksilo_core::signal::Signal<Option<DropViz>> {
+        &self.drop_feedback
+    }
+
     pub(super) fn clamp_scroll(&self) {
         let max = self.max_scroll_y.get();
         let current = self.scroll_y.get();

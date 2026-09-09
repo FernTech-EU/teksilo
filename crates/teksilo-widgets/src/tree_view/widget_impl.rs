@@ -766,7 +766,7 @@ impl<T: 'static> Widget for TreeView<T> {
             let width_for_hover = self.placed_content_width.clone();
             let hr_for_hover = hovered_row.clone();
             let export_for_hover = self.export.clone();
-            handlers = handlers.on_drag_hover(move |payload, position, _ctx| {
+            handlers = handlers.on_drag_hover(move |payload, position, ctx| {
                 let line_width = width_for_hover.get();
                 let vc = source_for_hover.visible_count();
                 if vc == 0 {
@@ -794,15 +794,17 @@ impl<T: 'static> Widget for TreeView<T> {
                 // Drop position from Y within the row (top third Before / middle
                 // Into / bottom After). The source's `can_accept` is the verdict
                 // — a Reject shows NO line (the pre-commit forbidden affordance).
+                // Before / Into / After from the y within the row. The bands
+                // are plain thirds for a cursor and widen at the edges for a
+                // finger — `common::drop_bands` owns the rule, and the hover
+                // affordance and the drop itself both read it, so the line the
+                // user sees cannot promise a position the drop does not take.
                 let y_in_row = content_y - row_top;
-                let third = (row_h / 3.0).max(f32::EPSILON);
-                let drop_pos = if y_in_row < third {
-                    DropPosition::Before
-                } else if y_in_row > 2.0 * third {
-                    DropPosition::After
-                } else {
-                    DropPosition::Into
-                };
+                let drop_pos = crate::common::drop_bands::drop_position_in_row(
+                    y_in_row,
+                    row_h,
+                    ctx.pointer_kind(),
+                );
                 // The source's verdict decides the *effective* position: a
                 // `Redirect` (e.g. Into-a-leaf → After) overrides the raw zone.
                 // `depth` rides along so `paint` can indent the affordance to
@@ -880,15 +882,17 @@ impl<T: 'static> Widget for TreeView<T> {
                     let ins = m.insertion_index(content_y);
                     (r, m.row_top(r), m.row_height(r), ins)
                 };
+                // Before / Into / After from the y within the row. The bands
+                // are plain thirds for a cursor and widen at the edges for a
+                // finger — `common::drop_bands` owns the rule, and the hover
+                // affordance and the drop itself both read it, so the line the
+                // user sees cannot promise a position the drop does not take.
                 let y_in_row = content_y - row_top;
-                let third = (row_h / 3.0).max(f32::EPSILON);
-                let drop_pos = if y_in_row < third {
-                    DropPosition::Before
-                } else if y_in_row > 2.0 * third {
-                    DropPosition::After
-                } else {
-                    DropPosition::Into
-                };
+                let drop_pos = crate::common::drop_bands::drop_position_in_row(
+                    y_in_row,
+                    row_h,
+                    ctx.pointer_kind(),
+                );
                 let is_same_view = payload
                     .get_typed::<RowDragData<T>>()
                     .is_some_and(|rd| rd.source == my_view_id);
@@ -1003,6 +1007,7 @@ impl<T: 'static> Widget for TreeView<T> {
             prev_built_start: self.pane_built_start.clone(),
             prev_built_end: self.pane_built_end.clone(),
             item_entries: Vec::new(),
+            row_roots: Vec::new(),
             row_map: self.row_map.clone(),
         };
         self.body_pane_id = Some(ctx.add(pane));

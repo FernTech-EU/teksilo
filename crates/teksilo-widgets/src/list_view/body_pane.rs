@@ -114,6 +114,16 @@ pub(crate) struct ListBodyPane<T: 'static> {
 
     // Build state
     pub(crate) item_entries: Vec<(usize, WidgetId)>,
+    /// The ids this pane actually hands the arena as its children, positionally
+    /// aligned with [`Self::item_entries`].
+    ///
+    /// A row that is a drag source is wrapped in a
+    /// [`DragSurface`](crate::data_views::DragSurface), so its layout child is
+    /// the wrapper rather than the row node itself; every other row's entry is
+    /// the row node. `item_entries` (and so `row_map`) stays on the row node,
+    /// which is the one carrying the accessibility properties and the
+    /// keyboard-toggle target.
+    pub(crate) row_roots: Vec<WidgetId>,
     /// Shared mirror of [`Self::item_entries`], published at the end of each
     /// build so the `ListView` root — and anything the app hands the handle to
     /// — can resolve a model index back to the realized row's wrapper id. The
@@ -211,6 +221,7 @@ impl<T: 'static> Widget for ListBodyPane<T> {
         // --- Create visible item widgets ---
         let (start, end) = self.visible_range();
         self.item_entries.clear();
+        self.row_roots.clear();
         // Lazy: nudge the source to load the realized window, and fetch more
         // as the viewport nears the end (append-only sources). This lives in
         // the pane, not the root, because the pane is what decides the
@@ -299,12 +310,13 @@ impl<T: 'static> Widget for ListBodyPane<T> {
                     let sel_click = sel.clone();
                     let click_anchor = self.source.anchor(i);
                     let fi_click = self.focused_index.clone();
+                    let fi_up = self.focused_index.clone();
                     // Deferred collapse: pressing an already-selected row keeps
                     // the whole (multi-)selection so it can be dragged; the
                     // collapse-to-single happens on release WITHOUT a drag,
                     // and only on a release the row still owns (see
                     // `release_completes_the_press`).
-                    let pending_collapse = Rc::new(Cell::new(false));
+                    let pending_collapse = crate::data_views::deferred_select::pending_cell();
                     ctx.apply_handlers(
                         child_id,
                         HandlerSet::new().on_pointer_event(move |event, ctx| match event {
@@ -347,13 +359,22 @@ impl<T: 'static> Widget for ListBodyPane<T> {
                                 // unrelated later release — but must not select
                                 // an index that no longer exists.
                                 match click_anchor.index() {
-                                    Some(row) => crate::data_views::deferred_select::on_up(
-                                        &sel_click,
-                                        row,
-                                        &pending_collapse,
-                                        ctx,
-                                    ),
-                                    None => pending_collapse.set(false),
+                                    Some(row) => {
+                                        // The nav cursor travels with the
+                                        // applied selection, not with the
+                                        // press: for a direct pointer the whole
+                                        // decision — cursor included — is made
+                                        // here.
+                                        if crate::data_views::deferred_select::on_up(
+                                            &sel_click,
+                                            row,
+                                            &pending_collapse,
+                                            ctx,
+                                        ) {
+                                            fi_up.set(Some(row));
+                                        }
+                                    }
+                                    None => pending_collapse.set(None),
                                 }
                                 teksilo_core::event::EventResponse::Ignored
                             }
@@ -452,7 +473,28 @@ impl<T: 'static> Widget for ListBodyPane<T> {
                 // and reads as "picked up" against the window surface. Uses
                 // `start_drag_with_preview` so the framework overlays the
                 // preview at the pointer.
+                let mut row_root = child_id;
                 if is_drag_source {
+                    // The reorder drag goes on a wrapper that STRICTLY encloses
+                    // this row, never on the row itself: a drag on the node
+                    // that captures the press is driven by the capture
+                    // dispatch, which runs before the arbitration advances, so
+                    // it latches at `drag_slop` and decides the sequence before
+                    // the list's own `PanClaim` can win at `pan_slop` — a
+                    // reorderable list would not scroll under a finger at all.
+                    // Enclosing it is also the only shape the tree arms
+                    // `DragActivation` for: `Immediate` for a mouse (the same
+                    // 5 dp it always was), `AfterLongPress` for a finger.
+                    //
+                    // A row with no activation hook has no gesture handler and
+                    // so no arena; nothing would capture the press, the
+                    // enrolment walk would never start, and the drag would
+                    // compete by no path at all. The absorber is what makes the
+                    // structure real — applied unconditionally rather than
+                    // gated on the hooks this pane happens to know about, so a
+                    // handler added here later cannot silently un-guarantee it.
+                    ctx.apply_handlers(child_id, crate::data_views::press_absorber());
+                    row_root = ctx.add(crate::data_views::DragSurface::new(child_id));
                     let drag_index = i;
                     let drag_model_id = model_id;
                     let drag_self_id = root_id;
@@ -469,7 +511,7 @@ impl<T: 'static> Widget for ListBodyPane<T> {
                     let read_for_drag = self.source.read_item_fn.clone();
                     let snapshot_for_drag = self.source.dnd.snapshot_out_fn.clone();
                     ctx.apply_handlers(
-                        child_id,
+                        row_root,
                         HandlerSet::new().on_drag(move |phase, ctx| {
                             if let teksilo_core::gesture::DragPhase::Started { .. } = phase {
                                 // The source's per-row transferable gate.
@@ -516,6 +558,7 @@ impl<T: 'static> Widget for ListBodyPane<T> {
                 }
 
                 self.item_entries.push((i, child_id));
+                self.row_roots.push(row_root);
             }
         }
         ctx.end_view_focus();
@@ -523,7 +566,7 @@ impl<T: 'static> Widget for ListBodyPane<T> {
         // Publish the realized (index → wrapper id) map for the root's a11y.
         *self.row_map.borrow_mut() = self.item_entries.clone();
 
-        self.item_entries.iter().map(|(_, id)| *id).collect()
+        self.row_roots.clone()
     }
 
     fn layout_response(
@@ -642,7 +685,7 @@ impl<T: 'static> Widget for ListBodyPane<T> {
     }
 
     fn children(&self) -> Vec<WidgetId> {
-        self.item_entries.iter().map(|(_, id)| *id).collect()
+        self.row_roots.clone()
     }
 
     fn clips_children(&self) -> bool {

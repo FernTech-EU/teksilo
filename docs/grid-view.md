@@ -131,6 +131,13 @@ ScrollAnchor)` / `.scroll_to_index(i, ScrollAnchor)` where `ScrollAnchor` is
 `Auto | Start | Center | End`. `.overscroll_behavior(Chain | Contain)` controls
 scroll chaining.
 
+## Touch
+
+Everything a finger does here — where a press commits the selection, why the
+rubber-band marquee waits for a hold, and how the reorder gets out of the pan's
+way — is the shared five-view contract in
+[Data views under a finger](data-view-touch.md).
+
 ## Lazy / incremental loading
 
 There is no view-level `on_near_end` hook — incremental loading is a **source

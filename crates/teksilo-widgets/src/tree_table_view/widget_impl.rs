@@ -431,7 +431,7 @@ impl<T: 'static> Widget for TreeTableView<T> {
             let export_for_hover = self.export.clone();
             let has_foreign_hook_hover = self.on_foreign_drop.is_some();
             let bounds_for_hover = self.body_bounds.clone();
-            handlers = handlers.on_drag_hover(move |payload, position, _ctx| {
+            handlers = handlers.on_drag_hover(move |payload, position, ctx| {
                 // Column reorder is handled by the header strip
                 // (`attach_header_reorder_handlers`); only row-level drops
                 // get an insertion/into affordance here. Without this bail,
@@ -474,15 +474,17 @@ impl<T: 'static> Widget for TreeTableView<T> {
                     let r = m.row_at(content_y);
                     (m.row_top(ins), r, m.row_top(r), m.row_height(r))
                 };
+                // Before / Into / After from the y within the row. The bands
+                // are plain thirds for a cursor and widen at the edges for a
+                // finger — `common::drop_bands` owns the rule, and the hover
+                // affordance and the drop itself both read it, so the line the
+                // user sees cannot promise a position the drop does not take.
                 let y_in_row = content_y - row_top;
-                let third = (row_h / 3.0).max(f32::EPSILON);
-                let drop_pos = if y_in_row < third {
-                    DropPosition::Before
-                } else if y_in_row > 2.0 * third {
-                    DropPosition::After
-                } else {
-                    DropPosition::Into
-                };
+                let drop_pos = crate::common::drop_bands::drop_position_in_row(
+                    y_in_row,
+                    row_h,
+                    ctx.pointer_kind(),
+                );
                 // The source owns the structural verdict — including the cycle
                 // guard (a node may not land inside its own subtree), which used
                 // to be re-derived here against the `TreeModel`.
@@ -569,15 +571,17 @@ impl<T: 'static> Widget for TreeTableView<T> {
                     let ins = m.insertion_index(content_y);
                     (idx, m.row_top(idx), m.row_height(idx), ins)
                 };
+                // Before / Into / After from the y within the row. The bands
+                // are plain thirds for a cursor and widen at the edges for a
+                // finger — `common::drop_bands` owns the rule, and the hover
+                // affordance and the drop itself both read it, so the line the
+                // user sees cannot promise a position the drop does not take.
                 let y_in_row = content_y - row_top;
-                let third = (row_h / 3.0).max(f32::EPSILON);
-                let drop_pos = if y_in_row < third {
-                    DropPosition::Before
-                } else if y_in_row > 2.0 * third {
-                    DropPosition::After
-                } else {
-                    DropPosition::Into
-                };
+                let drop_pos = crate::common::drop_bands::drop_position_in_row(
+                    y_in_row,
+                    row_h,
+                    ctx.pointer_kind(),
+                );
                 let is_same_view = payload
                     .get_typed::<RowDragData<T>>()
                     .is_some_and(|rd| rd.source == drop_model_id);
@@ -813,6 +817,7 @@ impl<T: 'static> Widget for TreeTableView<T> {
                 prev_built_end: self.pane_built_end.clone(),
                 total_refresh: self.pane_total_refresh.clone(),
                 row_entries: Vec::new(),
+                row_roots: Vec::new(),
                 row_map: self.row_map.clone(),
                 cell_map: self.cell_map.clone(),
             };

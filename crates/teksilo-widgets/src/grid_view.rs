@@ -35,21 +35,32 @@
 //! view owns no horizontal offset, so a horizontal pan is declined and chains
 //! outward. A pan that starts on a tile scrolls rather than activating it.
 //!
-//! **Known defect, and it bounds all of the above:** a finger does not scroll
-//! this view at all while its selection is in
-//! [`teksilo_data::SelectionMode::Multi`]. Measured on one 120 dp pan: no
-//! selection or `Single` → 157 dp of a 2808 dp range; `Multi` → 0;
-//! `Multi` + `.marquee_selection(false)` → 157 again. So the rubber-band
-//! marquee is what costs it — in `Multi` mode it puts an `on_drag` on this
-//! view's *own* node, the node that also carries the `PanClaim`. The marquee is
-//! not running instead of the scroll (it declines a press that lands on a tile,
-//! and the selection is untouched) and the claim is not losing the arbitration
-//! (the trace shows the sequence decided for this node); where the synthesised
-//! scroll is lost between the two is undiagnosed. Recorded against
-//! `grid_view/body_pane.rs` in `docs/widget-pointer-inventory.md`;
-//! `a_finger_on_a_multi_select_grid_pans_it` in
-//! `teksilo-widgets/tests/scrollables_touch.rs` is the `#[ignore]`d test
-//! waiting for it.
+//! ## The rubber band, and why it is not on this node
+//!
+//! In [`teksilo_data::SelectionMode::Multi`] a drag on the empty background
+//! sweeps a selection rectangle. That drag deliberately does **not** live on
+//! this view's own node, which is the one carrying the `PanClaim`: the node that
+//! captures a press has its gesture arena driven by the capture dispatch, which
+//! runs *before* the arbitration advances, so a drag there latches at
+//! `drag_slop` and decides the sequence before a claim can win at `pan_slop`.
+//! While it did, a `Multi`-selection grid did not scroll under a finger from
+//! anywhere at all, and a finger on the background swept a band immediately
+//! rather than after a hold — a press on a tile got neither, since the marquee
+//! declines such a press only after winning the arbitration for it.
+//!
+//! So the body pane carries a no-op tap that gives it an arena of its own (the
+//! press is captured *inside* the claimant, not by it) and the marquee's drag
+//! hangs on a `DragSurface` that strictly encloses the pane. That is the one
+//! shape the tree arms [`teksilo_tokens::DragActivation`] for, which is what
+//! makes the marquee wait for a long press under a finger and latch at 5 dp
+//! under a mouse.
+//!
+//! Every **tile** carries that same no-op tap as well, for a reason with nothing
+//! to do with dragging. With the pane holding one, a tile without an arena of
+//! its own leaves the *pane* as the press captor — and a release is dispatched
+//! to the captor and then bubbled target→root, which never reaches a tile
+//! beneath it. A plain selectable grid lost both its finger tap and, under a
+//! mouse, the release that collapses a multi-selection that way.
 
 pub(crate) mod a11y;
 pub(crate) mod body_pane;
@@ -1290,7 +1301,9 @@ impl<T: 'static> Widget for GridView<T> {
 
         // Rubber-band marquee (Multi mode only). A container pointer handler
         // records the modifier state at press time for additive selection;
-        // the drag handler sweeps the rectangle.
+        // the drag handler sweeps the rectangle — from the `DragSurface` that
+        // wraps the body pane, not from this root. See below.
+        let mut marquee_drag: Option<_> = None;
         let marquee_on = self.marquee_selection
             && self
                 .selection
@@ -1308,7 +1321,18 @@ impl<T: 'static> Widget for GridView<T> {
                     EventResponse::Ignored
                 });
             }
-            handlers = handlers.on_drag(build_marquee_handler(MarqueeConfig {
+            // The marquee's `on_drag` does NOT go on this root, and that is
+            // load-bearing rather than tidy. This root is the `PanClaim`
+            // holder, and a drag on the node that also captures the press
+            // latches at `drag_slop` (18 dp) before a claim can win at
+            // `pan_slop` (36) — the claim is then never evaluated at all, so a
+            // `Multi`-selection grid did not scroll under a finger *and* did
+            // not marquee (the drag declines a press that lands on a tile).
+            // Hanging it on the `DragSurface` below instead makes it a strict
+            // ancestor of whatever takes the press, which is the one shape the
+            // tree arms `DragActivation` for: `Immediate` for a mouse (5 dp,
+            // exactly as before), `AfterLongPress` for a finger.
+            marquee_drag = Some(build_marquee_handler(MarqueeConfig {
                 marquee: self.marquee.clone(),
                 selection: self.selection.clone().unwrap(),
                 strategy: strategy.clone(),
@@ -1338,8 +1362,11 @@ impl<T: 'static> Widget for GridView<T> {
                 let Some(st) = marquee_for_tick.get() else {
                     return;
                 };
-                let step =
-                    selection::marquee_auto_scroll_step(st.current.y, viewport_h_for_tick.get());
+                let step = selection::marquee_auto_scroll_step(
+                    st.current.y,
+                    viewport_h_for_tick.get(),
+                    st.kind,
+                );
                 if step != 0.0 {
                     let max = max_scroll_for_tick.get();
                     let new_y = (scroll_for_tick.get() + step).clamp(0.0, max);
@@ -1523,10 +1550,25 @@ impl<T: 'static> Widget for GridView<T> {
                 prev_built_end: Rc::new(Cell::new(0)),
                 total_refresh: pane_total_refresh,
                 tile_entries: Vec::new(),
+                tile_roots: Vec::new(),
                 header_entries: Vec::new(),
                 in_place_children: Cell::new(false),
             };
-            self.body_pane_id = Some(ctx.add(pane));
+            let pane_id = ctx.add(pane);
+            // A no-op tap gives the pane its own gesture arena, so a press on
+            // the background *between* tiles is captured inside the
+            // `DragSurface` rather than by it. Without that the surface would be
+            // the captor and its own drag would win the arbitration at 18 dp,
+            // which is the bug the surface exists to fix. A press on a tile is
+            // captured by the tile's own absorber, deeper still — which it must
+            // be, or the release would be dispatched here and bubbled outward,
+            // never reaching the tile that recorded the press.
+            ctx.apply_handlers(pane_id, crate::data_views::press_absorber());
+            let surface_id = ctx.add(crate::data_views::DragSurface::new(pane_id));
+            if let Some(drag) = marquee_drag.take() {
+                ctx.apply_handlers(surface_id, HandlerSet::new().on_drag(drag));
+            }
+            self.body_pane_id = Some(surface_id);
 
             let overlay = GridOverlay {
                 focused_index: self.focused_index.clone(),

@@ -739,6 +739,7 @@ impl<T: 'static> Widget for ListView<T> {
             prev_built_start: self.pane_built_start.clone(),
             prev_built_end: self.pane_built_end.clone(),
             item_entries: Vec::new(),
+            row_roots: Vec::new(),
         };
         self.body_pane_id = Some(ctx.add(pane));
 

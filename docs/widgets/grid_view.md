@@ -39,21 +39,32 @@ container outside — never a residual. Vertical only, despite the grid: this
 view owns no horizontal offset, so a horizontal pan is declined and chains
 outward. A pan that starts on a tile scrolls rather than activating it.
 
-**Known defect, and it bounds all of the above:** a finger does not scroll
-this view at all while its selection is in
-`teksilo_data::SelectionMode::Multi`. Measured on one 120 dp pan: no
-selection or `Single` → 157 dp of a 2808 dp range; `Multi` → 0;
-`Multi` + `.marquee_selection(false)` → 157 again. So the rubber-band
-marquee is what costs it — in `Multi` mode it puts an `on_drag` on this
-view's *own* node, the node that also carries the `PanClaim`. The marquee is
-not running instead of the scroll (it declines a press that lands on a tile,
-and the selection is untouched) and the claim is not losing the arbitration
-(the trace shows the sequence decided for this node); where the synthesised
-scroll is lost between the two is undiagnosed. Recorded against
-`grid_view/body_pane.rs` in `docs/widget-pointer-inventory.md`;
-`a_finger_on_a_multi_select_grid_pans_it` in
-`teksilo-widgets/tests/scrollables_touch.rs` is the `#[ignore]`d test
-waiting for it.
+## The rubber band, and why it is not on this node
+
+In `teksilo_data::SelectionMode::Multi` a drag on the empty background
+sweeps a selection rectangle. That drag deliberately does **not** live on
+this view's own node, which is the one carrying the `PanClaim`: the node that
+captures a press has its gesture arena driven by the capture dispatch, which
+runs *before* the arbitration advances, so a drag there latches at
+`drag_slop` and decides the sequence before a claim can win at `pan_slop`.
+While it did, a `Multi`-selection grid did not scroll under a finger from
+anywhere at all, and a finger on the background swept a band immediately
+rather than after a hold — a press on a tile got neither, since the marquee
+declines such a press only after winning the arbitration for it.
+
+So the body pane carries a no-op tap that gives it an arena of its own (the
+press is captured *inside* the claimant, not by it) and the marquee's drag
+hangs on a `DragSurface` that strictly encloses the pane. That is the one
+shape the tree arms `teksilo_tokens::DragActivation` for, which is what
+makes the marquee wait for a long press under a finger and latch at 5 dp
+under a mouse.
+
+Every **tile** carries that same no-op tap as well, for a reason with nothing
+to do with dragging. With the pane holding one, a tile without an arena of
+its own leaves the *pane* as the press captor — and a release is dispatched
+to the captor and then bubbled target→root, which never reaches a tile
+beneath it. A plain selectable grid lost both its finger tap and, under a
+mouse, the release that collapses a multi-selection that way.
 
 ## Builder methods at a glance
 

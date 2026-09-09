@@ -38,6 +38,12 @@ pub(crate) struct MarqueeState {
     pub(crate) origin_scroll: f32,
     /// Whether to union with (rather than replace) the existing selection.
     pub(crate) additive: bool,
+    /// The pointer that opened the marquee, captured at
+    /// [`DragPhase::Started`] so the edge auto-scroll can widen its band for
+    /// a finger. The per-frame tick that reads it runs from a frame effect
+    /// with no `EventContext`, so the kind has to be carried on the state
+    /// rather than asked for at the tick.
+    pub(crate) kind: teksilo_tokens::PointerKind,
 }
 
 impl MarqueeState {
@@ -58,27 +64,17 @@ impl MarqueeState {
     }
 }
 
-/// Edge-zone width (in dp) inside which the marquee ramps its auto-scroll
-/// velocity up to [`MARQUEE_MAX_VELOCITY`]. The precise-pointer band shared
-/// with every other data view — see [`crate::common::drag_autoscroll`], which
-/// also widens it for a coarse pointer.
-const MARQUEE_EDGE_ZONE: f32 = crate::common::drag_autoscroll::EDGE_BAND_PRECISE;
-/// Cap on per-tick auto-scroll velocity at the marquee's viewport edges.
-const MARQUEE_MAX_VELOCITY: f32 = crate::common::drag_autoscroll::MAX_VELOCITY;
-
-/// Auto-scroll step (in content px, +down/-up) for a marquee whose
-/// trailing corner sits at local `pointer_y` within a viewport of
-/// `viewport_height`. Zero outside both edge bands; ramps linearly
-/// inside a band and saturates at `MARQUEE_MAX_VELOCITY` beyond the
-/// viewport edge (drag gestures keep reporting positions past the
-/// boundary once the pointer is captured). Pure so it can be unit
-/// tested without a widget tree.
-pub(crate) fn marquee_auto_scroll_step(pointer_y: f32, viewport_height: f32) -> f32 {
-    crate::common::drag_autoscroll::step(pointer_y, viewport_height, MARQUEE_EDGE_ZONE)
-}
-
-/// The same ramp for a pointer of a known kind: a finger gets the wider band.
-pub(crate) fn marquee_auto_scroll_step_for(
+/// Auto-scroll step (in content px, +down/-up) for a marquee whose trailing
+/// corner sits at local `pointer_y` within a viewport of `viewport_height`,
+/// swept by a pointer of `kind`.
+///
+/// Zero outside both edge bands; ramps linearly inside a band and saturates at
+/// the shared velocity cap beyond the viewport edge (drag gestures keep
+/// reporting positions past the boundary once the pointer is captured). The
+/// band comes from [`crate::common::drag_autoscroll::band_for`], so a finger
+/// gets the wider one and a mouse keeps the band this view has always used.
+/// Pure so it can be unit tested without a widget tree.
+pub(crate) fn marquee_auto_scroll_step(
     pointer_y: f32,
     viewport_height: f32,
     kind: teksilo_tokens::PointerKind,
@@ -124,6 +120,7 @@ pub(crate) fn build_marquee_handler(
                     current: position,
                     origin_scroll: scroll,
                     additive: cfg.additive_mods.get(),
+                    kind: ctx.pointer_kind(),
                 }));
                 // A press right at an edge should start auto-scrolling
                 // immediately, without waiting for the first move.
@@ -163,12 +160,23 @@ pub(crate) fn build_marquee_handler(
 mod tests {
     use super::*;
 
+    use teksilo_tokens::PointerKind;
+
+    /// Every pre-existing ramp assertion below reads through this, which is the
+    /// whole no-regression statement for adding the pointer-kind argument: a
+    /// precise pointer's band is unchanged, so the numbers are the ones this
+    /// module asserted before the argument existed.
+    const MOUSE: PointerKind = PointerKind::Mouse;
+    /// The velocity cap the ramp saturates at, shared with every other view.
+    const MARQUEE_MAX_VELOCITY: f32 = crate::common::drag_autoscroll::MAX_VELOCITY;
+
     fn state(origin: Point, current: Point, origin_scroll: f32) -> MarqueeState {
         MarqueeState {
             origin,
             current,
             origin_scroll,
             additive: false,
+            kind: teksilo_tokens::PointerKind::Mouse,
         }
     }
 
@@ -230,32 +238,48 @@ mod tests {
         assert!((after.height - before.height - 100.0).abs() < 0.001);
     }
 
+    /// The band is a pointer-kind question: a finger starts scrolling further
+    /// from the edge than a mouse does. Pins the wiring, not the ramp — the
+    /// ramp itself is `common::drag_autoscroll`'s own test.
+    #[test]
+    fn a_finger_starts_scrolling_further_from_the_edge_than_a_mouse() {
+        // 48 dp in from the bottom: inside the coarse band (64), outside the
+        // precise one (32).
+        let y = 400.0 - 48.0;
+        assert_eq!(marquee_auto_scroll_step(y, 400.0, MOUSE), 0.0);
+        let touch = marquee_auto_scroll_step(y, 400.0, PointerKind::Touch);
+        assert!(
+            touch > 0.0,
+            "a finger should already be scrolling, got {touch}"
+        );
+    }
+
     #[test]
     fn auto_scroll_step_is_zero_away_from_edges() {
-        assert_eq!(marquee_auto_scroll_step(200.0, 400.0), 0.0);
+        assert_eq!(marquee_auto_scroll_step(200.0, 400.0, MOUSE), 0.0);
     }
 
     #[test]
     fn auto_scroll_step_ramps_near_bottom_edge() {
         // Just inside the bottom edge band.
-        let near = marquee_auto_scroll_step(400.0 - 16.0, 400.0);
+        let near = marquee_auto_scroll_step(400.0 - 16.0, 400.0, MOUSE);
         assert!(near > 0.0, "should scroll down, got {near}");
         assert!(near < MARQUEE_MAX_VELOCITY);
         // At/beyond the viewport edge, saturates at the max velocity.
-        let at_edge = marquee_auto_scroll_step(400.0, 400.0);
+        let at_edge = marquee_auto_scroll_step(400.0, 400.0, MOUSE);
         assert!((at_edge - MARQUEE_MAX_VELOCITY).abs() < 0.001);
-        let beyond = marquee_auto_scroll_step(500.0, 400.0);
+        let beyond = marquee_auto_scroll_step(500.0, 400.0, MOUSE);
         assert!((beyond - MARQUEE_MAX_VELOCITY).abs() < 0.001, "{beyond}");
     }
 
     #[test]
     fn auto_scroll_step_ramps_near_top_edge() {
-        let near = marquee_auto_scroll_step(16.0, 400.0);
+        let near = marquee_auto_scroll_step(16.0, 400.0, MOUSE);
         assert!(near < 0.0, "should scroll up, got {near}");
         assert!(near > -MARQUEE_MAX_VELOCITY);
-        let at_edge = marquee_auto_scroll_step(0.0, 400.0);
+        let at_edge = marquee_auto_scroll_step(0.0, 400.0, MOUSE);
         assert!((at_edge + MARQUEE_MAX_VELOCITY).abs() < 0.001);
-        let beyond = marquee_auto_scroll_step(-50.0, 400.0);
+        let beyond = marquee_auto_scroll_step(-50.0, 400.0, MOUSE);
         assert!((beyond + MARQUEE_MAX_VELOCITY).abs() < 0.001, "{beyond}");
     }
 }

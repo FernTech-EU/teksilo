@@ -829,6 +829,7 @@ impl<T: 'static> Widget for TableView<T> {
                 prev_built_end: self.pane_built_end.clone(),
                 total_refresh: self.pane_total_refresh.clone(),
                 row_entries: Vec::new(),
+                row_roots: Vec::new(),
                 row_map: self.row_map.clone(),
                 cell_map: self.cell_map.clone(),
             };

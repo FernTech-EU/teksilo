@@ -531,6 +531,18 @@ What the migration found, which is not what was expected of it:
   *and* carries the claim — scrolled neither itself nor the page behind it.
   Fixed in `advance_sequence` by exempting a `Pan` member from the stop; see
   §10.1.
+- **A pan committed what a *press* on the row would have committed, and no
+  release-time predicate can reach that.** The selection a data-view row makes
+  is written on `PointerDown`: a finger pan starting on an unselected row left
+  the selection on that row, and a pan over a cell-selecting `TableView`
+  selected the cell under the finger while the view scrolled. The fix is to move
+  the write, not to guard it — `data_views::deferred_select` records a direct
+  pointer's decision and applies it on the release, where
+  `release_completes_the_press` can refuse it; a precise pointer still selects
+  on press, which is the desktop click convention. So the true claim about a pan
+  is that it commits nothing a **click** would have committed, whichever half of
+  the click the widget used to act on.
+  `teksilo-widgets/tests/data_view_selection.rs`.
 - **A pan committed what a release on the row would have committed.** The five
   data views' row bodies act on `PointerUp` from a **raw** `on_pointer_event`
   arm — `TreeView`'s chevron toggle, and the deferred collapse of a
@@ -549,19 +561,51 @@ What the migration found, which is not what was expected of it:
   do there — with one predicate, `data_views::release_completes_the_press` over
   `EventContext::press_is_inside`. Question 5 of
   `teksilo-widgets/tests/scrollables_touch.rs`.
-- **A multi-select `GridView` does not pan at all.** One 120 dp pan over the
-  same grid: no selection model or one in `Single` mode → offset 157 of a 2808
-  range; `Multi` → 0; `Multi` plus `.marquee_selection(false)` → 157 again. The
-  rubber-band marquee is what costs it — in `Multi` mode it puts an `on_drag` on
-  the view's *own* node, the node that also carries the `PanClaim`, so that node
-  is both a pan claimant and a drag owner and takes the implicit press capture.
-  Not the marquee running instead (it declines a press on a tile, and the
-  selection is untouched) and not the claim losing (`TEKSILO_TRACE_INPUT=all`
-  shows the sequence decided for that node); where the synthesised scroll is
-  lost between the two is undiagnosed. Left open: it belongs with
-  `grid_view/body_pane.rs`, which the plan assigns to the data-view package.
-  `a_finger_on_a_multi_select_grid_pans_it` is the `#[ignore]`d test waiting for
-  it; recorded in [the pointer inventory](widget-pointer-inventory.md).
+- **A drag on the node that captures the press beats every claim, and is
+  invisible to `DragActivation`.** Measured as "a multi-select `GridView` does
+  not pan at all" — one 120 dp pan over the same grid: no selection model or one
+  in `Single` mode → offset 157 of a 2808 range; `Multi` → 0; `Multi` plus
+  `.marquee_selection(false)` → 157 again. The cause is neither the claim losing
+  nor the marquee running instead; both were ruled out, and an early draft that
+  blamed a slop race was wrong. It is the **capture dispatch**: the router
+  delivers a move to the captor *before* it advances the arbitration, so a drag
+  on that node latches at `drag_slop` (18 dp) and decides the sequence, after
+  which the candidate walk yields nothing and the claim is never evaluated at
+  `pan_slop` (36 dp). The marquee then declined the press for landing on a tile.
+  The drag won and did nothing.
+
+  The same chain would have stopped a finger scrolling **any** reorderable data
+  view, latent only because all five default `reorderable: false`. And it is why
+  `DragActivation::AfterLongPress` could not have helped as written: the policy
+  is read in exactly one place, the ancestor walk of the tree's sequence
+  enrolment, so it binds a drag only on a node that *strictly encloses* the
+  captor.
+
+  Fixed in the widgets, structurally and with no framework change: a drag-source
+  row and `GridView`'s body pane take a no-op tap
+  (`data_views::press_absorber`) so the press is captured *inside* the claimant,
+  and the drag moves onto a `data_views::DragSurface` that encloses it. Every
+  grid tile takes the tap too, drag or no drag — the pane's own arena would
+  otherwise capture a press made on a tile, and a release goes to the captor and
+  bubbles outward from there, never down to the tile. A mouse resolves `Auto` to
+  `Immediate` and still latches at 5 dp; a finger resolves it to
+  `AfterLongPress`, so a pan wins and a held contact reorders or marquees.
+  `teksilo-widgets/tests/data_view_drag.rs`.
+- **A finger could not pan a table from its column-header strip**, and nothing
+  said so. The header cell answered `Handled` to the `PointerDown`, which the
+  root-first preview pass reads as a **preview claim** — step 1 of the decision
+  procedure — and which therefore decides the sequence for that cell. Measured
+  on a table scrolled to 400: the offset stayed 400, and stayed 400 with every
+  column `reorderable(false)` too, so it was not the 5 dp reorder escalation.
+  The cell needed no claim (its sort rides the framework's press record, its
+  reorder escalates from `PointerMove`, and the resize grip takes an explicit
+  capture), so it answers `Ignored` and the strip pans: 557 on the same gesture.
+  That fixed the vertical axis and exposed the horizontal one — the cell keeps
+  receiving moves while the contact is over it, so a swipe *along* the strip still
+  escalated the column reorder at 5 dp (`max_scroll_x` 512, `scroll_x` 0, columns
+  swapped). A raw `start_drag` is not a sequence member and has no
+  `DragActivation` to resolve, so the cell now reads a `long_press` recognizer
+  instead: a swipe pans, a held contact reorders.
 
 Still to come:
 

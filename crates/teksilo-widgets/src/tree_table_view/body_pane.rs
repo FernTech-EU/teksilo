@@ -35,7 +35,7 @@ use teksilo_core::signal::Signal;
 use teksilo_core::widget::{LayoutContext, Widget, WidgetPlacement};
 use teksilo_core::widget_builder::HandlerSet;
 use teksilo_core::widget_id::WidgetId;
-use teksilo_data::{DragEligibility, RowState, SelectionMode};
+use teksilo_data::{DragEligibility, RowState};
 
 use crate::common::row_metrics::SharedRowMetrics;
 use crate::data_views::{RowSelection, ViewId, default_placeholder};
@@ -142,6 +142,15 @@ pub(crate) struct TreeBodyPane<T: 'static> {
 
     // Build state
     pub(crate) row_entries: Vec<(usize, WidgetId)>,
+    /// The ids this pane hands the arena as its children, positionally aligned
+    /// with [`Self::row_entries`].
+    ///
+    /// A row that is a drag source is wrapped in a
+    /// [`DragSurface`](crate::data_views::DragSurface) — the drag has to
+    /// strictly enclose whatever captures the press — so its layout child is
+    /// the wrapper. `row_entries` (and so `row_map`) stays on the `Role::Row`
+    /// node.
+    pub(crate) row_roots: Vec<WidgetId>,
     /// The realized `(row index -> row wrapper id)` map, shared with the owning
     /// view so its `&self` methods can resolve a row index to a widget without
     /// reaching into this pane.
@@ -260,6 +269,7 @@ impl<T: 'static> Widget for TreeBodyPane<T> {
 
         // Build the visible row range.
         self.row_entries.clear();
+        self.row_roots.clear();
         let mut cell_entries: Vec<((usize, usize), WidgetId)> = Vec::new();
         let (start, end) = self.visible_range();
         let display_indices = self.display_indices.borrow().clone();
@@ -580,9 +590,11 @@ impl<T: 'static> Widget for TreeBodyPane<T> {
             };
             self.row_entries.push((flat_idx, tree_row_id));
 
-            // Row handlers: selection click + optional drag-to-reorder
-            // (combined so a row carries both, applied once).
+            // Row handlers: selection click + optional drag-to-reorder. The
+            // drag is kept apart — it goes on an enclosing `DragSurface`, not
+            // on the row; see where it is applied below.
             let mut row_handlers = HandlerSet::new();
+            let mut row_drag: Option<HandlerSet> = None;
             if let Some(ref sel) = selection
                 && matches!(
                     selection_mode,
@@ -597,52 +609,47 @@ impl<T: 'static> Widget for TreeBodyPane<T> {
                 // dragged; the collapse-to-single happens on release WITHOUT
                 // a drag, and only on a release the row still owns (see
                 // `release_completes_the_press`) — mirrors `ListView`.
-                let pending_collapse = Rc::new(Cell::new(false));
+                let pending_collapse = crate::data_views::deferred_select::pending_cell();
+                let focused_for_up = self.focused_cell.clone();
                 row_handlers = row_handlers.on_pointer_event(move |event, ctx| match event {
                     WidgetEvent::PointerDown {
                         button: PointerButton::Primary,
                         modifiers,
                         ..
                     } => {
-                        // The press belongs to an interactive child (an
-                        // embedded checkbox, twist arrow, …) — let it handle
-                        // the tap; don't also select the row. Clear any stale
-                        // deferred-collapse (left by a prior drag whose
-                        // PointerUp the drag machinery consumed) so it can't
-                        // fire on this unrelated interaction.
-                        if ctx.press_claimed_by_interactive_child() {
-                            pending_collapse.set(false);
-                            return EventResponse::Ignored;
-                        }
-                        // Move the keyboard-navigation cursor to the clicked row so a
-                        // subsequent Arrow steps from here — the row-nav origin is
-                        // `focused_cell.get().unwrap_or((0,0))`, which nothing else
-                        // writes on a click. Keep the existing column; the ring stays
-                        // hidden (gated on the pointer/keyboard `focus_visible`
-                        // modality).
                         // Resolve the row's CURRENT position once: rows above
                         // may have appeared or vanished since this handler was
                         // built, and a gone row must not hand its click to
-                        // whoever took its slot.
+                        // whoever took its slot. The interactive-child guard
+                        // lives in the shared helper, which also clears a stale
+                        // deferred decision — so a vanished row clears it here
+                        // rather than stranding the flag.
                         let Some(row_index_for_click) = click_anchor.index() else {
+                            pending_collapse.set(None);
                             return EventResponse::Ignored;
                         };
-                        let col = focused_for_click.get().map(|(_, c)| c).unwrap_or(0);
-                        focused_for_click.set(Some((row_index_for_click, col)));
-                        if modifiers.command() && sel_for_click.mode() == SelectionMode::Multi {
-                            sel_for_click.toggle(row_index_for_click);
-                            pending_collapse.set(false);
-                        } else if modifiers.shift() && sel_for_click.mode() == SelectionMode::Multi
-                        {
-                            sel_for_click.extend_to(row_index_for_click);
-                            pending_collapse.set(false);
-                        } else if sel_for_click.is_selected(row_index_for_click) {
-                            // Defer: a following drag preserves the whole
-                            // selection; a plain click collapses on release.
-                            pending_collapse.set(true);
-                        } else {
-                            sel_for_click.select(row_index_for_click);
-                            pending_collapse.set(false);
+                        // The shared helper owns the whole decision: the
+                        // interactive-child guard, the accelerator and shift
+                        // clicks, the deferred collapse, and — for a direct
+                        // pointer — deferring the lot to the release. Its
+                        // return value is whether the nav cursor should move
+                        // now, so the arrow-nav origin can never point at a row
+                        // the selection does not.
+                        //
+                        // The row-nav origin is
+                        // `focused_cell.get().unwrap_or((0, 0))`, which nothing
+                        // else writes on a click. The existing column is kept;
+                        // the ring stays hidden (gated on the pointer/keyboard
+                        // `focus_visible` modality).
+                        if crate::data_views::deferred_select::on_down(
+                            &sel_for_click,
+                            row_index_for_click,
+                            *modifiers,
+                            &pending_collapse,
+                            ctx,
+                        ) {
+                            let col = focused_for_click.get().map(|(_, c)| c).unwrap_or(0);
+                            focused_for_click.set(Some((row_index_for_click, col)));
                         }
                         EventResponse::Ignored
                     }
@@ -650,30 +657,28 @@ impl<T: 'static> Widget for TreeBodyPane<T> {
                         button: PointerButton::Primary,
                         ..
                     } => {
-                        // A release on an interactive child is that child's
-                        // own tap — never collapse the row from it (guards
-                        // against a `pending_collapse` a prior drag left
-                        // stuck true).
-                        if ctx.press_claimed_by_interactive_child() {
-                            return EventResponse::Ignored;
-                        }
-                        // Collapse the deferred multi-selection to the
-                        // clicked row — but only if the release still
-                        // belongs to this row. An `active_drag` is not the
-                        // only way it stops doing so: a finger's pan claim
-                        // wins the arbitration without raising a drag, so
-                        // the `PointerUp` is not routed to
-                        // `handle_drag_drop` and does arrive here. See
-                        // `data_views::release_completes_the_press`.
-                        if !crate::data_views::release_completes_the_press(ctx) {
-                            // Abandoned, not postponed — see the helper.
-                            pending_collapse.set(false);
-                            return EventResponse::Ignored;
-                        }
-                        if pending_collapse.replace(false)
-                            && let Some(row) = click_anchor.index()
-                        {
-                            sel_for_click.select(row);
+                        // Apply whatever the press deferred — the collapse of
+                        // a multi-selection a mouse kept alive for a drag, or a
+                        // direct pointer's whole decision, nav cursor included.
+                        // The helper owns the interactive-child guard and asks
+                        // `release_completes_the_press` for itself, which is
+                        // how a finger's pan claim (which wins the arbitration
+                        // without raising a drag, so the `PointerUp` is not
+                        // routed to `handle_drag_drop` and does arrive here)
+                        // commits nothing.
+                        match click_anchor.index() {
+                            Some(row) => {
+                                if crate::data_views::deferred_select::on_up(
+                                    &sel_for_click,
+                                    row,
+                                    &pending_collapse,
+                                    ctx,
+                                ) {
+                                    let col = focused_for_up.get().map(|(_, c)| c).unwrap_or(0);
+                                    focused_for_up.set(Some((row, col)));
+                                }
+                            }
+                            None => pending_collapse.set(None),
                         }
                         EventResponse::Ignored
                     }
@@ -703,7 +708,7 @@ impl<T: 'static> Widget for TreeBodyPane<T> {
                 let sel_for_drag = selection.clone();
                 let export_for_drag = self.export.clone();
                 let source_for_drag = source.clone();
-                row_handlers = row_handlers.on_drag(move |phase, ctx| {
+                row_drag = Some(HandlerSet::new().on_drag(move |phase, ctx| {
                     if let teksilo_core::gesture::DragPhase::Started { .. } = phase {
                         // Selection-aware dragged set: the whole selection
                         // when the pressed row is part of a
@@ -795,7 +800,7 @@ impl<T: 'static> Widget for TreeBodyPane<T> {
                         )) as Box<dyn Widget>;
                         ctx.start_drag_with_preview(anchor, payload, preview);
                     }
-                });
+                }));
             }
             // Row activation (open/commit) — a gesture, so it arbitrates
             // against the reorder drag via the gesture arena (a click
@@ -836,6 +841,23 @@ impl<T: 'static> Widget for TreeBodyPane<T> {
                 ctx.apply_handlers(tree_row_id, handlers);
             }
             ctx.apply_handlers(tree_row_id, row_handlers);
+
+            // The reorder drag goes on a wrapper that STRICTLY encloses this
+            // row, never on the row itself: a drag on the node that captures
+            // the press is driven by the capture dispatch, which runs before
+            // the arbitration advances, so it latches at `drag_slop` and
+            // decides the sequence before the view's own `PanClaim` can win at
+            // `pan_slop`. Enclosing it is also the only shape the tree arms
+            // `DragActivation` for — `Immediate` for a mouse, `AfterLongPress`
+            // for a finger. The absorber guarantees the row a gesture arena so
+            // something *inside* the wrapper takes the press.
+            let mut row_root = tree_row_id;
+            if let Some(drag) = row_drag {
+                ctx.apply_handlers(tree_row_id, crate::data_views::press_absorber());
+                row_root = ctx.add(crate::data_views::DragSurface::new(tree_row_id));
+                ctx.apply_handlers(row_root, drag);
+            }
+            self.row_roots.push(row_root);
         }
         ctx.end_view_focus();
 
@@ -844,7 +866,7 @@ impl<T: 'static> Widget for TreeBodyPane<T> {
         // Publish the realized (index -> row wrapper id) map for the view.
         *self.row_map.borrow_mut() = self.row_entries.clone();
 
-        self.row_entries.iter().map(|(_, id)| *id).collect()
+        self.row_roots.clone()
     }
 
     fn layout_response(
@@ -944,7 +966,7 @@ impl<T: 'static> Widget for TreeBodyPane<T> {
     }
 
     fn children(&self) -> Vec<WidgetId> {
-        self.row_entries.iter().map(|(_, id)| *id).collect()
+        self.row_roots.clone()
     }
 
     fn clips_children(&self) -> bool {

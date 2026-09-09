@@ -13,6 +13,7 @@
 pub(crate) mod column_geometry;
 pub mod datetime;
 pub mod drag_autoscroll;
+pub(crate) mod drop_bands;
 pub(crate) mod editor_runtime;
 pub(crate) mod interaction;
 pub(crate) mod list_nav;
