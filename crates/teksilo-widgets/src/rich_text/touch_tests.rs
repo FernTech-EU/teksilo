@@ -186,6 +186,19 @@ impl Harness {
             .dispatch_pointer(touch(id, PointerPhase::Up, at, ms));
     }
 
+    /// A hold of `kind` at a window point, **laid out**.
+    ///
+    /// The `render()` is not tidiness. The affordances the hold raises live in a
+    /// `FullViewport` overlay, and until a layout runs its bounds are still zero
+    /// — so a press dispatched before one is not routed through the overlay at
+    /// all, and any test that then asserts the surface answered it is answering
+    /// for the wrong mechanism. Every hold in this file goes through here so that
+    /// cannot happen by omission.
+    fn hold_at(&mut self, kind: PointerKind, at: Point) {
+        self.tree.long_press_at(kind, at);
+        self.render();
+    }
+
     /// Press, then release, at the same point.
     fn finger_tap(&mut self, at: Point) {
         let id = finger();
@@ -251,7 +264,7 @@ fn a_mouse_raises_no_affordances() {
 fn a_mouse_hold_selects_no_word() {
     let mut h = Harness::focused("hello world and a longer line of prose");
     let target = h.at(8);
-    h.tree.long_press_at(PointerKind::Mouse, target);
+    h.hold_at(PointerKind::Mouse, target);
     assert!(
         h.selection().is_empty(),
         "a mouse hold selected {:?}",
@@ -337,7 +350,7 @@ fn a_finger_tap_raises_a_caret_handle_and_no_toolbar() {
 #[test]
 fn a_finger_hold_selects_a_word_and_raises_its_handles() {
     let mut h = Harness::focused("hello world and a longer line of prose");
-    h.tree.long_press_at(PointerKind::Touch, h.at(8));
+    h.hold_at(PointerKind::Touch, h.at(8));
     assert_eq!(h.selection(), 6..11, "the word under the finger");
     let kinds: Vec<_> = h.handles().iter().map(|g| g.kind).collect();
     assert_eq!(
@@ -364,7 +377,7 @@ fn a_finger_hold_selects_a_word_and_raises_its_handles() {
 #[test]
 fn a_hold_selects_the_word_under_the_finger_and_not_one_beside_it() {
     let mut h = Harness::focused("hello world and a longer line of prose");
-    h.tree.long_press_at(PointerKind::Touch, h.at(7));
+    h.hold_at(PointerKind::Touch, h.at(7));
     assert_eq!(h.selection(), 6..11, "the second word, not the first");
 }
 
@@ -374,7 +387,7 @@ fn a_hold_selects_the_word_under_the_finger_and_not_one_beside_it() {
 #[test]
 fn a_raised_handle_sits_at_the_caret_it_marks_in_window_space() {
     let mut h = Harness::focused("hello world and a longer line of prose");
-    h.tree.long_press_at(PointerKind::Touch, h.at(8));
+    h.hold_at(PointerKind::Touch, h.at(8));
     let start = h
         .handle_of(SelectionHandleKind::Start)
         .expect("a start handle is up");
@@ -398,7 +411,7 @@ fn a_raised_handle_sits_at_the_caret_it_marks_in_window_space() {
 #[test]
 fn the_release_after_a_hold_does_not_collapse_its_word() {
     let mut h = Harness::focused("hello world and a longer line of prose");
-    h.tree.long_press_at(PointerKind::Touch, h.at(8));
+    h.hold_at(PointerKind::Touch, h.at(8));
     assert_eq!(h.selection(), 6..11, "the hold selected the word");
 }
 
@@ -410,7 +423,7 @@ fn the_release_after_a_hold_does_not_collapse_its_word() {
 #[test]
 fn dragging_the_end_handle_extends_the_selection() {
     let mut h = Harness::focused("hello world and a longer line of prose");
-    h.tree.long_press_at(PointerKind::Touch, h.at(8));
+    h.hold_at(PointerKind::Touch, h.at(8));
     assert_eq!(h.selection(), 6..11);
     h.render();
     let end = h
@@ -440,7 +453,7 @@ fn dragging_the_end_handle_extends_the_selection() {
 #[test]
 fn a_hold_on_an_editable_editor_offers_cut_copy_and_paste() {
     let mut h = Harness::focused("hello world and a longer line of prose");
-    h.tree.long_press_at(PointerKind::Touch, h.at(8));
+    h.hold_at(PointerKind::Touch, h.at(8));
     let actions = h.toolbar_actions();
     assert!(actions.contains(&TextAction::Cut), "{actions:?}");
     assert!(actions.contains(&TextAction::Copy), "{actions:?}");
@@ -462,7 +475,7 @@ fn a_hold_on_a_viewer_offers_copy_only() {
     let mut h = Harness::new(RichTextEditor::read_only(doc));
     h.tree.focus(h.editor);
     h.render();
-    h.tree.long_press_at(PointerKind::Touch, h.at(8));
+    h.hold_at(PointerKind::Touch, h.at(8));
     assert_eq!(h.selection(), 6..11, "a viewer still selects");
     assert_eq!(h.toolbar_actions(), vec![TextAction::Copy]);
 }
@@ -523,6 +536,69 @@ fn a_plain_mouse_click_on_a_link_in_an_editable_editor_places_a_caret_instead() 
 }
 
 // ---------------------------------------------------------------------------
+// The affordance overlay, laid out
+// ---------------------------------------------------------------------------
+
+/// A tap that lands on **no handle** reaches the editor and places a caret,
+/// while the affordance overlay above it is at its real, viewport-sized bounds.
+///
+/// The overlay is `FullViewport` and declares `event_pass_through`, so the
+/// router's fall-through is the only thing that lets the editor underneath keep
+/// taking presses. That is invisible to a test that never lays out after the
+/// hold: an overlay whose bounds are still zero is not chosen by the hit test at
+/// all, so the press reaches the editor for a reason the fall-through had no part
+/// in. Hence [`Harness::hold_at`]'s layout, and hence the check below that the
+/// overlay really does cover the target.
+#[test]
+fn a_tap_beyond_the_affordances_reaches_the_editor_itself() {
+    let mut h = Harness::focused(FALLTHROUGH_TEXT);
+    h.hold_at(PointerKind::Touch, h.at(8));
+    let target = h.at(FALLTHROUGH_TARGET);
+    let handles = h.handles();
+    assert!(!handles.is_empty(), "the hold raised no handles");
+    for g in &handles {
+        assert!(
+            !g.hit.contains(target),
+            "the fixture's target is on the {:?} handle's own hit square: {:?}",
+            g.kind,
+            g.hit
+        );
+    }
+    let layer = h
+        .touch
+        .layer_content()
+        .expect("the affordance host was built");
+    let bounds = h
+        .tree
+        .overlay_manager()
+        .bounds_for_content(layer)
+        .expect("the overlay is up");
+    assert!(
+        bounds.contains(target),
+        "the overlay must be laid out over the target, or the fall-through is \
+         never consulted: {bounds:?} against {target:?}"
+    );
+
+    let id = finger();
+    h.finger_down(id, target, 0);
+    h.finger_up(id, target, 30);
+    assert_eq!(
+        h.caret(),
+        FALLTHROUGH_TARGET,
+        "the editor never saw the tap"
+    );
+}
+
+/// Four lines, so a tap can be placed clear of the handles' own squares without
+/// leaving the editor.
+const FALLTHROUGH_TEXT: &str =
+    "hello world and prose\nsecond line here\nthird line of text\nfourth line here";
+
+/// An offset on the last line — two lines below the handles the hold on line one
+/// raises.
+const FALLTHROUGH_TARGET: usize = 60;
+
+// ---------------------------------------------------------------------------
 // Retirement
 // ---------------------------------------------------------------------------
 
@@ -532,7 +608,7 @@ fn a_plain_mouse_click_on_a_link_in_an_editable_editor_places_a_caret_instead() 
 #[test]
 fn a_mouse_press_retires_the_touch_chrome() {
     let mut h = Harness::focused("hello world and a longer line of prose");
-    h.tree.long_press_at(PointerKind::Touch, h.at(8));
+    h.hold_at(PointerKind::Touch, h.at(8));
     assert!(!h.handles().is_empty(), "the hold raised handles");
     h.mouse_press(h.at(2));
     assert!(
@@ -548,7 +624,7 @@ fn a_mouse_press_retires_the_touch_chrome() {
 #[test]
 fn losing_focus_retires_the_touch_chrome() {
     let mut h = Harness::focused("hello world and a longer line of prose");
-    h.tree.long_press_at(PointerKind::Touch, h.at(8));
+    h.hold_at(PointerKind::Touch, h.at(8));
     assert!(!h.handles().is_empty(), "the hold raised handles");
     h.tree.focus(h.elsewhere);
     h.render();
@@ -565,7 +641,7 @@ fn losing_focus_retires_the_touch_chrome() {
 fn a_keystroke_refreshes_the_handles_it_did_not_place() {
     use teksilo_core::event::{Key, Modifiers, WidgetEvent};
     let mut h = Harness::focused("hello world and a longer line of prose");
-    h.tree.long_press_at(PointerKind::Touch, h.at(8));
+    h.hold_at(PointerKind::Touch, h.at(8));
     assert_eq!(h.selection(), 6..11);
     h.tree.dispatch_event(WidgetEvent::KeyDown {
         key: Key::ArrowRight,
@@ -595,7 +671,7 @@ fn an_at_edit_refreshes_the_handles() {
     use teksilo_core::accesskit::{Action, ActionData};
     use teksilo_core::event::WidgetEvent;
     let mut h = Harness::focused("hello world and a longer line of prose");
-    h.tree.long_press_at(PointerKind::Touch, h.at(8));
+    h.hold_at(PointerKind::Touch, h.at(8));
     assert_eq!(h.selection(), 6..11, "the hold's word");
     let kinds: Vec<_> = h.handles().iter().map(|g| g.kind).collect();
     assert_eq!(
@@ -774,6 +850,224 @@ fn a_viewport_growth_leaves_the_scroll_alone() {
 }
 
 // ---------------------------------------------------------------------------
+// The image resize grip, through the press path
+// ---------------------------------------------------------------------------
+
+/// A 2×2 opaque-red PNG.
+///
+/// Real pixels are a precondition, not decoration: `paint_images` skips an image
+/// whose bytes do not decode *before* it can record it as the selected one, so a
+/// fixture without them raises no grips and the probes below would miss for a
+/// reason that has nothing to do with aiming.
+fn red_png() -> Vec<u8> {
+    let mut buf = Vec::new();
+    {
+        let mut enc = png::Encoder::new(&mut buf, 2, 2);
+        enc.set_color(png::ColorType::Rgba);
+        enc.set_depth(png::BitDepth::Eight);
+        let mut w = enc.write_header().unwrap();
+        w.write_image_data(&[255, 0, 0, 255].repeat(4)).unwrap();
+    }
+    buf
+}
+
+/// The reach of the grip's own painted square — what a press had before the
+/// widening, and what the widened band has to be measured against.
+///
+/// The module's slop constant is private, so this restates it, exactly as
+/// `the_grip_widening_is_not_a_touch_only_courtesy` does.
+fn painted_grip_reach() -> f32 {
+    super::paint::RESIZE_HANDLE_SIZE / 2.0 + 5.0
+}
+
+/// A mounted, focused editor holding one **selected** picture, plus that
+/// picture's rect in the space the press path measures in and the reach in force
+/// at this tree's density.
+///
+/// The rect comes from the paint pass rather than from the fixture's own
+/// arithmetic, because the paint pass is what tells the press path where the
+/// grips are: reading it back is what makes these tests answer for the wiring
+/// rather than for a rectangle the test invented.
+fn with_selected_image() -> (Harness, [f32; 4], f32) {
+    // Small enough that the band outside the bottom-right grip is still inside
+    // the editor's node — a probe outside the node never reaches the press path
+    // at all — and large enough that the quarter-side clamp is not what the
+    // probes below are measuring.
+    const EDGE: u32 = 64;
+    let doc = TextDocument::new();
+    // Prose as well as the picture, so the editor is not sized by the picture
+    // alone.
+    let mut prose = String::new();
+    for i in 0..20 {
+        prose.push_str(&format!("line {i} of prose beside and below the picture\n"));
+    }
+    doc.set_plain_text(&prose).unwrap();
+    doc.add_resource(
+        teksilo_text::text_document::ResourceType::Image,
+        "a.png",
+        "image/png",
+        &red_png(),
+    )
+    .unwrap();
+    let editor = RichTextEditor::editor(doc);
+    // Both before mounting, so the picture and the selection are already in
+    // place for the **first** layout and paint: `paint_images` records the
+    // selected picture only on a full render, and it is the recorded rect the
+    // press path reads.
+    editor.insert_image("a.png", "a red square", EDGE, EDGE);
+    editor.handle().select_range(0, 1);
+    let mut h = Harness::new(editor);
+    h.tree.focus(h.editor);
+    h.render();
+    let (rect, reach) = {
+        let st = h.state.borrow();
+        let rect = st
+            .selected_image
+            .borrow()
+            .clone()
+            .expect("the paint pass recorded the selected picture")
+            .rect;
+        (
+            rect,
+            super::mouse::grip_reach_for_test(&st.input_tokens, rect),
+        )
+    };
+    assert!(
+        reach > painted_grip_reach(),
+        "the fixture has no band only the widened reach covers: {reach} vs {}",
+        painted_grip_reach()
+    );
+    (h, rect, reach)
+}
+
+/// The engine-space point `(dx, dy)` from the picture's bottom-right corner, as
+/// a **window** point the tree can be handed.
+///
+/// `to_engine_local` reconstructs the window point from the wrapper-local one
+/// the router hands it and then subtracts the body's origin, so the inverse is
+/// exactly `local + viewport_origin`. The editor is mounted inside padding, so a
+/// missing conversion here does not cancel out.
+fn window_off_corner(h: &Harness, rect: [f32; 4], dx: f32, dy: f32) -> Point {
+    let body = h.state.borrow().viewport_origin;
+    Point::new(
+        rect[0] + rect[2] + body.x + dx,
+        rect[1] + rect[3] + body.y + dy,
+    )
+}
+
+fn resizing_corner(h: &Harness) -> Option<(f32, f32)> {
+    match &h.state.borrow().drag_state {
+        super::state::DragState::ResizingImage { corner, .. } => Some(*corner),
+        _ => None,
+    }
+}
+
+/// A press **outside** the grip's painted square, in the band only the
+/// density-projected reach covers, starts the resize.
+///
+/// The mounted counterpart of
+/// `a_near_miss_on_a_grip_is_picked_up_by_the_widened_reach`, and the one that
+/// answers for the press path: the widening is only a feature if
+/// `grabbed_handle` consults it, and a pure-function test cannot see which reach
+/// that call site uses.
+#[test]
+fn a_press_beside_a_grip_starts_the_resize() {
+    let (mut h, rect, reach) = with_selected_image();
+    let inside = reach - 1.0;
+    // Precondition: the painted square's own reach misses this point, so
+    // whatever answers it is the widened one.
+    assert_eq!(
+        super::mouse::handle_near_for_test(
+            rect,
+            Point::new(rect[0] + rect[2] + inside, rect[1] + rect[3] + inside),
+            painted_grip_reach(),
+        ),
+        None,
+        "fixture precondition: the painted square's reach must miss {inside} dp out"
+    );
+    h.mouse_press(window_off_corner(&h, rect, inside, inside));
+    assert_eq!(
+        resizing_corner(&h),
+        Some((1.0, 1.0)),
+        "a press {inside} dp off the bottom-right corner did not grab it: {:?}",
+        h.state.borrow().drag_state
+    );
+}
+
+/// …and a press past the widened reach is ordinary text again. Without this the
+/// test above would pass for a grip that had swallowed the whole picture.
+#[test]
+fn a_press_past_the_widened_reach_is_not_a_resize() {
+    let (mut h, rect, reach) = with_selected_image();
+    let outside = reach + 1.0;
+    h.mouse_press(window_off_corner(&h, rect, outside, outside));
+    assert_eq!(
+        resizing_corner(&h),
+        None,
+        "a press {outside} dp off the corner grabbed a grip whose reach is {reach}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// The text-drag threshold, through the press path
+// ---------------------------------------------------------------------------
+
+/// Select a word, press inside it, then move `travel` along x. Returns the drag
+/// state the surface was left in.
+///
+/// A press inside a selection arms `PendingTextDrag` and the *move* decides:
+/// under the threshold the press is still a click and the state stands, past it
+/// the passage is handed to the drag system and the surface goes back to `Idle`.
+/// So the state after one move is the threshold, observed through the mounted
+/// editor rather than through the pure function.
+fn drag_state_after_moving(travel: f32) -> super::state::DragState {
+    let mut h = Harness::focused("hello world and a longer line of prose");
+    h.handle.select_range(6, 11);
+    let from = h.at(8);
+    h.mouse_press(from);
+    assert!(
+        matches!(
+            h.state.borrow().drag_state,
+            super::state::DragState::PendingTextDrag { .. }
+        ),
+        "fixture precondition: the press inside the selection must arm a drag"
+    );
+    h.mouse_move(Point::new(from.x + travel, from.y));
+    h.state.borrow().drag_state.clone()
+}
+
+/// A mouse's text drag starts at **its own** `drag_slop` and not before, so the
+/// probes straddle the profile's figure rather than a constant of this test's.
+/// The threshold used to be a local `4.0` invented in the module, which is
+/// shorter than the mouse's slop — so a press that wobbled picked a passage up.
+#[test]
+fn a_mouse_needs_its_own_drag_slop_to_pick_a_passage_up() {
+    // Read from a mounted surface, so it is the ladder the press path itself
+    // consults rather than one this test assumed.
+    let slop = {
+        let h = Harness::focused("hello world");
+        let tokens = h.state.borrow().input_tokens;
+        tokens.profile(PointerKind::Mouse).drag_slop
+    };
+    assert!(
+        matches!(
+            drag_state_after_moving(slop - 0.5),
+            super::state::DragState::PendingTextDrag { .. }
+        ),
+        "{} dp of travel started a drag the mouse's {slop} dp slop forbids",
+        slop - 0.5
+    );
+    assert!(
+        matches!(
+            drag_state_after_moving(slop + 0.5),
+            super::state::DragState::Idle
+        ),
+        "{} dp of travel did not hand the passage to the drag system",
+        slop + 0.5
+    );
+}
+
+// ---------------------------------------------------------------------------
 // The pure geometry
 // ---------------------------------------------------------------------------
 
@@ -893,7 +1187,7 @@ mod geometry {
         assert!(follows(pen, false, false));
         // A cursor in an editable surface with no modifier: place a caret.
         assert!(!follows(PointerKind::Mouse, false, false));
-        // …and follows once it asks, or once there is no caret to place.
+        // …and follows once it asks, or once the surface is read-only.
         assert!(follows(PointerKind::Mouse, false, true));
         assert!(follows(PointerKind::Mouse, true, false));
     }

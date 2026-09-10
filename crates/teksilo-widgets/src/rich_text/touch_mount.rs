@@ -8,7 +8,7 @@
 //! # Why this lives under `rich_text`
 //!
 //! It serves [`RichTextEditor`](super::RichTextEditor), `CodeEditor`,
-//! `PlainTextEditor` and `LogView` — three widgets over two state types — so
+//! `PlainTextEditor` and `LogView` — four widgets over two state types — so
 //! its natural home is `crate::common`. It sits here instead because
 //! `code_editor` already reaches into `rich_text` for its hit test
 //! ([`hit_test`](super::hit_test)) and its painter

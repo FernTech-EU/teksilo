@@ -106,9 +106,12 @@ re-themes live when you swap the scheme.
   sub-line samples are **banked** until they add up to a line, so a slow
   two-finger scroll moves the ring instead of being rounded away.
 - **Mouse reporting** — when a full-screen app (vim, tmux) enables it, presses /
-  releases / drags / wheel are reported (SGR + legacy X10). `Shift` forces local
-  selection instead. A **direct** pointer is governed separately by
-  `.touch_mouse_reporting(..)` and is not reported by default.
+  releases / drags / wheel are reported (SGR + legacy X10), each naming the cell
+  the pointer is over — the wheel included, so a program that splits its window
+  can tell which pane the notch happened in. A wheel notch is routed by hover and
+  carries no position of its own, so its cell is the one the cursor was last seen
+  on. `Shift` forces local selection instead. A **direct** pointer is governed
+  separately by `.touch_mouse_reporting(..)` and is not reported by default.
 - **Leaving the terminal** — `Ctrl+Tab` / `Ctrl+Shift+Tab` move focus to the
   next / previous widget. Plain `Tab` and `Shift+Tab` belong to the child (they
   are encoded as `\t` and CSI Z), so this chord is the way out; it is reserved
@@ -175,7 +178,13 @@ machinery every text surface uses. Two things are specific to a grid:
 - those offsets are **viewport** offsets, so anything that scrolls the view
   retires the affordances rather than trying to follow them. New *output* does
   not: the engine holds its selection in buffer coordinates and the snapshot
-  re-projects it, so the handles move with the text.
+  re-projects it, so the handles move with the text;
+- a handle's disc hangs a radius **off** the row it marks, so the host translates
+  every drag sample back onto that row — the grab offset is captured when the drag
+  begins and added to each sample after. Because `offset_at` floors the vertical
+  axis and a trailing handle's anchor sits past the row's bottom edge, an
+  untranslated sample resolves a whole row away however small the radius is. Same
+  correction, same shape, as the rich-text host's.
 
 `is_editable()` is `false` — the cursor belongs to the child program, so there is
 no caret to place, no caret handle and nothing a Cut could remove. A **cursor**
@@ -203,6 +212,11 @@ column, no mnemonics, and English labels (this crate has no message bundle). It 
 a menu for four commands, and an application that wants a richer or translated
 one installs its own `context_menu` factory on an ancestor — the terminal's is
 consulted first only because the walk starts at the target.
+
+Its rows do follow the **density ladder**: the row-height floor is a base passed
+through `dp(.., TargetRole::Target, ..)`, the same projection the selection
+handles' diameters take, so a menu opened by a finger is sized for one. A row
+still grows past that floor when its label's line is taller.
 
 ### `TouchReporting`
 

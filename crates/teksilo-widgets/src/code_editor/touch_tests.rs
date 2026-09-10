@@ -203,6 +203,19 @@ impl Harness {
             .dispatch_pointer(touch(id, PointerPhase::Up, at, ms));
     }
 
+    /// A hold of `kind` at a window point, **laid out**.
+    ///
+    /// The `render()` is not tidiness. The affordances the hold raises live in a
+    /// `FullViewport` overlay, and until a layout runs its bounds are still zero
+    /// — so a press dispatched before one is not routed through the overlay at
+    /// all, and any test that then asserts the surface answered it is answering
+    /// for the wrong mechanism. Every hold in this file goes through here so that
+    /// cannot happen by omission.
+    fn hold_at(&mut self, kind: PointerKind, at: Point) {
+        self.tree.long_press_at(kind, at);
+        self.render();
+    }
+
     fn finger_tap(&mut self, at: Point) {
         let id = finger();
         self.finger_down(id, at, 0);
@@ -252,6 +265,31 @@ fn an_alt_click_still_adds_a_caret() {
     );
 }
 
+/// …and a plain click **collapses** the set back to one caret. The other half of
+/// the same branch: Alt-click adds, a plain or shift click is the user saying
+/// where they want to be, and without the collapse a multi-caret session could
+/// only be left by a keystroke.
+#[test]
+fn a_plain_click_collapses_the_extra_carets() {
+    let mut h = Harness::code("fn main() { let x = 1; }");
+    h.mouse_press(h.at(2));
+    h.mouse_press_with(h.at(14), teksilo_core::event::Modifiers::ALT);
+    assert_eq!(h.caret_count(), 2, "fixture precondition: two carets");
+
+    h.mouse_press(h.at(20));
+    assert_eq!(
+        h.caret_count(),
+        1,
+        "a plain click left {} carets standing",
+        h.caret_count()
+    );
+    assert_eq!(h.caret(), 20, "and the primary caret followed the click");
+    assert!(
+        h.state.borrow().extra_carets.is_empty(),
+        "the extra carets are gone from the state, not merely uncounted"
+    );
+}
+
 /// A mouse reaches **none** of the touch machinery. This is the assertion that
 /// fails if the kind guard at the top of `handle_pointer_event` is removed.
 #[test]
@@ -275,7 +313,7 @@ fn a_mouse_raises_no_affordances() {
 #[test]
 fn a_mouse_hold_selects_no_word() {
     let mut h = Harness::code("fn main() { let x = 1; }");
-    h.tree.long_press_at(PointerKind::Mouse, h.at(4));
+    h.hold_at(PointerKind::Mouse, h.at(4));
     assert!(
         h.selection().is_empty(),
         "a mouse hold selected {:?}",
@@ -327,7 +365,7 @@ fn a_finger_that_panned_places_no_caret() {
 #[test]
 fn a_finger_hold_selects_a_word_and_raises_its_handles() {
     let mut h = Harness::code("fn main() { let value = 1; }");
-    h.tree.long_press_at(PointerKind::Touch, h.at(18));
+    h.hold_at(PointerKind::Touch, h.at(18));
     assert_eq!(h.selection(), 16..21, "the word under the finger");
     let kinds: Vec<_> = h.handles().iter().map(|g| g.kind).collect();
     assert_eq!(
@@ -345,7 +383,7 @@ fn a_finger_hold_selects_a_word_and_raises_its_handles() {
 #[test]
 fn a_hold_selects_the_word_under_the_finger_and_not_one_beside_it() {
     let mut h = Harness::code("fn main() { let value = 1; }");
-    h.tree.long_press_at(PointerKind::Touch, h.at(17));
+    h.hold_at(PointerKind::Touch, h.at(17));
     assert_eq!(h.selection(), 16..21);
 }
 
@@ -365,7 +403,7 @@ fn a_hold_collapses_a_multi_caret_set() {
     });
     assert_eq!(h.caret_count(), 2, "fixture precondition: two carets");
     // "value" is 4..9 on the first line.
-    h.tree.long_press_at(PointerKind::Touch, h.at(6));
+    h.hold_at(PointerKind::Touch, h.at(6));
     assert_eq!(h.caret_count(), 1, "the hold's range is one selection");
     assert_eq!(h.selection(), 4..9);
 }
@@ -374,7 +412,7 @@ fn a_hold_collapses_a_multi_caret_set() {
 #[test]
 fn dragging_the_end_handle_extends_the_selection() {
     let mut h = Harness::code("fn main() { let value = 1; }");
-    h.tree.long_press_at(PointerKind::Touch, h.at(18));
+    h.hold_at(PointerKind::Touch, h.at(18));
     assert_eq!(h.selection(), 16..21);
     h.render();
     let end = h
@@ -394,7 +432,7 @@ fn dragging_the_end_handle_extends_the_selection() {
 #[test]
 fn a_hold_on_a_code_editor_offers_cut_copy_and_paste() {
     let mut h = Harness::code("fn main() { let value = 1; }");
-    h.tree.long_press_at(PointerKind::Touch, h.at(18));
+    h.hold_at(PointerKind::Touch, h.at(18));
     let actions = h.toolbar_actions();
     assert!(actions.contains(&TextAction::Cut), "{actions:?}");
     assert!(actions.contains(&TextAction::Copy), "{actions:?}");
@@ -405,7 +443,7 @@ fn a_hold_on_a_code_editor_offers_cut_copy_and_paste() {
 #[test]
 fn a_hold_on_a_read_only_viewer_offers_copy_only() {
     let mut h = Harness::viewer("fn main() { let value = 1; }");
-    h.tree.long_press_at(PointerKind::Touch, h.at(18));
+    h.hold_at(PointerKind::Touch, h.at(18));
     assert_eq!(h.selection(), 16..21, "a viewer still selects");
     assert_eq!(h.toolbar_actions(), vec![TextAction::Copy]);
 }
@@ -416,7 +454,7 @@ fn a_hold_on_a_read_only_viewer_offers_copy_only() {
 fn the_plain_text_face_gets_the_same_hold() {
     let mut h = Harness::plain("some notes about a thing");
     // Offsets: "some"=0..4, "notes"=5..10, "about"=11..16.
-    h.tree.long_press_at(PointerKind::Touch, h.at(12));
+    h.hold_at(PointerKind::Touch, h.at(12));
     assert_eq!(h.selection(), 11..16, "the word under the finger");
     assert!(!h.handles().is_empty());
 }
@@ -427,7 +465,7 @@ fn the_plain_text_face_gets_the_same_hold() {
 #[test]
 fn a_hold_on_a_log_view_offers_copy() {
     let mut h = Harness::log(&["error while loading configuration", "second line"]);
-    h.tree.long_press_at(PointerKind::Touch, h.at(6));
+    h.hold_at(PointerKind::Touch, h.at(6));
     assert!(
         !h.selection().is_empty(),
         "the hold selected nothing in the log"
@@ -455,7 +493,7 @@ fn a_finger_tap_raises_a_caret_handle_and_no_toolbar() {
 #[test]
 fn a_mouse_press_retires_the_touch_chrome() {
     let mut h = Harness::code("fn main() { let value = 1; }");
-    h.tree.long_press_at(PointerKind::Touch, h.at(18));
+    h.hold_at(PointerKind::Touch, h.at(18));
     assert!(!h.handles().is_empty(), "the hold raised handles");
     h.mouse_press(h.at(2));
     assert!(
@@ -470,7 +508,7 @@ fn a_mouse_press_retires_the_touch_chrome() {
 #[test]
 fn losing_focus_retires_the_touch_chrome() {
     let mut h = Harness::code("fn main() { let value = 1; }");
-    h.tree.long_press_at(PointerKind::Touch, h.at(18));
+    h.hold_at(PointerKind::Touch, h.at(18));
     assert!(!h.handles().is_empty());
     h.tree.focus(h.elsewhere);
     h.render();
@@ -482,7 +520,7 @@ fn losing_focus_retires_the_touch_chrome() {
 fn a_keystroke_refreshes_the_handles_it_did_not_place() {
     use teksilo_core::event::{Key, Modifiers, WidgetEvent};
     let mut h = Harness::code("fn main() { let value = 1; }");
-    h.tree.long_press_at(PointerKind::Touch, h.at(18));
+    h.hold_at(PointerKind::Touch, h.at(18));
     assert_eq!(h.selection(), 16..21);
     h.tree.dispatch_event(WidgetEvent::KeyDown {
         key: Key::ArrowRight,
@@ -630,6 +668,71 @@ mod menu {
         );
     }
 
+    /// The two menu builders reach the **plain-text** face too. It is a wrapper
+    /// around a `CodeEditor`, so a builder it does not forward is a knob its
+    /// users simply do not have: without these it took the built-in menu and
+    /// could neither replace nor suppress it.
+    #[test]
+    fn a_plain_text_editor_installs_the_factory_it_was_given() {
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        let called = Rc::new(Cell::new(0u32));
+        let doc = TextDocument::new();
+        doc.set_plain_text("a note worth keeping").unwrap();
+        let seen = called.clone();
+        let editor = PlainTextEditor::new(doc).context_menu(move |_pos, _ctx| {
+            seen.set(seen.get() + 1);
+            Some(Box::new(crate::primitives::RectWidget::new())
+                as Box<dyn teksilo_core::widget::Widget>)
+        });
+        let inner = editor.inner.as_ref().expect("the wrapper holds its editor");
+        let (state, touch) = (inner.state.clone(), inner.touch.clone());
+        let mut h = Harness::mount(state, touch, editor);
+        let before = h.tree.overlay_manager().active_ids().len();
+        h.tree
+            .pointer_down_button(h.at(4), teksilo_core::event::PointerButton::Secondary);
+        assert_eq!(called.get(), 1, "the installed factory never ran");
+        assert!(
+            h.tree.overlay_manager().active_ids().len() > before,
+            "…and what it returned was not shown"
+        );
+    }
+
+    /// …and `default_context_menu(false)` suppresses the built-in one on that
+    /// face as well, so a right-click bubbles past it.
+    #[test]
+    fn a_plain_text_editors_built_in_menu_can_be_turned_off() {
+        let doc = TextDocument::new();
+        doc.set_plain_text("a note worth keeping").unwrap();
+        let editor = PlainTextEditor::new(doc).default_context_menu(false);
+        let inner = editor.inner.as_ref().expect("the wrapper holds its editor");
+        let (state, touch) = (inner.state.clone(), inner.touch.clone());
+        let mut h = Harness::mount(state, touch, editor);
+        let before = h.tree.overlay_manager().active_ids().len();
+        h.tree
+            .pointer_down_button(h.at(4), teksilo_core::event::PointerButton::Secondary);
+        assert_eq!(
+            h.tree.overlay_manager().active_ids().len(),
+            before,
+            "a suppressed menu opened anyway"
+        );
+    }
+
+    /// The plain-text face's built-in menu is there when nothing turns it off —
+    /// so the test above is measuring the suppression and not an absence.
+    #[test]
+    fn a_plain_text_editor_has_a_built_in_menu() {
+        let mut h = Harness::plain("a note worth keeping");
+        let before = h.tree.overlay_manager().active_ids().len();
+        h.tree
+            .pointer_down_button(h.at(4), teksilo_core::event::PointerButton::Secondary);
+        assert!(
+            h.tree.overlay_manager().active_ids().len() > before,
+            "a right-click on a plain-text editor opened no menu"
+        );
+    }
+
     /// A right-click **outside** the selection moves the caret to it, so Paste
     /// lands where the user pointed; one *inside* keeps the selection, so Cut and
     /// Copy act on it. Both halves, because either alone holds for the wrong
@@ -654,9 +757,9 @@ mod menu {
         assert!(h.selection().is_empty());
     }
 
-    /// A read-only surface is exempt from the repositioning: there is no caret to
-    /// move, and moving the selection would destroy the one the reader was about
-    /// to copy.
+    /// A read-only surface is exempt from the repositioning: its caret is
+    /// invisible, so a reposition buys nothing there and would destroy the
+    /// selection the reader was about to copy.
     #[test]
     fn a_right_click_in_a_viewer_leaves_its_selection_alone() {
         let mut h = Harness::viewer("fn main() { let value = 1; }");
@@ -786,10 +889,9 @@ mod shrink {
         assert_eq!(h.scroll(), 0.0);
     }
 
-    /// A **log view** never records a shrink. It has no caret, and pulling its
-    /// scroll offset anywhere would fight its own follow-tail rule — which is
-    /// derived from the scroll position, so a correction would silently turn
-    /// following back on.
+    /// A **log view** never records a shrink: pulling its scroll offset anywhere
+    /// would fight its own follow-tail rule, which is derived from that very
+    /// offset, so a correction would silently turn following back on.
     #[test]
     fn a_log_view_records_no_caret_reveal() {
         let view = LogView::new();
@@ -807,7 +909,8 @@ mod shrink {
         h.set_height(120.0);
         assert!(
             !h.state.borrow().pending_caret_reveal,
-            "a log view asked for a caret reveal it has no caret for"
+            "a log view asked for a caret reveal that would move its \
+             follow-tail offset"
         );
     }
 }
@@ -888,7 +991,7 @@ fn subtree(tree: &WidgetTree, root: WidgetId) -> Vec<WidgetId> {
 #[test]
 fn tapping_the_toolbars_cut_row_cuts_the_selection() {
     let mut h = Harness::code("fn main() { let value = 1; }");
-    h.tree.long_press_at(PointerKind::Touch, h.at(18));
+    h.hold_at(PointerKind::Touch, h.at(18));
     assert_eq!(h.selection(), 16..21, "the hold selected the word");
     h.render();
 
@@ -950,7 +1053,7 @@ fn dragging_a_handle_into_the_edge_band_scrolls_the_surface() {
     }
     let mut h = Harness::code(&text);
     // A word on the first line, so the End handle starts far from the bottom.
-    h.tree.long_press_at(PointerKind::Touch, h.at(6));
+    h.hold_at(PointerKind::Touch, h.at(6));
     assert!(!h.selection().is_empty(), "the hold selected a word");
     h.render();
     let before = h.state.borrow().scroll_y.get();
@@ -1002,7 +1105,7 @@ fn dragging_a_handle_clear_of_the_bands_scrolls_nothing() {
         text.push_str(&format!("let line_{i} = {i};\n"));
     }
     let mut h = Harness::code(&text);
-    h.tree.long_press_at(PointerKind::Touch, h.at(6));
+    h.hold_at(PointerKind::Touch, h.at(6));
     h.render();
     let before = h.state.borrow().scroll_y.get();
     let end = h
@@ -1065,7 +1168,7 @@ fn an_at_set_text_selection_moves_the_selection_and_the_handles() {
 
     let mut h = Harness::code("alpha\nbravo\ncharlie");
     // A hold on the first line, so the handles start there.
-    h.tree.long_press_at(PointerKind::Touch, h.at(2));
+    h.hold_at(PointerKind::Touch, h.at(2));
     assert_eq!(h.selection(), 0..5, "the hold selected the first word");
     let before = h
         .handles()
@@ -1118,5 +1221,67 @@ fn an_at_set_text_selection_moves_the_selection_and_the_handles() {
         "the end handle stayed on the first line at {:?} while the selection \
          moved to the third",
         after.caret
+    );
+}
+
+// ---------------------------------------------------------------------------
+// The affordance overlay, laid out
+// ---------------------------------------------------------------------------
+
+/// Four lines, so a tap can be placed clear of the handles' own squares without
+/// leaving the surface.
+const FALLTHROUGH_SOURCE: &str =
+    "fn main() {\n    let value = 1;\n    let other = 2;\n    let third = 3;\n}";
+
+/// An offset on the last statement — past the handles' squares on both axes.
+const FALLTHROUGH_TARGET: usize = 66;
+
+/// A tap that lands on **no handle** reaches the surface and places a caret,
+/// while the affordance overlay above it is at its real, viewport-sized bounds.
+///
+/// The overlay is `FullViewport` and declares `event_pass_through`, so the
+/// router's fall-through is the only thing that lets the surface underneath keep
+/// taking presses. That is invisible to a test that never lays out after the
+/// hold: an overlay whose bounds are still zero is not chosen by the hit test at
+/// all, so the press reaches the surface for a reason the fall-through had no
+/// part in. Hence [`Harness::hold_at`]'s layout, and hence the check below that
+/// the overlay really does cover the target.
+#[test]
+fn a_tap_beyond_the_affordances_reaches_the_editor_itself() {
+    let mut h = Harness::code(FALLTHROUGH_SOURCE);
+    h.hold_at(PointerKind::Touch, h.at(18));
+    let target = h.at(FALLTHROUGH_TARGET);
+    let handles = h.handles();
+    assert!(!handles.is_empty(), "the hold raised no handles");
+    for g in &handles {
+        assert!(
+            !g.hit.contains(target),
+            "the fixture's target is on the {:?} handle's own hit square: {:?}",
+            g.kind,
+            g.hit
+        );
+    }
+    let layer = h
+        .touch
+        .layer_content()
+        .expect("the affordance host was built");
+    let bounds = h
+        .tree
+        .overlay_manager()
+        .bounds_for_content(layer)
+        .expect("the overlay is up");
+    assert!(
+        bounds.contains(target),
+        "the overlay must be laid out over the target, or the fall-through is \
+         never consulted: {bounds:?} against {target:?}"
+    );
+
+    let id = finger();
+    h.finger_down(id, target, 0);
+    h.finger_up(id, target, 30);
+    assert_eq!(
+        h.caret(),
+        FALLTHROUGH_TARGET,
+        "the surface never saw the tap"
     );
 }

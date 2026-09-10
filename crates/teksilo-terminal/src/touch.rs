@@ -308,6 +308,26 @@ pub(crate) struct TerminalTouch {
     terminal: Cell<Option<WidgetId>>,
     /// The affordance overlay's content root (this build's).
     layer: Cell<Option<WidgetId>>,
+    /// The grab offset of the handle drag in progress: `caret centre − grab
+    /// point`, captured at [`HandleDragPhase::Begin`] and added to every later
+    /// sample.
+    ///
+    /// A handle's disc deliberately hangs **off** the line it marks — above it
+    /// for a `Start`, below it for an `End` — so the fingertip does not cover the
+    /// character being pointed at. The controller hit-tests the sample it is
+    /// handed, and this crate's `offset_at` floors the vertical axis, so an
+    /// untranslated sample asks for the offset at a point on the wrong side of a
+    /// **cell edge**: `caret.bottom()` is already the top of the next row, so any
+    /// non-zero radius under one cell resolves an `End` grab exactly one row
+    /// down, and a `Start` grab one row up. The error is a whole row however
+    /// small the radius is, which is why it cannot be left to the floor to
+    /// absorb.
+    ///
+    /// Same shape as the rich-text host's `EditorTouch::drag_offset`, so a
+    /// future correction inside the controller has one pattern to reconcile
+    /// rather than two. Not cleared at `End`: `Begin` always precedes a sample,
+    /// so a stale value can never be read.
+    drag_offset: Cell<Point>,
 }
 
 // There is deliberately no `raised` flag here. `TouchSelection` keeps one of its
@@ -330,6 +350,7 @@ impl TerminalTouch {
             controller: RefCell::new(TouchSelection::new()),
             terminal: Cell::new(None),
             layer: Cell::new(None),
+            drag_offset: Cell::new(Point::ZERO),
         })
     }
 
@@ -423,6 +444,30 @@ impl TextAffordanceDelegate for TerminalDelegate {
         // localized against is not one this closure can reconstruct.
         // `pointer_position` is the sample's own window position.
         let window = ctx.pointer_position().unwrap_or(point);
+        if phase == HandleDragPhase::Begin {
+            // Captured while the pre-drag geometry still stands: from here on
+            // every sample is translated onto the caret the handle marks. See
+            // `TerminalTouch::drag_offset`.
+            let caret = self
+                .touch
+                .controller
+                .borrow()
+                .handles()
+                .into_iter()
+                .find(|h| h.kind == kind)
+                .map(|h| {
+                    Point::new(
+                        h.caret.x + h.caret.width / 2.0,
+                        h.caret.y + h.caret.height / 2.0,
+                    )
+                });
+            self.touch.drag_offset.set(match caret {
+                Some(caret) => Point::new(caret.x - window.x, caret.y - window.y),
+                None => Point::ZERO,
+            });
+        }
+        let offset = self.touch.drag_offset.get();
+        let window = Point::new(window.x + offset.x, window.y + offset.y);
         // No pointer-kind guard: `TouchSelection::drag_handle` refuses an
         // indirect pointer as its first statement, and the handle's own node
         // refuses one before that.

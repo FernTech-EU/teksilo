@@ -98,9 +98,12 @@ the text it marks. Two conversions, and they are not interchangeable:
 
 ## Host checklist
 
-Written before any host existed; corrected in place by the single-line family,
-which was the first (`teksilo-widgets/src/primitives/text_input_field/touch.rs`).
-Where a step is a correction, it says what it used to say.
+Written before any host existed, then corrected in place twice — first by the
+single-line family, which was the first host
+(`teksilo-widgets/src/primitives/text_input_field/touch.rs`), and then by the core
+work that followed it, which is where the intro, step 3, step 4's placement rule
+and the Limits list get their corrections. Where a step is a correction, it says
+what it used to prescribe.
 
 1. **Implement `TextHitSource`** over the state the editor keeps, not over the
    command handle it registers as a `TextSurface`. Every controller entry point
@@ -139,38 +142,86 @@ Where a step is a correction, it says what it used to say.
    from the style's, and a theme that resizes the lens gets two different
    rectangles.
 
-3. **Wire the host's own pointer arms.** Forward `handle_pointer` from the
-   editor's own `on_pointer_event`, and `on_long_press` from its `on_long_press`
-   — passing the gesture's own `event.pointer` and a **window** point, since
-   `TapEvent::position` is widget-local (see *Coordinates* above). Neither needs
-   a pointer-kind guard of its own: `handle_pointer` reads the sample's device off
-   the context and `on_long_press` reads the gesture's off its `pointer`
-   argument, and both are inert for an indirect one.
+3. **Wire the host's own pointer arms**, and translate every handle-drag sample.
+   A host that mounts the affordance layer (step 4) wires two things, and
+   `handle_pointer` is neither of them:
 
-   That signature is why the argument exists. A hold is recognised by the gesture
-   timer, not by a pointer sample, and the tree's in-flight input snapshot is
-   saved and restored around every dispatch — so an entry point reading
-   `EventContext::pointer_kind` there was told **the mouse whatever the device
-   was**, and refused every finger. Two fixes, and a host should know both: the
-   tree now installs the holding contact for the length of a timer dispatch
-   (`InputSnapshot::for_recognized_gesture`), so anything a hold handler asks the
-   context about — the device, the pointer id, the captor, the frozen
-   `TouchAction` — is now answered for the contact that held; and the controller's
-   guard reads the gesture, so it holds for a host driving it from somewhere with
-   no snapshot behind it at all (an assistive-technology action, its own timer).
+   * **`on_long_press`**, forwarded from the editor's own — passing the gesture's
+     own `event.pointer` and a **window** point, since `TapEvent::position` is
+     widget-local (see *Coordinates* above). It needs no pointer-kind guard of its
+     own: `TouchSelection::on_long_press` reads the gesture's device off its
+     `pointer` argument and is inert for an indirect one.
+   * **The release arm**, in the editor's own pointer path, calling
+     `TouchSelection::raise` once the caret is placed. The arm has to be the
+     host's because a finger's press must be able to end as a *scroll*, which the
+     controller cannot see: a direct pointer places no caret on the press, and
+     places one on a release that still belongs to it. A hold **spends** the
+     press — it fires before the finger lifts — so record which contact the hold
+     answered for and skip that release, or every hold ends as a tap over the word
+     it just selected.
 
-   `handle_pointer`'s release arm raises unconditionally for a direct pointer,
-   and a finger's press has to be able to end as a *scroll* — which the
-   controller cannot see. So the host owns that arm too: a direct pointer places
-   no caret on the press, and places one on a release that still belongs to it
-   (`ctx.press_is_inside()`, the same predicate the data views' release-time
-   commits ask). Its `PointerDown` arm is unreachable for a host that mounts the
-   layer, because the handles are widgets above the editor and are offered the
-   press first — which the step already said.
+   Handle presses do not arrive on this path at all. The handles are widgets above
+   the editor and are offered the press first, so they drive
+   `TouchSelection::drag_handle` from the layer's own nodes, naming the kind
+   instead of hit-testing for it. **`handle_pointer` is the named alternative for
+   a host that paints its own handles instead of mounting the layer**: it
+   hit-tests the published handle geometry itself. Its `PointerDown` arm is
+   unreachable for a layer-mounting host, and its release arm raises
+   unconditionally for a direct pointer, which a host that must let a press end as
+   a scroll cannot use — so no shipped host calls it. This step used to prescribe
+   it as the way in for every host, alongside `on_long_press`.
 
-   A hold **spends** the press: it fires before the finger lifts, so the release
-   that follows must not place a caret over the word the hold just selected.
-   Record which contact the hold answered for, and skip that release.
+   That `pointer` argument on `on_long_press` is why the signature is shaped that
+   way. A hold is recognised by the gesture timer, not by a pointer sample, and
+   the tree's in-flight input snapshot is saved and restored around every dispatch
+   — so an entry point reading `EventContext::pointer_kind` there was told **the
+   mouse whatever the device was**, and refused every finger. Two fixes, and a
+   host should know both: the tree now installs the holding contact for the length
+   of a timer dispatch (`InputSnapshot::for_recognized_gesture`), so anything a
+   hold handler asks the context about — the device, the pointer id, the captor,
+   the frozen `TouchAction` — is now answered for the contact that held; and the
+   controller's guard reads the gesture, so it holds for a host driving it from
+   somewhere with no snapshot behind it at all (an assistive-technology action, its
+   own timer).
+
+   **The release predicate.** `ctx.press_is_inside()` — the predicate the data
+   views' release-time commits ask — is the framework's tap boundary, and for a
+   coarse pointer that boundary is the pressed node's whole *rectangle*. That is
+   the right rule for a control, where the node is one target and a finger covers
+   it, and the wrong one here, where the target is a **character**: a finger can
+   pan a tall document a long way without ever leaving it, so the release would
+   place a caret wherever the finger happened to stop. Any multi-line surface
+   therefore needs a **second** gate as well — the release's travel from where the
+   press landed, against that pointer's own `tap_slop`. The shipped one is
+   `EditorTouch::press_is_still_a_tap` (`rich_text/touch_mount.rs`), which records
+   the press's window position on `PointerDown` and refuses a release that
+   travelled further than a tap of its kind may. The shipped single-line family
+   asks `press_is_inside` alone (`text_input_field/mouse.rs`), and that is enough
+   there for two reasons that do not survive a taller surface: a strip that short
+   cannot absorb a vertical pan, so a panning finger leaves the rectangle; and a
+   press whose pan an ancestor scrollable won is refused by the same predicate.
+
+   **The grab offset**, which a multi-line host owes on every drag sample.
+   `TouchSelection::update_drag` hit-tests the **raw** contact position, and a
+   handle's disc hangs deliberately off the line — above it for a `Start`, below it
+   for an `End` or a caret — so the fingertip does not cover the character the
+   handle points at. Hand the controller the raw sample and it asks the surface for
+   the offset at a point a disc's rise away from the glyph row: on a multi-line
+   document that resolves onto a neighbouring line, and on a one-line one it falls
+   past the text and clamps to the document's end. Which way out is available is
+   decided by the surface, not by taste. A one-line surface pins the vertical
+   coordinate in `offset_at` (step 1) and owes nothing here. A surface with more
+   than one line has no line to pin to, so the correction belongs to the drag:
+   capture `caret centre − grab point` at `HandleDragPhase::Begin`, while the
+   pre-drag geometry still stands, and add it to every sample of that drag. It is
+   the ordinary grab offset every drag carries. `EditorTouch::drag_offset`
+   (`rich_text/touch_mount.rs`) is the shipped one, shared by both multi-line
+   editors; `dragging_the_end_handle_extends_the_selection`
+   (`rich_text/touch_tests.rs`) is the assertion it holds up, and without the
+   translation that drag resolves onto no character the handle marks. This is a
+   **core-contract gap worked around host-side**: the fix that would retire the
+   rule is `update_drag` taking the caret the handle marks, or the drag phase
+   carrying the offset, and until then every multi-line host owes it.
 
 4. **Mount a `TextAffordanceLayer`** in the `OverlayBand::TextAffordance` band
    via `EventContext::show_overlay_in_band`, built with
@@ -315,7 +366,10 @@ Three consequences, all of them contracts:
 
 24 dp of painted disc inside a 44 dp square target. The disc is a *decoration*
 and is the same at every density — it is already sized for a fingertip — while
-the target is a `TargetRole::Target` and grows with the density ladder. Target
+the target is a `TargetRole::Target`, so it can never come out below the
+density's own `target_size`. On the shipped ladder that floor never bites — 44 dp
+is already at or above every rung — so the handle's target is a **constant** 44 dp
+at all three densities. Target
 conformance is measured on the rectangle the pointer meets, which is the rule
 `docs/density-and-targets.md` states for any affordance whose hit area is
 widened rather than its ink. The `grab_size` ladder — 6 / 10 / 16 dp across
@@ -386,7 +440,9 @@ composed from them. Two properties of a one-line editor shape that adoption:
   the line. Without that, every press on the strip a handle occupies — which is
   *below* the text by construction — resolves to the end of the document.
 * **A handle's target is larger than the field at every density but one.** The
-  target is 44 dp square by the WCAG floor; the field's own height is whichever is
+  target is a constant 44 dp square (Apple's HIG minimum and WCAG 2.2 SC 2.5.5
+  AAA, not the 24 dp AA conformance floor — see `docs/density-and-targets.md`);
+  the field's own height is whichever is
   larger of its recipe constant and the density's `target_size`, so it climbs the
   ladder and only reaches 44 dp at `TargetDensity::Touch`. Below that the two
   handles of a short selection blanket the text between them and a little either
@@ -418,6 +474,13 @@ empty line would be visible nonsense.
 ## Limits
 
 * The lens clip is rectangular, so the shipped lens frame is too. See above.
+* **A handle drag hit-tests the raw contact**, with no compensation for the rise
+  the disc is drawn at, so the contract hands every host a sample that is off the
+  glyph row by design. A one-line surface absorbs it by pinning `offset_at`'s
+  vertical coordinate; every other host owes the grab-offset translation in
+  checklist step 3. Retiring it means changing the contract — `update_drag` taking
+  the caret the handle marks, or the drag phase carrying the offset — so no host
+  can do it.
 * **A pass-through overlay falls through; nothing else does.** `hit_test_with`
   continues to the tree only when the chosen overlay's content root declares
   `event_pass_through` and its subtree claimed nothing. An overlay content root

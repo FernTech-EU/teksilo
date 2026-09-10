@@ -40,6 +40,15 @@ fn cell_size() -> (f32, f32) {
     )
 }
 
+/// A window point inside the cell at `(col, row)` of an origin-aligned terminal.
+/// The `+ 6.0` is the chrome inset between the widget's bounds and the grid's
+/// content origin; a fractional `col`/`row` lands inside the cell rather than on
+/// its edge.
+fn cell_position(col: f32, row: f32) -> Point {
+    let (cw, ch) = cell_size();
+    Point::new(cw * col + 6.0, ch * row + 6.0)
+}
+
 /// A layout-transparent container that places its child at a fixed offset, so a
 /// test can put the terminal somewhere other than the window's top-left corner.
 /// `teksilo-terminal` cannot depend on `teksilo-widgets`, so there is no `Padding`
@@ -464,15 +473,19 @@ fn a_double_click_under_mouse_reporting_selects_nothing_locally() {
 // The wheel
 // ---------------------------------------------------------------------------
 
-fn wheel(tree: &mut WidgetTree, y: f32, modifiers: Modifiers) {
+fn wheel_at(tree: &mut WidgetTree, y: f32, modifiers: Modifiers, position: Option<Point>) {
     tree.dispatch_scroll(ScrollSample {
         delta: ScrollDelta::Lines { x: 0.0, y },
-        position: Some(Point::new(200.0, 160.0)),
+        position,
         phase: ScrollPhase::Discrete,
         source: ScrollSource::Wheel,
         pointer: PointerInfo::mouse(teksilo_core::pointer::EventTime::ZERO),
         modifiers,
     });
+}
+
+fn wheel(tree: &mut WidgetTree, y: f32, modifiers: Modifiers) {
+    wheel_at(tree, y, modifiers, Some(Point::new(200.0, 160.0)));
 }
 
 /// Turning the wheel **up** shows older output.
@@ -503,21 +516,128 @@ fn the_wheel_scrolls_the_scrollback_the_way_it_is_turned() {
 }
 
 /// …and reports the direction it was turned, when the child is tracking.
+///
+/// The coordinates are the cell the notch is over. They used to be `1;1` in this
+/// assertion whatever the pointer was on, which was the report being wrong
+/// rather than the wheel: see
+/// `a_wheel_report_names_the_cell_under_the_pointer`.
 #[test]
 fn the_wheel_reports_the_direction_it_was_turned() {
     let f = mount(|t| t);
     let mut tree = f.tree;
     track_mouse(&f.shared);
+    let over = Some(cell_position(4.5, 2.5));
 
-    wheel(&mut tree, -1.0, Modifiers::NONE);
-    assert_eq!(writes(&f.shared), "\x1b[<64;1;1M", "wheel up is button 64");
+    wheel_at(&mut tree, -1.0, Modifiers::NONE, over);
+    assert_eq!(writes(&f.shared), "\x1b[<64;5;3M", "wheel up is button 64");
     f.shared.borrow_mut().writes.clear();
 
-    wheel(&mut tree, 1.0, Modifiers::NONE);
+    wheel_at(&mut tree, 1.0, Modifiers::NONE, over);
     assert_eq!(
         writes(&f.shared),
-        "\x1b[<65;1;1M",
+        "\x1b[<65;5;3M",
         "wheel down is button 65"
+    );
+}
+
+/// A wheel report names the cell **under the pointer**, the same as a press.
+///
+/// It named cell `(0, 0)` whatever the pointer was on, so a full-screen program
+/// splitting its window — `tmux`, `htop`, an editor with two panes — read every
+/// notch as having happened in its top-left corner and scrolled the wrong pane.
+///
+/// Two cells, because one assertion cannot tell "derived from the pointer" from
+/// "happens to coincide with the pointer": the report has to *move* when the
+/// pointer does.
+#[test]
+fn a_wheel_report_names_the_cell_under_the_pointer() {
+    let f = mount(|t| t);
+    let mut tree = f.tree;
+    track_mouse(&f.shared);
+
+    wheel_at(
+        &mut tree,
+        -1.0,
+        Modifiers::NONE,
+        Some(cell_position(4.5, 2.5)),
+    );
+    assert_eq!(
+        writes(&f.shared),
+        "\x1b[<64;5;3M",
+        "column 4, row 2, in SGR's 1-based coordinates"
+    );
+    f.shared.borrow_mut().writes.clear();
+
+    wheel_at(
+        &mut tree,
+        -1.0,
+        Modifiers::NONE,
+        Some(cell_position(11.5, 7.5)),
+    );
+    assert_eq!(
+        writes(&f.shared),
+        "\x1b[<64;12;8M",
+        "a different cell reports a different pair"
+    );
+}
+
+/// A real mouse wheel carries **no** position — it is routed by hover, and
+/// `WidgetEvent::Scroll::position` is `None` for it — so the cell comes from
+/// where the cursor last was. Without that, the shipped wheel would keep
+/// reporting the origin however the positioned form behaved.
+#[test]
+fn a_positionless_wheel_report_names_the_cell_the_cursor_is_over() {
+    let f = mount(|t| t);
+    let mut tree = f.tree;
+    track_mouse(&f.shared);
+
+    tree.dispatch_event(WidgetEvent::PointerMove {
+        position: cell_position(6.5, 4.5),
+    });
+    // The move is itself reported under any-motion tracking; the wheel's bytes
+    // are what this test is about.
+    f.shared.borrow_mut().writes.clear();
+
+    wheel_at(&mut tree, -1.0, Modifiers::NONE, None);
+    assert_eq!(
+        writes(&f.shared),
+        "\x1b[<64;7;5M",
+        "the cell the cursor was left on"
+    );
+}
+
+/// …and on a terminal that is not at the window's corner, through the same
+/// conversion the press was fixed to use.
+///
+/// `WidgetTree::localize_event` does not rewrite a `Scroll`, so its position is
+/// still in **window** space where every other pointer position the handler sees
+/// is widget-local. Feeding it in raw would report a cell offset by the
+/// terminal's own position — the neighbouring form of the defect the press had.
+#[test]
+fn a_wheel_report_on_an_offset_terminal_names_the_cell_it_is_over() {
+    let mut tree = WidgetTree::new().with_theme(theme());
+    let factory = MemoryEngineFactory::new();
+    let shared = factory.shared();
+    let terminal = tree.add(Terminal::with_engine_factory(factory));
+    tree.add(Offset::at(terminal, 120.0, 60.0));
+    tree.layout(SizeProposal::exact(480.0, 320.0));
+    tree.run_mount_actions(&mut NoopWindowOps);
+    track_mouse(&shared);
+
+    let bounds = tree.bounds(terminal);
+    assert_eq!((bounds.x, bounds.y), (120.0, 60.0), "fixture sanity");
+    let over = cell_position(4.5, 2.5);
+
+    wheel_at(
+        &mut tree,
+        -1.0,
+        Modifiers::NONE,
+        Some(Point::new(bounds.x + over.x, bounds.y + over.y)),
+    );
+    assert_eq!(
+        writes(&shared),
+        "\x1b[<64;5;3M",
+        "an offset terminal reports the same cell an origin-aligned one does"
     );
 }
 
@@ -955,6 +1075,46 @@ fn the_menu_is_navigable_from_the_keyboard() {
     assert!(tree.overlay_manager().active_content_ids().is_empty());
 }
 
+/// The menu's rows follow the density ladder, the same as this crate's selection
+/// handles do.
+///
+/// `Compact` is the load-bearing half: the density layer must be inert until an
+/// app opts in, so a Compact menu keeps exactly the row height the crate shipped
+/// before there was a ladder. `Touch` is the conformance half — a menu a *finger*
+/// opens must not be the one part of the crate that ignores the density it was
+/// opened at.
+#[test]
+fn the_menu_rows_follow_the_density_ladder() {
+    for (density, row_height) in [
+        (teksilo_tokens::TargetDensity::Compact, 24.0_f32),
+        (teksilo_tokens::TargetDensity::Touch, 44.0),
+    ] {
+        let f = mount_with_history(0);
+        let mut tree = f.tree;
+        tree.set_input_density(density);
+        tree.layout(SizeProposal::exact(480.0, 320.0));
+
+        let contact = tree.new_contact();
+        tree.touch_down(contact, Point::new(120.0, 80.0));
+        tree.advance_time(Duration::from_millis(1_200));
+        let content = open_menu_content(&mut tree);
+
+        let rows = tree.children(content);
+        assert_eq!(rows.len(), 3, "Paste / Select all / Clear at {density:?}");
+        for row in &rows {
+            assert_eq!(
+                tree.bounds(*row).height,
+                row_height,
+                "a menu row's height at {density:?}"
+            );
+        }
+        assert!(
+            tree.bounds(content).height >= row_height * rows.len() as f32,
+            "the panel at {density:?} is tall enough to hold the rows it grew"
+        );
+    }
+}
+
 // ---------------------------------------------------------------------------
 // The crate boundary
 // ---------------------------------------------------------------------------
@@ -1064,9 +1224,34 @@ fn the_handles_sit_on_cell_boundaries() {
     }
 }
 
+/// The trailing handle of a one-line selection, and the row it marks.
+fn end_handle(tree: &WidgetTree, layer: WidgetId) -> Rect {
+    placed_handles(tree, layer)
+        .into_iter()
+        .max_by(|a, b| a.center().x.total_cmp(&b.center().x))
+        .expect("two handles")
+}
+
+/// The `(line, column)` the last recorded selection head named.
+fn last_head(shared: &Rc<RefCell<MemoryShared>>) -> (usize, usize) {
+    let updates = shared.borrow().selection_updates.clone();
+    let last = updates
+        .last()
+        .copied()
+        .expect("the drag moved the selection");
+    (last.0, last.1)
+}
+
 /// Dragging a handle moves the selection to the **nearest** boundary, so a
 /// fingertip landing four-fifths of the way across a cell takes the next
 /// boundary rather than truncating to the one behind it.
+///
+/// The destination's *y* is the handle's own, not the target line's centre: a
+/// finger sliding sideways along a row keeps holding the disc, which hangs a
+/// radius below the row it marks. Stating the destination in text coordinates
+/// instead — which this test used to do — cannot see whether the sample was
+/// translated back onto the row, because it has already been placed on it by
+/// hand. See `a_handle_drag_stays_on_the_row_the_handle_marks`.
 #[test]
 fn a_handle_drag_snaps_the_selection_to_the_nearest_boundary() {
     let (f, layer) = mount_with_raised_handles(teksilo_terminal::SelectionSpan {
@@ -1075,33 +1260,123 @@ fn a_handle_drag_snaps_the_selection_to_the_nearest_boundary() {
         block: false,
     });
     let mut tree = f.tree;
-    let (cw, ch) = cell_size();
+    let (cw, _) = cell_size();
     let inset = RecipeTerminalStyle.content_inset();
-
-    // The trailing handle is the one further right.
-    let end = placed_handles(&tree, layer)
-        .into_iter()
-        .max_by(|a, b| a.center().x.total_cmp(&b.center().x))
-        .expect("two handles");
+    let end = end_handle(&tree, layer);
 
     f.shared.borrow_mut().selection_updates.clear();
     let contact = tree.new_contact();
     tree.touch_down(contact, end.center());
     // 0.8 of a cell past column 20 — the nearest boundary is 21.
-    let target = Point::new(inset + cw * 20.8, inset + ch * 3.5);
+    let target = Point::new(inset + cw * 20.8, end.center().y);
     tree.touch_move(contact, target);
     tree.touch_up(contact, target);
 
-    let updates = f.shared.borrow().selection_updates.clone();
-    let last = updates
-        .last()
-        .copied()
-        .expect("the drag moved the selection");
     assert_eq!(
-        (last.0, last.1),
+        last_head(&f.shared),
         (3, 20),
-        "the head lands on the cell before boundary 21, on line 3: {updates:?}"
+        "the head lands on the cell before boundary 21, on line 3"
     );
+}
+
+/// A handle drag sideways stays on the row the handle marks.
+///
+/// The disc hangs a radius **off** the row so the fingertip does not cover the
+/// character it points at, so the point a finger actually holds is never on the
+/// glyph row. `offset_at` floors the vertical axis and an `End` handle's anchor
+/// sits past `caret.bottom()` — already the top edge of the next row — so an
+/// untranslated sample resolves one row down however small the radius is. The
+/// host owes the translation; this is the assertion that it makes it.
+#[test]
+fn a_handle_drag_stays_on_the_row_the_handle_marks() {
+    let (f, layer) = mount_with_raised_handles(teksilo_terminal::SelectionSpan {
+        start: (3, 5),
+        end: (3, 11),
+        block: false,
+    });
+    let mut tree = f.tree;
+    let (cw, _) = cell_size();
+    let end = end_handle(&tree, layer);
+
+    f.shared.borrow_mut().selection_updates.clear();
+    let contact = tree.new_contact();
+    tree.touch_down(contact, end.center());
+    // A horizontal delta only: the y a real finger keeps while sliding.
+    let target = Point::new(end.center().x + cw * 8.0, end.center().y);
+    tree.touch_move(contact, target);
+    tree.touch_up(contact, target);
+
+    assert_eq!(
+        last_head(&f.shared).0,
+        3,
+        "eight cells sideways is still line 3"
+    );
+}
+
+/// …and a drag **up or down** moves by the rows it travelled — one cell of
+/// finger movement is one row, so the compensation is a translation and not a
+/// clamp onto the row the drag started from.
+///
+/// A selection spanning rows 2–5, so the trailing handle has a row to move to in
+/// either direction: dragging it above the anchor would empty the range instead
+/// of naming a row (`set_handle_offset` clamps a crossed handle), which is the
+/// selection's own rule and not something this test is about.
+#[test]
+fn a_handle_drag_up_or_down_moves_by_the_rows_it_travelled() {
+    let (_, ch) = cell_size();
+    for (dy, want_row) in [(-ch, 4_usize), (ch, 6)] {
+        let (f, layer) = mount_with_raised_handles(teksilo_terminal::SelectionSpan {
+            start: (2, 5),
+            end: (5, 11),
+            block: false,
+        });
+        let mut tree = f.tree;
+        let end = end_handle(&tree, layer);
+
+        f.shared.borrow_mut().selection_updates.clear();
+        let contact = tree.new_contact();
+        tree.touch_down(contact, end.center());
+        let target = Point::new(end.center().x, end.center().y + dy);
+        tree.touch_move(contact, target);
+        tree.touch_up(contact, target);
+
+        assert_eq!(
+            last_head(&f.shared).0,
+            want_row,
+            "a drag of {dy} px from row 5 lands on row {want_row}"
+        );
+    }
+}
+
+/// The **leading** handle needs the compensation too, with the opposite sign: its
+/// disc sits *above* the row it marks rather than below it.
+///
+/// Read off the recorded selection **anchor** rather than the head, because a
+/// leading-handle drag moves the anchor and leaves the head where it was.
+#[test]
+fn a_leading_handle_drag_stays_on_the_row_it_marks() {
+    let (f, layer) = mount_with_raised_handles(teksilo_terminal::SelectionSpan {
+        start: (2, 5),
+        end: (5, 11),
+        block: false,
+    });
+    let mut tree = f.tree;
+    let (cw, _) = cell_size();
+    let start = placed_handles(&tree, layer)
+        .into_iter()
+        .min_by(|a, b| a.center().x.total_cmp(&b.center().x))
+        .expect("two handles");
+
+    f.shared.borrow_mut().selections.clear();
+    let contact = tree.new_contact();
+    tree.touch_down(contact, start.center());
+    let target = Point::new(start.center().x + cw * 6.0, start.center().y);
+    tree.touch_move(contact, target);
+    tree.touch_up(contact, target);
+
+    let anchors = f.shared.borrow().selections.clone();
+    let last = anchors.last().copied().expect("the drag moved the anchor");
+    assert_eq!(last.0, 2, "six cells sideways is still line 2");
 }
 
 /// A **mouse** double-click raises no touch chrome. It has a drag for adjusting

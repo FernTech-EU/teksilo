@@ -145,18 +145,18 @@ policy applied. What that comes to here:
   hit-test resolves them.
 * A **tap** places the caret. It is invisible — the caret policy is `Hidden` — but
   it is not inert: with no selection this surface's Copy takes the caret's whole
-  line, so a tap is what aims it. A tap raises **no** handle, because a read-only
-  surface has no caret to place and a 44 dp target over the text would offer
-  nothing.
+  line, so a tap is what aims it. A tap raises **no** handle: the caret handle is
+  the one that *moves* a caret, and the controller offers it only on a surface that
+  is editable, so a 44 dp target over the text would offer nothing here.
 * A **finger's drag** pans, in both axes: an unwrapped log line that runs off the
   right cannot be read otherwise.
 
-Two of the editor's on-screen-keyboard behaviours are deliberately absent, both
-for the same reason — there is no caret to serve. The IME candidate area is never
-reported (the surface is read-only, so no input method is allowed on it), and a
-viewport that shrinks does **not** re-reveal a caret: pulling this view's scroll
-offset anywhere would fight its own follow-tail rule, which is *derived* from that
-offset, so a "correction" would silently switch following back on.
+Two of the editor's on-screen-keyboard behaviours are deliberately absent, each
+for its own reason. The IME candidate area is never reported, because the surface
+is read-only and so no input method is allowed on it. And a viewport that shrinks
+does **not** re-reveal the caret: pulling this view's scroll offset anywhere would
+fight its own follow-tail rule, which is *derived* from that offset, so a
+"correction" would silently switch following back on.
 
 ## Accessibility
 

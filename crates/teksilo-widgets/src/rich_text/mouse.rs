@@ -225,11 +225,13 @@ fn proportional_resize(origin: [f32; 4], corner: (f32, f32), local: Point) -> [f
 ///   screen, so the precise pointer's split has no direct form — and a link a
 ///   finger cannot follow by tapping it reads as broken. The way to reach a
 ///   link's *text* with a finger is the hold, which selects the word under it.
-/// * **A precise pointer follows a link in a read-only surface**, where there is
-///   no caret to place and no text to edit, and needs Ctrl(⌘) in an editable one:
+/// * **A precise pointer follows a link in a read-only surface** and needs
+///   Ctrl(⌘) in an editable one. The reason for the split is an *authoring* one:
 ///   the writer who clicks their own link is far more often trying to edit its
 ///   text than to leave the document, and intercepting every click left the text
-///   inside a link unreachable by pointer entirely.
+///   inside a link unreachable by pointer entirely. On a viewer that reason has
+///   no force — the text cannot be edited, and the caret the click places is
+///   `CaretPolicy::Hidden` — while a link a plain click ignores reads as broken.
 fn link_follows(kind: PointerKind, read_only: bool, command_held: bool) -> bool {
     kind.is_direct() || read_only || command_held
 }
@@ -476,9 +478,10 @@ pub(super) fn handle_pointer_event(
                     //   unreachable by pointer entirely.
                     // * **Read-only.** A plain click follows it. The rationale
                     //   above is an *authoring* rationale and simply does not
-                    //   apply: there is no caret to place and no text to edit,
-                    //   so a link the reader cannot follow by clicking it is a
-                    //   link that reads as broken. This is the browser default,
+                    //   apply: there is no text to edit, and the caret the click
+                    //   would otherwise place is hidden — while a link the reader
+                    //   cannot follow by clicking it is a link that reads as
+                    //   broken. This is the browser default,
                     //   and a viewer can afford it for the same reason a browser
                     //   can — its text is not editable.
                     let callback = state.borrow().on_link_activated.clone();

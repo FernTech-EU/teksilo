@@ -1096,6 +1096,27 @@ impl PlainTextEditor {
         self
     }
 
+    /// Replace the built-in right-click menu — see
+    /// [`CodeEditor::context_menu`].
+    pub fn context_menu(
+        mut self,
+        factory: impl Fn(
+            teksilo_canvas::Point,
+            &mut teksilo_core::widget::EventContext,
+        ) -> Option<Box<dyn teksilo_core::widget::Widget>>
+        + 'static,
+    ) -> Self {
+        self.map(|e| e.context_menu(factory));
+        self
+    }
+
+    /// Whether to install the built-in right-click menu — see
+    /// [`CodeEditor::default_context_menu`].
+    pub fn default_context_menu(mut self, enabled: bool) -> Self {
+        self.map(|e| e.default_context_menu(enabled));
+        self
+    }
+
     /// A cloneable handle to drive the editor.
     pub fn handle(&self) -> CodeEditorHandle {
         self.inner.as_ref().expect("handle() before build").handle()

@@ -199,8 +199,8 @@ fn build_menu(state: SharedState) -> MenuList {
 /// `position` is a **window** point; the caret is repositioned to it unless the
 /// click landed inside the current selection, which is the platform convention
 /// for "right-click, then Cut / Copy / Paste at the new caret". A read-only
-/// surface is exempt: there is no caret to move, and moving the selection would
-/// destroy the one the reader was about to copy.
+/// surface is exempt: its caret is invisible, so a reposition buys nothing there
+/// and would destroy the selection the reader was about to copy.
 pub(super) fn factory(state: SharedState) -> CodeContextMenuFactory {
     Box::new(move |position, _ctx| {
         if !state.borrow().policy.is_read_only() {

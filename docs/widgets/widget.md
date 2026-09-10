@@ -292,6 +292,16 @@ A callback fired on each content-changing edit batch.
 
 Override the background colour.
 
+#### `pub fn context_menu( mut self, factory: impl Fn( teksilo_canvas::Point, &mut teksilo_core::widget::EventContext, ) -> Option<Box<dyn teksilo_core::widget::Widget>> + 'static, ) -> Self`
+
+Replace the built-in right-click menu — see
+`CodeEditor::context_menu`.
+
+#### `pub fn default_context_menu(mut self, enabled: bool) -> Self`
+
+Whether to install the built-in right-click menu — see
+`CodeEditor::default_context_menu`.
+
 #### `pub fn handle(&self) -> CodeEditorHandle`
 
 A cloneable handle to drive the editor.

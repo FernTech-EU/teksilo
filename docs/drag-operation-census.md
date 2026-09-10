@@ -9,7 +9,14 @@ alternative that is not a drag; package **P39** is sized from this list, and its
 criterion is that no row below still reads "none" in the *Non-drag route today*
 column.
 
-Measured against `wt-touch` @ `89c7a03c`. Every line number was read, not inferred.
+Measured against `wt-touch` @ `89c7a03c`, and every line number below was read at
+that commit rather than inferred. **Read them as pinned to it, not as current.**
+The touch programme rewrote most of these files afterwards: re-deriving the
+primary citation of all 34 rows that carry one found exactly one still resolving
+to the line it named. So treat a `file:line` here as a starting point to grep from,
+and prefer the function names — a line number is a claim with a short shelf life,
+which is why rows re-derived since carry the enclosing function instead.
+
 Rows marked **Compliant** already satisfy 2.5.7 and are recorded so P39 does not
 re-litigate them.
 
@@ -21,20 +28,24 @@ grep -rnE '\.on_drag\(|start_drag(_with_preview)?\(|capture_pointer\(|DragPhase'
 
 ## Summary
 
+Counted off each row's own *Non-drag route today* verdict, so the split is
+re-derivable from the table rather than a separate judgement: 37 census rows,
+plus 4 more recorded and dismissed in their own table below.
+
 | Status | Rows |
 | --- | ---: |
-| Compliant today (keyboard and/or AT route exists) | 17 |
-| Partial — an AT action or a menu exists but no keyboard chord, or only part of the operation is covered | 5 |
-| **No non-drag route at all** | **12** |
+| Compliant today (keyboard and/or AT route exists) — the row reads "**Yes**" | 17 |
+| Partial — an AT action or a menu exists but no keyboard chord, or only part of the operation is covered | 7 |
+| **No non-drag route at all** | **13** |
 | Not a drag / no obligation (recorded and dismissed) | 4 |
 
-The single highest-leverage fix is row 31: a framework-level keyboard
-pick-up / put-down mode in `teksilo-core`'s drag pipeline would retire rows 15, 18,
-20 and 30 at once.
+The single highest-leverage fix is row 30: a framework-level keyboard
+pick-up / put-down mode in `teksilo-core`'s drag pipeline would retire rows 14, 17,
+19 and 29 at once.
 
 ## Census
 
-| # | File : line | Operation | What it changes | Non-drag route today | Proposed non-drag command |
+| # | File : location | Operation | What it changes | Non-drag route today | Proposed non-drag command |
 | ---: | --- | --- | --- | --- | --- |
 | 1 | `crates/teksilo-widgets/src/slider.rs:351` | Drag the thumb to set the value | the bound `Signal<f32>` | **Yes.** `on_key` :389 — arrows ±step, Home/End = min/max; `on_access_action` :427 `Increment`/`Decrement`, advertised :504-505. No PageUp/PageDown. | **Compliant.** Optional: PageUp/PageDown (×10) and `Action::SetValue`. |
 | 2 | `crates/teksilo-widgets/src/color_picker/hue_strip.rs:162` | Drag the hue strip | hue `Signal<f32>` (0–360) | **Yes.** `on_key` :190 — arrows ±1°, PageUp/Down ±15°, Home/End; `on_access_action` :243, advertised :358-360. | **Compliant.** |
@@ -49,7 +60,7 @@ pick-up / put-down mode in `teksilo-core`'s drag pipeline would retire rows 15, 
 | 11 | `crates/teksilo-widgets/src/table_view/body_pane.rs:628` (`start_drag` :685/:696) | TableView row reorder | `accept_drop` → model order | **None.** `table_view/keyboard.rs` has no reorder branch and no `keyboard_reorder` call exists anywhere under `table_view*`. | Add the `Alt+↑/↓` branch the other four data views already have. This is the one data view missing it. |
 | 12 | `crates/teksilo-widgets/src/tree_table_view/body_pane.rs:695` (`start_drag` :777/:785) | TreeTableView row reorder **and reparent** | `source.keyboard_reorder` → tree shape | **Partial.** `tree_table_view.rs:1775` `Alt+↑/↓`, gated on no active sort. Reparenting: none. | Same as row 10 — `Alt+←/→` outdent / indent. |
 | 13 | `crates/teksilo-widgets/src/grid_view/body_pane.rs:405` (`start_drag` :447/:449) | GridView tile reorder | `accept_drop_fn` → model order | **Yes.** `grid_view/keyboard.rs:159` — `Alt+arrows` (±1 and ±`cols`) expressed as a same-view drop. | **Compliant.** |
-| 14 | `crates/teksilo-widgets/src/data_views.rs:1030` (`on_drag_ended` :1038) | **Cross-widget / OS row export** from all five views (`.exportable`, `.export_external`) | `on_rows_transferred_out` on the source, `on_rows_received` on the target | **None.** No `access_custom_action` anywhere in the data views; the `Alt+arrow` routes are strictly in-view. | A cut/paste two-step: Ctrl+X marks the selection for transfer, Ctrl+V on the target view or `DropTarget` completes it; expose as AT custom actions "Cut rows" / "Paste rows here". Subsumed by row 31 if that lands. |
+| 14 | `crates/teksilo-widgets/src/data_views.rs:1030` (`on_drag_ended` :1038) | **Cross-widget / OS row export** from all five views (`.exportable`, `.export_external`) | `on_rows_transferred_out` on the source, `on_rows_received` on the target | **None.** No `access_custom_action` anywhere in the data views; the `Alt+arrow` routes are strictly in-view. | A cut/paste two-step: Ctrl+X marks the selection for transfer, Ctrl+V on the target view or `DropTarget` completes it; expose as AT custom actions "Cut rows" / "Paste rows here". Subsumed by row 30 if that lands. |
 | 15 | `crates/teksilo-widgets/src/grid_view/selection.rs:102`, attached at `grid_view.rs:1280` | GridView marquee (rubber-band) selection | `SelectionModel::select_indices(hits, additive)` | **Yes.** `grid_view/keyboard.rs:140` Ctrl/⌘+A = select all (Ctrl+Shift+A = clear); :312/:414 Shift+arrows extend the range. | **Compliant** — every selection the marquee can produce is reachable. |
 | 16 | `crates/teksilo-widgets/src/tab_widget/header.rs:882` (`start_drag_with_preview` :894) | Tab reorder within a bar | `on_reorder(from, to)` | **Partial — AT only.** `on_access_action_request` :820 handles `CustomAction` 0 = Move Left/Up, 1 = Move Right/Down, advertised :1069-1105. **No keyboard chord** — `on_key` :743-816 covers arrows/Home/End/Delete/Enter/Space only. | Bind Ctrl+Shift+←/→ (or Alt+←/→) on a focused tab header to the same `on_reorder_to`; optionally add both moves to `TabInfo::context_menu`. |
 | 17 | `crates/teksilo-widgets/src/tab_widget/bar.rs:1880-1990` (`on_drop` / `on_tab_received`) | Cross-bar tab transfer (`accept_external_tabs`) | `on_tab_received(item, to_index)`; `on_transfer_out` on the source | **None.** The two custom actions only move within one bar. | AT custom action "Move to other group" + a tab context-menu "Move to ▸ \<bar\>", mirroring `docking/context_menu.rs`'s `move_to_submenu`. |
@@ -64,15 +75,15 @@ pick-up / put-down mode in `teksilo-core`'s drag pipeline would retire rows 15, 
 | 26 | same handler, `:967` (commit :1145-1161) | SceneView marquee selection | `SceneSelection` | **None.** No select-all, no Shift/Ctrl+arrow extend, and the synthetic `SyntheticKind::SceneItem` nodes advertise no `Action::Click` / `Focus` (`view/a11y_impl.rs`). Lightweight items are not focusable widgets. | Ctrl+A = select all in the scene; Tab / Shift+Tab rove a focus ring over items with Space = toggle-select and Shift+Space = extend; advertise `Click` + `Focus` on the synthetic nodes. |
 | 27 | same handler, `:929-943` (port drag) | Magnetism: connect two magnets by dragging a wire | the consumer's `on_connect(MagnetConnection)` | **Yes.** `view/magnetism.rs:172` — the `connect_key` (default `m`) enters connect mode, arrows/Home/End move the target, Enter/Space confirms, Esc cancels; synthetic `SceneMagnet` AT nodes with roving `active_descendant`. | **Compliant.** |
 | 28 | `crates/teksilo-widgets/src/drop_zone.rs:471` (hover :442) | Drop OS files onto a DropZone | `on_files_dropped` / `on_text_dropped` / `on_urls_dropped` | **Yes.** The built-in **Browse…** button (:371-414, `show_browse_button` defaults true at :105) opens the native file dialog and calls the same `on_files` callback. | **Compliant** — but the alternative disappears if an app calls `.show_browse_button(false)`; P39 should warn or refuse. |
-| 29 | `crates/teksilo-widgets/src/drop_target.rs:695` (`on_region_drop` :708) | Drop onto a wrapping DropTarget, including its five-zone form | the app's `on_drop` / `on_region_drop(region, ..)` | **None.** `accessibility()` :759 sets only `Role::Group`; no keys, no actions, no menu. It is a generic container, so the alternative has to be framework-supplied or app-side. | An optional `.on_paste_here(..)` plus one AT custom action per declared region ("Drop here", "Drop above", …), and a documented mark-source-then-activate-target pattern. Subsumed by row 31. |
+| 29 | `crates/teksilo-widgets/src/drop_target.rs:695` (`on_region_drop` :708) | Drop onto a wrapping DropTarget, including its five-zone form | the app's `on_drop` / `on_region_drop(region, ..)` | **None.** `accessibility()` :759 sets only `Role::Group`; no keys, no actions, no menu. It is a generic container, so the alternative has to be framework-supplied or app-side. | An optional `.on_paste_here(..)` plus one AT custom action per declared region ("Drop here", "Drop above", …), and a documented mark-source-then-activate-target pattern. Subsumed by row 30. |
 | 30 | `crates/teksilo-core/src/widget_tree/drag_drop_impl.rs` (`start_drag` / `start_drag_with_preview`; `begin_external_drag` :138) | **The generic drag-and-drop pipeline itself** | `DragSession` + the target's `on_drop` | **Escape cancels only.** There is no keyboard pick-up / put-down mode anywhere in core. | A framework-level keyboard DnD mode: a "lift" command parks the payload, Tab moves to a target, Enter drops, Esc cancels. **Highest-leverage single fix** — it retires rows 14, 17, 19 and 29. |
 | 31 | `crates/teksilo-widgets/src/title_bar/drag_region.rs:130` | **Move the window** (custom chrome) | `PlatformTitleBarHost::begin_drag()` | **None.** `accessibility()` :215 explicitly `set_hidden()` with the comment "no keyboard or AT analogue". The fallback window menu (`title_bar/window_menu.rs:61-85`) has Restore / Maximize / Minimize / Close — **no Move**. `on_double_tap` :139 toggles maximize, which is a non-drag route for maximize only. | Add **Move** to `build_window_menu`, driving a keyboard move mode (arrows nudge, Enter commits, Esc reverts) — the Win32 system-menu convention. |
 | 32 | `crates/teksilo-widgets/src/title_bar/resize_strip.rs:115` | **Resize the window** (custom chrome) | `PlatformTitleBarHost::begin_resize(edge)` | **None.** No keys, no AT node, and the fallback window menu has no **Size** entry. | Add **Size** to `build_window_menu` (pick an edge, then arrows), plus a `WindowState`-driven programmatic resize the menu can call. |
 | 33 | `crates/teksilo-widgets/src/scroll_bar.rs:393` | Drag the scrollbar thumb | `set_scroll` → the owner's scroll `Signal<f32>` | **Yes.** Track click pages (`on_tap` :434) — a single-pointer route to any position; wheel via `ScrollArea::on_scroll` :647; `ScrollArea` advertises `Action::ScrollUp/Down/Left/Right` (`scroll_area.rs:1188-1199`, handled :793-811). **Caveat:** the bar's own `on_key` :477 is dead code — the bar is `.focusable(false)` :372, `accessibility()` :582 calls `set_hidden()`, and it is a *sibling* of the content, so KeyDown never reaches it. | **Compliant** via track click + AT. Cleanup: delete the dead `on_key` or move those chords onto `ScrollArea`. |
-| 34 | `crates/teksilo-widgets/src/primitives/text_input_field/mouse.rs:53` | Drag-select text in TextInput / SearchField / SpinBox / PasswordField | `cursor.set_position(.., KeepAnchor)` | **Yes.** `text_input_field/keyboard.rs:81` Shift+arrow extend, Ctrl/⌘+A select-all; double/triple tap = word/line. | **Compliant.** |
-| 35 | `crates/teksilo-widgets/src/rich_text/mouse.rs:442` | Drag-select text in RichTextEditor / Viewer | `cursor.set_position(.., KeepAnchor)` | **Yes.** `rich_text/keyboard.rs:130-223` Shift+arrows including table-cell extension; the Ctrl+A ladder :164-279. | **Compliant.** |
-| 36 | `crates/teksilo-widgets/src/code_editor/mouse.rs:110` | Drag-select (and Alt-click multi-caret drag) in CodeEditor / LogView | `DragState::Selecting` → selection ranges | **Yes.** `code_editor/keyboard.rs` carries the full Shift+arrow / Ctrl+A set. | **Compliant.** |
-| 37 | `crates/teksilo-terminal/src/terminal.rs:1229` | Drag-select terminal text | `engine.selection_update(row, col, side)` | **Partial.** `on_double_tap` :660 / `on_triple_tap` :667 give word and line selection without a drag. `TerminalController::select_all()` exists (:194) but **no key is bound to it**; the only chords are Ctrl+Shift+C :1452 and Ctrl+Shift+V :1461. No Shift+arrow selection. | Bind Ctrl+Shift+A → `select_all()`, and add Shift+arrow / Shift+Home/End range selection over the grid (the terminal has no caret, so this needs a scrollback selection cursor). |
+| 34 | `text_input_field/mouse.rs` `handle_pointer_event`, `PointerMove` arm | Drag-select text in TextInput / SearchField / SpinBox / PasswordField | `cursor.set_position(.., KeepAnchor)` | **Yes.** `text_input_field/keyboard.rs` `handle_key` — Shift+arrow extend on `Key::ArrowLeft`/`ArrowRight`, `Key::A if ctrl` select-all (`ctrl` is `Modifiers::command()`, so ⌘A on macOS); double/triple tap = word/line. | **Compliant.** |
+| 35 | `rich_text/mouse.rs` `handle_pointer_event`, `PointerMove` arm | Drag-select text in RichTextEditor / Viewer | `cursor.set_position(.., KeepAnchor)` | **Yes.** `rich_text/keyboard.rs` `handle_key` — Shift+arrows, including the table-cell extension (`try_extend_cell_selection`); Ctrl/⌘+A runs `apply_select_all_ladder`. | **Compliant.** |
+| 36 | `code_editor/mouse.rs` `handle_pointer_event`, `PointerMove` arm (Alt-click multi-caret at its `PointerDown` arm) | Drag-select (and Alt-click multi-caret drag) in CodeEditor / LogView | `DragState::Selecting` → selection ranges | **Yes.** `code_editor/keyboard.rs` `handle_key` carries the full Shift+arrow set and `Key::A if ctrl` → `CodeCommand::SelectAll`. | **Compliant.** |
+| 37 | `teksilo-terminal/src/terminal.rs` `pointer_handler`, its `Local selection drag` branch | Drag-select terminal text | `engine.selection_update(row, col, side)` | **Partial.** The widget's `on_double_tap` / `on_triple_tap` both call `select_at` (`SelectionKind::Word` / `Line`), so word and line selection need no drag; and the context menu built by `terminal/menu.rs` `build_menu` carries **Select all**, reached by a hold, a right-click, an assistive client's `ShowContextMenu`, *and* the framework's keyboard chord — `is_context_menu_chord` (Menu key, Shift+F10, Ctrl+Shift+M on macOS) is intercepted in `pointer_router.rs` above the widget, so it reaches the terminal despite its `keyboard_capture(true)`. What is still drag-only is an **arbitrary range**: no Shift+arrow selection exists, and no key is bound to `TerminalController::select_all()` — the only chords the widget reads are `is_copy_chord` / `is_paste_chord` (⌘C / ⌘V on macOS, Ctrl+Shift+C / Ctrl+Shift+V elsewhere). | Add Shift+arrow / Shift+Home/End range selection over the grid — the terminal has no caret, so this needs a scrollback selection cursor. A direct Select all chord is optional now that the menu row is keyboard-reachable. |
 
 ## Recorded and dismissed
 

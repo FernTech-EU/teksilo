@@ -8853,8 +8853,8 @@ fn read_only_follows_a_link_on_a_plain_click() {
     assert_eq!(
         hrefs,
         vec!["https://example.com/x".to_string()],
-        "a read-only viewer must follow a link on an ordinary click — there is no caret to place, \
-         so a link that ignores a plain click reads as broken"
+        "a read-only viewer must follow a link on an ordinary click — its text cannot be \
+         edited, so a link that ignores a plain click reads as broken"
     );
 }
 

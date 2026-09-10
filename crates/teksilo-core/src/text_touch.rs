@@ -79,8 +79,11 @@ pub use magnifier::MagnifierRequest;
 /// by [`HANDLE_HIT_SIZE`], which is what the pointer actually meets.
 pub const HANDLE_DIAMETER: f32 = 24.0;
 
-/// Extent of a selection handle's square hit rectangle, in dp — a `Target`
-/// dimension, so a denser ladder can only widen it.
+/// Extent of a selection handle's square hit rectangle, in dp.
+///
+/// A `Target` dimension, so the density floor can only raise it — and it is
+/// specified at the size the *tallest* rung asks for, so no shipped ladder
+/// raises it and a handle is the same size to a fingertip at every density.
 pub const HANDLE_HIT_SIZE: f32 = 44.0;
 
 /// Width of the stem drawn from a handle's disc to the caret it marks, in dp.
@@ -668,18 +671,22 @@ impl TouchSelection {
         EventResponse::Handled
     }
 
-    /// Route one pointer event.
+    /// Route one pointer event, for a host that paints its own handles.
     ///
-    /// The host installs this on the editor itself. It claims only what belongs
-    /// to the affordances: a press that lands on a handle, and the samples of a
-    /// drag it started. Everything else — including every event from an
-    /// indirect pointer — is [`Ignored`](EventResponse::Ignored), so the host's
-    /// own caret placement runs exactly as it did.
+    /// **A host that mounts the [`TextAffordanceLayer`] does not call this.**
+    /// The layer's handles are widgets in their own right, sitting above the
+    /// editor and offered the press first, so such a host wires the pieces
+    /// directly instead: [`on_long_press`](Self::on_long_press) from its own
+    /// long-press handler, [`raise`](Self::raise) from its own release arm, and
+    /// [`drag_handle`](Self::drag_handle) from the layer's node. All three
+    /// stock hosts are of that shape.
     ///
-    /// A host that mounts the [`TextAffordanceLayer`] gets handle presses
-    /// through the layer's own nodes, which sit above the editor and are
-    /// offered the press first; the handle branch here is what serves a host
-    /// that paints its own handles instead.
+    /// What this offers a host that draws the handles itself is the routing
+    /// those hosts get from the layer: it claims only what belongs to the
+    /// affordances — a press that lands on a handle, and the samples of a drag
+    /// it started. Everything else, including every event from an indirect
+    /// pointer, is [`Ignored`](EventResponse::Ignored), so the host's own caret
+    /// placement runs exactly as it did.
     pub fn handle_pointer(
         &mut self,
         event: &WidgetEvent,
@@ -863,8 +870,12 @@ impl TouchSelection {
         let document_len = source.document_len();
         let selection = source.selection();
         let kinds: &[(SelectionHandleKind, usize)] = &if selection.is_empty() {
-            // A read-only surface has no caret to place, so it gets no caret
-            // handle — only the two that adjust a selection.
+            // A caret handle exists to drag a caret about, so it is offered
+            // only where the user may move one. A surface that takes no edits
+            // either has no caret at all (a terminal) or has one it does not
+            // let the user place (a log view); either way there is nothing for
+            // the handle to do. Selecting is not editing, so the two selection
+            // handles below are offered whether the surface is editable or not.
             if source.is_editable() {
                 vec![(SelectionHandleKind::Caret, selection.start)]
             } else {

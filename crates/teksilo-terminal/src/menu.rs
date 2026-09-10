@@ -35,13 +35,14 @@ use teksilo_core::accessibility::{AccessNodeBuilder, widget_id_to_node_id};
 use teksilo_core::build_context::BuildContext;
 use teksilo_core::event::{EventResponse, Key, WidgetEvent};
 use teksilo_core::signal::Signal;
+use teksilo_core::styles::density::dp;
 use teksilo_core::text_touch::{TextAction, TextHitSource};
 use teksilo_core::widget::{
     CursorIcon, EventContext, LayoutContext, LayoutResponse, PaintContext, Widget, WidgetPlacement,
 };
 use teksilo_core::widget_builder::HandlerSet;
 use teksilo_core::widget_id::WidgetId;
-use teksilo_tokens::{BorderRole, CornerRadius, SurfaceRole, TextRole, TextStyle};
+use teksilo_tokens::{BorderRole, CornerRadius, SurfaceRole, TargetRole, TextRole, TextStyle};
 
 use crate::state::TerminalState;
 use crate::touch::TerminalHitSource;
@@ -50,8 +51,17 @@ use crate::touch::TerminalHitSource;
 const MENU_PADDING: f32 = 4.0;
 /// Horizontal padding inside a row, in dp.
 const ROW_PADDING_X: f32 = 12.0;
-/// A row's height floor, in dp — the WCAG 2.5.8 minimum a finger needs. The
-/// row grows past it for a larger text scale; it never shrinks below it.
+/// A row's height floor at [`TargetDensity::Compact`], in dp — the WCAG 2.5.8
+/// minimum a finger needs.
+///
+/// It is a *base*, not the answer: every site reads it through [`dp`] with
+/// [`TargetRole::Target`], so a denser ladder raises the floor by the same
+/// projection the selection handles use. A menu a finger opens must not be the
+/// one part of this crate that ignores the density it was opened at. The row
+/// still grows past whichever floor is in force when the label's own line is
+/// taller.
+///
+/// [`TargetDensity::Compact`]: teksilo_tokens::TargetDensity::Compact
 const ROW_MIN_HEIGHT: f32 = 24.0;
 /// Extra height a row takes over its label, in dp.
 const ROW_LEADING: f32 = 10.0;
@@ -142,6 +152,11 @@ impl TerminalMenu {
             run,
             active: Signal::new(0),
             rows: Vec::new(),
+            // A placeholder until the first `layout_response`, which is the
+            // first point a theme — and so a density — is in scope. `Compact`'s
+            // floor is the safe stand-in: no pass paints from it, because
+            // `place_children` cannot run before `layout_response` has replaced
+            // it with the density-aware value.
             row_height: Cell::new(ROW_MIN_HEIGHT),
             width: Cell::new(0.0),
         }
@@ -226,8 +241,9 @@ impl Widget for TerminalMenu {
 
     fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> LayoutResponse {
         let style = Self::label_style(ctx.theme);
+        let row_min = dp(ROW_MIN_HEIGHT, TargetRole::Target, &ctx.theme.input);
         let mut width = 0.0f32;
-        let mut line = ROW_MIN_HEIGHT - ROW_LEADING;
+        let mut line = row_min - ROW_LEADING;
         if let Some(backend) = ctx.text_backend {
             let mut backend = backend.borrow_mut();
             for command in &self.commands {
@@ -240,7 +256,7 @@ impl Widget for TerminalMenu {
                 width = width.max(command.label().chars().count() as f32 * style.size * 0.6);
             }
         }
-        let row_height = (line + ROW_LEADING).max(ROW_MIN_HEIGHT);
+        let row_height = (line + ROW_LEADING).max(row_min);
         self.row_height.set(row_height);
         self.width.set(width);
         let size = Size::new(
@@ -347,8 +363,13 @@ impl Widget for TerminalMenuRow {
         Vec::new()
     }
 
-    fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> LayoutResponse {
-        proposal.resolve(0.0, ROW_MIN_HEIGHT).into()
+    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> LayoutResponse {
+        proposal
+            .resolve(
+                0.0,
+                dp(ROW_MIN_HEIGHT, TargetRole::Target, &ctx.theme.input),
+            )
+            .into()
     }
 
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
@@ -391,4 +412,82 @@ pub(crate) fn build_menu(state: &Rc<RefCell<TerminalState>>, run: RunCommand) ->
         commands_for(&mut st)
     };
     Box::new(TerminalMenu::new(commands, run))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use teksilo_core::widget::LayoutContext;
+    use teksilo_tokens::TargetDensity;
+
+    fn menu(commands: Vec<TerminalMenuCommand>) -> TerminalMenu {
+        TerminalMenu::new(commands, Rc::new(|_, _| {}))
+    }
+
+    fn row() -> TerminalMenuRow {
+        TerminalMenuRow {
+            command: TerminalMenuCommand::Copy,
+            index: 0,
+            count: 1,
+            active: Signal::new(0),
+            run: Rc::new(|_, _| {}),
+        }
+    }
+
+    fn theme_at(density: TargetDensity) -> teksilo_core::styles::Theme {
+        teksilo_core::presets::intui::light().with_density(density)
+    }
+
+    /// A row's own minimum follows the density ladder, so a parent that measures
+    /// a row rather than imposing a height on it gets a conforming answer too.
+    ///
+    /// This is the half of the routing the panel's `place_children` hides: it
+    /// overwrites every child's size with its own measured row height, so
+    /// nothing in a mounted tree can see this method's answer.
+    #[test]
+    fn a_rows_own_minimum_follows_the_density_ladder() {
+        for (density, expected) in [
+            (TargetDensity::Compact, 24.0_f32),
+            (TargetDensity::Comfortable, 32.0),
+            (TargetDensity::Touch, 44.0),
+        ] {
+            let theme = theme_at(density);
+            let ctx = LayoutContext::for_testing(&theme);
+            let response = row().layout_response(SizeProposal::unspecified(), &ctx);
+            assert_eq!(
+                response.size.height, expected,
+                "a menu row at {density:?} must reach the density's target size"
+            );
+        }
+    }
+
+    /// The panel's height is the row height times the row count plus its
+    /// padding, and the row height is the density's — so a denser ladder makes
+    /// the whole menu taller rather than making the rows overlap.
+    #[test]
+    fn the_panels_height_follows_the_rows() {
+        for (density, row_height) in [
+            (TargetDensity::Compact, 24.0_f32),
+            (TargetDensity::Touch, 44.0),
+        ] {
+            let theme = theme_at(density);
+            let ctx = LayoutContext::for_testing(&theme);
+            let m = menu(vec![
+                TerminalMenuCommand::Copy,
+                TerminalMenuCommand::Paste,
+                TerminalMenuCommand::Clear,
+            ]);
+            let response = m.layout_response(SizeProposal::unspecified(), &ctx);
+            assert_eq!(
+                response.size.height,
+                row_height * 3.0 + MENU_PADDING * 2.0,
+                "three rows at {density:?}"
+            );
+            assert_eq!(
+                m.row_height.get(),
+                row_height,
+                "…and `place_children` reads the same number"
+            );
+        }
+    }
 }

@@ -1373,6 +1373,16 @@ fn release_contact(st: &mut TerminalState) {
     }
 }
 
+/// The widget-local position an event carries, if it carries one.
+fn event_position(event: &WidgetEvent) -> Option<Point> {
+    match event {
+        WidgetEvent::PointerDown { position, .. }
+        | WidgetEvent::PointerUp { position, .. }
+        | WidgetEvent::PointerMove { position } => Some(*position),
+        _ => None,
+    }
+}
+
 fn pointer_handler(
     state: &Rc<RefCell<TerminalState>>,
     signals: &TerminalSignals,
@@ -1381,6 +1391,12 @@ fn pointer_handler(
     ctx: &mut EventContext,
 ) -> EventResponse {
     let kind = ctx.pointer_kind();
+    // Recorded before anything decides whether to act on the event, because the
+    // consumer is the *wheel*, which arrives through a different handler and
+    // with no position of its own. See `TerminalState::last_local_pointer`.
+    if let Some(position) = event_position(event) {
+        state.borrow_mut().last_local_pointer = Some(position);
+    }
     match event {
         WidgetEvent::PointerDown {
             position,
@@ -1606,6 +1622,7 @@ fn scroll_handler(
         modifiers,
         phase,
         pointer,
+        position,
         ..
     } = event
     else {
@@ -1663,9 +1680,10 @@ fn scroll_handler(
             MouseButton::WheelDown
         };
         let count = (lines.abs().round() as usize).max(1);
+        let (col, row) = wheel_report_cell(state, *position);
         let mut st = state.borrow_mut();
         for _ in 0..count {
-            report_mouse(&mut st, MouseKind::Press, button, 0, 0, *modifiers);
+            report_mouse(&mut st, MouseKind::Press, button, col, row, *modifiers);
         }
         drop(st);
         ctx.request_frame();
@@ -1871,6 +1889,51 @@ fn cell_at_position(
         CellSide::Left
     };
     Some((col, row, side))
+}
+
+/// Convert a **window**-space point into the widget-local space
+/// [`cell_at_position`] reads.
+///
+/// [`WidgetTree::localize_event`] rewrites every pointer position and every
+/// gesture into widget-local space before a handler sees it, but it does not
+/// rewrite [`WidgetEvent::Scroll`] — a wheel notch is routed by hover and
+/// historically carried no position at all. So the one scroll field that does
+/// carry one has to be brought into that space here, and it is *converted into*
+/// it rather than resolved by a second copy of the cell arithmetic: getting the
+/// origin inset wrong is the mistake this file has already made once.
+///
+/// [`WidgetTree::localize_event`]: teksilo_core::widget_tree::WidgetTree
+fn window_to_local(st: &TerminalState, position: Point) -> Point {
+    Point::new(position.x - st.bounds.x, position.y - st.bounds.y)
+}
+
+/// The cell a wheel notch's VT report names.
+///
+/// The cell under the pointer, the same as a press names: a full-screen program
+/// reads the coordinates to decide *which* pane the wheel turned over, so a
+/// report pinned at the grid's origin tells `less` in a split `tmux` that the
+/// user is always pointing at the top-left corner. The origin survives only as
+/// the answer when there is no pointer position to be had — a wheel before the
+/// cursor has ever been over the terminal.
+///
+/// Two sources, because a wheel has two producers: a positioned sample answers
+/// from its own position (window space, so through [`window_to_local`]), and a
+/// bare hover-routed notch answers from where the pointer last was. Both end in
+/// [`cell_at_position`].
+fn wheel_report_cell(
+    state: &Rc<RefCell<TerminalState>>,
+    position: Option<Point>,
+) -> (usize, usize) {
+    let local = match position {
+        Some(window) => window_to_local(&state.borrow(), window),
+        None => match state.borrow().last_local_pointer {
+            Some(local) => local,
+            None => return (0, 0),
+        },
+    };
+    cell_at_position(state, local)
+        .map(|(col, row, _)| (col, row))
+        .unwrap_or((0, 0))
 }
 
 fn copy_selection(state: &Rc<RefCell<TerminalState>>, ctx: &mut EventContext) {

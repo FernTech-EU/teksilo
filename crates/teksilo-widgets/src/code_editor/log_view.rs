@@ -82,8 +82,9 @@ pub struct LogView {
     h_scrollbar_id: Option<WidgetId>,
     v_scrollbar_bounds: Rc<Cell<Rect>>,
     h_scrollbar_bounds: Rc<Cell<Rect>>,
-    /// The touch-selection mount. A read-only surface, so its toolbar is Copy
-    /// and Select All — which until now had no route at all but `Ctrl+C` on a
+    /// The touch-selection mount. A read-only surface, so the only commands it
+    /// can offer are Copy and Select All — and a hold, which selects a word,
+    /// offers Copy alone. Until now that had no route at all but `Ctrl+C`, on a
     /// device that has no `Ctrl`.
     pub(super) touch: Rc<crate::rich_text::touch_mount::EditorTouch>,
     /// Install the built-in right-click menu during `build()`. Default `true`.
@@ -370,9 +371,10 @@ impl Widget for LogView {
                 }
             })
             // A hold selects the word under the finger and raises the toolbar —
-            // which on a read-only log is Copy and Select All. Attaching this
-            // withdraws the tree-owned long-press route, and the toolbar is what
-            // replaces it.
+            // which on a read-only log is Copy alone, since Select All is offered
+            // only while nothing is selected and the hold has just selected a
+            // word. Attaching this withdraws the tree-owned long-press route, and
+            // the toolbar is what replaces it.
             .on_long_press({
                 let state = self.state.clone();
                 let touch = self.touch.clone();

@@ -708,8 +708,13 @@ fn a_refresh_after_dismissal_raises_nothing() {
     assert!(controller.toolbar().is_none());
 }
 
-/// A surface that refuses edits can only be copied from, and has no caret to
-/// place — so no Cut, no Paste, no Select All and no caret handle.
+/// A surface that refuses edits can only be copied from, and offers no caret
+/// handle because the user cannot move its caret — so no Cut, no Paste, no
+/// Select All, and nothing to drag where the caret is.
+///
+/// Selecting is not editing, though: a read-only surface with a range still
+/// gets both selection handles, which is what lets a finger widen a selection
+/// in a terminal or a log view.
 #[test]
 fn a_read_only_surface_offers_a_copy_only_toolbar_and_no_caret_handle() {
     let source = FakeText::new().read_only().selected(5..10);
@@ -718,6 +723,13 @@ fn a_read_only_surface_offers_a_copy_only_toolbar_and_no_caret_handle() {
 
     let toolbar = controller.toolbar().expect("a copy toolbar");
     assert_eq!(toolbar.actions, vec![TextAction::Copy]);
+    let kinds: Vec<_> = controller.handles().into_iter().map(|h| h.kind).collect();
+    assert_eq!(
+        kinds,
+        vec![SelectionHandleKind::Start, SelectionHandleKind::End],
+        "a read-only surface must still offer the handles that adjust a \
+         selection"
+    );
 
     let empty = FakeText::new().read_only().selected(4..4);
     let mut controller = TouchSelection::new();
@@ -826,16 +838,49 @@ fn a_caret_scrolled_out_of_view_has_no_handle() {
     assert!(controller.handles().is_empty());
 }
 
-/// Handles are the one affordance density widens: the disc is chrome already
-/// sized to a fingertip, the target is what a finger meets.
+/// Neither of a handle's two dimensions moves with density, and they hold
+/// still for different reasons.
+///
+/// The disc is a `Decoration`, which `dp` passes through untouched. The target
+/// is a `Target`, which `dp` raises to the density's target size — but the
+/// handle is already specified at the size the *tallest* rung asks for, so the
+/// floor never bites and the shipped value stands at every rung. That is the
+/// intent: a handle is dragged by a fingertip whatever the rest of the UI is
+/// sized for, and a Compact build must not offer a smaller one.
+///
+/// Both are pinned as equalities rather than as "may only grow": an inequality
+/// against a constant is satisfied by the constant, so it would assert nothing
+/// the ladder could break. A theme that supplies its own
+/// `TextSelectionHandleRecipe` is a different door and is not covered here.
 #[test]
-fn density_widens_the_target_and_leaves_the_disc_alone() {
-    let compact = HandleMetrics::for_tokens(&InputTokens::for_density(TargetDensity::Compact));
-    let touch = HandleMetrics::for_tokens(&InputTokens::for_density(TargetDensity::Touch));
-    assert_eq!(compact.diameter, HANDLE_DIAMETER);
-    assert_eq!(compact.hit, HANDLE_HIT_SIZE);
-    assert_eq!(touch.diameter, HANDLE_DIAMETER, "the disc is a decoration");
-    assert!(touch.hit >= compact.hit, "the target may only grow");
+fn density_moves_neither_a_handles_target_nor_its_disc() {
+    for density in [
+        TargetDensity::Compact,
+        TargetDensity::Comfortable,
+        TargetDensity::Touch,
+    ] {
+        let metrics = HandleMetrics::for_tokens(&InputTokens::for_density(density));
+        assert_eq!(
+            metrics.diameter, HANDLE_DIAMETER,
+            "the disc is a decoration, and {density:?} moved it"
+        );
+        assert_eq!(
+            metrics.hit, HANDLE_HIT_SIZE,
+            "the target already clears every rung's floor, and {density:?} \
+             moved it"
+        );
+    }
+
+    // …and the reason the floor never bites: the shipped target is not merely
+    // above the *default* density's floor, it is at or above the tallest one's.
+    // Were it below, the assertions above would be asserting the ladder rather
+    // than the constant.
+    let tallest = InputTokens::for_density(TargetDensity::Touch).target_size;
+    assert!(
+        HANDLE_HIT_SIZE >= tallest,
+        "a handle specified below the tallest density's target ({tallest}) \
+         would be widened by it"
+    );
 }
 
 /// Two handles overlap when the selection is a character wide. The nearer one
@@ -1688,5 +1733,137 @@ fn a_finger_on_a_handle_node_drags_it_and_a_mouse_falls_through() {
         phases.contains(&(SelectionHandleKind::End, HandleDragPhase::Begin))
             && phases.contains(&(SelectionHandleKind::End, HandleDragPhase::End)),
         "a finger must drive the handle it landed on, got {phases:?}"
+    );
+}
+
+/// A handle's target is wider than the disc, so it shadows the text under it —
+/// and only a finger's press there is claimed.
+///
+/// This characterises the widening the affordance layer costs rather than
+/// asserting it is small: the target is measured in characters of the fixture's
+/// text, and a press aimed two characters off the anchor — a point the host's
+/// own hit source reads as text other than the edge the handle belongs to — is
+/// followed for each device.
+///
+/// * A **finger** is claimed: the handle takes the pointer's capture and drives
+///   its drag. That is the point of a target larger than the disc — a fingertip
+///   does not land on the pixel it aimed at, and a handle answering only its own
+///   centre would be undraggable.
+/// * A **mouse** is declined: nothing in the layer takes the capture, so the
+///   press is still there to be answered.
+///
+/// What "declined" is *not* visible in is the delivery. The content root above
+/// the handles — the node the layer's own docs tell a host to put its
+/// cursor-click arm on, and what the `StackWidget` here stands in for — is
+/// offered the press whichever device made it. So a host cannot read "the
+/// handles passed on this one" off the fact that it arrived; the capture is what
+/// says so.
+#[test]
+fn a_handles_target_shadows_text_and_only_a_finger_claims_it() {
+    let source = FakeText::new().selected(5..10);
+    let mut controller = TouchSelection::new();
+    controller.raise(LTR, &source);
+    let handle = controller
+        .handles()
+        .into_iter()
+        .find(|h| h.kind == SelectionHandleKind::End)
+        .expect("end handle");
+
+    // The measurement: whole characters either side of the anchor lie inside the
+    // target, so this is a run of text and not a rounding error.
+    for dx in [-2.0, -1.0, 1.0, 2.0] {
+        let at = Point::new(handle.anchor.x + dx * CHAR_WIDTH, handle.anchor.y);
+        assert!(
+            handle.hit.contains(at),
+            "{dx} characters off the anchor is outside the target, so the \
+             target shadows less text than this test characterises: {:?}",
+            handle.hit
+        );
+    }
+
+    // Two characters off, and what the host's own hit source reads there is not
+    // the edge the handle belongs to. That is the widening.
+    let shadowed = Point::new(handle.anchor.x - 2.0 * CHAR_WIDTH, handle.anchor.y);
+    assert_ne!(
+        source.offset_at(shadowed),
+        handle.offset,
+        "the target covers only its own edge, so there is no shadowed text \
+         to characterise"
+    );
+
+    let recorder = Rc::new(RecordingDelegate::default());
+    let delegate: Rc<dyn TextAffordanceDelegate> = recorder.clone();
+    let mut tree = crate::widget_tree::WidgetTree::new().with_theme(crate::presets::intui::light());
+    let layer = tree.add(TextAffordanceLayer::new(
+        controller.affordances(),
+        test_handle_recipe(),
+        test_magnifier_recipe(),
+        delegate,
+    ));
+    let offered_to_root: Rc<std::cell::Cell<usize>> = Default::default();
+    {
+        use crate::widget_builder::WidgetBuilder;
+        let offered_to_root = offered_to_root.clone();
+        tree.add(
+            crate::test_widgets::StackWidget::new()
+                .add_child(layer)
+                .on_pointer_event(move |event, _ctx| {
+                    if matches!(event, WidgetEvent::PointerDown { .. }) {
+                        offered_to_root.set(offered_to_root.get() + 1);
+                    }
+                    EventResponse::Ignored
+                }),
+        );
+    }
+    tree.layout(SizeProposal::exact(200.0, 60.0));
+
+    // The mouse first, so a later touch cannot be credited to it.
+    tree.dispatch_event(down(shadowed));
+    assert_eq!(
+        tree.pointer_captured_by(),
+        None,
+        "a mouse press inside the target was claimed by the layer"
+    );
+    tree.dispatch_event(up(shadowed));
+    assert!(
+        recorder.drags.borrow().is_empty(),
+        "a mouse press inside the target reached the handle: {:?}",
+        recorder.drags.borrow()
+    );
+    assert_eq!(
+        offered_to_root.get(),
+        1,
+        "the declined press did not reach the content root, so there is \
+         nothing for a host's arm to answer"
+    );
+
+    let contact = tree.new_contact();
+    tree.touch_down(contact, shadowed);
+    let captor = tree
+        .captured_by(contact)
+        .expect("a finger inside the target must be claimed");
+    assert_eq!(
+        tree.bounds(captor),
+        handle.hit,
+        "the finger was claimed by something other than the handle whose \
+         target it landed in"
+    );
+    tree.touch_up(contact, shadowed);
+    let phases: Vec<_> = recorder
+        .drags
+        .borrow()
+        .iter()
+        .map(|(kind, phase, _)| (*kind, *phase))
+        .collect();
+    assert!(
+        phases.contains(&(SelectionHandleKind::End, HandleDragPhase::Begin)),
+        "a finger two characters off the anchor must still drive the handle, \
+         got {phases:?}"
+    );
+    assert_eq!(
+        offered_to_root.get(),
+        2,
+        "the content root is offered the press whichever device made it — a \
+         host's arm there cannot read a decline off its arrival"
     );
 }

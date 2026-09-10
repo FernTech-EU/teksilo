@@ -159,8 +159,9 @@ pub(crate) struct CodeEditorState {
     /// A **shrink** only. Growing reveals more text and never pushes the caret
     /// out, and re-revealing on every resize would drag a reader's scroll
     /// position back to the caret every time a window edge moved. The
-    /// [`LogView`](super::LogView) never sets it — it has no caret, and pulling
-    /// its scroll offset anywhere would fight its own follow-tail rule.
+    /// [`LogView`](super::LogView) never sets it: its follow-tail rule is
+    /// *derived* from the scroll offset, so a reveal that moved that offset would
+    /// silently switch following back on.
     pub pending_caret_reveal: bool,
 
     // --- Layout strategy ---------------------------------------------------
@@ -415,7 +416,8 @@ impl CodeEditorState {
             // makes this a correctness matter rather than a nicety. Recorded
             // rather than acted on: the shrink forces a relayout, and the caret
             // cannot be revealed against a layout that has not run yet. A log
-            // view has no caret, so `is_streaming` is exempt.
+            // view is exempt (`is_streaming`): its follow-tail rule is derived
+            // from the scroll offset a reveal would move.
             self.pending_caret_reveal |= !self.is_streaming()
                 && (bounds.width < self.viewport_width - 0.5
                     || bounds.height < self.viewport_height - 0.5);

@@ -100,6 +100,16 @@ pub(crate) struct TerminalState {
     /// turns a pixel stream into line steps without losing the remainder.
     pub(crate) scroll_residue: f32,
 
+    /// Where the pointer last was, in **widget-local** space — the space
+    /// `WidgetTree::localize_event` hands every pointer event over in.
+    ///
+    /// Recorded for the wheel. A wheel notch is routed by hover and carries no
+    /// position of its own (`WidgetEvent::Scroll::position` is `None` for a
+    /// mouse), so the cell its VT report names can only come from where the
+    /// cursor last was. `None` until the pointer has been over the terminal at
+    /// all, which is the only case a report has no cell to name.
+    pub(crate) last_local_pointer: Option<Point>,
+
     pub(crate) drag: Option<DragState>,
     /// The button currently held for mouse *reporting* (drives drag reports),
     /// distinct from a local selection drag.
@@ -148,6 +158,7 @@ impl TerminalState {
             contacts: 0,
             pan_owner: None,
             scroll_residue: 0.0,
+            last_local_pointer: None,
             drag: None,
             mouse_button_held: None,
             prev_cursor_line: 0,

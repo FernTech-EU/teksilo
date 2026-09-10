@@ -1442,12 +1442,20 @@ impl WidgetTree {
                 // around every dispatch (`run_one_dispatch`), so without this
                 // it holds `InputSnapshot::default()` and every handler reached
                 // from a hold is told it is serving **the mouse**, whatever the
-                // device was. That answer reaches more than
-                // `EventContext::pointer_kind`: the captor, the press snapshot
-                // and the frozen `TouchAction` are all resolved from
-                // `current_input.pointer.id`, so all four answered for a mouse
-                // that was not there. The fling pump resolves its pointer from
-                // the table the same way (`dispatch_chained_scroll`).
+                // device was.
+                //
+                // The snapshot is more than the device: it is the key
+                // `make_event_context` builds the rest of the context from, so
+                // every answer looked up by `current_pointer_id()` comes out
+                // for the wrong pointer without it. What the context carries
+                // in, and all of it: the device and the id the snapshot holds
+                // outright (`EventContext::pointer_kind`, `pointer`), the
+                // captor (`current_pointer_capture`), the frozen `TouchAction`
+                // (`current_frozen_touch_action`, keyed through the contact's
+                // sequence) and the press snapshot (`current_press_snapshot`).
+                // What the context carries back out is a separate list, below.
+                // The fling pump resolves its pointer from the table the same
+                // way (`dispatch_chained_scroll`).
                 let installed = self
                     .pointers
                     .get(pointer)
@@ -1462,11 +1470,15 @@ impl WidgetTree {
                     Self::dispatch_recognized_gesture(node, gesture, &mut ctx);
                 }
                 // `collect_from_ctx` **after** the restore would be wrong:
-                // it resolves a handler's `capture_pointer()` and
-                // `cancel_pointer()` against `current_pointer_id()`, so a hold
-                // that captured would have captured for the mouse. The sample
-                // path has the same order — `run_one_dispatch` restores only
-                // once `dispatch_event_impl`, collection included, has returned.
+                // two of the requests a handler can queue name no pointer and
+                // are applied to whichever one `current_pointer_id()` answers
+                // with at collection time — an unnamed
+                // `capture_pointer()`/`release_pointer()`, and
+                // `cancel_pointer_sequence()`. Collected after the restore,
+                // a hold that captured would have captured the mouse and a
+                // hold that cancelled would have cancelled it. The sample path
+                // has the same order — `run_one_dispatch` restores only once
+                // `dispatch_event_impl`, collection included, has returned.
                 self.collect_from_ctx(ctx, id);
                 self.current_input = previous_input;
             }
@@ -2347,56 +2359,183 @@ mod clock_tests {
     /// printed `Mouse`), and it cost the first host of the touch-text contract
     /// a duplicate guard: `TouchSelection::on_long_press` refused every finger.
     ///
-    /// Four answers ride on `current_input.pointer`, not one, and all four were
-    /// wrong here: the device (`pointer_kind`), the id, the captor and the press
-    /// snapshot, which resolve through `current_pointer_id()`.
+    /// This asserts the whole of what the context carries **in**: the device,
+    /// the id, the captor, the frozen `TouchAction` and the press snapshot.
+    /// What a handler asks the tree *for* from inside a hold — a capture, a
+    /// cancel — travels the other way and is asserted by
+    /// `a_hold_captures_and_cancels_the_contact_that_held`.
     ///
     /// The mouse half is not decoration: it is what proves the fix installs the
     /// *holding contact* rather than hard-coding a finger.
     #[test]
     fn a_hold_is_dispatched_under_the_contact_that_held() {
+        use crate::TouchAction;
         use crate::test_widgets::FillWidget;
         use crate::widget_builder::WidgetBuilder;
 
-        for (kind, expected) in [
-            (
-                teksilo_tokens::PointerKind::Touch,
-                teksilo_tokens::PointerKind::Touch,
-            ),
-            (
-                teksilo_tokens::PointerKind::Mouse,
-                teksilo_tokens::PointerKind::Mouse,
-            ),
+        /// Every answer the context is built from the installed snapshot.
+        #[derive(Debug, Clone, Copy)]
+        struct Answers {
+            kind: teksilo_tokens::PointerKind,
+            id: crate::pointer::PointerId,
+            captor: Option<WidgetId>,
+            touch_action: TouchAction,
+            press_inside: bool,
+        }
+
+        for kind in [
+            teksilo_tokens::PointerKind::Touch,
+            teksilo_tokens::PointerKind::Mouse,
         ] {
-            let seen: std::rc::Rc<std::cell::Cell<Option<teksilo_tokens::PointerKind>>> =
-                Default::default();
-            let seen_id: std::rc::Rc<std::cell::Cell<Option<crate::pointer::PointerId>>> =
-                Default::default();
+            let seen: std::rc::Rc<std::cell::Cell<Option<Answers>>> = Default::default();
             let mut tree = WidgetTree::new();
-            {
+            let held_by = {
                 let seen = seen.clone();
-                let seen_id = seen_id.clone();
-                tree.add(FillWidget::new().on_long_press(move |_e, ctx| {
-                    seen.set(Some(ctx.pointer_kind()));
-                    seen_id.set(Some(ctx.pointer().id));
-                }));
-            }
+                tree.add(
+                    // A declared, non-`AUTO` action so the frozen value is
+                    // distinguishable from the neutral one a pointer with no
+                    // sequence answers with.
+                    FillWidget::new()
+                        .touch_action(TouchAction::PAN_Y)
+                        .on_long_press(move |_e, ctx| {
+                            seen.set(Some(Answers {
+                                kind: ctx.pointer_kind(),
+                                id: ctx.pointer().id,
+                                // Read off the field rather than through
+                                // `owns_pointer()`, which also needs a
+                                // `dispatch_node` — and a timer dispatch,
+                                // addressed to a node rather than walking to
+                                // one, sets none.
+                                captor: ctx.pointer_captor,
+                                touch_action: ctx.touch_action(),
+                                press_inside: ctx.press_is_inside(),
+                            }));
+                        }),
+                )
+            };
             tree.layout(SizeProposal::exact(100.0, 100.0));
 
             let held = tree.long_press_at(kind, Point::new(50.0, 50.0));
+            let seen = seen.get().expect("the hold was dispatched");
 
             assert_eq!(
-                seen.get(),
-                Some(expected),
+                seen.kind, kind,
                 "a {kind:?} hold was dispatched as {:?}",
-                seen.get()
+                seen.kind
             );
             assert_eq!(
-                seen_id.get(),
-                Some(held),
+                seen.id, held,
                 "a hold must carry the identity of the contact that held"
             );
+            assert_eq!(
+                seen.captor,
+                Some(held_by),
+                "the captor is looked up by the dispatched pointer, and the \
+                 holding contact's is the node whose arena took its press"
+            );
+            assert_eq!(
+                seen.touch_action,
+                TouchAction::PAN_Y,
+                "the frozen action is read off the dispatched pointer's \
+                 sequence, so a hold under the wrong pointer reads the \
+                 neutral {:?} of a pointer that has none",
+                TouchAction::AUTO
+            );
+            assert!(
+                seen.press_inside,
+                "the press snapshot is keyed by the dispatched pointer, and \
+                 the contact that held is holding a press"
+            );
         }
+    }
+
+    /// What a hold handler asks the tree **for** is applied to the contact that
+    /// held.
+    ///
+    /// The other half of
+    /// `a_hold_is_dispatched_under_the_contact_that_held`: that one asserts
+    /// what the context is built with, this one what the context is collected
+    /// into. Two requests carry no pointer of their own
+    /// and are resolved against `current_pointer_id()` at collection —
+    /// `capture_pointer()` and `cancel_pointer_sequence()` — so collecting
+    /// after `current_input` is restored, rather than before, silently
+    /// addresses both to the mouse.
+    ///
+    /// The mouse is made live in both arms and is *not* the contact under test,
+    /// so a misrouted request lands somewhere the assertions can see rather
+    /// than on a pointer the table does not hold.
+    #[test]
+    fn a_hold_captures_and_cancels_the_contact_that_held() {
+        use crate::pointer::{CancelReason, PointerId};
+        use crate::test_widgets::FillWidget;
+        use crate::widget_builder::WidgetBuilder;
+
+        // The capture the handler takes rides on the contact, and the mouse —
+        // live, hovering, holding nothing — is left alone. The contact's own
+        // entry is already captured by this node (the arena takes it implicitly
+        // at the press), so the mouse half is what a misroute shows up in.
+        {
+            let mut tree = WidgetTree::new();
+            let node = tree.add(FillWidget::new().on_long_press(|_e, ctx| {
+                ctx.capture_pointer();
+            }));
+            tree.layout(SizeProposal::exact(100.0, 100.0));
+            tree.pointer_move(Point::new(10.0, 10.0));
+
+            let contact = hold_a_finger(&mut tree, Point::new(50.0, 50.0));
+
+            assert_eq!(
+                tree.captured_by(contact),
+                Some(node),
+                "a capture taken from a hold belongs to the contact that held"
+            );
+            assert_eq!(
+                tree.captured_by(PointerId::MOUSE),
+                None,
+                "the mouse was not the thing holding, and must not have been \
+                 captured on its behalf"
+            );
+        }
+
+        // The cancel the handler raises revokes the contact, and only it. The
+        // finger's entry is gone (a contact that is taken away ceases to exist);
+        // the mouse's press-less entry is untouched.
+        {
+            let mut tree = WidgetTree::new();
+            tree.add(FillWidget::new().on_long_press(|_e, ctx| {
+                ctx.cancel_pointer_sequence(CancelReason::WidgetDestroyed);
+            }));
+            tree.layout(SizeProposal::exact(100.0, 100.0));
+            tree.pointer_move(Point::new(10.0, 10.0));
+
+            let contact = hold_a_finger(&mut tree, Point::new(50.0, 50.0));
+
+            assert!(
+                !tree.live_pointers().any(|p| p.id == contact),
+                "a cancel raised from a hold revokes the contact that held"
+            );
+            assert!(
+                tree.live_pointers().any(|p| p.id == PointerId::MOUSE),
+                "and revokes nothing else"
+            );
+        }
+    }
+
+    /// Press one finger at `at` and let its hold ripen, without releasing it.
+    ///
+    /// [`long_press_at`](WidgetTree::long_press_at) lifts the contact, and a
+    /// lift takes the capture back and ends the entry — so what the hold's own
+    /// handler did to the pointer table is only observable before it.
+    fn hold_a_finger(tree: &mut WidgetTree, at: Point) -> crate::pointer::PointerId {
+        let hold = tree
+            .effective_theme
+            .input
+            .profile(teksilo_tokens::PointerKind::Touch)
+            .long_press;
+        let contact = tree.new_contact();
+        tree.touch_down(contact, at);
+        tree.advance_input_time(hold);
+        contact
     }
 
     /// A deadline armed after the hand-back is reported to the event loop as a

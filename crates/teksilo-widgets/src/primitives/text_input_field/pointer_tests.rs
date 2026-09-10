@@ -566,13 +566,17 @@ fn a_tap_after_a_hold_places_a_caret_and_takes_the_toolbar_down() {
 /// A tap that lands **inside** a handle's target adjusts that end of the
 /// selection instead of placing a caret.
 ///
-/// Not a defect but a measured consequence of the geometry: a handle's target is
-/// 44 dp square by the WCAG floor, while a Compact single-line field is 20 dp
-/// tall, so the two handles of a short selection blanket the text between them
-/// and a little either side. It is what the density ladder is for — at
-/// `TargetDensity::Touch` the field is more than twice as tall and the discs
-/// hang below it — and the reason a tap meant to dismiss a selection has to land
-/// clear of both ends.
+/// Not a defect but a consequence of the geometry, and the rule is the ladder
+/// rather than any one measurement. A handle's target is `HANDLE_HIT_SIZE` through
+/// `dp(.., TargetRole::Target, ..)`, which only ever *raises* — and 44 dp is
+/// already at or above every rung of the shipped ladder, so the target is 44 dp
+/// square at all three densities. A single-line field is shorter than that: this
+/// harness builds the bare primitive, whose height is its measured text height,
+/// and the styled field's is `dp(TEXT_FIELD_HEIGHT, Target, ..)` — the larger of
+/// its own recipe constant and the density's `target_size` — which reaches 44 dp
+/// only at `TargetDensity::Touch`. So below Touch the two handles of a short
+/// selection blanket the text between them and a little either side, which is why
+/// a tap meant to dismiss a selection has to land clear of both ends.
 #[test]
 fn a_tap_inside_a_handles_target_adjusts_the_selection_instead() {
     let mut h = Harness::focused("hello world");
@@ -611,8 +615,12 @@ fn a_tap_inside_a_handles_target_adjusts_the_selection_instead() {
 /// nothing, so the placement the affordance band was designed for is usable and
 /// the geometry the layer needs — a rectangle containing every position the text
 /// can be at — is the plain one. The behaviour that made the size load-bearing is
-/// pinned by `a_tap_beyond_the_affordances_reaches_the_field_itself` below, which
-/// did not change and reddens if the fall-through is reverted.
+/// pinned by `a_tap_beyond_the_affordances_reaches_the_field_itself` below, whose
+/// **assertions** did not change — its one behaviour assertion is byte-identical —
+/// and which reddens if the fall-through is reverted. Its *fixture* had to change:
+/// it used to read the overlay's own rectangle, and that was only ever the same
+/// rectangle as the affordances' while the overlay was sized to them, so it now
+/// reads the affordances' directly, which is what it always meant.
 #[test]
 fn the_affordance_overlay_covers_the_viewport_and_passes_presses_through() {
     let mut h = Harness::focused("hello world");
@@ -640,12 +648,22 @@ fn the_affordance_overlay_covers_the_viewport_and_passes_presses_through() {
 /// A tap **beyond** the affordances' rectangle reaches the field, and the field
 /// answers it.
 ///
-/// The host-level proof of the router's fall-through, and the one assertion in
-/// this file that reddens if it is reverted: the overlay above this press is the
-/// whole viewport, so a router that returned what the affordance layer answered
-/// would drop the press and the field would stop taking presses for as long as a
-/// selection was up. Measured that way before the fix, as `hit_test` returning
-/// `None` at a point inside the field.
+/// The host-level proof of the router's fall-through: the overlay above this press
+/// is the whole viewport, so a router that returned what the affordance layer
+/// answered would drop the press and the field would stop taking presses for as
+/// long as a selection was up. Measured that way before the fix, as `hit_test`
+/// returning `None` at a point inside the field.
+///
+/// It is not the only assertion here that depends on the fall-through, and the
+/// others are the better evidence because **three of the four pre-date it**. Any
+/// test that presses inside the field, clear of the handles, while a selection is
+/// up is pressing under the viewport-sized overlay and asserting that the field
+/// answered — so reverting the fall-through reddens this one,
+/// `a_tap_after_a_hold_places_a_caret_and_takes_the_toolbar_down`,
+/// `a_right_click_retires_the_affordances_the_framework_tore_down` and
+/// `a_mouse_click_in_the_field_away_from_the_chrome_retires_it`. Only the last was
+/// written alongside the fix; the first three were already here, asserting
+/// ordinary behaviour, which is what makes them worth more than a bespoke test.
 ///
 /// The fixture reads the **affordances'** rectangle rather than the overlay's,
 /// which is what it always meant; the two were the same thing only while the
@@ -724,7 +742,7 @@ fn a_read_only_field_offers_copy_alone() {
     assert_eq!(h.toolbar_actions(), vec![TextAction::Copy]);
     assert!(
         h.handle(SelectionHandleKind::Caret).is_none(),
-        "a read-only surface has no caret to place"
+        "a caret handle is offered only where the user may place a caret"
     );
 }
 

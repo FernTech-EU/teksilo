@@ -19,7 +19,32 @@ use crate::engine::{
 /// The shared, test-observable state behind a [`MemoryEngine`]. Obtain it from
 /// [`MemoryEngineFactory::shared`] before building the widget, then read/write
 /// it from the test.
+///
+/// `#[non_exhaustive]`, because the set of things a test can observe grows every
+/// time the view learns to drive one more part of an engine. The supported way
+/// to get one is [`MemoryEngineFactory::shared`], and reading and assigning
+/// fields on the handle it hands back is what the attribute leaves untouched:
+///
+/// ```
+/// use teksilo_terminal::MemoryEngineFactory;
+///
+/// let factory = MemoryEngineFactory::new();
+/// let shared = factory.shared();
+/// shared.borrow_mut().history_len = 100;
+/// assert!(shared.borrow().writes.is_empty());
+/// ```
+///
+/// What it forbids is the one form a new field would break — an out-of-crate
+/// struct literal, functional-update syntax included:
+///
+/// ```compile_fail
+/// let shared = teksilo_terminal::MemoryShared {
+///     history_len: 100,
+///     ..Default::default()
+/// };
+/// ```
 #[derive(Default)]
+#[non_exhaustive]
 pub struct MemoryShared {
     /// Every byte the view wrote toward the "child" (encoded keystrokes, paste).
     pub writes: Vec<u8>,

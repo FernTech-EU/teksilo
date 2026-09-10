@@ -62,10 +62,12 @@ let editor = CodeEditor::new(doc)
 let handle = editor.handle();           // drive it from a toolbar / status bar
 ```
 
-`CodeEditor::read_only(doc)` is the same, minus the caret: navigation, selection,
-and copy only, `Role::Document`. Its right-click menu and its touch selection
-toolbar therefore offer Copy and Select All and nothing that would change the
-text — see [Pointer input](#pointer-input-two-devices).
+`CodeEditor::read_only(doc)` is the same, minus a visible caret: navigation,
+selection, and copy only, `Role::Document`. The only commands it can offer are
+therefore Copy and Select All — nothing that would change the text. Its
+right-click menu carries both rows; its touch toolbar shows whichever of the two
+the live selection allows — see
+[Pointer input](#pointer-input-two-devices).
 
 ## Builders
 
@@ -194,14 +196,21 @@ side rather than collapsing it. Two details of the drag are worth knowing:
   contact *moves* through the band; a finger held perfectly still there does not
   keep scrolling.
 
-The **toolbar** is the right-click menu's own rows — one builder, so a command
-cannot be offered by one surface and refused by the other. A command the surface
-will not honour is **omitted** rather than greyed, which is what every platform's
-touch toolbar does, and the offer also narrows with the *state*: Cut and Copy need
-a selection, Paste needs an editable surface, and Select All is offered only while
-nothing is selected. So a hold on an editable surface puts up Cut / Copy / Paste,
-and a hold on a read-only one — a viewer, a `LogView` — puts up Copy alone. A tap
-on a read-only surface raises **no** handle at all: there is no caret to place.
+The **toolbar** is the right-click menu's own rows — one set of rows, built from
+one list, so neither surface can offer a command the **keyboard** would refuse:
+both read the same policy the chords are filtered through.
+
+What each surface does with the live *state* differs, by design. The menu **greys**
+a row it cannot honour — the desktop convention — and gates it on the document
+having any content (Paste aside: the clipboard it reads is not visible from here),
+so it offers Cut with no selection. The toolbar **omits** what
+it cannot offer, which is what every platform's touch toolbar does, and it is the
+stricter of the two on state: Cut and Copy need a selection, Paste needs an
+editable surface, and Select All is offered only while nothing is selected. So a
+hold on an editable surface puts up Cut / Copy / Paste, and a hold on a read-only
+one — a viewer, a `LogView` — puts up Copy alone. A tap on a read-only surface
+raises **no** handle at all: the caret handle is the one that moves a caret, and
+the controller offers it only on an editable surface.
 
 The chrome is retired by a cursor's press anywhere in the surface, by focus
 leaving, and by a keystroke that moves the caret. The affordance band is exempt
@@ -237,8 +246,9 @@ Two things follow a caret placed by a **pointer**, and neither did before:
   a focused editor is the case that makes this a correctness matter rather than a
   nicety. Growing the viewport deliberately does *not* chase the caret: growth
   reveals more text and never pushes it out, and a reader scrolled away would
-  otherwise be yanked back every time a window edge moved. A `LogView` is exempt
-  — it has no caret, and pulling its offset would fight its own follow-tail rule.
+  otherwise be yanked back every time a window edge moved. A `LogView` is exempt:
+  pulling its offset would fight its own follow-tail rule, which is derived from
+  that very offset.
 
 ## Completion
 
