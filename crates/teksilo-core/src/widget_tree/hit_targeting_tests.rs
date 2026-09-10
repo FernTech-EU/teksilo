@@ -856,8 +856,10 @@ fn a_round_control_measures_to_its_disc() {
 /// latent because no shipped widget implements `hit_shape`, and it stayed
 /// untested afterwards because every other test in this file calls the hooks on
 /// a bare `Cell`: `Cell::tappable` is an inherent builder setting a flag, so no
-/// wrapper is ever constructed. These two are the only tests that go through
-/// one, and deleting either forward from `widget_builder.rs` reddens them.
+/// wrapper is ever constructed. These two are the hit-targeting tests that go
+/// through one, and deleting either forward from `widget_builder.rs` reddens
+/// them; the rest of the trait's surface is covered the same way in
+/// `widget_builder::wrapper_forwarding_tests`.
 fn wrapped_dot(cell: Cell) -> (WidgetTree, WidgetId) {
     use crate::widget_builder::WidgetBuilder;
     let mut tree = WidgetTree::new();

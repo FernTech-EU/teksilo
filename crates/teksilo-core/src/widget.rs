@@ -144,6 +144,17 @@ impl From<Size> for LayoutResponse {
 }
 
 /// The full Widget trait for Level 2 (custom rendering) widgets.
+///
+/// # Adding a method here
+///
+/// A defaulted method added to this trait is **inert for every widget a builder
+/// method has touched** until the framework's same-node wrappers forward it.
+/// [`WidgetWithHandlers`](crate::widget_builder::WidgetWithHandlers) and the
+/// `TeksiBranch{,3,4}` sum types replace the widget at its own arena node, so an
+/// unforwarded method answers this default and the widget loses the behaviour
+/// silently — no compile error, and no test that drives the hook on a bare
+/// struct can see it. Those impls deny `clippy::missing_trait_methods` so the
+/// omission surfaces as a lint on them rather than as a defect in an app.
 pub trait Widget: std::fmt::Debug + std::any::Any {
     /// Concrete type name of this widget (e.g.
     /// `"teksilo_widgets::button::Button"`). The default implementation

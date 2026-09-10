@@ -48,8 +48,10 @@ const CATEGORY_B: &[(&str, &str)] = &[
 #[test]
 fn every_category_b_widget_pre_empts_a_bare_child_with_its_own_slot() {
     for (widget, slot) in CATEGORY_B {
-        let message = hint_for(&format!("{widget} {{ TextWidget(\"hi\") }}"))
-            .unwrap_or_else(|| panic!("`{widget}` accepted a bare child instead of pre-empting it"));
+        let message =
+            hint_for(&format!("{widget} {{ TextWidget(\"hi\") }}")).unwrap_or_else(|| {
+                panic!("`{widget}` accepted a bare child instead of pre-empting it")
+            });
         assert!(
             message.contains("Category B widget with named slots"),
             "`{widget}` failed for some other reason: {message}"

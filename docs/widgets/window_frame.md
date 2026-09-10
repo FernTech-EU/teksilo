@@ -55,12 +55,12 @@ replacement. `after_paint` is post-order, so wrapping the title bar (the
 canonical shape — `WindowFrame::content(VStack { TitleBar, body })`) puts
 the band update after the aggregate snapshot every frame.
 
-One trap to know about: `WidgetWithHandlers` — the wrapper every
-`WidgetBuilder` method produces — forwards a hand-maintained list of `Widget`
-methods, and `wants_after_paint` / `after_paint` are **not** on it. Writing
-`WindowFrame::new(host).content(..).on_tap(..)` would therefore silence this
-publish (and `TitleBar`'s own, for the same reason). Add the frame to the
-tree unwrapped.
+Wrapping the frame in a `WidgetBuilder` method is safe: `WidgetWithHandlers`
+forwards `wants_after_paint` / `after_paint` along with the rest of the trait,
+so `WindowFrame::new(host).content(..).on_tap(..)` still publishes. It did not
+always — the wrapper's forwarding list was incomplete, and an unforwarded hook
+silences a publish with no diagnostic — so the list is now exhaustive and
+lint-guarded at its impl.
 
 ## Builder methods at a glance
 

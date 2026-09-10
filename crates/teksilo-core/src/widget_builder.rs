@@ -1621,7 +1621,31 @@ impl<W: Widget> std::fmt::Debug for WidgetWithHandlers<W> {
     }
 }
 
+/// Every method of [`Widget`], forwarded to the wrapped widget.
+///
+/// `WidgetWithHandlers<W>` **replaces** `W` at `W`'s own arena node — the tree
+/// never sees `W` again. So a hook this impl does not forward is not overridden,
+/// it is gone: the trait's default answers in its place, for every widget any
+/// builder method has ever touched. Nothing warns, nothing fails to compile, and
+/// the widget goes on building, painting and hit-testing; only the behaviour
+/// behind the dropped hook stops, at a call site nowhere near the `.on_tap(..)`
+/// that silenced it. A test that drives the hook on a bare widget cannot see
+/// this, which is why every hook is also driven through a builder method in the
+/// `wrapper_forwarding_tests` module below, and why `missing_trait_methods` is
+/// denied here: a method added to `Widget` must fail this impl's lint before it
+/// can quietly fail a user's app.
+///
+/// The methods appear in the order the trait declares them, so the two can be
+/// read side by side.
+#[deny(clippy::missing_trait_methods)]
 impl<W: Widget + 'static> Widget for WidgetWithHandlers<W> {
+    /// Forwarded so the name is the widget's. The wrapper's own name identifies
+    /// the wrapper, which is never what a census bucket or an inspector row is
+    /// asking about.
+    fn type_name(&self) -> &'static str {
+        self.widget.type_name()
+    }
+
     fn build(
         &mut self,
         ctx: &mut crate::build_context::BuildContext,
@@ -1635,6 +1659,14 @@ impl<W: Widget + 'static> Widget for WidgetWithHandlers<W> {
         ctx: &crate::widget::LayoutContext,
     ) -> crate::widget::LayoutResponse {
         self.widget.layout_response(proposal, ctx)
+    }
+
+    /// Forwarded because the opt-out exists to protect a widget whose
+    /// `layout_response` is not idempotent. Answering the default here caches
+    /// such a widget anyway, and a memoized non-idempotent measure is wrong in a
+    /// way no layout assertion localizes.
+    fn cacheable_layout(&self) -> bool {
+        self.widget.cacheable_layout()
     }
 
     fn place_children(
@@ -1656,12 +1688,70 @@ impl<W: Widget + 'static> Widget for WidgetWithHandlers<W> {
         self.widget.paint(bounds, canvas, ctx)
     }
 
+    /// The two paint hooks and their `wants_*` gates are forwarded as pairs: the
+    /// walker consults the gate and skips the hook when it answers `false`, so a
+    /// forwarded hook behind an unforwarded gate never runs, and the widget
+    /// reads as having no hook at all rather than as having lost one.
+    fn wants_after_paint(&self) -> bool {
+        self.widget.wants_after_paint()
+    }
+
+    fn after_paint(
+        &self,
+        view: &crate::widget::WidgetTreeView<'_>,
+        ctx: &crate::widget::PaintContext,
+    ) {
+        self.widget.after_paint(view, ctx)
+    }
+
+    fn wants_post_paint(&self) -> bool {
+        self.widget.wants_post_paint()
+    }
+
+    fn post_paint(
+        &self,
+        bounds: teksilo_canvas::Rect,
+        canvas: &mut teksilo_canvas::Canvas,
+        ctx: &crate::widget::PaintContext,
+    ) {
+        self.widget.post_paint(bounds, canvas, ctx)
+    }
+
     fn accessibility(&self, builder: &mut crate::accessibility::AccessNodeBuilder) {
         self.widget.accessibility(builder)
     }
 
+    /// Gate and hook again — see [`Widget::wants_after_paint`].
+    fn wants_descendant_redirects(&self) -> bool {
+        self.widget.wants_descendant_redirects()
+    }
+
+    fn a11y_redirect_descendant(
+        &self,
+        self_id: crate::widget_id::WidgetId,
+        descendant: crate::widget_id::WidgetId,
+    ) -> Option<accesskit::NodeId> {
+        self.widget.a11y_redirect_descendant(self_id, descendant)
+    }
+
+    fn accessible_title_hint(&self) -> Option<String> {
+        self.widget.accessible_title_hint()
+    }
+
+    fn initial_focus_hint(&self) -> Option<crate::widget_id::WidgetId> {
+        self.widget.initial_focus_hint()
+    }
+
+    fn context_menu_key_target(&self) -> Option<crate::widget_id::WidgetId> {
+        self.widget.context_menu_key_target()
+    }
+
     fn children(&self) -> Vec<crate::widget_id::WidgetId> {
         self.widget.children()
+    }
+
+    fn accessibility_children(&self) -> Option<Vec<crate::widget_id::WidgetId>> {
+        self.widget.accessibility_children()
     }
 
     fn as_any(&self) -> Option<&dyn std::any::Any> {
@@ -1685,6 +1775,10 @@ impl<W: Widget + 'static> Widget for WidgetWithHandlers<W> {
         self.handler_set
             .clips_children
             .unwrap_or_else(|| self.widget.clips_children())
+    }
+
+    fn focus_reveal_rect(&self, bounds: teksilo_canvas::Rect) -> Option<teksilo_canvas::Rect> {
+        self.widget.focus_reveal_rect(bounds)
     }
 
     /// The hit-shape family, forwarded for the same reason `as_any` is: a
@@ -1731,6 +1825,35 @@ impl<W: Widget + 'static> Widget for WidgetWithHandlers<W> {
         self.widget.target_regions(bounds)
     }
 
+    /// Forwarded because the default is the destructive answer. A container that
+    /// keeps memoized panes across a rebuild loses them to a builder method
+    /// otherwise, and the loss reads as content that vanishes on an unrelated
+    /// state change rather than as a dropped forward.
+    fn preserves_children_on_rebuild(&self) -> bool {
+        self.widget.preserves_children_on_rebuild()
+    }
+
+    /// Forwarded so tooltip content that knows itself to be empty can still say
+    /// so. The default is `true`, which shows an empty bubble instead.
+    fn tooltip_has_content(&self) -> bool {
+        self.widget.tooltip_has_content()
+    }
+
+    /// Forwarded because a declaration is how the registry and the rebinding UI
+    /// learn a keystroke exists. Dropped, the shortcut is not overridden by
+    /// anything — it is simply never registered.
+    fn declare_shortcuts(&self) -> Vec<crate::shortcut::Shortcut> {
+        self.widget.declare_shortcuts()
+    }
+
+    /// The one method here that is **not** a forward, deliberately: it exists so
+    /// the arena can lift off the handlers the builder chain just attached, and
+    /// those live on the wrapper, not on the widget. Forwarding it would hand
+    /// the arena the wrapped widget's set instead and the attached handlers
+    /// would never reach the node — which is the whole point of the wrapper.
+    ///
+    /// The call is the inherent `WidgetWithHandlers::take_handler_set`, not this
+    /// one.
     fn take_handler_set(&mut self) -> Option<HandlerSet> {
         Some(self.take_handler_set())
     }
@@ -2247,6 +2370,9 @@ pub trait WidgetBuilder: Widget + Sized + 'static {
 
 // Blanket implementation for all Widget types.
 impl<W: Widget + Sized + 'static> WidgetBuilder for W {}
+
+#[cfg(test)]
+mod wrapper_forwarding_tests;
 
 #[cfg(test)]
 mod tests {
