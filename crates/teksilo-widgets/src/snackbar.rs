@@ -36,6 +36,12 @@
 //!         .auto_dismiss_after(std::time::Duration::from_secs(5)),
 //! );
 //! ```
+//!
+//! ## Touch and pen
+//!
+//! The trigger activates on the release, whether it is the default `Button` or a
+//! caller's widget, and the actions inside the surface are buttons and links with
+//! their own targets. Nothing here actuates on a press.
 
 use std::rc::Rc;
 use std::time::Duration;

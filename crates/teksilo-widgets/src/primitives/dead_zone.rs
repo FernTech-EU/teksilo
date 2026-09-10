@@ -2,6 +2,16 @@
 // SPDX-FileCopyrightText: 2026 FernTech
 
 //! [`DeadZone`] — a gesture **dead zone** wrapper.
+//!
+//! ## Touch and pen
+//!
+//! The no-op tap and drag pair is **kept**, and it is not redundant with the
+//! `gesture_dead_zone` flag: the flag governs whether an ancestor may enrol this
+//! subtree's press as a member of its own gesture, while the absorbers are what
+//! give the wrapper a gesture arena — and the arena is what stops the bubble for a
+//! press on the wrapper's own bare area, the gap between the controls it protects.
+//! Reviewed under the arbitration package with that conclusion; nothing about it is
+//! pointer-kind-specific.
 
 use teksilo_canvas::{Rect, SizeProposal};
 use teksilo_core::build_context::BuildContext;

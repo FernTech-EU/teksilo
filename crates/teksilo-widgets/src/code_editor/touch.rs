@@ -9,8 +9,10 @@
 //! [`CodeEditor`](super::CodeEditor), [`PlainTextEditor`](super::PlainTextEditor)
 //! and [`LogView`](super::LogView) — because all three are one
 //! [`CodeEditorState`] with different policy. The log view is the interesting
-//! one: it is read-only, so its toolbar is Copy and Select All, and until now
-//! `Ctrl+C` was the *only* way to get a line out of it.
+//! one: it is read-only, so the only commands it can offer at all are Copy and
+//! Select All — and since Select All is offered only while nothing is selected, a
+//! hold's toolbar there is Copy alone. Until now `Ctrl+C` was the *only* way to
+//! get a line out of it.
 //!
 //! # Coordinates
 //!

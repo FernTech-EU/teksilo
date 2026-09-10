@@ -39,6 +39,18 @@
 //!             .supporting_text(lit!("Adjust your preferences below."))
 //!     });
 //! ```
+//!
+//! ## Touch and pen
+//!
+//! The trigger is a `Button` (or, with `.trigger(..)`, the caller's widget wrapped
+//! in the same activation handlers), and both actuate on the release. The footer's
+//! buttons are buttons.
+//!
+//! The scrim is the one full-viewport node that has to receive exactly the presses
+//! that land on it, so it says `no_hit_slop` outright rather than relying on the
+//! slop pass's size formula to exclude it by arithmetic — see
+//! `scrim_hit_targeting_tests` below. Its dismissal is a tap, so it too waits for
+//! the release.
 
 use std::cell::Cell;
 use std::rc::Rc;

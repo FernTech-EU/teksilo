@@ -1020,6 +1020,142 @@ fn dragging_a_rail_item_reorders_within_the_side() {
     );
 }
 
+/// The dock pane's five split/stack zones are the reusable `DropTarget`'s, not a
+/// hand-computed set of fifths — which is what makes them inherit the per-axis
+/// floor the drop target applies to a small pane (`tests/composite_touch.rs`
+/// measures the floor itself).
+///
+/// The pin is structural on purpose: if the five-zone overlay were ever
+/// hand-rolled again, the floor would silently stop applying and every geometry
+/// test of it would stay green.
+#[test]
+fn a_dock_panes_drop_zones_come_from_the_shared_drop_target() {
+    let model = DockingModel::new();
+    let (a, dwa) = dock("Aaa");
+    let (b, dwb) = dock("Bbb");
+    let mut t = tree();
+    let root = t.add(
+        DockingLayout::new(model.clone())
+            .center(FixedLeaf(200.0, 200.0))
+            .dock(dwa)
+            .dock(dwb),
+    );
+    model.open_dock(a, DockOpenLocation::side(DockSide::Leading));
+    // A second dock in the same tab makes each one a split pane, which is the
+    // shape that carries the zones.
+    model.open_dock(b, DockOpenLocation::side(DockSide::Leading));
+    t.layout(SizeProposal::exact(1000.0, 800.0));
+    t.tick_animations(Duration::from_millis(600));
+    t.layout(SizeProposal::exact(1000.0, 800.0));
+
+    fn has_drop_target(tree: &WidgetTree, id: WidgetId) -> bool {
+        if tree
+            .widget_type_name(id)
+            .is_some_and(|n| n.contains("DropTarget"))
+        {
+            return true;
+        }
+        tree.children(id).iter().any(|&c| has_drop_target(tree, c))
+    }
+    assert!(
+        has_drop_target(&t, root),
+        "a dock pane hosts the shared DropTarget",
+    );
+}
+
+/// A finger's tap on a rail item selects its activity and shows the side, on the
+/// release — the same single activation path the mouse, the keyboard and an AT
+/// `Click` share.
+#[test]
+fn a_finger_taps_a_rail_item_to_show_its_side() {
+    let model = DockingModel::new();
+    model.set_side_rail(DockSide::Leading, 48.0);
+    let (a, dwa) = dock("Aaa");
+    let (b, dwb) = dock("Bbb");
+    let mut t = tree();
+    let root = t.add(
+        DockingLayout::new(model.clone())
+            .center(FixedLeaf(200.0, 200.0))
+            .dock(dwa)
+            .dock(dwb),
+    );
+    model.open_dock(a, DockOpenLocation::side(DockSide::Leading));
+    model.open_dock(b, DockOpenLocation::side(DockSide::Leading).new_tab());
+    t.layout(SizeProposal::exact(1000.0, 800.0));
+    t.tick_animations(Duration::from_millis(600));
+    t.layout(SizeProposal::exact(1000.0, 800.0));
+
+    // Tap the activity that is *not* current: tapping the current one is the
+    // collapse toggle, which is a different assertion.
+    let a_item = find_role_name(&t, root, Role::Tab, "Aaa").expect("A rail item");
+    let ab = t.bounds(a_item);
+    let at = Point::new(ab.x + ab.width / 2.0, ab.y + ab.height / 2.0);
+
+    let selected_before = model.side_selected_tab_signal(DockSide::Leading).get();
+    assert_ne!(selected_before, 0, "fixture: A is not the current activity");
+    let f = t.new_contact();
+    t.touch_down(f, at);
+    assert_eq!(
+        model.side_selected_tab_signal(DockSide::Leading).get(),
+        selected_before,
+        "the press alone selects nothing",
+    );
+    t.touch_up(f, at);
+    t.layout(SizeProposal::exact(1000.0, 800.0));
+    assert_ne!(
+        model.side_selected_tab_signal(DockSide::Leading).get(),
+        selected_before,
+        "the release selects the activity the finger lifted on",
+    );
+    assert!(model.side_visible_signal(DockSide::Leading).get());
+}
+
+/// And a finger that travels instead of lifting reorders the rail: the drag is
+/// the rail item's, not the side's, so nothing had to be declared for a contact
+/// to reach it.
+#[test]
+fn a_finger_reorders_the_rail_by_dragging_an_item() {
+    let model = DockingModel::new();
+    model.set_side_rail(DockSide::Leading, 48.0);
+    let (a, dwa) = dock("Aaa");
+    let (b, dwb) = dock("Bbb");
+    let mut t = tree();
+    let root = t.add(
+        DockingLayout::new(model.clone())
+            .center(FixedLeaf(200.0, 200.0))
+            .dock(dwa)
+            .dock(dwb),
+    );
+    model.open_dock(a, DockOpenLocation::side(DockSide::Leading));
+    model.open_dock(b, DockOpenLocation::side(DockSide::Leading).new_tab());
+    t.layout(SizeProposal::exact(1000.0, 800.0));
+    t.tick_animations(Duration::from_millis(600));
+    t.layout(SizeProposal::exact(1000.0, 800.0));
+    assert_eq!(model.side_tabs(DockSide::Leading)[0].panes[0], a);
+
+    let a_item = find_role_name(&t, root, Role::Tab, "Aaa").expect("A rail item");
+    let b_item = find_role_name(&t, root, Role::Tab, "Bbb").expect("B rail item");
+    let ab = t.bounds(a_item);
+    let bb = t.bounds(b_item);
+    let from = Point::new(ab.x + ab.width / 2.0, ab.y + ab.height / 2.0);
+    let to = Point::new(from.x, bb.y + bb.height + 10.0);
+
+    let f = t.new_contact();
+    t.touch_down(f, from);
+    for step in 1..=8 {
+        let y = from.y + (to.y - from.y) * step as f32 / 8.0;
+        t.touch_move(f, Point::new(from.x, y));
+    }
+    t.touch_up(f, to);
+    t.layout(SizeProposal::exact(1000.0, 800.0));
+
+    assert_eq!(
+        model.side_tabs(DockSide::Leading)[0].panes[0],
+        b,
+        "a finger dragging A past B reordered the side",
+    );
+}
+
 #[test]
 fn dropping_a_tab_on_another_sides_rail_moves_it() {
     // An external activity (like a TabWidget `accept_external_tabs`): drag the

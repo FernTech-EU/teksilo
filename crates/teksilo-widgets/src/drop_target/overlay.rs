@@ -30,7 +30,9 @@ use teksilo_core::binding::BindingLevel;
 use teksilo_core::build_context::BuildContext;
 use teksilo_core::color_prop::ColorProp;
 use teksilo_core::signal::Signal;
-use teksilo_core::styles::{DropRegion, region_rect};
+use teksilo_core::styles::DropRegion;
+
+use crate::drop_target::region_rect_floored;
 use teksilo_core::widget::{LayoutContext, LayoutResponse, PaintContext, Widget, WidgetPlacement};
 use teksilo_core::widget_builder::HandlerSet;
 use teksilo_core::widget_id::WidgetId;
@@ -46,6 +48,10 @@ pub(crate) struct DropRegionOverlay {
     active_region: Signal<Option<DropRegion>>,
     /// Side-zone size factor (already clamped to `0.1..=1.0`).
     size_factor: f32,
+    /// The per-axis band floor the hit test uses, so the zone painted here is
+    /// the zone that drops. Read from the density's `target_size` by the style
+    /// that builds this overlay.
+    zone_floor: f32,
     /// Frame thickness for the highlight (0 = paint nothing — `variant == None`).
     border_width: f32,
     /// Per-region hint cards this overlay hosts and places. Order matches the
@@ -69,12 +75,14 @@ impl DropRegionOverlay {
     pub(crate) fn new(
         active_region: Signal<Option<DropRegion>>,
         size_factor: f32,
+        zone_floor: f32,
         border_width: f32,
         hints: Vec<(DropRegion, WidgetId)>,
     ) -> Self {
         Self {
             active_region,
             size_factor,
+            zone_floor,
             border_width,
             hints,
             fill: ColorProp::from(SurfaceRole::Accent),
@@ -117,7 +125,7 @@ impl Widget for DropRegionOverlay {
                 .find(|(_, id)| *id == child.id)
                 .map(|(r, _)| *r)
                 .unwrap_or(DropRegion::Center);
-            let zone = region_rect(region, bounds, self.size_factor);
+            let zone = region_rect_floored(region, bounds, self.size_factor, self.zone_floor);
             let natural = ctx
                 .child_size(child.id, SizeProposal::unspecified())
                 .unwrap_or(zone.size());
@@ -148,7 +156,7 @@ impl Widget for DropRegionOverlay {
         if !region.is_side() {
             return;
         }
-        let rect = region_rect(region, bounds, self.size_factor);
+        let rect = region_rect_floored(region, bounds, self.size_factor, self.zone_floor);
         // Side zones get a translucent fill + accent frame.
         let fill = self
             .fill
@@ -186,5 +194,55 @@ impl Widget for DropRegionOverlay {
 
     fn children(&self) -> Vec<WidgetId> {
         self.hints.iter().map(|(_, id)| *id).collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use teksilo_canvas::SizeProposal;
+    use teksilo_core::signal::Signal;
+    use teksilo_core::styles::DropRegion;
+    use teksilo_core::widget_tree::WidgetTree;
+
+    use super::DropRegionOverlay;
+    use crate::drop_target::band_depth;
+
+    /// The highlight the overlay paints is the band the hit test uses, floor
+    /// and all.
+    ///
+    /// Painted geometry needs its own case: the floor could be applied on the
+    /// hit side alone and every geometry test of it would stay green while the
+    /// user aimed at a strip four times narrower than the one that drops.
+    #[test]
+    fn the_painted_zone_is_the_floored_band() {
+        let floor = 24.0_f32;
+        let factor = 0.1_f32;
+        let extent = 100.0_f32;
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let active = Signal::new(Some(DropRegion::Leading));
+        tree.add(DropRegionOverlay::new(
+            active,
+            factor,
+            floor,
+            2.0,
+            Vec::new(),
+        ));
+        tree.layout(SizeProposal::exact(extent, extent));
+        let frame = tree.render();
+        let expected = band_depth(extent, factor, floor);
+        assert!(
+            (expected - floor).abs() < 0.01,
+            "fixture: the declared fraction must be under the floor here",
+        );
+        let widest = frame
+            .decorations
+            .iter()
+            .map(|d| d.rect[2])
+            .chain(frame.shapes.iter().map(|s| s.screen[2]))
+            .fold(0.0_f32, f32::max);
+        assert!(
+            (widest - expected).abs() < 0.01,
+            "the widest painted rect is {widest}, the floored band is {expected}",
+        );
     }
 }

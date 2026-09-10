@@ -12,11 +12,15 @@
 //! the state instead; `docs/touch-and-pen.md` §7 has the reasoning and the
 //! census of what still actuates on press.
 //!
-//! Two shapes of consumer, and the module serves both:
+//! Three shapes of consumer, and the module serves all three:
 //!
 //! * a control whose visual **is** the framework press binds
 //!   [`bind_pressed`] (or reads `ctx.pressed_signal()` directly) and deletes
 //!   its own handler;
+//! * a control whose visual is one value of a small enum — because the same
+//!   signal also carries hover and focus — binds [`bind_press_state`], which
+//!   moves only the pressed cell and asks the caller where the control rests
+//!   when the press ends;
 //! * a control that keeps its own state machine — because a keyboard
 //!   activation drives the same visual, or because a theme captured the signal
 //!   — consults [`press_shows_now`] and [`press_survives`] from inside the
@@ -40,6 +44,46 @@ pub(crate) fn bind_pressed(ctx: &mut BuildContext, mirror: Signal<bool>) {
     let pressed = ctx.pressed_signal();
     mirror.set(pressed.get());
     ctx.effect(&pressed, move |p| mirror.set(*p));
+}
+
+/// Drive an enum-valued interaction signal's *pressed* cell from the framework
+/// press.
+///
+/// The general form of [`bind_pressed`], for a control whose visual state is
+/// one value of a small enum rather than a bare bool: the ToolBox header's
+/// `HeaderInteraction`, a calendar zoom cell's two bools, a `RadioTile`'s
+/// `InteractionState`. Each of those already had a `Pressed` value its *theme*
+/// painted and no pointer ever reached — the value was written by the keyboard
+/// path alone, or by nothing at all — so the recipe's pressed chrome was
+/// unreachable for a mouse as well as for a finger.
+///
+/// `resting` is consulted only when the press ends: it answers "where does
+/// this control sit now", which the signal itself cannot, because while it
+/// holds `pressed` the hover truth has nowhere to live. The `pressed` guard on
+/// that branch is what keeps a release from overwriting a state the control's
+/// own `on_tap` has already chosen.
+///
+/// Seeded from the live press rather than from the resting value, so a rebuild
+/// that lands *during* a press does not blink the visual off.
+pub(crate) fn bind_press_state<T>(
+    ctx: &mut BuildContext,
+    state: Signal<T>,
+    pressed_value: T,
+    resting: impl Fn() -> T + 'static,
+) where
+    T: Clone + PartialEq + 'static,
+{
+    let pressed = ctx.pressed_signal();
+    if pressed.get() {
+        state.set(pressed_value.clone());
+    }
+    ctx.effect(&pressed, move |showing| {
+        if *showing {
+            state.set(pressed_value.clone());
+        } else if state.get() == pressed_value {
+            state.set(resting());
+        }
+    });
 }
 
 /// Whether a press visual may light up on the sample being handled.

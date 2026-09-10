@@ -4,6 +4,13 @@
 //! `DropdownItem` — the row widget for a single entry in the dropdown
 //! panel, plus the `build_default_item` helper used when the caller
 //! hasn't supplied a custom `render_item` closure.
+//!
+//! ## Touch and pen
+//!
+//! A dropdown row is a menu row: it commits on the release and takes the menu row's
+//! target floor at every density (`combo_box::panel` resolves the same number for
+//! the viewport that shows `max_visible_items` of them). Its hover highlight is
+//! decoration — the keyboard and the selection drive the same signal.
 
 use std::rc::Rc;
 use teksilo_i18n::lit;
@@ -56,7 +63,7 @@ pub(super) fn build_default_item(
     // ~28 dp.
     let body = &theme.typography.body;
     let body_line = body.size * body.line_height;
-    let pad_v = ((menu::MENU_ITEM_HEIGHT - body_line) * 0.5).max(0.0);
+    let pad_v = ((menu::menu_item_height(&ctx.theme().input) - body_line) * 0.5).max(0.0);
     let padding = Padding::symmetric(pad_v, menu::MENU_ITEM_PADDING_HORIZONTAL).child_id(row_id);
     ctx.add(padding)
 }
@@ -166,7 +173,11 @@ impl<T: Clone + PartialEq + 'static> Widget for DropdownItem<T> {
         proposal: SizeProposal,
         ctx: &LayoutContext,
     ) -> teksilo_core::widget::LayoutResponse {
-        let min_h = crate::styles::recipe_menu_item_style::MENU_ITEM_HEIGHT;
+        // A dropdown row is a menu row: same target, same ladder — 24 dp at
+        // Compact (the identity), 32 at Comfortable, 44 at Touch. Reading the
+        // raw constant left the combo box's own list at 24 dp under a theme
+        // whose `MenuList` rows had already grown to 44.
+        let min_h = crate::styles::recipe_menu_item_style::menu_item_height(&ctx.theme.input);
         // Forward the width proposal so each row stretches the full panel
         // width instead of collapsing to its text's intrinsic width —
         // ZStack::size_that_fits queries children with `unspecified`,

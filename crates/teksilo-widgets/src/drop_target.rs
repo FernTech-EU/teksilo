@@ -102,6 +102,26 @@
 //! unavailable on platforms with no external-DnD backend (e.g. X11, where OS
 //! drag-and-drop is a no-op). `DropZone` is the better choice when the drop
 //! *is* the primary action.
+//!
+//! ## Touch and pen
+//!
+//! An edge zone's depth is `zone_size_factor` of the axis, **floored** per axis to
+//! the density's target size: the fraction is the shape the caller asked for and
+//! wins wherever it already conforms, and below that the floor takes over. Without
+//! it a fifth of a small pane is a band no finger can land in, and the drop it
+//! swallows goes to the neighbouring zone with no warning.
+//!
+//! The floor is itself capped at a third of the extent, for the reason
+//! [`partition_targets`](teksilo_core::partition::partition_targets) splits evenly
+//! when its own floor cannot be met: on a target too small for
+//! `leading | centre | trailing` at the floor, three equal bands keep every zone
+//! reachable and visibly sub-floor, where an uncapped floor would let two opposing
+//! bands meet and delete the centre.
+//!
+//! One function answers both the hit test and the highlight
+//! ([`band_depth`]), so the zone a user sees stays the zone that drops. A
+//! **custom** `DropTargetStyle` that calls core's `region_rect` directly paints the
+//! unfloored band; call [`region_rect_floored`] instead.
 
 pub(crate) mod overlay;
 
@@ -115,7 +135,7 @@ use teksilo_core::build_context::BuildContext;
 use teksilo_core::signal::{Prop, Signal};
 use teksilo_core::styles::{
     DropRegion, DropRegionSet, DropTargetDragState, DropTargetStyle, DropTargetStyleConfig,
-    DropTargetVariant, SharedDropTargetStyle, region_at,
+    DropTargetVariant, SharedDropTargetStyle,
 };
 use teksilo_core::widget::{
     EventContext, LayoutContext, LayoutResponse, PendingChild, Widget, WidgetPlacement,
@@ -132,6 +152,85 @@ type LeaveCallback = Box<dyn FnMut(&mut EventContext)>;
 /// Default side-zone size factor (fraction of the axis each edge zone occupies)
 /// when the caller doesn't set one — matches docking's historical 20 %.
 const DEFAULT_ZONE_SIZE_FACTOR: f32 = 0.2;
+
+/// The depth of one edge band along the axis it is measured on: the caller's
+/// fraction of the extent, raised to `floor` when that fraction does not reach
+/// it.
+///
+/// A fraction alone cannot answer this. `zone_size_factor` is one number for
+/// both axes, and it is the *shape* the caller wants — a fifth, a quarter, a
+/// bisection — so on a large target it is right and must not be touched. On a
+/// small enough one, any of those fractions is a band no finger can land in, and
+/// the drop it swallows goes to the neighbouring zone with no warning. So the
+/// fraction wins wherever it already conforms and the floor
+/// takes over below that, which is the same shape as
+/// [`dp`](teksilo_core::styles::density::dp) — a floor that only ever raises,
+/// leaving every target that was already big enough exactly as it was.
+///
+/// The floor itself is capped at a third of the extent, for the reason
+/// [`partition_targets`](teksilo_core::partition::partition_targets) splits
+/// evenly when its own floor cannot be met: on a target too small for
+/// `leading | centre | trailing` at the floor, three equal bands keep every
+/// zone reachable and visibly sub-floor, where an uncapped floor would let two
+/// opposing bands meet and delete the centre.
+pub fn band_depth(extent: f32, factor: f32, floor: f32) -> f32 {
+    if !extent.is_finite() || extent <= 0.0 {
+        return 0.0;
+    }
+    // The same `0.1..=1.0` clamp `DropTarget::zone_size_factor` applies at the
+    // builder and `teksilo_core::styles::region_at` applies to its own input —
+    // core's `clamp_size_factor` is not re-exported, and a public function that
+    // trusted its caller here would answer differently from both of them.
+    let fraction = extent * factor.clamp(0.1, 1.0);
+    fraction.max(floor.min(extent / 3.0))
+}
+
+/// [`region_at`](teksilo_core::styles::region_at) with [`band_depth`]'s floor
+/// applied per axis.
+///
+/// Priority is core's, unchanged: leading → trailing → top → bottom → centre,
+/// so an overlapping pair still resolves the way the un-floored function does
+/// and a caller that reads the region index reads the same thing.
+pub fn region_at_floored(
+    local: Point,
+    size: Size,
+    set: teksilo_core::styles::DropRegionSet,
+    factor: f32,
+    floor: f32,
+) -> Option<DropRegion> {
+    let ex = band_depth(size.width, factor, floor);
+    let ey = band_depth(size.height, factor, floor);
+    if set.leading && local.x < ex {
+        Some(DropRegion::Leading)
+    } else if set.trailing && local.x > size.width - ex {
+        Some(DropRegion::Trailing)
+    } else if set.top && local.y < ey {
+        Some(DropRegion::Top)
+    } else if set.bottom && local.y > size.height - ey {
+        Some(DropRegion::Bottom)
+    } else if set.center {
+        Some(DropRegion::Center)
+    } else {
+        None
+    }
+}
+
+/// [`region_rect`](teksilo_core::styles::region_rect) with [`band_depth`]'s
+/// floor applied per axis — the paint side of [`region_at_floored`], so the
+/// zone a user sees stays the zone that drops.
+pub fn region_rect_floored(region: DropRegion, bounds: Rect, factor: f32, floor: f32) -> Rect {
+    let ex = band_depth(bounds.width, factor, floor);
+    let ey = band_depth(bounds.height, factor, floor);
+    match region {
+        DropRegion::Center => bounds,
+        DropRegion::Leading => Rect::new(bounds.x, bounds.y, ex, bounds.height),
+        DropRegion::Trailing => {
+            Rect::new(bounds.x + bounds.width - ex, bounds.y, ex, bounds.height)
+        }
+        DropRegion::Top => Rect::new(bounds.x, bounds.y, bounds.width, ey),
+        DropRegion::Bottom => Rect::new(bounds.x, bounds.y + bounds.height - ey, bounds.width, ey),
+    }
+}
 
 /// Per-region configuration for a multi-zone [`DropTarget`]: an optional hint
 /// plus a reactive enabled flag. Kept as a struct so more per-zone knobs can
@@ -609,6 +708,11 @@ impl Widget for DropTarget {
         let specs_hover = enable_specs.clone();
         let specs_drop = enable_specs;
         let factor = self.size_factor;
+        // A build-time read: a density change marks the tree at
+        // `BindingLevel::Rebuild`, so the floor baked into these handlers cannot
+        // go stale, and it is the same number the style hands the overlay that
+        // paints the zones.
+        let zone_floor = ctx.theme().input.target_size;
         let mut on_leave_cb = self.on_drag_leave_callback.take();
         let mut on_drop_cb = self.on_drop_callback.take();
         let mut on_region_drop_cb = self.on_region_drop_callback.take();
@@ -622,11 +726,12 @@ impl Widget for DropTarget {
                 // pointer is over a middle with no enabled zone (a "dead middle"
                 // when only side zones are declared with a small size_factor).
                 let new_region = if accepts {
-                    region_at(
+                    region_at_floored(
                         pos,
                         size_hover.get(),
                         resolve_region_set(&specs_hover),
                         factor,
+                        zone_floor,
                     )
                 } else {
                     None
@@ -710,11 +815,12 @@ impl Widget for DropTarget {
                 // never engages there). Normally the hover gate means such a drop
                 // never routes here at all; this is the belt-and-suspenders.
                 if let Some(cb) = &mut on_region_drop_cb {
-                    match region_at(
+                    match region_at_floored(
                         pos,
                         size_drop.get(),
                         resolve_region_set(&specs_drop),
                         factor,
+                        zone_floor,
                     ) {
                         Some(region) => cb(region, payload, pos, ctx),
                         None => false,

@@ -164,6 +164,25 @@ A vertical split (a `TreeView` row's before / into / after thirds, a drop
 target's edge bands) is [`DropRegion`]'s job; it has to answer in two dimensions
 anyway.
 
+#### A zone's floor is a floor, not a fraction
+
+Both in-node splitters state their zones as *proportions* — a header cell's
+filter affordance as its glyph plus padding against the label's remainder, a
+`DropTarget`'s edge band as a fraction of the axis — and a proportion of a small
+node is a zone nothing can hit. Both raise a sub-floor zone to the density's
+`target_size` and take the difference from its neighbour, which is the same
+clamp-and-redistribute [`partition_targets`] performs, and both cap the floor so
+the starved case degrades the way that function's does rather than losing a zone:
+a header cell splits evenly, a drop target's floor stops at a third of the extent
+so `leading | centre | trailing` keeps its middle.
+
+Unlike an outset, a zone floor is **not** pointer-kind-gated, and it cannot be: a
+zone boundary is one number per node, the widget paints its highlight from it, and
+a boundary that moved with the device would mean the zone a user sees is not the
+zone that acts. It is safe without a gate because it only ever bites where the
+declared proportion had already produced a zone too small for anyone — a fifth of
+a 100 dp pane is 20 dp for a mouse too.
+
 ### `Widget::hit_outset` — inside the exact pass
 
 ```rust

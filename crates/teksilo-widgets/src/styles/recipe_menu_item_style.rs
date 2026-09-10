@@ -32,6 +32,17 @@ use teksilo_core::styles::density::{dp, spacing};
 // radius, border, shadow density) is owned by `PopoverStyle` (the
 // `Menu` variant).
 pub const MENU_ITEM_HEIGHT: f32 = 24.0;
+
+/// [`MENU_ITEM_HEIGHT`] raised to the density's `target_size`
+/// (24 / 32 / 44 dp). The identity at Compact.
+///
+/// The same projection `MenuItemRecipe::for_tokens` applies to `item_height`,
+/// exposed on its own for the two menu-shaped surfaces that measure a row
+/// without going through the recipe: the ComboBox dropdown's rows and the
+/// viewport that shows `max_visible_items` of them.
+pub fn menu_item_height(tokens: &InputTokens) -> f32 {
+    dp(MENU_ITEM_HEIGHT, TargetRole::Target, tokens)
+}
 /// Right-side padding column (also used as chevron column width).
 pub const MENU_ITEM_PADDING_HORIZONTAL: f32 = 12.0;
 /// Leading-side padding before the icon/check column.

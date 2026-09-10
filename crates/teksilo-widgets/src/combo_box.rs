@@ -41,6 +41,17 @@
 //! - `panel` holds the `DropdownPanel` overlay content and the
 //!   `FilteredItemList` inner widget.
 //! - `tests` holds the headless unit tests.
+//!
+//! ## Touch and pen
+//!
+//! The closed box is one target — the arrow column is paint inside it, not a
+//! second target — and it opens the dropdown from its tap, so already on the
+//! release. The field's hover tint is decoration with nothing behind it.
+//!
+//! The dropdown's rows are menu rows and take the menu row's target floor at every
+//! density; before this they measured against the raw Compact constant while a
+//! `MenuList`'s rows grew, and the panel that shows `max_visible_items` of them now
+//! resolves the same number they do.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;

@@ -2214,6 +2214,41 @@ fn the_completion_panel_is_empty_without_a_session() {
     assert_eq!(tree.bounds(id).height, 0.0, "no rows → no height");
 }
 
+/// A suggestion row is a menu row, and takes the same target floor: 24 dp at
+/// Compact, 32 at Comfortable, 44 at Touch.
+///
+/// **The Compact row can move.** Deleting the floor and reading the panel back
+/// gives a 22 dp row here, so the floor adds 2 dp at Compact in this tree; a text
+/// backend with a taller line would leave it inert. Either way it is the
+/// `MinSize`-is-a-hit-box exception the density inventory's §0 records, and a
+/// stack of adjacent rows is the one shape no hit mechanism can serve.
+#[test]
+fn a_completion_row_follows_the_density_ladder() {
+    for (density, expected) in [
+        (teksilo_tokens::TargetDensity::Compact, 24.0_f32),
+        (teksilo_tokens::TargetDensity::Comfortable, 32.0),
+        (teksilo_tokens::TargetDensity::Touch, 44.0),
+    ] {
+        let st = completion_editor("pre", 3, &["prefix", "press", "preset"]);
+        completion::test_evaluate(&st, Trigger::Typed);
+        st.borrow().completion.open.set(true);
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        tree.set_input_density(density);
+        let panel = tree.add(completion::CompletionPanel::new(&st));
+        tree.layout(SizeProposal::with_width(360.0));
+        // Three rows, the container's 4 dp padding on each side and two 1 dp
+        // inter-row gaps: an equality, so a row that merely *grew* somewhere
+        // else cannot stand in for a row that met the floor.
+        let height = tree.bounds(panel).height;
+        let expected_panel = 3.0 * expected + 10.0;
+        assert!(
+            (height - expected_panel).abs() < 0.01,
+            "{density:?}: a three-row panel is {height} dp, three {expected} dp rows plus \
+             10 dp of padding and gaps is {expected_panel}",
+        );
+    }
+}
+
 /// A CodeEditor with a provider mounts and exposes the popup a11y (has-popup),
 /// and one without does not claim completion at all.
 #[test]

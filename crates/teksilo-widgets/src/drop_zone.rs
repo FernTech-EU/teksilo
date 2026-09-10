@@ -40,6 +40,14 @@
 //! ("3 files added"), and rejection. AccessKit models no drag/drop action and
 //! ARIA's `aria-grabbed` / `aria-dropeffect` are deprecated, so live-region
 //! announcements plus the Browse fallback are the supported pattern.
+//!
+//! ## Touch and pen
+//!
+//! The zone is one target and the whole surface of it, so nothing here needs a
+//! floor or an outset, and an external drop carries no press to move to a release.
+//! The keyboard Browse fallback is what makes the action reachable at all where
+//! there is no OS drag-and-drop backend; it is not a touch affordance and is
+//! documented at its own builder.
 
 use std::cell::RefCell;
 use std::path::PathBuf;

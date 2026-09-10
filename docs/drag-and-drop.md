@@ -685,6 +685,16 @@ DropTarget::new()
   per-zone overlay; a reject paints a full-bounds error border.
 - `Leading` / `Trailing` map to left / right — the framework surfaces no writing
   direction on the layout context yet, so RTL mirroring is a follow-up.
+- An edge zone's depth has a **floor**, per axis: `size_factor` of the extent, but
+  never less than the density's `target_size`, and never more than a third of the
+  extent (past that the strips would leave no middle). So a shallow strip on a
+  small target stays reachable rather than becoming a hairline. A custom
+  `DropTargetStyle` must paint with `drop_target::region_rect_floored`, not core's
+  `region_rect`, or the highlight will disagree with the zone that acts — those
+  two answers coming from one function is the point of it being exported.
+  The floor is **not** pointer-kind-gated, unlike a hit outset: the acting zone and
+  the painted zone have to be the same rectangle, and there is only one of those,
+  so a small target's boundary moves for a mouse too.
 
 **Styling.** Tier-3 `DropTargetStyle` (default `RecipeDropTargetStyle`); per-call
 `DropTarget::style(…)` or theme-wide `theme.style_slots.drop_target`.

@@ -5,6 +5,14 @@
 //! the app-facing [`DockWidget`] declaration, the content-factory registry,
 //! and the widgets that render a side's tabs → Splitter/ToolBox arrangement →
 //! draggable dock panels (with five-zone drop targets).
+//!
+//! ## Touch and pen
+//!
+//! The pane's five split/stack zones are the reusable
+//! [`crate::drop_target::DropTarget`]'s, not a hand-computed set of
+//! fifths, which is what makes them inherit its per-axis floor: on a narrow pane an
+//! edge zone is raised to the density's target size instead of staying a fifth no
+//! finger can land in.
 
 use std::cell::RefCell;
 use std::collections::HashMap;

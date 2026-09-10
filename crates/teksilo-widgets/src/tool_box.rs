@@ -29,6 +29,23 @@
 //!     .item("Properties", properties_widget)
 //!     .add(ToolBoxItem::new("Build", build_widget).enabled(false))
 //! ```
+//!
+//! ## Touch and pen
+//!
+//! A section header activates from its tap, so it already actuates on the
+//! release. Two things did change:
+//!
+//! * its **pressed** appearance is the framework's press now, not the keyboard
+//!   path's — before, the recipe painted a state no pointer of either kind ever
+//!   wrote;
+//! * a tap by a contact rests the header **idle** rather than hovered. A finger
+//!   sends no hover-leave to correct a resting `Hovered` with, so a tapped header
+//!   stayed lit with nothing on it — visible once the selection moved elsewhere,
+//!   because a selected header's own chrome hides the tint until then.
+//!
+//! The optional header drag (`on_header_drag`, the dock panel's handle) needs no
+//! declaration for a contact: `DragActivation::Auto` resolves to `Immediate`
+//! where nothing competes for the axis, and to the hold where a scroller does.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -774,20 +791,55 @@ impl Widget for ToolBoxHeader {
         let enabled_flags_for_key = self.enabled_flags.clone();
         let interaction_for_tap = interaction.clone();
         let interaction_for_hover = interaction.clone();
+        // The header's pressed chrome, driven by the router's press record. It
+        // was previously written by the keyboard path alone, so the recipe's
+        // pressed appearance was unreachable for a mouse and for a finger
+        // alike; the framework press also survives a press sliding off the
+        // header and back on, and is withdrawn without a release when a
+        // surrounding scroller claims the pan.
+        let hovered_cell = Rc::new(Cell::new(false));
+        {
+            let hovered = hovered_cell.clone();
+            crate::common::interaction::bind_press_state(
+                ctx,
+                interaction.clone(),
+                HeaderInteraction::Pressed,
+                move || {
+                    if hovered.get() {
+                        HeaderInteraction::Hovered
+                    } else {
+                        HeaderInteraction::Idle
+                    }
+                },
+            );
+        }
+        let hovered_for_hover = hovered_cell.clone();
         let interaction_for_key = interaction.clone();
         let interaction_for_focus = interaction.clone();
         let focus_origin_for_focus = focus_origin.clone();
 
         let mut handler_set = HandlerSet::new()
-            .on_tap(move |_pos, _ctx| {
+            .on_tap(move |_pos, ctx: &mut EventContext| {
                 if collapsible && selected_tap.get() == idx {
                     selected_tap.set(COLLAPSED_SENTINEL);
                 } else {
                     selected_tap.set(idx);
                 }
-                interaction_for_tap.set(HeaderInteraction::Hovered);
+                // Where the header rests after an activation. A mouse or a pen
+                // is still over it; a finger is gone the instant it lifts and
+                // sends no hover-leave to correct a `Hovered` state with, so it
+                // would otherwise leave the header tinted with nothing on it.
+                interaction_for_tap.set(if ctx.pointer_kind().hovers() {
+                    HeaderInteraction::Hovered
+                } else {
+                    HeaderInteraction::Idle
+                });
             })
             .on_hover(move |entered, _ctx| {
+                // Recorded beside the signal as well: while the header is
+                // `Pressed` the hover truth has nowhere to live in the enum,
+                // and the press binding needs it to pick the resting state.
+                hovered_for_hover.set(entered);
                 interaction_for_hover.set(if entered {
                     HeaderInteraction::Hovered
                 } else {

@@ -14,6 +14,24 @@
 //!
 //! Supports sort, resize, reuse across pinned panes, per-column filter
 //! popovers, and column-reorder drag.
+//!
+//! ## Touch and pen
+//!
+//! A header cell paints three things inside one node and tells them apart by
+//! coordinate: the label (whose press cycles the sort or starts the column
+//! reorder), the filter-popover trigger, and the resize band on its trailing edge.
+//!
+//! The label and filter zones come from
+//! [`partition_targets`](teksilo_core::partition::partition_targets), which gives
+//! the filter zone the density's target floor by clamp-and-redistribute — the glyph
+//! and its padding are below the conformance floor at every density — answers in
+//! reading order so nothing mirrors for RTL, and splits evenly when the two floors
+//! cannot both be met. The same function answers
+//! [`teksilo_core::widget::Widget::target_regions`], so the
+//! geometry an audit measures is the geometry the press test uses.
+//!
+//! The plain press stays `Ignored` so a finger can pan the table from its header
+//! strip, and a coarse pointer's column reorder waits for a hold.
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
@@ -315,6 +333,11 @@ pub(crate) struct HeaderCell {
     /// vector is shorter than the cell list and `HeaderRow` falls back to an
     /// even split).
     cell_window_w: Rc<Cell<f32>>,
+    /// The partition floor and reading direction, so `target_regions` — which
+    /// is handed a rectangle and nothing else — can carve the same zones the
+    /// press test carves. Written in `build` and `place_children`.
+    zone_floor: Cell<f32>,
+    zone_rtl: Cell<bool>,
     /// This cell's resolved height, written by `place_children` and read
     /// by `on_pointer_event` to reject pointer events that bubble up from
     /// the in-tree filter popover (a descendant overlay anchored below the
@@ -373,6 +396,8 @@ impl HeaderCell {
             table_id: spec.table_id,
             cell_window_x: Rc::new(Cell::new(0.0)),
             cell_window_w: Rc::new(Cell::new(0.0)),
+            zone_floor: Cell::new(0.0),
+            zone_rtl: Cell::new(false),
             cell_window_h: Rc::new(Cell::new(0.0)),
             filterable: spec.filterable,
             filter_zone_width: if spec.filterable {
@@ -405,6 +430,67 @@ impl std::fmt::Debug for HeaderCell {
             .field("current_sort", &self.current_sort)
             .finish()
     }
+}
+
+/// `part` discriminator: the sort / reorder zone carrying the column label.
+pub const HEADER_PART_LABEL: u16 = 0;
+/// `part` discriminator: the filter-popover trigger zone.
+pub const HEADER_PART_FILTER: u16 = 1;
+/// `part` discriminator: the column-resize band on the cell's trailing edge.
+pub const HEADER_PART_RESIZE: u16 = 2;
+
+/// The label / filter partition of one header cell, in the frame of `bounds`.
+///
+/// One function for the two questions a split cell has to answer the same way:
+/// where the press test draws the boundary, and what
+/// [`teksilo_core::widget::Widget::target_regions`]
+/// reports. Both used to be open-coded — the press test as a physical-x
+/// comparison with its own RTL branch, the report not at all — and a cell
+/// painting two targets inside one node is exactly what `target_regions`
+/// exists for.
+///
+/// The trailing resize grip is excluded: the resize test above owns that band,
+/// on **both** of the cell's edges. What is left is split by
+/// [`partition_targets`](teksilo_core::partition::partition_targets), which
+/// gives the filter affordance its `floor` by
+/// clamp-and-redistribute, answers in reading order (so nothing here mirrors
+/// for RTL), and — when the two floors cannot both be met — splits evenly
+/// rather than letting either zone vanish.
+///
+/// Returns `None` for a cell with no filter affordance: there is one zone, it
+/// is the cell, and there is nothing to partition.
+fn header_cell_zones(
+    bounds: Rect,
+    filter_zone_w: f32,
+    grip: f32,
+    floor: f32,
+    rtl: bool,
+) -> Option<[Rect; 2]> {
+    if filter_zone_w <= 0.0 || bounds.width <= 0.0 {
+        return None;
+    }
+    let usable_w = (bounds.width - grip).max(0.0);
+    // The grip sits at the reading-order trailing edge, which is the physical
+    // left one under RTL, so the usable band starts past it there.
+    let usable = Rect::new(
+        if rtl { bounds.x + grip } else { bounds.x },
+        bounds.y,
+        usable_w,
+        bounds.height,
+    );
+    let label_w = (usable_w - filter_zone_w).max(0.0);
+    let direction = if rtl {
+        teksilo_core::environment::LayoutDirection::RightToLeft
+    } else {
+        teksilo_core::environment::LayoutDirection::LeftToRight
+    };
+    let zones = teksilo_core::partition::partition_targets(
+        usable,
+        &[label_w, filter_zone_w],
+        floor,
+        direction,
+    );
+    Some([zones[0], zones[1]])
 }
 
 impl Widget for HeaderCell {
@@ -525,6 +611,10 @@ impl Widget for HeaderCell {
         let cell_window_w = self.cell_window_w.clone();
         let cell_window_h = self.cell_window_h.clone();
         let filter_zone_w = self.filter_zone_width;
+        // The zone floor is a build-time read: a density change marks the tree
+        // at `BindingLevel::Rebuild`, so a dimension baked here cannot go stale.
+        let zone_floor = ctx.theme().input.target_size;
+        self.zone_floor.set(zone_floor);
         let is_hovered = self.is_hovered.clone();
         // A coarse pointer's column reorder waits for a hold; see the escalation
         // arm in `PointerMove` for why the raw path cannot read
@@ -796,12 +886,17 @@ impl Widget for HeaderCell {
                         // trailing inner edge — physical-right under LTR,
                         // physical-left under RTL (the header HStack
                         // reverses), just inside the resize handle.
-                        let in_filter_zone = if rtl {
-                            local_x < grip_base + filter_zone_w
-                        } else {
-                            local_x > cell_w - grip_base - filter_zone_w
-                        };
-                        if filter_zone_w > 0.0 && cell_w > 0.0 && in_filter_zone {
+                        let in_filter_zone = header_cell_zones(
+                            Rect::new(0.0, 0.0, cell_w, cell_h),
+                            filter_zone_w,
+                            grip_base,
+                            zone_floor,
+                            rtl,
+                        )
+                        .is_some_and(|[_, filter]| {
+                            local_x >= filter.x && local_x <= filter.right()
+                        });
+                        if in_filter_zone {
                             return EventResponse::Ignored;
                         }
                         // Record press: PointerUp without movement →
@@ -996,7 +1091,7 @@ impl Widget for HeaderCell {
         bounds: Rect,
         _proposal: SizeProposal,
         children: &mut [WidgetPlacement],
-        _ctx: &LayoutContext,
+        ctx: &LayoutContext,
     ) {
         // Snapshot the cell's window-space physical-left edge so the
         // pointer-event handler can convert window x to cell-local x
@@ -1005,10 +1100,55 @@ impl Widget for HeaderCell {
         self.cell_window_x.set(bounds.x);
         self.cell_window_w.set(bounds.width);
         self.cell_window_h.set(bounds.height);
+        // `target_regions` is handed a rectangle and no context, so the
+        // direction it must partition in is recorded here.
+        self.zone_rtl.set(ctx.is_rtl());
         for child in children.iter_mut() {
             child.origin = bounds.origin();
             child.size = bounds.size();
         }
+    }
+
+    /// The label zone, the filter zone, and the resize band on the cell's
+    /// reading-order trailing edge.
+    ///
+    /// All three are geometry inside one node — the cell's chrome is one
+    /// composed subtree and its parts are told apart by coordinate at press
+    /// time — so without this report the filter affordance and the grip do not
+    /// exist to anything outside the press handler: not to a conformance audit,
+    /// and not to a router that would route a coarse press to the nearest
+    /// target. The rectangles come from [`header_cell_zones`], the same
+    /// function the press test asks, so the report and the routing cannot
+    /// drift.
+    ///
+    /// A cell with no filter affordance reports nothing: its one target is its
+    /// own node, which every consumer can already see.
+    fn target_regions(&self, bounds: Rect) -> Vec<teksilo_core::partition::TargetRegion> {
+        use teksilo_core::partition::TargetRegion;
+        let Some([label, filter]) = header_cell_zones(
+            bounds,
+            self.filter_zone_width,
+            self.resize_grip,
+            self.zone_floor.get(),
+            self.zone_rtl.get(),
+        ) else {
+            return Vec::new();
+        };
+        let grip = if self.zone_rtl.get() {
+            Rect::new(bounds.x, bounds.y, self.resize_grip, bounds.height)
+        } else {
+            Rect::new(
+                bounds.right() - self.resize_grip,
+                bounds.y,
+                self.resize_grip,
+                bounds.height,
+            )
+        };
+        vec![
+            TargetRegion::target(label, HEADER_PART_LABEL),
+            TargetRegion::target(filter, HEADER_PART_FILTER),
+            TargetRegion::grab(grip, HEADER_PART_RESIZE),
+        ]
     }
 
     // No `paint()` — the cell's visual chrome is composed via

@@ -9,6 +9,15 @@
 //! hit-test is geometric via the layout strategy, so tiles outside the
 //! realized window are selected too. Follows the `teksilo-scene`
 //! rubber-band pattern; the visual rectangle is painted by `GridOverlay`.
+//!
+//! ## Touch and pen
+//!
+//! The marquee is a `DragPhase` handler on a surface that strictly encloses the
+//! body pane — the only shape the tree arms `DragActivation` for — so a finger's
+//! marquee waits for a hold while a mouse still latches at its own slop, and a
+//! press that lands on a tile declines outright. Its auto-scroll band is
+//! pointer-kind-aware. All of that is the data-view sweep's; nothing about the
+//! marquee is this package's.
 
 use std::cell::Cell;
 use std::rc::Rc;

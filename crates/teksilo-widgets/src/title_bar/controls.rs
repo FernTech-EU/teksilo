@@ -17,6 +17,17 @@
 //! For M2 the maximize/restore swap is *not* implemented — the maximize
 //! button always shows the `□` glyph. M3+ will add a `Signal<bool>`-driven
 //! glyph swap once the host can update it from `WindowEvent::Resized`.
+//!
+//! ## Touch and pen
+//!
+//! A control cell clears the conformance floor on both axes at every density, so
+//! nothing here needs widening, and each button activates on the release. The cell
+//! is **not** density-projected: its height is the title bar's, which the platform
+//! chrome sizes, and raising it at Touch would overflow the bar.
+//!
+//! The hover tint is decoration. On Windows the OS owns hover over the non-client
+//! area, which is what the external hover signal is for; a contact produces no
+//! hover on any platform and loses nothing by it.
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -562,5 +573,48 @@ impl Widget for WindowControls {
 
     fn children(&self) -> Vec<WidgetId> {
         self.root_child_id.into_iter().collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use teksilo_canvas::SizeProposal;
+    use teksilo_core::widget_tree::WidgetTree;
+    use teksilo_tokens::{TargetDensity, TextRole};
+
+    use super::ControlButton;
+
+    /// The window-control cells clear the 24 dp conformance floor on both axes
+    /// at every density, which is why the touch sweep changes nothing about
+    /// them: 46 x 32 dp is already a bigger target than a `Button`'s.
+    ///
+    /// Their height is the title bar's, so the ladder cannot raise it without
+    /// overflowing the bar the platform sized — the reason this is a
+    /// measurement and not a projection.
+    #[test]
+    fn a_window_control_cell_clears_the_conformance_floor_at_every_density() {
+        for density in [
+            TargetDensity::Compact,
+            TargetDensity::Comfortable,
+            TargetDensity::Touch,
+        ] {
+            let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+            tree.set_input_density(density);
+            let floor = tree.theme().input.min_target_conformance;
+            let button = tree.add(ControlButton::new(
+                "\u{00D7}",
+                46.0,
+                32.0,
+                TextRole::Primary,
+            ));
+            tree.layout(SizeProposal::exact(200.0, 40.0));
+            let bounds = tree.bounds(button);
+            assert!(
+                bounds.width >= floor && bounds.height >= floor,
+                "{density:?}: the cell is {}x{} against a {floor} dp floor",
+                bounds.width,
+                bounds.height,
+            );
+        }
     }
 }

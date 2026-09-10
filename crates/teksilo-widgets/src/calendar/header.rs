@@ -2,6 +2,13 @@
 // SPDX-FileCopyrightText: 2026 FernTech
 
 //! `CalendarHeader` — month navigation strip: prev / "Month Year" / next.
+//!
+//! ## Touch and pen
+//!
+//! The nav arrows' footprint follows the density ladder, like the day cells beside
+//! them — they read the raw constant before, so a Touch build had 24 dp arrows in a
+//! header whose recipe had already decided on 44. The "Month Year" title is a
+//! `Button` and takes its floor from the button recipe.
 
 use std::rc::Rc;
 use teksilo_i18n::lit;
@@ -236,6 +243,20 @@ impl Widget for CalendarHeader {
     }
 }
 
+/// [`CALENDAR_NAV_ARROW_SIZE`] raised to the density's `target_size`
+/// (24 / 32 / 44 dp). The identity at Compact.
+///
+/// The same projection `CalendarRecipe::for_tokens` applies to
+/// `nav_arrow_size`; the arrow builds its own chrome rather than asking the
+/// style for it, so it applies the projection itself.
+fn nav_arrow_extent(tokens: &teksilo_tokens::InputTokens) -> f32 {
+    teksilo_core::styles::density::dp(
+        CALENDAR_NAV_ARROW_SIZE,
+        teksilo_tokens::TargetRole::Target,
+        tokens,
+    )
+}
+
 // ── Single icon-only navigation arrow (prev/next) ────────────────────
 
 #[derive(Clone, Copy)]
@@ -310,10 +331,17 @@ impl Widget for NavArrow {
             .corner_radius(CornerRadius::uniform(CALENDAR_NAV_ARROW_RADIUS * scale));
         let bg_id = ctx.add(bg);
         let z = ctx.add(ZStack::new().add_child(bg_id).add_child(centered));
+        // The arrow's footprint is a target, so it follows the density ladder
+        // (24 dp at Compact — the identity — 32 at Comfortable, 44 at Touch) as
+        // well as the global text scale. `CalendarRecipe` has projected
+        // `nav_arrow_size` since the density sweep; the arrow read the raw
+        // constant, so it stayed 24 dp under a theme that had decided on 44
+        // while the day cells beside it grew.
+        let arrow_extent = nav_arrow_extent(&ctx.theme().input) * scale;
         let sized = ctx.add(
             FixedSize::new()
-                .width(CALENDAR_NAV_ARROW_SIZE * scale)
-                .height(CALENDAR_NAV_ARROW_SIZE * scale)
+                .width(arrow_extent)
+                .height(arrow_extent)
                 .child_id(z),
         );
 
@@ -361,11 +389,12 @@ impl Widget for NavArrow {
         proposal: SizeProposal,
         ctx: &LayoutContext,
     ) -> teksilo_core::widget::LayoutResponse {
+        let extent = nav_arrow_extent(&ctx.theme.input);
         match self.root_id {
             Some(id) => ctx
                 .child_size(id, proposal)
-                .unwrap_or_else(|| Size::new(CALENDAR_NAV_ARROW_SIZE, CALENDAR_NAV_ARROW_SIZE)),
-            None => Size::new(CALENDAR_NAV_ARROW_SIZE, CALENDAR_NAV_ARROW_SIZE),
+                .unwrap_or_else(|| Size::new(extent, extent)),
+            None => Size::new(extent, extent),
         }
         .into()
     }

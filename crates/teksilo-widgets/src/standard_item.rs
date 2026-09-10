@@ -65,6 +65,25 @@
 //! a nameless `Role::CheckBox`. The chevron's `TwistArrow` is
 //! decorative (`set_hidden`); the row's expanded state is owned by
 //! the wrapper.
+//!
+//! ## Touch and pen
+//!
+//! A row's **height** is a target floor and follows the density ladder — the
+//! recipe has carried both projected heights since the density sweep, and the row
+//! now reads them rather than the raw Compact constants.
+//!
+//! A row's **press** is not the row's. Inside a `ListView` or a `TreeView` the
+//! body pane owns the tap, the double tap and the reorder drag, and resolves which
+//! row they mean by coordinate; the framework press belongs to the node whose
+//! gesture arena took it, so a row's own `pressed_signal` is structurally always
+//! false. The `Pressed` chrome the recipe paints is therefore reachable only
+//! through a caller-supplied `interaction_signal`. Changing that means ruling on
+//! which node owns a press when a data view is wrapped in something tappable,
+//! which is an open design question rather than a widget change.
+//!
+//! Hover is decoration plus the reveal policy: at a density that reveals every
+//! affordance the row pins its `reveal` signal on, so trailing actions do not
+//! depend on a hover a contact never produces.
 
 use std::rc::Rc;
 
@@ -831,11 +850,21 @@ impl Widget for StandardListItem {
 
     fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> LayoutResponse {
         use crate::styles::recipe_standard_item_style as si;
-        let min_height = if self.subtitle.is_some() {
-            si::STANDARD_ITEM_MIN_HEIGHT_TWO_LINE
-        } else {
-            si::STANDARD_ITEM_MIN_HEIGHT_SINGLE_LINE
-        };
+        // A row is a target, so its floor follows the density ladder — 28 dp at
+        // Compact (unchanged: the floor only ever raises), 32 at Comfortable, 44
+        // at Touch. `StandardItemRecipe` has carried both projected heights
+        // since the density sweep and nothing read them: the row measured
+        // itself against the raw Compact constants, so a Touch build laid out
+        // 28 dp list rows under a theme that had already decided on 44.
+        let min_height = teksilo_core::styles::density::dp(
+            if self.subtitle.is_some() {
+                si::STANDARD_ITEM_MIN_HEIGHT_TWO_LINE
+            } else {
+                si::STANDARD_ITEM_MIN_HEIGHT_SINGLE_LINE
+            },
+            teksilo_tokens::TargetRole::Target,
+            &ctx.theme.input,
+        );
         let raw = self
             .root_child_id
             .and_then(|id| ctx.child_size(id, proposal))

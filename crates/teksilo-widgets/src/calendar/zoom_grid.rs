@@ -15,6 +15,13 @@
 //!
 //! Visual chrome (selected / pressed / hover background, label
 //! colour) is delegated to the active `CalendarStyle::make_zoom_cell`.
+//!
+//! ## Touch and pen
+//!
+//! A zoom cell is well past the target floor on both axes at every density, and it
+//! picks on the release. Its **pressed** appearance is the framework's press now:
+//! the cell used to write `false` into that signal and nothing else, so the state
+//! its `CalendarStyle` painted was unreachable for a mouse as well as for a finger.
 
 use std::rc::Rc;
 
@@ -326,6 +333,14 @@ impl Widget for ZoomCell {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let hover = ctx.signal(false);
         let pressed = ctx.signal(false);
+        // The pressed chrome the `CalendarStyle` paints, driven by the router's
+        // own press record — the cell has no press handler of its own to keep.
+        // Before this it only ever wrote `false`: the month and year cells had
+        // a pressed appearance no pointer of any kind could reach. The
+        // framework press is also the only source that survives a press
+        // sliding off the cell and back on, and that is withdrawn without a
+        // release when an enclosing scroller claims the pan.
+        crate::common::interaction::bind_pressed(ctx, pressed.clone());
         let selected = self.selected.clone();
 
         // Visual chrome via the active CalendarStyle.
@@ -343,23 +358,17 @@ impl Widget for ZoomCell {
         let on_pick = self.on_pick.clone();
         let on_pick_for_access = on_pick.clone();
         let hover_for_handler = hover.clone();
-        let pressed_for_handler = pressed.clone();
-        let pressed_for_release = pressed.clone();
         let enabled = self.enabled;
         let handlers = HandlerSet::new()
             .focusable(enabled)
             .cursor(CursorIcon::Pointer)
             .on_hover(move |entered, _| {
                 hover_for_handler.set(entered);
-                if !entered {
-                    pressed_for_release.set(false);
-                }
             })
             .on_tap(move |_pos, ctx_evt| {
                 if !enabled {
                     return;
                 }
-                pressed_for_handler.set(false);
                 (on_pick)(ctx_evt);
             })
             .on_access_action(move |action, ctx_evt| {

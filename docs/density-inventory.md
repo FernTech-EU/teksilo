@@ -69,8 +69,16 @@ control whose own minimum hit box sat below WCAG 2.2 SC 2.5.8 (level AA).
 | `teksilo-preview-ui/src/navigator.rs` — a navigator tree row | 22 dp | 24 dp | Each row in the previewer's navigator is 2 dp taller; a full-height list shows marginally fewer rows. |
 | `teksilo-theme-macos` — `MinSize` on the button and the text field (two sites, one number: `MACOS_CONTROL_HEIGHT`) | 22 dp | 24 dp | A macOS-preset push button and field are 2 dp taller. The **painted bezel metric stays at Apple's 22 dp**; only the minimum box around it moves. |
 | `teksilo-widgets/src/text_input.rs` — the clear button | 16 dp | 24 dp | The `×` inside a clearable field gets a 24 dp box. The 12 dp glyph is unchanged; the button is centred in the larger box, so the field's own height does not move. |
+| `teksilo-widgets/src/code_editor/completion.rs` — a suggestion row (added by P25) | 22 dp measured | 24 dp | Up to 2 dp taller per row of the completion popup. The text and its padding are unchanged; the floor is a `MinSize` around them. The 22 dp is the row's height in a headless tree under the shipped typography — a real text backend with a taller line may already clear the floor, in which case the `MinSize` is inert at Compact as well. |
 
-Nothing else in the 562 rows below changes at Compact.
+Nothing else in the rows below changes at Compact.
+
+The fourth site is the same exception as the first three and worth stating once
+more, because it is the case where the floor rule's escape hatch does not exist: a
+stack of **adjacent** rows cannot take its conformance from `hit_outset`, since the
+only neighbour a row could borrow space from is another row, and an outset on each
+of them just moves the boundary between the two. A `MinSize` is a hit box, 24 dp is
+the floor that governs hit boxes, and the paint has to move.
 
 Dimensions live in **three** homes, and P20 has to reach all three:
 
@@ -177,6 +185,36 @@ row that made the largest difference was one nobody had looked at twice.
 | Four `docking/activity_bar.rs` gaps are **fixed**, not scaled | 4 | See the activity-rail note in §3b: the same two constants feed the rail's layout, its overflow-capacity estimate and its drop-insertion geometry, two of them from pure functions with their own unit tests and no theme in scope. Scaling one without the others makes the rail's capacity disagree with its layout — a worse outcome than a rail whose gaps do not grow. Owner for any future change: P30. |
 | Seven rows pointed at files the module split had emptied | 7 | `EDGE` / `MAX_VELOCITY` in `list_view.rs`, `table_view.rs`, `tree_table_view.rs` now live in each view's `widget_impl.rs`, and `MEAN_ADVANCE_OVER_LINE_HEIGHT` moved to `rich_text/body.rs`. The paths are corrected; the five auto-scroll copies are now **deleted**, folded into `common::drag_autoscroll`. |
 | `SPLITTER_MIN_PANE_SIZE` and `RESIZE_MIN_EDGE` are container clamps | 2 | Both are minimum *content* extents (96 dp and 24 dp) read where no theme is in scope, and `dp(.., Grab, ..)` is the identity for both at every density. Classed Decoration with the reason written at the row. |
+
+## Corrections P25 made to this document
+
+Every count above survived. What did not is the assumption behind them: **a
+projected recipe field is only a projection if something reads it.** Four
+consumers measured against the raw Compact constant while the recipe beside them
+carried the projected value, so the ladder was inert for four of the most common
+targets in a real application.
+
+| Correction | Where | Why it mattered |
+| --- | --- | --- |
+| `StandardItemRecipe::min_height_single_line` / `min_height_two_line` had **no reader at all** | `standard_item.rs`, `StandardListItem::layout_response` | Every `ListView` / `TreeView` row measured itself against the raw 28 / 44 dp, so a Touch build laid out 28 dp rows under a theme that had already decided on 44. The two projected fields were dead. |
+| `CalendarRecipe::nav_arrow_size` was not read by the arrows | `calendar/header.rs`, `NavArrow::build` and its `layout_response` | The header's chevrons stayed 24 dp at Touch while the day cells beside them grew — a strip whose two halves followed different ladders. |
+| `MenuItemRecipe::item_height` was not read by the ComboBox | `combo_box/item.rs`, `DropdownItem::layout_response`; `combo_box/panel.rs`, `build_virtualized_list` | A combo box's own list stayed 24 dp while a `MenuList`'s rows reached 44, and the panel sizing itself for `max_visible_items` used the same raw number, so the two at least agreed while both were wrong. |
+| The completion popup had no projection at all | `code_editor/completion.rs` | Its rows are menu rows in every other respect. Now floored through `density_min_size`, which is the §0 site above. |
+| A `Target` classed "visual fixed; hit via `partition_targets`" that is **not** an in-node split | `split_button.rs`, `SPLIT_BUTTON_CHEVRON_WIDTH` | The mechanism named in the row could not be implemented as written: the chevron is its own node beside its own sibling, and partitioning a node's rectangle only makes sense when one node paints both zones. The row now names `hit_outset`. |
+
+### One refusal, with its measurement
+
+`docking/activity_bar.rs`'s `item_extent` maps an `IconButtonSize` to a rail
+item's square extent by reading the raw `ICON_BUTTON_SIZE_*` constants, and P25
+**left it that way**. The reason is the one already recorded for the rail's gaps:
+the same function feeds the strip's layout, its overflow-capacity estimate and its
+drop-insertion geometry, two of them pure functions with their own unit tests and
+no theme in scope, and projecting one without the others makes the rail's capacity
+disagree with its layout. What the projection would buy is comfort, not reach —
+every `IconButtonSize` a rail can carry (24 / 24 / 30 / 40 / 50 dp) already clears
+`min_target_conformance`, which is 24 dp at **every** density, and the rail's
+default is 40. Owner for any future change: whoever revisits the rail's geometry
+as a whole.
 
 ## Dimensions that are *not* constants
 
@@ -580,7 +618,7 @@ Five recipes carry no dimension constant of their own:
 | `crates/teksilo-widgets/src/split_button.rs` | 69 | `SPLIT_BUTTON_PADDING_VERTICAL` | `0.0` | Spacing | scales with `spacing_factor` — `split_button_padding_vertical(&InputTokens)` |
 | `crates/teksilo-widgets/src/split_button.rs` | 70 | `SPLIT_BUTTON_CORNER_RADIUS` | `4.0` | Decoration | fixed — corner radius is shape identity, not a hit target |
 | `crates/teksilo-widgets/src/split_button.rs` | 71 | `SPLIT_BUTTON_BORDER_WIDTH` | `1.0` | Decoration | fixed — hairline stroke; scaling it thickens the design language |
-| `crates/teksilo-widgets/src/split_button.rs` | 72 | `SPLIT_BUTTON_CHEVRON_WIDTH` | `22.0` | Target | visual fixed at 22 dp; hit via `partition_targets` with a 24 dp floor |
+| `crates/teksilo-widgets/src/split_button.rs` | 72 | `SPLIT_BUTTON_CHEVRON_WIDTH` | `22.0` | Target | visual fixed at 22 dp; hit via `hit_outset` on the `ChevronRegion` node, whole shortfall on the leading edge (**corrected by P25** — the two halves are separate nodes, so `partition_targets` would have had to move the painted boundary at Compact) |
 | `crates/teksilo-widgets/src/split_button.rs` | 73 | `SPLIT_BUTTON_DIVIDER_WIDTH` | `1.0` | Decoration | fixed — decorative geometry, no hit consequence |
 | `crates/teksilo-widgets/src/split_button.rs` | 74 | `SPLIT_BUTTON_CHEVRON_ICON_SIZE` | `12.0` | Decoration | fixed — glyph metric; follows text scale, not target density |
 | `crates/teksilo-widgets/src/split_button.rs` | 76 | `SPLIT_BUTTON_ICON_LABEL_GAP` | `6.0` | Spacing | scales with `spacing_factor` — `split_button_icon_label_gap(&InputTokens)` |

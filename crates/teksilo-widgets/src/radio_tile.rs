@@ -35,6 +35,18 @@
 //!     .tile(RadioTile::new().icon(icon).title(tr!(single_file())).description(tr!(single_file_desc())))
 //!     .tile(RadioTile::new().icon(icon2).title(tr!(bundle())).description(tr!(bundle_desc())))
 //! ```
+//!
+//! ## Touch and pen
+//!
+//! A tile is a whole-card target, comfortably past the floor at every density, and
+//! it activates on the release. What the touch sweep changed is its **pressed**
+//! appearance: it was written by the `Space` path alone, so the recipe painted a
+//! state no pointer reached — on the one control where a press visual matters
+//! most, because there is no smaller affordance inside the card to look at.
+//!
+//! A tap by a contact also rests the tile idle rather than hovered, for the reason
+//! `ToolBox`'s header does: a finger sends no hover-leave, and the stale tint
+//! becomes visible as soon as the selection moves to another tile.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -611,13 +623,49 @@ impl Widget for RadioTile {
         let sel_access = self.selected.clone();
         let int_tap = interaction.clone();
         let int_hover = interaction.clone();
+        // The tile's pressed chrome, driven by the router's press record. It was
+        // previously written by the `Space` path alone, so the recipe's pressed
+        // appearance was unreachable for a mouse and for a finger alike — and a
+        // whole-card control is the one a press visual matters most on, because
+        // there is no smaller affordance inside it to look at. The framework
+        // press also survives a press sliding off the card and back on, and is
+        // withdrawn without a release when a surrounding scroller claims the
+        // pan, which is exactly what a tile in a scrolling settings pane needs.
+        let hovered_cell = Rc::new(std::cell::Cell::new(false));
+        {
+            let hovered = hovered_cell.clone();
+            crate::common::interaction::bind_press_state(
+                ctx,
+                interaction.clone(),
+                InteractionState::Pressed,
+                move || {
+                    if hovered.get() {
+                        InteractionState::Hovered
+                    } else {
+                        InteractionState::Idle
+                    }
+                },
+            );
+        }
+        let hovered_for_hover = hovered_cell.clone();
 
         let mut handler_set = HandlerSet::new()
-            .on_tap(move |_pos, _ctx: &mut EventContext| {
+            .on_tap(move |_pos, ctx: &mut EventContext| {
                 sel_tap.set(value);
-                int_tap.set(InteractionState::Hovered);
+                // A mouse or a pen is still over the tile after the release; a
+                // finger is gone and sends no hover-leave to correct a
+                // `Hovered` state with.
+                int_tap.set(if ctx.pointer_kind().hovers() {
+                    InteractionState::Hovered
+                } else {
+                    InteractionState::Idle
+                });
             })
             .on_hover(move |entered: bool, _ctx: &mut EventContext| {
+                // Recorded beside the signal as well: while the tile is
+                // `Pressed` the hover truth has nowhere to live in the enum,
+                // and the press binding needs it to pick the resting state.
+                hovered_for_hover.set(entered);
                 if entered {
                     int_hover.set(InteractionState::Hovered);
                 } else {

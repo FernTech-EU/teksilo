@@ -42,6 +42,12 @@
 //!         }
 //!     });
 //! ```
+//!
+//! ## Touch and pen
+//!
+//! A log row is a `StandardListItem`, so its target floor follows the density
+//! ladder with every other list row, and its tap replays the entry on the release.
+//! The trailing action strip is made of `Link`s and `Button`s, each its own target.
 
 use std::rc::Rc;
 use teksilo_i18n::lit;
@@ -738,6 +744,52 @@ mod tests {
         tree.children(root)
             .into_iter()
             .find_map(|c| find_by_type(tree, c, suffix))
+    }
+
+    /// A finger's tap on a log row replays its entry, on the release. The row is
+    /// a `StandardListItem`, so its own target floor follows the density ladder
+    /// with every other list row (`tests/composite_touch.rs`); what this pins is
+    /// that the row's tap is reachable by a contact at all.
+    #[test]
+    fn a_finger_taps_a_log_row_to_replay_its_entry() {
+        use std::cell::Cell;
+
+        let archive = fresh_archive();
+        archive.push(entry("first", Some("body 1"), Vec::new()));
+        let invoked = Rc::new(Cell::new(0u32));
+        let sink = invoked.clone();
+        let (mut tree, root) = tree_sized(
+            NotificationLog::new(archive).on_entry_invoked(move |_e, _ctx| {
+                sink.set(sink.get() + 1);
+            }),
+            SizeProposal::exact(480.0, 360.0),
+        );
+        // Matched on `contains`, so the row is found whether or not the handler
+        // wrapper its `on_tap` puts around it reports a name of its own — which
+        // is why this walk is local rather than the module's `ends_with` one.
+        fn find_row(tree: &WidgetTree, id: WidgetId) -> Option<WidgetId> {
+            if tree
+                .widget_type_name(id)
+                .is_some_and(|n| n.contains("StandardListItem"))
+            {
+                return Some(id);
+            }
+            tree.children(id)
+                .into_iter()
+                .find_map(|c| find_row(tree, c))
+        }
+        let row = find_row(&tree, root).expect("a log row");
+        let bounds = tree.bounds(row);
+        let at = teksilo_canvas::Point::new(
+            bounds.x + bounds.width * 0.25,
+            bounds.y + bounds.height * 0.5,
+        );
+
+        let f = tree.new_contact();
+        tree.touch_down(f, at);
+        assert_eq!(invoked.get(), 0, "the press alone replays nothing");
+        tree.touch_up(f, at);
+        assert_eq!(invoked.get(), 1, "the release replays the entry");
     }
 
     #[test]

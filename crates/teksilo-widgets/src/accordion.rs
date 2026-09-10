@@ -28,6 +28,19 @@
 //! let expanded = Signal::new(false);
 //! let _accordion = Accordion::new(lit!("Advanced settings"), expanded);
 //! ```
+//!
+//! ## Touch and pen
+//!
+//! The header is one target on the density ladder and toggles from its tap, so on
+//! the release. Where a dock panel installs `on_header_drag`, the same header is
+//! also a drag source: `DragActivation::Auto` resolves that to `Immediate` when
+//! nothing competes for the axis and to the hold when a scroller does, so a contact
+//! needs no declaration to move a panel — and a press that lifts without
+//! travelling still toggles.
+//!
+//! The trailing slot is wrapped in a [`DeadZone`](crate::primitives::DeadZone), so
+//! its action buttons and `⋮` menu take a press — jitter and all — without arming
+//! the panel drag behind them.
 
 use teksilo_canvas::{Rect, Size, SizeProposal};
 use teksilo_core::accessibility::AccessNodeBuilder;

@@ -1,6 +1,19 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
+//! `OverlayTrigger` — the shared "this widget opens that overlay" wrapper.
+//!
+//! Used by `Dialog`, `Snackbar` and every other presenter that lets a caller
+//! replace its default `Button` trigger with a widget of their own.
+//!
+//! ## Touch and pen
+//!
+//! The trigger has no geometry and no press visual of its own: it forwards the
+//! caller's child, whose target and appearance are the child's, and routes the
+//! opening handlers onto that child's external bucket so they fire beside the
+//! child's own. The activation is an `on_tap`, so it happens on the release for
+//! every pointer kind.
+
 use teksilo_canvas::{Rect, SizeProposal};
 use teksilo_core::accessibility::AccessNodeBuilder;
 use teksilo_core::build_context::BuildContext;

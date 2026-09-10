@@ -188,6 +188,10 @@ impl DropTargetStyle for RecipeDropTargetStyle {
             let overlay = ctx.add(DropRegionOverlay::new(
                 cfg.active_region.clone(),
                 cfg.size_factor,
+                // The same floor the target's own hit test applies, from the
+                // same token, so the painted zone and the dropping zone are one
+                // rectangle.
+                ctx.theme().input.target_size,
                 border_width,
                 hint_cards,
             ));
