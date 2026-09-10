@@ -981,11 +981,29 @@ fn pinch_recorder(notes: Rc<RefCell<Vec<PinchNote>>>) -> impl crate::widget::Wid
 
 /// **The point of the package.** Two contacts and the OS trackpad stream
 /// produce the *same* pinch stream, because both go through the one ingress.
+///
+/// *Contract change.* Both arms of this test used to describe the span ratio
+/// against the *start* of the gesture (`span / 100.0`), which is what the touch
+/// recognizer emitted and what the OS arm was hand-fed to match. It could not be
+/// what the OS arm really produces — winit reports a change per event — so the
+/// parity was between the recognizer and a fixture, not between the two
+/// producers. [`GestureEvent::PinchChanged`] now states a per-sample contract;
+/// both arms describe the same geometry in those terms, so the second sample
+/// reads 200/140 rather than 200/100 and the two streams are still identical.
 #[test]
 fn the_two_pinch_ingresses_produce_the_same_stream() {
     // The geometry both runs describe: two contacts 100 dp apart, spreading to
     // 200 dp in two steps, then one lifts.
+    let start_span = 100.0f32;
     let spans = [140.0f32, 200.0f32];
+    // The same geometry as the per-sample steps the contract asks for: each
+    // span over the one before it.
+    let steps: Vec<f32> = std::iter::once(start_span)
+        .chain(spans)
+        .collect::<Vec<_>>()
+        .windows(2)
+        .map(|w| w[1] / w[0])
+        .collect();
 
     // --- ingress 1: two real contacts ---------------------------------
     let touch_notes = Rc::new(RefCell::new(Vec::new()));
@@ -1035,12 +1053,12 @@ fn the_two_pinch_ingresses_produce_the_same_stream() {
         Some(Point::new(centre, 200.0)),
         &mut ops,
     );
-    for span in spans {
+    for (span, step) in spans.iter().zip(&steps) {
         let center = Point::new(centre - 50.0 + span / 2.0, 200.0);
         os_tree.dispatch_os_gesture(
             GestureEvent::PinchChanged {
                 center,
-                scale: span / 100.0,
+                scale: *step,
                 rotation: 0.0,
             },
             Some(center),
@@ -1053,17 +1071,32 @@ fn the_two_pinch_ingresses_produce_the_same_stream() {
         *touch_notes.borrow(),
         vec![
             PinchNote::Started,
+            // 140/100 — the step since the start.
             PinchNote::Changed {
                 scale: 1400,
                 rotation: 0
             },
+            // 200/140 — the step since the previous sample, not 200/100.
             PinchNote::Changed {
-                scale: 2000,
+                scale: 1429,
                 rotation: 0
             },
             PinchNote::Ended,
         ],
-        "the touchscreen stream is Started / Changed × 2 / Ended"
+        "the touchscreen stream is Started / Changed × 2 / Ended, carrying \
+         per-sample steps"
+    );
+    let folded: f32 = touch_notes
+        .borrow()
+        .iter()
+        .filter_map(|n| match n {
+            PinchNote::Changed { scale, .. } => Some(*scale as f32 / 1000.0),
+            _ => None,
+        })
+        .product();
+    assert!(
+        (folded - 2.0).abs() < 1e-2,
+        "and folding them in reaches the ×2 spread the fingers described, got {folded}"
     );
     assert_eq!(
         *touch_notes.borrow(),

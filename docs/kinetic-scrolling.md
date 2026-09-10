@@ -424,6 +424,19 @@ and nowhere else, and a second, touch-only event family would have doubled the
 handler surface and guaranteed the same drift again. A test asserts the two
 streams are *identical*, not merely similar.
 
+One ingress also means one payload contract, and it is stated on
+`GestureEvent::PinchChanged`: `scale` and `rotation` are **per-sample deltas**
+against the previous sample of the same gesture, and `rotation` is in
+**radians**. A consumer folds each sample in (`zoom *= scale`,
+`rotation += rotation`) rather than assigning it. Deltas rather than values
+cumulative since the start, because the trackpad arm cannot produce a cumulative
+value — winit reports a change per event and hands over no gesture-start baseline
+to divide by; the recognizer, which has one, keeps it under
+`TouchPinchRecognizer::cumulative_scale` / `cumulative_rotation` so the two
+readings never share a name. Degrees are converted where the unit is known, in
+`teksilo_platform::event_translation`'s `rotation_gesture`, and never in a
+consumer.
+
 Third and later contacts are ignored: rotation through three moving points has no
 unique rigid transform, so the recognizer takes the two **earliest** contacts and
 says so rather than averaging something. A contact leaving mid-pinch ends the

@@ -45,10 +45,15 @@ reconcile independently on every mutation.
   arrive as further `Pixels` deltas; the existing animation
   pipeline turns this into smooth inertial fling without a custom
   recognizer.
-- **`on_pinch`** — OS trackpad pinch (`PinchPhase::Changed`) feeds
-  `scale` into the zoom signal and `rotation` into the rotation
-  signal, anchored around the gesture center so the scene point
-  under the user's fingers stays put.
+- **`on_pinch`** — a pinch (`PinchPhase::Changed`) feeds `scale` into
+  the zoom signal and `rotation` into the rotation signal, anchored
+  around the gesture center so the scene point under the user's
+  fingers stays put. Both producers — the OS trackpad stream and the
+  two-contact touch recognizer — deliver **per-sample deltas**: `scale`
+  is the factor since the previous sample (multiplied in) and `rotation`
+  the twist since the previous sample in **radians** (added). The
+  platform translator converts winit's degrees at the seam, so nothing
+  in the scene does.
 - **Reduced-motion** — at build time, captures
   `BuildContext::prefers_reduced_motion`.
   When set, scroll handlers `set` the signals directly instead of

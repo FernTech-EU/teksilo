@@ -28,23 +28,24 @@ signs up to are a numbered contract in
 > text with handles and a magnifier, drags to and from the OS, pinches a scene,
 > and reaches a 24 dp target; a pen draws with pressure and tilt and hovers.
 >
-> **Three things a running application still does not do right.** It does not
+> **Two things a running application still does not do right.** It does not
 > switch density because a finger arrived
 > (`DensityPolicy::FollowLastPointer` and `Environment::prefers_touch` have an
 > ingress and no writer — what a stray tap should cost, whether a pen is coarse,
-> and when hysteresis commits are unanswered). It does not paint an overscroll
+> and when hysteresis commits are unanswered). And it does not paint an overscroll
 > (`ScrollableAxes::overscroll` publishes the value; nothing renders a stretch or
-> a glow). And a **two-finger pinch over-zooms**: the two producers disagree on
-> whether `PinchChanged`'s `scale` and `rotation` are cumulative or per-sample —
-> the touchscreen recognizer reports both *cumulatively* since the gesture's
-> start, the OS trackpad arm reports per-sample deltas, and the consumer combines
-> whichever arrives — so a touchscreen spread compounds and runs into `max_zoom`.
-> A trackpad *twist* is separately off by a factor of ~57, because winit's degrees
-> are passed into a field the recognizer documents as radians. Both are
-> pinned by `#[ignore]`d tests in
-> `teksilo-scene/src/view/tests/touch_camera.rs`, and both fixes are below the
-> scene, in core and in the platform translator. §9 lists what else is reviewed
-> rather than tested.
+> a glow). §9 lists what else is reviewed rather than tested.
+>
+> The pinch payload the two producers hand over is now one contract, stated on
+> `GestureEvent::PinchChanged`: `scale` is the factor **since the previous
+> sample** and `rotation` the twist since the previous sample in **radians**. A
+> touchscreen spread to twice the starting span therefore leaves the zoom at
+> exactly twice rather than compounding into `max_zoom`, and a one-degree trackpad
+> twist turns the content one degree rather than ~57 — winit reports degrees and
+> the platform translator converts them at the seam. The one ingress both
+> producers reach is described in
+> [kinetic-scrolling.md §7](kinetic-scrolling.md); the payload contract lives on
+> the event itself.
 
 ---
 

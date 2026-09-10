@@ -185,51 +185,50 @@ fn a_selecting_views_marquee_latches_before_its_pan_is_eligible() {
     );
 }
 
-/// The scene reads a `PinchChanged`'s `scale` as the factor **since the previous
-/// sample**, which is what the OS trackpad stream delivers and what the two
-/// pre-existing single-event pinch tests assert.
+/// A two-fingered spread to twice the starting span leaves the zoom at exactly
+/// twice — it does not compound.
 ///
-/// The touchscreen recognizer delivers something else: its `scale` is cumulative
-/// since `PinchStarted` (`TouchPinchRecognizer::contact_moved` divides the live
-/// span by the *start* span). Multiplying the live zoom by a cumulative factor on
-/// every sample compounds it, so a genuine ×2 spread delivered over several
-/// samples multiplies the zoom by the product of every intermediate ratio and
-/// slams into `max_zoom`.
+/// This is the accumulation half of the pinch contract, driven end to end: two
+/// real contacts through the router's `TouchPinchRecognizer`, through the one
+/// pinch ingress, into `SceneView::on_pinch`.
 ///
-/// This test states the contract the scene consumes. It is `#[ignore]`d because
-/// it fails today for the touch producer, and the fix is not in this crate: the
-/// producers have to agree, and both live outside `teksilo-scene` — either
-/// `teksilo_core::gesture::pinch` emits a per-sample ratio (four lines, and its
-/// own `two_contacts_start_and_the_scale_is_the_span_ratio` assertion changes),
-/// or `teksilo_platform`'s `pinch_gesture` accumulates. Un-`ignore` it with
-/// whichever lands; nothing here needs to change either way.
-///
-/// Measured on this fixture: five samples carrying the cumulative scales 1.15,
-/// 1.32, 1.52, 1.74, 2.00 leave the zoom at 8.03 instead of 2.0. A real gesture
-/// delivers samples every frame rather than five in total, so it reaches the
-/// default `max_zoom` of 10 and stops there.
+/// *Un-`#[ignore]`d.* It was landed failing, because the two pinch producers
+/// disagreed on what `scale` meant. The recognizer divided the live span by the
+/// span at the *start* of the gesture, while the consumer — and the OS trackpad
+/// arm, which reports a change per event and has no start baseline to divide by
+/// — read each sample as the step since the one before. Folding a cumulative
+/// value in with `zoom *= scale` multiplies the intermediate ratios together:
+/// the five samples below left the zoom at 8.03 rather than 2.0, and a real
+/// gesture delivering a sample per frame reached the default `max_zoom` of 10
+/// and stopped there. `GestureEvent::PinchChanged` now states the per-sample
+/// contract and `TouchPinchRecognizer` emits it.
 #[test]
-#[ignore = "the two pinch producers disagree on what `scale` means; the fix is \
-            in teksilo-core or teksilo-platform, not here — see the doc comment"]
 fn a_cumulative_pinch_reaches_the_spread_it_asked_for() {
     let mut tree = WidgetTree::new();
     let view_id = tree.add(SceneView::new(Scene::new()));
     tree.layout(SizeProposal::exact(800.0, 600.0));
-    let centre = Point::new(400.0, 300.0);
 
-    tree.pointer_move(centre);
-    tree.dispatch_event(WidgetEvent::Gesture {
-        gesture: teksilo_core::gesture::GestureEvent::PinchStarted { center: centre },
-    });
-    for cumulative in [1.15f32, 1.32, 1.52, 1.74, 2.00] {
-        tree.dispatch_event(WidgetEvent::Gesture {
-            gesture: teksilo_core::gesture::GestureEvent::PinchChanged {
-                center: centre,
-                scale: cumulative,
-                rotation: 0.0,
-            },
-        });
+    // Two fingers 100 dp apart, straddling the middle of the viewport.
+    let (a, b) = (finger(), finger());
+    let y = 300.0;
+    let anchor = Point::new(350.0, y);
+    tree.dispatch_pointer(contact(a, PointerPhase::Down, anchor));
+    tree.dispatch_pointer(contact(b, PointerPhase::Down, Point::new(450.0, y)));
+    assert!(
+        tree.touch_pinch_active(),
+        "two contacts on the view start a pinch",
+    );
+
+    // Spread the moving finger out to a 200 dp span — twice the start — over
+    // five frames, the way samples really arrive.
+    for span in [115.0f32, 132.0, 152.0, 174.0, 200.0] {
+        tree.dispatch_pointer(contact(
+            b,
+            PointerPhase::Move,
+            Point::new(anchor.x + span, y),
+        ));
     }
+
     let zoom = view_handle(&tree, view_id).zoom.get();
     assert!(
         (zoom - 2.0).abs() < 0.05,
@@ -238,33 +237,55 @@ fn a_cumulative_pinch_reaches_the_spread_it_asked_for() {
     );
 }
 
-/// The pinch payload's `rotation` is read as radians, because that is what the
-/// scene's `rotation` signal and its view transform are in.
+/// One degree of trackpad twist rotates the scene by one degree.
 ///
-/// The OS trackpad translator hands winit's `RotationGesture` delta straight
-/// through, and winit reports that in **degrees** — so this test measures 1.0 rad
-/// (about 57°) of scene rotation for one degree of twist. Same shape of defect as
-/// the `scale` one above and the same reason it is not fixed here: the unit is
-/// decided in `teksilo-platform`.
+/// This is the unit half of the pinch contract, at the consumer: the payload's
+/// `rotation` is radians and reaches the view transform unscaled, and successive
+/// samples add. The degrees-to-radians conversion itself happens at the platform
+/// seam — `teksilo_platform::event_translation`'s `rotation_gesture`, asserted
+/// by its own `rotation_gesture_translates` and, end to end from a winit event,
+/// by `teksilo_app`'s `a_trackpad_twist_reaches_the_widget_in_radians`.
+///
+/// *Un-`#[ignore]`d.* It was landed failing because the seam passed winit's
+/// degrees straight into a field the recognizer and every consumer read as
+/// radians, so a one-degree twist turned the scene by a radian — about 57°. The
+/// payload below is now what the seam produces for one degree.
 #[test]
-#[ignore = "teksilo-platform's rotation_gesture passes winit's degrees into a \
-            radian field; the fix is there, not here"]
 fn a_one_degree_trackpad_twist_rotates_the_scene_by_one_degree() {
     let mut tree = WidgetTree::new();
     let view_id = tree.add(SceneView::new(Scene::new()));
     tree.layout(SizeProposal::exact(800.0, 600.0));
     tree.pointer_move(Point::new(400.0, 300.0));
-    // What the platform layer produces for a one-degree twist today.
-    tree.dispatch_event(WidgetEvent::Gesture {
-        gesture: teksilo_core::gesture::GestureEvent::PinchChanged {
-            center: Point::new(400.0, 300.0),
-            scale: 1.0,
-            rotation: 1.0,
-        },
-    });
-    let radians = view_handle(&tree, view_id).rotation.get();
+
+    // What the platform seam produces for one degree of twist, twice — which
+    // also pins that samples are added rather than assigned.
+    let one_degree = 1.0f32.to_radians();
+    for _ in 0..2 {
+        tree.dispatch_event(WidgetEvent::Gesture {
+            gesture: teksilo_core::gesture::GestureEvent::PinchChanged {
+                center: Point::new(400.0, 300.0),
+                scale: 1.0,
+                rotation: one_degree,
+            },
+        });
+    }
+
+    let view = view_handle(&tree, view_id);
+    let radians = view.rotation.get();
     assert!(
-        (radians - std::f32::consts::PI / 180.0).abs() < 1e-4,
-        "one degree of twist is 0.01745 rad of scene rotation, got {radians}",
+        (radians - 2.0 * one_degree).abs() < 1e-4,
+        "two degrees of twist is 0.03491 rad of scene rotation, got {radians}",
+    );
+
+    // …and it is the *transform* that turns by two degrees, so nothing between
+    // the signal and the renderer re-interprets the unit. Zoom is 1, so the
+    // angle of the image of a unit vector is the rotation itself.
+    let t = view.view_transform();
+    let o = t.apply_point(Point::new(0.0, 0.0));
+    let x = t.apply_point(Point::new(1.0, 0.0));
+    let turned = (x.y - o.y).atan2(x.x - o.x);
+    assert!(
+        (turned - 2.0 * one_degree).abs() < 1e-3,
+        "the view transform must turn by the same two degrees, got {turned} rad",
     );
 }

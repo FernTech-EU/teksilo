@@ -19,6 +19,22 @@
 //! `WidgetTree::dispatch_os_gesture`. There is exactly one ingress, and a
 //! widget that implements `on_pinch` gets a touchscreen for free.
 //!
+//! # What a sample carries
+//!
+//! One ingress is only one ingress if both producers mean the same thing by
+//! the payload, so this recognizer emits what
+//! [`GestureEvent::PinchChanged`] documents: **per-sample deltas**. `scale` is
+//! the span now over the span at the *previous* sample, and `rotation` is the
+//! twist since the previous sample, in radians. That is what the trackpad arm
+//! can produce — winit reports a change per event and hands over no
+//! gesture-start baseline — and what a consumer folding samples in
+//! (`zoom *= scale`, `rotation += rotation`) needs.
+//!
+//! The gesture-start baseline is not lost: it is kept internally and reachable
+//! through [`TouchPinchRecognizer::cumulative_scale`] /
+//! [`cumulative_rotation`](TouchPinchRecognizer::cumulative_rotation), named so
+//! they cannot be read as the event's fields.
+//!
 //! # Three or more contacts
 //!
 //! A pinch is defined on two points. Rotation for three or more is not
@@ -68,17 +84,27 @@ pub struct TouchPinchRecognizer {
     /// both slots full and is ignored.
     contacts: [Option<Contact>; 2],
     /// The distance between the contacts when the gesture began — the
-    /// denominator of every later scale.
+    /// denominator of [`cumulative_scale`](Self::cumulative_scale), and of the
+    /// first emitted step.
     start_span: f32,
     /// The angle of the contact-to-contact vector when the gesture began.
     start_angle: f32,
-    /// The most recent scale, kept so a consumer can ask without re-deriving.
+    /// The span at the previous sample — the denominator of the **emitted**
+    /// per-sample scale, which is what makes it a delta rather than a value
+    /// cumulative since the start.
+    last_span: f32,
+    /// Span now over span at the start, kept for
+    /// [`cumulative_scale`](Self::cumulative_scale). Deliberately *not* what
+    /// [`GestureEvent::PinchChanged`] carries.
     cumulative_scale: f32,
     /// Total rotation in radians since the start, **unwrapped**: accumulated
     /// as shortest-arc steps so a pinch turned past ±π keeps growing rather
-    /// than jumping by 2π.
+    /// than jumping by 2π. Kept for
+    /// [`cumulative_rotation`](Self::cumulative_rotation); the emitted
+    /// `rotation` is one such step, not this sum.
     cumulative_rotation: f32,
-    /// The angle at the previous sample, for the unwrapping above.
+    /// The angle at the previous sample — the baseline of the emitted rotation
+    /// step, and of the unwrapping above.
     last_angle: f32,
     /// Whether a `PinchStarted` has been emitted and not yet balanced.
     active: bool,
@@ -91,6 +117,7 @@ impl TouchPinchRecognizer {
             contacts: [None; 2],
             start_span: 0.0,
             start_angle: 0.0,
+            last_span: 0.0,
             cumulative_scale: 1.0,
             cumulative_rotation: 0.0,
             last_angle: 0.0,
@@ -117,14 +144,23 @@ impl TouchPinchRecognizer {
         ))
     }
 
-    /// The current scale relative to the span at the start — `1.0` before a
-    /// pinch begins.
-    pub fn scale(&self) -> f32 {
+    /// The span now over the span at [`PinchStarted`](GestureEvent::PinchStarted)
+    /// — `1.0` before a pinch begins.
+    ///
+    /// **Not** what the emitted
+    /// [`PinchChanged`](GestureEvent::PinchChanged) carries: that is the step
+    /// since the previous sample. The two readings differ, so they do not share
+    /// the word `scale`; ask here for the total spread of the whole gesture (a
+    /// commit-on-release consumer), and read the event for what to fold in now.
+    pub fn cumulative_scale(&self) -> f32 {
         self.cumulative_scale
     }
 
     /// Total rotation in radians since the start, unwrapped.
-    pub fn rotation(&self) -> f32 {
+    ///
+    /// The same distinction as [`cumulative_scale`](Self::cumulative_scale):
+    /// the emitted `rotation` is one step, this is their sum.
+    pub fn cumulative_rotation(&self) -> f32 {
         self.cumulative_rotation
     }
 
@@ -149,6 +185,7 @@ impl TouchPinchRecognizer {
             return None;
         }
         self.start_span = span;
+        self.last_span = span;
         self.start_angle = angle(a.position, b.position);
         self.last_angle = self.start_angle;
         self.cumulative_scale = 1.0;
@@ -164,6 +201,10 @@ impl TouchPinchRecognizer {
     /// Returns [`GestureEvent::PinchChanged`] while a pinch is active and the
     /// moved contact is one of the two it follows; `None` otherwise — a third
     /// finger sliding around never disturbs the pinch.
+    ///
+    /// The payload is a **per-sample delta** against the previous sample, per
+    /// [`GestureEvent::PinchChanged`]'s contract, not a value cumulative since
+    /// the start.
     pub fn contact_moved(&mut self, id: PointerId, position: Point) -> Option<GestureEvent> {
         let slot = self
             .contacts
@@ -175,16 +216,24 @@ impl TouchPinchRecognizer {
         }
         let (a, b) = self.pair()?;
         let span = distance(a.position, b.position);
+        // The emitted scale is the step since the previous sample. The
+        // denominator is floored at `MIN_SPAN` so a pair that converged to
+        // almost nothing on the last sample cannot make the next step
+        // explode or divide by zero — the same reason a pinch will not start
+        // below that span.
+        let scale_step = span / self.last_span.max(MIN_SPAN);
+        self.last_span = span;
         if self.start_span >= MIN_SPAN {
             self.cumulative_scale = span / self.start_span;
         }
         let now = angle(a.position, b.position);
-        self.cumulative_rotation += shortest_arc(now - self.last_angle);
+        let rotation_step = shortest_arc(now - self.last_angle);
+        self.cumulative_rotation += rotation_step;
         self.last_angle = now;
         Some(GestureEvent::PinchChanged {
             center: self.center()?,
-            scale: self.cumulative_scale,
-            rotation: self.cumulative_rotation,
+            scale: scale_step,
+            rotation: rotation_step,
         })
     }
 
@@ -304,6 +353,19 @@ mod tests {
         assert!(pinch.center().is_none());
     }
 
+    /// The emitted `scale` is the span ratio **against the previous sample**,
+    /// and the gesture-start ratio is still reachable under its own name.
+    ///
+    /// *Contract change.* This test used to assert that the emitted `scale` was
+    /// the ratio against the span at the *start* of the gesture. It was the
+    /// wrong half of a disagreement: the OS trackpad arm reports a change per
+    /// event and has no start baseline to divide by, and both real consumers
+    /// (`SceneView::on_pinch`, the previewer canvas) fold each sample in with
+    /// `zoom *= scale`. Feeding a cumulative value into that compounds it —
+    /// three samples of a ×2 spread multiplied the zoom by ~2.7 and a real
+    /// gesture ran into `max_zoom`. [`GestureEvent::PinchChanged`] now states
+    /// the per-sample contract and this recognizer satisfies it, so the
+    /// assertion moved to the second denominator rather than being relaxed.
     #[test]
     fn two_contacts_start_and_the_scale_is_the_span_ratio() {
         let p = ids(2);
@@ -319,7 +381,8 @@ mod tests {
             other => panic!("expected PinchStarted, got {other:?}"),
         }
 
-        // Spread to twice the span.
+        // Spread to twice the span. The first sample's previous span *is* the
+        // start span, so this one step reads 2.0 either way.
         let changed = pinch
             .contact_moved(p[1], Point::new(200.0, 0.0))
             .expect("a move on a tracked contact reports a change");
@@ -330,6 +393,91 @@ mod tests {
             }
             other => panic!("expected PinchChanged, got {other:?}"),
         }
+
+        // Spread again, to three times the *start* span. This is where the two
+        // readings part: the step is 300/200, not 300/100.
+        let changed = pinch
+            .contact_moved(p[1], Point::new(300.0, 0.0))
+            .expect("a second move reports a second change");
+        match changed {
+            GestureEvent::PinchChanged { scale, .. } => {
+                assert!(
+                    (scale - 1.5).abs() < 1e-5,
+                    "the second sample is the step since the first (300/200 = 1.5), \
+                     not the ratio to the start span (300/100 = 3.0); got {scale}"
+                );
+            }
+            other => panic!("expected PinchChanged, got {other:?}"),
+        }
+
+        // The start baseline is kept, under a name that cannot be misread as
+        // the event's field: the product of the steps is the total spread.
+        assert!(
+            (pinch.cumulative_scale() - 3.0).abs() < 1e-5,
+            "the whole gesture spread the span threefold, got {}",
+            pinch.cumulative_scale()
+        );
+    }
+
+    /// A steady multi-sample spread's steps multiply back to the total spread.
+    ///
+    /// The property the per-sample contract exists for: a consumer that folds
+    /// every sample in with `zoom *= scale` lands on the spread the fingers
+    /// actually described, whatever the sample rate. Under the old cumulative
+    /// payload the same fold produced the *product* of the intermediate ratios
+    /// — 8.0 rather than 2.0 for the five samples below.
+    #[test]
+    fn the_steps_of_a_spread_multiply_back_to_the_spread() {
+        let p = ids(2);
+        let mut pinch = TouchPinchRecognizer::new();
+        pinch.contact_down(p[0], Point::new(0.0, 0.0));
+        pinch.contact_down(p[1], Point::new(100.0, 0.0));
+
+        // Span 100 -> 200 in five uneven steps, the way frames arrive.
+        let mut folded = 1.0f32;
+        for span in [115.0f32, 132.0, 152.0, 174.0, 200.0] {
+            let changed = pinch
+                .contact_moved(p[1], Point::new(span, 0.0))
+                .expect("each move reports a change");
+            let GestureEvent::PinchChanged { scale, .. } = changed else {
+                panic!("expected PinchChanged, got {changed:?}");
+            };
+            folded *= scale;
+        }
+        assert!(
+            (folded - 2.0).abs() < 1e-4,
+            "folding every step in must reach the ×2 spread, got {folded}"
+        );
+        assert!(
+            (pinch.cumulative_scale() - 2.0).abs() < 1e-4,
+            "and the retained baseline agrees, got {}",
+            pinch.cumulative_scale()
+        );
+    }
+
+    /// A pair that converges to almost nothing cannot make the next step
+    /// explode: the previous span is floored at [`MIN_SPAN`] before it is
+    /// divided by.
+    #[test]
+    fn a_collapsed_span_does_not_divide_the_next_step_by_zero() {
+        let p = ids(2);
+        let mut pinch = TouchPinchRecognizer::new();
+        pinch.contact_down(p[0], Point::new(0.0, 0.0));
+        pinch.contact_down(p[1], Point::new(100.0, 0.0));
+
+        // The contacts land on top of one another…
+        pinch.contact_moved(p[1], Point::new(0.0, 0.0));
+        // …and separate again. Without the floor this divides by zero.
+        let changed = pinch
+            .contact_moved(p[1], Point::new(50.0, 0.0))
+            .expect("the pinch is still running");
+        let GestureEvent::PinchChanged { scale, .. } = changed else {
+            panic!("expected PinchChanged, got {changed:?}");
+        };
+        assert!(
+            scale.is_finite() && scale > 0.0,
+            "a step out of a collapsed span must stay finite and positive, got {scale}"
+        );
     }
 
     #[test]
@@ -341,11 +489,31 @@ mod tests {
 
         // Rotate the second contact around the first in eight 45° steps: a
         // full turn, which a wrapping implementation would report as ~0.
+        let mut emitted = Vec::new();
         for step in 1..=8 {
             let theta = std::f32::consts::FRAC_PI_4 * step as f32;
-            pinch.contact_moved(p[1], Point::new(100.0 * theta.cos(), 100.0 * theta.sin()));
+            let changed = pinch
+                .contact_moved(p[1], Point::new(100.0 * theta.cos(), 100.0 * theta.sin()))
+                .expect("each move reports a change");
+            let GestureEvent::PinchChanged { rotation, .. } = changed else {
+                panic!("expected PinchChanged, got {changed:?}");
+            };
+            emitted.push(rotation);
         }
-        let turns = pinch.rotation() / std::f32::consts::TAU;
+        // Each sample carries one 45° step in radians, not the running total:
+        // that is the contract on `GestureEvent::PinchChanged`.
+        for (i, step) in emitted.iter().enumerate() {
+            assert!(
+                (step - std::f32::consts::FRAC_PI_4).abs() < 1e-3,
+                "sample {i} is one 45° step (0.7854 rad), got {step}"
+            );
+        }
+        let summed = emitted.iter().sum::<f32>() / std::f32::consts::TAU;
+        assert!(
+            (summed - 1.0).abs() < 1e-3,
+            "the steps add up to one turn, got {summed}"
+        );
+        let turns = pinch.cumulative_rotation() / std::f32::consts::TAU;
         assert!(
             (turns - 1.0).abs() < 1e-3,
             "a full turn should read as one turn, got {turns}"

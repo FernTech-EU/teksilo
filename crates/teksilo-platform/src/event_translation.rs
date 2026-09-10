@@ -1396,6 +1396,10 @@ pub fn translate_mouse_wheel(
 // `InputSample::Gesture` through `PointerBackend::translate`.
 
 /// A winit PinchGesture as a Teksilo gesture.
+///
+/// winit's `delta` is the change in magnification *for this event*, so
+/// `1.0 + delta` is already the per-sample factor
+/// [`GestureEvent::PinchChanged`] asks for — nothing accumulates here.
 fn pinch_gesture(delta: f64, phase: winit::event::TouchPhase, center: Point) -> GestureEvent {
     match phase {
         winit::event::TouchPhase::Started => GestureEvent::PinchStarted { center },
@@ -1411,6 +1415,13 @@ fn pinch_gesture(delta: f64, phase: winit::event::TouchPhase, center: Point) -> 
 }
 
 /// A winit RotationGesture as a Teksilo gesture.
+///
+/// **This is where the unit is decided.** winit reports the delta in degrees
+/// (`NSEvent.rotation` on the one backend that produces the event), and
+/// [`GestureEvent::PinchChanged`]'s `rotation` is radians, so the conversion
+/// belongs here — at the seam, where the incoming unit is known — and not in a
+/// consumer: `on_pinch` has one ingress and potentially several consumers, and
+/// each converting for itself is how the two would drift apart again.
 fn rotation_gesture(
     delta_degrees: f32,
     phase: winit::event::TouchPhase,
@@ -1421,7 +1432,7 @@ fn rotation_gesture(
         winit::event::TouchPhase::Moved => GestureEvent::PinchChanged {
             center,
             scale: 1.0,
-            rotation: delta_degrees,
+            rotation: delta_degrees.to_radians(),
         },
         winit::event::TouchPhase::Ended | winit::event::TouchPhase::Cancelled => {
             GestureEvent::PinchEnded
@@ -1450,6 +1461,11 @@ pub fn translate_pinch_gesture(
 /// Translate a winit RotationGesture into a PinchChanged with rotation.
 /// Rotation gestures are folded into the pinch gesture model since they
 /// typically co-occur with pinch on trackpads.
+///
+/// The delta arrives in degrees and leaves in radians: winit reports the twist
+/// in degrees and [`GestureEvent::PinchChanged`]'s `rotation` is radians, so the
+/// conversion is made here, at the seam where the incoming unit is known, rather
+/// than in each consumer.
 pub fn translate_rotation_gesture(
     delta_degrees: f32,
     phase: winit::event::TouchPhase,

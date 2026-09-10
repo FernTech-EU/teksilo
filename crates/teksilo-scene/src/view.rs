@@ -47,11 +47,14 @@
 //!   the zoom signal and `rotation` into the rotation signal, anchored
 //!   around the gesture center so the scene point under the user's
 //!   fingers stays put. Two producers reach the one handler: the OS
-//!   trackpad stream and the two-contact touch recognizer. `scale` is
-//!   read as the factor **since the previous sample** and `rotation` as
-//!   the radian delta since the previous sample — see the two
-//!   `#[ignore]`d tests in `view::tests::touch_camera` for the producers
-//!   that do not yet agree with that.
+//!   trackpad stream and the two-contact touch recognizer, and both
+//!   satisfy the contract on
+//!   [`GestureEvent::PinchChanged`](teksilo_core::gesture::GestureEvent::PinchChanged)
+//!   — `scale` is the factor **since the previous sample** (folded in with
+//!   `zoom *= scale`) and `rotation` the **radian** delta since the previous
+//!   sample (`rotation += delta`). Degrees never reach here: winit's unit is
+//!   converted at the platform seam. `view::tests::touch_camera` holds both
+//!   halves.
 //! - **Reduced-motion** — at build time, captures
 //!   [`BuildContext::prefers_reduced_motion`](teksilo_core::build_context::BuildContext::prefers_reduced_motion).
 //!   When set, scroll handlers `set` the signals directly instead of

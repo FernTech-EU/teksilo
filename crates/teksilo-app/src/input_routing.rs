@@ -563,6 +563,57 @@ pub(crate) mod tests {
         assert_eq!(log.borrow().gestures, 1);
     }
 
+    /// A trackpad twist reaches the widget in **radians**, converted at the
+    /// platform seam.
+    ///
+    /// The whole chain a real twist takes: a winit `RotationGesture` whose delta
+    /// is degrees, through `event_translation`'s `rotation_gesture`, through the
+    /// tree's one pinch ingress, into an `on_pinch` handler — which is where the
+    /// unit becomes visible, because `GestureEvent::PinchChanged`'s `rotation` is
+    /// defined as radians and consumers feed it straight into a rotation.
+    ///
+    /// Before the conversion existed, this arrived as `15.0` and a consumer read
+    /// it as 15 radians: ~57× the twist the user made.
+    #[test]
+    fn a_trackpad_twist_reaches_the_widget_in_radians() {
+        let seen: Rc<RefCell<Vec<f32>>> = Rc::new(RefCell::new(Vec::new()));
+        let recorder = seen.clone();
+        let mut tree = WidgetTree::new();
+        tree.add(Leaf.on_pinch(move |phase, _ctx| {
+            if let teksilo_core::gesture::PinchPhase::Changed { rotation, .. } = phase {
+                recorder.borrow_mut().push(rotation);
+            }
+        }));
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+
+        let mut backend = backend();
+        feed(
+            &mut backend,
+            &mut tree,
+            &[
+                cursor(100.0, 100.0),
+                WindowEvent::RotationGesture {
+                    device_id: DeviceId::dummy(),
+                    delta: 15.0,
+                    phase: TouchPhase::Moved,
+                },
+            ],
+        );
+
+        let rotations = seen.borrow();
+        assert_eq!(rotations.len(), 1, "one twist, one Changed phase");
+        let rotation = rotations[0];
+        assert!(
+            (rotation - 15.0f32.to_radians()).abs() < 1e-5,
+            "a 15-degree twist reaches the handler as 0.2618 rad, got {rotation}"
+        );
+        assert!(
+            (rotation - 15.0).abs() > 1e-3,
+            "and not as winit's 15 degrees passed through into a radian field, \
+             which would be ~57× the twist; got {rotation}"
+        );
+    }
+
     #[test]
     fn a_double_tap_gesture_reaches_the_widget() {
         let (mut tree, log) = tree_with_log();

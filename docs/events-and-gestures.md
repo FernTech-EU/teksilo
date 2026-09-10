@@ -331,7 +331,13 @@ none of them is one node's business:
   dead code.) Three or more contacts: the two **earliest** are used and the rest
   ignored, because rotation through three moving points is undefined; a contact
   leaving mid-pinch ends the gesture rather than promoting a spare, which would
-  teleport the centre.
+  teleport the centre. One ingress carries one payload contract, stated on
+  `GestureEvent::PinchChanged`: `scale` and `rotation` are **per-sample deltas**
+  against the previous sample, and `rotation` is in **radians** (the platform
+  translator converts winit's degrees at the seam). Fold each sample in —
+  `zoom *= scale`, `rotation += rotation` — rather than assigning it; the
+  gesture-start totals are separately available as
+  `TouchPinchRecognizer::cumulative_scale` / `cumulative_rotation`.
 - `PalmWatch` — the conservative fallback for a backend that cannot tell a palm
   from a finger, which is every one Teksilo ships (`BackendCaps::reports_palm` is
   false everywhere; a digitiser that *does* answer has its palms refused at the

@@ -110,6 +110,15 @@ fn pinch_gesture_ended() {
     ));
 }
 
+/// A rotation gesture leaves the seam in radians.
+///
+/// *Contract change.* This test used to assert the payload was `15.0` for a
+/// 15-degree twist — winit's number passed through unconverted into a field
+/// [`GestureEvent::PinchChanged`] defines as radians. Every consumer read it as
+/// radians (the scene feeds it straight to `Transform2D::rotate`), so a
+/// one-degree trackpad twist turned the content by a radian: ~57× too far. The
+/// unit is known here and nowhere downstream, so the conversion is here and the
+/// assertion is now the converted value.
 #[test]
 fn rotation_gesture_translates() {
     let mut state = TranslationState::new();
@@ -121,7 +130,14 @@ fn rotation_gesture_translates() {
         },
     } = event
     {
-        assert!((rotation - 15.0).abs() < 0.001);
+        assert!(
+            (rotation - 15.0f32.to_radians()).abs() < 0.001,
+            "15 degrees of twist is 0.2618 rad, got {rotation}"
+        );
+        assert!(
+            (rotation - 15.0).abs() > 0.001,
+            "…and emphatically not winit's degrees passed through, got {rotation}"
+        );
         assert!((scale - 1.0).abs() < 0.001);
     } else {
         panic!("Expected PinchChanged with rotation");
@@ -782,9 +798,12 @@ fn the_trackpad_gestures_reach_the_backend_surface() {
         },
         2,
     );
+    // Radians, not winit's degrees — see `rotation_gesture_translates` for the
+    // assertion this replaced and why.
     assert!(matches!(
         rotate[0].as_gesture(),
-        Some(GestureEvent::PinchChanged { rotation, .. }) if (rotation - 15.0).abs() < 1e-6
+        Some(GestureEvent::PinchChanged { rotation, .. })
+            if (rotation - 15.0f32.to_radians()).abs() < 1e-6
     ));
 
     let double_tap = feed(

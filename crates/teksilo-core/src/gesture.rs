@@ -231,9 +231,40 @@ pub enum GestureEvent {
     PinchStarted {
         center: Point,
     },
+    /// A running pinch's geometry changed.
+    ///
+    /// # The producer contract
+    ///
+    /// Both `scale` and `rotation` are **per-sample deltas**, measured against
+    /// the previous sample of this same gesture — against the geometry at
+    /// [`PinchStarted`](Self::PinchStarted) for the first one. A consumer folds
+    /// each sample into what it already holds (multiplying for `scale`, adding
+    /// for `rotation`) and never reads a sample as an absolute.
+    ///
+    /// Deltas rather than values cumulative since the start, because a pinch has
+    /// two producers that must agree and only one of them *can* report a
+    /// cumulative value: winit's trackpad `PinchGesture` / `RotationGesture`
+    /// report a change per event and hand over no gesture-start baseline to
+    /// divide by. [`TouchPinchRecognizer`], which does have one, keeps it
+    /// internally and exposes it under a name that cannot be mistaken for these
+    /// fields — see
+    /// [`cumulative_scale`](TouchPinchRecognizer::cumulative_scale).
     PinchChanged {
+        /// Midpoint of the two contacts (or of the trackpad gesture), in the
+        /// receiving widget's local coordinates.
         center: Point,
+        /// The span **now** divided by the span at the previous sample. `1.0` is
+        /// no change, above `1.0` a spread, below `1.0` a squeeze. A producer
+        /// never emits `0.0`, a negative or a non-finite value; a consumer
+        /// handed one anyway should drop the sample rather than apply it.
+        /// Multiply by it — do not assign it.
         scale: f32,
+        /// The twist since the previous sample, in **radians** (never degrees:
+        /// the platform translator converts at the seam, where winit's unit is
+        /// known). Signed, and unwrapped — a gesture turned past ±π keeps
+        /// producing same-signed steps instead of jumping by 2π. `0.0` from a
+        /// producer that reports magnification without rotation. Add it — do not
+        /// assign it.
         rotation: f32,
     },
     PinchEnded,
@@ -298,7 +329,8 @@ pub enum DragPhase {
 /// Phase of a pinch (or rotation) gesture, as delivered to an `on_pinch`
 /// handler. On desktop these are produced by OS trackpad gestures
 /// (`TouchpadMagnify` / `RotationGesture`); on touch they come from a
-/// dedicated recognizer.
+/// dedicated recognizer ([`TouchPinchRecognizer`]). Both producers satisfy one
+/// contract, stated on [`Changed`](Self::Changed).
 ///
 /// `#[non_exhaustive]` for the same reason as [`DragPhase`].
 #[derive(Debug, Clone, Copy)]
@@ -308,9 +340,19 @@ pub enum PinchPhase {
         center: Point,
         pointer: PointerInfo,
     },
+    /// The pinch's geometry changed.
+    ///
+    /// `scale` and `rotation` are **per-sample deltas** against the previous
+    /// sample of this gesture, exactly as
+    /// [`GestureEvent::PinchChanged`] defines them — fold each sample in
+    /// (multiply for `scale`, add for `rotation`) rather than assigning it.
     Changed {
+        /// Midpoint of the gesture, in the receiving widget's local
+        /// coordinates.
         center: Point,
+        /// The span now over the span at the previous sample. Multiply by it.
         scale: f32,
+        /// The twist since the previous sample, in **radians**. Add it.
         rotation: f32,
         pointer: PointerInfo,
     },

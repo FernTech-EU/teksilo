@@ -384,10 +384,11 @@ impl Widget for ZoomStage {
         let handlers = teksilo_core::widget_builder::HandlerSet::new()
             .on_pinch(move |phase, _ctx| {
                 if let teksilo_core::gesture::PinchPhase::Changed { scale, .. } = phase {
-                    // Multiplied, which is what both pinch producers require of
-                    // a consumer: the touch recognizer reports a per-sample
-                    // delta and the trackpad arm a cumulative factor, and this
-                    // is the reading the scene's own handler takes.
+                    // Multiplied, which is what `GestureEvent::PinchChanged`
+                    // asks of a consumer: both producers — the touch recognizer
+                    // and the OS trackpad arm — report the factor since the
+                    // previous sample, so each one is folded in. Same reading as
+                    // the scene's own handler.
                     let next = zoom_for_pinch.get() * scale;
                     zoom_for_pinch.set(next.clamp(ZOOM_MIN, ZOOM_MAX));
                 }

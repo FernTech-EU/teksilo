@@ -384,6 +384,25 @@ See [docs/range-keyboard.md](docs/range-keyboard.md) for the full chord table.
   nothing at the call site to say so. Every installed slot now fires for one
   dispatched action, and the action counts as handled if any of them says so.
 
+- **A two-finger pinch reaches the zoom it asked for instead of running into
+  `max_zoom`.** A spread to twice the starting span now leaves a `SceneView` at
+  exactly twice, whatever the sample rate; before, each sample carried the ratio
+  to the *start* of the gesture and the handler multiplied every one of them in,
+  so a single spread compounded to the product of its intermediate ratios.
+- **A trackpad twist turns content by the angle the user twisted.** One degree of
+  rotation on the trackpad rotated a `SceneView` by one radian — about 57° —
+  because winit reports degrees and the payload is read as radians. The
+  conversion now happens where the incoming unit is known.
+- `GestureEvent::PinchChanged` and `PinchPhase::Changed` now document `scale` and
+  `rotation`: both are deltas against the previous sample, and `rotation` is in
+  radians. Fold each sample in (`zoom *= scale`, `rotation += rotation`) rather
+  than assigning it.
+- **`TouchPinchRecognizer::scale` and `rotation` are renamed
+  `cumulative_scale` and `cumulative_rotation`.** They report the totals since
+  the gesture started, which is not what a `PinchChanged` carries; the names now
+  say which of the two a caller is reading.
+
+
 #### Menus
 
 - **Menu item labels line up on one leading inset again under the Fluent and

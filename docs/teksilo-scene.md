@@ -280,17 +280,14 @@ Pointer and gesture input plugs in directly:
 - **Trackpad two-finger pan** and **mouse-wheel scroll** drive
   `pan_x` / `pan_y` (Ctrl+wheel = zoom-about-pointer).
 - **Pinch** drives `zoom` and `rotation` anchored on the gesture
-  center — with a **known defect** in what the two producers mean by it. A
-  trackpad's `PinchChanged` carries per-sample deltas; the touchscreen
-  recognizer's carries values accumulated since the gesture started; and the
-  handler combines whichever arrives, so a two-finger spread on glass compounds
-  and runs into `max_zoom` instead of reaching the spread it asked for. A
-  trackpad *twist* is separately scaled by ~57, because winit's degrees are
-  passed into a field documented as radians. Both are pinned by `#[ignore]`d
-  tests in `view/tests/touch_camera.rs`, and both fixes are below this crate — in
-  `teksilo-core`'s `gesture/pinch.rs` and in `teksilo-platform`'s
-  `event_translation`. Zoom by wheel, by `Ctrl`+wheel and by the keyboard is
-  unaffected.
+  center. Both producers deliver the same thing, which is what makes the one
+  ingress worth having: `PinchChanged`'s `scale` is the factor **since the
+  previous sample** and its `rotation` the twist since the previous sample in
+  **radians**, so the handler multiplies the one in and adds the other. A
+  touchscreen spread to twice the starting span leaves the zoom at exactly twice,
+  whatever the sample rate, and a one-degree trackpad twist turns the scene one
+  degree — winit's degrees are converted at the platform seam, not here. Both are
+  pinned by tests in `view/tests/touch_camera.rs`.
 - **One finger** pans the camera; see the touch model below for when it
   does and when the marquee takes the gesture instead.
 - **Reduced-motion** is honoured: pan / zoom snap instead of
