@@ -228,7 +228,15 @@ impl WidgetTree {
         if self.arena.get(member).is_none() {
             return;
         }
-        let event = self.pointer_cancel_event(pointer, reason);
+        // The entry is still there on this path — a losing member's revoke does
+        // not end the pointer, only its own recognizers — so the event names the
+        // real device. A pointer that has gone anyway has no press left to
+        // announce, and the recognizer teardown above is the whole of what it
+        // needed.
+        let Some((info, at)) = self.pointers.get(pointer).map(|e| (e.info, e.position)) else {
+            return;
+        };
+        let event = Self::pointer_cancel_event(info, at, reason);
         self.dispatch_to_widget_direct(member, &event, ops);
     }
 
@@ -285,6 +293,17 @@ impl WidgetTree {
         }
         crate::trace_input!(Samples, "cancelling {pointer:?}: {reason:?}");
 
+        // Read the pointer's identity ONCE, here, while its table entry is
+        // certainly present — `press_is_revocable` above answered false for an
+        // absent entry, so this cannot fail. Both the snapshot below and the
+        // `PointerCancel` delivered at the end of the teardown are built from
+        // this one read, which is what stops them disagreeing: step 6 of the
+        // teardown *removes* a contact's entry, so anything reading the table
+        // after it gets a fabricated answer.
+        let Some((info, at)) = self.pointers.get(pointer).map(|e| (e.info, e.position)) else {
+            return;
+        };
+
         // Serve the teardown as *this* pointer's sample: every helper below
         // that reads "the pointer being dispatched" — the recognizer context,
         // the drag's capture release, `EventContext::pointer()` inside the
@@ -293,19 +312,15 @@ impl WidgetTree {
         // a cancel drained after an outer sample leaves that sample's snapshot
         // as it found it.
         let snapshot = crate::pointer::InputSnapshot {
-            pointer: self
-                .pointers
-                .get(pointer)
-                .map(|e| e.info)
-                .unwrap_or_else(|| crate::pointer::PointerInfo::mouse(self.input_now())),
-            position: self.pointers.get(pointer).map(|e| e.position),
+            pointer: info,
+            position: Some(at),
             ..Default::default()
         };
         let previous_input = std::mem::replace(&mut self.current_input, snapshot);
         // Anything the cancel's own handler dispatches is queued behind it,
         // exactly as it would be from inside an ordinary sample.
         self.dispatch_depth += 1;
-        self.tear_down_cancelled_pointer(pointer, reason, recipient, ops);
+        self.tear_down_cancelled_pointer(pointer, info, at, reason, recipient, ops);
         self.dispatch_depth -= 1;
         self.current_input = previous_input;
     }
@@ -313,9 +328,16 @@ impl WidgetTree {
     /// The ordered teardown itself, with `current_input` already serving
     /// `pointer`. See [`cancel_pointer`](Self::cancel_pointer) for why the
     /// order is what it is.
+    ///
+    /// `info` and `at` are the pointer's identity and last position, read by the
+    /// caller **before** any of this ran: step 6 removes a contact's table
+    /// entry, and the event delivered in step 7 has to name the pointer that
+    /// went away.
     fn tear_down_cancelled_pointer(
         &mut self,
         pointer: PointerId,
+        info: crate::pointer::PointerInfo,
+        at: Point,
         reason: CancelReason,
         recipient: Option<WidgetId>,
         ops: &mut dyn crate::window::WindowOps,
@@ -413,9 +435,11 @@ impl WidgetTree {
             self.cancelled_pointers.push(pointer);
         }
 
-        // 7. The event, last, to a tree that has already let go.
+        // 7. The event, last, to a tree that has already let go — built from the
+        //    identity the caller captured, since step 6 may have taken the
+        //    entry away.
         if let Some(recipient) = recipient {
-            let event = self.pointer_cancel_event(pointer, reason);
+            let event = Self::pointer_cancel_event(info, at, reason);
             self.dispatch_to_widget_direct(recipient, &event, ops);
         }
     }
@@ -467,15 +491,29 @@ impl WidgetTree {
             .find(|id| self.arena.get(*id).is_some())
     }
 
-    /// The `PointerCancel` for this pointer, positioned where it last was.
-    fn pointer_cancel_event(&self, pointer: PointerId, reason: CancelReason) -> WidgetEvent {
-        let entry = self.pointers.get(pointer);
+    /// The `PointerCancel` announcing `pointer`, at the position it last
+    /// reported.
+    ///
+    /// Takes the identity rather than looking it up, and that is the point: the
+    /// teardown **removes a contact's table entry** before the event is
+    /// delivered (step 6, deliberately — a lifted or revoked contact stops
+    /// existing), so a builder that read the table here read the entry it had
+    /// just deleted and fell back to a fabricated mouse with no position. The
+    /// handler whose entire job is to know which pointer went away was told the
+    /// mouse cancelled a press only a finger had made. Every caller now reads
+    /// the entry while it is still there and hands the answer down, so the event
+    /// payload and `EventContext::pointer()` inside the handler cannot disagree
+    /// — which is how that defect stayed invisible, since the snapshot half was
+    /// always right.
+    fn pointer_cancel_event(
+        pointer: crate::pointer::PointerInfo,
+        position: Point,
+        reason: CancelReason,
+    ) -> WidgetEvent {
         WidgetEvent::PointerCancel {
-            position: entry.map(|e| e.position),
+            position: Some(position),
             reason,
-            pointer: entry
-                .map(|e| e.info)
-                .unwrap_or_else(|| crate::pointer::PointerInfo::mouse(self.input_now())),
+            pointer,
         }
     }
 
@@ -670,6 +708,130 @@ mod tests {
             "a revoked contact leaves the table, as a lifted one does"
         );
         tree.assert_no_leaked_pointer_state();
+    }
+
+    // ---------------------------------------------------------------
+    // The delivered payload names the pointer that went away
+    // ---------------------------------------------------------------
+
+    /// What a `PointerCancel` handler was told, per delivery.
+    type PayloadLog = Rc<RefCell<Vec<(CancelReason, PointerInfo, Option<Point>)>>>;
+
+    /// A leaf that grips the pointer and records the whole `PointerCancel`
+    /// payload it is handed — not just the reason.
+    fn payload_grip(log: &PayloadLog) -> impl Widget {
+        let log = log.clone();
+        FillWidget::new()
+            .on_pointer_event(|event, ctx| {
+                if matches!(event, WidgetEvent::PointerDown { .. }) {
+                    ctx.capture_pointer();
+                }
+                EventResponse::Ignored
+            })
+            .on_pointer_cancel(move |pointer, reason, ctx| {
+                log.borrow_mut()
+                    .push((reason, *pointer, ctx.pointer_position()));
+            })
+    }
+
+    /// A cancelled **contact** is announced as that contact.
+    ///
+    /// The handler whose whole job is to know which pointer went away was being
+    /// handed a fabricated mouse: the teardown removes a non-hovering pointer's
+    /// table entry before the event is built, and the builder read the entry it
+    /// had just deleted, so an app branching on `pointer.kind` — releasing a
+    /// per-contact grip, dropping a stroke, un-highlighting one finger's row —
+    /// was told the mouse cancelled a press only a finger had made, and given no
+    /// position to do it at.
+    #[test]
+    fn a_cancelled_contact_is_announced_as_that_contact() {
+        let log: PayloadLog = Rc::new(RefCell::new(Vec::new()));
+        let mut tree = WidgetTree::new();
+        let leaf = tree.add(payload_grip(&log));
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        let contact = new_contact();
+        let at = Point::new(20.0, 50.0);
+        tree.dispatch_pointer(touch(contact, PointerPhase::Down, at));
+        assert_eq!(tree.captured_by(contact), Some(leaf));
+
+        tree.dispatch_pointer(touch(contact, PointerPhase::Cancel, at));
+
+        let seen = log.borrow();
+        assert_eq!(seen.len(), 1, "one cancel, delivered once");
+        let (reason, pointer, position) = seen[0];
+        assert_eq!(reason, CancelReason::Platform);
+        assert_eq!(
+            pointer.kind,
+            teksilo_tokens::PointerKind::Touch,
+            "the event must name the device that was cancelled",
+        );
+        assert_eq!(
+            pointer.id, contact,
+            "and its own id, not the mouse's reserved one",
+        );
+        assert_eq!(
+            position,
+            Some(at),
+            "with the position the contact was last at",
+        );
+    }
+
+    /// The same for a mouse, so the fix above is a *translation* of whatever the
+    /// entry held and not a hardcoded touch.
+    #[test]
+    fn a_cancelled_mouse_press_is_still_announced_as_the_mouse() {
+        let log: PayloadLog = Rc::new(RefCell::new(Vec::new()));
+        let mut tree = WidgetTree::new();
+        tree.add(payload_grip(&log));
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        let at = Point::new(30.0, 40.0);
+        press(&mut tree, at);
+        tree.cancel_all_pointers(CancelReason::ModalOpened, &mut crate::window::NoopWindowOps);
+
+        let seen = log.borrow();
+        assert_eq!(seen.len(), 1);
+        let (reason, pointer, position) = seen[0];
+        assert_eq!(reason, CancelReason::ModalOpened);
+        assert_eq!(pointer.kind, teksilo_tokens::PointerKind::Mouse);
+        assert_eq!(pointer.id, PointerId::MOUSE);
+        assert_eq!(position, Some(at));
+    }
+
+    /// A second producer, with a different shape: the subtree holding the press
+    /// is parked, so the cancel is queued by `set_dormant` rather than raised
+    /// from the sample door, and the position it announces is the one carried by
+    /// a *later* move than the press. The payload must read the same — the
+    /// fallback the defect lived in sits below all fifteen producers, so one
+    /// producer being right is not evidence about the others.
+    #[test]
+    fn a_parked_subtree_announces_the_contact_it_stranded() {
+        let log: PayloadLog = Rc::new(RefCell::new(Vec::new()));
+        let mut tree = WidgetTree::new();
+        let leaf = tree.add(payload_grip(&log));
+        let branch = tree.add(StackWidget::new().add_child(leaf));
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        let contact = new_contact();
+        tree.dispatch_pointer(touch(contact, PointerPhase::Down, Point::new(20.0, 50.0)));
+        assert_eq!(tree.captured_by(contact), Some(leaf));
+        let moved_to = Point::new(24.0, 52.0);
+        tree.dispatch_pointer(touch(contact, PointerPhase::Move, moved_to));
+
+        tree.set_dormant(branch);
+
+        let seen = log.borrow();
+        assert_eq!(seen.len(), 1, "the parked leaf was told once");
+        let (reason, pointer, position) = seen[0];
+        assert_eq!(reason, CancelReason::SubtreeParked);
+        assert_eq!(pointer.kind, teksilo_tokens::PointerKind::Touch);
+        assert_eq!(pointer.id, contact);
+        assert_eq!(
+            position,
+            Some(moved_to),
+            "the position is where the contact last was, not where it pressed",
+        );
     }
 
     /// A cancel sample for a pointer the tree never saw must not *create* one.
@@ -1171,6 +1333,7 @@ mod tests {
                 &mut self,
                 _data: crate::drag_payload::OutboundDragData,
                 _image: Option<crate::drag_payload::DragImageData>,
+                _pointer: teksilo_tokens::PointerKind,
             ) -> bool {
                 self.began.set(true);
                 true

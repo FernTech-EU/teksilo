@@ -1051,3 +1051,112 @@ fn a_reorderable_rows_hold_does_not_also_fire_its_own_long_press() {
         "the reorder took the hold, so the row's own long press must not fire",
     );
 }
+
+// ---------------------------------------------------------------------------
+// The drag auto-scroll band follows the device, from a tick that has no sample
+// ---------------------------------------------------------------------------
+
+/// Where the two bands disagree: inside the coarse band, outside the precise
+/// one.
+///
+/// `common::drag_autoscroll` widens the edge band for a coarse pointer because a
+/// contact patch's reported centre cannot be parked as finely as a cursor. The
+/// band is read in `on_drag_tick`, which fires from `WidgetTree::layout` and so
+/// has no pointer sample behind it — the drag's own pointer is what answers
+/// there. This y is chosen so that only the wider band reaches it, which is what
+/// makes the two assertions below discriminate rather than agree.
+fn only_the_coarse_band_reaches() -> f32 {
+    let precise = teksilo_widgets::common::drag_autoscroll::EDGE_BAND_PRECISE;
+    let coarse = teksilo_widgets::common::drag_autoscroll::EDGE_BAND_COARSE;
+    assert!(coarse > precise, "the coarse band must be the wider one");
+    VIEWPORT - (precise + coarse) / 2.0
+}
+
+/// A finger's reorder auto-scrolls from inside the coarse band.
+///
+/// Before the drag session carried a pointer identity this was unreachable:
+/// `process_drag_tick` runs from `layout()`, outside any dispatch, so
+/// `ctx.pointer_kind()` in the tick handler answered `Mouse` whatever the device
+/// was, and the wider band never applied to a single finger drag.
+#[test]
+fn a_finger_reorder_auto_scrolls_from_inside_the_coarse_band() {
+    let model = ListModel::from_vec((0..ITEMS).collect());
+    let view = reorderable_list(&model);
+    let offset = view.scroll_y_signal().clone();
+    let (mut tree, _id) = tree_with(view);
+
+    let finger = tree.new_contact();
+    let from = Point::new(200.0, 60.0); // row 1
+    tree.touch_down(finger, from);
+    tree.advance_input_time(hold() + std::time::Duration::from_millis(10));
+    tree.touch_move(finger, Point::new(from.x, from.y + drag_slop() + 2.0));
+    tree.touch_move(finger, Point::new(from.x, only_the_coarse_band_reaches()));
+
+    for _ in 0..8 {
+        tree.layout(SizeProposal::exact(VIEWPORT, VIEWPORT));
+    }
+    assert!(
+        offset.get() > 0.0,
+        "a finger held inside the coarse band must auto-scroll; offset {}",
+        offset.get(),
+    );
+    tree.touch_up(finger, Point::new(from.x, only_the_coarse_band_reaches()));
+}
+
+/// And a mouse at the very same position does not, because its band is the
+/// narrower one it has always had.
+///
+/// The pair is the point: an assertion that a finger scrolls says nothing on its
+/// own, since a band that widened for *every* pointer would pass it too — and
+/// that would be a change to mouse behaviour.
+#[test]
+fn a_mouse_reorder_keeps_the_narrower_band_at_the_same_position() {
+    use teksilo_core::event::{Modifiers, PointerButton, WidgetEvent};
+
+    let model = ListModel::from_vec((0..ITEMS).collect());
+    let view = reorderable_list(&model);
+    let offset = view.scroll_y_signal().clone();
+    let (mut tree, _id) = tree_with(view);
+
+    let from = Point::new(200.0, 60.0);
+    tree.dispatch_event(WidgetEvent::PointerDown {
+        position: from,
+        button: PointerButton::Primary,
+        modifiers: Modifiers::NONE,
+    });
+    tree.dispatch_event(WidgetEvent::PointerMove {
+        position: Point::new(from.x, from.y + 8.0),
+    });
+    let at = only_the_coarse_band_reaches();
+    tree.dispatch_event(WidgetEvent::PointerMove {
+        position: Point::new(from.x, at),
+    });
+
+    for _ in 0..8 {
+        tree.layout(SizeProposal::exact(VIEWPORT, VIEWPORT));
+    }
+    assert_eq!(
+        offset.get(),
+        0.0,
+        "a cursor at {at} is outside its own 32 dp band and must not scroll",
+    );
+
+    // …and it does scroll once it is inside that band, so the assertion above
+    // is about the band and not about the mouse drag failing to arm at all.
+    tree.dispatch_event(WidgetEvent::PointerMove {
+        position: Point::new(from.x, VIEWPORT - 8.0),
+    });
+    for _ in 0..8 {
+        tree.layout(SizeProposal::exact(VIEWPORT, VIEWPORT));
+    }
+    assert!(
+        offset.get() > 0.0,
+        "the mouse drag is live and does scroll inside 32 dp; offset {}",
+        offset.get(),
+    );
+    tree.dispatch_event(WidgetEvent::PointerUp {
+        position: Point::new(from.x, VIEWPORT - 8.0),
+        button: PointerButton::Primary,
+        modifiers: Modifiers::NONE,
+    });
+}

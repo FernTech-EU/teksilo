@@ -59,22 +59,29 @@ use wayland_client::protocol::wl_pointer::{ButtonState, Event as PointerEvent, W
 use wayland_client::protocol::wl_registry::WlRegistry;
 use wayland_client::protocol::wl_seat::WlSeat;
 use wayland_client::protocol::wl_surface::WlSurface;
+use wayland_client::protocol::wl_touch::{Event as TouchEvent, WlTouch};
 use wayland_client::{Connection, Dispatch, Proxy, QueueHandle, WEnum};
 
 use super::{
     ExternalDndBackend, ExternalDndEventPayload, ExternalDndGuard, ExternalDragEvent, NoopDndGuard,
-    outbound_bytes, outbound_mimes,
+    TouchSerialSource, outbound_bytes, outbound_mimes,
 };
 
 /// Command sent from the (main-thread) guard to the DnD dispatch thread to
 /// start a native outbound drag. The wayland proxies all live on the dispatch
 /// thread, so the request is handed across rather than touched directly.
-enum OutboundCommand {
+enum Command {
+    /// Start a native outbound drag.
     Begin {
         data: OutboundDragData,
         #[allow(dead_code)] // reserved for a future caller-supplied drag icon surface
         image: Option<DragImageData>,
+        /// The device carrying the drag, which decides **which press serial**
+        /// `start_drag` is given. See [`TouchSerialSource`].
+        pointer: teksilo_tokens::PointerKind,
     },
+    /// Revise the accept state of the inbound offer from the widget verdict.
+    SetDropAccepted(bool),
 }
 
 /// Preferred drop MIME types, in order. `text/uri-list` carries file paths.
@@ -167,6 +174,12 @@ struct DndState {
     /// The current drag's data offer + its advertised MIME types.
     current_offer: Option<WlDataOffer>,
     offer_mimes: Vec<String>,
+    /// The `enter` serial of the in-flight inbound drag — `wl_data_offer::accept`
+    /// needs it, and it is also needed to *revise* the answer later.
+    offer_serial: u32,
+    /// The MIME type accepted for the in-flight inbound offer, so a revision
+    /// can re-offer the same one rather than re-deriving it.
+    offer_accepted_mime: Option<String>,
     position: Point,
     // --- Outbound (app → OS) state ---
     /// Manager kept alive so we can create data sources on demand.
@@ -175,9 +188,11 @@ struct DndState {
     data_device: WlDataDevice,
     /// This window's surface as a proxy (drag origin for `start_drag`).
     origin_surface: Option<WlSurface>,
-    /// Serial of the most recent pointer button *press* — required by
-    /// `start_drag` (must come from a button-down in the implicit grab).
-    last_press_serial: u32,
+    /// Press serials per device class — required by `start_drag`, which must be
+    /// given a serial from the input event that opened the current implicit
+    /// grab. A finger's grab was opened by a `wl_touch::down`, not a
+    /// `wl_pointer::button`.
+    press_serials: TouchSerialSource,
     /// The in-flight outbound data source + the bytes it serves on `send`.
     outbound_source: Option<WlDataSource>,
     outbound_data: Option<OutboundDragData>,
@@ -186,11 +201,17 @@ struct DndState {
     /// Set once the drop has been performed, so a trailing `cancelled` does
     /// not override the success outcome.
     outbound_finished: bool,
-    /// Inbound commands from the guard (start an outbound drag).
-    cmd_rx: Receiver<OutboundCommand>,
+    /// Inbound commands from the guard (start an outbound drag, revise accept).
+    cmd_rx: Receiver<Command>,
     // Held to keep the proxies alive for the queue's lifetime.
     _seat: WlSeat,
     _pointer: WlPointer,
+    /// Bound so a `wl_touch::down` serial is observable: without it a finger
+    /// cannot start an outbound drag at all. Bound unconditionally, exactly as
+    /// the pointer above is — `wl_seat::get_touch` on a seat with no touch
+    /// capability simply takes no effect, and this thread never listens for the
+    /// capability event.
+    _touch: WlTouch,
 }
 
 impl DndState {
@@ -217,17 +238,50 @@ impl DndState {
             }));
     }
 
-    /// Drain pending outbound-drag commands from the guard and start a native
-    /// `wl_data_source` drag for each. Called once per dispatch-loop tick.
-    fn process_outbound_commands(&mut self) {
+    /// Drain pending commands from the guard. Called once per dispatch-loop tick.
+    fn process_commands(&mut self) {
         while let Ok(cmd) = self.cmd_rx.try_recv() {
             match cmd {
-                OutboundCommand::Begin { data, image: _ } => self.begin_outbound(data),
+                Command::Begin {
+                    data,
+                    image: _,
+                    pointer,
+                } => self.begin_outbound(data, pointer),
+                Command::SetDropAccepted(accepted) => self.revise_accept(accepted),
             }
         }
     }
 
-    fn begin_outbound(&mut self, data: OutboundDragData) {
+    /// Re-answer the in-flight inbound offer with the widget tree's verdict.
+    ///
+    /// `wl_data_offer::accept` and `set_actions` may both be re-issued for the
+    /// lifetime of the offer, and the compositor's cursor follows the latest
+    /// answer — which is the whole point: the answer sent from `enter` could
+    /// only be about whether the offered MIME types were readable, because the
+    /// widget under the drag had not been asked yet.
+    ///
+    /// A refusal is `accept(serial, None)` plus empty actions: `accept` alone
+    /// leaves a negotiated action standing and some compositors keep showing the
+    /// copy cursor, and empty actions alone leave the type accepted.
+    fn revise_accept(&mut self, accepted: bool) {
+        let Some(offer) = self.current_offer.clone() else {
+            return;
+        };
+        if accepted {
+            offer.accept(self.offer_serial, self.offer_accepted_mime.clone());
+            if offer.version() >= 3 {
+                offer.set_actions(DndAction::Copy, DndAction::Copy);
+            }
+        } else {
+            offer.accept(self.offer_serial, None);
+            if offer.version() >= 3 {
+                offer.set_actions(DndAction::empty(), DndAction::empty());
+            }
+        }
+        let _ = self.conn.flush();
+    }
+
+    fn begin_outbound(&mut self, data: OutboundDragData, pointer: teksilo_tokens::PointerKind) {
         let Some(origin) = self.origin_surface.clone() else {
             // No surface proxy ⇒ can't start a drag; report cancellation so
             // the source's on_drag_ended still fires.
@@ -236,18 +290,20 @@ impl DndState {
             });
             return;
         };
-        // `start_drag` requires a serial from a recent pointer button press in
-        // the current implicit grab. If we haven't observed one yet (e.g. the
-        // press hadn't been dispatched on this thread when the begin command
-        // arrived), the compositor would silently reject the request and never
-        // send a terminal event — leaving the in-app drag dead and the stash
-        // leaked. Report cancellation instead so the framework cleans up.
-        if self.last_press_serial == 0 {
+        // `start_drag` requires a serial from the press that opened the current
+        // implicit grab — a `wl_pointer::button` for a mouse or pen, a
+        // `wl_touch::down` for a finger. If we have not observed one for *this
+        // device* (the press had not been dispatched on this thread yet, or the
+        // seat has no touch capability at all), the compositor would silently
+        // reject the request and never send a terminal event — leaving the
+        // in-app drag dead and the stash leaked. Report cancellation instead so
+        // the framework cleans up.
+        let Some(serial) = self.press_serials.serial_for(pointer) else {
             self.post(ExternalDragEvent::DragEnded {
                 outcome: DropOutcome::Cancelled,
             });
             return;
-        }
+        };
         // Tear down any previous in-flight source.
         if let Some(src) = self.outbound_source.take() {
             src.destroy();
@@ -267,7 +323,7 @@ impl DndState {
             Some(&source),
             &origin,
             None, // no custom drag icon surface yet
-            self.last_press_serial,
+            serial,
         );
         let _ = self.conn.flush();
 
@@ -294,6 +350,18 @@ impl DndState {
             src.destroy();
         }
         self.outbound_data = None;
+        // Our own drag ending while it is over one of this app's windows is the
+        // one abort a destination can be told about: the window holding the
+        // re-entered session gets no `leave` for a drag the compositor has
+        // simply stopped, and would otherwise keep a live session and a
+        // highlighted target for the rest of the process. A live route here can
+        // only belong to this drag — a seat carries one drag at a time, and this
+        // function is reached only from our own `wl_data_source` events.
+        if self.active_route.is_some() {
+            self.post_routed(ExternalDragEvent::Cancelled);
+            self.active_route = None;
+            self.shared.release_claim(self.window_id);
+        }
         self.post(ExternalDragEvent::DragEnded { outcome });
     }
 }
@@ -344,7 +412,26 @@ impl Dispatch<WlPointer, ()> for DndState {
         } = event
             && btn == WEnum::Value(ButtonState::Pressed)
         {
-            state.last_press_serial = serial;
+            state.press_serials.record_pointer(serial);
+        }
+    }
+}
+
+impl Dispatch<WlTouch, ()> for DndState {
+    fn event(
+        state: &mut Self,
+        _touch: &WlTouch,
+        event: TouchEvent,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        // The touch counterpart of the button-press serial above. A finger's
+        // implicit grab is opened by `down`, and `start_drag` will only accept a
+        // serial from the grab it is asked to convert — so without this a finger
+        // cannot export a drag at all, whatever the framework does.
+        if let TouchEvent::Down { serial, .. } = event {
+            state.press_serials.record_touch(serial);
         }
     }
 }
@@ -477,8 +564,10 @@ impl Dispatch<WlDataDevice, ()> for DndState {
                 // Accept a MIME we can read AND negotiate a drag action — both
                 // are required or the compositor shows the "forbidden" cursor
                 // and blocks the drop. `set_actions` is a v3+ request.
+                state.offer_serial = serial;
+                state.offer_accepted_mime = pick_mime(&state.offer_mimes);
                 if let Some(offer) = &id {
-                    if let Some(mime) = pick_mime(&state.offer_mimes) {
+                    if let Some(mime) = state.offer_accepted_mime.clone() {
                         offer.accept(serial, Some(mime));
                     }
                     if offer.version() >= 3 {
@@ -509,6 +598,8 @@ impl Dispatch<WlDataDevice, ()> for DndState {
                 state.active_route = None;
                 state.shared.release_claim(state.window_id);
                 state.current_offer = None;
+                state.offer_accepted_mime = None;
+                state.offer_serial = 0;
             }
             DataDeviceEvent::Drop => {
                 if state.active_route.is_none() {
@@ -544,6 +635,8 @@ impl Dispatch<WlDataDevice, ()> for DndState {
                 }
                 state.active_route = None;
                 state.shared.release_claim(state.window_id);
+                state.offer_accepted_mime = None;
+                state.offer_serial = 0;
             }
             // Clipboard selection — not our concern.
             DataDeviceEvent::Selection { .. } => {}
@@ -613,7 +706,7 @@ fn receive(conn: &Connection, offer: &WlDataOffer, mimes: &[String]) -> External
 /// hand a start-drag request to the dispatch thread (all wayland proxies live
 /// there).
 pub struct WaylandDndGuard {
-    cmd_tx: Option<Sender<OutboundCommand>>,
+    cmd_tx: Option<Sender<Command>>,
     /// Shared routing table, so closing this window withdraws its surface.
     shared: Arc<SharedDnd>,
     /// Protocol id of the surface this window published, if any.
@@ -637,18 +730,31 @@ impl Drop for WaylandDndGuard {
 }
 
 impl ExternalDndGuard for WaylandDndGuard {
-    fn begin_drag(&self, data: &OutboundDragData, image: Option<&DragImageData>) -> bool {
+    fn begin_drag(
+        &self,
+        data: &OutboundDragData,
+        image: Option<&DragImageData>,
+        pointer: teksilo_tokens::PointerKind,
+    ) -> bool {
         let Some(tx) = &self.cmd_tx else {
             return false;
         };
         // The dispatch thread performs create_data_source + start_drag on its
-        // next tick (≤ 8 ms) using the most recent button-press serial, which
-        // is still valid because the button is held throughout the drag.
-        tx.send(OutboundCommand::Begin {
+        // next tick (≤ 8 ms) using the most recent press serial **of the device
+        // carrying the drag**, which is still valid because that press is held
+        // throughout the drag.
+        tx.send(Command::Begin {
             data: data.clone(),
             image: image.cloned(),
+            pointer,
         })
         .is_ok()
+    }
+
+    fn set_drop_accepted(&self, accepted: bool) {
+        if let Some(tx) = &self.cmd_tx {
+            let _ = tx.send(Command::SetDropAccepted(accepted));
+        }
     }
 }
 
@@ -702,6 +808,12 @@ impl ExternalDndBackend for WaylandExternalDndBackend {
         // serials (start_drag needs one). Same multi-queue model as the rest
         // of this backend — we never read the socket ourselves.
         let pointer = seat.get_pointer(&qh, ());
+        // And the touch object, for the same reason. A seat without the touch
+        // capability answers with a proxy that never emits, which is harmless —
+        // `serial_for(Touch)` then reports no serial and the outbound drag is
+        // declined cleanly instead of being refused by the compositor in
+        // silence.
+        let touch = seat.get_touch(&qh, ());
 
         // winit's surface id (same connection ⇒ comparable to `enter.surface`).
         let target_surface = unsafe {
@@ -728,7 +840,7 @@ impl ExternalDndBackend for WaylandExternalDndBackend {
             );
         }
 
-        let (cmd_tx, cmd_rx) = channel::<OutboundCommand>();
+        let (cmd_tx, cmd_rx) = channel::<Command>();
 
         let mut state = DndState {
             window_id,
@@ -739,11 +851,13 @@ impl ExternalDndBackend for WaylandExternalDndBackend {
             active_route: None,
             current_offer: None,
             offer_mimes: Vec::new(),
+            offer_serial: 0,
+            offer_accepted_mime: None,
             position: Point::new(0.0, 0.0),
             data_device_manager: ddm,
             data_device,
             origin_surface,
-            last_press_serial: 0,
+            press_serials: TouchSerialSource::default(),
             outbound_source: None,
             outbound_data: None,
             outbound_action: DndAction::empty(),
@@ -751,6 +865,7 @@ impl ExternalDndBackend for WaylandExternalDndBackend {
             cmd_rx,
             _seat: seat,
             _pointer: pointer,
+            _touch: touch,
         };
 
         std::thread::Builder::new()
@@ -765,7 +880,7 @@ impl ExternalDndBackend for WaylandExternalDndBackend {
                 // poll on a short interval. Drag events arrive within one tick.
                 while queue.dispatch_pending(&mut state).is_ok() {
                     // Start any outbound drags the guard requested.
-                    state.process_outbound_commands();
+                    state.process_commands();
                     // Flush any requests we queued (accept / receive / finish /
                     // offer / start_drag).
                     let _ = state.conn.flush();

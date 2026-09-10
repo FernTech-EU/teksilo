@@ -88,9 +88,29 @@ pub enum ExternalDragEvent {
         /// Current position in window-logical coordinates.
         position: Point,
     },
-    /// The drag left the window, or the OS cancelled the operation, without
-    /// a drop.
+    /// The drag left the window without a drop, and may come back.
+    ///
+    /// For an app-originated drag currently re-entered into this window this is
+    /// **not** the end: the OS drag is still in flight, so the framework parks
+    /// the typed payload for whichever window the drag enters next. Use
+    /// [`Cancelled`](Self::Cancelled) for an ending.
     Left,
+    /// The drag over this window has been **aborted**: no drop will follow, and
+    /// nothing is coming back.
+    ///
+    /// Distinct from [`Left`](Self::Left) in exactly one way, and it is the
+    /// reason both exist: a leave re-parks a re-entered app drag's typed
+    /// payload because the OS drag continues, while an abort must not — a parked
+    /// payload belonging to a drag that has ended could be misclaimed by the
+    /// next genuine drag from another application.
+    ///
+    /// **Which backends produce it.** No OS tells a *destination* that a
+    /// foreign drag was aborted rather than merely leaving: `wl_data_device`
+    /// sends `leave`, XDND sends `XdndLeave`, OLE calls `DragLeave`, and AppKit
+    /// calls `draggingExited:`, in both cases. What a backend does know is that
+    /// its own outbound drag has ended while it was over one of this app's
+    /// windows, and the Wayland and X11 backends report that here.
+    Cancelled,
     /// The user dropped. Carries the extracted payload and the drop position.
     Dropped {
         /// Files / text / URLs / raw MIME bytes extracted from the OS payload.
@@ -194,6 +214,76 @@ pub(crate) fn outbound_bytes(data: &OutboundDragData, mime_type: &str) -> Vec<u8
 }
 
 // ============================================================
+// TouchSerialSource — which press opened the implicit grab
+// ============================================================
+
+/// The most recent press serial per device class, so an outbound drag can be
+/// started with the serial belonging to the device that is actually dragging.
+///
+/// `wl_data_device::start_drag` must be given the serial of an input event that
+/// opened the current implicit grab. A mouse opens one with
+/// `wl_pointer::button`, a finger with `wl_touch::down` — different objects,
+/// different serials, and handing over the wrong one makes the compositor
+/// reject the request **silently**: no drag starts and no terminal event
+/// arrives, so the framework's outbound bookkeeping is left waiting for a drag
+/// that never existed. A backend that only ever bound `wl_pointer` therefore
+/// could not export a finger drag at all.
+///
+/// Kept here rather than in the Wayland backend so it compiles and is tested on
+/// every host, the way [`outbound_mimes`] is.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(
+    not(all(unix, not(target_os = "macos"))),
+    allow(
+        dead_code,
+        reason = "only the Wayland backend needs a per-device press serial"
+    )
+)]
+pub(crate) struct TouchSerialSource {
+    /// Serial of the last `wl_pointer::button` press, or 0 if none.
+    pointer: u32,
+    /// Serial of the last `wl_touch::down`, or 0 if none.
+    touch: u32,
+}
+
+#[cfg_attr(
+    not(all(unix, not(target_os = "macos"))),
+    allow(
+        dead_code,
+        reason = "only the Wayland backend needs a per-device press serial"
+    )
+)]
+impl TouchSerialSource {
+    /// Record a pointer-button press.
+    pub(crate) fn record_pointer(&mut self, serial: u32) {
+        self.pointer = serial;
+    }
+
+    /// Record a touch-down.
+    pub(crate) fn record_touch(&mut self, serial: u32) {
+        self.touch = serial;
+    }
+
+    /// The serial to start a drag carried by `kind` with, or `None` when no
+    /// usable press has been seen.
+    ///
+    /// A coarse pointer takes the touch serial and a precise one the pointer
+    /// serial. Neither falls back to the other: a serial from the wrong device
+    /// does not name a grab that device holds, so offering it would trade a
+    /// clean "we cannot start this drag" — which the caller reports as a
+    /// cancellation, and which the framework cleans up after — for a silent
+    /// compositor refusal that ends nothing.
+    pub(crate) fn serial_for(&self, kind: teksilo_tokens::PointerKind) -> Option<u32> {
+        let serial = if kind.is_coarse() {
+            self.touch
+        } else {
+            self.pointer
+        };
+        (serial != 0).then_some(serial)
+    }
+}
+
+// ============================================================
 // ExternalDndBackend trait + registration guard
 // ============================================================
 
@@ -217,9 +307,38 @@ pub trait ExternalDndGuard {
     /// When the OS drag ends, the backend MUST post an
     /// [`ExternalDragEvent::DragEnded`] through the poster captured at
     /// [`ExternalDndBackend::attach`].
-    fn begin_drag(&self, _data: &OutboundDragData, _image: Option<&DragImageData>) -> bool {
+    /// `pointer` is the device carrying the drag, and a backend cannot infer it:
+    /// on Wayland `wl_data_device::start_drag` converts the implicit grab named
+    /// by the serial it is given, a mouse opens one with `wl_pointer::button` and
+    /// a finger with `wl_touch::down`, and the wrong serial is refused in
+    /// silence — no drag, and no terminal event to clean up after. See
+    /// `docs/drag-and-drop.md` §11.5.
+    fn begin_drag(
+        &self,
+        _data: &OutboundDragData,
+        _image: Option<&DragImageData>,
+        _pointer: teksilo_tokens::PointerKind,
+    ) -> bool {
         false
     }
+
+    /// Revise the OS's accept state for an **inbound** drag over this window
+    /// from the widget tree's verdict.
+    ///
+    /// A backend has to answer the drag source on its own thread and at once —
+    /// XDND requires an `XdndStatus` per `XdndPosition`, and Wayland wants
+    /// `wl_data_offer::accept` plus `set_actions` — which is long before the
+    /// widget tree has seen the position. So a backend's first answer can only
+    /// say whether the *formats* are readable, and without this the OS went on
+    /// showing "will accept" over a target that refuses the payload. Both
+    /// protocols allow the answer to be revised for the rest of the drag, which
+    /// is what this does.
+    ///
+    /// The operation follows the bit: Copy when accepted, none when refused.
+    /// Copy is the only operation Teksilo advertises in either direction.
+    ///
+    /// Default: no-op, for a backend with no inbound negotiation to revise.
+    fn set_drop_accepted(&self, _accepted: bool) {}
 
     /// Tell the backend this window's HiDPI scale factor.
     ///
@@ -381,13 +500,23 @@ impl ExternalDndHandle {
         window_id: TeksiloWindowId,
         data: &OutboundDragData,
         image: Option<&DragImageData>,
+        pointer: teksilo_tokens::PointerKind,
     ) -> bool {
         self.inner
             .guards
             .borrow()
             .get(&window_id)
-            .map(|g| g.begin_drag(data, image))
+            .map(|g| g.begin_drag(data, image, pointer))
             .unwrap_or(false)
+    }
+
+    /// Push the widget tree's accept verdict for an inbound OS drag over
+    /// `window_id` to its backend. See [`ExternalDndGuard::set_drop_accepted`].
+    /// No-op if the window isn't attached.
+    pub fn set_drop_accepted(&self, window_id: TeksiloWindowId, accepted: bool) {
+        if let Some(guard) = self.inner.guards.borrow().get(&window_id) {
+            guard.set_drop_accepted(accepted);
+        }
     }
 
     /// Run the deferred blocking outbound OS drag for `window_id` (Windows OLE
@@ -458,6 +587,8 @@ type AttachmentList = Arc<std::sync::Mutex<Vec<(TeksiloWindowId, Arc<dyn AppEven
 pub struct MemoryExternalDndBackend {
     attachments: AttachmentList,
     outbound: Arc<std::sync::Mutex<Vec<OutboundDragData>>>,
+    outbound_pointers: Arc<std::sync::Mutex<Vec<teksilo_tokens::PointerKind>>>,
+    accepts: Arc<std::sync::Mutex<Vec<bool>>>,
 }
 
 /// Guard that removes the window's attachment record on drop, so
@@ -467,16 +598,28 @@ pub struct MemoryDndGuard {
     window_id: TeksiloWindowId,
     attachments: AttachmentList,
     outbound: Arc<std::sync::Mutex<Vec<OutboundDragData>>>,
+    outbound_pointers: Arc<std::sync::Mutex<Vec<teksilo_tokens::PointerKind>>>,
+    accepts: Arc<std::sync::Mutex<Vec<bool>>>,
 }
 
 impl ExternalDndGuard for MemoryDndGuard {
-    fn begin_drag(&self, data: &OutboundDragData, _image: Option<&DragImageData>) -> bool {
+    fn begin_drag(
+        &self,
+        data: &OutboundDragData,
+        _image: Option<&DragImageData>,
+        pointer: teksilo_tokens::PointerKind,
+    ) -> bool {
         // Record the outbound request and report success so tests can assert
         // escalation reached the backend. Test code drives the matching
         // `DragEnded` via [`MemoryExternalDndBackend::emit`].
         self.outbound.lock().unwrap().push(data.clone());
+        self.outbound_pointers.lock().unwrap().push(pointer);
         let _ = self.window_id;
         true
+    }
+
+    fn set_drop_accepted(&self, accepted: bool) {
+        self.accepts.lock().unwrap().push(accepted);
     }
 }
 
@@ -530,6 +673,17 @@ impl MemoryExternalDndBackend {
     pub fn outbound_drags(&self) -> Vec<OutboundDragData> {
         self.outbound.lock().unwrap().clone()
     }
+
+    /// The pointer kind each outbound drag was started with, in order.
+    pub fn outbound_pointers(&self) -> Vec<teksilo_tokens::PointerKind> {
+        self.outbound_pointers.lock().unwrap().clone()
+    }
+
+    /// Every accept verdict pushed via
+    /// [`ExternalDndGuard::set_drop_accepted`], in order.
+    pub fn drop_accepts(&self) -> Vec<bool> {
+        self.accepts.lock().unwrap().clone()
+    }
 }
 
 impl ExternalDndBackend for MemoryExternalDndBackend {
@@ -544,6 +698,8 @@ impl ExternalDndBackend for MemoryExternalDndBackend {
             window_id,
             attachments: self.attachments.clone(),
             outbound: self.outbound.clone(),
+            outbound_pointers: self.outbound_pointers.clone(),
+            accepts: self.accepts.clone(),
         })
     }
 }
@@ -769,6 +925,102 @@ mod tests {
         let backend = MemoryExternalDndBackend::new();
         let _handle = ExternalDndHandle::new(backend.clone());
         assert!(!backend.emit(win(99), ExternalDragEvent::Left));
+    }
+
+    // ------------------------------------------------------------------
+    // P31: which press serial starts an outbound drag
+    // ------------------------------------------------------------------
+
+    /// A drag carried by a finger takes the **touch-down** serial.
+    ///
+    /// `wl_data_device::start_drag` converts the implicit grab named by the
+    /// serial it is given. A finger's grab was opened by `wl_touch::down`, so a
+    /// pointer-button serial names a grab the finger does not hold, and the
+    /// compositor refuses the request without a word — no drag, and no terminal
+    /// event to clean up after.
+    #[test]
+    fn a_touch_originated_drag_selects_the_touch_serial() {
+        use teksilo_tokens::{PenKind, PointerKind};
+
+        let mut serials = TouchSerialSource::default();
+        serials.record_pointer(11);
+        serials.record_touch(22);
+
+        assert_eq!(serials.serial_for(PointerKind::Touch), Some(22));
+        assert_eq!(serials.serial_for(PointerKind::Mouse), Some(11));
+        assert_eq!(serials.serial_for(PointerKind::Pen(PenKind::Pen)), Some(11));
+        assert_eq!(serials.serial_for(PointerKind::Unknown), Some(11));
+    }
+
+    /// A newer press of the same class replaces the older one; the other class
+    /// is untouched. A drag is started by the most recent press of the device
+    /// carrying it, and a mouse resting with a button held while a finger taps
+    /// must not have its serial overwritten.
+    #[test]
+    fn each_device_class_keeps_its_own_latest_press() {
+        use teksilo_tokens::PointerKind;
+
+        let mut serials = TouchSerialSource::default();
+        serials.record_pointer(1);
+        serials.record_touch(2);
+        serials.record_touch(3);
+        assert_eq!(serials.serial_for(PointerKind::Touch), Some(3));
+        assert_eq!(serials.serial_for(PointerKind::Mouse), Some(1));
+    }
+
+    /// No serial for the device asked about means **no serial**, not the other
+    /// device's.
+    ///
+    /// A seat with no touch capability, or a touch-down not yet dispatched on
+    /// the backend thread, has to produce a clean refusal: the caller reports it
+    /// as a cancellation and the framework tears the outbound bookkeeping down.
+    /// Substituting the pointer's serial would trade that for a silent
+    /// compositor refusal, which ends nothing and leaks the parked payload.
+    #[test]
+    fn a_device_with_no_press_yields_no_serial_rather_than_the_other_ones() {
+        use teksilo_tokens::PointerKind;
+
+        let mut serials = TouchSerialSource::default();
+        serials.record_pointer(7);
+        assert_eq!(serials.serial_for(PointerKind::Touch), None);
+
+        let mut serials = TouchSerialSource::default();
+        serials.record_touch(7);
+        assert_eq!(serials.serial_for(PointerKind::Mouse), None);
+
+        assert_eq!(
+            TouchSerialSource::default().serial_for(PointerKind::Mouse),
+            None,
+        );
+    }
+
+    /// The handle forwards the dragging device to the window's guard, and the
+    /// widget tree's accept verdict with it.
+    #[test]
+    fn the_handle_forwards_the_device_and_the_accept_verdict() {
+        use teksilo_tokens::PointerKind;
+
+        let backend = MemoryExternalDndBackend::new();
+        let handle = ExternalDndHandle::new(backend.clone());
+        let cap = CapturingPoster::new();
+        let poster: Arc<dyn AppEventPoster> = cap.clone();
+        handle.attach(win(4), fake_parent(), poster);
+
+        let data = OutboundDragData {
+            text: Some("hi".to_string()),
+            ..Default::default()
+        };
+        assert!(handle.begin_drag(win(4), &data, None, PointerKind::Touch));
+        assert_eq!(backend.outbound_pointers(), vec![PointerKind::Touch]);
+
+        handle.set_drop_accepted(win(4), false);
+        handle.set_drop_accepted(win(4), true);
+        assert_eq!(backend.drop_accepts(), vec![false, true]);
+
+        // An unattached window swallows both without panicking.
+        handle.set_drop_accepted(win(99), true);
+        assert!(!handle.begin_drag(win(99), &data, None, PointerKind::Mouse));
+        assert_eq!(backend.drop_accepts(), vec![false, true]);
     }
 
     #[test]

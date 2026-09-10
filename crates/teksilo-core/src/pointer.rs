@@ -659,14 +659,16 @@ pub enum CancelReason {
 /// handler can ask which pointer it is serving without the answer having to be
 /// threaded through every handler signature.
 ///
-/// Three producers, and the third is the one a reader is most likely to get
-/// wrong: a pointer sample ([`from_pointer_sample`](Self::from_pointer_sample)),
-/// a scroll sample ([`from_scroll_sample`](Self::from_scroll_sample)), and a
-/// gesture the **timer** recognised
-/// ([`for_recognized_gesture`](Self::for_recognized_gesture)) — a hold, which
-/// has a contact behind it but no sample. Everything else — an accessibility
-/// action, a drag tick fired from a layout pass, a hand-built test context —
-/// holds the [`Default`], a mouse at the epoch.
+/// The two obvious producers are a pointer sample
+/// ([`from_pointer_sample`](Self::from_pointer_sample)) and a scroll sample
+/// ([`from_scroll_sample`](Self::from_scroll_sample)). The two a reader is
+/// likely to get wrong are the ones with a pointer but **no sample**: a gesture
+/// the *timer* recognised ([`for_recognized_gesture`](Self::for_recognized_gesture))
+/// — a hold — and a **drag session** ([`for_drag_session`](Self::for_drag_session)),
+/// whose ticks fire from a layout pass and whose OS phases arrive from a platform
+/// thread. Everything else — a legacy `WidgetEvent`
+/// ([`from_event`](Self::from_event)), an accessibility action, a hand-built test
+/// context — holds the [`Default`], a mouse at the epoch.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct InputSnapshot {
     pub(crate) pointer: PointerInfo,
@@ -725,6 +727,28 @@ impl InputSnapshot {
     /// the handler is given; publishing a window position here as well would
     /// offer a handler two answers that do not agree.
     pub(crate) fn for_recognized_gesture(pointer: PointerInfo) -> Self {
+        Self {
+            pointer,
+            ..Self::default()
+        }
+    }
+
+    /// The snapshot a **drag session** implies.
+    ///
+    /// A drag-and-drop session outlives the sample that started it: `on_drag_tick`
+    /// fires from a layout pass, and an OS drag's phases arrive from a platform
+    /// thread. Neither is a sample, so `current_input` holds the
+    /// [`Default`](Self::default) there — and a drag handler asking which device
+    /// it is serving was told "mouse" for the whole of a finger drag. The tree
+    /// installs this around those dispatches instead; the pointer comes from
+    /// `DragSession::pointer`, recorded when the drag started.
+    ///
+    /// [`position`](Self::position) stays `None` for the same reason it does on
+    /// [`for_recognized_gesture`](Self::for_recognized_gesture): the drag
+    /// handler is handed its position in **widget-local** coordinates, and a
+    /// window position published beside it would be a second answer that
+    /// disagrees.
+    pub(crate) fn for_drag_session(pointer: PointerInfo) -> Self {
         Self {
             pointer,
             ..Self::default()

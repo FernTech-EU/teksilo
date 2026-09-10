@@ -1271,6 +1271,33 @@ tell a right answer from a missing one:
   deleting the call leaves the suite green while a real stylus drops to the
   idle rate.
 
+External drag-and-drop adds its own, all in the same class — the answer is a
+protocol behaviour no headless host can produce:
+
+- **the Wayland touch-down serial** (`external_dnd/wayland.rs`, `DndState::begin_outbound`).
+  The rule that a finger's drag is started with a `wl_touch::down` serial rather
+  than a `wl_pointer::button` one is a pure function and is tested; whether a
+  compositor then accepts the request is only visible against a real one. The
+  failure mode to look for is the *silent* one: no drag starts and no terminal
+  event arrives.
+- **the revised Wayland accept** (`DndState::revise_accept`) and **the revised
+  `XdndStatus`** (`DndThread::revise_inbound_accept`). That the widget's verdict
+  reaches the setter is tested at the seam; that the *cursor* then changes over a
+  refusing target needs a real source application. GTK and Qt both track the
+  latest status, which is the premise.
+- **the inbound `Cancelled` post** from a backend whose own outbound drag ends
+  over one of this app's windows. The platform-independent net for the same
+  condition — a re-entered session whose process-wide stash has gone — *is*
+  tested, so a missing post degrades to "cleared on the next layout pass" rather
+  than to a stuck session.
+
+And one that is a *pinned premise* rather than an untested line: X11's outbound
+drag reads the core pointer's button mask, which answers for a finger only
+because X11 promotes a pointer-emulating touch onto that pointer. A test beside
+the backend asserts the capability row that says so, so a platform change fails
+an assertion — but the promotion itself is what a touchscreen on X11 has to
+confirm.
+
 These are the lines a hardware sign-off has to look at by hand.
 
 The cancel teardown is complete: the framework press signal clears there

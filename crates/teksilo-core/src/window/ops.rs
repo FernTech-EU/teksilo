@@ -106,13 +106,41 @@ pub trait WindowOps {
     /// a headless build, or a target with no drop-target implementation)
     /// returns `false`, in which case the framework cancels the drag
     /// — the pre-existing "pointer left the window ⇒ drag cancels" behavior.
+    /// `pointer` is the device carrying the drag. It is not decoration: on
+    /// Wayland `wl_data_device::start_drag` must be given the serial of the
+    /// input event that began the implicit grab, and a finger's grab was opened
+    /// by a `wl_touch::down`, not a `wl_pointer::button` — hand the wrong
+    /// serial over and the compositor rejects the request silently and sends no
+    /// terminal event at all.
     fn begin_os_drag(
         &mut self,
         _data: crate::drag_payload::OutboundDragData,
         _image: Option<crate::drag_payload::DragImageData>,
+        _pointer: teksilo_tokens::PointerKind,
     ) -> bool {
         false
     }
+
+    /// Tell the platform whether the widget under an **inbound** OS drag
+    /// accepts it, so the OS shows the right cursor and permits (or refuses)
+    /// the drop.
+    ///
+    /// An inbound backend must answer the drag source synchronously — XDND
+    /// requires an `XdndStatus` for every `XdndPosition`, and Wayland wants
+    /// `wl_data_offer::accept` + `set_actions` on the offer — which happens on
+    /// the backend's own thread, before the widget tree has seen the sample. So
+    /// the backend's first answer can only be about *format* compatibility;
+    /// this is how the widget's actual verdict gets back to the OS. Called by
+    /// the tree only when the answer changes.
+    ///
+    /// The negotiated *operation* follows from the bit: Copy when accepted,
+    /// none when refused. Copy is the only operation Teksilo advertises in
+    /// either direction, so there is nothing else for a widget to choose — see
+    /// `docs/drag-and-drop.md` §11.5.
+    ///
+    /// Default: no-op — the standalone sink and any platform without an
+    /// inbound backend.
+    fn set_drop_accepted(&mut self, _accepted: bool) {}
 
     /// Abandon an OS drag started by [`Self::begin_os_drag`] (the user pressed
     /// Escape).

@@ -3002,6 +3002,12 @@ impl WidgetTree {
             };
             self.active_drag = Some(crate::drag_state::DragSession {
                 payload,
+                // The pointer that armed the drag. `start_drag` is always
+                // reached from a handler serving a real sample, which is the
+                // only place this is knowable — from here on the drag runs
+                // through layout ticks and platform threads that have no
+                // sample of their own. See `DragSession::pointer`.
+                pointer: self.current_input.pointer,
                 source_widget: Some(source_widget),
                 is_external: false,
                 current_position: teksilo_canvas::Point::ZERO,

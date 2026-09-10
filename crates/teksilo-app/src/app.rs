@@ -1972,6 +1972,9 @@ impl TeksiloAppHandler {
                 ExternalDragEvent::Left => {
                     current.tree.cancel_external_drag(&mut ops);
                 }
+                ExternalDragEvent::Cancelled => {
+                    current.tree.abort_external_drag(&mut ops);
+                }
                 ExternalDragEvent::Dropped { data, position } => {
                     current.tree.end_external_drag(position, data, &mut ops);
                 }

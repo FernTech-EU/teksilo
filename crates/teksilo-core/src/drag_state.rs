@@ -10,6 +10,7 @@ use teksilo_canvas::{Point, Rect};
 use teksilo_tokens::Color;
 
 use crate::drag_payload::DragPayload;
+use crate::pointer::PointerInfo;
 use crate::widget_id::WidgetId;
 
 /// A drop target's response to a drag hovering over it.
@@ -55,6 +56,21 @@ impl DropFeedback {
 pub(crate) struct DragSession {
     /// The data being dragged.
     pub payload: DragPayload,
+    /// The pointer carrying the drag.
+    ///
+    /// Recorded at the drag's start and never revised, because a drag belongs
+    /// to one pointer for its whole life: the press that armed it is the press
+    /// that ends it.
+    ///
+    /// It is here because **most of a drag runs outside any pointer dispatch**.
+    /// `on_drag_tick` fires from `WidgetTree::layout`, and an OS drag's phases
+    /// arrive from the platform's own thread — at both of those points
+    /// `current_input` holds its default, a mouse, so a handler asking the
+    /// context which device it was serving got the wrong answer for the whole
+    /// of a finger drag. The tree installs this pointer as the input snapshot
+    /// around those dispatches instead. See
+    /// `WidgetTree::process_drag_tick`.
+    pub pointer: PointerInfo,
     /// The widget that initiated the drag. `None` for external (OS) drags,
     /// which have no in-app source widget.
     pub source_widget: Option<WidgetId>,
@@ -75,6 +91,7 @@ pub(crate) struct DragSession {
 impl std::fmt::Debug for DragSession {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("DragSession")
+            .field("pointer", &self.pointer.kind)
             .field("source_widget", &self.source_widget)
             .field("is_external", &self.is_external)
             .field("current_position", &self.current_position)

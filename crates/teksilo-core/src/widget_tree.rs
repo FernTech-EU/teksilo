@@ -548,6 +548,12 @@ pub struct WidgetTree {
     /// plain internal drag so leaving again re-stashes instead of starting a
     /// second OS drag, and dropping doesn't double-fire `on_drag_ended`.
     pub(crate) os_drag_reentered: bool,
+    /// The accept state last pushed to the platform for an inbound OS drag, so
+    /// the same answer is not re-sent on every motion sample.
+    ///
+    /// `None` outside an OS drag, and reset when one ends — a fresh drag must
+    /// push its first verdict even if it happens to match the last drag's.
+    pub(crate) os_drop_accepted: Option<bool>,
     /// Optional platform host for custom window chrome (set when the
     /// application opts in via `WindowConfig::custom_chrome(true)`). Stored
     /// here so that the root-builder closure has access during widget
@@ -942,6 +948,7 @@ impl WidgetTree {
             active_drag: None,
             outbound_drag_source: None,
             os_drag_reentered: false,
+            os_drop_accepted: None,
             title_bar_host: None,
             app_context: Rc::new(crate::event_source::TreeAppContext::empty()),
             locale: None,
