@@ -1515,6 +1515,31 @@ impl WidgetArena {
         if owner_distance <= 0.0 {
             return exact;
         }
+        // A grip that won its point through its own `Widget::hit_outset` made a
+        // deliberate claim *inside* the exact pass, and the miss-only pass must
+        // not take it back.
+        //
+        // Without this the two mechanisms fight, and the outset loses every
+        // time: a grip only ever claims a point at a positive distance from its
+        // own shape, so any slop-eligible node under its ring is strictly
+        // closer and wins. The rule, rather than the arithmetic: a ring is taken
+        // back wherever a neighbour is still small enough to earn a top-up of
+        // its own, so raising the density can LOWER a grip's reach — `up_to`
+        // grows from 24 to 44 dp and rows that earned nothing become candidates.
+        // It is not confined to the coarse densities either: at Compact a
+        // neighbour under 24 dp is already a candidate.
+        //
+        // The two measurements this rests on are pinned in teksilo-widgets by
+        // `an_outsets_claim_survives_the_slop_pass_in_the_shipped_controls`
+        // (a SearchField's clear button at Compact, a TableView's scroll bar at
+        // Touch), and the mechanism itself by
+        // `a_grip_that_won_through_its_outset_keeps_its_point_against_the_slop_pass`
+        // in this crate. Reverting this branch reddens all three. The precedence
+        // chain in `docs/density-and-targets.md` names one chain for both
+        // mechanisms, and this is what keeps it one.
+        if exact.is_some_and(|target| self.won_through_outset(target, point, &roots, hit)) {
+            return exact;
+        }
         let mut best: Option<HitCandidate> = None;
         for &root in roots.iter().rev() {
             for candidate in self.hit_candidates(root, point, exclude, hit) {
@@ -1543,6 +1568,70 @@ impl WidgetArena {
             current = self.get(id).and_then(|n| n.parent);
         }
         None
+    }
+
+    /// Whether `target`, or a node on its path to a root, claimed `point`
+    /// through its own [`Widget::hit_outset`] — the point sits outside that
+    /// node's real bounds and inside its inflated ones.
+    ///
+    /// The predicate behind the outset's precedence over the miss-only pass in
+    /// [`apply_slop`](Self::apply_slop). The whole path is examined because the
+    /// pre-pass resolves a candidate *through* the ordinary recursion, so the
+    /// node the exact pass returns may be a descendant of the grip that won.
+    ///
+    /// [`Widget::hit_outset`]: crate::widget::Widget::hit_outset
+    fn won_through_outset(
+        &self,
+        target: WidgetId,
+        point: teksilo_canvas::Point,
+        roots: &[WidgetId],
+        hit: &HitContext<'_>,
+    ) -> bool {
+        let mut chain = vec![target];
+        let mut current = target;
+        while !roots.contains(&current) {
+            match self.get(current).and_then(|n| n.parent) {
+                Some(parent) => {
+                    chain.push(parent);
+                    current = parent;
+                }
+                None => break,
+            }
+        }
+        chain.reverse();
+        let mut p = point;
+        for &node_id in &chain {
+            let Some(space) = self.hit_space(node_id, p) else {
+                return false;
+            };
+            let Some(node) = self.get(node_id) else {
+                return false;
+            };
+            if !node.no_hit_slop {
+                let outset = node.widget.hit_outset(hit.kind(), hit.tokens());
+                let (top, bottom) = (finite(outset.top), finite(outset.bottom));
+                let (leading, trailing) = (finite(outset.leading), finite(outset.trailing));
+                if top > 0.0 || bottom > 0.0 || leading > 0.0 || trailing > 0.0 {
+                    let (left, right) = match hit.layout_direction() {
+                        crate::environment::LayoutDirection::LeftToRight => (leading, trailing),
+                        crate::environment::LayoutDirection::RightToLeft => (trailing, leading),
+                    };
+                    let inflated = teksilo_canvas::Rect::new(
+                        space.bounds.x - left,
+                        space.bounds.y - top,
+                        space.bounds.width + left + right,
+                        space.bounds.height + top + bottom,
+                    );
+                    if !space.bounds.contains(space.bounds_point)
+                        && inflated.contains(space.bounds_point)
+                    {
+                        return true;
+                    }
+                }
+            }
+            p = space.child_point;
+        }
+        false
     }
 
     /// Distance from a root-space `point` to `id`'s own shape, in screen dp.

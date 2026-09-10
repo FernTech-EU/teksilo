@@ -1238,6 +1238,34 @@ mod tests {
         assert_eq!(tree.focused(), Some(b));
     }
 
+    /// `focus` is a command, not a query: it moves focus to the node it is
+    /// handed without asking whether traversal could ever land there.
+    ///
+    /// This is why a test claiming **keyboard reachability** has to read the
+    /// traversal graph — `tab_stops_within` — rather than focus its subject and
+    /// press a key. The latter is green for a control no keyboard user can
+    /// reach, which is how a widget once lost `focusable(true)` with all six of
+    /// its tests still passing. If this behaviour ever grows a guard, the
+    /// reachability recipe in `docs/a11y/non-drag-alternatives.md` and the
+    /// comments citing it are what to revisit.
+    #[test]
+    fn focus_does_not_check_that_the_node_is_focusable() {
+        let mut tree = WidgetTree::new();
+        let inert = tree.add(FillWidget::new()); // no `.focusable()`
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        assert!(
+            tree.tab_stops_within(inert).is_empty(),
+            "the subject has to be unreachable for the point to be made"
+        );
+
+        tree.focus(inert);
+        assert_eq!(
+            tree.focused(),
+            Some(inert),
+            "focus lands on a node Tab traversal can never offer"
+        );
+    }
+
     #[test]
     fn tab_focus_has_keyboard_origin() {
         let mut tree = WidgetTree::new();

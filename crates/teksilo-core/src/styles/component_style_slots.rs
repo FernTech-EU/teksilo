@@ -92,6 +92,83 @@ pub struct ComponentStyleSlots {
     pub text_selection: Option<SharedTextSelectionStyle>,
 }
 
+impl ComponentStyleSlots {
+    /// The names of the slots that carry an override, in declaration order.
+    ///
+    /// One consumer: the target-conformance audit
+    /// ([`unprojected_style_slots`](crate::accessibility::target_audit::unprojected_style_slots)),
+    /// which reports the app-installed Tier-3 styles no
+    /// [`DensityProjection`](crate::styles::DensityProjection) will re-derive —
+    /// so a control that could not follow the density ladder is attributed to
+    /// the style that owns its metrics rather than looking like a framework bug.
+    ///
+    /// The body destructures `Self` **without** a `..` rest pattern, so adding a
+    /// slot to the struct and forgetting it here is a compile error rather than
+    /// a silently unreported override.
+    pub fn installed(&self) -> Vec<&'static str> {
+        macro_rules! probe {
+            ($($name:ident),* $(,)?) => {{
+                let Self { $($name),* } = self;
+                let mut out = Vec::new();
+                $(if $name.is_some() {
+                    out.push(stringify!($name));
+                })*
+                out
+            }};
+        }
+        probe!(
+            button,
+            split_button,
+            splitter,
+            icon_button,
+            toggle,
+            checkbox,
+            radio,
+            radio_tile,
+            slider,
+            text_input,
+            combo_box,
+            menu_item,
+            panel,
+            card,
+            chart,
+            popover,
+            tooltip,
+            scroll_bar,
+            standard_item,
+            tab,
+            dialog,
+            snackbar,
+            toast,
+            banner,
+            badge,
+            progress_bar,
+            link,
+            segmented_control,
+            avatar,
+            calendar,
+            color_picker,
+            spin_box,
+            date_edit,
+            search_field,
+            rich_text_editor,
+            table,
+            list_container,
+            drop_zone,
+            drop_target,
+            grid_view,
+            web_view,
+            text_selection
+        )
+    }
+
+    /// Whether no slot carries an override — the state every shipped preset
+    /// that ships raw tokens alone is in.
+    pub fn is_empty(&self) -> bool {
+        self.installed().is_empty()
+    }
+}
+
 impl std::fmt::Debug for ComponentStyleSlots {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         // Hand-rolled because `Rc<dyn FooStyle>` doesn't impl Debug.

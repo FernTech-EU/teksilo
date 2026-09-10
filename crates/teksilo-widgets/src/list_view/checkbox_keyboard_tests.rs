@@ -39,18 +39,21 @@ fn a_list_is_one_tab_stop_however_many_rows_are_realized() {
     // Tab order a function of the virtualization window: 31 stops in this
     // fixture, and a *different* 31 after scrolling. A listbox is one Tab
     // stop with a cursor moving inside it.
-    let (mut tree, _sel, _ck, p) = checked_list();
-    let mut seen = std::collections::BTreeSet::new();
-    for _ in 0..40 {
-        tree.press_key(Key::Tab, Modifiers::NONE);
-        tree.layout(p);
-        seen.insert(tree.focused());
-    }
+    //
+    // Read off the traversal graph rather than by pressing Tab and counting
+    // where focus lands. The fixture focuses the view directly and
+    // `WidgetTree::focus` has no focusable guard, so that count is 1 both when
+    // the list is a single stop and when it is no stop at all — the shape that
+    // survived deleting `focusable(true)` elsewhere in this workspace.
+    let (tree, _sel, _ck, _p) = checked_list();
+    let stops = tree.tab_stops_within(tree.roots()[0]);
     assert_eq!(
-        seen.len(),
+        stops.len(),
         1,
-        "Tab must not walk into the rows; got {} distinct stops",
-        seen.len()
+        "a listbox is one Tab stop; got {} — 0 means no keyboard user can \
+         reach the list at all, more than 1 means a row control has leaked \
+         into the Tab order, where its presence tracks the scroll position",
+        stops.len()
     );
 }
 

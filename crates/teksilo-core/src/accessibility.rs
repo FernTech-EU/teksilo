@@ -6,6 +6,7 @@ use accesskit::{Action, Live, Node, NodeId, Role, TextDirection, TextPosition, T
 use crate::widget_id::WidgetId;
 
 pub mod audit;
+pub mod target_audit;
 pub mod text_runs;
 
 /// Builder wrapper around accesskit::Node for widget accessibility declarations.

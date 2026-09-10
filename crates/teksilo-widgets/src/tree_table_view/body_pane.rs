@@ -409,15 +409,25 @@ impl<T: 'static> Widget for TreeBodyPane<T> {
                     let indent_px = depth as f32 * indent_per_level;
                     let source_for_twist = source.clone();
                     let twist_anchor = row_anchor.clone();
-                    let twist = ctx.add(
-                        TwistArrow::new(cp::TREE_TWIST_SIZE, has_children, is_expanded).on_click(
-                            move |_ctx| {
-                                if let Some(i) = twist_anchor.index() {
-                                    source_for_twist.toggle_at(i);
-                                }
-                            },
-                        ),
-                    );
+                    // The click is wired only on a branch. A leaf's chevron
+                    // paints nothing and `toggle_at` on a leaf changes nothing,
+                    // but an `on_click` still makes the node a *pointer target*
+                    // — a 12 dp one, invisible, doing nothing, and below the
+                    // 24 dp floor at every density. `TwistArrow::hit_outset`
+                    // already returns zero for a leaf ("a widened node that
+                    // then ignores the press is a hole punched in the row
+                    // behind it"), so the node could never grow either.
+                    // `StandardTreeItem` has always guarded it this way.
+                    let mut twist_widget =
+                        TwistArrow::new(cp::TREE_TWIST_SIZE, has_children, is_expanded);
+                    if has_children {
+                        twist_widget = twist_widget.on_click(move |_ctx| {
+                            if let Some(i) = twist_anchor.index() {
+                                source_for_twist.toggle_at(i);
+                            }
+                        });
+                    }
+                    let twist = ctx.add(twist_widget);
                     // Build inside-out so each `ctx.add` happens
                     // outside the mutable borrow chain.
                     let twist_and_label = HStack::new()

@@ -2301,6 +2301,14 @@ fn container_focus_ring_shows_when_tab_focused_without_selection() {
 
     // Tab in: focus the view under keyboard modality. `Tab` is ignored by the
     // tree's key handler, so the selection stays empty (no row ring).
+    //
+    // That there is a Tab to come in *by* is asserted rather than assumed —
+    // `WidgetTree::focus` has no focusable guard, so every assertion below
+    // would hold for a view no keyboard user could reach.
+    assert!(
+        tree.tab_stops_within(tv).contains(&tv),
+        "the view is no Tab stop, so there is no Tab-focus state to ring"
+    );
     tree.focus(tv);
     tree.press_key(Key::Tab, Modifiers::NONE);
     assert!(view_focused.get(), "view holds keyboard focus");
@@ -3603,15 +3611,20 @@ fn a_tree_is_one_tab_stop_and_space_checks_the_focused_row() {
     );
     let p = SizeProposal::exact(400.0, 300.0);
     wtree.layout(p);
-    wtree.focus(tv);
 
-    let mut seen = std::collections::BTreeSet::new();
-    for _ in 0..12 {
-        wtree.press_key(Key::Tab, Modifiers::NONE);
-        wtree.layout(p);
-        seen.insert(wtree.focused());
-    }
-    assert_eq!(seen.len(), 1, "the tree is a single Tab stop");
+    // Read off the traversal graph, not by pressing Tab and counting where
+    // focus lands: `WidgetTree::focus` has no focusable guard, so a forced
+    // focus followed by keys that the tree consumes yields one distinct target
+    // whether the tree is a single Tab stop or no stop at all.
+    let stops = wtree.tab_stops_within(tv);
+    assert_eq!(
+        stops.len(),
+        1,
+        "a tree is one Tab stop; got {} — 0 means no keyboard user can reach \
+         it, more than 1 means a row control leaked into the Tab order",
+        stops.len()
+    );
+    wtree.focus(tv);
 
     // Cursor on the first root ("A", a branch) — Space checks it, and the
     // model aggregates that down to its children.

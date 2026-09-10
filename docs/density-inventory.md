@@ -55,25 +55,43 @@ it **at Compact**, which the programme's no-regression invariant forbids. Theref
 > moves, Compact renders identically").
 
 The one exception is a `MinSize`: a `MinSize` *is* a hit box, and 24 dp is the floor
-that governs hit boxes, so `density_min_size` enforces it there. Three sites in the
-whole tree were below it, and those three change at Compact — see
-[§0](#0--the-three-sites-that-change-at-compact).
+that governs hit boxes, so `density_min_size` enforces it there. The sites in the
+whole tree that were below it are enumerated in
+[§0](#0--the-sites-that-change-at-compact), and each of them changes at Compact.
+That list is the only place the count lives, so a later package that takes another
+such exception adds a row there rather than a number here.
 
-## §0 — the three sites that change at Compact
+## §0 — the sites that change at Compact
 
-The only Compact-visible change this package makes. Each was an interactive
-control whose own minimum hit box sat below WCAG 2.2 SC 2.5.8 (level AA).
+The only Compact-visible changes the density work makes, and the enumeration the
+rest of this document and the target-conformance gate both defer to: an exception
+that is not a row here has not been taken. Each was an interactive control whose own
+minimum hit box sat below WCAG 2.2 SC 2.5.8 (level AA). Rows are not call sites — the
+macOS entry below is two `MinSize` sites sharing one constant.
 
 | Site | Was | Is | What a reader sees at Compact |
 | --- | ---: | ---: | --- |
 | `teksilo-preview-ui/src/navigator.rs` — a navigator tree row | 22 dp | 24 dp | Each row in the previewer's navigator is 2 dp taller; a full-height list shows marginally fewer rows. |
 | `teksilo-theme-macos` — `MinSize` on the button and the text field (two sites, one number: `MACOS_CONTROL_HEIGHT`) | 22 dp | 24 dp | A macOS-preset push button and field are 2 dp taller. The **painted bezel metric stays at Apple's 22 dp**; only the minimum box around it moves. |
-| `teksilo-widgets/src/text_input.rs` — the clear button | 16 dp | 24 dp | The `×` inside a clearable field gets a 24 dp box. The 12 dp glyph is unchanged; the button is centred in the larger box, so the field's own height does not move. |
 | `teksilo-widgets/src/code_editor/completion.rs` — a suggestion row (added by P25) | 22 dp measured | 24 dp | Up to 2 dp taller per row of the completion popup. The text and its padding are unchanged; the floor is a `MinSize` around them. The 22 dp is the row's height in a headless tree under the shipped typography — a real text backend with a taller line may already clear the floor, in which case the `MinSize` is inert at Compact as well. |
 
 Nothing else in the rows below changes at Compact.
 
-The fourth site is the same exception as the first three and worth stating once
+**One row left this table, and P40 measured why.** `text_input.rs`'s clear button
+was a fourth entry here: 16 dp raised to a 24 dp `MinSize` box. A later touch
+package replaced that with a hit-only mechanism — the slot is
+`crate::button::HitTarget::fixed(16.0, 16.0)` declaring a `Widget::hit_outset`,
+so the paint stays 16 dp at every density and the field's row does not widen.
+`text_input.rs`'s own module doc states the trade ("raising its box would widen
+every field in the workspace at Compact"), and the target-conformance gate
+measures the result: the slot paints 16 × 16 and reaches 24 × 24 at Compact,
+pinned by `an_outsets_claim_survives_the_slop_pass_in_the_shipped_controls`. It
+is therefore **not** a Compact-visible change and cannot sit in a table whose
+whole job is to enumerate those. The §1 row for its old `MinSize::new` call site
+is corrected in place rather than deleted, so the site P02 audited is still
+accounted for.
+
+The completion-popup row is the same exception as the others and worth stating once
 more, because it is the case where the floor rule's escape hatch does not exist: a
 stack of **adjacent** rows cannot take its conformance from `hit_outset`, since the
 only neighbour a row could borrow space from is another row, and an outset on each
@@ -216,22 +234,54 @@ every `IconButtonSize` a rail can carry (24 / 24 / 30 / 40 / 50 dp) already clea
 default is 40. Owner for any future change: whoever revisits the rail's geometry
 as a whole.
 
+## Corrections P40 made to this document
+
+The target-conformance audit measures a target's **reachable** extent rather than
+its painted one, so it is the first reader of this document that could not take a
+named mechanism on trust: a row naming a mechanism that does not exist measures
+short and the gate says so. Five rows below were wrong, in three ways — **two**
+named a mechanism the code could not implement, **two** named one that is
+implemented and does not deliver, and **one** understated a floor. The first two
+are the same failure P25 recorded for `SPLIT_BUTTON_CHEVRON_WIDTH` — *a
+mechanism named in the treatment column that the code could not implement as
+written* — which makes it the failure mode the next reader of this table should
+look for first.
+
+| Correction | Where | Why it mattered |
+| --- | --- | --- |
+| **The `SpinBox` step buttons are reached by nothing, and `partition_targets` was never a candidate** | `spin_box.rs`, `build_step_buttons`; `spin_box/step_button.rs`, `StepButton::new` | `partition_targets` carves **one** node's rectangle into zones, so it can only be the mechanism where a single node paints both. The two step buttons are their own nodes stacked beside their own sibling, exactly as the `SplitButton` chevron is its own node beside its own — P25's correction, recurring. Naming the wrong mechanism hid a real gap behind a plausible sentence: nothing reaches these buttons. An outset cannot (it never escapes its parent, and the parent is a column exactly one button wide and two buttons tall, so the space it would claim vertically is the other step's); the miss-only pass cannot (the field beside them takes presses of its own, so an eligible bubble owner sits at distance zero); and `TouchTarget` cannot while the pair is stacked inside the field's own height. The row now says so, and `step_button.rs` had already said it at the code. This is an allow-listed WCAG 2.2 SC 2.5.8 failure at every density, conforming by SC 2.5.8 *Equivalent* — the same value is set by typing in the field, by Up/Down and PageUp/PageDown, by the wheel, and by the `Increment` / `Decrement` assistive actions. Closing it geometrically means changing the *layout* (a side-by-side −/+ at coarse densities), which is a design decision and not a targeting one. |
+| **`TAB_CLOSE_BUTTON_SIZE` is not reached by `partition_targets` either, and nothing reads it** | `recipe_tab_style.rs`; the affordance is built in `tab_widget/header.rs` | The row promised an in-node split on the tab, and P25 had already refused that for this exact affordance with the measurement: a tab's close `×` is a real `IconButton` node at `IconButtonSize::Compact`, so there is no single rectangle to carve. The correction P25 wrote into `docs/widget-pointer-inventory.md` was never carried back to this table — the twin left standing. Worse, `close_button_size` has no reader anywhere in the workspace (the field is set by the IntUI recipe and by the Fluent and macOS presets, and read by nothing), so the 16 dp it names sizes nothing at all. The affordance a finger has to hit is the `IconButton`, which clears the floor at Compact and follows the ladder. What that affordance *does* have is a reveal problem, not a size one, and it belongs to the hover census. |
+| **The tree chevron's `hit_outset` is declared and inert** | `recipe_standard_item_style.rs`, `STANDARD_ITEM_CHEVRON_COLUMN_WIDTH`; the wrapper is in `standard_item.rs`, `StandardTreeItem::build` | The row named `hit_outset`, and the hook is implemented — but `build` wraps the chevron in `FixedSize::new().width(chevron_size)`, a wrapper exactly its own size on both axes, and an outset is only ever offered points every ancestor's rectangle already contains. Measured: 16 × 16 in a `TreeView` at all three densities, reach equal to paint, no mechanism credited, while the same chevron in a bare row reaches 24 × 24. This is A10's *reach limit*, recorded there from the inspector's resize strip and now measured in a shipped widget. Deleting the wrapper is necessary and not sufficient — the reach becomes 20 × 20 / 24 × 18.8 / 30 × 17.6, still short at Compact, because at depth 0 the chevron is flush against the row's content box. Allow-listed in the gate with an owner; pinned by `the_chevrons_outset_is_inert_inside_a_standard_tree_row`. |
+| **A grab ring can reach past a neighbouring target's centre, and at Touch the dock gutter's does** | `docking.rs`, `DOCK_GUTTER`; the hook is in `docking/resize_handle.rs`, `DockResizeHandle::hit_outset` | The row's treatment ("grab via `hit_outset`, 24 dp, 44 at Touch") is true and incomplete: the gutter inflates to `TargetRole::Target`, so at Touch its ring is ±19 dp, and the dock tab strip begins 0 dp below it. Measured: the strip's header reaches **0 × 0** at Touch and is reachable at Compact, where the ring is ±9. A10's precedence chain settles an outset against *another outset* by distance to the uninflated rectangle and says nothing about an outset against a plain target that contains the point — the gap is in the mechanism, not in this row, but the row is where a reader meets the number. The splitter gutter one row up declares the same ring; nothing was measured against it, because the panes on either side of it in the fixture take no press. |
+| **The clear button is no longer a Compact-visible `MinSize` exception** | `text_input.rs`, `TextInput::build`; the §0 table and the §1 row for its old call site | §0 listed the clear button as raised from 16 dp to a 24 dp box, and §1 listed the `MinSize::new(16.0, 16.0)` that did it. Neither is in the code: the slot is a `HitTarget::fixed(16.0, 16.0)` declaring a `hit_outset`, which is the whole point of the arrangement (`text_input.rs`'s module doc: "raising its box would widen every field in the workspace at Compact"). Measured: the slot paints 16 × 16 and reaches 24 × 24 at Compact, and reaching 22 × 24 instead is what reverting `arena.rs`'s `won_through_outset` costs — pinned by `an_outsets_claim_survives_the_slop_pass_in_the_shipped_controls`. The row mattered because everything in this document, the target-conformance gate's allow-list included, defers to §0 as *the* enumeration of Compact-visible exceptions: a row that no longer changes Compact inflates that count for every later reader. |
+| **The table header's zone floor is the density's `target_size`, not a fixed 24 dp** | `table_view/header.rs`, `HeaderCell::build` and `header_cell_zones` | The paragraph under the table said "a 24 dp floor per zone". `HeaderCell::build` reads `ctx.theme().input.target_size`, so the floor is 24 / 32 / 44 — understating it made the one row where `partition_targets` genuinely *is* the mechanism look like the only one that does not follow the ladder. The same paragraph cited `header.rs:529` for where `filter_zone_width` is read; that line now holds unrelated code, and the two real readers are named by function instead. |
+
 ## Dimensions that are *not* constants
 
 Three dimensions the audit flagged were inline literals with no constant to rename.
-P20 introduced one for each; all three are below the 24 dp floor, so the constant is
-the number the hit mechanisms partition against rather than a value that scales.
+P20 introduced one for each; all three are below the 24 dp floor, so the constant
+names a painted extent that stays put at every density, and the treatment column says
+which hit mechanism — if any — makes up the shortfall.
 
-| File | Line | Dimension | Value | Class | P20 treatment |
-| --- | ---: | --- | ---: | --- | --- |
-| `crates/teksilo-widgets/src/title_bar/window_frame.rs` | 71 | resize-strip `thickness` field default | `6.0` | Grab | named `WINDOW_FRAME_RESIZE_THICKNESS`; visual fixed at 6 dp, grab via `hit_outset` (24 dp, 44 at Touch) |
-| `crates/teksilo-widgets/src/spin_box.rs` | 1496 | `button_width` for the step buttons | `18.0` | Target | named `SPIN_BOX_STEP_BUTTON_WIDTH`; visual fixed at 18 dp, hit via `partition_targets` inside the field frame |
-| `crates/teksilo-widgets/src/spin_box/step_button.rs` | 101 | step-button `width` | `18.0` | Target | named `SPIN_BOX_STEP_BUTTON_WIDTH`; visual fixed at 18 dp, hit via `partition_targets` inside the field frame |
+This table's second column names the **function**, not a line: of 34 line
+citations in one earlier artifact exactly one still resolved 36 packages later,
+and two of the four rows P40 rewrote below carried an off-by-one. A function
+name survives a refactor that renumbers a file, which is the same reason
+`TargetMeasurement::path` is a chain of type names.
+
+| File | Site | Dimension | Value | Class | P20 treatment |
+| --- | --- | --- | ---: | --- | --- |
+| `crates/teksilo-widgets/src/title_bar/window_frame.rs` | `WindowFrame::new` | resize-strip `thickness` field default | `6.0` | Grab | named `WINDOW_FRAME_RESIZE_THICKNESS`; visual fixed at 6 dp, grab via `hit_outset` (24 dp, 44 at Touch) — and the corner grips on the same hook reach **nothing**, which is an allow-listed finding in the target-conformance gate, pinned by `a_window_corner_grip_is_boxed_in_by_its_own_edge_strips` |
+| `crates/teksilo-widgets/src/spin_box.rs` | `build_step_buttons` | `button_width` for the step buttons | `18.0` | Target | named `SPIN_BOX_STEP_BUTTON_WIDTH`; visual fixed at 18 dp, and **no hit mechanism reaches it** — an allow-listed SC 2.5.8 failure, conformance by *Equivalent* (**corrected by P40** — see [Corrections P40](#corrections-p40-made-to-this-document)) |
+| `crates/teksilo-widgets/src/spin_box/step_button.rs` | `StepButton::new` | step-button `width` | `18.0` | Target | named `SPIN_BOX_STEP_BUTTON_WIDTH`; visual fixed at 18 dp, and **no hit mechanism reaches it** — an allow-listed SC 2.5.8 failure, conformance by *Equivalent* (**corrected by P40** — see [Corrections P40](#corrections-p40-made-to-this-document)) |
 
 `table_view/header.rs` splits one header cell into a label zone and a filter zone by
-coordinate inside a single node (`filter_zone_width`, read at `header.rs:529`); it has
-no dp constant at all and is handled by `core::partition_targets` with a 24 dp floor
-per zone, not by a density projection.
+coordinate inside a single node (`filter_zone_width`, read in `HeaderCell::build` and
+in `HeaderCell::target_regions`); it has no dp constant at all and is handled by
+`core::partition_targets` through one `header_cell_zones` function, not by a density
+projection. Its floor per zone is the **density's** `target_size` — 24 dp at Compact,
+32 and 44 above it — read once in `HeaderCell::build` and cached, because a density
+change marks the tree at `BindingLevel::Rebuild`. It is not a fixed 24 dp.
 
 ## §1 — `MinSize::new` call sites
 
@@ -265,7 +315,7 @@ per zone, not by a density projection.
 | `crates/teksilo-widgets/src/styles/recipe_split_button_style.rs` | 85 | `MinSize::new(total_min_width, SPLIT_BUTTON_HEIGHT)` | 24 | Target | scales with `target_size` — `density_min_size(.., &InputTokens)` |
 | `crates/teksilo-widgets/src/styles/recipe_text_input_style.rs` | 117 | `MinSize::new(0.0, height)` from `TEXT_FIELD_HEIGHT` | 28 | Target | scales with `target_size` — `density_min_size(.., &InputTokens)` |
 | `crates/teksilo-widgets/src/styles/recipe_text_input_style.rs` | 175 | `MinSize::new(0.0, height)` from `TEXT_FIELD_HEIGHT` | 28 | Target | scales with `target_size` — `density_min_size(.., &InputTokens)` |
-| `crates/teksilo-widgets/src/text_input.rs` | 746 | `MinSize::new(16.0, 16.0)` (clear button) | 16 | Target | scales with `target_size` — **below the 24 dp AA floor today** |
+| `crates/teksilo-widgets/src/text_input.rs` | `TextInput::build` (was line 746) | `MinSize::new(16.0, 16.0)` (clear button) — **call site removed** | 16 | Target | the `MinSize` is gone: the slot is now `crate::button::HitTarget::fixed(16.0, 16.0)` declaring a `Widget::hit_outset`, so the paint stays 16 dp at every density and the 24 dp target is made up between the pointer and the arena (**corrected by P40** — see [Corrections P40](#corrections-p40-made-to-this-document)) |
 | `crates/teksilo-widgets/src/text_input.rs` | 810 | `MinSize::new(min_w, field_dims::TEXT_FIELD_HEIGHT)` | 28 | Target | scales with `target_size` — `density_min_size(.., &InputTokens)` |
 | `crates/teksilo-widgets/src/tool_box.rs` | 722 | `MinSize::new(TOOL_BOX_HEADER_MIN_HEIGHT, 0.0)` | 28 | Target | scales with `target_size` (rotated header) — `density_min_size(.., &InputTokens)` |
 | `crates/teksilo-widgets/src/tool_box.rs` | 724 | `MinSize::new(0.0, TOOL_BOX_HEADER_MIN_HEIGHT)` | 28 | Target | scales with `target_size` — `density_min_size(.., &InputTokens)` |
@@ -525,7 +575,7 @@ Five recipes carry no dimension constant of their own:
 | `crates/teksilo-widgets/src/styles/recipe_standard_item_style.rs` | 35 | `STANDARD_ITEM_MIN_HEIGHT_SINGLE_LINE` | `28.0` | Target | scales with `target_size` — `StandardItemRecipe::for_tokens` |
 | `crates/teksilo-widgets/src/styles/recipe_standard_item_style.rs` | 36 | `STANDARD_ITEM_MIN_HEIGHT_TWO_LINE` | `44.0` | Target | scales with `target_size` — `StandardItemRecipe::for_tokens` |
 | `crates/teksilo-widgets/src/styles/recipe_standard_item_style.rs` | 41 | `STANDARD_ITEM_LABEL_COLUMN_MIN_WIDTH` | `48.0` | Decoration | fixed — decorative geometry, no hit consequence |
-| `crates/teksilo-widgets/src/styles/recipe_standard_item_style.rs` | 42 | `STANDARD_ITEM_CHEVRON_COLUMN_WIDTH` | `16.0` | Target | visual fixed at 16 dp (below the floor); coarse hit via `hit_outset` |
+| `crates/teksilo-widgets/src/styles/recipe_standard_item_style.rs` | 43 | `STANDARD_ITEM_CHEVRON_COLUMN_WIDTH` | `16.0` | Target | visual fixed at 16 dp (below the floor); `hit_outset` is declared and **delivers nothing here** — `StandardTreeItem::build` wraps the chevron in a `FixedSize` of exactly this width, and an outset is only offered points every ancestor already contains (**corrected by P40** — see [Corrections P40](#corrections-p40-made-to-this-document)) |
 | `crates/teksilo-widgets/src/styles/recipe_standard_item_style.rs` | 43 | `STANDARD_ITEM_TREE_INDENT_STEP` | `16.0` | Spacing | scales with `spacing_factor` — `StandardItemRecipe::for_tokens` |
 | `crates/teksilo-widgets/src/styles/recipe_standard_item_style.rs` | 44 | `STANDARD_ITEM_ITEM_CORNER_RADIUS` | `8.0` | Decoration | fixed — corner radius is shape identity, not a hit target |
 | `crates/teksilo-widgets/src/styles/recipe_standard_item_style.rs` | 45 | `STANDARD_ITEM_BG_HORIZONTAL_INSET` | `4.0` | Spacing | scales with `spacing_factor` — `StandardItemRecipe::for_tokens` |
@@ -536,7 +586,7 @@ Five recipes carry no dimension constant of their own:
 | `crates/teksilo-widgets/src/styles/recipe_tab_style.rs` | 47 | `TAB_PADDING_HORIZONTAL` | `12.0` | Spacing | scales with `spacing_factor` — `TabRecipe::for_tokens` |
 | `crates/teksilo-widgets/src/styles/recipe_tab_style.rs` | 48 | `TAB_UNDERLINE_ACTIVE` | `2.0` | Decoration | fixed — decorative geometry, no hit consequence |
 | `crates/teksilo-widgets/src/styles/recipe_tab_style.rs` | 49 | `TAB_UNDERLINE_HOVER` | `2.0` | Decoration | fixed — decorative geometry, no hit consequence |
-| `crates/teksilo-widgets/src/styles/recipe_tab_style.rs` | 50 | `TAB_CLOSE_BUTTON_SIZE` | `16.0` | Target | visual fixed at 16 dp (below the floor); hit via `partition_targets` on the tab |
+| `crates/teksilo-widgets/src/styles/recipe_tab_style.rs` | 51 | `TAB_CLOSE_BUTTON_SIZE` | `16.0` | Target | visual fixed at 16 dp, but it has **no reader in this workspace** and so carries no target: the tab's close affordance is a real `IconButton` at `IconButtonSize::Compact`, 24 dp at Compact and on the ladder above it (**corrected by P40** — see [Corrections P40](#corrections-p40-made-to-this-document)) |
 | `crates/teksilo-widgets/src/styles/recipe_tab_style.rs` | 52 | `DROP_INDICATOR_WIDTH` | `2.0` | Decoration | fixed — decorative geometry, no hit consequence |
 | `crates/teksilo-widgets/src/styles/recipe_table_style.rs` | 35 | `ROW_HEIGHT` | `28.0` | Target | scales with `target_size` — `TableRecipe::for_tokens` |
 | `crates/teksilo-widgets/src/styles/recipe_table_style.rs` | 37 | `HEADER_HEIGHT` | `32.0` | Target | scales with `target_size` — `TableRecipe::for_tokens` |
@@ -552,7 +602,7 @@ Five recipes carry no dimension constant of their own:
 | `crates/teksilo-widgets/src/styles/recipe_table_style.rs` | 65 | `FOCUS_RING_INSET` | `1.0` | Spacing | scales with `spacing_factor` — `TableRecipe::for_tokens` |
 | `crates/teksilo-widgets/src/styles/recipe_table_style.rs` | 67 | `MIN_COLUMN_WIDTH_DEFAULT` | `32.0` | Target | scales with `target_size` — `TableRecipe::for_tokens` |
 | `crates/teksilo-widgets/src/styles/recipe_table_style.rs` | 69 | `TREE_INDENT_PER_LEVEL` | `16.0` | Spacing | scales with `spacing_factor` — `TableRecipe::for_tokens` |
-| `crates/teksilo-widgets/src/styles/recipe_table_style.rs` | 71 | `TREE_TWIST_SIZE` | `12.0` | Target | visual fixed at 12 dp (below the floor); coarse hit via `hit_outset` |
+| `crates/teksilo-widgets/src/styles/recipe_table_style.rs` | 72 | `TREE_TWIST_SIZE` | `12.0` | Target | visual fixed at 12 dp (below the floor); coarse hit via `hit_outset`, which is credited but earns **one side only** — the chevron sits at its cell's leading edge, measuring 18 × 24 at Compact and 22 × 28 at Comfortable, clearing the floor at Touch (**corrected by P40** — see [Corrections P40](#corrections-p40-made-to-this-document)) |
 | `crates/teksilo-widgets/src/styles/recipe_table_style.rs` | 73 | `TREE_TWIST_LABEL_GAP` | `4.0` | Spacing | scales with `spacing_factor` — `TableRecipe::for_tokens` |
 | `crates/teksilo-widgets/src/styles/recipe_text_input_style.rs` | 46 | `TEXT_FIELD_HEIGHT` | `28.0` | Target | scales with `target_size` — `TextInputRecipe::for_tokens` |
 | `crates/teksilo-widgets/src/styles/recipe_text_input_style.rs` | 47 | `TEXT_FIELD_PADDING_HORIZONTAL` | `4.0` | Spacing | scales with `spacing_factor` — `TextInputRecipe::for_tokens` |
@@ -706,7 +756,7 @@ from its *items* — `DockRailItemSize` resolves through `IconButtonRecipe`, whi
 | `crates/teksilo-widgets/src/docking/resize_handle.rs` | 34 | `KEYBOARD_STEP` | `16.0` | Grab | fixed — keyboard step, not a hit dimension |
 | `crates/teksilo-widgets/src/docking/resize_handle.rs` | 35 | `SNAP_OFFSET` | `30.0` | Grab | fixed — snap distance, not a hit dimension |
 | `crates/teksilo-widgets/src/docking.rs` | 65 | `COLLAPSED_EPS` | `0.01` | Decoration | fixed — decorative geometry, no hit consequence |
-| `crates/teksilo-widgets/src/docking.rs` | 67 | `DOCK_GUTTER` | `6.0` | Grab | visual fixed at 6 dp; grab via `hit_outset` (24 dp, 44 at Touch) |
+| `crates/teksilo-widgets/src/docking.rs` | 67 | `DOCK_GUTTER` | `6.0` | Grab | visual fixed at 6 dp; grab via `hit_outset` (24 dp, 44 at Touch) — and at Touch that ring reaches **past the centre line of the dock tab strip beside it**, which the audit reports as an unreachable target (**corrected by P40** — see [Corrections P40](#corrections-p40-made-to-this-document)) |
 | `crates/teksilo-widgets/src/drop_target/overlay.rs` | 40 | `REGION_FILL_ALPHA` | `0.22` | — not a dimension | fixed — unitless (ratio / alpha / duration / epsilon) |
 | `crates/teksilo-widgets/src/drop_target.rs` | 134 | `DEFAULT_ZONE_SIZE_FACTOR` | `0.2` | — not a dimension | fixed — unitless (ratio / alpha / duration / epsilon) |
 | `crates/teksilo-widgets/src/grid_view.rs` | 131 | `SCROLLBAR_THICKNESS` | `12.0` | Grab | visual fixed; coarse grab via `hit_outset` + `target_regions` |

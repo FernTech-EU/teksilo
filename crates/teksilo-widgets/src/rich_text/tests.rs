@@ -371,6 +371,16 @@ fn read_only_editor_is_focusable_and_dispatches_key_events() {
         focused,
     );
 
+    // A click reaching it is not the same as a keyboard reaching it: the click
+    // walks to the nearest focusable ancestor, while Tab additionally honours
+    // `tab_stop` on that node and every ancestor. A read-only editor a pointer
+    // can focus and Tab cannot is a 2.1.1 failure, so the traversal graph is
+    // asserted rather than inferred from the click.
+    assert!(
+        !tree.tab_stops_within(id).is_empty(),
+        "a read-only editor must be reachable by Tab, not only by a click"
+    );
+
     // Capture the cursor position before key dispatch.
     let version_before = version.get();
     tree.dispatch_event(WidgetEvent::KeyDown {

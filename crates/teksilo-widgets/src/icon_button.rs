@@ -103,8 +103,9 @@ use crate::primitives::icon_widget::IconWidget;
 
 /// Size variant for [`IconButton`]. See [`teksilo_core::styles::IconButtonSize`]
 /// for the canonical definition. Variants are calibrated to the
-/// IntelliJ Int UI scale (Compact 22 dp, Default 24 dp, Toolbar 30 dp,
-/// Large 40 dp, Hero 50 dp).
+/// IntelliJ Int UI scale (Compact 24 dp, Default 24 dp, Toolbar 30 dp,
+/// Large 40 dp, Hero 50 dp); `IconButtonRecipe::for_tokens` puts every rung
+/// on the density ladder.
 pub use teksilo_core::styles::IconButtonSize;
 
 use crate::button::InteractionState;

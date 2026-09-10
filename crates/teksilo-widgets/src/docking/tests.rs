@@ -2059,9 +2059,21 @@ fn bare_dock_shows_options_header_only_when_opted_in() {
     let mut t = tree();
     let root = t.add(layout);
     t.layout(SizeProposal::exact(900.0, 600.0));
+    let options = find_named(&t, root, "More actions: Explorer")
+        .expect("show_header(true) ⇒ a bare dock has the ⋮ options button");
+
+    // The census counts this button as the keyboard route to the placements a
+    // drag offers, so its reachability is asserted rather than read off the
+    // fact that an `IconButton` is focusable by default: it sits inside an
+    // accordion header wrapped in a `DeadZone`, and a `tab_stop` suppression
+    // anywhere above it would leave the menu pointer-only.
+    //
+    // The stop is the inner `IconButton`, not this node: the name is carried by
+    // the enclosing `PopoverWidget`, which is correctly not a stop of its own.
     assert!(
-        has_named(&t, root, "More actions: Explorer"),
-        "show_header(true) ⇒ a bare dock has the ⋮ options button"
+        !t.tab_stops_within(options).is_empty(),
+        "the ⋮ options button offers no Tab stop, so its menu — the only \
+         non-drag route to those placements — is reachable by pointer alone"
     );
 }
 

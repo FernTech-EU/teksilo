@@ -811,12 +811,16 @@ fn the_field_handle_names_the_node_that_takes_focus() {
         "the handle names the field, which is the node that survives the filter"
     );
 
-    tree.focus(field);
-    tree.request_frame();
+    // And focus can actually arrive there. Read off the traversal graph, not by
+    // focusing the field and reading focus back: `WidgetTree::focus` carries no
+    // focusable guard, so that assertion holds for the composite's own id too —
+    // the very thing this test exists to distinguish.
+    let stops = tree.tab_stops_within(outer);
     assert_eq!(
-        tree.focused(),
-        Some(field),
-        "and focus lands on it, which the composite's own id could not do"
+        stops,
+        vec![field],
+        "the field is the composite's only Tab stop, which is why it is the id \
+         a host must be handed; got {stops:?}"
     );
 }
 

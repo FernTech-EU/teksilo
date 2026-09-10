@@ -287,11 +287,13 @@ type OnValueChangedFn<T> = Rc<dyn Fn(T, &mut EventContext)>;
 /// enforced to the minimum at layout time via `MinSize`.
 /// Painted width of one stacked step button, in dp.
 ///
-/// Below the 24 dp WCAG floor by design: the two buttons are a partitioned
-/// in-node target inside the field's frame, and their coarse hit area comes
-/// from `Widget::hit_outset`, not from growing the paint (which would widen
-/// every numeric field on a form). Named here so the hit mechanisms and the
-/// `chrome` arithmetic below read the same number.
+/// Below the 24 dp WCAG floor, and **no hit mechanism reaches it** — see the
+/// "Touch and pen" section of this module and `StepButton::children` for the
+/// measurement. The two steps are separate nodes stacked in a trailing column
+/// exactly one button wide, so there is nothing for `Widget::hit_outset` to
+/// grow into and nothing for `partition_targets` to carve; growing the paint
+/// instead would widen every numeric field on a form. Named here so the hit
+/// mechanisms and the `chrome` arithmetic below read the same number.
 pub const SPIN_BOX_STEP_BUTTON_WIDTH: f32 = 18.0;
 
 /// Painted height of one stacked step button, in dp. Only a fallback — the

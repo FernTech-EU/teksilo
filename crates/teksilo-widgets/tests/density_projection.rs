@@ -408,15 +408,18 @@ fn every_inventory_row_carries_a_known_class() {
 /// conformance from the hit mechanisms, which is what A10 designed them for.
 ///
 /// The named exceptions are the `MinSize` rows: a `MinSize` *is* a hit box, so
-/// `density_min_size` enforces the floor there, and those three sites change at
-/// Compact by design.
+/// `density_min_size` enforces the floor there, and the files listed below
+/// change at Compact by design. The count is deliberately not written here —
+/// `docs/density-inventory.md` §0 enumerates the Compact-visible exceptions and
+/// is the only place it lives, because a count repeated in a second place is a
+/// count that drifts. It drifted here: this sentence said "three" while the
+/// list under it named four.
 #[test]
 fn no_sub_floor_dimension_claims_to_scale_with_target_size() {
     const DECLARED_EXCEPTIONS: &[&str] = &[
         "crates/teksilo-preview-ui/src/navigator.rs",
         "crates/teksilo-theme-macos/src/styles/button.rs",
         "crates/teksilo-theme-macos/src/styles/text_input.rs",
-        "crates/teksilo-widgets/src/text_input.rs",
     ];
 
     for row in inventory_rows() {

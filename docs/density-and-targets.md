@@ -286,6 +286,36 @@ of **one** chain covering both widening mechanisms: it silences the widget's
 `hit_outset` as well as its slop. It is per-node, not per-subtree — to take a
 whole subtree out of hit-testing use `hit_transparent`.
 
+#### An outset claim is not a slop candidate
+
+The chain is one chain in a second sense, and it has to be said outright because
+the two mechanisms otherwise compete: **when the exact pass resolved its point
+through some node's `hit_outset`, the miss-only pass returns that hit unchanged
+and never runs its comparison.** The claim was already made, inside the pass that
+is allowed to make it, so there is nothing left to re-attribute. The whole path
+from the root to the exact hit is checked, because the outset pre-pass resolves
+its candidate *through* the ordinary recursion — the node the exact pass returns
+may be a descendant of the grip that won the point.
+
+Without that rule the outset loses every time it is contested. A grip only ever
+claims a point at a **positive** distance from its own uninflated shape, which is
+exactly the condition under which the bubble-path rule lets a slop candidate
+through: any slop-eligible node lying under the ring is strictly closer than the
+grip, so it takes the press. The symptom is perverse rather than merely wrong: a
+grip's reach *shrinks* as the density gets coarser, because raising `up_to` from
+24 to 44 dp turns neighbours that could earn nothing into candidates that can.
+And it is not confined to the coarse densities — **at Compact any neighbour still
+under 24 dp is already a candidate**, which is a shipped control rather than a
+hypothetical: a `SearchField`'s clear button reaches 24 × 24 dp at Compact with
+this rule and 22 × 24 without it, while a `TableView`'s scroll bar reaches 32 dp
+across its thickness at Touch with it and 18 dp without. Both figures are
+assertions —
+`an_outsets_claim_survives_the_slop_pass_in_the_shipped_controls` in
+`crates/teksilo-widgets/tests/target_conformance.rs` — not prose. The predicate
+is `won_through_outset` in `arena.rs`, consulted by `apply_slop` before it walks
+any candidate; `no_hit_slop` still silences the outset and the slop together,
+which is what keeps one chain one.
+
 ### `TouchTarget` — the residue
 
 ```rust
@@ -300,6 +330,50 @@ response — grow weight, shrink weight and compression floor — unchanged.
 control's *own* dimensions rather than padding around it. `Touch` is the ladder
 where a 24 dp control still falls 20 dp short and no recipe can close the gap
 from inside.
+
+## Measuring conformance: the audit and its fixture lists
+
+`teksilo_core::accessibility::target_audit` measures how big every target in a
+laid-out tree actually is **to a finger**, and each crate holds a named fixture
+list that drives it (`tests/target_conformance.rs`). The walker does not add the
+mechanisms above up: every one of them is conditional, so it proposes a growth
+and then confirms it against the real hit test, probing outward from the point a
+user aims at. The module docs carry the reasoning; five rules govern writing a
+fixture, and each of them was learnt by a fixture that measured nothing.
+
+- **Build the subject inside the container it ships in.** A control alone in a
+  stack over-reports: with no eligible handler on the bubble path the slop pass
+  tops up every near miss, so a broken control measures as conformant. A
+  tappable row around it is what makes the fixture discriminate.
+- **Give the subject the handler its real container gives it.** A `ListView`
+  installs its rows' press handler only when it has a `SelectionModel`; a
+  `NotificationLog`'s rows are inert without `on_entry_invoked`; a `TwistArrow`
+  declares no outset without an `on_click`. Omit one and the subject is not a
+  target at all, and the audit measures the furniture around it.
+- **Lay out twice where the affordance is gated by a value layout publishes.**
+  `Toolbar::is_overflowing` and `SegmentedControl`'s overflow flag are written
+  from `place_children` and bound at `Relayout`, so after one pass the overflow
+  chevron is still dormant.
+- **Assert what was measured, not what appears in the path.** A subject's own
+  type name appears in the path of everything beneath it, so a check that reads
+  the whole path is satisfied by a child; the claim has to be about the measured
+  node.
+- **Configure the subject so the regions it reports exist.** A
+  `Widget::target_regions` implementation may return an empty list for a default
+  configuration, and it takes every part with it — a table's header cell reports
+  nothing at all unless one of its columns is filterable, so its label zone,
+  filter zone *and* resize grip go unmeasured together. A hook left unmeasured
+  this way can be deleted with the gate still green, which is the one failure the
+  gate exists to prevent; the check is that every `target_regions` implementation
+  in the crate contributes at least one measured part.
+
+Two things the audit cannot see, by construction rather than by omission: a
+target with **no arena node** (a `ListView` row where the view routes presses by
+index, a text surface's selection handles, a close affordance carved out of one
+node's rectangle) unless its widget reports it from `Widget::target_regions`;
+and an affordance **revealed by hover**, which does not exist at all below
+`RevealPolicy::Always` — which is the correct answer for a finger, since a
+finger never hovers.
 
 ## Gesture profiles
 

@@ -543,8 +543,10 @@ fn a_text_field_is_at_least_the_control_height() {
         // button's *minimum hit box* is now the 24 dp WCAG 2.2 SC 2.5.8 floor:
         // the density sweep routes every `MinSize` through `density_min_size`,
         // and a `MinSize` is exactly the hit box that floor governs. This is
-        // one of the three sites in the whole tree where that raised a
-        // dimension at the Compact density — see `docs/density-inventory.md`.
+        // one of the sites `docs/density-inventory.md` §0 enumerates, where the
+        // sweep raised a dimension at the Compact density. §0 is the only place
+        // that count lives; this comment used to carry its own, and it was out
+        // of date by one.
         let expected = bezel.max(24.0);
 
         assert!(

@@ -244,7 +244,7 @@ Five primitives constrain what their child can be:
 | Wrapper | Rule | When to use |
 | --- | --- | --- |
 | `FixedSize` | Child reports `bound.width` / `bound.height` (or its natural size on unbound axes); parent proposal is ignored on bound axes. | Dialog widths from settings, animated panel widths. |
-| `MinSize` | Child's wanted size is clamped *upward* on each constrained axis. | Touch targets (`MinSize::new(48.0, 48.0)`), readable column widths. |
+| `MinSize` | Child's wanted size is clamped *upward* on each constrained axis. | Hit targets, readable column widths. For a target, take the floor from the theme rather than hardcoding a number — see 4.2. |
 | `MaxSize` | Child's wanted size is clamped *downward*. Sets `clips_children: true` so overflow is scissored. | Reading-width caps (`MaxSize::width(640.0)`), modal max-height. |
 | `AspectRatio` | Wanted size fits within proposal at a fixed `width / height`. | Image previews, video tiles, square avatars. |
 | `Padding` | Wraps a child with insets; child receives `proposal − insets`, parent reports `child + insets`. | Inner spacing inside cards, dialogs, list rows. |
@@ -276,8 +276,11 @@ Both `width` and `height` accept `impl Into<Prop<f32>>` — pass an `f32` for st
 [crates/teksilo-widgets/src/primitives/min_size.rs](../crates/teksilo-widgets/src/primitives/min_size.rs)
 
 ```rust
-// 48×48 minimum touch target — the Button composite uses this internally:
-MinSize::new(48.0, 48.0).child(content)
+// A minimum hit box. `RecipeButtonStyle::make_body` wraps a Button in one of
+// these, at `ButtonRecipe::min_size` — 72 x 24 dp at Compact for all three
+// variant recipes, raised per axis to the active density's `target_size` by
+// `density_min_size`:
+MinSize::new(recipe.min_size.width, recipe.min_size.height).child(content)
 
 // Single axis:
 MinSize::width(120.0).child(label)

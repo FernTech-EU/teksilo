@@ -4470,3 +4470,89 @@ fn click_probe(
     });
     (tree, id, seen, activated)
 }
+
+/// A **leaf** row's chevron is not a pointer target; a **branch** row's is.
+///
+/// Both halves are asserted, and that is the point of the test: a leaf-only
+/// assertion passes just as well if chevrons stop being targets altogether, and
+/// a branch-only one passes while every leaf carries an invisible 12 dp target
+/// that does nothing.
+///
+/// The leaf half is what [`TreeBodyPane`] used to get wrong. It wired
+/// `on_click` on every chevron, including the ones that paint nothing, and an
+/// `on_click` is exactly what makes a node a pointer target — a 12 dp one, two
+/// dp of it below the WCAG 2.2 SC 2.5.8 floor at every density, actuating
+/// `toggle_at` on a row with nothing to toggle. `StandardTreeItem::build` has
+/// always guarded the same wiring behind `has_children`, and
+/// `TwistArrow::hit_outset` returns [`EdgeInsets::ZERO`] for a leaf, so the node
+/// could not have grown to the floor even in principle.
+///
+/// "Is a pointer target" is asked through
+/// [`measure_targets`](teksilo_core::accessibility::target_audit::measure_targets),
+/// whose candidate set is `WidgetArena::takes_a_press` — the framework's own
+/// definition of "would act on a press", and the same predicate the miss-only
+/// slop pass reads for eligibility. Asked at Compact because the answer is
+/// structural rather than dimensional: a chevron either carries the handler or
+/// it does not, at every density.
+#[test]
+fn only_a_branch_rows_chevron_is_a_pointer_target() {
+    use teksilo_core::accessibility::target_audit::measure_targets;
+    use teksilo_tokens::TargetDensity;
+
+    let proxy = SortFilterTreeModel::new(sample_tree());
+    proxy.expand_all(); // docs@0 readme@1 guide@2 src@3 main.rs@4
+    let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+    let view = tree.add(
+        TreeTableView::from_projection(proxy.clone())
+            .add_column(name_col())
+            .row_height(20.0),
+    );
+    tree.layout(SizeProposal {
+        width: Some(400.0),
+        height: Some(300.0),
+    });
+
+    // Every chevron in the body, with the flat row index its bounds put it in.
+    fn chevrons(tree: &WidgetTree, id: WidgetId, out: &mut Vec<(usize, WidgetId)>) {
+        if tree.widget_type_name(id) == Some("teksilo_widgets::primitives::twist_arrow::TwistArrow")
+        {
+            let y = tree.bounds(id).center().y;
+            let row = ((y - cp::HEADER_HEIGHT) / 20.0).floor().max(0.0) as usize;
+            out.push((row, id));
+        }
+        for child in tree.children(id) {
+            chevrons(tree, child, out);
+        }
+    }
+    let mut found = Vec::new();
+    chevrons(&tree, view, &mut found);
+    found.sort_by_key(|(row, _)| *row);
+    assert_eq!(
+        found.iter().map(|(row, _)| *row).collect::<Vec<_>>(),
+        vec![0, 1, 2, 3, 4],
+        "one chevron per visible row, leaves included — a leaf's chevron still \
+         occupies the indent column, it is only not a target: {found:?}",
+    );
+
+    let targets: Vec<WidgetId> = measure_targets(&tree, TargetDensity::Compact)
+        .into_iter()
+        .filter(|m| m.part.is_none())
+        .map(|m| m.node)
+        .collect();
+
+    for (row, chevron) in found {
+        let is_branch = row == 0 || row == 3; // "docs" and "src"
+        assert_eq!(
+            targets.contains(&chevron),
+            is_branch,
+            "row {row}'s chevron is {}a pointer target, and it should {}be: \
+             rows 0 and 3 are the branches, 1, 2 and 4 are leaves",
+            if targets.contains(&chevron) {
+                ""
+            } else {
+                "not "
+            },
+            if is_branch { "" } else { "not " },
+        );
+    }
+}

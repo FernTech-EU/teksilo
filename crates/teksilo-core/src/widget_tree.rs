@@ -70,7 +70,7 @@ impl AnimatedRegistration {
 
 #[allow(clippy::type_complexity)]
 pub struct WidgetTree {
-    arena: WidgetArena,
+    pub(crate) arena: WidgetArena,
     /// Current theme value cached for `&Theme` accessors used by layout/paint
     /// contexts and by widgets that need an immediate read. The reactive source
     /// of truth is `theme_signal`; both are updated in lockstep by `set_theme`.
@@ -343,7 +343,7 @@ pub struct WidgetTree {
     /// focus-aware selection + focus rings in `StandardItem`.
     view_focus_stack: Vec<crate::signal::Signal<bool>>,
     /// Layout direction for RTL/LTR support.
-    layout_direction: crate::environment::LayoutDirection,
+    pub(crate) layout_direction: crate::environment::LayoutDirection,
     /// Animation scheduler for smooth animated state and signal transitions.
     animation_scheduler: crate::animation::AnimationScheduler,
     /// Weakly tracked animated values from both state and signal APIs.

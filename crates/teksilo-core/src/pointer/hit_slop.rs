@@ -265,6 +265,23 @@ impl<'a> HitContext<'a> {
         self
     }
 
+    /// Turn the miss-only slop pass **off** while keeping the pointer kind, so
+    /// the exact pass — including every widget's [`Widget::hit_outset`] for that
+    /// kind — is all that runs.
+    ///
+    /// The one consumer is the target-conformance audit
+    /// ([`target_audit`](crate::accessibility::target_audit)), which measures a
+    /// control's reach twice: once through this door and once through the full
+    /// one, and attributes the difference to the mechanism that produced it. A
+    /// harness that could not tell the two apart would certify a target and be
+    /// unable to say what makes it reachable.
+    ///
+    /// [`Widget::hit_outset`]: crate::widget::Widget::hit_outset
+    pub fn without_slop(mut self) -> Self {
+        self.slop = HitSlop::NONE;
+        self
+    }
+
     /// Install a probe the slop pass calls to ask whether a node refuses edits.
     ///
     /// A read-only surface is never a slop candidate, and "read-only" is a

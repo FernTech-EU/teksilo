@@ -3206,7 +3206,7 @@ impl WidgetTree {
 
     /// The one hit-test body: overlay first, then the arena, under whichever
     /// [`HitContext`](crate::pointer::hit_slop::HitContext) the caller built.
-    fn hit_test_with(
+    pub(crate) fn hit_test_with(
         &self,
         point: Point,
         exclude_overlay: Option<crate::overlay::OverlayId>,

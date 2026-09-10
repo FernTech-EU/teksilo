@@ -89,6 +89,45 @@ fn invoke_custom_action(tree: &mut WidgetTree, widget: WidgetId, label: &str) ->
     )
 }
 
+/// Fail unless Tab traversal can land on `node`.
+///
+/// The keyboard obligation is about *getting there*, and only the traversal
+/// graph answers that. `WidgetTree::focus` carries no focusable guard, so a
+/// `tree.focus(id)` followed by a keystroke proves the node's handler runs and
+/// says nothing about whether a keyboard user can ever arrive: deleting
+/// `focusable(true)` from a control leaves every such assertion green.
+fn assert_reachable_by_tab(tree: &WidgetTree, node: WidgetId) {
+    let stops = tree.tab_stops_within(tree.roots()[0]);
+    assert!(
+        stops.contains(&node),
+        "{node:?} is no Tab stop, so the keyboard route starts nowhere: {stops:?}"
+    );
+}
+
+/// Fail unless the roving strip these headers form can be entered at all.
+///
+/// A roving tab-index composite is deliberately **one** Tab stop however many
+/// items it holds, so [`assert_reachable_by_tab`] is the wrong probe for a
+/// single header — it would fail on every unselected one by design. What the
+/// keyboard route needs here is that the strip is enterable; that the arrows
+/// then move the cursor inside it is a separate assertion, and each roving
+/// module below carries one.
+fn assert_roving_strip_is_reachable(tree: &WidgetTree, items: &[WidgetId]) {
+    let stops = tree.tab_stops_within(tree.roots()[0]);
+    let entered: Vec<WidgetId> = items
+        .iter()
+        .copied()
+        .filter(|i| stops.contains(i))
+        .collect();
+    assert_eq!(
+        entered.len(),
+        1,
+        "a roving strip is exactly one Tab stop; {} of {} items are stops",
+        entered.len(),
+        items.len()
+    );
+}
+
 /// Right-click at `at`, which is how a context menu opens for a mouse.
 fn right_click(tree: &mut WidgetTree, at: Point) {
     tree.dispatch_event(WidgetEvent::PointerDown {
@@ -269,6 +308,7 @@ mod list_view_row_reorder {
     fn alt_home_and_alt_end_reach_both_ends_from_the_keyboard() {
         let mut f = fixture();
         f.selection.select(3);
+        assert_reachable_by_tab(&f.tree, f.view);
         f.tree.focus(f.view);
         f.tree.press_key(Key::Home, Modifiers::ALT);
         assert_eq!(
@@ -541,6 +581,7 @@ mod tree_view_row_reorder {
     fn alt_arrows_reorder_reparent_and_reach_the_ends() {
         let mut f = fixture();
         f.selection.select(1);
+        assert_reachable_by_tab(&f.tree, f.view);
         f.tree.focus(f.view);
         f.tree.press_key(Key::End, Modifiers::ALT);
         assert_eq!(shape(&f)[0].1, vec!["A", "C", "D", "B"]);
@@ -879,6 +920,7 @@ mod table_view_row_reorder {
     fn alt_home_and_alt_end_reach_both_ends_from_the_keyboard() {
         let mut f = fixture();
         f.selection.select(2);
+        assert_reachable_by_tab(&f.tree, f.view);
         f.tree.focus(f.view);
         f.tree.press_key(Key::Home, Modifiers::ALT);
         assert_eq!(order(&f.model), vec!["gamma", "alpha", "beta", "delta"]);
@@ -1049,6 +1091,7 @@ mod tree_table_view_row_reorder {
     fn alt_arrows_reorder_and_reparent_from_the_keyboard() {
         let mut f = fixture();
         f.selection.select(1);
+        assert_reachable_by_tab(&f.tree, f.view);
         f.tree.focus(f.view);
         f.tree.press_key(Key::End, Modifiers::ALT);
         assert_eq!(roots(&f), vec!["A", "C", "D", "B"]);
@@ -1217,6 +1260,7 @@ mod grid_view_tile_reorder {
     fn alt_home_and_alt_end_reach_both_ends_from_the_keyboard() {
         let mut f = fixture();
         f.selection.select(2);
+        assert_reachable_by_tab(&f.tree, f.view);
         f.tree.focus(f.view);
         f.tree.press_key(Key::Home, Modifiers::ALT);
         assert_eq!(order(&f.model), vec!["c", "a", "b", "d", "e", "f"]);
@@ -1427,6 +1471,7 @@ mod tab_reorder {
     fn alt_arrows_and_alt_ends_move_a_focused_tab() {
         let mut f = fixture();
         let second = headers(&f.tree)[1];
+        assert_roving_strip_is_reachable(&f.tree, &headers(&f.tree));
         f.tree.focus(second);
         f.tree.press_key(Key::ArrowRight, Modifiers::ALT);
         assert_eq!(order(&f), vec!["A", "C", "B", "D"]);

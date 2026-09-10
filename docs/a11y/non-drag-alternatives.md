@@ -164,6 +164,15 @@ Step 4's fourth item is the one that cannot be skipped, and the way to write it
 is to drive the real drag in the same test and compare the model. A test that
 asserts a menu row is present passes when the row does nothing.
 
+Its second item has a shape that must be written a particular way.
+`WidgetTree::focus` carries no focusable guard, so focusing the subject and
+pressing the chord proves the handler runs and says nothing about whether a
+keyboard user can arrive: the whole test stays green after `focusable(true)` is
+deleted from the widget. Assert the traversal graph instead —
+`WidgetTree::tab_stops_within` contains the node, or, for a roving tab-index
+composite where only the current item is a stop, that the strip contributes
+exactly one and that the arrows move the cursor inside it.
+
 ## What is still drag-only
 
 These are open, with what each needs. The census carries the full reasoning.
