@@ -11344,6 +11344,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "teksilo-teksu-guard"
+version = "0.9.4"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 3.0.4",
+ "teksilo-canvas",
+ "teksilo-core",
+ "teksilo-macros",
+ "teksilo-parse",
+ "teksilo-tokens",
+]
+
+[[package]]
 name = "teksilo-telemetry"
 version = "0.9.5"
 dependencies = [

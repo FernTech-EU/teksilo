@@ -22,7 +22,12 @@ pub fn error<T: std::fmt::Display>(span: Span, msg: T) -> Error {
 /// in any order without hitting "no method named `child` found for
 /// `WidgetWithHandlers<T>`".
 ///
-/// Kept in sync with `crates/teksilo-core/src/widget_builder.rs`.
+/// Membership is decided by the return type: a `WidgetBuilder` method
+/// returning `WidgetWithHandlers<Self>` belongs here, because that
+/// return is what breaks the chain. The `teksilo-teksu-guard` crate
+/// parses `crates/teksilo-core/src/widget_builder.rs` and fails the
+/// build when a wrapping method is absent from the list below, so this
+/// is not kept in step by discipline.
 pub fn is_widget_builder_method(name: &str) -> bool {
     matches!(
         name,
@@ -34,6 +39,7 @@ pub fn is_widget_builder_method(name: &str) -> bool {
             | "on_drag"
             | "on_swipe"
             | "on_pinch"
+            | "gesture_dead_zone"
             | "accept_tap_buttons"
             | "accept_double_tap_buttons"
             | "accept_triple_tap_buttons"
@@ -43,8 +49,19 @@ pub fn is_widget_builder_method(name: &str) -> bool {
             | "on_key"
             | "on_key_preview"
             | "on_pointer_event"
+            | "on_pointer_cancel"
             | "on_hover"
             | "on_scroll"
+            | "keyboard_capture"
+            // Touch and pointer arbitration
+            | "touch_action"
+            | "scroll_container"
+            | "pan_claim"
+            | "overscroll_behavior"
+            | "multi_contact"
+            | "long_press_role"
+            | "hit_slop"
+            | "no_hit_slop"
             // Framework-level node properties
             | "focusable"
             | "tab_index"
@@ -58,6 +75,7 @@ pub fn is_widget_builder_method(name: &str) -> bool {
             | "hover_within"
             | "visible_when"
             // Drag / drop
+            | "drag_activation"
             | "on_drag_hover"
             | "on_drag_leave"
             | "on_drag_tick"
@@ -133,7 +151,14 @@ pub fn is_category_b_widget(ident: &str) -> bool {
             | "DialogContent"
             | "Breadcrumb"
             | "TabWidget"
-            | "Popover"
+            // The popover family is four names, all of them aliases of
+            // `PopoverWidget<T>`, and none of them spelled `Popover` — which is
+            // what this list used to say, so a bare child in any real popover
+            // fell through to the generic error instead of the slot hint.
+            | "PopoverWidget"
+            | "PopoverButton"
+            | "PopoverIconButton"
+            | "PopoverCustom"
             | "Snackbar"
             | "Dialog"
             | "Wizard"
@@ -152,7 +177,7 @@ fn category_b_slot_hint(ident: &str) -> &'static str {
         "DialogContent" => "body",
         "Breadcrumb" => "item",
         "TabWidget" => "tab",
-        "Popover" => "content",
+        "PopoverWidget" | "PopoverButton" | "PopoverIconButton" | "PopoverCustom" => "content",
         "Snackbar" => "content",
         "Dialog" => "content",
         "Wizard" => "step",

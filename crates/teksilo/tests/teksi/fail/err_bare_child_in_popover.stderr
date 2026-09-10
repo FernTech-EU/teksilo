@@ -1,0 +1,5 @@
+error: `PopoverButton` is a Category B widget with named slots — use `content: <widget>` instead of a bare child element
+  --> tests/teksi/fail/err_bare_child_in_popover.rs:46:13
+   |
+46 |             TextWidget("hi")
+   |             ^^^^^^^^^^

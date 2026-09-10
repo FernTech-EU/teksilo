@@ -26,7 +26,7 @@ cargo run -p multi-window                      # Multi-window demo
 cargo run -p recent-projects                   # MRU/persistence demo
 cargo run -p rich-text-editor                  # Rich text editing
 cargo run -p rich-text-viewer                  # Rich text viewing
-cargo run -p code_editor                       # CodeEditor: gutter, current-line band, bracket auto-close/match, Ctrl+/ comment, smart Tab, Ctrl+D multi-caret, Alt+arrows move-line, injected language-agnostic highlighter + completion. Also PlainTextEditor. See docs/code-editor.md
+cargo run -p code_editor                       # CodeEditor: gutter, current-line band, bracket auto-close/match, Ctrl+/ comment, smart Tab, Ctrl+D duplicate line/selection, Ctrl+Alt+↑/↓ and Alt-click multi-caret, Alt+arrows move-line, injected language-agnostic highlighter + completion. Also PlainTextEditor. See docs/code-editor.md
 cargo run -p log_view                          # LogView: read-only append-only tail-following streaming view — windowed layout (only the visible rows shaped, ~4 MB flat at 100k+ lines), derived follow-tail, scrollback cap, injected per-line severity colour, windowed a11y. See docs/log-view.md
 cargo run -p font-picker                       # FontPicker: list/search/filter all installed fonts (per-row in-font samples, script + monospaced filters), live preview
 cargo run -p spin-box                          # Numeric input demo
@@ -1188,6 +1188,16 @@ See [docs/teksu-macro-reference.md](docs/teksu-macro-reference.md) for
 the full surface language, desugaring cheat sheet, and limitations;
 [docs/teksu-language-spec-v3.md](docs/teksu-language-spec-v3.md) for the
 design spec with worked translations of the widget-catalog examples.
+**Adding a `WidgetBuilder` method obliges you to add its name to
+[`teksilo-parse::diag::is_widget_builder_method`](crates/teksilo-parse/src/diag.rs).** The
+lowering in `teksilo-macros/src/lower.rs` uses that predicate to decide whether a `name: value`
+before a child is a wrapping property, and a method missing from it surfaces to the user as
+"no method named `child` found for `WidgetWithHandlers<T>`" — a diagnostic that names neither
+the real cause nor the file to edit. Two shipped methods were absent this way for several
+releases. `crates/teksilo-teksu-guard` now fails the build on the divergence: it parses
+`widget_builder.rs` with `syn`, collects every method returning `WidgetWithHandlers<Self>`, and
+compares that set against the predicate in both directions.
+
 Slash command `/teksu-macro` loads the skill for read/write/explain/
 translate/debug workflows.
 

@@ -1,0 +1,29 @@
+# SPDX-License-Identifier: MPL-2.0
+# SPDX-FileCopyrightText: 2026 FernTech
+
+[package]
+name = "teksilo-teksu-guard"
+edition = "2024"
+version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Build-breaking drift guard keeping teksu!'s builder-method list in step with teksilo-core's WidgetBuilder trait."
+# Not published: the guard reads teksilo-core's source through a
+# workspace-relative path, which does not exist in a crates.io tarball.
+# It also exists solely to fail this workspace's build, so it has no
+# meaning to a downstream consumer.
+publish = false
+
+[dependencies]
+proc-macro2 = "1"
+quote = "1"
+syn = { version = "3", features = ["full", "extra-traits"] }
+
+[dev-dependencies]
+teksilo-parse = { workspace = true }
+teksilo-canvas = { workspace = true }
+teksilo-core = { workspace = true }
+teksilo-macros = { workspace = true }
+teksilo-tokens = { workspace = true }
