@@ -663,25 +663,23 @@ fn dropping_a_column_at_either_end_of_an_unpinned_strip_moves_it_without_pinning
     }
     fn drag_header(tree: &mut WidgetTree, from_x: f32, to_x: f32) {
         let y = cp::HEADER_HEIGHT * 0.5;
-        tree.dispatch_event(WidgetEvent::PointerDown {
-            position: Point::new(from_x, y),
-            button: PointerButton::Primary,
-            modifiers: Modifiers::NONE,
-        });
+        tree.dispatch_event(WidgetEvent::pointer_down(
+            Point::new(from_x, y),
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
         // Stepped, like a real pointer: the reorder drag is armed by the
         // pressed cell on the first move past the threshold, so that move
         // has to land while the pointer is still over it.
         for i in 1..=10 {
             let x = from_x + (to_x - from_x) * i as f32 / 10.0;
-            tree.dispatch_event(WidgetEvent::PointerMove {
-                position: Point::new(x, y),
-            });
+            tree.dispatch_event(WidgetEvent::pointer_move(Point::new(x, y)));
         }
-        tree.dispatch_event(WidgetEvent::PointerUp {
-            position: Point::new(to_x, y),
-            button: PointerButton::Primary,
-            modifiers: Modifiers::NONE,
-        });
+        tree.dispatch_event(WidgetEvent::pointer_up(
+            Point::new(to_x, y),
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
     }
     fn state(tree: &WidgetTree, table: WidgetId) -> (Vec<String>, Vec<String>) {
         let any = tree.widget_as_any(table).unwrap();
@@ -1115,16 +1113,16 @@ fn row_click_moves_focus_so_arrow_nav_resumes_there() {
 
     // Click row 3's body: rows are 20px tall and start below the header.
     let click_y = cp::HEADER_HEIGHT + 3.0 * 20.0 + 10.0;
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: Point::new(100.0, click_y),
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
-    tree.dispatch_event(WidgetEvent::PointerUp {
-        position: Point::new(100.0, click_y),
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        Point::new(100.0, click_y),
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
+    tree.dispatch_event(WidgetEvent::pointer_up(
+        Point::new(100.0, click_y),
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
     assert_eq!(sel.selected_indices(), vec![3], "click selects row 3");
     assert_eq!(
         read_focused_cell(&tree, table).map(|(r, _)| r),
@@ -2413,19 +2411,17 @@ fn resize_drag_right_grows_column_for_non_first_column() {
     let drag_to_x = down_x + 30.0;
     let down_y = cp::HEADER_HEIGHT * 0.5;
 
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: Point::new(down_x, down_y),
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
-    tree.dispatch_event(WidgetEvent::PointerMove {
-        position: Point::new(drag_to_x, down_y),
-    });
-    tree.dispatch_event(WidgetEvent::PointerUp {
-        position: Point::new(drag_to_x, down_y),
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        Point::new(down_x, down_y),
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
+    tree.dispatch_event(WidgetEvent::pointer_move(Point::new(drag_to_x, down_y)));
+    tree.dispatch_event(WidgetEvent::pointer_up(
+        Point::new(drag_to_x, down_y),
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
 
     let widths = {
         let any = tree.widget_as_any(table).unwrap();
@@ -2469,19 +2465,20 @@ fn resize_pointer_down_in_filter_zone_does_not_start_resize() {
         - (cp::FILTER_INDICATOR_SIZE + cp::CELL_PADDING_HORIZONTAL) * 0.5;
     let click_y = cp::HEADER_HEIGHT * 0.5;
     let mods = Modifiers::NONE;
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: Point::new(click_x, click_y),
-        button: PointerButton::Primary,
-        modifiers: mods,
-    });
-    tree.dispatch_event(WidgetEvent::PointerMove {
-        position: Point::new(click_x + 20.0, click_y),
-    });
-    tree.dispatch_event(WidgetEvent::PointerUp {
-        position: Point::new(click_x + 20.0, click_y),
-        button: PointerButton::Primary,
-        modifiers: mods,
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        Point::new(click_x, click_y),
+        PointerButton::Primary,
+        mods,
+    ));
+    tree.dispatch_event(WidgetEvent::pointer_move(Point::new(
+        click_x + 20.0,
+        click_y,
+    )));
+    tree.dispatch_event(WidgetEvent::pointer_up(
+        Point::new(click_x + 20.0, click_y),
+        PointerButton::Primary,
+        mods,
+    ));
     let widths = {
         let any = tree.widget_as_any(table).unwrap();
         let tv = any.downcast_ref::<TableView<Row>>().unwrap();
@@ -2574,19 +2571,17 @@ fn header_resize_works_when_table_is_nested_in_panel() {
     let drag_to_x = down_x + 30.0;
     let down_y = table_bounds.y + cp::HEADER_HEIGHT * 0.5;
 
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: Point::new(down_x, down_y),
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
-    tree.dispatch_event(WidgetEvent::PointerMove {
-        position: Point::new(drag_to_x, down_y),
-    });
-    tree.dispatch_event(WidgetEvent::PointerUp {
-        position: Point::new(drag_to_x, down_y),
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        Point::new(down_x, down_y),
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
+    tree.dispatch_event(WidgetEvent::pointer_move(Point::new(drag_to_x, down_y)));
+    tree.dispatch_event(WidgetEvent::pointer_up(
+        Point::new(drag_to_x, down_y),
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
 
     let widths = {
         let any = tree.widget_as_any(table_id).unwrap();
@@ -2627,18 +2622,14 @@ fn cursor_resets_to_default_when_pointer_leaves_resize_zone() {
     use crate::styles::recipe_table_style as cp;
     let header_y = cp::HEADER_HEIGHT * 0.5;
     // Hover near the right edge of "name" → cursor becomes ColResize.
-    tree.dispatch_event(WidgetEvent::PointerMove {
-        position: Point::new(398.0, header_y),
-    });
+    tree.dispatch_event(WidgetEvent::pointer_move(Point::new(398.0, header_y)));
     assert_eq!(
         tree.current_cursor(),
         CursorIcon::ColResize,
         "expected ColResize on the trailing edge"
     );
     // Now hover well inside the cell, away from the edge.
-    tree.dispatch_event(WidgetEvent::PointerMove {
-        position: Point::new(200.0, header_y),
-    });
+    tree.dispatch_event(WidgetEvent::pointer_move(Point::new(200.0, header_y)));
     assert_eq!(
         tree.current_cursor(),
         CursorIcon::Default,
@@ -2712,19 +2703,17 @@ fn header_resizing_works_in_full_data_grid_layout() {
     let down_y = table_bounds.y + cp::HEADER_HEIGHT * 0.5;
     let drop_x = down_x + 60.0;
 
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: Point::new(down_x, down_y),
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
-    tree.dispatch_event(WidgetEvent::PointerMove {
-        position: Point::new(drop_x, down_y),
-    });
-    tree.dispatch_event(WidgetEvent::PointerUp {
-        position: Point::new(drop_x, down_y),
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        Point::new(down_x, down_y),
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
+    tree.dispatch_event(WidgetEvent::pointer_move(Point::new(drop_x, down_y)));
+    tree.dispatch_event(WidgetEvent::pointer_up(
+        Point::new(drop_x, down_y),
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
 
     let widths = {
         let any = tree.widget_as_any(table_id).unwrap();
@@ -3084,19 +3073,17 @@ fn resize_handle_hit_tests_correctly_under_scroll() {
     let resize_y = table_bounds.y + cp::HEADER_HEIGHT * 0.5;
     let drop_x = resize_x + 20.0;
 
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: Point::new(resize_x, resize_y),
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
-    tree.dispatch_event(WidgetEvent::PointerMove {
-        position: Point::new(drop_x, resize_y),
-    });
-    tree.dispatch_event(WidgetEvent::PointerUp {
-        position: Point::new(drop_x, resize_y),
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        Point::new(resize_x, resize_y),
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
+    tree.dispatch_event(WidgetEvent::pointer_move(Point::new(drop_x, resize_y)));
+    tree.dispatch_event(WidgetEvent::pointer_up(
+        Point::new(drop_x, resize_y),
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
 
     let any = tree.widget_as_any(table).unwrap();
     let tv = any.downcast_ref::<TableView<Row>>().unwrap();
@@ -3629,28 +3616,24 @@ fn rtl_live_resize_tracks_without_drift() {
     let down_x = 340.0 + resize_handle * 0.5;
     let down_y = cp::HEADER_HEIGHT * 0.5;
 
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: Point::new(down_x, down_y),
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        Point::new(down_x, down_y),
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
     // Drag left in two steps with a relayout between — the relayout moves
     // id's physical-left edge, which is what used to corrupt the delta.
-    tree.dispatch_event(WidgetEvent::PointerMove {
-        position: Point::new(down_x - 20.0, down_y),
-    });
+    tree.dispatch_event(WidgetEvent::pointer_move(Point::new(down_x - 20.0, down_y)));
     tree.layout(SizeProposal {
         width: Some(400.0),
         height: Some(200.0),
     });
-    tree.dispatch_event(WidgetEvent::PointerMove {
-        position: Point::new(down_x - 40.0, down_y),
-    });
-    tree.dispatch_event(WidgetEvent::PointerUp {
-        position: Point::new(down_x - 40.0, down_y),
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
+    tree.dispatch_event(WidgetEvent::pointer_move(Point::new(down_x - 40.0, down_y)));
+    tree.dispatch_event(WidgetEvent::pointer_up(
+        Point::new(down_x - 40.0, down_y),
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
 
     let id_w = {
         let any = tree.widget_as_any(table).unwrap();
@@ -3868,22 +3851,18 @@ fn row_drop_insertion_with_variable_heights() {
 
     // Drag row 4 (id 4, spans 130..170) up to y = 35.
     let from = Point::new(150.0, 150.0);
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: from,
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
-    tree.dispatch_event(WidgetEvent::PointerMove {
-        position: Point::new(from.x + 10.0, from.y),
-    });
-    tree.dispatch_event(WidgetEvent::PointerMove {
-        position: Point::new(from.x, 35.0),
-    });
-    tree.dispatch_event(WidgetEvent::PointerUp {
-        position: Point::new(from.x, 35.0),
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        from,
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
+    tree.dispatch_event(WidgetEvent::pointer_move(Point::new(from.x + 10.0, from.y)));
+    tree.dispatch_event(WidgetEvent::pointer_move(Point::new(from.x, 35.0)));
+    tree.dispatch_event(WidgetEvent::pointer_up(
+        Point::new(from.x, 35.0),
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
 
     // Insertion before row 1: ids become [0, 4, 1, 2, 3].
     let ids: Vec<u32> = (0..model.len())
@@ -3982,22 +3961,18 @@ fn reorder_drag_routes_to_source_accept_drop_without_mutating() {
 
     // Drag row 4 (spans 130..170) up to y = 35 → insert before row 1.
     let from = Point::new(150.0, 150.0);
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: from,
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
-    tree.dispatch_event(WidgetEvent::PointerMove {
-        position: Point::new(from.x + 10.0, from.y),
-    });
-    tree.dispatch_event(WidgetEvent::PointerMove {
-        position: Point::new(from.x, 35.0),
-    });
-    tree.dispatch_event(WidgetEvent::PointerUp {
-        position: Point::new(from.x, 35.0),
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        from,
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
+    tree.dispatch_event(WidgetEvent::pointer_move(Point::new(from.x + 10.0, from.y)));
+    tree.dispatch_event(WidgetEvent::pointer_move(Point::new(from.x, 35.0)));
+    tree.dispatch_event(WidgetEvent::pointer_up(
+        Point::new(from.x, 35.0),
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
 
     assert_eq!(
         *captured.borrow(),
@@ -4330,23 +4305,21 @@ mod resize_grip {
     use teksilo_core::event::{Modifiers, PointerButton, WidgetEvent};
 
     fn down(tree: &mut WidgetTree, x: f32, y: f32) {
-        tree.dispatch_event(WidgetEvent::PointerDown {
-            position: Point::new(x, y),
-            button: PointerButton::Primary,
-            modifiers: Modifiers::NONE,
-        });
+        tree.dispatch_event(WidgetEvent::pointer_down(
+            Point::new(x, y),
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
     }
     fn moved(tree: &mut WidgetTree, x: f32, y: f32) {
-        tree.dispatch_event(WidgetEvent::PointerMove {
-            position: Point::new(x, y),
-        });
+        tree.dispatch_event(WidgetEvent::pointer_move(Point::new(x, y)));
     }
     fn up(tree: &mut WidgetTree, x: f32, y: f32) {
-        tree.dispatch_event(WidgetEvent::PointerUp {
-            position: Point::new(x, y),
-            button: PointerButton::Primary,
-            modifiers: Modifiers::NONE,
-        });
+        tree.dispatch_event(WidgetEvent::pointer_up(
+            Point::new(x, y),
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
     }
 
     fn overrides(tree: &WidgetTree, table: WidgetId) -> std::collections::HashMap<String, f32> {
@@ -5228,18 +5201,16 @@ fn resize_drag_moves_the_grabbed_divider_with_the_pointer_and_leaves_preceding_c
     use crate::styles::recipe_table_style as cp;
     let y = cp::HEADER_HEIGHT * 0.5;
     let down_x = 200.0 - cp::RESIZE_HANDLE_WIDTH * 0.5;
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: Point::new(down_x, y),
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        Point::new(down_x, y),
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
     // Several small moves with a layout between each, like real frames.
     let mut x = down_x;
     for _ in 0..10 {
         x += 3.0;
-        tree.dispatch_event(WidgetEvent::PointerMove {
-            position: Point::new(x, y),
-        });
+        tree.dispatch_event(WidgetEvent::pointer_move(Point::new(x, y)));
         tree.layout(proposal);
         let cells = header_cells(&tree, table);
         let divider = tree.bounds(cells[1]).right();
@@ -5253,11 +5224,11 @@ fn resize_drag_moves_the_grabbed_divider_with_the_pointer_and_leaves_preceding_c
             tree.bounds(cells[0]).width
         );
     }
-    tree.dispatch_event(WidgetEvent::PointerUp {
-        position: Point::new(x, y),
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
+    tree.dispatch_event(WidgetEvent::pointer_up(
+        Point::new(x, y),
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
     tree.layout(proposal);
 
     let widths = {
@@ -5339,25 +5310,23 @@ fn header_separators_follow_a_column_resize_and_a_horizontal_scroll() {
     // move to 230, the first must stay.
     let y = cp::HEADER_HEIGHT * 0.5;
     let down_x = 200.0 - cp::RESIZE_HANDLE_WIDTH * 0.5;
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: Point::new(down_x, y),
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
-    tree.dispatch_event(WidgetEvent::PointerMove {
-        position: Point::new(down_x + 30.0, y),
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        Point::new(down_x, y),
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
+    tree.dispatch_event(WidgetEvent::pointer_move(Point::new(down_x + 30.0, y)));
     tree.layout(proposal);
     assert_eq!(
         header_separator_xs(&mut tree),
         vec![100.0 - dw, 230.0 - dw],
         "the separator must follow the resized column while the drag is live"
     );
-    tree.dispatch_event(WidgetEvent::PointerUp {
-        position: Point::new(down_x + 30.0, y),
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
+    tree.dispatch_event(WidgetEvent::pointer_up(
+        Point::new(down_x + 30.0, y),
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
     tree.layout(proposal);
     assert_eq!(header_separator_xs(&mut tree), vec![100.0 - dw, 230.0 - dw]);
 
@@ -5447,19 +5416,17 @@ fn stretch_last_column_fills_the_gap_follows_the_display_order_and_has_no_grip_o
     // Its trailing grip is inert: a drag there writes nothing and moves
     // nothing.
     let y = cp::HEADER_HEIGHT * 0.5;
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: Point::new(400.0 - cp::RESIZE_HANDLE_WIDTH * 0.5, y),
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
-    tree.dispatch_event(WidgetEvent::PointerMove {
-        position: Point::new(360.0, y),
-    });
-    tree.dispatch_event(WidgetEvent::PointerUp {
-        position: Point::new(360.0, y),
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        Point::new(400.0 - cp::RESIZE_HANDLE_WIDTH * 0.5, y),
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
+    tree.dispatch_event(WidgetEvent::pointer_move(Point::new(360.0, y)));
+    tree.dispatch_event(WidgetEvent::pointer_up(
+        Point::new(360.0, y),
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
     tree.layout(proposal);
     assert!(
         overrides(&tree, table).is_empty(),
@@ -5470,19 +5437,17 @@ fn stretch_last_column_fills_the_gap_follows_the_display_order_and_has_no_grip_o
 
     // Resizing a *preceding* column reflows it: widen `a` by 30.
     let down_x = 100.0 - cp::RESIZE_HANDLE_WIDTH * 0.5;
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: Point::new(down_x, y),
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
-    tree.dispatch_event(WidgetEvent::PointerMove {
-        position: Point::new(down_x + 30.0, y),
-    });
-    tree.dispatch_event(WidgetEvent::PointerUp {
-        position: Point::new(down_x + 30.0, y),
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        Point::new(down_x, y),
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
+    tree.dispatch_event(WidgetEvent::pointer_move(Point::new(down_x + 30.0, y)));
+    tree.dispatch_event(WidgetEvent::pointer_up(
+        Point::new(down_x + 30.0, y),
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
     tree.layout(proposal);
     assert_eq!(header_widths(&tree, table), vec![130.0, 80.0, 190.0]);
 

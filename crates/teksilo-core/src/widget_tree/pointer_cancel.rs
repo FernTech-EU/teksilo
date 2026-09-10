@@ -507,11 +507,11 @@ impl WidgetTree {
     /// always right.
     fn pointer_cancel_event(
         pointer: crate::pointer::PointerInfo,
-        position: Point,
+        window_position: Point,
         reason: CancelReason,
     ) -> WidgetEvent {
         WidgetEvent::PointerCancel {
-            position: Some(position),
+            window_position: Some(window_position),
             reason,
             pointer,
         }
@@ -568,23 +568,23 @@ mod tests {
     }
 
     fn press(tree: &mut WidgetTree, at: Point) {
-        tree.dispatch_event(WidgetEvent::PointerDown {
-            position: at,
-            button: PointerButton::Primary,
-            modifiers: Modifiers::NONE,
-        });
+        tree.dispatch_event(WidgetEvent::pointer_down(
+            at,
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
     }
 
     fn moved(tree: &mut WidgetTree, at: Point) {
-        tree.dispatch_event(WidgetEvent::PointerMove { position: at });
+        tree.dispatch_event(WidgetEvent::pointer_move(at));
     }
 
     fn release(tree: &mut WidgetTree, at: Point) {
-        tree.dispatch_event(WidgetEvent::PointerUp {
-            position: at,
-            button: PointerButton::Primary,
-            modifiers: Modifiers::NONE,
-        });
+        tree.dispatch_event(WidgetEvent::pointer_up(
+            at,
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
     }
 
     /// A fresh contact: the platform mints a new id per press.
@@ -1073,11 +1073,11 @@ mod tests {
 
         // The press lands on the overlay's own content, which grips the
         // pointer — a scrollbar thumb inside a dropdown, say.
-        tree.dispatch_event(WidgetEvent::PointerDown {
-            position: tree.bounds(content).center(),
-            button: PointerButton::Primary,
-            modifiers: Modifiers::NONE,
-        });
+        tree.dispatch_event(WidgetEvent::pointer_down(
+            tree.bounds(content).center(),
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
         assert_eq!(tree.captured_by(PointerId::MOUSE), Some(content));
 
         tree.dismiss_overlay(overlay);
@@ -1361,12 +1361,7 @@ mod tests {
         assert!(tree.active_drag.is_some());
 
         // Out of the window: the drag escalates.
-        tree.dispatch_event_with_ops(
-            WidgetEvent::PointerMove {
-                position: Point::new(-40.0, 50.0),
-            },
-            &mut ops,
-        );
+        tree.dispatch_event_with_ops(WidgetEvent::pointer_move(Point::new(-40.0, 50.0)), &mut ops);
 
         assert!(ops.began.get(), "the platform took the drag");
         assert_eq!(

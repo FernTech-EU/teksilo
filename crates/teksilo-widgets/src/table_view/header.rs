@@ -725,7 +725,7 @@ impl Widget for HeaderCell {
                 };
 
                 match event {
-                    WidgetEvent::PointerMove { position } => {
+                    WidgetEvent::PointerMove { position, .. } => {
                         let local_x = position.x;
                         // 1. Active resize: advance regardless of pointer
                         //    location (the pointer is captured). Only the

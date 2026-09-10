@@ -415,16 +415,16 @@ fn arrow_nav_resumes_from_the_clicked_row() {
     tree.focus(lv_id);
 
     // Click row 3 (rows are 20px tall, so y≈70; x past any leading control).
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: Point::new(50.0, 70.0),
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
-    tree.dispatch_event(WidgetEvent::PointerUp {
-        position: Point::new(50.0, 70.0),
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        Point::new(50.0, 70.0),
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
+    tree.dispatch_event(WidgetEvent::pointer_up(
+        Point::new(50.0, 70.0),
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
     assert_eq!(
         selection.selected_indices(),
         vec![3],
@@ -466,16 +466,16 @@ fn focused_index_follows_insert_before_it() {
     tree.focus(lv_id);
 
     // Click row 3 — sets both selection and the keyboard-nav anchor to 3.
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: Point::new(50.0, 70.0),
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
-    tree.dispatch_event(WidgetEvent::PointerUp {
-        position: Point::new(50.0, 70.0),
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        Point::new(50.0, 70.0),
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
+    tree.dispatch_event(WidgetEvent::pointer_up(
+        Point::new(50.0, 70.0),
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
     assert_eq!(selection.selected_indices(), vec![3], "precondition");
 
     // A peer-driven reload prepends two rows — row 3 is now row 5.
@@ -525,16 +525,16 @@ fn focused_index_dropped_when_its_row_is_removed() {
     tree.focus(lv_id);
 
     // Click row 3.
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: Point::new(50.0, 70.0),
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
-    tree.dispatch_event(WidgetEvent::PointerUp {
-        position: Point::new(50.0, 70.0),
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        Point::new(50.0, 70.0),
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
+    tree.dispatch_event(WidgetEvent::pointer_up(
+        Point::new(50.0, 70.0),
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
     assert_eq!(selection.selected_indices(), vec![3], "precondition");
 
     // Row 3 itself is removed from under the focused anchor.
@@ -660,16 +660,16 @@ fn checkbox_press_does_not_select_row() {
     let rows = row_ids(&tree, lv_id);
     let row0 = tree.bounds(rows[0]);
     let press = |t: &mut WidgetTree, x: f32, y: f32| {
-        t.dispatch_event(WidgetEvent::PointerDown {
-            position: Point::new(x, y),
-            button: PointerButton::Primary,
-            modifiers: Modifiers::NONE,
-        });
-        t.dispatch_event(WidgetEvent::PointerUp {
-            position: Point::new(x, y),
-            button: PointerButton::Primary,
-            modifiers: Modifiers::NONE,
-        });
+        t.dispatch_event(WidgetEvent::pointer_down(
+            Point::new(x, y),
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
+        t.dispatch_event(WidgetEvent::pointer_up(
+            Point::new(x, y),
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
     };
 
     // Press the embedded checkbox (leading edge): toggles it, must NOT select.
@@ -1047,16 +1047,16 @@ fn ctrl_click_toggles() {
 
     // Ctrl+click item 2 to add it
     let center = tree.bounds(children[2]).center();
-    tree.dispatch_event(teksilo_core::event::WidgetEvent::PointerDown {
-        position: center,
-        button: teksilo_core::event::PointerButton::Primary,
-        modifiers: Modifiers::COMMAND,
-    });
-    tree.dispatch_event(teksilo_core::event::WidgetEvent::PointerUp {
-        position: center,
-        button: teksilo_core::event::PointerButton::Primary,
-        modifiers: Modifiers::COMMAND,
-    });
+    tree.dispatch_event(teksilo_core::event::WidgetEvent::pointer_down(
+        center,
+        teksilo_core::event::PointerButton::Primary,
+        Modifiers::COMMAND,
+    ));
+    tree.dispatch_event(teksilo_core::event::WidgetEvent::pointer_up(
+        center,
+        teksilo_core::event::PointerButton::Primary,
+        Modifiers::COMMAND,
+    ));
 
     assert!(selection.is_selected(0), "item 0 should still be selected");
     assert!(selection.is_selected(2), "item 2 should be toggled on");
@@ -1077,11 +1077,11 @@ fn shift_click_extends_range() {
 
     // Shift+click item 3 — should extend from anchor (1) to 3
     let center = tree.bounds(children[3]).center();
-    tree.dispatch_event(teksilo_core::event::WidgetEvent::PointerDown {
-        position: center,
-        button: teksilo_core::event::PointerButton::Primary,
-        modifiers: Modifiers::SHIFT,
-    });
+    tree.dispatch_event(teksilo_core::event::WidgetEvent::pointer_down(
+        center,
+        teksilo_core::event::PointerButton::Primary,
+        Modifiers::SHIFT,
+    ));
 
     let selected = selection.selected_indices();
     assert_eq!(
@@ -1708,21 +1708,19 @@ fn make_reorderable_list(
 /// Move to target, Up.
 fn drag_item(tree: &mut WidgetTree, from: Point, to: Point) {
     use teksilo_core::event::{Modifiers, PointerButton, WidgetEvent};
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: from,
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        from,
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
     // Cross drag threshold (default 5px)
-    tree.dispatch_event(WidgetEvent::PointerMove {
-        position: Point::new(from.x + 10.0, from.y),
-    });
-    tree.dispatch_event(WidgetEvent::PointerMove { position: to });
-    tree.dispatch_event(WidgetEvent::PointerUp {
-        position: to,
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
+    tree.dispatch_event(WidgetEvent::pointer_move(Point::new(from.x + 10.0, from.y)));
+    tree.dispatch_event(WidgetEvent::pointer_move(to));
+    tree.dispatch_event(WidgetEvent::pointer_up(
+        to,
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
 }
 
 #[test]
@@ -2027,11 +2025,11 @@ fn drag_survives_rebuild_triggered_by_selection() {
     // trips the selection signal, which dirty-marks the ListView for
     // rebuild. Bubble reaches the wrapper, arms the gesture arena, and
     // captures the pointer at the old wrapper id.
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: Point::new(50.0, 15.0),
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        Point::new(50.0, 15.0),
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
     // Force the rebuild to run *before* the drag progresses — this is
     // the ordering the real app hits because layout runs between the
     // PointerDown and the first PointerMove. Old wrappers are destroyed
@@ -2039,18 +2037,14 @@ fn drag_survives_rebuild_triggered_by_selection() {
     tree.layout(SizeProposal::exact(400.0, 300.0));
 
     // Cross drag threshold.
-    tree.dispatch_event(WidgetEvent::PointerMove {
-        position: Point::new(60.0, 15.0),
-    });
+    tree.dispatch_event(WidgetEvent::pointer_move(Point::new(60.0, 15.0)));
     // Move to target.
-    tree.dispatch_event(WidgetEvent::PointerMove {
-        position: Point::new(60.0, 120.0),
-    });
-    tree.dispatch_event(WidgetEvent::PointerUp {
-        position: Point::new(60.0, 120.0),
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
+    tree.dispatch_event(WidgetEvent::pointer_move(Point::new(60.0, 120.0)));
+    tree.dispatch_event(WidgetEvent::pointer_up(
+        Point::new(60.0, 120.0),
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
 
     // Item 0 (value 10) should have moved to index 3.
     assert_eq!(
@@ -2171,14 +2165,12 @@ fn drag_spawns_preview_overlay_and_cleans_up() {
     let baseline = tree.overlay_manager().len();
 
     // PointerDown + threshold-crossing PointerMove starts the drag.
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: Point::new(50.0, 15.0),
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
-    tree.dispatch_event(WidgetEvent::PointerMove {
-        position: Point::new(60.0, 15.0),
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        Point::new(50.0, 15.0),
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
+    tree.dispatch_event(WidgetEvent::pointer_move(Point::new(60.0, 15.0)));
 
     assert_eq!(
         tree.overlay_manager().len(),
@@ -2187,11 +2179,11 @@ fn drag_spawns_preview_overlay_and_cleans_up() {
     );
 
     // Drop — preview should be dismissed.
-    tree.dispatch_event(WidgetEvent::PointerUp {
-        position: Point::new(60.0, 15.0),
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
+    tree.dispatch_event(WidgetEvent::pointer_up(
+        Point::new(60.0, 15.0),
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
     assert_eq!(
         tree.overlay_manager().len(),
         baseline,
@@ -2209,17 +2201,13 @@ fn edge_auto_scroll_advances_scroll_y_during_drag() {
 
     // Kick off a drag and move the pointer near the BOTTOM edge so
     // the on_drag_tick scroll delta is positive.
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: Point::new(50.0, 15.0),
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
-    tree.dispatch_event(WidgetEvent::PointerMove {
-        position: Point::new(60.0, 15.0),
-    });
-    tree.dispatch_event(WidgetEvent::PointerMove {
-        position: Point::new(60.0, 290.0), // inside bottom 32 px edge zone
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        Point::new(50.0, 15.0),
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
+    tree.dispatch_event(WidgetEvent::pointer_move(Point::new(60.0, 15.0)));
+    tree.dispatch_event(WidgetEvent::pointer_move(Point::new(60.0, 290.0)));
 
     // Drive layout a few times to accumulate on_drag_tick fires.
     for _ in 0..8 {
@@ -2232,11 +2220,11 @@ fn edge_auto_scroll_advances_scroll_y_during_drag() {
     );
 
     // Clean up the drag.
-    tree.dispatch_event(WidgetEvent::PointerUp {
-        position: Point::new(60.0, 290.0),
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
+    tree.dispatch_event(WidgetEvent::pointer_up(
+        Point::new(60.0, 290.0),
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
 }
 
 // -- Boundary scroll chaining -------------------------------------------

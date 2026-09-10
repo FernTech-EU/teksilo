@@ -1111,9 +1111,7 @@ mod tests {
         assert!(tree.active_drag.is_some());
 
         // Move the pointer
-        tree.dispatch_event(WidgetEvent::PointerMove {
-            position: Point::new(50.0, 30.0),
-        });
+        tree.dispatch_event(WidgetEvent::pointer_move(Point::new(50.0, 30.0)));
 
         let drag = tree.active_drag.as_ref().unwrap();
         assert!((drag.current_position.x - 50.0).abs() < 0.01);
@@ -1163,11 +1161,11 @@ mod tests {
         tree.collect_from_ctx(ctx, source);
 
         // Drop at a position over the target
-        tree.dispatch_event(WidgetEvent::PointerUp {
-            position: Point::new(150.0, 50.0),
-            button: PointerButton::Primary,
-            modifiers: Modifiers::NONE,
-        });
+        tree.dispatch_event(WidgetEvent::pointer_up(
+            Point::new(150.0, 50.0),
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
 
         assert!(tree.active_drag.is_none(), "drag session should be cleared");
         assert!(dropped.get(), "on_drop should have been called");
@@ -1185,11 +1183,11 @@ mod tests {
         tree.collect_from_ctx(ctx, source);
 
         // Drop outside any widget
-        tree.dispatch_event(WidgetEvent::PointerUp {
-            position: Point::new(999.0, 999.0),
-            button: PointerButton::Primary,
-            modifiers: Modifiers::NONE,
-        });
+        tree.dispatch_event(WidgetEvent::pointer_up(
+            Point::new(999.0, 999.0),
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
 
         assert!(tree.active_drag.is_none(), "drag session should be cleared");
     }
@@ -1234,9 +1232,7 @@ mod tests {
         tree.collect_from_ctx(ctx, source);
 
         // Hover over the foreground target → it becomes `current_target`.
-        tree.dispatch_event(WidgetEvent::PointerMove {
-            position: Point::new(100.0, 50.0),
-        });
+        tree.dispatch_event(WidgetEvent::pointer_move(Point::new(100.0, 50.0)));
         assert_eq!(
             tree.active_drag.as_ref().unwrap().current_target,
             Some(fg),
@@ -1249,11 +1245,11 @@ mod tests {
 
         // Drop where fg used to be → must fall through to the live bg, not
         // vanish into the destroyed fg id.
-        tree.dispatch_event(WidgetEvent::PointerUp {
-            position: Point::new(100.0, 50.0),
-            button: PointerButton::Primary,
-            modifiers: Modifiers::NONE,
-        });
+        tree.dispatch_event(WidgetEvent::pointer_up(
+            Point::new(100.0, 50.0),
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
 
         assert!(tree.active_drag.is_none(), "drag session cleared");
         assert!(
@@ -1418,9 +1414,7 @@ mod tests {
         tree.collect_from_ctx(ctx, source);
 
         // Move over the target
-        tree.dispatch_event(WidgetEvent::PointerMove {
-            position: Point::new(150.0, 50.0),
-        });
+        tree.dispatch_event(WidgetEvent::pointer_move(Point::new(150.0, 50.0)));
 
         assert!(
             hover_count.get() > 0,
@@ -1471,9 +1465,7 @@ mod tests {
         tree.collect_from_ctx(ctx, source);
 
         // Frame 1: nothing engages → child becomes the tracked (rejecting) target.
-        tree.dispatch_event(WidgetEvent::PointerMove {
-            position: Point::new(100.0, 50.0),
-        });
+        tree.dispatch_event(WidgetEvent::pointer_move(Point::new(100.0, 50.0)));
         assert_eq!(
             tree.active_drag.as_ref().unwrap().current_target,
             Some(child)
@@ -1482,9 +1474,7 @@ mod tests {
 
         // Frame 2: ancestor engages while child still rejects.
         engage.set(true);
-        tree.dispatch_event(WidgetEvent::PointerMove {
-            position: Point::new(101.0, 50.0),
-        });
+        tree.dispatch_event(WidgetEvent::pointer_move(Point::new(101.0, 50.0)));
 
         assert_eq!(
             leaves.get(),
@@ -1505,11 +1495,11 @@ mod tests {
         assert!(tree.active_drag.is_some());
 
         // PointerUp far outside any widget
-        tree.dispatch_event(WidgetEvent::PointerUp {
-            position: Point::new(-100.0, -100.0),
-            button: PointerButton::Primary,
-            modifiers: Modifiers::NONE,
-        });
+        tree.dispatch_event(WidgetEvent::pointer_up(
+            Point::new(-100.0, -100.0),
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
 
         assert!(tree.active_drag.is_none(), "drag should be cleared");
     }
@@ -1553,11 +1543,11 @@ mod tests {
         ctx.start_drag(source, crate::drag_payload::DragPayload::typed(42_u32));
         tree.collect_from_ctx(ctx, source);
 
-        tree.dispatch_event(WidgetEvent::PointerUp {
-            position: Point::new(150.0, 50.0),
-            button: PointerButton::Primary,
-            modifiers: Modifiers::NONE,
-        });
+        tree.dispatch_event(WidgetEvent::pointer_up(
+            Point::new(150.0, 50.0),
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
 
         assert!(!accepted.get(), "on_drop should reject wrong payload type");
     }
@@ -1597,11 +1587,11 @@ mod tests {
         tree.collect_from_ctx(ctx, source);
 
         // Drop on target
-        tree.dispatch_event(WidgetEvent::PointerUp {
-            position: Point::new(150.0, 50.0),
-            button: PointerButton::Primary,
-            modifiers: Modifiers::NONE,
-        });
+        tree.dispatch_event(WidgetEvent::pointer_up(
+            Point::new(150.0, 50.0),
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
 
         assert_eq!(
             received_value.get(),
@@ -1639,11 +1629,11 @@ mod tests {
 
         // Drop at the child's center. Hit test lands on the child; drop
         // should bubble up to the parent StackWidget.
-        tree.dispatch_event(WidgetEvent::PointerUp {
-            position: Point::new(100.0, 50.0),
-            button: PointerButton::Primary,
-            modifiers: Modifiers::NONE,
-        });
+        tree.dispatch_event(WidgetEvent::pointer_up(
+            Point::new(100.0, 50.0),
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
 
         assert!(
             parent_fired.get(),
@@ -1690,14 +1680,12 @@ mod tests {
 
         // Hover over the child (its on_drag_hover runs → NoFeedback → bubble),
         // then release there.
-        tree.dispatch_event(WidgetEvent::PointerMove {
-            position: Point::new(100.0, 50.0),
-        });
-        tree.dispatch_event(WidgetEvent::PointerUp {
-            position: Point::new(100.0, 50.0),
-            button: PointerButton::Primary,
-            modifiers: Modifiers::NONE,
-        });
+        tree.dispatch_event(WidgetEvent::pointer_move(Point::new(100.0, 50.0)));
+        tree.dispatch_event(WidgetEvent::pointer_up(
+            Point::new(100.0, 50.0),
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
 
         assert!(parent_drop.get(), "drop bubbles to the accepting ancestor");
         assert!(
@@ -1739,11 +1727,11 @@ mod tests {
         );
 
         // Drop outside any target — cleanup should remove the overlay.
-        tree.dispatch_event(WidgetEvent::PointerUp {
-            position: Point::new(999.0, 999.0),
-            button: PointerButton::Primary,
-            modifiers: Modifiers::NONE,
-        });
+        tree.dispatch_event(WidgetEvent::pointer_up(
+            Point::new(999.0, 999.0),
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
 
         assert!(tree.active_drag.is_none(), "drag session should be cleared");
         assert_eq!(
@@ -1767,9 +1755,7 @@ mod tests {
         );
         tree.collect_from_ctx(ctx, source);
 
-        tree.dispatch_event(WidgetEvent::PointerMove {
-            position: Point::new(73.0, 41.0),
-        });
+        tree.dispatch_event(WidgetEvent::pointer_move(Point::new(73.0, 41.0)));
 
         let drag = tree.active_drag.as_ref().expect("active drag");
         assert!(
@@ -1821,9 +1807,7 @@ mod tests {
         tree.collect_from_ctx(ctx, source);
 
         // Move over the target to establish feedback.
-        tree.dispatch_event(WidgetEvent::PointerMove {
-            position: Point::new(150.0, 50.0),
-        });
+        tree.dispatch_event(WidgetEvent::pointer_move(Point::new(150.0, 50.0)));
 
         assert!(tree.active_drag.is_some());
         assert_eq!(tree.overlay_manager().len(), overlay_count_before + 1);
@@ -1864,14 +1848,12 @@ mod tests {
 
         // Move over and release on the `on_tap` widget. Normally this would
         // synthesize a Tap gesture — but an active drag short-circuits.
-        tree.dispatch_event(WidgetEvent::PointerMove {
-            position: Point::new(150.0, 50.0),
-        });
-        tree.dispatch_event(WidgetEvent::PointerUp {
-            position: Point::new(150.0, 50.0),
-            button: PointerButton::Primary,
-            modifiers: Modifiers::NONE,
-        });
+        tree.dispatch_event(WidgetEvent::pointer_move(Point::new(150.0, 50.0)));
+        tree.dispatch_event(WidgetEvent::pointer_up(
+            Point::new(150.0, 50.0),
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
 
         assert!(
             !tap_fired.get(),
@@ -1916,18 +1898,14 @@ mod tests {
         tree.collect_from_ctx(ctx, source);
 
         // Pointer inside the inset (where the target lives).
-        tree.dispatch_event(WidgetEvent::PointerMove {
-            position: Point::new(100.0, 50.0),
-        });
+        tree.dispatch_event(WidgetEvent::pointer_move(Point::new(100.0, 50.0)));
         assert_eq!(leave.get(), 0, "no leave yet — target just became active");
 
         // Pointer in the inset area, outside the target's bounds — the
         // only hit is the InsetWidget which has no drag handlers, so
         // drop_target becomes None. Target changed → leave fires on the
         // old target.
-        tree.dispatch_event(WidgetEvent::PointerMove {
-            position: Point::new(10.0, 10.0),
-        });
+        tree.dispatch_event(WidgetEvent::pointer_move(Point::new(10.0, 10.0)));
         assert_eq!(
             leave.get(),
             1,
@@ -1935,12 +1913,8 @@ mod tests {
         );
 
         // Moving back in shouldn't fire again.
-        tree.dispatch_event(WidgetEvent::PointerMove {
-            position: Point::new(100.0, 50.0),
-        });
-        tree.dispatch_event(WidgetEvent::PointerMove {
-            position: Point::new(100.0, 50.0),
-        });
+        tree.dispatch_event(WidgetEvent::pointer_move(Point::new(100.0, 50.0)));
+        tree.dispatch_event(WidgetEvent::pointer_move(Point::new(100.0, 50.0)));
         assert_eq!(
             leave.get(),
             1,
@@ -1948,9 +1922,7 @@ mod tests {
         );
 
         // Leaving again fires a second time.
-        tree.dispatch_event(WidgetEvent::PointerMove {
-            position: Point::new(10.0, 10.0),
-        });
+        tree.dispatch_event(WidgetEvent::pointer_move(Point::new(10.0, 10.0)));
         assert_eq!(leave.get(), 2);
     }
 
@@ -1980,14 +1952,12 @@ mod tests {
         let mut ctx = crate::widget::EventContext::new();
         ctx.start_drag(source, crate::drag_payload::DragPayload::typed(0_u32));
         tree.collect_from_ctx(ctx, source);
-        tree.dispatch_event(WidgetEvent::PointerMove {
-            position: Point::new(100.0, 50.0),
-        });
-        tree.dispatch_event(WidgetEvent::PointerUp {
-            position: Point::new(100.0, 50.0),
-            button: PointerButton::Primary,
-            modifiers: Modifiers::NONE,
-        });
+        tree.dispatch_event(WidgetEvent::pointer_move(Point::new(100.0, 50.0)));
+        tree.dispatch_event(WidgetEvent::pointer_up(
+            Point::new(100.0, 50.0),
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
 
         assert_eq!(leave.get(), 1, "on_drag_leave fires exactly once on drop");
     }
@@ -2018,9 +1988,7 @@ mod tests {
         let mut ctx = crate::widget::EventContext::new();
         ctx.start_drag(source, crate::drag_payload::DragPayload::typed(0_u32));
         tree.collect_from_ctx(ctx, source);
-        tree.dispatch_event(WidgetEvent::PointerMove {
-            position: Point::new(100.0, 50.0),
-        });
+        tree.dispatch_event(WidgetEvent::pointer_move(Point::new(100.0, 50.0)));
         tree.press_key(Key::Escape, Modifiers::NONE);
 
         assert_eq!(
@@ -2056,9 +2024,7 @@ mod tests {
         let mut ctx = crate::widget::EventContext::new();
         ctx.start_drag(source, crate::drag_payload::DragPayload::typed(0_u32));
         tree.collect_from_ctx(ctx, source);
-        tree.dispatch_event(WidgetEvent::PointerMove {
-            position: Point::new(100.0, 50.0),
-        });
+        tree.dispatch_event(WidgetEvent::pointer_move(Point::new(100.0, 50.0)));
 
         tree.arena.destroy(source);
         // revalidate_interaction_state runs on the next process_pending_rebuilds
@@ -2103,9 +2069,7 @@ mod tests {
         ctx.start_drag(source, crate::drag_payload::DragPayload::typed(0_u32));
         tree.collect_from_ctx(ctx, source);
         // Move over the target so it becomes the current drop target.
-        tree.dispatch_event(WidgetEvent::PointerMove {
-            position: Point::new(100.0, 50.0),
-        });
+        tree.dispatch_event(WidgetEvent::pointer_move(Point::new(100.0, 50.0)));
         assert_eq!(ticks.get(), 0, "tick shouldn't have fired yet");
 
         tree.layout(SizeProposal::exact(200.0, 100.0));
@@ -2115,11 +2079,11 @@ mod tests {
         assert_eq!(ticks.get(), 3);
 
         // End the drag; ticks stop.
-        tree.dispatch_event(WidgetEvent::PointerUp {
-            position: Point::new(100.0, 50.0),
-            button: PointerButton::Primary,
-            modifiers: Modifiers::NONE,
-        });
+        tree.dispatch_event(WidgetEvent::pointer_up(
+            Point::new(100.0, 50.0),
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
         let after_drop = ticks.get();
         tree.layout(SizeProposal::exact(200.0, 100.0));
         tree.layout(SizeProposal::exact(200.0, 100.0));
@@ -2174,9 +2138,7 @@ mod tests {
         // Move pointer to (100, 60) in tree coords — inside the inset
         // target whose origin is (40, 40). Local position should be
         // (60, 20).
-        tree.dispatch_event(WidgetEvent::PointerMove {
-            position: Point::new(100.0, 60.0),
-        });
+        tree.dispatch_event(WidgetEvent::pointer_move(Point::new(100.0, 60.0)));
         let hov = hover_local.get();
         assert!(
             (hov.x - 60.0).abs() < 0.01 && (hov.y - 20.0).abs() < 0.01,
@@ -2185,11 +2147,11 @@ mod tests {
         );
 
         // Drop at (110, 55) tree coords → local (70, 15).
-        tree.dispatch_event(WidgetEvent::PointerUp {
-            position: Point::new(110.0, 55.0),
-            button: PointerButton::Primary,
-            modifiers: Modifiers::NONE,
-        });
+        tree.dispatch_event(WidgetEvent::pointer_up(
+            Point::new(110.0, 55.0),
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
         let drp = drop_local.get();
         assert!(
             (drp.x - 70.0).abs() < 0.01 && (drp.y - 15.0).abs() < 0.01,
@@ -2220,11 +2182,11 @@ mod tests {
         assert_eq!(tree.current_cursor(), CursorIcon::Grabbing);
 
         // Drop somewhere.
-        tree.dispatch_event(WidgetEvent::PointerUp {
-            position: Point::new(50.0, 25.0),
-            button: PointerButton::Primary,
-            modifiers: Modifiers::NONE,
-        });
+        tree.dispatch_event(WidgetEvent::pointer_up(
+            Point::new(50.0, 25.0),
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
         assert_eq!(tree.current_cursor(), CursorIcon::Default);
     }
 
@@ -2328,9 +2290,7 @@ mod tests {
 
         // A subsequent PointerMove must remark the preview so its
         // overlay bounds get repositioned on the next layout pass.
-        tree.dispatch_event(WidgetEvent::PointerMove {
-            position: Point::new(75.0, 120.0),
-        });
+        tree.dispatch_event(WidgetEvent::pointer_move(Point::new(75.0, 120.0)));
         assert!(
             tree.needs_layout(),
             "PointerMove during drag must mark preview for layout"
@@ -2370,9 +2330,7 @@ mod tests {
         ctx.start_drag(source, crate::drag_payload::DragPayload::typed(0_u32));
         tree.collect_from_ctx(ctx, source);
         // Make target the current drop target.
-        tree.dispatch_event(WidgetEvent::PointerMove {
-            position: Point::new(100.0, 50.0),
-        });
+        tree.dispatch_event(WidgetEvent::pointer_move(Point::new(100.0, 50.0)));
 
         // A wheel event during drag should reach the drop target (not the
         // stale hover from before the drag started).
@@ -2828,11 +2786,11 @@ mod tests {
         ctx.start_drag(source, crate::drag_payload::DragPayload::typed(42_u32));
         tree.collect_from_ctx(ctx, source);
 
-        tree.dispatch_event(WidgetEvent::PointerUp {
-            position: Point::new(150.0, 50.0),
-            button: PointerButton::Primary,
-            modifiers: Modifiers::NONE,
-        });
+        tree.dispatch_event(WidgetEvent::pointer_up(
+            Point::new(150.0, 50.0),
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
 
         assert_eq!(outcome.get(), Some(DropOutcome::InApp { accepted: true }));
     }

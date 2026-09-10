@@ -1173,7 +1173,19 @@ pub fn translate_cursor_moved(
         return None;
     }
     state.cursor_position = Some(position);
-    Some(WidgetEvent::PointerMove { position })
+    // winit's `CursorMoved` *is* the mouse cursor — a contact takes
+    // `translate_touch` and a pen `poll_pen`, both of which build a real
+    // `PointerSample` — so this is the mouse, described by the same
+    // `mouse_pointer()` the sample path uses (its clock and its held buttons)
+    // rather than by a bare epoch default. The tracked modifier state travels
+    // with the move because a drag reads Shift and Ctrl from the move, not from
+    // the press.
+    let pointer = state.mouse_pointer();
+    Some(WidgetEvent::PointerMove {
+        position,
+        modifiers: state.current_modifiers,
+        pointer,
+    })
 }
 
 /// Translate a winit `Ime` event into a teksilo-core `WidgetEvent`.
@@ -1227,16 +1239,21 @@ pub fn translate_mouse_input(
     if state.is_promoted_click() {
         return None;
     }
+    // winit's `MouseInput` is the mouse's own button; a contact's press comes
+    // through `translate_touch` as a `PointerSample`.
+    let pointer = state.mouse_pointer();
     match button_state {
         winit::event::ElementState::Pressed => Some(WidgetEvent::PointerDown {
             position,
             button: pointer_button,
             modifiers: state.current_modifiers,
+            pointer,
         }),
         winit::event::ElementState::Released => Some(WidgetEvent::PointerUp {
             position,
             button: pointer_button,
             modifiers: state.current_modifiers,
+            pointer,
         }),
     }
 }

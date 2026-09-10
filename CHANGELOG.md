@@ -125,6 +125,27 @@ See [docs/range-keyboard.md](docs/range-keyboard.md) for the full chord table.
 
 ### Changed
 
+#### Core
+
+- **`WidgetEvent::PointerDown`, `PointerUp`, `PointerMove`, `PointerEnter` and
+  `PointerLeave` now carry `pointer: PointerInfo`**, so a handler can tell a
+  finger from a stylus from a mouse without reaching for the context.
+  `PointerEnter` and `PointerLeave` become struct variants; a pattern that named
+  them bare now needs `{ .. }`.
+- **`PointerMove` also carries `modifiers: Modifiers`.** A drag reads Shift and
+  Ctrl from the move rather than from the press, so a modifier pressed mid-drag
+  reaches the widget.
+- New constructors keep a mouse-describing call site to one line and default the
+  pointer to `PointerInfo::mouse` at the epoch: `WidgetEvent::pointer_move_with`,
+  `pointer_enter`, `pointer_leave`, beside the existing `pointer_down`,
+  `pointer_up`, `pointer_move`.
+- **`WidgetEvent::Scroll::position` and `PointerCancel::position` are renamed
+  `window_position`.** Both stay in window-logical coordinates — the router
+  routes by the first, and the kinetic tracker behind a pan follows the pointer
+  rather than the widget — and they are the only positional fields a handler
+  receives that are not localised to it. The frame is now in the name, so a
+  reader that needs content coordinates is told to convert at every use.
+
 #### Widgets
 
 - `TextInputField::on_access_set_value` (and `TextInput`'s forwarder) now takes

@@ -1088,16 +1088,16 @@ mod tests {
         use teksilo_core::event::{Modifiers, PointerButton};
 
         fn tap_at(tree: &mut WidgetTree, p: teksilo_canvas::Point) {
-            tree.dispatch_event(WidgetEvent::PointerDown {
-                position: p,
-                button: PointerButton::Primary,
-                modifiers: Modifiers::NONE,
-            });
-            tree.dispatch_event(WidgetEvent::PointerUp {
-                position: p,
-                button: PointerButton::Primary,
-                modifiers: Modifiers::NONE,
-            });
+            tree.dispatch_event(WidgetEvent::pointer_down(
+                p,
+                PointerButton::Primary,
+                Modifiers::NONE,
+            ));
+            tree.dispatch_event(WidgetEvent::pointer_up(
+                p,
+                PointerButton::Primary,
+                Modifiers::NONE,
+            ));
         }
 
         let expanded = Signal::new(true);
@@ -1241,16 +1241,16 @@ mod tests {
 
         // Tapping the trailing widget fires its handler and does NOT toggle.
         let p = teksilo_canvas::Point::new(tb.x + tb.width / 2.0, tb.y + tb.height / 2.0);
-        tree.dispatch_event(WidgetEvent::PointerDown {
-            position: p,
-            button: PointerButton::Primary,
-            modifiers: Modifiers::NONE,
-        });
-        tree.dispatch_event(WidgetEvent::PointerUp {
-            position: p,
-            button: PointerButton::Primary,
-            modifiers: Modifiers::NONE,
-        });
+        tree.dispatch_event(WidgetEvent::pointer_down(
+            p,
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
+        tree.dispatch_event(WidgetEvent::pointer_up(
+            p,
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
         assert!(tapped.get(), "trailing widget received the tap");
         assert!(
             expanded.get(),

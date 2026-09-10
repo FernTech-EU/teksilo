@@ -65,16 +65,16 @@ fn row_selection_click_repaints_immediately_without_expand_collapse() {
     // ("docs"), which sits below the header at y ≈ header + 0.
     let header_h = cp::HEADER_HEIGHT;
     let click_y = header_h + 10.0;
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: Point::new(40.0, click_y),
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
-    tree.dispatch_event(WidgetEvent::PointerUp {
-        position: Point::new(40.0, click_y),
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        Point::new(40.0, click_y),
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
+    tree.dispatch_event(WidgetEvent::pointer_up(
+        Point::new(40.0, click_y),
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
     // Selection updated.
     assert_eq!(selection.selected_indices(), vec![0]);
     // And — the regression — the rendered tree must reflect the
@@ -213,16 +213,16 @@ fn row_click_moves_focus_so_arrow_nav_resumes_there() {
 
     // Click flat row 1 ("b"): 20px rows starting below the header.
     let click_y = cp::HEADER_HEIGHT + 1.0 * 20.0 + 10.0;
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: Point::new(40.0, click_y),
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
-    tree.dispatch_event(WidgetEvent::PointerUp {
-        position: Point::new(40.0, click_y),
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        Point::new(40.0, click_y),
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
+    tree.dispatch_event(WidgetEvent::pointer_up(
+        Point::new(40.0, click_y),
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
     assert_eq!(
         selection.selected_indices(),
         vec![1],
@@ -905,19 +905,15 @@ fn the_into_box_is_inset_and_the_insertion_line_is_indented() {
     // Hold a drag from "main.rs" (flat 4) — nothing is inside its subtree,
     // so every target below accepts.
     let start = Point::new(40.0, h + 90.0);
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: start,
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
-    tree.dispatch_event(WidgetEvent::PointerMove {
-        position: Point::new(52.0, start.y),
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        start,
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
+    tree.dispatch_event(WidgetEvent::pointer_move(Point::new(52.0, start.y)));
 
     // Bottom third of "readme" (flat 1, depth 1) → After, at depth 1.
-    tree.dispatch_event(WidgetEvent::PointerMove {
-        position: Point::new(52.0, h + 38.0),
-    });
+    tree.dispatch_event(WidgetEvent::pointer_move(Point::new(52.0, h + 38.0)));
     let frame = tree.render();
     let line_recipe = teksilo_core::styles::ListInsertionRecipe::default();
     // The insertion line is the only decoration exactly `thickness` tall
@@ -938,9 +934,7 @@ fn the_into_box_is_inset_and_the_insertion_line_is_indented() {
     );
 
     // Middle third of "docs" (flat 0, depth 0) → Into, a box round the row.
-    tree.dispatch_event(WidgetEvent::PointerMove {
-        position: Point::new(52.0, h + 10.0),
-    });
+    tree.dispatch_event(WidgetEvent::pointer_move(Point::new(52.0, h + 10.0)));
     let frame = tree.render();
     let recipe = teksilo_core::styles::ListDropIntoRecipe::default();
     let boxes: Vec<_> = frame
@@ -2969,20 +2963,18 @@ fn auto_row_height_measures_tree_cells() {
 fn drag(tree: &mut WidgetTree, from: teksilo_canvas::Point, to: teksilo_canvas::Point) {
     use teksilo_canvas::Point;
     use teksilo_core::event::{Modifiers, PointerButton, WidgetEvent};
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: from,
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
-    tree.dispatch_event(WidgetEvent::PointerMove {
-        position: Point::new(from.x + 10.0, from.y),
-    });
-    tree.dispatch_event(WidgetEvent::PointerMove { position: to });
-    tree.dispatch_event(WidgetEvent::PointerUp {
-        position: to,
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        from,
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
+    tree.dispatch_event(WidgetEvent::pointer_move(Point::new(from.x + 10.0, from.y)));
+    tree.dispatch_event(WidgetEvent::pointer_move(to));
+    tree.dispatch_event(WidgetEvent::pointer_up(
+        to,
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
 }
 
 #[test]
@@ -3918,19 +3910,17 @@ fn tt_grip_reaches_into_the_next_column() {
     let (mut tree, id) = tt_resize_table();
     let y = cp::HEADER_HEIGHT * 0.5;
     // One pixel PAST the name/size divider, i.e. inside `size`.
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: Point::new(341.0, y),
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
-    tree.dispatch_event(WidgetEvent::PointerMove {
-        position: Point::new(311.0, y),
-    });
-    tree.dispatch_event(WidgetEvent::PointerUp {
-        position: Point::new(311.0, y),
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        Point::new(341.0, y),
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
+    tree.dispatch_event(WidgetEvent::pointer_move(Point::new(311.0, y)));
+    tree.dispatch_event(WidgetEvent::pointer_up(
+        Point::new(311.0, y),
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
     let w = tt_overrides(&tree, id);
     assert!(
         (w.get("name").copied().unwrap_or(0.0) - 310.0).abs() < 0.5,
@@ -3970,20 +3960,18 @@ fn tt_resize_keeps_preceding_flex_column_and_tracks_the_pointer() {
     tree.layout(proposal);
     let y = cp::HEADER_HEIGHT * 0.5;
     let down_x = 230.0 - cp::RESIZE_HANDLE_WIDTH * 0.5;
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: Point::new(down_x, y),
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
-    tree.dispatch_event(WidgetEvent::PointerMove {
-        position: Point::new(down_x + 30.0, y),
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        Point::new(down_x, y),
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
+    tree.dispatch_event(WidgetEvent::pointer_move(Point::new(down_x + 30.0, y)));
     tree.layout(proposal);
-    tree.dispatch_event(WidgetEvent::PointerUp {
-        position: Point::new(down_x + 30.0, y),
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
+    tree.dispatch_event(WidgetEvent::pointer_up(
+        Point::new(down_x + 30.0, y),
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
     let w = tt_overrides(&tree, id);
     assert!(
         (w.get("size").copied().unwrap_or(0.0) - 90.0).abs() < 0.5,
@@ -4047,19 +4035,17 @@ fn tt_stretch_last_column_fills_the_gap_and_reflows_on_a_resize() {
 
     let y = cp::HEADER_HEIGHT * 0.5;
     let down_x = 60.0 - cp::RESIZE_HANDLE_WIDTH * 0.5;
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: Point::new(down_x, y),
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
-    tree.dispatch_event(WidgetEvent::PointerMove {
-        position: Point::new(down_x + 40.0, y),
-    });
-    tree.dispatch_event(WidgetEvent::PointerUp {
-        position: Point::new(down_x + 40.0, y),
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        Point::new(down_x, y),
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
+    tree.dispatch_event(WidgetEvent::pointer_move(Point::new(down_x + 40.0, y)));
+    tree.dispatch_event(WidgetEvent::pointer_up(
+        Point::new(down_x + 40.0, y),
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
     tree.layout(proposal);
     assert_eq!(header_widths(&tree, id), vec![100.0, 300.0]);
     let w = tt_overrides(&tree, id);
@@ -4151,16 +4137,16 @@ fn three_row_slice() -> teksilo_data::TreeDataSlice<u64, &'static str> {
 fn double_click_at(tree: &mut WidgetTree, at: Point) {
     use teksilo_core::event::{Modifiers, PointerButton, WidgetEvent};
     for _ in 0..2 {
-        tree.dispatch_event(WidgetEvent::PointerDown {
-            position: at,
-            button: PointerButton::Primary,
-            modifiers: Modifiers::NONE,
-        });
-        tree.dispatch_event(WidgetEvent::PointerUp {
-            position: at,
-            button: PointerButton::Primary,
-            modifiers: Modifiers::NONE,
-        });
+        tree.dispatch_event(WidgetEvent::pointer_down(
+            at,
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
+        tree.dispatch_event(WidgetEvent::pointer_up(
+            at,
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
     }
 }
 

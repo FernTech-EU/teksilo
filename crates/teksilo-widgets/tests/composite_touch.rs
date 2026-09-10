@@ -62,19 +62,19 @@ fn colours(frame: &RenderFrame) -> Vec<[f32; 4]> {
 }
 
 fn mouse_down(tree: &mut WidgetTree, at: Point) {
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: at,
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        at,
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
 }
 
 fn mouse_up(tree: &mut WidgetTree, at: Point) {
-    tree.dispatch_event(WidgetEvent::PointerUp {
-        position: at,
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
+    tree.dispatch_event(WidgetEvent::pointer_up(
+        at,
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
 }
 
 /// The first descendant of `root` whose widget type name contains `needle`,
@@ -390,7 +390,7 @@ fn a_finger_tapping_a_tool_box_header_leaves_it_untinted() {
     let idle = colours(&tree.render());
 
     // 1. What a hover looks like on the *unselected* second header.
-    tree.dispatch_event(WidgetEvent::PointerMove { position: second });
+    tree.dispatch_event(WidgetEvent::pointer_move(second));
     tree.layout(SizeProposal::exact(300.0, 400.0));
     let hover_tint: Vec<[f32; 4]> = colours(&tree.render())
         .into_iter()
@@ -400,9 +400,7 @@ fn a_finger_tapping_a_tool_box_header_leaves_it_untinted() {
         !hover_tint.is_empty(),
         "fixture: a mouse hover must tint an unselected header, or this proves nothing",
     );
-    tree.dispatch_event(WidgetEvent::PointerMove {
-        position: Point::new(290.0, 390.0),
-    });
+    tree.dispatch_event(WidgetEvent::pointer_move(Point::new(290.0, 390.0)));
     tree.layout(SizeProposal::exact(300.0, 400.0));
 
     // 2. A finger taps the second header (it becomes the selected one) …
@@ -489,7 +487,7 @@ fn a_finger_tapping_a_radio_tile_leaves_it_untinted() {
     let idle = colours(&tree.render());
 
     // What a hover looks like on an unselected tile.
-    tree.dispatch_event(WidgetEvent::PointerMove { position: a_at });
+    tree.dispatch_event(WidgetEvent::pointer_move(a_at));
     tree.layout(SizeProposal::exact(300.0, 200.0));
     let hover_tint: Vec<[f32; 4]> = colours(&tree.render())
         .into_iter()
@@ -499,9 +497,7 @@ fn a_finger_tapping_a_radio_tile_leaves_it_untinted() {
         !hover_tint.is_empty(),
         "fixture: a mouse hover must tint an unselected tile",
     );
-    tree.dispatch_event(WidgetEvent::PointerMove {
-        position: Point::new(295.0, 195.0),
-    });
+    tree.dispatch_event(WidgetEvent::pointer_move(Point::new(295.0, 195.0)));
     tree.layout(SizeProposal::exact(300.0, 200.0));
 
     // A finger picks A, then B — so A is no longer selected and has nothing

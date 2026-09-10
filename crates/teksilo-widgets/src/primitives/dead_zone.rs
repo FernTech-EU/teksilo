@@ -173,16 +173,16 @@ mod tests {
         let b = tree.bounds(button);
         let (cx, cy) = (b.x + b.width / 2.0, b.y + b.height / 2.0);
         // Clean click activates the button.
-        tree.dispatch_event(WidgetEvent::PointerDown {
-            position: Point::new(cx, cy),
-            button: PointerButton::Primary,
-            modifiers: Modifiers::NONE,
-        });
-        tree.dispatch_event(WidgetEvent::PointerUp {
-            position: Point::new(cx, cy),
-            button: PointerButton::Primary,
-            modifiers: Modifiers::NONE,
-        });
+        tree.dispatch_event(WidgetEvent::pointer_down(
+            Point::new(cx, cy),
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
+        tree.dispatch_event(WidgetEvent::pointer_up(
+            Point::new(cx, cy),
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
         assert!(
             clicked.get(),
             "the button inside the dead zone still activates"

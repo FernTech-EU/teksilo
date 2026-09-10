@@ -353,7 +353,7 @@ impl Widget for PointerWatchOverlay {
                 let position = match event {
                     WidgetEvent::PointerDown { position, .. }
                     | WidgetEvent::PointerUp { position, .. }
-                    | WidgetEvent::PointerMove { position } => Some(*position),
+                    | WidgetEvent::PointerMove { position, .. } => Some(*position),
                     _ => None,
                 };
                 let down = matches!(

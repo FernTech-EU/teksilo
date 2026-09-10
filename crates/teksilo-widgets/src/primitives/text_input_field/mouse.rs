@@ -45,6 +45,7 @@ pub(crate) fn handle_pointer_event(
             position,
             button,
             modifiers,
+            ..
         } => {
             if *button != PointerButton::Primary {
                 return EventResponse::Ignored;
@@ -75,7 +76,7 @@ pub(crate) fn handle_pointer_event(
             // Ignored so gesture arena (double/triple tap) also sees this.
             EventResponse::Ignored
         }
-        WidgetEvent::PointerMove { position } => {
+        WidgetEvent::PointerMove { position, .. } => {
             let is_dragging = matches!(state.borrow().drag_state, DragState::Selecting);
             if !is_dragging {
                 return EventResponse::Ignored;

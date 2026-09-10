@@ -104,7 +104,7 @@ pub(crate) struct TerminalState {
     /// `WidgetTree::localize_event` hands every pointer event over in.
     ///
     /// Recorded for the wheel. A wheel notch is routed by hover and carries no
-    /// position of its own (`WidgetEvent::Scroll::position` is `None` for a
+    /// position of its own (`WidgetEvent::Scroll::window_position` is `None` for a
     /// mouse), so the cell its VT report names can only come from where the
     /// cursor last was. `None` until the pointer has been over the terminal at
     /// all, which is the only case a report has no cell to name.

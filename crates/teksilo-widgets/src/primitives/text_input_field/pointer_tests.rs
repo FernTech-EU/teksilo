@@ -149,8 +149,7 @@ impl Harness {
     }
 
     fn mouse_move(&mut self, at: Point) {
-        self.tree
-            .dispatch_event(WidgetEvent::PointerMove { position: at });
+        self.tree.dispatch_event(WidgetEvent::pointer_move(at));
     }
 
     fn mouse_release(&mut self, at: Point) {

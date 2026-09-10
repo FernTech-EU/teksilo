@@ -772,20 +772,33 @@ impl InputSnapshot {
     pub(crate) fn from_event(event: &crate::event::WidgetEvent) -> Self {
         use crate::event::WidgetEvent;
         match event {
-            WidgetEvent::PointerDown { position, .. }
-            | WidgetEvent::PointerUp { position, .. }
-            | WidgetEvent::PointerMove { position } => Self {
+            WidgetEvent::PointerDown {
+                position, pointer, ..
+            }
+            | WidgetEvent::PointerUp {
+                position, pointer, ..
+            }
+            | WidgetEvent::PointerMove {
+                position, pointer, ..
+            } => Self {
+                pointer: *pointer,
                 position: Some(*position),
                 ..Self::default()
             },
+            // Hover transitions carry no position of their own — the move that
+            // caused them did.
+            WidgetEvent::PointerEnter { pointer } | WidgetEvent::PointerLeave { pointer } => Self {
+                pointer: *pointer,
+                ..Self::default()
+            },
             WidgetEvent::Scroll {
-                position,
+                window_position,
                 phase,
                 pointer,
                 ..
             } => Self {
                 pointer: *pointer,
-                position: *position,
+                position: *window_position,
                 scroll_phase: *phase,
                 // A legacy `Scroll` carries no source; a wheel notch is what it
                 // has always been. `dispatch_scroll` overrides this from the
@@ -794,10 +807,12 @@ impl InputSnapshot {
                 coalesced: Vec::new(),
             },
             WidgetEvent::PointerCancel {
-                position, pointer, ..
+                window_position,
+                pointer,
+                ..
             } => Self {
                 pointer: *pointer,
-                position: *position,
+                position: *window_position,
                 ..Self::default()
             },
             _ => Self::default(),

@@ -1287,16 +1287,16 @@ mod tests {
             b.x
         );
         for ev in [
-            WidgetEvent::PointerDown {
-                position: Point::new(140.0, 30.0),
-                button: PointerButton::Primary,
-                modifiers: Modifiers::NONE,
-            },
-            WidgetEvent::PointerUp {
-                position: Point::new(140.0, 30.0),
-                button: PointerButton::Primary,
-                modifiers: Modifiers::NONE,
-            },
+            WidgetEvent::pointer_down(
+                Point::new(140.0, 30.0),
+                PointerButton::Primary,
+                Modifiers::NONE,
+            ),
+            WidgetEvent::pointer_up(
+                Point::new(140.0, 30.0),
+                PointerButton::Primary,
+                Modifiers::NONE,
+            ),
         ] {
             tree.dispatch_event(ev);
         }

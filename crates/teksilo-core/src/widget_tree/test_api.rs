@@ -86,26 +86,18 @@ impl WidgetTree {
     ) {
         let center = self.arena.bounds(id).center();
         self.dispatch_event_with_ops(
-            WidgetEvent::PointerDown {
-                position: center,
-                button: PointerButton::Primary,
-                modifiers: Modifiers::NONE,
-            },
+            WidgetEvent::pointer_down(center, PointerButton::Primary, Modifiers::NONE),
             &mut *ops,
         );
         self.dispatch_event_with_ops(
-            WidgetEvent::PointerUp {
-                position: center,
-                button: PointerButton::Primary,
-                modifiers: Modifiers::NONE,
-            },
+            WidgetEvent::pointer_up(center, PointerButton::Primary, Modifiers::NONE),
             &mut *ops,
         );
     }
 
     /// Simulate pointer movement to a position.
     pub fn pointer_move(&mut self, position: Point) {
-        self.dispatch_event(WidgetEvent::PointerMove { position });
+        self.dispatch_event(WidgetEvent::pointer_move(position));
     }
 
     /// Simulate a key press (down + up), carrying the text the platform
@@ -138,35 +130,27 @@ impl WidgetTree {
 
     /// Simulate a pointer down at a specific position with a specific button.
     pub fn pointer_down_button(&mut self, position: Point, button: PointerButton) {
-        self.dispatch_event(WidgetEvent::PointerDown {
-            position,
-            button,
-            modifiers: Modifiers::NONE,
-        });
+        self.dispatch_event(WidgetEvent::pointer_down(position, button, Modifiers::NONE));
     }
 
     /// Simulate a pointer up at a specific position with a specific button.
     pub fn pointer_up_button(&mut self, position: Point, button: PointerButton) {
-        self.dispatch_event(WidgetEvent::PointerUp {
-            position,
-            button,
-            modifiers: Modifiers::NONE,
-        });
+        self.dispatch_event(WidgetEvent::pointer_up(position, button, Modifiers::NONE));
     }
 
     /// Simulate a drag from one position to another.
     pub fn drag(&mut self, from: Point, to: Point) {
-        self.dispatch_event(WidgetEvent::PointerDown {
-            position: from,
-            button: PointerButton::Primary,
-            modifiers: Modifiers::NONE,
-        });
-        self.dispatch_event(WidgetEvent::PointerMove { position: to });
-        self.dispatch_event(WidgetEvent::PointerUp {
-            position: to,
-            button: PointerButton::Primary,
-            modifiers: Modifiers::NONE,
-        });
+        self.dispatch_event(WidgetEvent::pointer_down(
+            from,
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
+        self.dispatch_event(WidgetEvent::pointer_move(to));
+        self.dispatch_event(WidgetEvent::pointer_up(
+            to,
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
     }
 
     /// Get bounds of a child by index.

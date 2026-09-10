@@ -98,7 +98,7 @@ impl Widget for ResizeHandle {
                     ctx.capture_pointer();
                     EventResponse::Handled
                 }
-                WidgetEvent::PointerMove { position } => {
+                WidgetEvent::PointerMove { position, .. } => {
                     // The anchor says "I started a resize"; `owns_pointer` says
                     // "and I still own the press" — capture is an arbitration
                     // act, so a handle that lost it stops driving.

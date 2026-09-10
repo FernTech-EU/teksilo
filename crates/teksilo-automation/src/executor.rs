@@ -171,7 +171,8 @@ fn execute_op(
             let c = center(tree.bounds(widget));
             // Route the wheel: hover the target first (scroll dispatches to
             // the hovered/focused widget), then deliver the delta.
-            pointer_move(tree, ops, c);
+            let m = modifiers(*ctrl, *shift, *alt, *meta, *command);
+            pointer_move(tree, ops, c, m);
             // Modifiers are carried, not hardcoded to `NONE`: a modifier-held
             // wheel is a distinct gesture (Ctrl-wheel-to-zoom is why
             // `WidgetEvent::Scroll` has this field at all), and a probe that
@@ -191,11 +192,8 @@ fn execute_op(
             // only `TouchPan` down the pan-claimant chain, so a programmatic
             // scroll bubbles exactly as a wheel notch does and no pan claimant
             // competes for it.
-            let mut sample = ScrollSample::wheel(
-                ScrollDelta::Pixels { x: *dx, y: *dy },
-                modifiers(*ctrl, *shift, *alt, *meta, *command),
-                tree.input_now(),
-            );
+            let mut sample =
+                ScrollSample::wheel(ScrollDelta::Pixels { x: *dx, y: *dy }, m, tree.input_now());
             sample.source = ScrollSource::Programmatic;
             tree.dispatch_scroll_with_ops(sample, ops);
             finish_settle(tree, ops, settle)
@@ -683,8 +681,22 @@ fn execute_op(
 // `scroll`. These helpers make the synthetic-input ops behave the same way —
 // same events, same order, real ops.
 
-fn pointer_move(tree: &mut WidgetTree, ops: &mut dyn WindowOps, position: Point) {
-    tree.dispatch_event_with_ops(WidgetEvent::PointerMove { position }, ops);
+// The three below are the `PointerKindDto::Mouse` path only — a `touch` or `pen`
+// injection builds a real `PointerSample` and enters through the tree's pointer
+// door instead (see `inject_pointer`), so the mouse the `WidgetEvent`
+// constructors default to is the device these describe.
+
+/// `modifiers` is threaded rather than defaulted for the same reason the wheel's
+/// are: a drag reads Shift and Ctrl from the *move*, so a probe that could only
+/// send a bare move could not reach a Shift-extend selection or a Ctrl-additive
+/// marquee — and it would report success while doing it.
+fn pointer_move(
+    tree: &mut WidgetTree,
+    ops: &mut dyn WindowOps,
+    position: Point,
+    modifiers: Modifiers,
+) {
+    tree.dispatch_event_with_ops(WidgetEvent::pointer_move_with(position, modifiers), ops);
 }
 
 fn pointer_down(
@@ -694,14 +706,7 @@ fn pointer_down(
     button: teksilo_core::PointerButton,
     modifiers: Modifiers,
 ) {
-    tree.dispatch_event_with_ops(
-        WidgetEvent::PointerDown {
-            position,
-            button,
-            modifiers,
-        },
-        ops,
-    );
+    tree.dispatch_event_with_ops(WidgetEvent::pointer_down(position, button, modifiers), ops);
 }
 
 fn pointer_up(
@@ -711,14 +716,7 @@ fn pointer_up(
     button: teksilo_core::PointerButton,
     modifiers: Modifiers,
 ) {
-    tree.dispatch_event_with_ops(
-        WidgetEvent::PointerUp {
-            position,
-            button,
-            modifiers,
-        },
-        ops,
-    );
+    tree.dispatch_event_with_ops(WidgetEvent::pointer_up(position, button, modifiers), ops);
 }
 
 /// Press and release one key, carrying the text the platform attaches to it
@@ -913,7 +911,7 @@ fn inject_mouse(
         ));
     }
     match action {
-        PA::Move => pointer_move(tree, ops, p),
+        PA::Move => pointer_move(tree, ops, p, m),
         PA::Down => pointer_down(tree, ops, p, button, m),
         PA::Up => pointer_up(tree, ops, p, button, m),
         PA::Click => {
@@ -1275,7 +1273,9 @@ fn drag(tree: &mut WidgetTree, ops: &mut dyn WindowOps, from: Point, to: Point) 
         teksilo_core::PointerButton::Primary,
         Modifiers::NONE,
     );
-    pointer_move(tree, ops, to);
+    // `DragNode` names no modifiers, so there are none to thread; `NONE` here
+    // matches the press and the release either side of it.
+    pointer_move(tree, ops, to, Modifiers::NONE);
     pointer_up(
         tree,
         ops,

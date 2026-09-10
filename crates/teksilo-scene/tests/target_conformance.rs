@@ -908,16 +908,16 @@ fn item_takes_a_press_at(item: Rect, at: Point, density: TargetDensity, coarse: 
         tree.dispatch_pointer(sample(id, PointerPhase::Up, at, 16));
     } else {
         tree.pointer_move(at);
-        tree.dispatch_event(WidgetEvent::PointerDown {
-            position: at,
-            button: PointerButton::Primary,
-            modifiers: Modifiers::default(),
-        });
-        tree.dispatch_event(WidgetEvent::PointerUp {
-            position: at,
-            button: PointerButton::Primary,
-            modifiers: Modifiers::default(),
-        });
+        tree.dispatch_event(WidgetEvent::pointer_down(
+            at,
+            PointerButton::Primary,
+            Modifiers::default(),
+        ));
+        tree.dispatch_event(WidgetEvent::pointer_up(
+            at,
+            PointerButton::Primary,
+            Modifiers::default(),
+        ));
     }
     taps.get() > 0
 }
@@ -1089,17 +1089,17 @@ fn a_port_drag_connects_from(d: f32, density: TargetDensity, coarse: bool) -> bo
         tree.dispatch_pointer(sample(id, PointerPhase::Up, to, 32));
     } else {
         tree.pointer_move(from);
-        tree.dispatch_event(WidgetEvent::PointerDown {
-            position: from,
-            button: PointerButton::Primary,
-            modifiers: Modifiers::default(),
-        });
-        tree.dispatch_event(WidgetEvent::PointerMove { position: to });
-        tree.dispatch_event(WidgetEvent::PointerUp {
-            position: to,
-            button: PointerButton::Primary,
-            modifiers: Modifiers::default(),
-        });
+        tree.dispatch_event(WidgetEvent::pointer_down(
+            from,
+            PointerButton::Primary,
+            Modifiers::default(),
+        ));
+        tree.dispatch_event(WidgetEvent::pointer_move(to));
+        tree.dispatch_event(WidgetEvent::pointer_up(
+            to,
+            PointerButton::Primary,
+            Modifiers::default(),
+        ));
     }
     connections.get() > 0
 }

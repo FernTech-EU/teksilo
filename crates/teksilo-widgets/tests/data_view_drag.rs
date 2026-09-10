@@ -1119,18 +1119,14 @@ fn a_mouse_reorder_keeps_the_narrower_band_at_the_same_position() {
     let (mut tree, _id) = tree_with(view);
 
     let from = Point::new(200.0, 60.0);
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: from,
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
-    tree.dispatch_event(WidgetEvent::PointerMove {
-        position: Point::new(from.x, from.y + 8.0),
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        from,
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
+    tree.dispatch_event(WidgetEvent::pointer_move(Point::new(from.x, from.y + 8.0)));
     let at = only_the_coarse_band_reaches();
-    tree.dispatch_event(WidgetEvent::PointerMove {
-        position: Point::new(from.x, at),
-    });
+    tree.dispatch_event(WidgetEvent::pointer_move(Point::new(from.x, at)));
 
     for _ in 0..8 {
         tree.layout(SizeProposal::exact(VIEWPORT, VIEWPORT));
@@ -1143,9 +1139,10 @@ fn a_mouse_reorder_keeps_the_narrower_band_at_the_same_position() {
 
     // …and it does scroll once it is inside that band, so the assertion above
     // is about the band and not about the mouse drag failing to arm at all.
-    tree.dispatch_event(WidgetEvent::PointerMove {
-        position: Point::new(from.x, VIEWPORT - 8.0),
-    });
+    tree.dispatch_event(WidgetEvent::pointer_move(Point::new(
+        from.x,
+        VIEWPORT - 8.0,
+    )));
     for _ in 0..8 {
         tree.layout(SizeProposal::exact(VIEWPORT, VIEWPORT));
     }
@@ -1154,9 +1151,9 @@ fn a_mouse_reorder_keeps_the_narrower_band_at_the_same_position() {
         "the mouse drag is live and does scroll inside 32 dp; offset {}",
         offset.get(),
     );
-    tree.dispatch_event(WidgetEvent::PointerUp {
-        position: Point::new(from.x, VIEWPORT - 8.0),
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
+    tree.dispatch_event(WidgetEvent::pointer_up(
+        Point::new(from.x, VIEWPORT - 8.0),
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
 }

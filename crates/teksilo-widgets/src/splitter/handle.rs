@@ -373,7 +373,7 @@ impl Widget for SplitterHandle {
                         // check, so it never registers as a (double-)tap.
                         EventResponse::Ignored
                     }
-                    WidgetEvent::PointerMove { position } => {
+                    WidgetEvent::PointerMove { position, .. } => {
                         // `owns_pointer` as well as the local flag: capturing
                         // the pointer is an arbitration act, and a handle that
                         // lost the press (a peer claimed it, the sequence was

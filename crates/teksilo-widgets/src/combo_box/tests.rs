@@ -1104,14 +1104,15 @@ fn scrollbar_thumb_drag_survives_midflight_rebuild() {
     let thumb_start_y = sb_bounds.y + 4.0;
 
     tree.pointer_move(teksilo_canvas::Point::new(thumb_cx, thumb_start_y));
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: teksilo_canvas::Point::new(thumb_cx, thumb_start_y),
-        button: teksilo_core::event::PointerButton::Primary,
-        modifiers: teksilo_core::event::Modifiers::NONE,
-    });
-    tree.dispatch_event(WidgetEvent::PointerMove {
-        position: teksilo_canvas::Point::new(thumb_cx, thumb_start_y + 10.0),
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        teksilo_canvas::Point::new(thumb_cx, thumb_start_y),
+        teksilo_core::event::PointerButton::Primary,
+        teksilo_core::event::Modifiers::NONE,
+    ));
+    tree.dispatch_event(WidgetEvent::pointer_move(teksilo_canvas::Point::new(
+        thumb_cx,
+        thumb_start_y + 10.0,
+    )));
 
     // Step the drag in small increments, running layout between each
     // step to simulate the real app's per-frame layout cycle. A
@@ -1122,19 +1123,19 @@ fn scrollbar_thumb_drag_survives_midflight_rebuild() {
     let step = 20.0;
     while y + step < end_y {
         y += step;
-        tree.dispatch_event(WidgetEvent::PointerMove {
-            position: teksilo_canvas::Point::new(thumb_cx, y),
-        });
+        tree.dispatch_event(WidgetEvent::pointer_move(teksilo_canvas::Point::new(
+            thumb_cx, y,
+        )));
         tree.layout(SizeProposal::exact(300.0, 600.0));
     }
-    tree.dispatch_event(WidgetEvent::PointerMove {
-        position: teksilo_canvas::Point::new(thumb_cx, end_y),
-    });
-    tree.dispatch_event(WidgetEvent::PointerUp {
-        position: teksilo_canvas::Point::new(thumb_cx, end_y),
-        button: teksilo_core::event::PointerButton::Primary,
-        modifiers: teksilo_core::event::Modifiers::NONE,
-    });
+    tree.dispatch_event(WidgetEvent::pointer_move(teksilo_canvas::Point::new(
+        thumb_cx, end_y,
+    )));
+    tree.dispatch_event(WidgetEvent::pointer_up(
+        teksilo_canvas::Point::new(thumb_cx, end_y),
+        teksilo_core::event::PointerButton::Primary,
+        teksilo_core::event::Modifiers::NONE,
+    ));
     tree.layout(SizeProposal::exact(300.0, 600.0));
 
     let any_late = (1900..2000).any(|i| tree.find_by_label(&format!("Row {i}")).is_some());
@@ -1271,22 +1272,24 @@ fn scrollbar_thumb_drag_scrolls_virtualized_combo() {
     let thumb_cx = sb_bounds.x + sb_bounds.width / 2.0;
     let thumb_cy = sb_bounds.y + 4.0;
     tree.pointer_move(teksilo_canvas::Point::new(thumb_cx, thumb_cy));
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: teksilo_canvas::Point::new(thumb_cx, thumb_cy),
-        button: teksilo_core::event::PointerButton::Primary,
-        modifiers: teksilo_core::event::Modifiers::NONE,
-    });
-    tree.dispatch_event(WidgetEvent::PointerMove {
-        position: teksilo_canvas::Point::new(thumb_cx, thumb_cy + 10.0),
-    });
-    tree.dispatch_event(WidgetEvent::PointerMove {
-        position: teksilo_canvas::Point::new(thumb_cx, sb_bounds.y + sb_bounds.height - 4.0),
-    });
-    tree.dispatch_event(WidgetEvent::PointerUp {
-        position: teksilo_canvas::Point::new(thumb_cx, sb_bounds.y + sb_bounds.height - 4.0),
-        button: teksilo_core::event::PointerButton::Primary,
-        modifiers: teksilo_core::event::Modifiers::NONE,
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        teksilo_canvas::Point::new(thumb_cx, thumb_cy),
+        teksilo_core::event::PointerButton::Primary,
+        teksilo_core::event::Modifiers::NONE,
+    ));
+    tree.dispatch_event(WidgetEvent::pointer_move(teksilo_canvas::Point::new(
+        thumb_cx,
+        thumb_cy + 10.0,
+    )));
+    tree.dispatch_event(WidgetEvent::pointer_move(teksilo_canvas::Point::new(
+        thumb_cx,
+        sb_bounds.y + sb_bounds.height - 4.0,
+    )));
+    tree.dispatch_event(WidgetEvent::pointer_up(
+        teksilo_canvas::Point::new(thumb_cx, sb_bounds.y + sb_bounds.height - 4.0),
+        teksilo_core::event::PointerButton::Primary,
+        teksilo_core::event::Modifiers::NONE,
+    ));
     tree.layout(SizeProposal::exact(300.0, 600.0));
 
     // After a full-track drag, late rows should be materialized.

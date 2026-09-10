@@ -81,19 +81,17 @@ pub(crate) fn assert_body_survives_thumb_drag(
     let x = width - 5.0;
     let start = Point::new(x, thumb_top + 4.0);
     tree.pointer_move(start);
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: start,
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        start,
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
 
     // Walk the thumb to the bottom of the track, still held.
     let travel = height - thumb_top - 8.0;
     for step in 1..=10 {
         let y = thumb_top + 4.0 + travel * (step as f32 / 10.0);
-        tree.dispatch_event(WidgetEvent::PointerMove {
-            position: Point::new(x, y),
-        });
+        tree.dispatch_event(WidgetEvent::pointer_move(Point::new(x, y)));
         pump(tree);
     }
 
@@ -111,11 +109,11 @@ pub(crate) fn assert_body_survives_thumb_drag(
          effect, so this test is not exercising the deferral at all"
     );
 
-    tree.dispatch_event(WidgetEvent::PointerUp {
-        position: Point::new(x, height - 4.0),
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
+    tree.dispatch_event(WidgetEvent::pointer_up(
+        Point::new(x, height - 4.0),
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
     pump(tree);
     let after = rows_in_viewport(tree);
 

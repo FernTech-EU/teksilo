@@ -441,7 +441,7 @@ fn ctrl_wheel_zooms_about_cursor_keeping_scene_anchor_fixed() {
     // Park the cursor at (700, 400) — far from viewport center
     // (400, 300) — so any anchor mistake shows up clearly.
     let cursor = Point::new(700.0, 400.0);
-    tree.dispatch_event(Ev::PointerMove { position: cursor });
+    tree.dispatch_event(Ev::pointer_move(cursor));
 
     // Capture scene point under the cursor BEFORE zooming.
     let view = view_handle(&tree, view_id);
@@ -1386,7 +1386,7 @@ fn zoom_about_cursor_keeps_anchor_in_an_offset_scene_view() {
 
     // Park the cursor well inside the view but far from its centre.
     let cursor = Point::new(320.0, 340.0);
-    tree.dispatch_event(Ev::PointerMove { position: cursor });
+    tree.dispatch_event(Ev::pointer_move(cursor));
 
     let scene_under_cursor = view_handle(&tree, scene_id).map_to_scene(cursor);
 
@@ -2577,19 +2577,17 @@ fn marquee_drag_ends_with_pending_commit() {
     tree.layout(SizeProposal::exact(400.0, 300.0));
 
     tree.pointer_move(Point::new(40.0, 40.0));
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: Point::new(40.0, 40.0),
-        button: teksilo_core::event::PointerButton::Primary,
-        modifiers: teksilo_core::event::Modifiers::default(),
-    });
-    tree.dispatch_event(WidgetEvent::PointerMove {
-        position: Point::new(80.0, 80.0),
-    });
-    tree.dispatch_event(WidgetEvent::PointerUp {
-        position: Point::new(80.0, 80.0),
-        button: teksilo_core::event::PointerButton::Primary,
-        modifiers: teksilo_core::event::Modifiers::default(),
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        Point::new(40.0, 40.0),
+        teksilo_core::event::PointerButton::Primary,
+        teksilo_core::event::Modifiers::default(),
+    ));
+    tree.dispatch_event(WidgetEvent::pointer_move(Point::new(80.0, 80.0)));
+    tree.dispatch_event(WidgetEvent::pointer_up(
+        Point::new(80.0, 80.0),
+        teksilo_core::event::PointerButton::Primary,
+        teksilo_core::event::Modifiers::default(),
+    ));
 
     let view = view_handle(&tree, view_id);
     let pending = view.pending_marquee_commit.get();
@@ -2629,14 +2627,12 @@ fn marquee_drag_recognizes_started_phase() {
     // Hover so pointer-over state is set, then PointerDown,
     // PointerMove (crosses 5px threshold), PointerUp.
     tree.pointer_move(Point::new(40.0, 40.0));
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: Point::new(40.0, 40.0),
-        button: teksilo_core::event::PointerButton::Primary,
-        modifiers: teksilo_core::event::Modifiers::default(),
-    });
-    tree.dispatch_event(WidgetEvent::PointerMove {
-        position: Point::new(80.0, 80.0),
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        Point::new(40.0, 40.0),
+        teksilo_core::event::PointerButton::Primary,
+        teksilo_core::event::Modifiers::default(),
+    ));
+    tree.dispatch_event(WidgetEvent::pointer_move(Point::new(80.0, 80.0)));
 
     // After Started fires, marquee state should be Some.
     let view = view_handle(&tree, view_id);
@@ -2669,14 +2665,12 @@ fn drag_on_heavyweight_tappable_card_starts_marquee() {
 
     // Press ON the card, then drag past the 5px threshold.
     tree.pointer_move(Point::new(70.0, 70.0));
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: Point::new(70.0, 70.0),
-        button: teksilo_core::event::PointerButton::Primary,
-        modifiers: teksilo_core::event::Modifiers::default(),
-    });
-    tree.dispatch_event(WidgetEvent::PointerMove {
-        position: Point::new(120.0, 120.0),
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        Point::new(70.0, 70.0),
+        teksilo_core::event::PointerButton::Primary,
+        teksilo_core::event::Modifiers::default(),
+    ));
+    tree.dispatch_event(WidgetEvent::pointer_move(Point::new(120.0, 120.0)));
 
     let view = view_handle(&tree, view_id);
     assert!(
@@ -2714,19 +2708,17 @@ fn marquee_drag_records_pending_commit() {
     // produce a screen-rect enclosing `inside` but not
     // `outside`. The view-transform is identity at this
     // point, so screen and scene coords coincide.
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: Point::new(40.0, 40.0),
-        button: teksilo_core::event::PointerButton::Primary,
-        modifiers: teksilo_core::event::Modifiers::default(),
-    });
-    tree.dispatch_event(WidgetEvent::PointerMove {
-        position: Point::new(80.0, 80.0),
-    });
-    tree.dispatch_event(WidgetEvent::PointerUp {
-        position: Point::new(80.0, 80.0),
-        button: teksilo_core::event::PointerButton::Primary,
-        modifiers: teksilo_core::event::Modifiers::default(),
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        Point::new(40.0, 40.0),
+        teksilo_core::event::PointerButton::Primary,
+        teksilo_core::event::Modifiers::default(),
+    ));
+    tree.dispatch_event(WidgetEvent::pointer_move(Point::new(80.0, 80.0)));
+    tree.dispatch_event(WidgetEvent::pointer_up(
+        Point::new(80.0, 80.0),
+        teksilo_core::event::PointerButton::Primary,
+        teksilo_core::event::Modifiers::default(),
+    ));
 
     let view = view_handle(&tree, view_id);
     // Materialise the marquee result — outside a real
@@ -2770,19 +2762,17 @@ fn drag_to_move_translates_lightweight_item() {
 
     // Press inside the item (60, 60), drag to (100, 100), release.
     tree.pointer_move(Point::new(60.0, 60.0));
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: Point::new(60.0, 60.0),
-        button: teksilo_core::event::PointerButton::Primary,
-        modifiers: teksilo_core::event::Modifiers::default(),
-    });
-    tree.dispatch_event(WidgetEvent::PointerMove {
-        position: Point::new(100.0, 100.0),
-    });
-    tree.dispatch_event(WidgetEvent::PointerUp {
-        position: Point::new(100.0, 100.0),
-        button: teksilo_core::event::PointerButton::Primary,
-        modifiers: teksilo_core::event::Modifiers::default(),
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        Point::new(60.0, 60.0),
+        teksilo_core::event::PointerButton::Primary,
+        teksilo_core::event::Modifiers::default(),
+    ));
+    tree.dispatch_event(WidgetEvent::pointer_move(Point::new(100.0, 100.0)));
+    tree.dispatch_event(WidgetEvent::pointer_up(
+        Point::new(100.0, 100.0),
+        teksilo_core::event::PointerButton::Primary,
+        teksilo_core::event::Modifiers::default(),
+    ));
 
     // Diagnostic: verify the snapshot was populated, and
     // check whether drag_target or marquee was selected.
@@ -2862,14 +2852,12 @@ fn drag_start_uses_narrow_phase_for_thin_draggable_items() {
     );
     tree.layout(SizeProposal::exact(400.0, 300.0));
     tree.pointer_move(Point::new(70.0, 130.0));
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: Point::new(70.0, 130.0),
-        button: teksilo_core::event::PointerButton::Primary,
-        modifiers: teksilo_core::event::Modifiers::default(),
-    });
-    tree.dispatch_event(WidgetEvent::PointerMove {
-        position: Point::new(110.0, 170.0),
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        Point::new(70.0, 130.0),
+        teksilo_core::event::PointerButton::Primary,
+        teksilo_core::event::Modifiers::default(),
+    ));
+    tree.dispatch_event(WidgetEvent::pointer_move(Point::new(110.0, 170.0)));
     {
         let view = view_handle(&tree, view_id);
         assert!(
@@ -2889,14 +2877,12 @@ fn drag_start_uses_narrow_phase_for_thin_draggable_items() {
     );
     tree.layout(SizeProposal::exact(400.0, 300.0));
     tree.pointer_move(Point::new(100.0, 50.0));
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: Point::new(100.0, 50.0),
-        button: teksilo_core::event::PointerButton::Primary,
-        modifiers: teksilo_core::event::Modifiers::default(),
-    });
-    tree.dispatch_event(WidgetEvent::PointerMove {
-        position: Point::new(140.0, 90.0),
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        Point::new(100.0, 50.0),
+        teksilo_core::event::PointerButton::Primary,
+        teksilo_core::event::Modifiers::default(),
+    ));
+    tree.dispatch_event(WidgetEvent::pointer_move(Point::new(140.0, 90.0)));
     {
         let view = view_handle(&tree, view_id);
         assert!(
@@ -2941,19 +2927,17 @@ fn drag_to_move_persists_via_rebuild_signal_no_snap_back() {
 
     // -- First drag: (60, 60) → (100, 100) → release.
     tree.pointer_move(Point::new(60.0, 60.0));
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: Point::new(60.0, 60.0),
-        button: teksilo_core::event::PointerButton::Primary,
-        modifiers: teksilo_core::event::Modifiers::default(),
-    });
-    tree.dispatch_event(WidgetEvent::PointerMove {
-        position: Point::new(100.0, 100.0),
-    });
-    tree.dispatch_event(WidgetEvent::PointerUp {
-        position: Point::new(100.0, 100.0),
-        button: teksilo_core::event::PointerButton::Primary,
-        modifiers: teksilo_core::event::Modifiers::default(),
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        Point::new(60.0, 60.0),
+        teksilo_core::event::PointerButton::Primary,
+        teksilo_core::event::Modifiers::default(),
+    ));
+    tree.dispatch_event(WidgetEvent::pointer_move(Point::new(100.0, 100.0)));
+    tree.dispatch_event(WidgetEvent::pointer_up(
+        Point::new(100.0, 100.0),
+        teksilo_core::event::PointerButton::Primary,
+        teksilo_core::event::Modifiers::default(),
+    ));
 
     // After Ended the on_drag closure must have posted a
     // pending move and bumped reconcile_dirty.
@@ -2991,19 +2975,17 @@ fn drag_to_move_persists_via_rebuild_signal_no_snap_back() {
     // After the first drag the item is at (90, 90, 30, 30), so
     // the press at (100, 100) is inside it.
     tree.pointer_move(Point::new(100.0, 100.0));
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: Point::new(100.0, 100.0),
-        button: teksilo_core::event::PointerButton::Primary,
-        modifiers: teksilo_core::event::Modifiers::default(),
-    });
-    tree.dispatch_event(WidgetEvent::PointerMove {
-        position: Point::new(140.0, 140.0),
-    });
-    tree.dispatch_event(WidgetEvent::PointerUp {
-        position: Point::new(140.0, 140.0),
-        button: teksilo_core::event::PointerButton::Primary,
-        modifiers: teksilo_core::event::Modifiers::default(),
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        Point::new(100.0, 100.0),
+        teksilo_core::event::PointerButton::Primary,
+        teksilo_core::event::Modifiers::default(),
+    ));
+    tree.dispatch_event(WidgetEvent::pointer_move(Point::new(140.0, 140.0)));
+    tree.dispatch_event(WidgetEvent::pointer_up(
+        Point::new(140.0, 140.0),
+        teksilo_core::event::PointerButton::Primary,
+        teksilo_core::event::Modifiers::default(),
+    ));
     tree.layout(SizeProposal::exact(400.0, 300.0));
 
     let view = view_handle(&tree, view_id);
@@ -3053,19 +3035,17 @@ fn drag_cascades_to_declared_descendants() {
 
     // Drag the parent (60, 60) → (100, 100) — delta = +40 x +40.
     tree.pointer_move(Point::new(60.0, 60.0));
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: Point::new(60.0, 60.0),
-        button: teksilo_core::event::PointerButton::Primary,
-        modifiers: teksilo_core::event::Modifiers::default(),
-    });
-    tree.dispatch_event(WidgetEvent::PointerMove {
-        position: Point::new(100.0, 100.0),
-    });
-    tree.dispatch_event(WidgetEvent::PointerUp {
-        position: Point::new(100.0, 100.0),
-        button: teksilo_core::event::PointerButton::Primary,
-        modifiers: teksilo_core::event::Modifiers::default(),
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        Point::new(60.0, 60.0),
+        teksilo_core::event::PointerButton::Primary,
+        teksilo_core::event::Modifiers::default(),
+    ));
+    tree.dispatch_event(WidgetEvent::pointer_move(Point::new(100.0, 100.0)));
+    tree.dispatch_event(WidgetEvent::pointer_up(
+        Point::new(100.0, 100.0),
+        teksilo_core::event::PointerButton::Primary,
+        teksilo_core::event::Modifiers::default(),
+    ));
     tree.layout(SizeProposal::exact(400.0, 300.0));
 
     let view = view_handle(&tree, view_id);
@@ -3122,37 +3102,33 @@ fn parent_child_drag_persists_across_two_drags() {
 
     // -- Drag 1: press at (60,60), release at (100,100). Δ = +40,+40.
     tree.pointer_move(Point::new(60.0, 60.0));
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: Point::new(60.0, 60.0),
-        button: teksilo_core::event::PointerButton::Primary,
-        modifiers: teksilo_core::event::Modifiers::default(),
-    });
-    tree.dispatch_event(WidgetEvent::PointerMove {
-        position: Point::new(100.0, 100.0),
-    });
-    tree.dispatch_event(WidgetEvent::PointerUp {
-        position: Point::new(100.0, 100.0),
-        button: teksilo_core::event::PointerButton::Primary,
-        modifiers: teksilo_core::event::Modifiers::default(),
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        Point::new(60.0, 60.0),
+        teksilo_core::event::PointerButton::Primary,
+        teksilo_core::event::Modifiers::default(),
+    ));
+    tree.dispatch_event(WidgetEvent::pointer_move(Point::new(100.0, 100.0)));
+    tree.dispatch_event(WidgetEvent::pointer_up(
+        Point::new(100.0, 100.0),
+        teksilo_core::event::PointerButton::Primary,
+        teksilo_core::event::Modifiers::default(),
+    ));
     tree.layout(SizeProposal::exact(400.0, 300.0));
 
     // -- Drag 2: parent now at (90,90,80,60). Press inside it at
     // (110,110), release at (150,150). Δ = +40,+40.
     tree.pointer_move(Point::new(110.0, 110.0));
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: Point::new(110.0, 110.0),
-        button: teksilo_core::event::PointerButton::Primary,
-        modifiers: teksilo_core::event::Modifiers::default(),
-    });
-    tree.dispatch_event(WidgetEvent::PointerMove {
-        position: Point::new(150.0, 150.0),
-    });
-    tree.dispatch_event(WidgetEvent::PointerUp {
-        position: Point::new(150.0, 150.0),
-        button: teksilo_core::event::PointerButton::Primary,
-        modifiers: teksilo_core::event::Modifiers::default(),
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        Point::new(110.0, 110.0),
+        teksilo_core::event::PointerButton::Primary,
+        teksilo_core::event::Modifiers::default(),
+    ));
+    tree.dispatch_event(WidgetEvent::pointer_move(Point::new(150.0, 150.0)));
+    tree.dispatch_event(WidgetEvent::pointer_up(
+        Point::new(150.0, 150.0),
+        teksilo_core::event::PointerButton::Primary,
+        teksilo_core::event::Modifiers::default(),
+    ));
     tree.layout(SizeProposal::exact(400.0, 300.0));
 
     let view = view_handle(&tree, view_id);
@@ -3256,19 +3232,17 @@ fn looping_item_animation_survives_drag_end_rebuild() {
     // triggers a SceneView rebuild on the next layout pass, which
     // is where the regression bites.
     tree.pointer_move(Point::new(20.0, 20.0));
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: Point::new(20.0, 20.0),
-        button: teksilo_core::event::PointerButton::Primary,
-        modifiers: teksilo_core::event::Modifiers::default(),
-    });
-    tree.dispatch_event(WidgetEvent::PointerMove {
-        position: Point::new(60.0, 60.0),
-    });
-    tree.dispatch_event(WidgetEvent::PointerUp {
-        position: Point::new(60.0, 60.0),
-        button: teksilo_core::event::PointerButton::Primary,
-        modifiers: teksilo_core::event::Modifiers::default(),
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        Point::new(20.0, 20.0),
+        teksilo_core::event::PointerButton::Primary,
+        teksilo_core::event::Modifiers::default(),
+    ));
+    tree.dispatch_event(WidgetEvent::pointer_move(Point::new(60.0, 60.0)));
+    tree.dispatch_event(WidgetEvent::pointer_up(
+        Point::new(60.0, 60.0),
+        teksilo_core::event::PointerButton::Primary,
+        teksilo_core::event::Modifiers::default(),
+    ));
     // First layout: drains the pending move; rebuild's
     // `register_bindings` re-arms the loop's pending request.
     tree.layout(SizeProposal::exact(400.0, 300.0));
@@ -3323,19 +3297,17 @@ fn drag_in_empty_area_starts_marquee_not_move() {
     // Press at (10, 10) — empty area. Drag to (200, 200) —
     // crosses the item. Release.
     tree.pointer_move(Point::new(10.0, 10.0));
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: Point::new(10.0, 10.0),
-        button: teksilo_core::event::PointerButton::Primary,
-        modifiers: teksilo_core::event::Modifiers::default(),
-    });
-    tree.dispatch_event(WidgetEvent::PointerMove {
-        position: Point::new(200.0, 200.0),
-    });
-    tree.dispatch_event(WidgetEvent::PointerUp {
-        position: Point::new(200.0, 200.0),
-        button: teksilo_core::event::PointerButton::Primary,
-        modifiers: teksilo_core::event::Modifiers::default(),
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        Point::new(10.0, 10.0),
+        teksilo_core::event::PointerButton::Primary,
+        teksilo_core::event::Modifiers::default(),
+    ));
+    tree.dispatch_event(WidgetEvent::pointer_move(Point::new(200.0, 200.0)));
+    tree.dispatch_event(WidgetEvent::pointer_up(
+        Point::new(200.0, 200.0),
+        teksilo_core::event::PointerButton::Primary,
+        teksilo_core::event::Modifiers::default(),
+    ));
 
     let view = view_handle(&tree, view_id);
     view.flush_marquee_commit();
@@ -3457,19 +3429,17 @@ fn marquee_no_op_in_none_mode() {
     let view_id = tree.add(SceneView::new(scene));
     tree.layout(SizeProposal::exact(400.0, 300.0));
 
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: Point::new(40.0, 40.0),
-        button: teksilo_core::event::PointerButton::Primary,
-        modifiers: teksilo_core::event::Modifiers::default(),
-    });
-    tree.dispatch_event(WidgetEvent::PointerMove {
-        position: Point::new(80.0, 80.0),
-    });
-    tree.dispatch_event(WidgetEvent::PointerUp {
-        position: Point::new(80.0, 80.0),
-        button: teksilo_core::event::PointerButton::Primary,
-        modifiers: teksilo_core::event::Modifiers::default(),
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        Point::new(40.0, 40.0),
+        teksilo_core::event::PointerButton::Primary,
+        teksilo_core::event::Modifiers::default(),
+    ));
+    tree.dispatch_event(WidgetEvent::pointer_move(Point::new(80.0, 80.0)));
+    tree.dispatch_event(WidgetEvent::pointer_up(
+        Point::new(80.0, 80.0),
+        teksilo_core::event::PointerButton::Primary,
+        teksilo_core::event::Modifiers::default(),
+    ));
 
     let view = view_handle(&tree, view_id);
     assert_eq!(view.selection().count(), 0);
@@ -3502,19 +3472,17 @@ fn marquee_does_not_unmount_heavyweight_children() {
     assert!(tree.children(view_id).contains(&materialised_id));
 
     // Drag a marquee in empty space (above the widget).
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: Point::new(200.0, 10.0),
-        button: teksilo_core::event::PointerButton::Primary,
-        modifiers: teksilo_core::event::Modifiers::default(),
-    });
-    tree.dispatch_event(WidgetEvent::PointerMove {
-        position: Point::new(260.0, 30.0),
-    });
-    tree.dispatch_event(WidgetEvent::PointerUp {
-        position: Point::new(260.0, 30.0),
-        button: teksilo_core::event::PointerButton::Primary,
-        modifiers: teksilo_core::event::Modifiers::default(),
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        Point::new(200.0, 10.0),
+        teksilo_core::event::PointerButton::Primary,
+        teksilo_core::event::Modifiers::default(),
+    ));
+    tree.dispatch_event(WidgetEvent::pointer_move(Point::new(260.0, 30.0)));
+    tree.dispatch_event(WidgetEvent::pointer_up(
+        Point::new(260.0, 30.0),
+        teksilo_core::event::PointerButton::Primary,
+        teksilo_core::event::Modifiers::default(),
+    ));
 
     // After marquee end the framework processes any dirty
     // signals — drive a layout to give place_children a chance
@@ -4081,16 +4049,16 @@ fn on_tap_fires_when_item_clicked() {
     tree.add(SceneView::new(scene));
     tree.layout(SizeProposal::exact(400.0, 300.0));
     // Tap squarely inside the item.
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: teksilo_canvas::Point::new(40.0, 40.0),
-        button: teksilo_core::event::PointerButton::Primary,
-        modifiers: teksilo_core::event::Modifiers::default(),
-    });
-    tree.dispatch_event(WidgetEvent::PointerUp {
-        position: teksilo_canvas::Point::new(40.0, 40.0),
-        button: teksilo_core::event::PointerButton::Primary,
-        modifiers: teksilo_core::event::Modifiers::default(),
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        teksilo_canvas::Point::new(40.0, 40.0),
+        teksilo_core::event::PointerButton::Primary,
+        teksilo_core::event::Modifiers::default(),
+    ));
+    tree.dispatch_event(WidgetEvent::pointer_up(
+        teksilo_canvas::Point::new(40.0, 40.0),
+        teksilo_core::event::PointerButton::Primary,
+        teksilo_core::event::Modifiers::default(),
+    ));
     assert_eq!(count.get(), 1, "on_tap must fire once");
 }
 
@@ -4115,11 +4083,11 @@ fn on_context_menu_fires_on_secondary_button() {
     let mut tree = WidgetTree::new();
     tree.add(SceneView::new(scene));
     tree.layout(SizeProposal::exact(400.0, 300.0));
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: teksilo_canvas::Point::new(40.0, 40.0),
-        button: teksilo_core::event::PointerButton::Secondary,
-        modifiers: teksilo_core::event::Modifiers::default(),
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        teksilo_canvas::Point::new(40.0, 40.0),
+        teksilo_core::event::PointerButton::Secondary,
+        teksilo_core::event::Modifiers::default(),
+    ));
     assert!(fired.get(), "on_context_menu must fire on right-click");
 }
 
@@ -4142,19 +4110,19 @@ fn drag_mode_no_drag_disables_marquee_and_drag_to_move() {
     tree.layout(SizeProposal::exact(400.0, 300.0));
     // Attempt drag — should produce no change.
     tree.pointer_move(teksilo_canvas::Point::new(20.0, 20.0));
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: teksilo_canvas::Point::new(20.0, 20.0),
-        button: teksilo_core::event::PointerButton::Primary,
-        modifiers: teksilo_core::event::Modifiers::default(),
-    });
-    tree.dispatch_event(WidgetEvent::PointerMove {
-        position: teksilo_canvas::Point::new(60.0, 60.0),
-    });
-    tree.dispatch_event(WidgetEvent::PointerUp {
-        position: teksilo_canvas::Point::new(60.0, 60.0),
-        button: teksilo_core::event::PointerButton::Primary,
-        modifiers: teksilo_core::event::Modifiers::default(),
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        teksilo_canvas::Point::new(20.0, 20.0),
+        teksilo_core::event::PointerButton::Primary,
+        teksilo_core::event::Modifiers::default(),
+    ));
+    tree.dispatch_event(WidgetEvent::pointer_move(teksilo_canvas::Point::new(
+        60.0, 60.0,
+    )));
+    tree.dispatch_event(WidgetEvent::pointer_up(
+        teksilo_canvas::Point::new(60.0, 60.0),
+        teksilo_core::event::PointerButton::Primary,
+        teksilo_core::event::Modifiers::default(),
+    ));
     tree.layout(SizeProposal::exact(400.0, 300.0));
     let view = view_handle(&tree, view_id);
     // local_pos unchanged.
@@ -4747,24 +4715,24 @@ fn scroll_hand_drag_honors_pan_axes_horizontal() {
     // on the delta of the SECOND move only — diagonal (+25, +35),
     // of which only the x component should move pan.
     tree.pointer_move(teksilo_canvas::Point::new(100.0, 100.0));
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: teksilo_canvas::Point::new(100.0, 100.0),
-        button: teksilo_core::event::PointerButton::Primary,
-        modifiers: teksilo_core::event::Modifiers::default(),
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        teksilo_canvas::Point::new(100.0, 100.0),
+        teksilo_core::event::PointerButton::Primary,
+        teksilo_core::event::Modifiers::default(),
+    ));
     // First move: crosses threshold, fires DragStarted (no pan).
-    tree.dispatch_event(WidgetEvent::PointerMove {
-        position: teksilo_canvas::Point::new(105.0, 105.0),
-    });
+    tree.dispatch_event(WidgetEvent::pointer_move(teksilo_canvas::Point::new(
+        105.0, 105.0,
+    )));
     // Second move: fires DragMoved with delta (+25, +35).
-    tree.dispatch_event(WidgetEvent::PointerMove {
-        position: teksilo_canvas::Point::new(130.0, 140.0),
-    });
-    tree.dispatch_event(WidgetEvent::PointerUp {
-        position: teksilo_canvas::Point::new(130.0, 140.0),
-        button: teksilo_core::event::PointerButton::Primary,
-        modifiers: teksilo_core::event::Modifiers::default(),
-    });
+    tree.dispatch_event(WidgetEvent::pointer_move(teksilo_canvas::Point::new(
+        130.0, 140.0,
+    )));
+    tree.dispatch_event(WidgetEvent::pointer_up(
+        teksilo_canvas::Point::new(130.0, 140.0),
+        teksilo_core::event::PointerButton::Primary,
+        teksilo_core::event::Modifiers::default(),
+    ));
 
     let view = view_handle(&tree, view_id);
     let pan = view.pan();
@@ -4794,19 +4762,19 @@ fn scroll_hand_drag_blocked_when_pan_axes_none() {
     tree.layout(SizeProposal::exact(400.0, 300.0));
 
     tree.pointer_move(teksilo_canvas::Point::new(50.0, 50.0));
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: teksilo_canvas::Point::new(50.0, 50.0),
-        button: teksilo_core::event::PointerButton::Primary,
-        modifiers: teksilo_core::event::Modifiers::default(),
-    });
-    tree.dispatch_event(WidgetEvent::PointerMove {
-        position: teksilo_canvas::Point::new(120.0, 90.0),
-    });
-    tree.dispatch_event(WidgetEvent::PointerUp {
-        position: teksilo_canvas::Point::new(120.0, 90.0),
-        button: teksilo_core::event::PointerButton::Primary,
-        modifiers: teksilo_core::event::Modifiers::default(),
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        teksilo_canvas::Point::new(50.0, 50.0),
+        teksilo_core::event::PointerButton::Primary,
+        teksilo_core::event::Modifiers::default(),
+    ));
+    tree.dispatch_event(WidgetEvent::pointer_move(teksilo_canvas::Point::new(
+        120.0, 90.0,
+    )));
+    tree.dispatch_event(WidgetEvent::pointer_up(
+        teksilo_canvas::Point::new(120.0, 90.0),
+        teksilo_core::event::PointerButton::Primary,
+        teksilo_core::event::Modifiers::default(),
+    ));
 
     let view = view_handle(&tree, view_id);
     assert_eq!(
@@ -5058,16 +5026,16 @@ fn ignores_xform_hit_test_anchor_tracks_scene_point_but_size_fixed_under_zoom() 
     tree.layout(SizeProposal::exact(400.0, 300.0));
 
     let tap = |tree: &mut WidgetTree, x: f32, y: f32| {
-        tree.dispatch_event(WidgetEvent::PointerDown {
-            position: teksilo_canvas::Point::new(x, y),
-            button: teksilo_core::event::PointerButton::Primary,
-            modifiers: teksilo_core::event::Modifiers::default(),
-        });
-        tree.dispatch_event(WidgetEvent::PointerUp {
-            position: teksilo_canvas::Point::new(x, y),
-            button: teksilo_core::event::PointerButton::Primary,
-            modifiers: teksilo_core::event::Modifiers::default(),
-        });
+        tree.dispatch_event(WidgetEvent::pointer_down(
+            teksilo_canvas::Point::new(x, y),
+            teksilo_core::event::PointerButton::Primary,
+            teksilo_core::event::Modifiers::default(),
+        ));
+        tree.dispatch_event(WidgetEvent::pointer_up(
+            teksilo_canvas::Point::new(x, y),
+            teksilo_core::event::PointerButton::Primary,
+            teksilo_core::event::Modifiers::default(),
+        ));
     };
     // Zoom 1: screen anchor = (100, 100). Tap inside (110, 110).
     tap(&mut tree, 110.0, 110.0);
@@ -5140,16 +5108,16 @@ fn ignores_xform_hit_test_anchor_follows_pan() {
     tree.layout(SizeProposal::exact(400.0, 300.0));
 
     let tap = |tree: &mut WidgetTree, x: f32, y: f32| {
-        tree.dispatch_event(WidgetEvent::PointerDown {
-            position: teksilo_canvas::Point::new(x, y),
-            button: teksilo_core::event::PointerButton::Primary,
-            modifiers: teksilo_core::event::Modifiers::default(),
-        });
-        tree.dispatch_event(WidgetEvent::PointerUp {
-            position: teksilo_canvas::Point::new(x, y),
-            button: teksilo_core::event::PointerButton::Primary,
-            modifiers: teksilo_core::event::Modifiers::default(),
-        });
+        tree.dispatch_event(WidgetEvent::pointer_down(
+            teksilo_canvas::Point::new(x, y),
+            teksilo_core::event::PointerButton::Primary,
+            teksilo_core::event::Modifiers::default(),
+        ));
+        tree.dispatch_event(WidgetEvent::pointer_up(
+            teksilo_canvas::Point::new(x, y),
+            teksilo_core::event::PointerButton::Primary,
+            teksilo_core::event::Modifiers::default(),
+        ));
     };
 
     // (160, 160) is inside (150..190, 150..190) — should hit.
@@ -5569,16 +5537,16 @@ fn path_item_stroke_only_dispatch_uses_segment_distance_not_aabb() {
     tree.layout(SizeProposal::exact(400.0, 300.0));
 
     let tap = |tree: &mut WidgetTree, x: f32, y: f32| {
-        tree.dispatch_event(WidgetEvent::PointerDown {
-            position: teksilo_canvas::Point::new(x, y),
-            button: teksilo_core::event::PointerButton::Primary,
-            modifiers: teksilo_core::event::Modifiers::default(),
-        });
-        tree.dispatch_event(WidgetEvent::PointerUp {
-            position: teksilo_canvas::Point::new(x, y),
-            button: teksilo_core::event::PointerButton::Primary,
-            modifiers: teksilo_core::event::Modifiers::default(),
-        });
+        tree.dispatch_event(WidgetEvent::pointer_down(
+            teksilo_canvas::Point::new(x, y),
+            teksilo_core::event::PointerButton::Primary,
+            teksilo_core::event::Modifiers::default(),
+        ));
+        tree.dispatch_event(WidgetEvent::pointer_up(
+            teksilo_canvas::Point::new(x, y),
+            teksilo_core::event::PointerButton::Primary,
+            teksilo_core::event::Modifiers::default(),
+        ));
     };
 
     // Tap squarely ON the vertical stroke segment.
@@ -5649,16 +5617,16 @@ fn group_item_logical_only_dispatch_passes_through_to_item_beneath() {
     tree.layout(SizeProposal::exact(400.0, 300.0));
 
     let tap = |tree: &mut WidgetTree, x: f32, y: f32| {
-        tree.dispatch_event(WidgetEvent::PointerDown {
-            position: teksilo_canvas::Point::new(x, y),
-            button: teksilo_core::event::PointerButton::Primary,
-            modifiers: teksilo_core::event::Modifiers::default(),
-        });
-        tree.dispatch_event(WidgetEvent::PointerUp {
-            position: teksilo_canvas::Point::new(x, y),
-            button: teksilo_core::event::PointerButton::Primary,
-            modifiers: teksilo_core::event::Modifiers::default(),
-        });
+        tree.dispatch_event(WidgetEvent::pointer_down(
+            teksilo_canvas::Point::new(x, y),
+            teksilo_core::event::PointerButton::Primary,
+            teksilo_core::event::Modifiers::default(),
+        ));
+        tree.dispatch_event(WidgetEvent::pointer_up(
+            teksilo_canvas::Point::new(x, y),
+            teksilo_core::event::PointerButton::Primary,
+            teksilo_core::event::Modifiers::default(),
+        ));
     };
 
     // Tap inside the inner rect (inside both the inner item AND
@@ -5708,16 +5676,16 @@ fn group_item_visual_dispatch_uses_aabb_as_before() {
     tree.add(SceneView::new(scene));
     tree.layout(SizeProposal::exact(400.0, 300.0));
 
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: teksilo_canvas::Point::new(50.0, 50.0),
-        button: teksilo_core::event::PointerButton::Primary,
-        modifiers: teksilo_core::event::Modifiers::default(),
-    });
-    tree.dispatch_event(WidgetEvent::PointerUp {
-        position: teksilo_canvas::Point::new(50.0, 50.0),
-        button: teksilo_core::event::PointerButton::Primary,
-        modifiers: teksilo_core::event::Modifiers::default(),
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        teksilo_canvas::Point::new(50.0, 50.0),
+        teksilo_core::event::PointerButton::Primary,
+        teksilo_core::event::Modifiers::default(),
+    ));
+    tree.dispatch_event(WidgetEvent::pointer_up(
+        teksilo_canvas::Point::new(50.0, 50.0),
+        teksilo_core::event::PointerButton::Primary,
+        teksilo_core::event::Modifiers::default(),
+    ));
     assert_eq!(
         hits.get(),
         1,
@@ -5924,24 +5892,24 @@ fn drag_mode_signal_flips_behavior_at_runtime() {
 
     let drag = |tree: &mut WidgetTree, fx: f32, fy: f32, tx: f32, ty: f32| {
         tree.pointer_move(teksilo_canvas::Point::new(fx, fy));
-        tree.dispatch_event(WidgetEvent::PointerDown {
-            position: teksilo_canvas::Point::new(fx, fy),
-            button: teksilo_core::event::PointerButton::Primary,
-            modifiers: teksilo_core::event::Modifiers::default(),
-        });
+        tree.dispatch_event(WidgetEvent::pointer_down(
+            teksilo_canvas::Point::new(fx, fy),
+            teksilo_core::event::PointerButton::Primary,
+            teksilo_core::event::Modifiers::default(),
+        ));
         // Two moves so the second produces DragMoved (recognizer
         // emits Started on the threshold-crossing Move and Moved
         // on subsequent ones).
         let mid = teksilo_canvas::Point::new((fx + tx) * 0.5, (fy + ty) * 0.5);
-        tree.dispatch_event(WidgetEvent::PointerMove { position: mid });
-        tree.dispatch_event(WidgetEvent::PointerMove {
-            position: teksilo_canvas::Point::new(tx, ty),
-        });
-        tree.dispatch_event(WidgetEvent::PointerUp {
-            position: teksilo_canvas::Point::new(tx, ty),
-            button: teksilo_core::event::PointerButton::Primary,
-            modifiers: teksilo_core::event::Modifiers::default(),
-        });
+        tree.dispatch_event(WidgetEvent::pointer_move(mid));
+        tree.dispatch_event(WidgetEvent::pointer_move(teksilo_canvas::Point::new(
+            tx, ty,
+        )));
+        tree.dispatch_event(WidgetEvent::pointer_up(
+            teksilo_canvas::Point::new(tx, ty),
+            teksilo_core::event::PointerButton::Primary,
+            teksilo_core::event::Modifiers::default(),
+        ));
     };
 
     // Round 1: RubberBand mode. Drag from (50,50) to (200,200) —
@@ -5996,21 +5964,21 @@ fn drag_mode_signal_to_no_drag_disables_dispatch_at_runtime() {
 
     let drag = |tree: &mut WidgetTree, fx: f32, fy: f32, tx: f32, ty: f32| {
         tree.pointer_move(teksilo_canvas::Point::new(fx, fy));
-        tree.dispatch_event(WidgetEvent::PointerDown {
-            position: teksilo_canvas::Point::new(fx, fy),
-            button: teksilo_core::event::PointerButton::Primary,
-            modifiers: teksilo_core::event::Modifiers::default(),
-        });
+        tree.dispatch_event(WidgetEvent::pointer_down(
+            teksilo_canvas::Point::new(fx, fy),
+            teksilo_core::event::PointerButton::Primary,
+            teksilo_core::event::Modifiers::default(),
+        ));
         let mid = teksilo_canvas::Point::new((fx + tx) * 0.5, (fy + ty) * 0.5);
-        tree.dispatch_event(WidgetEvent::PointerMove { position: mid });
-        tree.dispatch_event(WidgetEvent::PointerMove {
-            position: teksilo_canvas::Point::new(tx, ty),
-        });
-        tree.dispatch_event(WidgetEvent::PointerUp {
-            position: teksilo_canvas::Point::new(tx, ty),
-            button: teksilo_core::event::PointerButton::Primary,
-            modifiers: teksilo_core::event::Modifiers::default(),
-        });
+        tree.dispatch_event(WidgetEvent::pointer_move(mid));
+        tree.dispatch_event(WidgetEvent::pointer_move(teksilo_canvas::Point::new(
+            tx, ty,
+        )));
+        tree.dispatch_event(WidgetEvent::pointer_up(
+            teksilo_canvas::Point::new(tx, ty),
+            teksilo_core::event::PointerButton::Primary,
+            teksilo_core::event::Modifiers::default(),
+        ));
     };
 
     drag(&mut tree, 100.0, 100.0, 150.0, 150.0);
@@ -6099,16 +6067,16 @@ fn on_tap_event_receives_modifiers_and_button() {
     tree.layout(SizeProposal::exact(400.0, 300.0));
 
     // Tap with Shift held.
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: teksilo_canvas::Point::new(40.0, 40.0),
-        button: teksilo_core::event::PointerButton::Primary,
-        modifiers: teksilo_core::event::Modifiers::SHIFT,
-    });
-    tree.dispatch_event(WidgetEvent::PointerUp {
-        position: teksilo_canvas::Point::new(40.0, 40.0),
-        button: teksilo_core::event::PointerButton::Primary,
-        modifiers: teksilo_core::event::Modifiers::SHIFT,
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        teksilo_canvas::Point::new(40.0, 40.0),
+        teksilo_core::event::PointerButton::Primary,
+        teksilo_core::event::Modifiers::SHIFT,
+    ));
+    tree.dispatch_event(WidgetEvent::pointer_up(
+        teksilo_canvas::Point::new(40.0, 40.0),
+        teksilo_core::event::PointerButton::Primary,
+        teksilo_core::event::Modifiers::SHIFT,
+    ));
 
     let ev = captured.borrow().expect("on_tap_event must fire");
     assert_eq!(ev.position_scene, teksilo_canvas::Point::new(40.0, 40.0));
@@ -6143,16 +6111,16 @@ fn on_tap_point_shim_still_compiles_and_fires() {
     let mut tree = WidgetTree::new();
     tree.add(SceneView::new(scene));
     tree.layout(SizeProposal::exact(400.0, 300.0));
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: teksilo_canvas::Point::new(40.0, 40.0),
-        button: teksilo_core::event::PointerButton::Primary,
-        modifiers: teksilo_core::event::Modifiers::default(),
-    });
-    tree.dispatch_event(WidgetEvent::PointerUp {
-        position: teksilo_canvas::Point::new(40.0, 40.0),
-        button: teksilo_core::event::PointerButton::Primary,
-        modifiers: teksilo_core::event::Modifiers::default(),
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        teksilo_canvas::Point::new(40.0, 40.0),
+        teksilo_core::event::PointerButton::Primary,
+        teksilo_core::event::Modifiers::default(),
+    ));
+    tree.dispatch_event(WidgetEvent::pointer_up(
+        teksilo_canvas::Point::new(40.0, 40.0),
+        teksilo_core::event::PointerButton::Primary,
+        teksilo_core::event::Modifiers::default(),
+    ));
 
     assert_eq!(count.get(), 1);
     assert_eq!(pt_seen.get(), teksilo_canvas::Point::new(40.0, 40.0));
@@ -6188,16 +6156,16 @@ fn accept_tap_buttons_gates_middle_click() {
     tree.layout(SizeProposal::exact(400.0, 300.0));
 
     let click = |tree: &mut WidgetTree, button: teksilo_core::event::PointerButton| {
-        tree.dispatch_event(WidgetEvent::PointerDown {
-            position: teksilo_canvas::Point::new(40.0, 40.0),
+        tree.dispatch_event(WidgetEvent::pointer_down(
+            teksilo_canvas::Point::new(40.0, 40.0),
             button,
-            modifiers: teksilo_core::event::Modifiers::default(),
-        });
-        tree.dispatch_event(WidgetEvent::PointerUp {
-            position: teksilo_canvas::Point::new(40.0, 40.0),
+            teksilo_core::event::Modifiers::default(),
+        ));
+        tree.dispatch_event(WidgetEvent::pointer_up(
+            teksilo_canvas::Point::new(40.0, 40.0),
             button,
-            modifiers: teksilo_core::event::Modifiers::default(),
-        });
+            teksilo_core::event::Modifiers::default(),
+        ));
     };
 
     // PRIMARY hits.
@@ -6260,11 +6228,11 @@ fn on_context_menu_event_receives_modifiers() {
     let mut tree = WidgetTree::new();
     tree.add(SceneView::new(scene));
     tree.layout(SizeProposal::exact(400.0, 300.0));
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: teksilo_canvas::Point::new(35.0, 35.0),
-        button: teksilo_core::event::PointerButton::Secondary,
-        modifiers: teksilo_core::event::Modifiers::CTRL,
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        teksilo_canvas::Point::new(35.0, 35.0),
+        teksilo_core::event::PointerButton::Secondary,
+        teksilo_core::event::Modifiers::CTRL,
+    ));
 
     let ev = captured.borrow().expect("on_context_menu_event must fire");
     assert_eq!(ev.button, teksilo_core::event::PointerButton::Secondary);
@@ -6294,16 +6262,16 @@ fn mismatched_down_up_buttons_do_not_fire_tap() {
     let mut tree = WidgetTree::new();
     tree.add(SceneView::new(scene));
     tree.layout(SizeProposal::exact(400.0, 300.0));
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: teksilo_canvas::Point::new(40.0, 40.0),
-        button: teksilo_core::event::PointerButton::Primary,
-        modifiers: teksilo_core::event::Modifiers::default(),
-    });
-    tree.dispatch_event(WidgetEvent::PointerUp {
-        position: teksilo_canvas::Point::new(40.0, 40.0),
-        button: teksilo_core::event::PointerButton::Middle,
-        modifiers: teksilo_core::event::Modifiers::default(),
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        teksilo_canvas::Point::new(40.0, 40.0),
+        teksilo_core::event::PointerButton::Primary,
+        teksilo_core::event::Modifiers::default(),
+    ));
+    tree.dispatch_event(WidgetEvent::pointer_up(
+        teksilo_canvas::Point::new(40.0, 40.0),
+        teksilo_core::event::PointerButton::Middle,
+        teksilo_core::event::Modifiers::default(),
+    ));
     assert_eq!(count.get(), 0, "mismatched buttons must not fire tap");
 }
 
@@ -6467,11 +6435,11 @@ fn lightweight_item_tooltip_dismissed_on_pointer_down() {
     assert_eq!(tree.active_overlays().len(), 1);
 
     // A press retracts the hover tooltip — the user has committed.
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: Point::new(40.0, 40.0),
-        button: teksilo_core::event::PointerButton::Primary,
-        modifiers: teksilo_core::event::Modifiers::NONE,
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        Point::new(40.0, 40.0),
+        teksilo_core::event::PointerButton::Primary,
+        teksilo_core::event::Modifiers::NONE,
+    ));
     assert!(
         tree.active_overlays().is_empty(),
         "tooltip must dismiss on pointer-down"

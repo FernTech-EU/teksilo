@@ -486,7 +486,7 @@ pub(crate) fn drive_readout(
 ) -> EventResponse {
     let coarse = ctx.pointer_kind().is_coarse();
     match event {
-        WidgetEvent::PointerMove { position } => {
+        WidgetEvent::PointerMove { position, .. } => {
             if coarse {
                 state.scrubbed.set(true);
             }
@@ -515,7 +515,7 @@ pub(crate) fn drive_readout(
         }
         // A revoked interaction is not an inspection.
         WidgetEvent::PointerCancel { .. } => set_readout(readout, None, state, None),
-        WidgetEvent::PointerLeave => set_readout(readout, None, state, None),
+        WidgetEvent::PointerLeave { .. } => set_readout(readout, None, state, None),
         _ => {}
     }
     EventResponse::Ignored

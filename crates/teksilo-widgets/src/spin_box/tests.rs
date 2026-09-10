@@ -640,9 +640,10 @@ fn wheel(tree: &mut WidgetTree, spin_id: teksilo_core::widget_id::WidgetId, line
 
     // Scroll routes to the hovered widget, so park the pointer first.
     let b = tree.bounds(spin_id);
-    tree.dispatch_event(WidgetEvent::PointerMove {
-        position: Point::new(b.x + b.width * 0.5, b.y + b.height * 0.5),
-    });
+    tree.dispatch_event(WidgetEvent::pointer_move(Point::new(
+        b.x + b.width * 0.5,
+        b.y + b.height * 0.5,
+    )));
     tree.dispatch_event(WidgetEvent::scroll(
         ScrollDelta::Lines { x: 0.0, y: lines },
         Modifiers::NONE,

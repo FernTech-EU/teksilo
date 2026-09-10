@@ -163,7 +163,7 @@ impl Harness {
 
     fn mouse_move(&mut self, at: Point) {
         self.tree
-            .dispatch_event(teksilo_core::event::WidgetEvent::PointerMove { position: at });
+            .dispatch_event(teksilo_core::event::WidgetEvent::pointer_move(at));
     }
 
     fn mouse_release(&mut self, at: Point) {

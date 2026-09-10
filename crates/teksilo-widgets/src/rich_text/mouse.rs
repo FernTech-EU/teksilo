@@ -394,6 +394,7 @@ pub(super) fn handle_pointer_event(
             position,
             button,
             modifiers,
+            ..
         } => {
             if *button != PointerButton::Primary {
                 // Secondary / middle are for the application's own
@@ -597,7 +598,7 @@ pub(super) fn handle_pointer_event(
             // would never fire `on_double_tap` / `on_triple_tap`.
             EventResponse::Ignored
         }
-        WidgetEvent::PointerMove { position } => {
+        WidgetEvent::PointerMove { position, .. } => {
             // Drag-select extension. The `drag_state` field tells us
             // whether a primary button is still held; if it isn't,
             // we ignore the move.

@@ -204,11 +204,11 @@ mod tests {
     #[test]
     fn a_mouse_inside_the_same_claimant_may_show_at_once() {
         let (seen, mut tree, at) = row_in_a_list();
-        tree.dispatch_event(WidgetEvent::PointerDown {
-            position: at,
-            button: PointerButton::Primary,
-            modifiers: teksilo_core::event::Modifiers::NONE,
-        });
+        tree.dispatch_event(WidgetEvent::pointer_down(
+            at,
+            PointerButton::Primary,
+            teksilo_core::event::Modifiers::NONE,
+        ));
         assert_eq!(seen.borrow().as_slice(), &[(true, true)]);
     }
 

@@ -1484,16 +1484,16 @@ mod tests {
         // after dispatch confirms this click lands outside it.
         assert_eq!(tree.active_overlays().len(), 1);
 
-        tree.dispatch_event(WidgetEvent::PointerDown {
-            position: target_center,
-            button: PointerButton::Primary,
-            modifiers: Modifiers::NONE,
-        });
-        tree.dispatch_event(WidgetEvent::PointerUp {
-            position: target_center,
-            button: PointerButton::Primary,
-            modifiers: Modifiers::NONE,
-        });
+        tree.dispatch_event(WidgetEvent::pointer_down(
+            target_center,
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
+        tree.dispatch_event(WidgetEvent::pointer_up(
+            target_center,
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
 
         assert!(
             tree.active_overlays().is_empty(),
@@ -1522,16 +1522,16 @@ mod tests {
             teksilo_canvas::Point::new(gb.x + gb.width / 2.0, gb.y + gb.height / 2.0);
         assert_eq!(tree.active_overlays().len(), 1);
 
-        tree.dispatch_event(WidgetEvent::PointerDown {
-            position: trigger_center,
-            button: PointerButton::Primary,
-            modifiers: Modifiers::NONE,
-        });
-        tree.dispatch_event(WidgetEvent::PointerUp {
-            position: trigger_center,
-            button: PointerButton::Primary,
-            modifiers: Modifiers::NONE,
-        });
+        tree.dispatch_event(WidgetEvent::pointer_down(
+            trigger_center,
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
+        tree.dispatch_event(WidgetEvent::pointer_up(
+            trigger_center,
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
 
         assert!(
             tree.active_overlays().is_empty(),
@@ -2002,17 +2002,17 @@ mod tests {
 
     fn mouse_at(tree: &mut WidgetTree, at: teksilo_canvas::Point, down: bool) {
         let event = if down {
-            WidgetEvent::PointerDown {
-                position: at,
-                button: teksilo_core::event::PointerButton::Primary,
-                modifiers: Modifiers::NONE,
-            }
+            WidgetEvent::pointer_down(
+                at,
+                teksilo_core::event::PointerButton::Primary,
+                Modifiers::NONE,
+            )
         } else {
-            WidgetEvent::PointerUp {
-                position: at,
-                button: teksilo_core::event::PointerButton::Primary,
-                modifiers: Modifiers::NONE,
-            }
+            WidgetEvent::pointer_up(
+                at,
+                teksilo_core::event::PointerButton::Primary,
+                Modifiers::NONE,
+            )
         };
         tree.dispatch_event(event);
     }
@@ -2023,7 +2023,7 @@ mod tests {
     fn a_mouse_click_presses_then_activates_on_release() {
         let (mut tree, btn, pressed, hits) = probed_button();
         let at = tree.bounds(btn).center();
-        tree.dispatch_event(WidgetEvent::PointerMove { position: at });
+        tree.dispatch_event(WidgetEvent::pointer_move(at));
         mouse_at(&mut tree, at, true);
         assert!(pressed.get(), "a mouse press lights the pressed visual");
         assert_eq!(hits.get(), 0, "nothing has activated on the press");
@@ -2124,7 +2124,7 @@ mod tests {
 
         let (mut tree, btn, pressed, hovered, hits) = probed_button_with_hover();
         let at = tree.bounds(btn).center();
-        tree.dispatch_event(WidgetEvent::PointerMove { position: at });
+        tree.dispatch_event(WidgetEvent::pointer_move(at));
         assert!(hovered.get(), "the pointer arrived over the button");
         mouse_at(&mut tree, at, true);
         assert!(
@@ -2170,7 +2170,7 @@ mod tests {
 
         let (mut tree, btn, pressed, hovered, hits) = probed_button_with_hover();
         let at = tree.bounds(btn).center();
-        tree.dispatch_event(WidgetEvent::PointerMove { position: at });
+        tree.dispatch_event(WidgetEvent::pointer_move(at));
         mouse_at(&mut tree, at, true);
         assert!(pressed.get());
         tree.cancel_pointer(

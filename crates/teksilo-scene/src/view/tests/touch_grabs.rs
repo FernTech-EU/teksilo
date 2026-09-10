@@ -53,32 +53,32 @@ fn finger_drag(tree: &mut WidgetTree, from: Point, to: Point) {
 
 fn mouse_drag(tree: &mut WidgetTree, from: Point, to: Point) {
     tree.pointer_move(from);
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: from,
-        button: PointerButton::Primary,
-        modifiers: Modifiers::default(),
-    });
-    tree.dispatch_event(WidgetEvent::PointerMove { position: to });
-    tree.dispatch_event(WidgetEvent::PointerUp {
-        position: to,
-        button: PointerButton::Primary,
-        modifiers: Modifiers::default(),
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        from,
+        PointerButton::Primary,
+        Modifiers::default(),
+    ));
+    tree.dispatch_event(WidgetEvent::pointer_move(to));
+    tree.dispatch_event(WidgetEvent::pointer_up(
+        to,
+        PointerButton::Primary,
+        Modifiers::default(),
+    ));
 }
 
 /// Press at `from` and release at `to` with no move in between — the shape that
 /// exercises the tap-versus-drag tolerance without involving a recognizer.
 fn mouse_press_release(tree: &mut WidgetTree, from: Point, to: Point) {
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: from,
-        button: PointerButton::Primary,
-        modifiers: Modifiers::default(),
-    });
-    tree.dispatch_event(WidgetEvent::PointerUp {
-        position: to,
-        button: PointerButton::Primary,
-        modifiers: Modifiers::default(),
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        from,
+        PointerButton::Primary,
+        Modifiers::default(),
+    ));
+    tree.dispatch_event(WidgetEvent::pointer_up(
+        to,
+        PointerButton::Primary,
+        Modifiers::default(),
+    ));
 }
 
 fn contact_press_release(tree: &mut WidgetTree, from: Point, to: Point) {
@@ -331,14 +331,12 @@ fn a_finger_earns_reach_on_a_magnet_handle_and_a_mouse_does_not() {
     let view_id = tree.add(SceneView::new(magnet_scene()).magnetism(cfg()));
     tree.layout(SizeProposal::exact(400.0, 300.0));
     tree.pointer_move(Point::new(49.0, 20.0));
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: Point::new(49.0, 20.0),
-        button: PointerButton::Primary,
-        modifiers: Modifiers::default(),
-    });
-    tree.dispatch_event(WidgetEvent::PointerMove {
-        position: Point::new(49.0, 45.0),
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        Point::new(49.0, 20.0),
+        PointerButton::Primary,
+        Modifiers::default(),
+    ));
+    tree.dispatch_event(WidgetEvent::pointer_move(Point::new(49.0, 45.0)));
     assert!(
         view_handle(&tree, view_id).port_drag.borrow().is_none(),
         "a mouse nine pixels away misses it, exactly as before",
@@ -350,14 +348,12 @@ fn a_finger_earns_reach_on_a_magnet_handle_and_a_mouse_does_not() {
     let view_id = tree.add(SceneView::new(magnet_scene()).magnetism(cfg()));
     tree.layout(SizeProposal::exact(400.0, 300.0));
     tree.pointer_move(Point::new(44.0, 20.0));
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: Point::new(44.0, 20.0),
-        button: PointerButton::Primary,
-        modifiers: Modifiers::default(),
-    });
-    tree.dispatch_event(WidgetEvent::PointerMove {
-        position: Point::new(44.0, 45.0),
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        Point::new(44.0, 20.0),
+        PointerButton::Primary,
+        Modifiers::default(),
+    ));
+    tree.dispatch_event(WidgetEvent::pointer_move(Point::new(44.0, 45.0)));
     assert!(
         view_handle(&tree, view_id).port_drag.borrow().is_some(),
         "four pixels away is inside the declared six, for a mouse too",
@@ -516,11 +512,11 @@ fn a_mouse_press_arms_no_hold_tooltip() {
     tree.add(SceneView::new(scene));
     tree.layout(SizeProposal::exact(400.0, 300.0));
 
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: Point::new(40.0, 40.0),
-        button: PointerButton::Primary,
-        modifiers: Modifiers::default(),
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        Point::new(40.0, 40.0),
+        PointerButton::Primary,
+        Modifiers::default(),
+    ));
     tree.advance_time(long_press() + std::time::Duration::from_millis(20));
     assert!(
         tree.active_overlays().is_empty(),
@@ -548,15 +544,13 @@ fn a_mouse_press_held_past_the_hold_deadline_still_marquees() {
     tree.layout(SizeProposal::exact(400.0, 300.0));
 
     tree.pointer_move(Point::new(40.0, 40.0));
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: Point::new(40.0, 40.0),
-        button: PointerButton::Primary,
-        modifiers: Modifiers::default(),
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        Point::new(40.0, 40.0),
+        PointerButton::Primary,
+        Modifiers::default(),
+    ));
     tree.advance_time(long_press() + std::time::Duration::from_millis(50));
-    tree.dispatch_event(WidgetEvent::PointerMove {
-        position: Point::new(90.0, 90.0),
-    });
+    tree.dispatch_event(WidgetEvent::pointer_move(Point::new(90.0, 90.0)));
     assert!(
         view_handle(&tree, view_id).marquee.get().is_some(),
         "holding before dragging must not cost the mouse its marquee",

@@ -171,16 +171,16 @@ impl Harness {
 
     fn mouse_press_with(&mut self, at: Point, modifiers: teksilo_core::event::Modifiers) {
         self.tree
-            .dispatch_event(teksilo_core::event::WidgetEvent::PointerDown {
-                position: at,
-                button: teksilo_core::event::PointerButton::Primary,
+            .dispatch_event(teksilo_core::event::WidgetEvent::pointer_down(
+                at,
+                teksilo_core::event::PointerButton::Primary,
                 modifiers,
-            });
+            ));
     }
 
     fn mouse_move(&mut self, at: Point) {
         self.tree
-            .dispatch_event(teksilo_core::event::WidgetEvent::PointerMove { position: at });
+            .dispatch_event(teksilo_core::event::WidgetEvent::pointer_move(at));
     }
 
     fn mouse_release(&mut self, at: Point) {

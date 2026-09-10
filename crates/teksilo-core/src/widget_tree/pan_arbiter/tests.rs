@@ -515,9 +515,7 @@ fn a_mouse_wheel_still_reaches_a_non_claimant_on_scroll_handler() {
     let _root = tree.add(StackWidget::new().add_child(spin_box));
     tree.layout(SizeProposal::exact(200.0, 200.0));
 
-    tree.dispatch_event(WidgetEvent::PointerMove {
-        position: Point::new(100.0, 100.0),
-    });
+    tree.dispatch_event(WidgetEvent::pointer_move(Point::new(100.0, 100.0)));
     tree.dispatch_event(WidgetEvent::scroll(
         ScrollDelta::Lines { x: 0.0, y: -1.0 },
         Modifiers::NONE,
@@ -651,9 +649,8 @@ fn a_drag_raised_by_the_press_owner_takes_the_press_out_of_the_arbitration() {
 #[test]
 fn mouse_wheel_boundary_chaining_is_unchanged() {
     let mut n = nested(0.0, 1000.0);
-    n.tree.dispatch_event(WidgetEvent::PointerMove {
-        position: Point::new(100.0, 100.0),
-    });
+    n.tree
+        .dispatch_event(WidgetEvent::pointer_move(Point::new(100.0, 100.0)));
     n.tree.dispatch_event(WidgetEvent::scroll(
         ScrollDelta::Pixels { x: 0.0, y: 30.0 },
         Modifiers::NONE,
@@ -872,9 +869,8 @@ fn a_pointer_down_on_a_flinging_target_stops_the_fling() {
 #[test]
 fn macos_momentum_does_not_stack_a_second_fling() {
     let mut n = nested(10_000.0, 10_000.0);
-    n.tree.dispatch_event(WidgetEvent::PointerMove {
-        position: Point::new(100.0, 100.0),
-    });
+    n.tree
+        .dispatch_event(WidgetEvent::pointer_move(Point::new(100.0, 100.0)));
     // The OS momentum stream: pixel deltas with `phase: Momentum`, routed as
     // an ordinary (bubbling) trackpad scroll.
     for _ in 0..5 {

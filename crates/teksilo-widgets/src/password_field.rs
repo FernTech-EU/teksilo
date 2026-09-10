@@ -529,7 +529,7 @@ impl Widget for PasswordField {
                             ctx.request_frame();
                             EventResponse::Handled
                         }
-                        WidgetEvent::PointerUp { .. } | WidgetEvent::PointerLeave => {
+                        WidgetEvent::PointerUp { .. } | WidgetEvent::PointerLeave { .. } => {
                             revealed_hold.set(false);
                             ctx.request_frame();
                             EventResponse::Handled

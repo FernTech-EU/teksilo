@@ -176,16 +176,16 @@ fn collapsing_a_split_accordion_keeps_its_header() {
     // Tap in A's header (top of the accordion) → collapse it → the Splitter
     // folds A's pane to the header sliver.
     let p = Point::new(ab.x + 10.0, ab.y + 6.0);
-    t.dispatch_event(WidgetEvent::PointerDown {
-        position: p,
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
-    t.dispatch_event(WidgetEvent::PointerUp {
-        position: p,
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
+    t.dispatch_event(WidgetEvent::pointer_down(
+        p,
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
+    t.dispatch_event(WidgetEvent::pointer_up(
+        p,
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
     t.tick_animations(Duration::from_millis(400));
     t.layout(SizeProposal::exact(1000.0, 800.0));
 
@@ -915,11 +915,11 @@ fn right_clicking_a_rail_item_opens_a_context_menu() {
     let centre = Point::new(b.x + b.width / 2.0, b.y + b.height / 2.0);
 
     assert!(t.active_overlays().is_empty(), "no menu before the click");
-    t.dispatch_event(WidgetEvent::PointerDown {
-        position: centre,
-        button: PointerButton::Secondary,
-        modifiers: Modifiers::NONE,
-    });
+    t.dispatch_event(WidgetEvent::pointer_down(
+        centre,
+        PointerButton::Secondary,
+        Modifiers::NONE,
+    ));
     assert_eq!(
         t.active_overlays().len(),
         1,
@@ -951,11 +951,11 @@ fn context_menu_is_only_on_tabs_not_on_pane_content() {
     // Right-click the pane *content* (well below the tab strip): no menu — the
     // panes / accordions / dock content must NOT carry the context menu.
     let content = Point::new(tb.x + tb.width / 2.0, tb.y + tb.height + 60.0);
-    t.dispatch_event(WidgetEvent::PointerDown {
-        position: content,
-        button: PointerButton::Secondary,
-        modifiers: Modifiers::NONE,
-    });
+    t.dispatch_event(WidgetEvent::pointer_down(
+        content,
+        PointerButton::Secondary,
+        Modifiers::NONE,
+    ));
     assert!(
         t.active_overlays().is_empty(),
         "right-clicking pane content must not open a context menu"
@@ -963,11 +963,11 @@ fn context_menu_is_only_on_tabs_not_on_pane_content() {
 
     // Right-click the tab header itself: the menu opens.
     let tab_centre = Point::new(tb.x + tb.width / 2.0, tb.y + tb.height / 2.0);
-    t.dispatch_event(WidgetEvent::PointerDown {
-        position: tab_centre,
-        button: PointerButton::Secondary,
-        modifiers: Modifiers::NONE,
-    });
+    t.dispatch_event(WidgetEvent::pointer_down(
+        tab_centre,
+        PointerButton::Secondary,
+        Modifiers::NONE,
+    ));
     assert_eq!(
         t.active_overlays().len(),
         1,
@@ -1371,16 +1371,16 @@ fn hamburger_restores_activities_when_all_hidden_in_strip() {
     let b = t.bounds(hb);
     let c = Point::new(b.x + b.width / 2.0, b.y + b.height / 2.0);
     assert!(t.active_overlays().is_empty());
-    t.dispatch_event(WidgetEvent::PointerDown {
-        position: c,
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
-    t.dispatch_event(WidgetEvent::PointerUp {
-        position: c,
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
+    t.dispatch_event(WidgetEvent::pointer_down(
+        c,
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
+    t.dispatch_event(WidgetEvent::pointer_up(
+        c,
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
     assert_eq!(
         t.active_overlays().len(),
         1,

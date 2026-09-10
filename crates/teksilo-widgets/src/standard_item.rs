@@ -1773,9 +1773,9 @@ mod tests {
         assert_eq!(state.get(), InteractionState::Idle);
 
         let b = tree.bounds(id);
-        tree.dispatch_event(teksilo_core::WidgetEvent::PointerMove {
-            position: teksilo_canvas::Point::new(b.x + b.width / 2.0, b.y + b.height / 2.0),
-        });
+        tree.dispatch_event(teksilo_core::WidgetEvent::pointer_move(
+            teksilo_canvas::Point::new(b.x + b.width / 2.0, b.y + b.height / 2.0),
+        ));
         tree.layout(SizeProposal::exact(300.0, 40.0));
         let _ = tree.render();
         assert_eq!(
@@ -1939,16 +1939,16 @@ mod tests {
 
     fn dispatch_tap(tree: &mut WidgetTree, position: teksilo_canvas::Point) {
         use teksilo_core::event::{Modifiers, PointerButton, WidgetEvent};
-        tree.dispatch_event(WidgetEvent::PointerDown {
+        tree.dispatch_event(WidgetEvent::pointer_down(
             position,
-            button: PointerButton::Primary,
-            modifiers: Modifiers::NONE,
-        });
-        tree.dispatch_event(WidgetEvent::PointerUp {
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
+        tree.dispatch_event(WidgetEvent::pointer_up(
             position,
-            button: PointerButton::Primary,
-            modifiers: Modifiers::NONE,
-        });
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
     }
 
     #[test]

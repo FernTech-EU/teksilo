@@ -12,7 +12,7 @@ use super::*;
 fn cursor_moved_to_pointer_move() {
     let mut state = TranslationState::new();
     let event = translate_cursor_moved(100.0, 50.0, &mut state).unwrap();
-    if let WidgetEvent::PointerMove { position } = event {
+    if let WidgetEvent::PointerMove { position, .. } = event {
         assert_eq!(position.x, 100.0);
         assert_eq!(position.y, 50.0);
     } else {
@@ -25,7 +25,7 @@ fn scale_factor_divides_physical_coords() {
     let mut state = TranslationState::new();
     state.set_scale_factor(2.0);
     let event = translate_cursor_moved(200.0, 100.0, &mut state).unwrap();
-    if let WidgetEvent::PointerMove { position } = event {
+    if let WidgetEvent::PointerMove { position, .. } = event {
         assert_eq!(position.x, 100.0);
         assert_eq!(position.y, 50.0);
     } else {

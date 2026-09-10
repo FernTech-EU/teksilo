@@ -2499,11 +2499,11 @@ mod tests {
 
         assert_eq!(tree.active_overlays().len(), 1);
 
-        tree.dispatch_event(WidgetEvent::PointerDown {
-            position: Point::new(500.0, 500.0),
-            button: PointerButton::Primary,
-            modifiers: Modifiers::NONE,
-        });
+        tree.dispatch_event(WidgetEvent::pointer_down(
+            Point::new(500.0, 500.0),
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
         assert!(tree.active_overlays().is_empty());
         assert!(!tree.is_visible(content));
     }

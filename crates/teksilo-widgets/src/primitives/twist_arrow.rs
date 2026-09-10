@@ -279,16 +279,16 @@ mod tests {
         let (mut tree, arrow) = row_with_chevron(toggles.clone(), row_taps.clone());
         let b = tree.bounds(arrow);
         let at = teksilo_canvas::Point::new(b.x + b.width + 4.0, b.center().y);
-        tree.dispatch_event(teksilo_core::event::WidgetEvent::PointerDown {
-            position: at,
-            button: teksilo_core::event::PointerButton::Primary,
-            modifiers: teksilo_core::event::Modifiers::NONE,
-        });
-        tree.dispatch_event(teksilo_core::event::WidgetEvent::PointerUp {
-            position: at,
-            button: teksilo_core::event::PointerButton::Primary,
-            modifiers: teksilo_core::event::Modifiers::NONE,
-        });
+        tree.dispatch_event(teksilo_core::event::WidgetEvent::pointer_down(
+            at,
+            teksilo_core::event::PointerButton::Primary,
+            teksilo_core::event::Modifiers::NONE,
+        ));
+        tree.dispatch_event(teksilo_core::event::WidgetEvent::pointer_up(
+            at,
+            teksilo_core::event::PointerButton::Primary,
+            teksilo_core::event::Modifiers::NONE,
+        ));
         assert_eq!(
             toggles.get(),
             0,

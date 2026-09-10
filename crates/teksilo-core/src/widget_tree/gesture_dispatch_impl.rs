@@ -604,22 +604,18 @@ mod tests {
 
         // Press inside, move past the 5px threshold while still inside —
         // DragRecognizer emits DragStarted, and auto-capture kicks in.
-        tree.dispatch_event(WidgetEvent::PointerDown {
-            position: Point::new(50.0, 25.0),
-            button: PointerButton::Primary,
-            modifiers: Modifiers::NONE,
-        });
-        tree.dispatch_event(WidgetEvent::PointerMove {
-            position: Point::new(70.0, 25.0),
-        });
+        tree.dispatch_event(WidgetEvent::pointer_down(
+            Point::new(50.0, 25.0),
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
+        tree.dispatch_event(WidgetEvent::pointer_move(Point::new(70.0, 25.0)));
         assert!(started.get(), "DragStarted must fire");
 
         // Move the pointer well outside the widget bounds. Without
         // auto-capture this event would hit-test to another widget and
         // the scrollbar would never see it.
-        tree.dispatch_event(WidgetEvent::PointerMove {
-            position: Point::new(500.0, 500.0),
-        });
+        tree.dispatch_event(WidgetEvent::pointer_move(Point::new(500.0, 500.0)));
         assert!(
             moved.get() >= 1,
             "Move outside bounds must still reach drag handler"
@@ -627,11 +623,11 @@ mod tests {
 
         // Release outside bounds — must still fire DragEnded on the
         // original widget, and pointer capture must be released.
-        tree.dispatch_event(WidgetEvent::PointerUp {
-            position: Point::new(500.0, 500.0),
-            button: PointerButton::Primary,
-            modifiers: Modifiers::NONE,
-        });
+        tree.dispatch_event(WidgetEvent::pointer_up(
+            Point::new(500.0, 500.0),
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
         assert!(ended.get(), "DragEnded must fire on the original widget");
         assert_eq!(
             tree.pointer_captured_by(),
@@ -659,11 +655,11 @@ mod tests {
         tree.layout(SizeProposal::exact(100.0, 50.0));
 
         let center = tree.bounds(widget).center();
-        tree.dispatch_event(WidgetEvent::PointerDown {
-            position: center,
-            button: PointerButton::Primary,
-            modifiers: Modifiers::NONE,
-        });
+        tree.dispatch_event(WidgetEvent::pointer_down(
+            center,
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
 
         // Before the timeout, tick does nothing.
         tree.tick_gestures(Instant::now());
@@ -744,16 +740,16 @@ mod tests {
         tree.layout(SizeProposal::exact(100.0, 50.0));
 
         // 1) A plain click on the child fires the child's tap, not the drag.
-        tree.dispatch_event(WidgetEvent::PointerDown {
-            position: Point::new(50.0, 25.0),
-            button: PointerButton::Primary,
-            modifiers: Modifiers::NONE,
-        });
-        tree.dispatch_event(WidgetEvent::PointerUp {
-            position: Point::new(50.0, 25.0),
-            button: PointerButton::Primary,
-            modifiers: Modifiers::NONE,
-        });
+        tree.dispatch_event(WidgetEvent::pointer_down(
+            Point::new(50.0, 25.0),
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
+        tree.dispatch_event(WidgetEvent::pointer_up(
+            Point::new(50.0, 25.0),
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
         assert!(
             tapped.get(),
             "a click on the child fires the descendant tap"
@@ -769,11 +765,11 @@ mod tests {
         // 2) Press on the child, then move past threshold → the ANCESTOR drag
         // starts (it competes for the sequence while the child tap holds
         // capture), and the descendant tap does NOT fire.
-        tree.dispatch_event(WidgetEvent::PointerDown {
-            position: Point::new(50.0, 25.0),
-            button: PointerButton::Primary,
-            modifiers: Modifiers::NONE,
-        });
+        tree.dispatch_event(WidgetEvent::pointer_down(
+            Point::new(50.0, 25.0),
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
         // The arbitration is observable: exactly one competitor, the ancestor,
         // enrolled as a `Gesture` member and still in the running. This is the
         // migration contract for the deleted `drag_observers`.
@@ -785,9 +781,7 @@ mod tests {
                 crate::gesture::MemberState::Possible
             )],
         );
-        tree.dispatch_event(WidgetEvent::PointerMove {
-            position: Point::new(80.0, 25.0),
-        });
+        tree.dispatch_event(WidgetEvent::pointer_move(Point::new(80.0, 25.0)));
         assert!(
             drag_started.get(),
             "dragging from the child must start the ancestor drag"
@@ -797,11 +791,11 @@ mod tests {
             Some(_parent),
             "and the ancestor is the sequence's winner"
         );
-        tree.dispatch_event(WidgetEvent::PointerUp {
-            position: Point::new(80.0, 25.0),
-            button: PointerButton::Primary,
-            modifiers: Modifiers::NONE,
-        });
+        tree.dispatch_event(WidgetEvent::pointer_up(
+            Point::new(80.0, 25.0),
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
         assert!(!tapped.get(), "a drag must not fire the descendant tap");
     }
 
@@ -841,11 +835,11 @@ mod tests {
         );
         tree.layout(SizeProposal::exact(100.0, 50.0));
 
-        tree.dispatch_event(WidgetEvent::PointerDown {
-            position: Point::new(50.0, 25.0),
-            button: PointerButton::Primary,
-            modifiers: Modifiers::NONE,
-        });
+        tree.dispatch_event(WidgetEvent::pointer_down(
+            Point::new(50.0, 25.0),
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
         // Enrolment walks the whole frozen path, not just the immediate
         // parent: the canvas two levels up is the one competitor.
         assert_eq!(
@@ -856,9 +850,7 @@ mod tests {
                 crate::gesture::MemberState::Possible
             )],
         );
-        tree.dispatch_event(WidgetEvent::PointerMove {
-            position: Point::new(80.0, 25.0),
-        });
+        tree.dispatch_event(WidgetEvent::pointer_move(Point::new(80.0, 25.0)));
         assert!(
             drag_started.get(),
             "dragging a deeply-nested tappable child must start the ancestor drag"
@@ -900,16 +892,16 @@ mod tests {
         tree.layout(SizeProposal::exact(100.0, 50.0));
 
         // Click (press then release at the same point — the tap resolves).
-        tree.dispatch_event(WidgetEvent::PointerDown {
-            position: Point::new(50.0, 25.0),
-            button: PointerButton::Primary,
-            modifiers: Modifiers::NONE,
-        });
-        tree.dispatch_event(WidgetEvent::PointerUp {
-            position: Point::new(50.0, 25.0),
-            button: PointerButton::Primary,
-            modifiers: Modifiers::NONE,
-        });
+        tree.dispatch_event(WidgetEvent::pointer_down(
+            Point::new(50.0, 25.0),
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
+        tree.dispatch_event(WidgetEvent::pointer_up(
+            Point::new(50.0, 25.0),
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
         // The release sweep closed the sequence, so nothing is competing any
         // more — the state that used to leak was an armed ancestor recognizer.
         assert!(
@@ -918,9 +910,7 @@ mod tests {
             "the release sweep ends the sequence"
         );
         // Now hover somewhere (no button down). Must NOT start the drag.
-        tree.dispatch_event(WidgetEvent::PointerMove {
-            position: Point::new(85.0, 25.0),
-        });
+        tree.dispatch_event(WidgetEvent::pointer_move(Point::new(85.0, 25.0)));
         assert!(
             !drag_started.get(),
             "a hover after a click must not start a phantom ancestor drag"
@@ -1023,11 +1013,11 @@ mod tests {
         // Prototypes are installed on the first press that reaches the node…
         assert!(tree.gesture_owners.is_empty());
         let center = tree.bounds(gestured).center();
-        tree.dispatch_event(WidgetEvent::PointerDown {
-            position: center,
-            button: PointerButton::Primary,
-            modifiers: Modifiers::NONE,
-        });
+        tree.dispatch_event(WidgetEvent::pointer_down(
+            center,
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
         assert_eq!(
             tree.gesture_owners.iter().copied().collect::<Vec<_>>(),
             vec![gestured],
@@ -1168,12 +1158,12 @@ mod tests {
                     EventTime::from_millis(10),
                 ));
             } else {
-                tree.dispatch_event(WidgetEvent::PointerDown {
-                    position: from,
-                    button: PointerButton::Primary,
-                    modifiers: Modifiers::NONE,
-                });
-                tree.dispatch_event(WidgetEvent::PointerMove { position: to });
+                tree.dispatch_event(WidgetEvent::pointer_down(
+                    from,
+                    PointerButton::Primary,
+                    Modifiers::NONE,
+                ));
+                tree.dispatch_event(WidgetEvent::pointer_move(to));
             }
             started.get()
         }
@@ -1207,11 +1197,11 @@ mod tests {
         tree.layout(SizeProposal::exact(100.0, 50.0));
 
         let center = tree.bounds(widget).center();
-        tree.dispatch_event(WidgetEvent::PointerDown {
-            position: center,
-            button: PointerButton::Primary,
-            modifiers: Modifiers::NONE,
-        });
+        tree.dispatch_event(WidgetEvent::pointer_down(
+            center,
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
 
         // Not yet: 499 ms is under the mouse profile's 500 ms hold.
         clock.set(EventTime::from_millis(499));
@@ -1247,11 +1237,11 @@ mod tests {
         tree.layout(SizeProposal::exact(100.0, 50.0));
 
         let center = tree.bounds(widget).center();
-        tree.dispatch_event(WidgetEvent::PointerDown {
-            position: center,
-            button: PointerButton::Primary,
-            modifiers: Modifiers::NONE,
-        });
+        tree.dispatch_event(WidgetEvent::pointer_down(
+            center,
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
 
         // Short of the mouse profile's 500 ms hold, and nothing has fired.
         tree.advance_time(std::time::Duration::from_millis(400));
@@ -1295,11 +1285,11 @@ mod tests {
         tree.layout(SizeProposal::exact(100.0, 50.0));
         assert!(!tree.is_visible(panel), "precondition: the panel is parked");
 
-        tree.dispatch_event(WidgetEvent::PointerDown {
-            position: tree.bounds(widget).center(),
-            button: PointerButton::Primary,
-            modifiers: Modifiers::NONE,
-        });
+        tree.dispatch_event(WidgetEvent::pointer_down(
+            tree.bounds(widget).center(),
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
         tree.advance_time(std::time::Duration::from_millis(600));
 
         assert!(
@@ -1328,16 +1318,16 @@ mod tests {
 
         let center = tree.bounds(widget).center();
         for _ in 0..3 {
-            tree.dispatch_event(WidgetEvent::PointerDown {
-                position: center,
-                button: PointerButton::Primary,
-                modifiers: Modifiers::NONE,
-            });
-            tree.dispatch_event(WidgetEvent::PointerUp {
-                position: center,
-                button: PointerButton::Primary,
-                modifiers: Modifiers::NONE,
-            });
+            tree.dispatch_event(WidgetEvent::pointer_down(
+                center,
+                PointerButton::Primary,
+                Modifiers::NONE,
+            ));
+            tree.dispatch_event(WidgetEvent::pointer_up(
+                center,
+                PointerButton::Primary,
+                Modifiers::NONE,
+            ));
         }
         assert_eq!(doubles.get(), 1, "click 2 fires DoubleTap");
         assert_eq!(triples.get(), 1, "click 3 fires TripleTap");
@@ -1389,23 +1379,23 @@ mod arbitration_tests {
     }
 
     fn press(tree: &mut WidgetTree, at: Point) {
-        tree.dispatch_event(WidgetEvent::PointerDown {
-            position: at,
-            button: PointerButton::Primary,
-            modifiers: Modifiers::NONE,
-        });
+        tree.dispatch_event(WidgetEvent::pointer_down(
+            at,
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
     }
 
     fn moved(tree: &mut WidgetTree, at: Point) {
-        tree.dispatch_event(WidgetEvent::PointerMove { position: at });
+        tree.dispatch_event(WidgetEvent::pointer_move(at));
     }
 
     fn release(tree: &mut WidgetTree, at: Point) {
-        tree.dispatch_event(WidgetEvent::PointerUp {
-            position: at,
-            button: PointerButton::Primary,
-            modifiers: Modifiers::NONE,
-        });
+        tree.dispatch_event(WidgetEvent::pointer_up(
+            at,
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
     }
 
     /// **The single most important test in the package.** A mouse drag latches

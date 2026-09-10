@@ -1378,7 +1378,7 @@ fn event_position(event: &WidgetEvent) -> Option<Point> {
     match event {
         WidgetEvent::PointerDown { position, .. }
         | WidgetEvent::PointerUp { position, .. }
-        | WidgetEvent::PointerMove { position } => Some(*position),
+        | WidgetEvent::PointerMove { position, .. } => Some(*position),
         _ => None,
     }
 }
@@ -1402,6 +1402,7 @@ fn pointer_handler(
             position,
             button,
             modifiers,
+            ..
         } => {
             if kind.is_direct() {
                 state.borrow_mut().contacts += 1;
@@ -1470,7 +1471,7 @@ fn pointer_handler(
             }
             EventResponse::Ignored
         }
-        WidgetEvent::PointerMove { position } => {
+        WidgetEvent::PointerMove { position, .. } => {
             let cell = cell_at_position(state, *position);
             let held = state.borrow().mouse_button_held;
             if let Some(mb) = held {
@@ -1529,6 +1530,7 @@ fn pointer_handler(
             position,
             button,
             modifiers,
+            ..
         } => {
             if kind.is_direct() {
                 release_contact(&mut state.borrow_mut());
@@ -1622,7 +1624,7 @@ fn scroll_handler(
         modifiers,
         phase,
         pointer,
-        position,
+        window_position,
         ..
     } = event
     else {
@@ -1680,7 +1682,7 @@ fn scroll_handler(
             MouseButton::WheelDown
         };
         let count = (lines.abs().round() as usize).max(1);
-        let (col, row) = wheel_report_cell(state, *position);
+        let (col, row) = wheel_report_cell(state, *window_position);
         let mut st = state.borrow_mut();
         for _ in 0..count {
             report_mouse(&mut st, MouseKind::Press, button, col, row, *modifiers);
@@ -1894,13 +1896,17 @@ fn cell_at_position(
 /// Convert a **window**-space point into the widget-local space
 /// [`cell_at_position`] reads.
 ///
+/// This is the conversion the framework contract asks a consumer to make.
 /// [`WidgetTree::localize_event`] rewrites every pointer position and every
-/// gesture into widget-local space before a handler sees it, but it does not
-/// rewrite [`WidgetEvent::Scroll`] — a wheel notch is routed by hover and
-/// historically carried no position at all. So the one scroll field that does
-/// carry one has to be brought into that space here, and it is *converted into*
-/// it rather than resolved by a second copy of the cell arithmetic: getting the
-/// origin inset wrong is the mistake this file has already made once.
+/// gesture into widget-local space before a handler sees it; the two fields it
+/// deliberately leaves alone say so in their own names —
+/// `Scroll::window_position` and `PointerCancel::window_position` — because both
+/// of their framework uses need window space (the router routes by the first,
+/// and the kinetic tracker behind a pan follows the pointer rather than the
+/// widget). A widget that wants cell coordinates out of one therefore converts,
+/// and converts *into* the local space rather than growing a second copy of the
+/// cell arithmetic: getting the origin inset wrong is the mistake this file has
+/// already made once.
 ///
 /// [`WidgetTree::localize_event`]: teksilo_core::widget_tree::WidgetTree
 fn window_to_local(st: &TerminalState, position: Point) -> Point {

@@ -313,7 +313,7 @@ pub fn handle_scroll_event(
     let WidgetEvent::Scroll {
         delta,
         phase,
-        position,
+        window_position,
         pointer,
         ..
     } = event
@@ -333,7 +333,10 @@ pub fn handle_scroll_event(
             options,
             *phase,
             Vec2::new(dx, dy),
-            position.unwrap_or(Point::ZERO),
+            // Window-space on purpose: `KineticScroller::pan`'s tracker follows
+            // the pointer, and a frame that moved with the widget being
+            // measured would fold that widget's own motion into the velocity.
+            window_position.unwrap_or(Point::ZERO),
             pointer.time,
         )
     } else {
@@ -501,7 +504,7 @@ pub fn shift_wheel_remap(event: &WidgetEvent, ctx: &EventContext) -> Option<Widg
     let WidgetEvent::Scroll {
         delta,
         modifiers,
-        position,
+        window_position,
         phase,
         pointer,
     } = event
@@ -523,7 +526,7 @@ pub fn shift_wheel_remap(event: &WidgetEvent, ctx: &EventContext) -> Option<Widg
     Some(WidgetEvent::Scroll {
         delta: remapped,
         modifiers: *modifiers,
-        position: *position,
+        window_position: *window_position,
         phase: *phase,
         pointer: *pointer,
     })
@@ -1190,11 +1193,11 @@ mod tests {
     #[test]
     fn a_mouse_drag_does_not_pan() {
         let mut f = fixture(|_| {});
-        f.tree.dispatch_event(WidgetEvent::PointerDown {
-            position: Point::new(100.0, 150.0),
-            button: teksilo_core::event::PointerButton::Primary,
-            modifiers: Modifiers::NONE,
-        });
+        f.tree.dispatch_event(WidgetEvent::pointer_down(
+            Point::new(100.0, 150.0),
+            teksilo_core::event::PointerButton::Primary,
+            Modifiers::NONE,
+        ));
         f.tree.pointer_move(Point::new(100.0, 60.0));
         assert_eq!(f.axes.y.get(), 0.0);
     }

@@ -269,6 +269,7 @@ impl SceneView {
                         position,
                         button,
                         modifiers,
+                        ..
                     } => {
                         cursor_pos.set(Some(*position));
                         let scene_pt = to_scene(*position);
@@ -384,6 +385,7 @@ impl SceneView {
                         position,
                         button,
                         modifiers,
+                        ..
                     } => {
                         // A lift before the deadline is a tap, not a hold, so the
                         // pending tip is dropped. A lift *after* it finds nothing
@@ -420,7 +422,7 @@ impl SceneView {
                             }
                         }
                     }
-                    Ev::PointerLeave => {
+                    Ev::PointerLeave { .. } => {
                         cursor_pos.set(None);
                         // Pointer left the view entirely — retract the
                         // tooltip (shown or pending).

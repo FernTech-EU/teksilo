@@ -710,7 +710,7 @@ impl TouchSelection {
                     None => EventResponse::Ignored,
                 }
             }
-            WidgetEvent::PointerMove { position } if self.drag.is_some() => {
+            WidgetEvent::PointerMove { position, .. } if self.drag.is_some() => {
                 self.update_drag(*position, direction, source);
                 EventResponse::Handled
             }

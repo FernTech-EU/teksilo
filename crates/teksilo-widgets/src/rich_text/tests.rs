@@ -201,11 +201,11 @@ fn read_only_editor_arrow_keys_move_caret_and_preserve_selection() {
     // it explicitly.
     let _ = tree.render();
 
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: Point::new(1.0, 8.0),
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        Point::new(1.0, 8.0),
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
     let focused = tree.focused();
     assert!(
         focused.is_some_and(|f| f == id || tree.is_descendant_of(f, id)),
@@ -286,11 +286,11 @@ fn read_only_editor_end_key_does_not_escalate_past_block() {
     tree.layout(SizeProposal::exact(400.0, 300.0));
     let _ = tree.render();
 
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: Point::new(1.0, 8.0),
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        Point::new(1.0, 8.0),
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
 
     tree.dispatch_event(WidgetEvent::KeyDown {
         key: Key::End,
@@ -359,11 +359,11 @@ fn read_only_editor_is_focusable_and_dispatches_key_events() {
     tree.layout(SizeProposal::exact(400.0, 300.0));
 
     // Simulate a primary click on the middle of the widget to focus it.
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: Point::new(100.0, 20.0),
-        button: teksilo_core::event::PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        Point::new(100.0, 20.0),
+        teksilo_core::event::PointerButton::Primary,
+        Modifiers::NONE,
+    ));
     let focused = tree.focused();
     assert!(
         focused.is_some_and(|f| f == id || tree.is_descendant_of(f, id)),
@@ -526,11 +526,11 @@ fn focus_editor(tree: &mut WidgetTree, id: teksilo_core::widget_id::WidgetId) {
     // swallow the click. The body is the focusable inner leaf; the
     // wrapper composes chrome around it through
     // `RichTextEditorStyle::make_body`.
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: Point::new(20.0, 20.0),
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        Point::new(20.0, 20.0),
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
     let focused = tree.focused();
     assert!(
         focused.is_some_and(|f| f == id || tree.is_descendant_of(f, id)),
@@ -1045,27 +1045,25 @@ fn ctx_with_memory_clipboard(
 
 fn synth_pointer_down(tree: &mut WidgetTree, x: f32, y: f32) {
     use teksilo_core::event::{Modifiers, PointerButton, WidgetEvent};
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: Point::new(x, y),
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        Point::new(x, y),
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
 }
 
 fn synth_pointer_up(tree: &mut WidgetTree, x: f32, y: f32) {
     use teksilo_core::event::{Modifiers, PointerButton, WidgetEvent};
-    tree.dispatch_event(WidgetEvent::PointerUp {
-        position: Point::new(x, y),
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
+    tree.dispatch_event(WidgetEvent::pointer_up(
+        Point::new(x, y),
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
 }
 
 fn synth_pointer_move(tree: &mut WidgetTree, x: f32, y: f32) {
     use teksilo_core::event::WidgetEvent;
-    tree.dispatch_event(WidgetEvent::PointerMove {
-        position: Point::new(x, y),
-    });
+    tree.dispatch_event(WidgetEvent::pointer_move(Point::new(x, y)));
 }
 
 #[test]
@@ -2291,11 +2289,11 @@ fn editor_right_click_opens_default_context_menu() {
     let _ = tree.render();
 
     let before = tree.active_overlays().len();
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: Point::new(50.0, 10.0),
-        button: PointerButton::Secondary,
-        modifiers: Modifiers::NONE,
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        Point::new(50.0, 10.0),
+        PointerButton::Secondary,
+        Modifiers::NONE,
+    ));
     tree.layout(SizeProposal::exact(400.0, 300.0));
 
     assert!(
@@ -2326,11 +2324,11 @@ fn editor_right_click_suppressed_when_default_context_menu_disabled() {
     let _ = tree.render();
 
     let before = tree.active_overlays().len();
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: Point::new(50.0, 10.0),
-        button: PointerButton::Secondary,
-        modifiers: Modifiers::NONE,
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        Point::new(50.0, 10.0),
+        PointerButton::Secondary,
+        Modifiers::NONE,
+    ));
     tree.layout(SizeProposal::exact(400.0, 300.0));
     assert_eq!(
         tree.active_overlays().len(),
@@ -2370,11 +2368,11 @@ fn editor_context_menu_copy_item_copies_selection_to_clipboard() {
     // Open the context menu via right-click. Two layout passes so
     // the overlay's widgets get real bounds — `tree.click` reads
     // `arena.bounds` to compute click center.
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: Point::new(30.0, 10.0),
-        button: PointerButton::Secondary,
-        modifiers: Modifiers::NONE,
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        Point::new(30.0, 10.0),
+        PointerButton::Secondary,
+        Modifiers::NONE,
+    ));
     tree.layout(SizeProposal::exact(400.0, 300.0));
     let _ = tree.render();
     tree.layout(SizeProposal::exact(400.0, 300.0));
@@ -2442,11 +2440,11 @@ fn editor_context_menu_paste_unformatted_item_strips_formatting() {
         teksilo_core::event::Modifiers::CTRL,
     );
 
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: Point::new(30.0, 10.0),
-        button: PointerButton::Secondary,
-        modifiers: Modifiers::NONE,
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        Point::new(30.0, 10.0),
+        PointerButton::Secondary,
+        Modifiers::NONE,
+    ));
     tree.layout(SizeProposal::exact(400.0, 300.0));
     let _ = tree.render();
     tree.layout(SizeProposal::exact(400.0, 300.0));
@@ -2503,11 +2501,11 @@ fn editor_context_menu_copy_item_disabled_without_selection() {
     tree.layout(SizeProposal::exact(400.0, 300.0));
     let _ = tree.render();
 
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: Point::new(30.0, 10.0),
-        button: PointerButton::Secondary,
-        modifiers: Modifiers::NONE,
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        Point::new(30.0, 10.0),
+        PointerButton::Secondary,
+        Modifiers::NONE,
+    ));
     tree.layout(SizeProposal::exact(400.0, 300.0));
 
     let update = tree.sync_accessibility();
@@ -2541,11 +2539,11 @@ fn read_only_editor_context_menu_shape_hides_cut_and_paste() {
     tree.layout(SizeProposal::exact(400.0, 300.0));
     let _ = tree.render();
 
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: Point::new(20.0, 10.0),
-        button: PointerButton::Secondary,
-        modifiers: Modifiers::NONE,
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        Point::new(20.0, 10.0),
+        PointerButton::Secondary,
+        Modifiers::NONE,
+    ));
     tree.layout(SizeProposal::exact(400.0, 300.0));
 
     let update = tree.sync_accessibility();
@@ -2609,11 +2607,11 @@ fn editor_context_menu_slot_replaces_default_entirely() {
     tree.layout(SizeProposal::exact(400.0, 300.0));
     let _ = tree.render();
 
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: Point::new(20.0, 10.0),
-        button: PointerButton::Secondary,
-        modifiers: Modifiers::NONE,
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        Point::new(20.0, 10.0),
+        PointerButton::Secondary,
+        Modifiers::NONE,
+    ));
     tree.layout(SizeProposal::exact(400.0, 300.0));
 
     let update = tree.sync_accessibility();
@@ -2664,11 +2662,11 @@ fn editor_right_click_does_not_collapse_selection() {
     );
     assert!(has_sel.get(), "Ctrl+A must flip has_selection");
 
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: Point::new(30.0, 10.0),
-        button: PointerButton::Secondary,
-        modifiers: Modifiers::NONE,
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        Point::new(30.0, 10.0),
+        PointerButton::Secondary,
+        Modifiers::NONE,
+    ));
     tree.layout(SizeProposal::exact(400.0, 300.0));
 
     assert!(
@@ -2706,11 +2704,11 @@ fn editor_right_click_outside_selection_repositions_caret() {
     assert!(has_sel.get(), "precondition: a selection exists");
 
     // Right-click at the far left — resolves to the very start, outside [6, 11].
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: Point::new(1.0, 8.0),
-        button: PointerButton::Secondary,
-        modifiers: Modifiers::NONE,
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        Point::new(1.0, 8.0),
+        PointerButton::Secondary,
+        Modifiers::NONE,
+    ));
     tree.layout(SizeProposal::exact(400.0, 300.0));
 
     assert!(
@@ -2878,11 +2876,11 @@ fn read_only_editor_arrow_keys_survive_default_context_menu() {
     tree.layout(SizeProposal::exact(400.0, 300.0));
     let _ = tree.render();
 
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: Point::new(1.0, 8.0),
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        Point::new(1.0, 8.0),
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
     let focused = tree.focused();
     assert!(
         focused.is_some_and(|f| f == id || tree.is_descendant_of(f, id)),
@@ -4310,11 +4308,11 @@ fn link_click_callback_installs_without_panicking() {
     tree.layout(SizeProposal::exact(400.0, 300.0));
     let _ = tree.render();
 
-    tree.dispatch_event(teksilo_core::event::WidgetEvent::PointerDown {
-        position: Point::new(5.0, 10.0),
-        button: teksilo_core::event::PointerButton::Primary,
-        modifiers: teksilo_core::event::Modifiers::NONE,
-    });
+    tree.dispatch_event(teksilo_core::event::WidgetEvent::pointer_down(
+        Point::new(5.0, 10.0),
+        teksilo_core::event::PointerButton::Primary,
+        teksilo_core::event::Modifiers::NONE,
+    ));
     // No assertion on `seen` — the callback firing depends on the
     // mock engine's layout producing a Link hit at (5, 10), which
     // isn't guaranteed. The test's job here is to guard the
@@ -6604,11 +6602,11 @@ fn rtl_editor(text: &str, at: usize) -> (WidgetTree, teksilo_core::signal::Signa
 
     // Click to focus — key events only reach a focused widget — then
     // park the caret exactly where the test wants it.
-    tree.dispatch_event(teksilo_core::event::WidgetEvent::PointerDown {
-        position: teksilo_canvas::Point::new(1.0, 8.0),
-        button: teksilo_core::event::PointerButton::Primary,
-        modifiers: teksilo_core::event::Modifiers::NONE,
-    });
+    tree.dispatch_event(teksilo_core::event::WidgetEvent::pointer_down(
+        teksilo_canvas::Point::new(1.0, 8.0),
+        teksilo_core::event::PointerButton::Primary,
+        teksilo_core::event::Modifiers::NONE,
+    ));
     handle.select_range(at, at);
     assert_eq!(caret.get(), at, "caret should start at {at}");
     (tree, caret)
@@ -6762,16 +6760,16 @@ fn typewriter_fixture(
 /// silently disable typewriter scrolling for the rest of the test.
 fn click_at(tree: &mut WidgetTree, y: f32) {
     use teksilo_core::event::{Modifiers, PointerButton, WidgetEvent};
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: Point::new(20.0, y),
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
-    tree.dispatch_event(WidgetEvent::PointerUp {
-        position: Point::new(20.0, y),
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        Point::new(20.0, y),
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
+    tree.dispatch_event(WidgetEvent::pointer_up(
+        Point::new(20.0, y),
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
 }
 
 fn key(tree: &mut WidgetTree, key: teksilo_core::event::Key) {
@@ -6935,16 +6933,14 @@ fn a_drag_selection_is_never_interrupted_by_the_pin() {
     click_at(&mut tree, 8.0);
 
     // Press and drag downward without releasing — an in-progress selection.
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: Point::new(20.0, 8.0),
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        Point::new(20.0, 8.0),
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
     recorded.set(None);
     for y in [20.0, 40.0, 60.0, 90.0] {
-        tree.dispatch_event(WidgetEvent::PointerMove {
-            position: Point::new(20.0, y),
-        });
+        tree.dispatch_event(WidgetEvent::pointer_move(Point::new(20.0, y)));
     }
 
     assert!(
@@ -6955,11 +6951,11 @@ fn a_drag_selection_is_never_interrupted_by_the_pin() {
 
     // Releasing leaves the pin stood down (the pointer placed the caret);
     // the keyboard takes it back.
-    tree.dispatch_event(WidgetEvent::PointerUp {
-        position: Point::new(20.0, 90.0),
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
+    tree.dispatch_event(WidgetEvent::pointer_up(
+        Point::new(20.0, 90.0),
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
     recorded.set(None);
     key(&mut tree, teksilo_core::event::Key::ArrowDown);
     assert_eq!(recorded.get(), Some(ScrollAlign::Fraction(0.5)));
@@ -8533,11 +8529,11 @@ fn a_plain_click_on_a_link_places_the_caret_and_does_not_follow_it() {
     let _ = tree.render();
     focus_editor(&mut tree, id);
 
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: Point::new(60.0, 20.0),
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        Point::new(60.0, 20.0),
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
 
     assert_eq!(followed.get(), 0, "a plain click must not follow the link");
     assert!(
@@ -8566,11 +8562,11 @@ fn ctrl_click_on_a_link_follows_it() {
     let _ = tree.render();
     focus_editor(&mut tree, id);
 
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: Point::new(60.0, 20.0),
-        button: PointerButton::Primary,
-        modifiers: Modifiers::COMMAND,
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        Point::new(60.0, 20.0),
+        PointerButton::Primary,
+        Modifiers::COMMAND,
+    ));
 
     assert_eq!(seen.borrow().as_str(), "https://example.com");
 }
@@ -8845,11 +8841,11 @@ fn hrefs_after_click(
     let _ = tree.add(editor);
     tree.layout(SizeProposal::exact(400.0, 300.0));
     let _ = tree.render();
-    tree.dispatch_event(teksilo_core::event::WidgetEvent::PointerDown {
-        position: Point::new(2.0, 2.0),
-        button: teksilo_core::event::PointerButton::Primary,
+    tree.dispatch_event(teksilo_core::event::WidgetEvent::pointer_down(
+        Point::new(2.0, 2.0),
+        teksilo_core::event::PointerButton::Primary,
         modifiers,
-    });
+    ));
 
     seen.borrow().clone()
 }

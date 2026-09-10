@@ -99,11 +99,11 @@ fn caret_hidden_when_window_inactive() {
 
     // Focus the field by clicking its centre.
     let b = tree.bounds(id);
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: Point::new(b.x + b.width / 2.0, b.y + b.height / 2.0),
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        Point::new(b.x + b.width / 2.0, b.y + b.height / 2.0),
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
     // One frame so the blink turns the caret on (on_focus sets it on; the
     // 500 ms interval hasn't elapsed after a single 16 ms tick).
     tree.request_frame();

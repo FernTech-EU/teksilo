@@ -303,7 +303,7 @@ impl Widget for DockResizeHandle {
                         ctx.request_focus(drag_self_id);
                         EventResponse::Ignored
                     }
-                    WidgetEvent::PointerMove { position } => {
+                    WidgetEvent::PointerMove { position, .. } => {
                         // The local flag says "I started a resize";
                         // `owns_pointer` says "and I still own the press".
                         // Capture is an arbitration act, so a handle that lost

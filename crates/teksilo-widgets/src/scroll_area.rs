@@ -3314,11 +3314,11 @@ mod pan_tests {
     #[test]
     fn a_mouse_press_and_drag_does_not_pan() {
         let (mut tree, y, _overscroll) = area(|sa| sa);
-        tree.dispatch_event(WidgetEvent::PointerDown {
-            position: Point::new(100.0, 80.0),
-            button: PointerButton::Primary,
-            modifiers: Modifiers::NONE,
-        });
+        tree.dispatch_event(WidgetEvent::pointer_down(
+            Point::new(100.0, 80.0),
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
         tree.pointer_move(Point::new(100.0, 20.0));
         assert_eq!(y.get(), 0.0, "a mouse drag is not a pan");
 

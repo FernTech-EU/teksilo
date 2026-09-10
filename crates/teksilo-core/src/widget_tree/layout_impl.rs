@@ -649,7 +649,12 @@ impl WidgetTree {
             let new_target = self.hit_test(pos);
             if new_target.is_some() {
                 if let Some(new) = new_target {
-                    self.dispatch_to_widget(new, &WidgetEvent::PointerEnter, &mut *ops);
+                    // Credited to the hover owner, whose cached position is
+                    // what re-derived the target — no sample raised this.
+                    let enter = WidgetEvent::PointerEnter {
+                        pointer: self.hover_transition_pointer(),
+                    };
+                    self.dispatch_to_widget(new, &enter, &mut *ops);
                     // Seed the tooltip dwell too, exactly as `handle_pointer_move`
                     // pairs these two. The rebuild replaced the anchor's tooltip
                     // entry with a fresh one whose `hover_start` is `None`, and

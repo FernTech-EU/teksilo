@@ -82,6 +82,7 @@ pub(super) fn handle_pointer_event(
             position,
             button,
             modifiers,
+            ..
         } => {
             if *button != PointerButton::Primary {
                 // Secondary / middle belong to the context menu; let them bubble.
@@ -155,7 +156,7 @@ pub(super) fn handle_pointer_event(
             EventResponse::Ignored
         }
 
-        WidgetEvent::PointerMove { position } => {
+        WidgetEvent::PointerMove { position, .. } => {
             let (dragging, viewport_height) = {
                 let st = state.borrow();
                 (

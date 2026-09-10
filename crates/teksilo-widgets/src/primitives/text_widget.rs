@@ -585,7 +585,7 @@ impl Widget for TextWidget {
             handler_set = handler_set.on_pointer_event(move |event, ctx| {
                 use teksilo_core::event::{EventResponse, WidgetEvent};
                 match event {
-                    WidgetEvent::PointerMove { position } => {
+                    WidgetEvent::PointerMove { position, .. } => {
                         // `position` is already widget-local.
                         let local = *position;
                         let layout_ref = last_layout_for_pointer.borrow();
@@ -643,7 +643,7 @@ impl Widget for TextWidget {
                         }
                         EventResponse::Ignored
                     }
-                    WidgetEvent::PointerLeave => {
+                    WidgetEvent::PointerLeave { .. } => {
                         ctx.set_cursor(CursorIcon::Default);
                         if let Some(handler) = on_hover.as_ref() {
                             let mut slot = hovered.borrow_mut();

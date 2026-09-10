@@ -1130,11 +1130,11 @@ mod tests {
 
         // Pointer down on the thumb (which starts at top)
         tree.pointer_move(Point::new(6.0, 10.0));
-        tree.dispatch_event(WidgetEvent::PointerDown {
-            position: Point::new(6.0, 10.0),
-            button: PointerButton::Primary,
-            modifiers: teksilo_core::event::Modifiers::NONE,
-        });
+        tree.dispatch_event(WidgetEvent::pointer_down(
+            Point::new(6.0, 10.0),
+            PointerButton::Primary,
+            teksilo_core::event::Modifiers::NONE,
+        ));
 
         // Drag 100px down: track is 400px, thumb is 200px (50% ratio),
         // so available travel = 200px, 100px drag = 50% of travel = 250 scroll.
@@ -1142,12 +1142,8 @@ mod tests {
         // DragStarted (which carries the *down* position, so the thumb-vs-track
         // check latches on), then subsequent moves emit DragMoved with a delta
         // from the initial press.
-        tree.dispatch_event(WidgetEvent::PointerMove {
-            position: Point::new(6.0, 20.0),
-        });
-        tree.dispatch_event(WidgetEvent::PointerMove {
-            position: Point::new(6.0, 110.0),
-        });
+        tree.dispatch_event(WidgetEvent::pointer_move(Point::new(6.0, 20.0)));
+        tree.dispatch_event(WidgetEvent::pointer_move(Point::new(6.0, 110.0)));
 
         let pos = position.get();
         assert!(pos > 200.0, "Expected scroll > 200, got {}", pos);
@@ -1167,17 +1163,17 @@ mod tests {
         // so after 3 clicks the position should be clamped at 500.
         for _ in 0..5 {
             tree.pointer_move(Point::new(6.0, 390.0));
-            tree.dispatch_event(WidgetEvent::PointerDown {
-                position: Point::new(6.0, 390.0),
-                button: PointerButton::Primary,
-                modifiers: teksilo_core::event::Modifiers::NONE,
-            });
+            tree.dispatch_event(WidgetEvent::pointer_down(
+                Point::new(6.0, 390.0),
+                PointerButton::Primary,
+                teksilo_core::event::Modifiers::NONE,
+            ));
             // Release so next click isn't a drag
-            tree.dispatch_event(WidgetEvent::PointerUp {
-                position: Point::new(6.0, 390.0),
-                button: PointerButton::Primary,
-                modifiers: teksilo_core::event::Modifiers::NONE,
-            });
+            tree.dispatch_event(WidgetEvent::pointer_up(
+                Point::new(6.0, 390.0),
+                PointerButton::Primary,
+                teksilo_core::event::Modifiers::NONE,
+            ));
         }
 
         let pos = position.get();
@@ -1367,16 +1363,16 @@ mod tests {
         // press+release sequence without the pointer crossing the drag
         // threshold.
         tree.pointer_move(Point::new(6.0, 350.0));
-        tree.dispatch_event(WidgetEvent::PointerDown {
-            position: Point::new(6.0, 350.0),
-            button: PointerButton::Primary,
-            modifiers: teksilo_core::event::Modifiers::NONE,
-        });
-        tree.dispatch_event(WidgetEvent::PointerUp {
-            position: Point::new(6.0, 350.0),
-            button: PointerButton::Primary,
-            modifiers: teksilo_core::event::Modifiers::NONE,
-        });
+        tree.dispatch_event(WidgetEvent::pointer_down(
+            Point::new(6.0, 350.0),
+            PointerButton::Primary,
+            teksilo_core::event::Modifiers::NONE,
+        ));
+        tree.dispatch_event(WidgetEvent::pointer_up(
+            Point::new(6.0, 350.0),
+            PointerButton::Primary,
+            teksilo_core::event::Modifiers::NONE,
+        ));
 
         let pos = position.get();
         assert!(
@@ -1427,25 +1423,27 @@ mod tests {
         let thumb_cx = sb_bounds.x + sb_bounds.width / 2.0;
         let thumb_cy = sb_bounds.y + sb_bounds.height / 4.0;
         tree.pointer_move(Point::new(thumb_cx, thumb_cy));
-        tree.dispatch_event(WidgetEvent::PointerDown {
-            position: Point::new(thumb_cx, thumb_cy),
-            button: PointerButton::Primary,
-            modifiers: Modifiers::NONE,
-        });
+        tree.dispatch_event(WidgetEvent::pointer_down(
+            Point::new(thumb_cx, thumb_cy),
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
 
         // Cross the drag threshold…
-        tree.dispatch_event(WidgetEvent::PointerMove {
-            position: Point::new(thumb_cx, thumb_cy + 10.0),
-        });
+        tree.dispatch_event(WidgetEvent::pointer_move(Point::new(
+            thumb_cx,
+            thumb_cy + 10.0,
+        )));
         // …and then actually drag down.
-        tree.dispatch_event(WidgetEvent::PointerMove {
-            position: Point::new(thumb_cx, thumb_cy + 100.0),
-        });
-        tree.dispatch_event(WidgetEvent::PointerUp {
-            position: Point::new(thumb_cx, thumb_cy + 100.0),
-            button: PointerButton::Primary,
-            modifiers: Modifiers::NONE,
-        });
+        tree.dispatch_event(WidgetEvent::pointer_move(Point::new(
+            thumb_cx,
+            thumb_cy + 100.0,
+        )));
+        tree.dispatch_event(WidgetEvent::pointer_up(
+            Point::new(thumb_cx, thumb_cy + 100.0),
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
 
         // Apply the scroll-triggered relayout so the content's cached
         // bounds reflect the new scroll offset (the real event loop does
@@ -1482,30 +1480,26 @@ mod tests {
 
         // Start drag on the thumb
         tree.pointer_move(Point::new(6.0, 10.0));
-        tree.dispatch_event(WidgetEvent::PointerDown {
-            position: Point::new(6.0, 10.0),
-            button: PointerButton::Primary,
-            modifiers: teksilo_core::event::Modifiers::NONE,
-        });
+        tree.dispatch_event(WidgetEvent::pointer_down(
+            Point::new(6.0, 10.0),
+            PointerButton::Primary,
+            teksilo_core::event::Modifiers::NONE,
+        ));
 
         // Move far outside the scrollbar bounds
-        tree.dispatch_event(WidgetEvent::PointerMove {
-            position: Point::new(200.0, 300.0),
-        });
+        tree.dispatch_event(WidgetEvent::pointer_move(Point::new(200.0, 300.0)));
 
         // Release outside
-        tree.dispatch_event(WidgetEvent::PointerUp {
-            position: Point::new(200.0, 300.0),
-            button: PointerButton::Primary,
-            modifiers: teksilo_core::event::Modifiers::NONE,
-        });
+        tree.dispatch_event(WidgetEvent::pointer_up(
+            Point::new(200.0, 300.0),
+            PointerButton::Primary,
+            teksilo_core::event::Modifiers::NONE,
+        ));
 
         // Now hover the scrollbar again — should NOT continue dragging
         let pos_before = position.get();
         tree.pointer_move(Point::new(6.0, 50.0));
-        tree.dispatch_event(WidgetEvent::PointerMove {
-            position: Point::new(6.0, 50.0),
-        });
+        tree.dispatch_event(WidgetEvent::pointer_move(Point::new(6.0, 50.0)));
 
         let pos_after = position.get();
         assert!(
@@ -1805,17 +1799,16 @@ mod touch_tests {
         let grab = Point::new(thumb.rect.center().x, thumb.rect.center().y);
 
         tree.pointer_move(grab);
-        tree.dispatch_event(WidgetEvent::PointerDown {
-            position: grab,
-            button: PointerButton::Primary,
-            modifiers: Modifiers::NONE,
-        });
-        tree.dispatch_event(WidgetEvent::PointerMove {
-            position: Point::new(grab.x, grab.y + 10.0),
-        });
-        tree.dispatch_event(WidgetEvent::PointerMove {
-            position: Point::new(grab.x, grab.y + 100.0),
-        });
+        tree.dispatch_event(WidgetEvent::pointer_down(
+            grab,
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
+        tree.dispatch_event(WidgetEvent::pointer_move(Point::new(grab.x, grab.y + 10.0)));
+        tree.dispatch_event(WidgetEvent::pointer_move(Point::new(
+            grab.x,
+            grab.y + 100.0,
+        )));
         assert!(
             position.get() > 200.0,
             "the drag moved the thumb: {}",
@@ -1899,16 +1892,16 @@ mod touch_tests {
         let (mut tree, _id, position) = mounted();
         let tap = Point::new(6.0, 390.0);
         tree.pointer_move(tap);
-        tree.dispatch_event(WidgetEvent::PointerDown {
-            position: tap,
-            button: PointerButton::Primary,
-            modifiers: Modifiers::NONE,
-        });
-        tree.dispatch_event(WidgetEvent::PointerUp {
-            position: tap,
-            button: PointerButton::Primary,
-            modifiers: Modifiers::NONE,
-        });
+        tree.dispatch_event(WidgetEvent::pointer_down(
+            tap,
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
+        tree.dispatch_event(WidgetEvent::pointer_up(
+            tap,
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
         // max = 500 at a 0.5 ratio, so one viewport is 500 × 0.5 / 0.5 = 500,
         // clamped to the end.
         assert_eq!(position.get(), 500.0);
@@ -1916,16 +1909,16 @@ mod touch_tests {
         // …and a tap above the thumb pages back.
         let tap = Point::new(6.0, 10.0);
         tree.pointer_move(tap);
-        tree.dispatch_event(WidgetEvent::PointerDown {
-            position: tap,
-            button: PointerButton::Primary,
-            modifiers: Modifiers::NONE,
-        });
-        tree.dispatch_event(WidgetEvent::PointerUp {
-            position: tap,
-            button: PointerButton::Primary,
-            modifiers: Modifiers::NONE,
-        });
+        tree.dispatch_event(WidgetEvent::pointer_down(
+            tap,
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
+        tree.dispatch_event(WidgetEvent::pointer_up(
+            tap,
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
         assert_eq!(position.get(), 0.0);
     }
 

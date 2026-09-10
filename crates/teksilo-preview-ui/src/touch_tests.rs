@@ -523,7 +523,7 @@ fn ctrl_wheel_zooms_and_a_bare_wheel_does_not() {
     t.dispatch_event(WidgetEvent::Scroll {
         delta: ScrollDelta::Lines { x: 0.0, y: 1.0 },
         modifiers: Modifiers::NONE,
-        position: Some(at),
+        window_position: Some(at),
         phase: teksilo_core::pointer::ScrollPhase::Discrete,
         pointer: teksilo_core::pointer::PointerInfo::mouse(teksilo_core::pointer::EventTime::ZERO),
     });
@@ -536,7 +536,7 @@ fn ctrl_wheel_zooms_and_a_bare_wheel_does_not() {
     t.dispatch_event(WidgetEvent::Scroll {
         delta: ScrollDelta::Lines { x: 0.0, y: 1.0 },
         modifiers: Modifiers::COMMAND,
-        position: Some(at),
+        window_position: Some(at),
         phase: teksilo_core::pointer::ScrollPhase::Discrete,
         pointer: teksilo_core::pointer::PointerInfo::mouse(teksilo_core::pointer::EventTime::ZERO),
     });

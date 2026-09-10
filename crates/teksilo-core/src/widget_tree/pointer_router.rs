@@ -83,7 +83,7 @@ fn pointer_event_position(event: &WidgetEvent) -> Option<Point> {
     match event {
         WidgetEvent::PointerDown { position, .. }
         | WidgetEvent::PointerUp { position, .. }
-        | WidgetEvent::PointerMove { position } => Some(*position),
+        | WidgetEvent::PointerMove { position, .. } => Some(*position),
         // Deliberately not `PointerCancel`. A revocation must never *create*
         // a pointer: admitting one here would resurrect a contact the funnel
         // is in the middle of forgetting, and leave its entry behind for good.
@@ -261,14 +261,18 @@ impl WidgetTree {
                 position: sample.position,
                 button,
                 modifiers: sample.modifiers,
+                pointer: sample.pointer,
             },
             PointerPhase::Move => WidgetEvent::PointerMove {
                 position: sample.position,
+                modifiers: sample.modifiers,
+                pointer: sample.pointer,
             },
             PointerPhase::Up => WidgetEvent::PointerUp {
                 position: sample.position,
                 button,
                 modifiers: sample.modifiers,
+                pointer: sample.pointer,
             },
             // The platform revoked the contact (a `wl_touch.cancel`, a
             // `WM_POINTERCAPTURECHANGED`, a compositor grab). It takes the
@@ -353,7 +357,7 @@ impl WidgetTree {
         let event = WidgetEvent::Scroll {
             delta: sample.delta,
             modifiers: sample.modifiers,
-            position: sample.position,
+            window_position: sample.position,
             phase: sample.phase,
             pointer: sample.pointer,
         };
@@ -400,10 +404,38 @@ impl WidgetTree {
         let Some(hovered) = self.hovered_id() else {
             return;
         };
-        self.dispatch_to_widget(hovered, &WidgetEvent::PointerLeave, &mut *ops);
+        // The hover owner is the pointer that just left — read from the table
+        // because this door carries no sample of its own.
+        let leave = WidgetEvent::PointerLeave {
+            pointer: self.hover_transition_pointer(),
+        };
+        self.dispatch_to_widget(hovered, &leave, &mut *ops);
         self.tooltip_pointer_leave(hovered, &mut *ops);
         self.set_hovered(None);
         self.update_hover_within_signals(Some(hovered), None);
+    }
+
+    /// The pointer a hover transition is credited to.
+    ///
+    /// [`PointerEnter`](WidgetEvent::PointerEnter) /
+    /// [`PointerLeave`](WidgetEvent::PointerLeave) are hover-owner events by
+    /// construction — a contact never writes hover — so the answer is the hover
+    /// owner's own [`PointerInfo`](crate::pointer::PointerInfo), read from the
+    /// table rather than from the in-flight sample: a transition can be raised
+    /// by something that is not a pointer sample at all (a relayout that moves
+    /// a widget out from under the cursor, the window-leave door), and a
+    /// hover-incapable pointer must never be credited with hover.
+    ///
+    /// Falls back to a mouse at the current tree time when the table has no
+    /// hover owner, which is the state a synthesized `dispatch_event` leaves it
+    /// in. Either way this is the tree's own view rather than a producer's — see
+    /// the rule stated on
+    /// [`handle_pointer_move`](Self::handle_pointer_move).
+    pub(super) fn hover_transition_pointer(&self) -> crate::pointer::PointerInfo {
+        self.pointers
+            .hover_owner()
+            .map(|entry| entry.info)
+            .unwrap_or_else(|| crate::pointer::PointerInfo::mouse(self.input_now()))
     }
 
     /// Run one dispatch with `snapshot` installed as the tree's view of the
@@ -741,7 +773,7 @@ impl WidgetTree {
         // --- Active drag session handling ---
         if self.active_drag.is_some() {
             match &event {
-                WidgetEvent::PointerMove { position } => {
+                WidgetEvent::PointerMove { position, .. } => {
                     self.handle_drag_move(*position, &mut *ops);
                     return;
                 }
@@ -795,7 +827,7 @@ impl WidgetTree {
         }
 
         match &event {
-            WidgetEvent::PointerMove { position } => {
+            WidgetEvent::PointerMove { position, .. } => {
                 // Every sample: re-check the sequence's members against the
                 // arena, and record where the pointer now is so each threshold
                 // reads one number.
@@ -811,38 +843,22 @@ impl WidgetTree {
                 self.note_palm_sample(*position);
                 self.feed_pinch(super::pan_arbiter::PinchFeed::Move, *position, &mut *ops);
                 if let Some(captured) = self.current_pointer_capture() {
-                    self.dispatch_to_widget(
-                        captured,
-                        &WidgetEvent::PointerMove {
-                            position: *position,
-                        },
-                        &mut *ops,
-                    );
+                    self.dispatch_to_widget(captured, &event, &mut *ops);
                     // Advance the arbitration so an ancestor drag can still
                     // begin while a descendant tap holds the capture. Once a
                     // drag latches, `active_drag` takes over and the capture
                     // branch above is bypassed.
                     if self.active_drag.is_none() {
-                        self.advance_sequence(
-                            &WidgetEvent::PointerMove {
-                                position: *position,
-                            },
-                            &mut *ops,
-                        );
+                        self.advance_sequence(&event, &mut *ops);
                     }
                 } else {
-                    self.handle_pointer_move(*position, &mut *ops);
+                    self.handle_pointer_move(&event, *position, &mut *ops);
                     // No capture: for a mouse there is nothing enrolled (a
                     // gesture member is only enrolled *through* a capture), so
                     // this is a no-op. A contact panning from empty space has
                     // its pan claimants here.
                     if self.active_drag.is_none() {
-                        self.advance_sequence(
-                            &WidgetEvent::PointerMove {
-                                position: *position,
-                            },
-                            &mut *ops,
-                        );
+                        self.advance_sequence(&event, &mut *ops);
                     }
                 }
                 // After the arbitration, so a claim taken on *this* sample
@@ -1030,7 +1046,10 @@ impl WidgetTree {
                 let (reason, pointer) = (*reason, pointer.id);
                 self.cancel_pointer(pointer, reason, &mut *ops);
             }
-            WidgetEvent::Scroll { position, .. } => {
+            WidgetEvent::Scroll {
+                window_position: position,
+                ..
+            } => {
                 use super::pan_arbiter::ScrollDelivery;
                 match ScrollDelivery::for_source(self.current_input.scroll_source) {
                     // A synthesised pan (and the coast that follows it) walks
@@ -1195,8 +1214,8 @@ impl WidgetTree {
                 }
             }
             WidgetEvent::ScrollIntoView { .. }
-            | WidgetEvent::PointerEnter
-            | WidgetEvent::PointerLeave
+            | WidgetEvent::PointerEnter { .. }
+            | WidgetEvent::PointerLeave { .. }
             | WidgetEvent::FocusGained { .. }
             | WidgetEvent::FocusLost => {}
         }
@@ -1683,7 +1702,31 @@ impl WidgetTree {
         }
     }
 
-    fn handle_pointer_move(&mut self, position: Point, ops: &mut dyn crate::window::WindowOps) {
+    /// The hover walk for one move: hit-test, run the enter/leave transitions,
+    /// then deliver `event` to whatever the pointer is now over.
+    ///
+    /// `event` is the `PointerMove` being dispatched and is forwarded
+    /// **verbatim** — its `modifiers` (a Shift or Ctrl pressed mid-drag) and its
+    /// `pointer` are the producer's own, not a copy assembled here. `position`
+    /// is that event's position, passed separately only because every step below
+    /// needs it.
+    ///
+    /// Which is the rule for the whole router: a producer's event reaches the
+    /// widget carrying what the producer said, while an event the *tree*
+    /// synthesizes — the enter/leave pair below — carries the tree's own view of
+    /// who is pointing, read from the pointer table. The two differ only for a
+    /// hand-built legacy event, which names no time and is stamped from the tree
+    /// clock into the snapshot [`EventContext::pointer`] reports (see
+    /// [`dispatch_event_with_ops`](Self::dispatch_event_with_ops)) without that
+    /// stamp being written back onto the event.
+    ///
+    /// [`EventContext::pointer`]: crate::widget::EventContext::pointer
+    fn handle_pointer_move(
+        &mut self,
+        event: &WidgetEvent,
+        position: Point,
+        ops: &mut dyn crate::window::WindowOps,
+    ) {
         // A contact routes its move by hit test but writes **no hover**: a
         // finger has no hover state, so a second finger arriving beside a
         // hovering mouse must leave enter/leave, the cursor, tooltip dwell and
@@ -1691,20 +1734,30 @@ impl WidgetTree {
         let moving = self.current_input.pointer;
         if self.pointers.hover_owner_id() != Some(self.current_pointer_id()) {
             if let Some(target) = self.hit_test_for(position, &moving) {
-                self.dispatch_to_widget(target, &WidgetEvent::PointerMove { position }, &mut *ops);
+                self.dispatch_to_widget(target, event, &mut *ops);
             }
             return;
         }
         let target = self.hit_test_for(position, &moving);
 
         if target != self.hovered_id() {
+            // Past the gate above, so the mover *is* the hover owner.
+            let hover = self.hover_transition_pointer();
             let previously_hovered = self.hovered_id();
             if let Some(old) = previously_hovered {
-                self.dispatch_to_widget(old, &WidgetEvent::PointerLeave, &mut *ops);
+                self.dispatch_to_widget(
+                    old,
+                    &WidgetEvent::PointerLeave { pointer: hover },
+                    &mut *ops,
+                );
                 self.tooltip_pointer_leave(old, &mut *ops);
             }
             if let Some(new) = target {
-                self.dispatch_to_widget(new, &WidgetEvent::PointerEnter, &mut *ops);
+                self.dispatch_to_widget(
+                    new,
+                    &WidgetEvent::PointerEnter { pointer: hover },
+                    &mut *ops,
+                );
                 self.tooltip_pointer_enter(new);
             }
             self.set_hovered(target);
@@ -1716,7 +1769,7 @@ impl WidgetTree {
         }
 
         if let Some(target) = target {
-            self.dispatch_to_widget(target, &WidgetEvent::PointerMove { position }, &mut *ops);
+            self.dispatch_to_widget(target, event, &mut *ops);
         }
     }
 
@@ -1746,26 +1799,41 @@ impl WidgetTree {
                 position,
                 button,
                 modifiers,
+                pointer,
             } => Some(WidgetEvent::PointerDown {
                 position: self.arena.local_pointer_position(id, *position),
                 button: *button,
                 modifiers: *modifiers,
+                pointer: *pointer,
             }),
             WidgetEvent::PointerUp {
                 position,
                 button,
                 modifiers,
+                pointer,
             } => Some(WidgetEvent::PointerUp {
                 position: self.arena.local_pointer_position(id, *position),
                 button: *button,
                 modifiers: *modifiers,
+                pointer: *pointer,
             }),
-            WidgetEvent::PointerMove { position } => Some(WidgetEvent::PointerMove {
+            WidgetEvent::PointerMove {
+                position,
+                modifiers,
+                pointer,
+            } => Some(WidgetEvent::PointerMove {
                 position: self.arena.local_pointer_position(id, *position),
+                modifiers: *modifiers,
+                pointer: *pointer,
             }),
             WidgetEvent::Gesture { gesture } => Some(WidgetEvent::Gesture {
                 gesture: self.localize_gesture(id, gesture),
             }),
+            // Deliberately no `Scroll` or `PointerCancel` arm. Both name their
+            // position `window_position` precisely because it stays in window
+            // space — see the fields' own docs for why routing and velocity
+            // need it there — and adding an arm here would silently change the
+            // frame every reader of those two fields works in.
             _ => None,
         }
     }
@@ -1995,7 +2063,10 @@ impl WidgetTree {
                 // pointer is somewhere inside me" rather than "the pointer is on my
                 // own background". Every other event still stops at its handler,
                 // which is what makes handling one mean anything.
-                if !matches!(event, WidgetEvent::PointerEnter | WidgetEvent::PointerLeave) {
+                if !matches!(
+                    event,
+                    WidgetEvent::PointerEnter { .. } | WidgetEvent::PointerLeave { .. }
+                ) {
                     return true;
                 }
             }
@@ -2141,7 +2212,7 @@ impl WidgetTree {
             // and `Scroll` still preview through the catch-all below — the
             // tab-bar wheel-remap (`tab_widget/bar.rs`) and the split-view /
             // rich-text drag guards depend on that.
-            WidgetEvent::PointerEnter | WidgetEvent::PointerLeave => None,
+            WidgetEvent::PointerEnter { .. } | WidgetEvent::PointerLeave { .. } => None,
             _ => {
                 let has = node.external_handlers.on_pointer_event.is_some()
                     || node.handlers.on_pointer_event.is_some();
@@ -2172,7 +2243,7 @@ impl WidgetTree {
             arena_blocked,
         } = gates;
         match event {
-            WidgetEvent::PointerEnter => {
+            WidgetEvent::PointerEnter { .. } => {
                 if let Some(cursor) = node.node_cursor {
                     ctx.set_cursor(cursor);
                 }
@@ -2191,7 +2262,7 @@ impl WidgetTree {
                     node.node_cursor.map(|_| EventResponse::Handled)
                 }
             }
-            WidgetEvent::PointerLeave => {
+            WidgetEvent::PointerLeave { .. } => {
                 if node.node_cursor.is_some() {
                     ctx.set_cursor(crate::widget::CursorIcon::Default);
                 }
@@ -2387,6 +2458,7 @@ impl WidgetTree {
                 position,
                 button,
                 modifiers,
+                ..
             } => {
                 // Raw pointer handler runs first so widgets can intercept
                 // events that the gesture recognizers won't catch (e.g.
@@ -2450,6 +2522,7 @@ impl WidgetTree {
                 position,
                 button,
                 modifiers,
+                ..
             } => {
                 if fire_on_pointer_event {
                     let r = fire_event_handler_both(
@@ -2484,7 +2557,7 @@ impl WidgetTree {
                 }
                 None
             }
-            WidgetEvent::PointerMove { position } => {
+            WidgetEvent::PointerMove { position, .. } => {
                 if fire_on_pointer_event {
                     let r = fire_event_handler_both(
                         &mut node.external_handlers.on_pointer_event,
@@ -3573,21 +3646,21 @@ mod tests {
         assert_eq!(tree.bounds(child).origin(), Point::new(20.0, 20.0));
 
         // A tap at window (50, 40) must reach the handler as local (30, 20).
-        tree.dispatch_event(WidgetEvent::PointerDown {
-            position: Point::new(50.0, 40.0),
-            button: PointerButton::Primary,
-            modifiers: Modifiers::NONE,
-        });
+        tree.dispatch_event(WidgetEvent::pointer_down(
+            Point::new(50.0, 40.0),
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
         assert_eq!(
             down_pos.get(),
             Some(Point::new(30.0, 20.0)),
             "on_pointer_event PointerDown must be widget-local"
         );
-        tree.dispatch_event(WidgetEvent::PointerUp {
-            position: Point::new(50.0, 40.0),
-            button: PointerButton::Primary,
-            modifiers: Modifiers::NONE,
-        });
+        tree.dispatch_event(WidgetEvent::pointer_up(
+            Point::new(50.0, 40.0),
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
         assert_eq!(
             tap_pos.get(),
             Some(Point::new(30.0, 20.0)),
@@ -3596,19 +3669,15 @@ mod tests {
 
         // A drag (down then a move past the recognizer threshold) must
         // also deliver widget-local coordinates.
-        tree.dispatch_event(WidgetEvent::PointerDown {
-            position: Point::new(50.0, 40.0),
-            button: PointerButton::Primary,
-            modifiers: Modifiers::NONE,
-        });
+        tree.dispatch_event(WidgetEvent::pointer_down(
+            Point::new(50.0, 40.0),
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
         // First move crosses the recognizer threshold (DragStarted);
         // the second reports a known DragMoved position.
-        tree.dispatch_event(WidgetEvent::PointerMove {
-            position: Point::new(65.0, 55.0),
-        });
-        tree.dispatch_event(WidgetEvent::PointerMove {
-            position: Point::new(90.0, 70.0),
-        });
+        tree.dispatch_event(WidgetEvent::pointer_move(Point::new(65.0, 55.0)));
+        tree.dispatch_event(WidgetEvent::pointer_move(Point::new(90.0, 70.0)));
         assert_eq!(
             drag_pos.get(),
             Some(Point::new(70.0, 50.0)),
@@ -5596,11 +5665,11 @@ mod tests {
         tree.layout(SizeProposal::exact(200.0, 100.0));
 
         let click = Point::new(73.0, 42.0);
-        tree.dispatch_event(WidgetEvent::PointerDown {
-            position: click,
-            button: PointerButton::Secondary,
-            modifiers: Modifiers::NONE,
-        });
+        tree.dispatch_event(WidgetEvent::pointer_down(
+            click,
+            PointerButton::Secondary,
+            Modifiers::NONE,
+        ));
 
         let got = captured_position.get();
         assert_eq!(
@@ -5634,11 +5703,11 @@ mod tests {
         ));
         tree.layout(SizeProposal::exact(200.0, 100.0));
 
-        tree.dispatch_event(WidgetEvent::PointerDown {
-            position: Point::new(50.0, 25.0),
-            button: PointerButton::Secondary,
-            modifiers: Modifiers::NONE,
-        });
+        tree.dispatch_event(WidgetEvent::pointer_down(
+            Point::new(50.0, 25.0),
+            PointerButton::Secondary,
+            Modifiers::NONE,
+        ));
 
         assert_eq!(
             outer_called.get(),
@@ -5657,11 +5726,11 @@ mod tests {
         tree.layout(SizeProposal::exact(200.0, 100.0));
 
         let overlay_count_before = tree.overlay_manager.len();
-        tree.dispatch_event(WidgetEvent::PointerDown {
-            position: Point::new(50.0, 25.0),
-            button: PointerButton::Secondary,
-            modifiers: Modifiers::NONE,
-        });
+        tree.dispatch_event(WidgetEvent::pointer_down(
+            Point::new(50.0, 25.0),
+            PointerButton::Secondary,
+            Modifiers::NONE,
+        ));
         let overlay_count_after = tree.overlay_manager.len();
         assert_eq!(
             overlay_count_before, overlay_count_after,
@@ -6345,11 +6414,11 @@ mod tests {
         assert_eq!(tree.overlay_manager.len(), 1);
 
         // Right-click the editor inside the modal.
-        tree.dispatch_event(WidgetEvent::PointerDown {
-            position: Point::new(50.0, 25.0),
-            button: PointerButton::Secondary,
-            modifiers: Modifiers::NONE,
-        });
+        tree.dispatch_event(WidgetEvent::pointer_down(
+            Point::new(50.0, 25.0),
+            PointerButton::Secondary,
+            Modifiers::NONE,
+        ));
 
         assert!(
             tree.overlay_manager.active_ids().contains(&modal),
@@ -6936,11 +7005,11 @@ mod press_and_focus_tests {
         tree.layout(SizeProposal::exact(100.0, 50.0));
         let center = tree.bounds(w).center();
 
-        tree.dispatch_event(WidgetEvent::PointerDown {
-            position: center,
-            button: PointerButton::Primary,
-            modifiers: Modifiers::NONE,
-        });
+        tree.dispatch_event(WidgetEvent::pointer_down(
+            center,
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
         assert_eq!(
             tree.focused(),
             Some(w),
@@ -7030,11 +7099,11 @@ mod press_and_focus_tests {
         let center = tree.bounds(w).center();
 
         assert!(!pressed.get(), "not pressed at rest");
-        tree.dispatch_event(WidgetEvent::PointerDown {
-            position: center,
-            button: PointerButton::Primary,
-            modifiers: Modifiers::NONE,
-        });
+        tree.dispatch_event(WidgetEvent::pointer_down(
+            center,
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
         assert!(pressed.get(), "an indirect pointer lights up on the press");
         assert!(
             !tree.press_pending(w),
@@ -7043,11 +7112,11 @@ mod press_and_focus_tests {
         );
         assert_eq!(tree.pressed_by(w), Some(PointerId::MOUSE));
 
-        tree.dispatch_event(WidgetEvent::PointerUp {
-            position: center,
-            button: PointerButton::Primary,
-            modifiers: Modifiers::NONE,
-        });
+        tree.dispatch_event(WidgetEvent::pointer_up(
+            center,
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
         assert!(!pressed.get(), "the release clears it");
         assert_eq!(tree.pressed_by(w), None);
     }
@@ -7243,21 +7312,13 @@ mod press_and_focus_tests {
             PointerButton::Back,
             PointerButton::Forward,
         ] {
-            tree.dispatch_event(WidgetEvent::PointerDown {
-                position: center,
-                button,
-                modifiers: Modifiers::NONE,
-            });
+            tree.dispatch_event(WidgetEvent::pointer_down(center, button, Modifiers::NONE));
             assert!(
                 !pressed.get(),
                 "{button:?} cannot activate an `on_tap` node, so it must not light one up",
             );
             assert_eq!(tree.pressed_by(w), None, "and owns no visual to clear");
-            tree.dispatch_event(WidgetEvent::PointerUp {
-                position: center,
-                button,
-                modifiers: Modifiers::NONE,
-            });
+            tree.dispatch_event(WidgetEvent::pointer_up(center, button, Modifiers::NONE));
             assert_eq!(
                 taps.get(),
                 0,
@@ -7266,18 +7327,18 @@ mod press_and_focus_tests {
         }
 
         // …and the button it does act on is untouched.
-        tree.dispatch_event(WidgetEvent::PointerDown {
-            position: center,
-            button: PointerButton::Primary,
-            modifiers: Modifiers::NONE,
-        });
+        tree.dispatch_event(WidgetEvent::pointer_down(
+            center,
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
         assert!(pressed.get(), "a primary press lights up as it always has");
         assert_eq!(tree.pressed_by(w), Some(PointerId::MOUSE));
-        tree.dispatch_event(WidgetEvent::PointerUp {
-            position: center,
-            button: PointerButton::Primary,
-            modifiers: Modifiers::NONE,
-        });
+        tree.dispatch_event(WidgetEvent::pointer_up(
+            center,
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
         assert!(!pressed.get());
         assert_eq!(taps.get(), 1);
     }
@@ -7292,11 +7353,11 @@ mod press_and_focus_tests {
         tree.layout(SizeProposal::exact(100.0, 50.0));
         let center = tree.bounds(w).center();
 
-        tree.dispatch_event(WidgetEvent::PointerDown {
-            position: center,
-            button: PointerButton::Secondary,
-            modifiers: Modifiers::NONE,
-        });
+        tree.dispatch_event(WidgetEvent::pointer_down(
+            center,
+            PointerButton::Secondary,
+            Modifiers::NONE,
+        ));
         assert!(
             !pressed.get(),
             "nothing opened, and nothing may look pressed either",
@@ -7322,18 +7383,18 @@ mod press_and_focus_tests {
         tree.layout(SizeProposal::exact(100.0, 50.0));
         let center = tree.bounds(w).center();
 
-        tree.dispatch_event(WidgetEvent::PointerDown {
-            position: center,
-            button: PointerButton::Middle,
-            modifiers: Modifiers::NONE,
-        });
+        tree.dispatch_event(WidgetEvent::pointer_down(
+            center,
+            PointerButton::Middle,
+            Modifiers::NONE,
+        ));
         assert!(pressed.get(), "this node really does act on a middle-click");
 
-        tree.dispatch_event(WidgetEvent::PointerUp {
-            position: center,
-            button: PointerButton::Middle,
-            modifiers: Modifiers::NONE,
-        });
+        tree.dispatch_event(WidgetEvent::pointer_up(
+            center,
+            PointerButton::Middle,
+            Modifiers::NONE,
+        ));
         assert!(!pressed.get());
     }
 
@@ -7452,11 +7513,11 @@ mod press_and_focus_tests {
         tree.layout(SizeProposal::exact(200.0, 400.0));
         let _ = list;
 
-        tree.dispatch_event(WidgetEvent::PointerDown {
-            position: Point::new(100.0, 200.0),
-            button: PointerButton::Primary,
-            modifiers: Modifiers::NONE,
-        });
+        tree.dispatch_event(WidgetEvent::pointer_down(
+            Point::new(100.0, 200.0),
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
         assert!(!tree.press_pending(row));
         assert!(pressed.get(), "Compact with a mouse is exactly as it was");
     }
@@ -7927,11 +7988,11 @@ mod overlay_release_dismissal_tests {
     #[test]
     fn a_mouse_click_outside_a_menu_dismisses_on_the_press_and_falls_through() {
         let (mut tree, _page, taps) = page_with_a_menu();
-        tree.dispatch_event(WidgetEvent::PointerDown {
-            position: outside(),
-            button: PointerButton::Primary,
-            modifiers: Modifiers::NONE,
-        });
+        tree.dispatch_event(WidgetEvent::pointer_down(
+            outside(),
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
         assert!(
             tree.active_overlays().is_empty(),
             "the mouse still dismisses on the press"
@@ -7942,11 +8003,11 @@ mod overlay_release_dismissal_tests {
                 .is_some_and(|e| e.sequence.is_some()),
             "and the press still reaches the page beneath"
         );
-        tree.dispatch_event(WidgetEvent::PointerUp {
-            position: outside(),
-            button: PointerButton::Primary,
-            modifiers: Modifiers::NONE,
-        });
+        tree.dispatch_event(WidgetEvent::pointer_up(
+            outside(),
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
         assert_eq!(taps.get(), 1, "the control beneath activated");
         assert!(
             !tree.overlay_manager().has_armed_dismiss(PointerId::MOUSE),

@@ -996,22 +996,20 @@ fn pointer_drag_reorders_tile_through_source_accept_drop() {
     tree.layout(SizeProposal::exact(440.0, 300.0));
 
     let from = Point::new(50.0, 25.0); // tile 0 center
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: from,
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        from,
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
     // Cross the drag threshold, then move past the last tile (insertion = end).
-    tree.dispatch_event(WidgetEvent::PointerMove {
-        position: Point::new(72.0, 25.0),
-    });
+    tree.dispatch_event(WidgetEvent::pointer_move(Point::new(72.0, 25.0)));
     let to = Point::new(430.0, 25.0);
-    tree.dispatch_event(WidgetEvent::PointerMove { position: to });
-    tree.dispatch_event(WidgetEvent::PointerUp {
-        position: to,
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
+    tree.dispatch_event(WidgetEvent::pointer_move(to));
+    tree.dispatch_event(WidgetEvent::pointer_up(
+        to,
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
 
     assert_eq!(
         model.with_item(3, |v| *v),
@@ -1044,24 +1042,22 @@ fn pointer_drag_drop_in_a_row_gap_does_not_append_at_the_end() {
     tree.layout(SizeProposal::exact(220.0, 300.0));
 
     let from = Point::new(50.0, 25.0); // tile 0 center
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: from,
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        from,
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
     // Cross the drag threshold, then move into the row-gap: y=53 sits
     // between row 0 (0..50) and row 1 (58..108); x=70 is inside column 0,
     // past its horizontal center.
-    tree.dispatch_event(WidgetEvent::PointerMove {
-        position: Point::new(72.0, 25.0),
-    });
+    tree.dispatch_event(WidgetEvent::pointer_move(Point::new(72.0, 25.0)));
     let to = Point::new(70.0, 53.0);
-    tree.dispatch_event(WidgetEvent::PointerMove { position: to });
-    tree.dispatch_event(WidgetEvent::PointerUp {
-        position: to,
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
+    tree.dispatch_event(WidgetEvent::pointer_move(to));
+    tree.dispatch_event(WidgetEvent::pointer_up(
+        to,
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
 
     assert_ne!(
         model.with_item(7, |v| *v),
@@ -1098,20 +1094,18 @@ fn marquee_edge_auto_scroll_selects_tiles_revealed_by_scrolling() {
     // `index_at_point` misses and this starts a marquee, not an item
     // drag) near the top of the viewport.
     let press = Point::new(120.0, 10.0);
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: press,
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        press,
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
     // Cross the 5px drag threshold.
-    tree.dispatch_event(WidgetEvent::PointerMove {
-        position: Point::new(120.0, 16.0),
-    });
+    tree.dispatch_event(WidgetEvent::pointer_move(Point::new(120.0, 16.0)));
     // Sweep into the tile column (x=50) and past the bottom edge — deep
     // enough into the edge band that the pointer never needs to move
     // again for auto-scroll to keep going.
     let hold = Point::new(50.0, 200.0);
-    tree.dispatch_event(WidgetEvent::PointerMove { position: hold });
+    tree.dispatch_event(WidgetEvent::pointer_move(hold));
 
     // Pump enough frame ticks for the auto-scroll effect to run well past
     // one screenful. Each `layout()` call advances at most one tick (see
@@ -1123,11 +1117,11 @@ fn marquee_edge_auto_scroll_selects_tiles_revealed_by_scrolling() {
         tree.layout(SizeProposal::exact(150.0, 150.0));
     }
 
-    tree.dispatch_event(WidgetEvent::PointerUp {
-        position: hold,
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
+    tree.dispatch_event(WidgetEvent::pointer_up(
+        hold,
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
 
     assert!(
         selection.is_selected(0),

@@ -130,16 +130,16 @@ fn assert_roving_strip_is_reachable(tree: &WidgetTree, items: &[WidgetId]) {
 
 /// Right-click at `at`, which is how a context menu opens for a mouse.
 fn right_click(tree: &mut WidgetTree, at: Point) {
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: at,
-        button: PointerButton::Secondary,
-        modifiers: Modifiers::NONE,
-    });
-    tree.dispatch_event(WidgetEvent::PointerUp {
-        position: at,
-        button: PointerButton::Secondary,
-        modifiers: Modifiers::NONE,
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        at,
+        PointerButton::Secondary,
+        Modifiers::NONE,
+    ));
+    tree.dispatch_event(WidgetEvent::pointer_up(
+        at,
+        PointerButton::Secondary,
+        Modifiers::NONE,
+    ));
 }
 
 /// Every label in the accessibility tree — what a screen reader would list.
@@ -210,20 +210,18 @@ fn nodes_with_role(
 
 /// Run a full pointer drag: down, past the threshold, to the target, up.
 fn drag(tree: &mut WidgetTree, from: Point, to: Point) {
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: from,
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
-    tree.dispatch_event(WidgetEvent::PointerMove {
-        position: Point::new(from.x + 10.0, from.y),
-    });
-    tree.dispatch_event(WidgetEvent::PointerMove { position: to });
-    tree.dispatch_event(WidgetEvent::PointerUp {
-        position: to,
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        from,
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
+    tree.dispatch_event(WidgetEvent::pointer_move(Point::new(from.x + 10.0, from.y)));
+    tree.dispatch_event(WidgetEvent::pointer_move(to));
+    tree.dispatch_event(WidgetEvent::pointer_up(
+        to,
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
 }
 
 // ---------------------------------------------------------------------------

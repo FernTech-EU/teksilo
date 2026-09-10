@@ -210,19 +210,11 @@ fn mouse_ctx<'a>() -> EventContext<'a> {
 }
 
 fn down(position: Point) -> WidgetEvent {
-    WidgetEvent::PointerDown {
-        position,
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    }
+    WidgetEvent::pointer_down(position, PointerButton::Primary, Modifiers::NONE)
 }
 
 fn up(position: Point) -> WidgetEvent {
-    WidgetEvent::PointerUp {
-        position,
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    }
+    WidgetEvent::pointer_up(position, PointerButton::Primary, Modifiers::NONE)
 }
 
 // ---------------------------------------------------------------------------

@@ -261,17 +261,17 @@ fn a_mouse_drag_still_selects_from_the_cell_it_pressed() {
     let from = Point::new(cw * 3.5 + 6.0, ch * 2.5 + 6.0);
     let to = Point::new(cw * 7.5 + 6.0, ch * 2.5 + 6.0);
 
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: from,
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
-    tree.dispatch_event(WidgetEvent::PointerMove { position: to });
-    tree.dispatch_event(WidgetEvent::PointerUp {
-        position: to,
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        from,
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
+    tree.dispatch_event(WidgetEvent::pointer_move(to));
+    tree.dispatch_event(WidgetEvent::pointer_up(
+        to,
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
 
     let s = f.shared.borrow();
     assert_eq!(
@@ -305,15 +305,13 @@ fn a_selection_drag_keeps_its_moves_after_leaving_the_widget() {
     tree.run_mount_actions(&mut NoopWindowOps);
 
     let (cw, ch) = cell_size();
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: Point::new(cw * 2.5 + 6.0, ch * 1.5 + 6.0),
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        Point::new(cw * 2.5 + 6.0, ch * 1.5 + 6.0),
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
     // Well outside the 480 × 320 window.
-    tree.dispatch_event(WidgetEvent::PointerMove {
-        position: Point::new(2_000.0, 2_000.0),
-    });
+    tree.dispatch_event(WidgetEvent::pointer_move(Point::new(2_000.0, 2_000.0)));
 
     assert!(
         !shared.borrow().selection_updates.is_empty(),
@@ -341,11 +339,11 @@ fn a_press_on_an_offset_terminal_lands_on_the_cell_it_is_over() {
     let bounds = tree.bounds(terminal);
     assert_eq!((bounds.x, bounds.y), (120.0, 60.0), "fixture sanity");
 
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: Point::new(bounds.x + cw * 4.5 + 6.0, bounds.y + ch * 3.5 + 6.0),
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        Point::new(bounds.x + cw * 4.5 + 6.0, bounds.y + ch * 3.5 + 6.0),
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
 
     assert_eq!(
         shared.borrow().selections,
@@ -396,19 +394,17 @@ fn mouse_reporting_bytes_are_unchanged() {
     let (cw, ch) = cell_size();
     let at = |col: f32, row: f32| Point::new(cw * col + 6.0, ch * row + 6.0);
 
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: at(4.5, 2.5),
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
-    tree.dispatch_event(WidgetEvent::PointerMove {
-        position: at(5.5, 2.5),
-    });
-    tree.dispatch_event(WidgetEvent::PointerUp {
-        position: at(5.5, 2.5),
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        at(4.5, 2.5),
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
+    tree.dispatch_event(WidgetEvent::pointer_move(at(5.5, 2.5)));
+    tree.dispatch_event(WidgetEvent::pointer_up(
+        at(5.5, 2.5),
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
 
     assert_eq!(
         writes(&f.shared),
@@ -429,11 +425,11 @@ fn shift_still_overrides_mouse_reporting() {
     track_mouse(&f.shared);
     let (cw, ch) = cell_size();
 
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: Point::new(cw * 4.5 + 6.0, ch * 2.5 + 6.0),
-        button: PointerButton::Primary,
-        modifiers: Modifiers::SHIFT,
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        Point::new(cw * 4.5 + 6.0, ch * 2.5 + 6.0),
+        PointerButton::Primary,
+        Modifiers::SHIFT,
+    ));
 
     assert!(
         writes(&f.shared).is_empty(),
@@ -591,9 +587,7 @@ fn a_positionless_wheel_report_names_the_cell_the_cursor_is_over() {
     let mut tree = f.tree;
     track_mouse(&f.shared);
 
-    tree.dispatch_event(WidgetEvent::PointerMove {
-        position: cell_position(6.5, 4.5),
-    });
+    tree.dispatch_event(WidgetEvent::pointer_move(cell_position(6.5, 4.5)));
     // The move is itself reported under any-motion tracking; the wheel's bytes
     // are what this test is about.
     f.shared.borrow_mut().writes.clear();

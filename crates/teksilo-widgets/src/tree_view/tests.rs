@@ -807,16 +807,16 @@ fn make_standard_tree_view() -> (WidgetTree, WidgetId, teksilo_data::SelectionMo
 
 fn press_at(w: &mut WidgetTree, x: f32, y: f32) {
     use teksilo_core::event::{Modifiers, PointerButton, WidgetEvent};
-    w.dispatch_event(WidgetEvent::PointerDown {
-        position: Point::new(x, y),
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
-    w.dispatch_event(WidgetEvent::PointerUp {
-        position: Point::new(x, y),
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
+    w.dispatch_event(WidgetEvent::pointer_down(
+        Point::new(x, y),
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
+    w.dispatch_event(WidgetEvent::pointer_up(
+        Point::new(x, y),
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
 }
 
 #[test]
@@ -913,19 +913,17 @@ fn chevron_tap_with_jitter_toggles_in_a_reorderable_tree() {
     // Down, drift to exactly 5px (arms an ancestor drag but keeps the tap
     // alive), then release back within tolerance — a valid tap that the drag
     // must not steal.
-    wtree.dispatch_event(WidgetEvent::PointerDown {
-        position: Point::new(8.0, 10.0),
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
-    wtree.dispatch_event(WidgetEvent::PointerMove {
-        position: Point::new(8.0, 15.0), // exactly 5px from down
-    });
-    wtree.dispatch_event(WidgetEvent::PointerUp {
-        position: Point::new(8.0, 13.0), // 3px from down → within tap tolerance
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
+    wtree.dispatch_event(WidgetEvent::pointer_down(
+        Point::new(8.0, 10.0),
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
+    wtree.dispatch_event(WidgetEvent::pointer_move(Point::new(8.0, 15.0)));
+    wtree.dispatch_event(WidgetEvent::pointer_up(
+        Point::new(8.0, 13.0),
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
     wtree.layout(SizeProposal::exact(400.0, 300.0));
 
     assert_eq!(
@@ -941,20 +939,18 @@ fn chevron_tap_with_jitter_toggles_in_a_reorderable_tree() {
 /// Move to target, Up. Mirrors `list_view::tests::drag_item`.
 fn drag_item(tree: &mut WidgetTree, from: Point, to: Point) {
     use teksilo_core::event::{Modifiers, PointerButton, WidgetEvent};
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: from,
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
-    tree.dispatch_event(WidgetEvent::PointerMove {
-        position: Point::new(from.x + 10.0, from.y),
-    });
-    tree.dispatch_event(WidgetEvent::PointerMove { position: to });
-    tree.dispatch_event(WidgetEvent::PointerUp {
-        position: to,
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        from,
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
+    tree.dispatch_event(WidgetEvent::pointer_move(Point::new(from.x + 10.0, from.y)));
+    tree.dispatch_event(WidgetEvent::pointer_move(to));
+    tree.dispatch_event(WidgetEvent::pointer_up(
+        to,
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
 }
 
 /// Build a reorderable TreeView at the tree root with three top-level
@@ -1029,13 +1025,13 @@ fn the_hover_affordance_reads_the_same_drop_bands_as_the_drop() {
             wtree.touch_move(f, latch);
             wtree.touch_move(f, to);
         } else {
-            wtree.dispatch_event(WidgetEvent::PointerDown {
-                position: from,
-                button: PointerButton::Primary,
-                modifiers: Modifiers::NONE,
-            });
-            wtree.dispatch_event(WidgetEvent::PointerMove { position: latch });
-            wtree.dispatch_event(WidgetEvent::PointerMove { position: to });
+            wtree.dispatch_event(WidgetEvent::pointer_down(
+                from,
+                PointerButton::Primary,
+                Modifiers::NONE,
+            ));
+            wtree.dispatch_event(WidgetEvent::pointer_move(latch));
+            wtree.dispatch_event(WidgetEvent::pointer_move(to));
         }
         // Read before the release: the drop clears the affordance.
         feedback.get()
@@ -1377,17 +1373,13 @@ fn spring_loaded_folder_expands_after_dwell() {
     wtree.layout(SizeProposal::exact(400.0, 300.0));
 
     // Start a drag on C (y=70, row 2), then hover over B (row 1, y=42).
-    wtree.dispatch_event(WidgetEvent::PointerDown {
-        position: Point::new(50.0, 70.0),
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
-    wtree.dispatch_event(WidgetEvent::PointerMove {
-        position: Point::new(60.0, 70.0),
-    });
-    wtree.dispatch_event(WidgetEvent::PointerMove {
-        position: Point::new(60.0, 42.0),
-    });
+    wtree.dispatch_event(WidgetEvent::pointer_down(
+        Point::new(50.0, 70.0),
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
+    wtree.dispatch_event(WidgetEvent::pointer_move(Point::new(60.0, 70.0)));
+    wtree.dispatch_event(WidgetEvent::pointer_move(Point::new(60.0, 42.0)));
 
     // Confirm B is currently collapsed.
     assert!(tree.with_item(b, |_| ()).is_some());
@@ -1414,11 +1406,11 @@ fn spring_loaded_folder_expands_after_dwell() {
     let _ = a;
 
     // Clean up drag.
-    wtree.dispatch_event(WidgetEvent::PointerUp {
-        position: Point::new(60.0, 42.0),
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
+    wtree.dispatch_event(WidgetEvent::pointer_up(
+        Point::new(60.0, 42.0),
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
 }
 
 #[test]
@@ -1450,17 +1442,13 @@ fn spring_loaded_folder_expand_then_drop_moves_the_originally_dragged_node() {
     wtree.layout(SizeProposal::exact(400.0, 300.0));
 
     // Start a drag on C (y=70, row 2), then hover over B (row 1, y=42).
-    wtree.dispatch_event(WidgetEvent::PointerDown {
-        position: Point::new(50.0, 70.0),
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
-    wtree.dispatch_event(WidgetEvent::PointerMove {
-        position: Point::new(60.0, 70.0),
-    });
-    wtree.dispatch_event(WidgetEvent::PointerMove {
-        position: Point::new(60.0, 42.0),
-    });
+    wtree.dispatch_event(WidgetEvent::pointer_down(
+        Point::new(50.0, 70.0),
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
+    wtree.dispatch_event(WidgetEvent::pointer_move(Point::new(60.0, 70.0)));
+    wtree.dispatch_event(WidgetEvent::pointer_move(Point::new(60.0, 42.0)));
     assert_eq!(
         row_ids(&wtree, tv_id).len(),
         3,
@@ -1480,12 +1468,12 @@ fn spring_loaded_folder_expand_then_drop_moves_the_originally_dragged_node() {
     // Move to the top third of row 0 (A) — DropPosition::Before — and
     // release: drop the dragged node before A.
     let drop_at = Point::new(60.0, 2.0);
-    wtree.dispatch_event(WidgetEvent::PointerMove { position: drop_at });
-    wtree.dispatch_event(WidgetEvent::PointerUp {
-        position: drop_at,
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
+    wtree.dispatch_event(WidgetEvent::pointer_move(drop_at));
+    wtree.dispatch_event(WidgetEvent::pointer_up(
+        drop_at,
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
 
     assert_eq!(
         tree.with_item(tree.root(0), |&v| v),
@@ -3134,18 +3122,14 @@ fn drag_over(target_row: usize, frac: f32) -> (WidgetTree, WidgetId, f32) {
 
     // Drag the last row (B) so no target is inside the dragged subtree.
     let src_y = 3.0 * 28.0 + 14.0;
-    wtree.dispatch_event(WidgetEvent::PointerDown {
-        position: Point::new(50.0, src_y),
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
-    wtree.dispatch_event(WidgetEvent::PointerMove {
-        position: Point::new(62.0, src_y),
-    });
+    wtree.dispatch_event(WidgetEvent::pointer_down(
+        Point::new(50.0, src_y),
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
+    wtree.dispatch_event(WidgetEvent::pointer_move(Point::new(62.0, src_y)));
     let y = target_row as f32 * 28.0 + 28.0 * frac;
-    wtree.dispatch_event(WidgetEvent::PointerMove {
-        position: Point::new(62.0, y),
-    });
+    wtree.dispatch_event(WidgetEvent::pointer_move(Point::new(62.0, y)));
     (wtree, tv_id, y)
 }
 

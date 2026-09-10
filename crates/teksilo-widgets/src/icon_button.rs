@@ -1145,11 +1145,11 @@ mod tests {
         // Pointer-down inside the button → pressed flash.
         let b = tree.bounds(btn);
         let center = teksilo_canvas::Point::new(b.x + b.width / 2.0, b.y + b.height / 2.0);
-        tree.dispatch_event(WidgetEvent::PointerDown {
-            position: center,
-            button: PointerButton::Primary,
-            modifiers: Modifiers::NONE,
-        });
+        tree.dispatch_event(WidgetEvent::pointer_down(
+            center,
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
         tree.layout(teksilo_canvas::SizeProposal::exact(100.0, 100.0));
         let frame = tree.render();
         assert!(

@@ -317,7 +317,16 @@ impl WidgetTree {
             .get_mut(displaced)
             .and_then(|entry| entry.hovered.take());
         if let Some(old) = stale {
-            self.dispatch_to_widget(old, &WidgetEvent::PointerLeave, &mut *ops);
+            // Credited to the pointer that just *lost* the role — it is the one
+            // no longer pointing at `old` — not to the claimant.
+            let leave = WidgetEvent::PointerLeave {
+                pointer: self
+                    .pointers
+                    .get(displaced)
+                    .map(|entry| entry.info)
+                    .unwrap_or_else(|| crate::pointer::PointerInfo::mouse(self.input_now())),
+            };
+            self.dispatch_to_widget(old, &leave, &mut *ops);
             self.tooltip_pointer_leave(old, &mut *ops);
         }
         // The new owner starts with no hover of its own; the move that gave it
@@ -1217,6 +1226,7 @@ impl WidgetTree {
                 position,
                 button,
                 modifiers,
+                ..
             } => crate::gesture::RawPointerEvent::Down {
                 position: *position,
                 button: *button,
@@ -1224,7 +1234,7 @@ impl WidgetTree {
                 pointer: cx.pointer,
                 time: cx.now,
             },
-            WidgetEvent::PointerMove { position } => crate::gesture::RawPointerEvent::Move {
+            WidgetEvent::PointerMove { position, .. } => crate::gesture::RawPointerEvent::Move {
                 position: *position,
                 pointer: cx.pointer,
                 time: cx.now,
@@ -1233,6 +1243,7 @@ impl WidgetTree {
                 position,
                 button,
                 modifiers,
+                ..
             } => crate::gesture::RawPointerEvent::Up {
                 position: *position,
                 button: *button,
@@ -1675,11 +1686,11 @@ mod tests {
         tree.layout(SizeProposal::exact(100.0, 50.0));
 
         // A press inside the child captures the pointer to it.
-        tree.dispatch_event(WidgetEvent::PointerDown {
-            position: Point::new(50.0, 25.0),
-            button: PointerButton::Primary,
-            modifiers: Modifiers::NONE,
-        });
+        tree.dispatch_event(WidgetEvent::pointer_down(
+            Point::new(50.0, 25.0),
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
         assert_eq!(
             tree.pointer_captured_by(),
             Some(child),
@@ -2704,9 +2715,7 @@ mod pointer_table_tests {
         let _root = tree.add(SideBySide { a, b });
         tree.layout(SizeProposal::exact(100.0, 100.0));
 
-        tree.dispatch_event(WidgetEvent::PointerMove {
-            position: Point::new(25.0, 50.0),
-        });
+        tree.dispatch_event(WidgetEvent::pointer_move(Point::new(25.0, 50.0)));
         assert_eq!(tree.hovered(), Some(a));
 
         let churn = Rc::new(std::cell::Cell::new(0usize));
@@ -2769,9 +2778,7 @@ mod pointer_table_tests {
         let _root = tree.add(SideBySide { a, b });
         tree.layout(SizeProposal::exact(100.0, 100.0));
 
-        tree.dispatch_event(WidgetEvent::PointerMove {
-            position: Point::new(25.0, 50.0),
-        });
+        tree.dispatch_event(WidgetEvent::pointer_move(Point::new(25.0, 50.0)));
         assert_eq!(tree.hovered(), Some(a));
 
         let stylus = contact_id(5);
@@ -2906,16 +2913,16 @@ mod pointer_table_tests {
         tree.layout(SizeProposal::exact(100.0, 100.0));
 
         let at = tree.bounds(child).center();
-        tree.dispatch_event(WidgetEvent::PointerDown {
-            position: at,
-            button: PointerButton::Primary,
-            modifiers: Modifiers::NONE,
-        });
-        tree.dispatch_event(WidgetEvent::PointerUp {
-            position: at,
-            button: PointerButton::Primary,
-            modifiers: Modifiers::NONE,
-        });
+        tree.dispatch_event(WidgetEvent::pointer_down(
+            at,
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
+        tree.dispatch_event(WidgetEvent::pointer_up(
+            at,
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
 
         assert_eq!(
             *log.borrow(),
@@ -2943,7 +2950,7 @@ mod pointer_table_tests {
             tree.add(FillWidget::new().on_pointer_event(move |event, ctx| {
                 match event {
                     WidgetEvent::PointerDown { .. } => ctx.capture_pointer(),
-                    WidgetEvent::PointerMove { position } => seen.borrow_mut().push(*position),
+                    WidgetEvent::PointerMove { position, .. } => seen.borrow_mut().push(*position),
                     _ => {}
                 }
                 EventResponse::Ignored
@@ -2956,29 +2963,148 @@ mod pointer_table_tests {
         });
         tree.layout(SizeProposal::exact(100.0, 100.0));
 
-        tree.dispatch_event(WidgetEvent::PointerDown {
-            position: Point::new(30.0, 40.0),
-            button: PointerButton::Primary,
-            modifiers: Modifiers::NONE,
-        });
+        tree.dispatch_event(WidgetEvent::pointer_down(
+            Point::new(30.0, 40.0),
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
         assert_eq!(tree.pointer_captured_by(), Some(knob));
-        tree.dispatch_event(WidgetEvent::PointerMove {
-            position: Point::new(30.0, 40.0),
-        });
+        tree.dispatch_event(WidgetEvent::pointer_move(Point::new(30.0, 40.0)));
 
         // The container slides its child 20 dp to the trailing side.
         offset.set(20.0);
         tree.arena.mark_all_dirty();
         tree.layout(SizeProposal::exact(100.0, 100.0));
 
-        tree.dispatch_event(WidgetEvent::PointerMove {
-            position: Point::new(30.0, 40.0),
-        });
+        tree.dispatch_event(WidgetEvent::pointer_move(Point::new(30.0, 40.0)));
 
         assert_eq!(
             *seen.borrow(),
             vec![Point::new(30.0, 40.0), Point::new(10.0, 40.0)],
             "the same window position must localise against the captor's new origin"
+        );
+    }
+
+    /// The localisation contract is **deliberately asymmetric**, and this pins
+    /// the asymmetry so nobody "fixes" it into a defect.
+    ///
+    /// `localize_event` rewrites `PointerDown` / `PointerUp` / `PointerMove` /
+    /// `Gesture` into the receiver's own space, and has no arm for `Scroll` or
+    /// `PointerCancel`. That is why those two name their position
+    /// `window_position`: the router routes by the first (hit-testing is
+    /// necessarily window-space), and `common/scrollable.rs` feeds it to
+    /// `KineticScroller::pan`, whose tracker follows the *pointer* — and since
+    /// localisation resolves against the captor's **current** bounds on every
+    /// event (the test above), a localised value would fold the measured
+    /// widget's own motion into the velocity.
+    ///
+    /// Two independent things keep it that way, and the two assertions below
+    /// answer for one each — which is why both are here rather than one
+    /// standing in for the other:
+    ///
+    /// * **`Scroll`** reaches its handler through the localising route
+    ///   (`dispatch_to_widget` → `localize_event`), so the missing arm is the
+    ///   whole of its protection. Adding one reads like a tidy-up; the scroll
+    ///   assertion is what goes red.
+    /// * **`PointerCancel`** is delivered by the cancel funnel through
+    ///   `dispatch_to_widget_direct`, which does not localise at all, so an arm
+    ///   added to `localize_event` would be inert on that path. What guards it
+    ///   is that `pointer_cancel_event` records the pointer table's own
+    ///   (window-space) position verbatim; localising it at the funnel, which
+    ///   knows the recipient and could, is the single change the cancel
+    ///   assertion catches.
+    #[test]
+    fn scroll_and_cancel_stay_in_window_space_while_a_press_is_localised() {
+        #[derive(Default)]
+        struct Seen {
+            press: Vec<Point>,
+            scroll: Vec<Option<Point>>,
+            cancel: Vec<Option<Point>>,
+        }
+        let seen: Rc<RefCell<Seen>> = Rc::new(RefCell::new(Seen::default()));
+        let mut tree = WidgetTree::new();
+        let target = {
+            let a = seen.clone();
+            let b = seen.clone();
+            tree.add(
+                FillWidget::new()
+                    .on_pointer_event(move |event, ctx| {
+                        match event {
+                            WidgetEvent::PointerDown { position, .. } => {
+                                a.borrow_mut().press.push(*position);
+                                // Hold the pointer so the cancel funnel has
+                                // someone to address.
+                                ctx.capture_pointer();
+                            }
+                            WidgetEvent::PointerCancel {
+                                window_position, ..
+                            } => a.borrow_mut().cancel.push(*window_position),
+                            _ => {}
+                        }
+                        EventResponse::Ignored
+                    })
+                    .on_scroll(move |event, _ctx| {
+                        if let WidgetEvent::Scroll {
+                            window_position, ..
+                        } = event
+                        {
+                            b.borrow_mut().scroll.push(*window_position);
+                        }
+                        EventResponse::Ignored
+                    }),
+            )
+        };
+        // The slot puts its child 20 dp along, so window x and local x differ by
+        // exactly 20 and a localised value is distinguishable from a raw one.
+        let _root = tree.add(ShiftedSlot {
+            child: target,
+            offset: crate::signal::Signal::new(20.0f32),
+        });
+        tree.layout(SizeProposal::exact(100.0, 100.0));
+
+        let at = Point::new(30.0, 40.0);
+        tree.dispatch_event(WidgetEvent::pointer_down(
+            at,
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
+        tree.dispatch_event(WidgetEvent::Scroll {
+            delta: crate::event::ScrollDelta::Lines { x: 0.0, y: 1.0 },
+            modifiers: Modifiers::NONE,
+            window_position: Some(at),
+            phase: crate::pointer::ScrollPhase::Discrete,
+            pointer: crate::pointer::PointerInfo::mouse(crate::pointer::EventTime::ZERO),
+        });
+        let captor = tree.pointer_captured_by();
+        assert_eq!(
+            captor,
+            Some(target),
+            "the press must have taken the capture"
+        );
+        let pointer = tree.pointers.primary_id().expect("a live pointer");
+        tree.cancel_pointer(
+            pointer,
+            crate::pointer::CancelReason::Platform,
+            &mut crate::window::NoopWindowOps,
+        );
+
+        let seen = seen.borrow();
+        assert_eq!(
+            seen.press,
+            vec![Point::new(10.0, 40.0)],
+            "a press is localised: window x 30 minus the slot's 20 dp offset"
+        );
+        assert_eq!(
+            seen.scroll,
+            vec![Some(at)],
+            "`Scroll::window_position` must arrive as produced: localising it would feed \
+             the kinetic tracker a frame that moves with the widget it measures"
+        );
+        assert_eq!(
+            seen.cancel,
+            vec![Some(at)],
+            "`PointerCancel::window_position` must arrive as the revoking path recorded \
+             it, for the same reason"
         );
     }
 

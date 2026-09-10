@@ -1190,21 +1190,25 @@ impl TeksiloAppHandler {
                         current.tree.layout_with_ops(proposal, &mut ops);
                     }
                     current.tree.focus_ops(trigger_id, &mut ops);
-                    let pointer = current.tree.bounds(trigger_id).center();
+                    // A keyboard chord (F10, Alt+letter) opened this menu, so
+                    // there is no pointer to describe: the constructors' mouse
+                    // default is the honest answer, and it is what the trigger
+                    // saw before the press carried a pointer at all.
+                    let at = current.tree.bounds(trigger_id).center();
                     current.tree.dispatch_event_with_ops(
-                        WidgetEvent::PointerDown {
-                            position: pointer,
-                            button: teksilo_core::event::PointerButton::Primary,
-                            modifiers: teksilo_core::event::Modifiers::NONE,
-                        },
+                        WidgetEvent::pointer_down(
+                            at,
+                            teksilo_core::event::PointerButton::Primary,
+                            teksilo_core::event::Modifiers::NONE,
+                        ),
                         &mut ops,
                     );
                     current.tree.dispatch_event_with_ops(
-                        WidgetEvent::PointerUp {
-                            position: pointer,
-                            button: teksilo_core::event::PointerButton::Primary,
-                            modifiers: teksilo_core::event::Modifiers::NONE,
-                        },
+                        WidgetEvent::pointer_up(
+                            at,
+                            teksilo_core::event::PointerButton::Primary,
+                            teksilo_core::event::Modifiers::NONE,
+                        ),
                         &mut ops,
                     );
                 }

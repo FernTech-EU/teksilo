@@ -31,16 +31,16 @@ fn outer_handler_sees(key: Key, text: Option<&str>, field: TextInputField) -> bo
 
     let b = tree.bounds(outer);
     let centre = Point::new(b.x + b.width / 2.0, b.y + b.height / 2.0);
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: centre,
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
-    tree.dispatch_event(WidgetEvent::PointerUp {
-        position: centre,
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        centre,
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
+    tree.dispatch_event(WidgetEvent::pointer_up(
+        centre,
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
     let focused = tree.focused().expect("the click focused something");
     assert_ne!(
         focused, outer,

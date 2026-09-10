@@ -363,16 +363,16 @@ fn calendar_title_button_click_demotes_mode() {
     // the top — that's where the header label sits ("May 2026").
     let bounds = tree.bounds(id);
     let click_pos = Point::new(bounds.x + bounds.width / 2.0, bounds.y + 20.0);
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: click_pos,
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
-    tree.dispatch_event(WidgetEvent::PointerUp {
-        position: click_pos,
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        click_pos,
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
+    tree.dispatch_event(WidgetEvent::pointer_up(
+        click_pos,
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
 
     // After the click, mode should have demoted to Months.
     assert_eq!(
@@ -462,16 +462,16 @@ fn calendar_title_button_clickable_across_centered_band() {
         // Reset mode each iteration (tests interact independently).
         mode.set(CalendarMode::Days);
         let click_pos = Point::new(bounds.x + bounds.width * pct, header_y);
-        tree.dispatch_event(WidgetEvent::PointerDown {
-            position: click_pos,
-            button: PointerButton::Primary,
-            modifiers: Modifiers::NONE,
-        });
-        tree.dispatch_event(WidgetEvent::PointerUp {
-            position: click_pos,
-            button: PointerButton::Primary,
-            modifiers: Modifiers::NONE,
-        });
+        tree.dispatch_event(WidgetEvent::pointer_down(
+            click_pos,
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
+        tree.dispatch_event(WidgetEvent::pointer_up(
+            click_pos,
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
         assert_eq!(
             mode.get(),
             CalendarMode::Months,

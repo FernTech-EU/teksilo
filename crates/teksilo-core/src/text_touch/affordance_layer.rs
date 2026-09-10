@@ -156,7 +156,7 @@ impl Widget for SelectionHandle {
                         drag_delegate.handle_drag(kind, HandleDragPhase::Begin, *position, ctx);
                         EventResponse::Handled
                     }
-                    WidgetEvent::PointerMove { position } => {
+                    WidgetEvent::PointerMove { position, .. } => {
                         drag_delegate.handle_drag(kind, HandleDragPhase::Move, *position, ctx);
                         EventResponse::Handled
                     }
@@ -164,9 +164,23 @@ impl Widget for SelectionHandle {
                         drag_delegate.handle_drag(kind, HandleDragPhase::End, *position, ctx);
                         EventResponse::Handled
                     }
-                    WidgetEvent::PointerCancel { position, .. } => {
-                        let point = position.unwrap_or(Point::new(0.0, 0.0));
-                        drag_delegate.handle_drag(kind, HandleDragPhase::Cancel, point, ctx);
+                    WidgetEvent::PointerCancel { .. } => {
+                        // Deliberately **not** `window_position`. The three arms
+                        // above hand `handle_drag` points in this handle's own
+                        // space — the router localises them — while a cancel's
+                        // position is window-space by contract, so forwarding it
+                        // would credit the same sink a point from a different
+                        // frame. `HandleDragPhase::Cancel` discards the point
+                        // (`TouchSelection::drag_handle` routes it to
+                        // `cancel_drag`, which takes none), so the honest value
+                        // is the origin: nothing in the wrong frame flows, and
+                        // no reader is deprived of one it could have used.
+                        drag_delegate.handle_drag(
+                            kind,
+                            HandleDragPhase::Cancel,
+                            Point::new(0.0, 0.0),
+                            ctx,
+                        );
                         EventResponse::Handled
                     }
                     _ => EventResponse::Ignored,
