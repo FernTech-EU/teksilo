@@ -99,7 +99,21 @@ impl Widget for FocusTab {
         }
     }
 
-    fn accessibility(&self, _builder: &mut AccessNodeBuilder) {}
+    fn accessibility(&self, builder: &mut AccessNodeBuilder) {
+        // The focus chain, root last, indented as painted.
+        // The house convention for painted text (`TextWidget` does exactly
+        // this): one `Role::Label` whose name is what is on the screen.
+        // Without it the tab is a blank rectangle to a screen reader.
+        builder.set_role(teksilo_core::accesskit::Role::Label);
+        builder.set_name(
+            self.rows
+                .borrow()
+                .iter()
+                .map(|row| format!("{}{}", "  ".repeat(row.depth as usize), row.label))
+                .collect::<Vec<_>>()
+                .join("\n"),
+        );
+    }
 }
 
 fn collect_focus_chain(arena: &WidgetArena, focused: WidgetId, out: &mut Vec<FocusRow>) {

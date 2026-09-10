@@ -127,7 +127,13 @@ impl Widget for HighlightLayer {
         }
     }
 
-    fn accessibility(&self, _builder: &mut AccessNodeBuilder) {}
+    fn accessibility(&self, builder: &mut AccessNodeBuilder) {
+        // Pure decoration over the application: outlines, tinted bands and a
+        // cursor-following tooltip, all of it `event_pass_through`. It is
+        // hidden rather than left silent, so nothing walks into a layer that
+        // duplicates every widget it draws over.
+        builder.set_hidden();
+    }
 }
 
 /// Paint the AllBounds-mode hover tooltip near `info.bounds`.
@@ -523,7 +529,13 @@ impl Widget for BoundsTracker {
         proposal.resolve(0.0, 0.0).into()
     }
 
-    fn accessibility(&self, _builder: &mut AccessNodeBuilder) {}
+    fn accessibility(&self, builder: &mut AccessNodeBuilder) {
+        // Pure decoration over the application: outlines, tinted bands and a
+        // cursor-following tooltip, all of it `event_pass_through`. It is
+        // hidden rather than left silent, so nothing walks into a layer that
+        // duplicates every widget it draws over.
+        builder.set_hidden();
+    }
 }
 
 /// Recursively collect the **overhang strips** where a distributing

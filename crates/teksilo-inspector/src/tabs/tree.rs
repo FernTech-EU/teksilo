@@ -26,7 +26,7 @@ use teksilo_widgets::primitives::{Expand, Padding, VStack};
 use teksilo_widgets::{ScrollArea, TextInput};
 
 use crate::state::InspectorState;
-use crate::tabs::{ROW_HEIGHT, ROW_INDENT_PX, ROW_PADDING_X, last_segment};
+use crate::tabs::{ROW_INDENT_PX, ROW_PADDING_X, last_segment, row_height};
 
 #[derive(Clone, Debug)]
 struct TreeRow {
@@ -98,7 +98,13 @@ impl Widget for TreeTab {
         }
     }
 
-    fn accessibility(&self, _builder: &mut AccessNodeBuilder) {}
+    fn accessibility(&self, _builder: &mut AccessNodeBuilder) {
+        // Deliberately empty: this node only composes real child widgets, which
+        // emit their own accessibility nodes. Emitting no property leaves the
+        // default `GenericContainer`, which the walker prunes while promoting
+        // those children — a wrapper that named itself would add an element the
+        // tab bar has already named.
+    }
 }
 
 /// Snapshot-driven rows leaf. Walks the arena from roots in
@@ -163,6 +169,10 @@ impl Widget for TreeRows {
     }
 
     fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> LayoutResponse {
+        // The rows of this tab are pressed, so their height follows the input
+        // density — and the press-to-row division below has to use the same
+        // number the paint does. See `crate::tabs::row_height`.
+        let rh = row_height(&ctx.theme.input);
         // Snapshot tree once per layout pass (cheap — a flat traversal).
         let mut rows: Vec<TreeRow> = Vec::new();
         if let Some(arena) = ctx.arena() {
@@ -181,7 +191,7 @@ impl Widget for TreeRows {
         if !filter.trim().is_empty() {
             rows.retain(|r| r.label.to_lowercase().contains(filter.trim()));
         }
-        let height = rows.len() as f32 * ROW_HEIGHT;
+        let height = rows.len() as f32 * rh;
         *self.rows.borrow_mut() = rows;
 
         // Resolve any deferred click via local y. Track whether this
@@ -190,7 +200,7 @@ impl Widget for TreeRows {
         // the row they clicked and the jump would be jarring).
         let click_consumed = self.state.pending_tree_click_y.get().is_some();
         if let Some(y) = self.state.pending_tree_click_y.get() {
-            let idx = (y / ROW_HEIGHT).floor() as usize;
+            let idx = (y / rh).floor() as usize;
             if let Some(row) = self.rows.borrow().get(idx) {
                 self.state.selected_id.set(Some(row.id));
             }
@@ -208,7 +218,7 @@ impl Widget for TreeRows {
                 && let Some(id) = cur_sel
                 && let Some(idx) = self.rows.borrow().iter().position(|r| r.id == id)
             {
-                let target = ((idx as f32) * ROW_HEIGHT - 20.0).max(0.0);
+                let target = ((idx as f32) * rh - 20.0).max(0.0);
                 if (self.scroll_y.get() - target).abs() > 0.5 {
                     self.scroll_y.set(target);
                 }
@@ -219,6 +229,7 @@ impl Widget for TreeRows {
     }
 
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
+        let rh = row_height(&ctx.theme.input);
         let theme = ctx.theme;
         let style = &theme.typography.body;
         let color = TextRole::Primary.resolve(&theme.colors);
@@ -226,20 +237,15 @@ impl Widget for TreeRows {
         let selected_id = self.state.selected_id.get();
 
         for (i, row) in self.rows.borrow().iter().enumerate() {
-            let y = bounds.y + (i as f32) * ROW_HEIGHT;
-            let row_rect = Rect::new(bounds.x, y, bounds.width, ROW_HEIGHT);
+            let y = bounds.y + (i as f32) * rh;
+            let row_rect = Rect::new(bounds.x, y, bounds.width, rh);
             // Highlight the selected row.
             if Some(row.id) == selected_id {
                 let bg = Color::from_rgba(0.13, 0.55, 1.0, 0.15);
                 canvas.fill_rounded_rect(row_rect, teksilo_tokens::CornerRadius::ZERO, bg);
             }
             let x = bounds.x + ROW_PADDING_X + (row.depth as f32) * ROW_INDENT_PX;
-            let text_rect = Rect::new(
-                x,
-                y + 2.0,
-                (bounds.width - (x - bounds.x)).max(0.0),
-                ROW_HEIGHT,
-            );
+            let text_rect = Rect::new(x, y + 2.0, (bounds.width - (x - bounds.x)).max(0.0), rh);
             let text_color = if Some(row.id) == selected_id {
                 color
             } else {
@@ -249,7 +255,21 @@ impl Widget for TreeRows {
         }
     }
 
-    fn accessibility(&self, _builder: &mut AccessNodeBuilder) {}
+    fn accessibility(&self, builder: &mut AccessNodeBuilder) {
+        // The widget tree, one indented line per row — the same rows paint draws.
+        // The house convention for painted text (`TextWidget` does exactly
+        // this): one `Role::Label` whose name is what is on the screen.
+        // Without it the tab is a blank rectangle to a screen reader.
+        builder.set_role(teksilo_core::accesskit::Role::Label);
+        builder.set_name(
+            self.rows
+                .borrow()
+                .iter()
+                .map(|row| format!("{}{}", "  ".repeat(row.depth as usize), row.label))
+                .collect::<Vec<_>>()
+                .join("\n"),
+        );
+    }
 }
 
 fn push_subtree(arena: &WidgetArena, id: WidgetId, depth: u32, out: &mut Vec<TreeRow>) {

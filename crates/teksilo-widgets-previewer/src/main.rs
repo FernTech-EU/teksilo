@@ -9,9 +9,14 @@
 //! cargo run -p teksilo-widgets-previewer
 //! cargo run -p teksilo-widgets-previewer -- --widget=button --variant=disabled
 //! cargo run -p teksilo-widgets-previewer -- --file=crates/teksilo-widgets/src/button.rs
+//! cargo run -p teksilo-widgets-previewer -- --density=touch
 //! cargo run -p teksilo-widgets-previewer -- --list
 //! cargo run -p teksilo-widgets-previewer -- --export-docs
 //! ```
+//!
+//! `--density=compact|comfortable|touch` starts the previewer on that input
+//! density, which is the whole catalog rendered at that ladder; the toolbar
+//! switches it live.
 //!
 //! `--export-docs` is the headless batch that fills `docs/widgets/img/`
 //! with the pictures the generated mdBook catalog pages reference. It

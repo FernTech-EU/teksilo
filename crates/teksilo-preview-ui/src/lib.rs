@@ -20,6 +20,8 @@ mod navigator;
 mod png_export;
 mod shot;
 mod toolbar;
+#[cfg(test)]
+mod touch_tests;
 
 pub use cli::PreviewerOptions;
 pub use doc_export::{
@@ -47,18 +49,25 @@ pub fn run_previewer(opts: PreviewerOptions) {
     // would override on the next OS event and fight the user's
     // explicit choice.
     let initial_canvas_theme = crate::app_state::CanvasTheme::Native;
+    let initial_density = opts.density;
     TeksiloAppBuilder::new()
-        .theme(initial_canvas_theme.theme())
+        .theme(initial_canvas_theme.theme_at(initial_density))
         .theme_mode(ThemeMode::Manual)
         .initial_window(
             WindowConfig::new()
                 .title(title)
                 .size(initial_size.0, initial_size.1)
                 .root(move |tree, _state| {
+                    // The window's own tree is the one place an app can set a
+                    // density outright, so `--density` is applied here; the
+                    // toolbar's live switch has to go through a theme plus a
+                    // rebuild instead (see `crate::toolbar`).
+                    tree.set_input_density(initial_density);
                     let root = crate::app_state::PreviewerRoot::new(
                         initial_widget.clone(),
                         initial_variant.clone(),
-                    );
+                    )
+                    .with_density(initial_density);
                     tree.add(root)
                 }),
         )

@@ -120,7 +120,26 @@ impl Widget for OverlaysTab {
         }
     }
 
-    fn accessibility(&self, _builder: &mut AccessNodeBuilder) {}
+    fn accessibility(&self, builder: &mut AccessNodeBuilder) {
+        // The active overlays, one line each.
+        // The house convention for painted text (`TextWidget` does exactly
+        // this): one `Role::Label` whose name is what is on the screen.
+        // Without it the tab is a blank rectangle to a screen reader.
+        builder.set_role(teksilo_core::accesskit::Role::Label);
+        builder.set_name(
+            self.rows
+                .borrow()
+                .iter()
+                .map(|row| {
+                    format!(
+                        "{} content={} anchor={}",
+                        row.overlay_id, row.content_label, row.anchor_label
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join("\n"),
+        );
+    }
 }
 
 fn widget_label(arena: &WidgetArena, id: WidgetId) -> Option<String> {

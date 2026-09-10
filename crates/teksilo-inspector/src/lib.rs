@@ -10,6 +10,8 @@
 //! without `#[cfg]` lines.
 
 #[cfg(debug_assertions)]
+mod grip;
+#[cfg(debug_assertions)]
 mod highlight;
 #[cfg(all(debug_assertions, test))]
 mod integration_tests;
@@ -27,6 +29,8 @@ mod shell;
 mod state;
 #[cfg(debug_assertions)]
 mod tabs;
+#[cfg(all(debug_assertions, test))]
+mod touch_tests;
 
 #[cfg(debug_assertions)]
 pub use state::InspectorState;

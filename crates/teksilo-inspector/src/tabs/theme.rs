@@ -402,5 +402,11 @@ impl Widget for ThemeTab {
         }
     }
 
-    fn accessibility(&self, _builder: &mut AccessNodeBuilder) {}
+    fn accessibility(&self, _builder: &mut AccessNodeBuilder) {
+        // Deliberately empty: this node only composes real child widgets, which
+        // emit their own accessibility nodes. Emitting no property leaves the
+        // default `GenericContainer`, which the walker prunes while promoting
+        // those children — a wrapper that named itself would add an element the
+        // tab bar has already named.
+    }
 }

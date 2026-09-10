@@ -69,8 +69,15 @@ fn build_row(ctx: &mut BuildContext, decl: &KnobDecl, values: &KnobValues) -> Wi
         .style(TextStyleRole::Small)
         .color(TextRole::Secondary)
         .single_line();
-    let label_box = MaxSize::new(110.0, f32::INFINITY).child(label);
-    let editor_widget = MaxSize::new(f32::INFINITY, f32::INFINITY).child_id(editor);
+    // Width-only caps. `MaxSize::new(w, f32::INFINITY)` is not the same thing:
+    // an unbounded *proposal* — which is exactly what the enclosing `ScrollArea`
+    // hands its content — resolves a `max` into a proposal, so an infinite max
+    // height proposed an infinite height. The rows then measured `inf` tall and
+    // the `HStack`'s vertical centring resolved their y to `NaN`, at which point
+    // `Rect::contains` is false for every point and the row is unreachable by
+    // any pointer at all. Measured on the form's own slider row.
+    let label_box = MaxSize::width(110.0).child(label);
+    let editor_widget = MaxSize::width(f32::INFINITY).child_id(editor);
     let row = HStack::new()
         .spacing(8.0)
         .child(label_box)
@@ -145,7 +152,7 @@ fn build_i32(
         HStack::new()
             .spacing(8.0)
             .child(slider)
-            .child(MaxSize::new(40.0, f32::INFINITY).child(label)),
+            .child(MaxSize::width(40.0).child(label)),
     )
 }
 
@@ -168,7 +175,7 @@ fn build_f32(
         HStack::new()
             .spacing(8.0)
             .child(slider)
-            .child(MaxSize::new(56.0, f32::INFINITY).child(label)),
+            .child(MaxSize::width(56.0).child(label)),
     )
 }
 

@@ -35,6 +35,7 @@ use teksilo_i18n::lit;
 use teksilo_widgets::primitives::{Expand, FixedSize, HStack, Padding, VStack, ZStack};
 use teksilo_widgets::{Button, Panel, Segment, SegmentId, SegmentedControl, Slider, TabWidget};
 
+use crate::grip::InspectorGrip;
 use crate::highlight::{BoundsTracker, HighlightLayer};
 use crate::keyboard::PanelShortcutHost;
 use crate::picker::{PickResolver, PickerOverlay};
@@ -45,6 +46,7 @@ use crate::tabs::data_models::DataModelsTab;
 use crate::tabs::focus::FocusTab;
 use crate::tabs::locale::LocaleTab;
 use crate::tabs::overlays::OverlaysTab;
+use crate::tabs::pointers::{PointerWatchOverlay, PointersTab};
 use crate::tabs::properties::PropertiesTab;
 use crate::tabs::shortcuts::ShortcutsTab;
 use crate::tabs::theme::ThemeTab;
@@ -117,10 +119,36 @@ impl Widget for InspectorShell {
         ctx.set_dormant(pick_menu_id);
         state.pick_menu_id.set(Some(pick_menu_id));
 
+        // The pointer watch: the same mounted-only-while-armed shape as the
+        // picker, and for the same reason — while it is up it takes the
+        // application's input.
+        let watch_overlay_id = ctx.add(PointerWatchOverlay::new(state.clone()));
+        ctx.visible_when(watch_overlay_id, state.pointer_watch.clone());
+        if !state.pointer_watch.get() {
+            ctx.set_dormant(watch_overlay_id);
+        }
+
+        // The coarse-pointer door. Mounted only once a finger has been seen
+        // AND while the panel is closed, so a mouse-driven session never grows
+        // one and an open panel (which has its own Close button) does not
+        // either. `visible_when` parks it dormant otherwise, which takes it out
+        // of hit-testing entirely.
+        let grip_id = ctx.add(InspectorGrip::new(state.clone()));
+        let grip_visible = state.coarse_pointer.zip(&state.open).map(|t| {
+            let (coarse, open) = *t;
+            coarse && !open
+        });
+        ctx.visible_when(grip_id, grip_visible.clone());
+        if !grip_visible.get() {
+            ctx.set_dormant(grip_id);
+        }
+
         let z = ZStack::new()
             .add_child(self.user_root_id)
             .child(highlight)
-            .add_child(picker_overlay_id);
+            .add_child(picker_overlay_id)
+            .add_child(watch_overlay_id)
+            .add_child(grip_id);
 
         // Slot for the inspector panel + its top-edge resize handle.
         // The Switcher gates the whole block on `state.open`: closed
@@ -146,11 +174,18 @@ impl Widget for InspectorShell {
         // natural width when no `width` is set). `flex(0)` opts
         // out of the parent VStack's height-slack distribution so we
         // don't compete with the user-root's `Expand(flex=1)`.
+        // The strip's own box stays 6 dp of paint, and at Touch density the slot
+        // around it grows to the density's target size with the strip centred in
+        // it — `TouchTarget`, A10's third mechanism, which is the only one that
+        // can work here. The strip's `hit_outset` claims the space *inside* that
+        // slot; on its own it claims nothing at all, because an outset is only
+        // ever offered the points its own ancestors' bounds contain, and a
+        // wrapper that hugs a 6 dp strip contains none of them. Identity at
+        // Compact, so a mouse's panel is unchanged to the pixel.
         let panel_block = VStack::new()
             .child(
                 Expand::horizontal().flex(0.0).child(
-                    FixedSize::new()
-                        .height(Signal::new(crate::resize_handle::HANDLE_HEIGHT))
+                    teksilo_widgets::primitives::TouchTarget::new()
                         .child(ResizeHandle::new(state.clone())),
                 ),
             )
@@ -172,13 +207,17 @@ impl Widget for InspectorShell {
         // Derived height signal — depends on BOTH `open` and
         // `panel_height` so dragging the handle OR toggling the panel
         // re-runs layout. `Signal::zip` dirties on either source.
-        let height_signal = state.open.zip(&state.panel_height).map(|(open, h)| {
-            if *open {
-                *h + crate::resize_handle::HANDLE_HEIGHT
-            } else {
-                0.0
-            }
-        });
+        //
+        // The strip's *slot* is what has to be reserved, not its paint: at Touch
+        // the `TouchTarget` above grows it to the density's target size, and
+        // reserving 6 dp there would squeeze the panel by the difference. Read
+        // once per build, which is exactly when it can change — a density switch
+        // rebuilds every root.
+        let handle_slot = crate::resize_handle::slot_height(&ctx.theme().input);
+        let height_signal = state
+            .open
+            .zip(&state.panel_height)
+            .map(move |(open, h)| if *open { *h + handle_slot } else { 0.0 });
 
         let stack = VStack::new()
             .child(Expand::new().flex(1.0).child(z))
@@ -215,7 +254,33 @@ impl Widget for InspectorShell {
         }
     }
 
-    fn accessibility(&self, _builder: &mut AccessNodeBuilder) {}
+    fn preserves_children_on_rebuild(&self) -> bool {
+        // **Load-bearing.** The shell's one irreplaceable child is the
+        // application's own root, which it did not build and cannot rebuild: it
+        // is handed the id by the post-root hook and re-attaches it every
+        // build. Without the reconcile mode, a rebuild of the shell destroys
+        // that subtree and the window is left showing inspector chrome over
+        // nothing.
+        //
+        // Measured, not reasoned: `WidgetTree::set_input_density` marks every
+        // root for rebuild, and with `false` the wrapped root came back from a
+        // density switch with `widget_type_name() == None` — destroyed. The
+        // chrome this build allocates fresh (highlight, tracker, resolver,
+        // picker, watch, grip, panel) is *not* re-attached and so is reaped by
+        // the same reconcile, which is exactly the `TabWidget` / `SceneView`
+        // case: re-attach what is memoised, let the rest go.
+        true
+    }
+
+    fn accessibility(&self, _builder: &mut AccessNodeBuilder) {
+        // Deliberately empty, and it must stay that way. This node wraps the
+        // whole window; a role or a name here would insert an element between
+        // the window and the application's own tree, and `set_hidden` would
+        // prune the application out of the accessibility tree altogether. A
+        // node that emits no properties keeps its default `GenericContainer`,
+        // which the walker prunes while promoting its children in order — for a
+        // pure wrapper, being invisible to AT *is* the correct behaviour.
+    }
 }
 
 /// Zero-size placeholder used in Switchers when we want "nothing here".
@@ -226,7 +291,7 @@ fn empty_filler() -> impl Widget + 'static {
 }
 
 /// Build the inspector panel's content. Toolbar above a `TabWidget`
-/// with nine tabs, all inside a `Panel`.
+/// with [`NUM_TABS`](crate::state::NUM_TABS) tabs, all inside a `Panel`.
 fn build_panel(state: InspectorState) -> impl Widget + 'static {
     use teksilo_widgets::TabInfo;
     fn ti(label: &'static str) -> TabInfo {
@@ -267,6 +332,10 @@ fn build_panel(state: InspectorState) -> impl Widget + 'static {
         .static_tab(
             ti("Models"),
             fill_width(scrollable_tab(DataModelsTab::new(state.clone()))),
+        )
+        .static_tab(
+            ti("Pointers"),
+            fill_width(scrollable_tab(PointersTab::new(state.clone()))),
         );
 
     let toolbar = build_toolbar(state.clone());
@@ -356,6 +425,30 @@ fn build_toolbar(state: InspectorState) -> impl Widget + 'static {
             overflow_target.set(next);
         });
 
+    // Arming the watch is what makes live contacts visible, and it costs the
+    // application its input while armed — so the label says which state it is
+    // in rather than what it will do.
+    let watch_label = state.pointer_watch.map(|on| {
+        if *on {
+            "Watching ✓".to_string()
+        } else {
+            "Watch".to_string()
+        }
+    });
+    let watch_target = state.pointer_watch.clone();
+    let watch_rows = state.pointer_rows.clone();
+    let watch_button = Button::new(lit!("Watch"))
+        .label(watch_label)
+        .on_activate_fn(move |_ctx| {
+            let next = !watch_target.get();
+            watch_target.set(next);
+            if !next {
+                // Disarming clears the readout: the rows described contacts
+                // that are no longer being followed.
+                watch_rows.set(Vec::new());
+            }
+        });
+
     let open_state_for_close = state.open.clone();
     let close_button = Button::new(lit!("×")).on_activate_fn(move |_ctx| {
         open_state_for_close.set(false);
@@ -368,6 +461,7 @@ fn build_toolbar(state: InspectorState) -> impl Widget + 'static {
             .child(bounds_seg)
             .child(opacity_slider)
             .child(overflow_button)
+            .child(watch_button)
             .child(Expand::new().flex(1.0).child(empty_filler()))
             .child(close_button),
     )
@@ -465,5 +559,8 @@ fn build_pick_chain_menu(ctx: &mut BuildContext, state: InspectorState) -> Widge
         .border_width(1.0)
         .padding(4.0)
         .child(menu_vstack);
-    ctx.add(panel)
+    // `add_detached`, not `add`: overlay content parked dormant must record its
+    // ownership edge, or every rebuild of the shell strands another copy in the
+    // arena. Latent while nothing rebuilt the shell; a density switch does.
+    ctx.add_detached(panel)
 }

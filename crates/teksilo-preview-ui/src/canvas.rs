@@ -19,6 +19,20 @@
 //!   fresh widget instance.
 //! * Wraps the widget in a background rect and a footer strip showing
 //!   bounds + last frame time.
+//!
+//! ## Zoom
+//!
+//! The stage is wrapped in a [`ZoomStage`], which applies
+//! `state.zoom_percent` as a **visual** transform: the previewed widget is laid
+//! out at its real size and magnified for the eye, so the footer's readout
+//! keeps telling the truth at any zoom. Driven by a two-finger pinch and by
+//! Ctrl-wheel over the stage. A pinch that starts on a widget declaring
+//! `touch_action` without `PINCH_ZOOM` — a `Slider`, say — is refused by the
+//! framework before it reaches here, which is the widget's declaration doing
+//! its job, not a bug in the canvas.
+
+use std::cell::Cell;
+use std::rc::Rc;
 
 use teksilo_canvas::{Rect, SizeProposal};
 use teksilo_core::accessibility::AccessNodeBuilder;
@@ -131,9 +145,13 @@ impl Widget for PreviewCanvas {
         // widget appears in the middle regardless of its natural size.
         let preview_centered = ctx.add(Center::new().child_id(inner_id));
 
-        // Stage = ZStack(bg, centered preview).
+        // Stage = ZStack(bg, centered preview), inside the zoom stage.
         let stage = ZStack::new().add_child(bg_id).add_child(preview_centered);
-        let stage_id = ctx.add(stage);
+        let stage_inner_id = ctx.add(stage);
+        let stage_id = ctx.add(ZoomStage::new(
+            self.state.zoom_percent.clone(),
+            stage_inner_id,
+        ));
 
         // Wrap stage in an Expand that claims remaining VStack space
         // *and* ignores its child's intrinsic size when computing
@@ -248,12 +266,20 @@ impl PreviewCanvas {
             .color(TextRole::Secondary)
             .single_line()
             .text(size_readout);
+        // The zoom is visual, so the size beside it is the widget's real one at
+        // every zoom — the readout says which is which.
+        let zoom_widget = TextWidget::new(lit!(""))
+            .style(TextStyleRole::Tiny)
+            .color(TextRole::Secondary)
+            .single_line()
+            .text(self.state.zoom_percent.map(|z| format!("{:.0} %", z)));
         let _ = ctx;
         teksilo_widgets::primitives::Padding::symmetric(4.0, 12.0).child(
             HStack::new()
                 .spacing(12.0)
                 .child(label_widget)
                 .child(Spacer::new())
+                .child(zoom_widget)
                 .child(size_widget),
         )
     }
@@ -267,4 +293,182 @@ fn placeholder_message(text: &str) -> Box<dyn Widget> {
                 .color(TextRole::Secondary),
         ),
     )
+}
+
+/// Lowest and highest zoom the canvas allows, in percent.
+///
+/// Below 25 % a control is unreadable; above 400 % a full-window preview is
+/// mostly one glyph. Both ends are clamps, not springs: a pinch that runs past
+/// them simply stops.
+const ZOOM_MIN: f32 = 25.0;
+const ZOOM_MAX: f32 = 400.0;
+/// Zoom change per Ctrl-wheel notch, as a multiplier.
+const ZOOM_WHEEL_STEP: f32 = 1.1;
+
+/// A single-child stage that magnifies what it paints, without changing what it
+/// lays out.
+///
+/// Built on `BuildContext::set_transform` around the slot's centre, which is the
+/// `Scale` wrapper's mechanism (`animations/scale.rs`) with an arbitrary factor
+/// instead of an animated 0→1: the matrix is recomputed from the last bounds
+/// whenever the factor changes, and the node clips so a magnified preview cannot
+/// spill over the navigator or the knob form.
+///
+/// Layout is untouched on purpose. The previewer's whole job is to tell the
+/// truth about a widget's size, and a zoom that fed back into layout would make
+/// the size readout report the zoom instead.
+pub(crate) struct ZoomStage {
+    zoom: Signal<f32>,
+    child_id: WidgetId,
+    transform: Option<Signal<teksilo_canvas::Transform2D>>,
+    last_bounds: Rc<Cell<Rect>>,
+}
+
+impl ZoomStage {
+    pub(crate) fn new(zoom: Signal<f32>, child_id: WidgetId) -> Self {
+        Self {
+            zoom,
+            child_id,
+            transform: None,
+            last_bounds: Rc::new(Cell::new(Rect::new(0.0, 0.0, 0.0, 0.0))),
+        }
+    }
+
+    /// `T(pivot) · S(scale) · T(-pivot)` — a uniform scale about a point in the
+    /// same space the node's bounds are in.
+    fn centred_scale(pivot: teksilo_canvas::Point, scale: f32) -> teksilo_canvas::Transform2D {
+        teksilo_canvas::Transform2D {
+            m: [
+                scale,
+                0.0,
+                0.0,
+                scale,
+                pivot.x * (1.0 - scale),
+                pivot.y * (1.0 - scale),
+            ],
+        }
+    }
+
+    fn factor(zoom: f32) -> f32 {
+        (zoom.clamp(ZOOM_MIN, ZOOM_MAX)) / 100.0
+    }
+}
+
+impl std::fmt::Debug for ZoomStage {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ZoomStage")
+            .field("zoom", &self.zoom.get())
+            .finish()
+    }
+}
+
+impl Widget for ZoomStage {
+    fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+        let self_id = ctx.self_id();
+        let transform = ctx.signal(teksilo_canvas::Transform2D::identity());
+        ctx.set_transform(self_id, transform.clone());
+
+        // Recompute the matrix on every zoom change, from the bounds the last
+        // layout pass published. `set_transform` binds at RepaintOnly, so this
+        // is the only path that runs on a zoom change — a relayout would not.
+        let bounds_for_effect = self.last_bounds.clone();
+        let transform_for_effect = transform.clone();
+        ctx.effect(&self.zoom, move |z| {
+            let bounds = bounds_for_effect.get();
+            transform_for_effect.set(Self::centred_scale(bounds.center(), Self::factor(*z)));
+        });
+        self.transform = Some(transform);
+
+        let zoom_for_pinch = self.zoom.clone();
+        let zoom_for_wheel = self.zoom.clone();
+        let handlers = teksilo_core::widget_builder::HandlerSet::new()
+            .on_pinch(move |phase, _ctx| {
+                if let teksilo_core::gesture::PinchPhase::Changed { scale, .. } = phase {
+                    // Multiplied, which is what both pinch producers require of
+                    // a consumer: the touch recognizer reports a per-sample
+                    // delta and the trackpad arm a cumulative factor, and this
+                    // is the reading the scene's own handler takes.
+                    let next = zoom_for_pinch.get() * scale;
+                    zoom_for_pinch.set(next.clamp(ZOOM_MIN, ZOOM_MAX));
+                }
+            })
+            .on_scroll(move |event, _ctx| {
+                use teksilo_core::event::{EventResponse, ScrollDelta, WidgetEvent};
+                let WidgetEvent::Scroll {
+                    delta, modifiers, ..
+                } = event
+                else {
+                    return EventResponse::Ignored;
+                };
+                // Only with the accelerator held: an ordinary wheel over the
+                // stage belongs to whatever scrolls around it.
+                if !modifiers.command() {
+                    return EventResponse::Ignored;
+                }
+                let up = match delta {
+                    ScrollDelta::Lines { y, .. } => *y,
+                    ScrollDelta::Pixels { y, .. } => *y,
+                };
+                if up == 0.0 {
+                    return EventResponse::Ignored;
+                }
+                let step = if up > 0.0 {
+                    ZOOM_WHEEL_STEP
+                } else {
+                    1.0 / ZOOM_WHEEL_STEP
+                };
+                let next = zoom_for_wheel.get() * step;
+                zoom_for_wheel.set(next.clamp(ZOOM_MIN, ZOOM_MAX));
+                EventResponse::Handled
+            });
+        ctx.apply_self_handlers(handlers);
+        vec![self.child_id]
+    }
+
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        ctx: &LayoutContext,
+    ) -> teksilo_core::widget::LayoutResponse {
+        ctx.child_size(self.child_id, proposal)
+            .unwrap_or_else(|| proposal.resolve(0.0, 0.0))
+            .into()
+    }
+
+    fn place_children(
+        &self,
+        bounds: Rect,
+        _proposal: SizeProposal,
+        children: &mut [WidgetPlacement],
+        _ctx: &LayoutContext,
+    ) {
+        self.last_bounds.set(bounds);
+        // Publish the matrix here as well, so the first frame — and any resize
+        // — paints at the right pivot without waiting for a zoom change.
+        if let Some(transform) = &self.transform {
+            transform.set(Self::centred_scale(
+                bounds.center(),
+                Self::factor(self.zoom.get()),
+            ));
+        }
+        for child in children.iter_mut() {
+            child.origin = bounds.origin();
+            child.size = bounds.size();
+        }
+    }
+
+    fn children(&self) -> Vec<WidgetId> {
+        vec![self.child_id]
+    }
+
+    fn clips_children(&self) -> bool {
+        // A zoomed-in preview must stay inside the canvas pane.
+        true
+    }
+
+    fn accessibility(&self, _builder: &mut AccessNodeBuilder) {
+        // Layout- and AT-transparent: a magnifier around the stage, whose
+        // children emit everything there is to emit. Emitting no property keeps
+        // the default `GenericContainer`, which the walker prunes.
+    }
 }

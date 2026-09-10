@@ -126,6 +126,26 @@ pub trait WebViewHandle: 'static {
     fn set_visible(&self, visible: bool);
     /// Give the engine subview keyboard focus.
     fn set_focus(&self);
+    /// Ask the engine to stop taking pointer input over its own rectangle, so
+    /// the OS delivers those events to the host window and Teksilo routes them
+    /// — the engine half of [`WebViewInput::Transparent`].
+    ///
+    /// Returns whether the engine honoured it. **Not every engine can**: the
+    /// call needs control over the native surface's hit region, which the
+    /// embedding API may simply not expose, and a backend that cannot do it
+    /// must answer `false` rather than pretend. The widget reports a declined
+    /// pass-through as a [`WebViewEvent::ConsoleMessage`] so the mode never
+    /// fails silently.
+    ///
+    /// **Not every engine can do this**, and one that cannot must say so
+    /// through [`WebViewEvent::ConsoleMessage`] — the channel this crate
+    /// already reserves for reporting an unsupported operation — rather than
+    /// accept the call and change nothing. There is deliberately no return
+    /// value and no default implementation: an answer invented here would be
+    /// an answer for an engine nobody asked.
+    ///
+    /// [`WebViewInput::Transparent`]: crate::WebViewInput::Transparent
+    fn set_input_passthrough(&self, passthrough: bool);
     /// Open the engine's developer tools (no-op on backends that don't
     /// expose them — Servo's embedding API has no clean devtools hook today).
     fn open_devtools(&self) {}
@@ -159,6 +179,17 @@ pub enum WebViewEvent {
     /// A console message (forwarded in debug builds / by best-effort
     /// backends to report unsupported operations).
     ConsoleMessage { level: ConsoleLevel, text: String },
+    /// The engine's own keyboard focus changed: `true` when the page took the
+    /// keyboard, `false` when it gave it up.
+    ///
+    /// A web view has two disjoint focus rings — the toolkit's and the
+    /// engine's platform tree — and the engine's is the one Teksilo cannot
+    /// see. Without this event a tap inside the page moves the OS focus while
+    /// Teksilo goes on believing a text field elsewhere still owns it, caret
+    /// blinking. The `WebView` widget follows the event with
+    /// `EventContext::request_focus` on its own frame, so the toolkit's focus
+    /// agrees with the OS.
+    EngineFocusChanged(bool),
 }
 
 /// Boxed inside `AppEvent::External` when a backend produces an event.
@@ -459,6 +490,10 @@ pub enum WebViewOp {
     SetFocus {
         web_view_id: WebViewId,
     },
+    SetInputPassthrough {
+        web_view_id: WebViewId,
+        passthrough: bool,
+    },
     OpenDevtools {
         web_view_id: WebViewId,
     },
@@ -528,6 +563,7 @@ fn op_web_view_id(op: &WebViewOp) -> WebViewId {
         | WebViewOp::Stop { web_view_id }
         | WebViewOp::SetVisible { web_view_id, .. }
         | WebViewOp::SetFocus { web_view_id }
+        | WebViewOp::SetInputPassthrough { web_view_id, .. }
         | WebViewOp::OpenDevtools { web_view_id }
         | WebViewOp::CloseDevtools { web_view_id }
         | WebViewOp::Dropped { web_view_id } => *web_view_id,
@@ -622,6 +658,12 @@ impl WebViewHandle for MemoryWebViewHandle {
             web_view_id: self.web_view_id,
         });
     }
+    fn set_input_passthrough(&self, passthrough: bool) {
+        self.records.push(WebViewOp::SetInputPassthrough {
+            web_view_id: self.web_view_id,
+            passthrough,
+        });
+    }
     fn open_devtools(&self) {
         self.records.push(WebViewOp::OpenDevtools {
             web_view_id: self.web_view_id,
@@ -702,6 +744,9 @@ impl WebViewHandle for NoopWebViewHandle {
     fn stop(&self) {}
     fn set_visible(&self, _visible: bool) {}
     fn set_focus(&self) {}
+    fn set_input_passthrough(&self, _passthrough: bool) {
+        // No surface, so nothing to make transparent.
+    }
 }
 
 impl WebViewBackend for NoopWebViewBackend {

@@ -26,6 +26,21 @@
 //!   XWayland (unset `WAYLAND_DISPLAY` + `GDK_BACKEND=x11` before winit init),
 //!   or use the Servo backend.
 //!
+//! **Engine focus.** wry exposes no focus-changed callback, so the page's own
+//! focus is reported by the page: an initialization script forwards `window`'s
+//! `focus` / `blur` events over the same IPC channel, prefixed with
+//! [`FOCUS_IPC_PREFIX`], and the IPC handler turns those into
+//! [`WebViewEvent::EngineFocusChanged`] instead of a user message. A page that
+//! posts that exact prefix itself therefore loses the message — the prefix is
+//! chosen to make that a deliberate act.
+//!
+//! **Input pass-through** ([`crate::WebViewInput::Transparent`]) is **not
+//! available** here: `wry::WebView`'s whole mutating surface is `set_cookie`,
+//! `set_background_color`, `set_bounds` and `set_visible`, none of which touches
+//! the native surface's hit region. The call is answered with a
+//! [`WebViewEvent::ConsoleMessage`], which is this crate's channel for an
+//! operation a backend cannot perform.
+//!
 //! **Known gaps (tracked):** custom-protocol *handlers* are not yet plumbed
 //! through `WebViewAttributes` (only scheme names are carried), so `app://`
 //! style local serving is not wired here; `go_back`/`go_forward` are driven
@@ -47,6 +62,30 @@ use crate::backend::{
     ConsoleLevel, NoopWebViewHandle, WebSource, WebViewAttributes, WebViewBackend, WebViewEvent,
     WebViewHandle, WebViewId, js_string, post_event,
 };
+
+/// The IPC message prefix reserved for the page-focus bridge.
+///
+/// Deliberately unlovely: it has to be a string no application would post by
+/// accident, because a message that starts with it is consumed as a focus
+/// report rather than delivered to `on_message`.
+pub const FOCUS_IPC_PREFIX: &str = "__teksilo_webview_focus:";
+
+/// Initialization script installing the page-focus bridge.
+///
+/// `window`'s `focus` / `blur` fire when the web content takes and gives up the
+/// keyboard, which is the closest thing to an engine focus event wry offers —
+/// there is no callback for it on the Rust side.
+fn focus_bridge_script() -> String {
+    format!(
+        "(function(){{\
+           var p={prefix};\
+           var send=function(v){{try{{window.ipc.postMessage(p+v)}}catch(e){{}}}};\
+           window.addEventListener('focus',function(){{send('1')}});\
+           window.addEventListener('blur',function(){{send('0')}});\
+         }})()",
+        prefix = js_string(FOCUS_IPC_PREFIX)
+    )
+}
 
 /// Production engine backend. Construct and hand to
 /// `install_web_view(WryBackend::new())`.
@@ -142,15 +181,16 @@ impl WebViewBackend for WryBackend {
             .with_devtools(attrs.devtools);
 
         // --- Browser event handlers → WebViewEvent (each gets its own clone) ---
+        builder = builder.with_initialization_script(focus_bridge_script());
         {
             let poster = poster.clone();
             builder = builder.with_ipc_handler(move |req| {
-                post_event(
-                    &poster,
-                    window_id,
-                    web_view_id,
-                    WebViewEvent::Message(req.body().clone()),
-                );
+                let body = req.body();
+                let event = match body.strip_prefix(FOCUS_IPC_PREFIX) {
+                    Some(flag) => WebViewEvent::EngineFocusChanged(flag == "1"),
+                    None => WebViewEvent::Message(body.clone()),
+                };
+                post_event(&poster, window_id, web_view_id, event);
             });
         }
         {
@@ -236,7 +276,12 @@ impl WebViewBackend for WryBackend {
         }
 
         match builder.build_as_child(&parent) {
-            Ok(webview) => Box::new(WryHandle { webview }),
+            Ok(webview) => Box::new(WryHandle {
+                webview,
+                poster: poster.clone(),
+                window_id,
+                web_view_id,
+            }),
             Err(e) => fail(
                 &poster,
                 window_id,
@@ -253,6 +298,12 @@ impl WebViewBackend for WryBackend {
 /// subview down (RAII).
 struct WryHandle {
     webview: WebView,
+    /// Kept so the handle can report an operation this engine cannot perform
+    /// (see [`WebViewHandle::set_input_passthrough`]) through the same
+    /// `ConsoleMessage` channel the open path uses.
+    poster: Option<Arc<dyn AppEventPoster>>,
+    window_id: TeksiloWindowId,
+    web_view_id: WebViewId,
 }
 
 impl WebViewHandle for WryHandle {
@@ -325,6 +376,25 @@ impl WebViewHandle for WryHandle {
     }
     fn set_focus(&self) {
         let _ = self.webview.focus();
+    }
+    fn set_input_passthrough(&self, passthrough: bool) {
+        if !passthrough {
+            // Native input is this engine's only mode, so being asked for it is
+            // not worth a diagnostic.
+            return;
+        }
+        post_event(
+            &self.poster,
+            self.window_id,
+            self.web_view_id,
+            WebViewEvent::ConsoleMessage {
+                level: ConsoleLevel::Warn,
+                text: "WryBackend: input pass-through is unsupported — this engine \
+                       exposes no control over its surface's hit region, so the page \
+                       keeps taking presses over its own rectangle"
+                    .to_string(),
+            },
+        );
     }
     fn open_devtools(&self) {
         self.webview.open_devtools();

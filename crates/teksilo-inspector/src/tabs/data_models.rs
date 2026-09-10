@@ -20,9 +20,13 @@ use teksilo_core::widget_id::WidgetId;
 use teksilo_tokens::{Color, CornerRadius, TextRole};
 
 use crate::state::InspectorState;
-use crate::tabs::{ROW_HEIGHT, ROW_PADDING_X};
+use crate::tabs::{ROW_PADDING_X, row_height};
 
-const HEADER_HEIGHT: f32 = ROW_HEIGHT;
+/// The header is exactly one row tall — so it, the rows and the click
+/// coordinate that indexes them all move together with the density.
+fn header_height(tokens: &teksilo_tokens::InputTokens) -> f32 {
+    row_height(tokens)
+}
 const NAME_COL_WIDTH: f32 = 160.0;
 const KIND_COL_WIDTH: f32 = 100.0;
 const LEN_COL_WIDTH: f32 = 60.0;
@@ -84,7 +88,13 @@ impl Widget for DataModelsTab {
         Vec::new()
     }
 
-    fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> LayoutResponse {
+    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> LayoutResponse {
+        // Rows are pressed here, so their height follows the density; the
+        // header offset and the dump lines ride the same number, because the
+        // paint is one cumulative y walk and a mixed walk is exactly how a
+        // press lands on the wrong row.
+        let rh = row_height(&ctx.theme.input);
+        let header = header_height(&ctx.theme.input);
         let snapshot = teksilo_data::debug_registry::snapshot();
         let mut rows: Vec<ModelRow> = Vec::with_capacity(snapshot.len());
         for (name, model) in &snapshot {
@@ -96,12 +106,12 @@ impl Widget for DataModelsTab {
         }
 
         // Resolve any deferred row click. Click coordinate space:
-        // y=0..HEADER_HEIGHT is the header (no selection); below is
+        // y=0..header is the header (no selection); below is
         // rows[0..rows.len()].
         if let Some(y) = self.state.pending_models_click_y.get() {
             self.state.pending_models_click_y.set(None);
-            if y >= HEADER_HEIGHT {
-                let idx = ((y - HEADER_HEIGHT) / ROW_HEIGHT).floor() as usize;
+            if y >= header {
+                let idx = ((y - header) / rh).floor() as usize;
                 if idx < snapshot.len() {
                     let current = self.state.selected_model_index.get();
                     if current == Some(idx) {
@@ -132,10 +142,7 @@ impl Widget for DataModelsTab {
 
         let row_count = rows.len().max(1);
         let dump_lines = dump.lines().take(DUMP_PREVIEW_LINES).count().max(1);
-        let height = HEADER_HEIGHT
-            + (row_count as f32) * ROW_HEIGHT
-            + ROW_HEIGHT
-            + (dump_lines as f32) * ROW_HEIGHT;
+        let height = header + (row_count as f32) * rh + rh + (dump_lines as f32) * rh;
 
         *self.rows.borrow_mut() = rows;
         *self.dump.borrow_mut() = dump;
@@ -143,6 +150,8 @@ impl Widget for DataModelsTab {
     }
 
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
+        let rh = row_height(&ctx.theme.input);
+        let header = header_height(&ctx.theme.input);
         let theme = ctx.theme;
         let style = &theme.typography.body;
         let mono = &theme.typography.mono;
@@ -153,7 +162,7 @@ impl Widget for DataModelsTab {
         let mut y = bounds.y + 2.0;
         canvas.draw_text(
             "name",
-            Rect::new(bounds.x + ROW_PADDING_X, y, NAME_COL_WIDTH, ROW_HEIGHT),
+            Rect::new(bounds.x + ROW_PADDING_X, y, NAME_COL_WIDTH, rh),
             style,
             secondary,
         );
@@ -163,7 +172,7 @@ impl Widget for DataModelsTab {
                 bounds.x + ROW_PADDING_X + NAME_COL_WIDTH,
                 y,
                 KIND_COL_WIDTH,
-                ROW_HEIGHT,
+                rh,
             ),
             style,
             secondary,
@@ -174,18 +183,18 @@ impl Widget for DataModelsTab {
                 bounds.x + ROW_PADDING_X + NAME_COL_WIDTH + KIND_COL_WIDTH,
                 y,
                 LEN_COL_WIDTH,
-                ROW_HEIGHT,
+                rh,
             ),
             style,
             secondary,
         );
-        y += HEADER_HEIGHT;
+        y += header;
 
         let rows = self.rows.borrow();
         if rows.is_empty() {
             canvas.draw_text(
                 "(no models registered — call `.debug_named(\"name\")` on a ListModel)",
-                Rect::new(bounds.x + ROW_PADDING_X, y + 2.0, bounds.width, ROW_HEIGHT),
+                Rect::new(bounds.x + ROW_PADDING_X, y + 2.0, bounds.width, rh),
                 style,
                 secondary,
             );
@@ -200,7 +209,7 @@ impl Widget for DataModelsTab {
         let fallback_bg = Color::from_rgba(0.13, 0.55, 1.0, 0.08);
 
         for (i, row) in rows.iter().enumerate() {
-            let row_rect = Rect::new(bounds.x, y, bounds.width, ROW_HEIGHT);
+            let row_rect = Rect::new(bounds.x, y, bounds.width, rh);
             if Some(i) == selected_idx {
                 canvas.fill_rounded_rect(row_rect, CornerRadius::ZERO, selection_bg);
             } else if Some(i) == effective_idx {
@@ -208,12 +217,7 @@ impl Widget for DataModelsTab {
             }
             canvas.draw_text(
                 &row.name,
-                Rect::new(
-                    bounds.x + ROW_PADDING_X,
-                    y + 2.0,
-                    NAME_COL_WIDTH,
-                    ROW_HEIGHT,
-                ),
+                Rect::new(bounds.x + ROW_PADDING_X, y + 2.0, NAME_COL_WIDTH, rh),
                 style,
                 primary,
             );
@@ -223,7 +227,7 @@ impl Widget for DataModelsTab {
                     bounds.x + ROW_PADDING_X + NAME_COL_WIDTH,
                     y + 2.0,
                     KIND_COL_WIDTH,
-                    ROW_HEIGHT,
+                    rh,
                 ),
                 style,
                 secondary,
@@ -234,17 +238,17 @@ impl Widget for DataModelsTab {
                     bounds.x + ROW_PADDING_X + NAME_COL_WIDTH + KIND_COL_WIDTH,
                     y + 2.0,
                     LEN_COL_WIDTH,
-                    ROW_HEIGHT,
+                    rh,
                 ),
                 style,
                 primary,
             );
-            y += ROW_HEIGHT;
+            y += rh;
         }
 
         // Separator + "dump" label. Distinguish explicit vs fallback
         // selection in the label so the dim row tint isn't a mystery.
-        y += ROW_HEIGHT * 0.25;
+        y += rh * 0.25;
         let dump_label = match selected_idx {
             Some(i) => match rows.get(i) {
                 Some(row) => format!("dump ({}):", row.name),
@@ -254,24 +258,40 @@ impl Widget for DataModelsTab {
         };
         canvas.draw_text(
             &dump_label,
-            Rect::new(bounds.x + ROW_PADDING_X, y, bounds.width, ROW_HEIGHT),
+            Rect::new(bounds.x + ROW_PADDING_X, y, bounds.width, rh),
             style,
             secondary,
         );
-        y += ROW_HEIGHT;
+        y += rh;
 
         // Dump preview — monospace, line-wrapped at lines, cap.
         let dump = self.dump.borrow();
         for line in dump.lines().take(DUMP_PREVIEW_LINES) {
             canvas.draw_text(
                 line,
-                Rect::new(bounds.x + ROW_PADDING_X, y, bounds.width, ROW_HEIGHT),
+                Rect::new(bounds.x + ROW_PADDING_X, y, bounds.width, rh),
                 mono,
                 primary,
             );
-            y += ROW_HEIGHT;
+            y += rh;
         }
     }
 
-    fn accessibility(&self, _builder: &mut AccessNodeBuilder) {}
+    fn accessibility(&self, builder: &mut AccessNodeBuilder) {
+        // The registered models, one `name kind len` line each. The dump below
+        // them is not repeated here: it is the selected model's own Debug output,
+        // which a screen reader reaches through the Copy button in Properties.
+        // The house convention for painted text (`TextWidget` does exactly
+        // this): one `Role::Label` whose name is what is on the screen.
+        // Without it the tab is a blank rectangle to a screen reader.
+        builder.set_role(teksilo_core::accesskit::Role::Label);
+        builder.set_name(
+            self.rows
+                .borrow()
+                .iter()
+                .map(|row| format!("{}  {}  {}", row.name, row.kind, row.len))
+                .collect::<Vec<_>>()
+                .join("\n"),
+        );
+    }
 }

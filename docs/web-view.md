@@ -184,6 +184,7 @@ WebView::new()
     .user_agent("MyApp/1.0")
     .transparent(true)
     .devtools(cfg!(debug_assertions))
+    .input_mode(WebViewInput::Native)    // who owns the pointer over the page (see below)
     .url_signal(url_signal)              // Signal<String> — TWO-WAY (see below)
     .title_signal(title_signal)         // Signal<String> — updated on title change
     .loading_signal(loading_signal)     // Signal<bool>   — true between page-load start/finish
@@ -200,6 +201,58 @@ Imperative controls (call via `ctx.with_widget_mut::<WebView>(id, RepaintOnly, |
 `load_url`, `eval`, `post_message` (Rust → JS), `reload`, `go_back`,
 `go_forward`, `stop`, `open_devtools` / `close_devtools` (runtime toggle; no-op
 where unsupported). The stable routing identity is `WebView::id() -> WebViewId`.
+
+## Who owns the pointer over the page
+
+A native subview is above the wgpu surface for *input* as well as for pixels: the
+OS routes a press over its rectangle to the engine, and Teksilo is not told.
+`input_mode(WebViewInput)` is the declaration of which side owns that rectangle.
+
+| | `Native` (default) | `Transparent` |
+|---|---|---|
+| `touch_action` over the region | `NONE` | unset (`AUTO`) |
+| miss-only slop / grip outsets | off (`no_hit_slop`) | as any other widget |
+| a pointer event that does reach the node | answered, and the pointer's live sequence revoked | declined, so it bubbles |
+| the engine is asked to pass input through | no | yes |
+
+**`Native`** is what a browser-shaped view wants: links, form fields, the page's
+own scrolling and its own long-press menus are the page's business, so Teksilo
+claims nothing over the region. `touch_action(NONE)` stops a pan, a pinch or a
+tree-owned hold forming anywhere on the hit path — an enclosing `ScrollArea` must
+not also move under the finger while the page scrolls itself — and `no_hit_slop`
+makes the painted rectangle the exact contract in both directions: no neighbouring
+control may claim a press that landed on the page, and the page claims none that
+missed it.
+
+The third thing `Native` does is tear down a pointer it is handed. A press
+Teksilo *does* see over the page is a press it will stop seeing samples for the
+moment the engine takes it, and leaving that interaction alive strands whatever
+it belonged to — an arbitration waiting for movement that never arrives, a press
+record waiting for a release the OS will deliver to the page instead. So the
+widget revokes it through the one cancel funnel
+(`EventContext::cancel_pointer_sequence`). The reason it uses is `Deactivated`,
+the taxonomy's explicit catch-all: the pointer was not revoked by the platform,
+by a peer or by a modal — an embedded native surface simply owns it from here on,
+and no variant says that. What the widget cannot see is a pointer already
+*captured* elsewhere that wanders over the page: a captured pointer's moves route
+to its captor, so the crossing is invisible to the web view.
+
+**`Transparent`** is for a view that renders rather than interacts — a document
+preview, a rendered chart, a kiosk banner — and it is the mode to reach for when
+app widgets, menus or a dialog have to be operable *over* the page. Teksilo then
+owns the rectangle: the node widens and bubbles like any other widget, no
+sequence is revoked, and the engine is asked to stop taking input
+(`WebViewHandle::set_input_passthrough`).
+
+**The engine half is a request, not a guarantee**, and which engine honours it is
+a property of that engine's embedding API, not of Teksilo:
+
+| Backend | `set_input_passthrough(true)` |
+|---|---|
+| `wry` | **Unsupported.** `wry::WebView`'s whole mutating surface is `set_cookie`, `set_background_color`, `set_bounds` and `set_visible`; none of them touches the native surface's hit region. The call is answered with a `WebViewEvent::ConsoleMessage`, this crate's channel for an operation a backend cannot perform. |
+| `servo` | Honoured trivially, and inverted: Servo takes input only through `notify_input_event`, which that backend never calls, so its surface already passes everything through. |
+| `MemoryWebViewBackend` | Recorded as `WebViewOp::SetInputPassthrough`, which is what lets a headless test assert the widget asked. |
+| `NoopWebViewBackend` | No surface, nothing to do. |
 
 **Two-way `url_signal`.** The engine writes the resolved URL into the bound signal
 on navigation-finish, and an external `url_signal.set("…")` drives programmatic
@@ -282,6 +335,31 @@ hidden (no flash). This is the only case where a widget must mirror framework
 visibility onto an OS resource; any future native-embed widget (video surface,
 native map) reuses `activation_signal` the same way.
 
+### Three reasons, one `set_visible`
+
+Dormancy is one of three independent reasons the subview may have to stand down,
+and they are resolved into a single call so the engine is never told a visibility
+that accounts for only one of them (a page parked in an unselected tab *and*
+scrolled out of view must not reappear when only the scroll changes):
+
+1. **Dormant** — the activation signal above.
+2. **Clipped away** — nothing clips a subview for us. It is parented to the
+   top-level window, so a `WebView` inside a scrolled `ScrollArea` would keep the
+   page painted over whatever sits outside the viewport, at full size, for as long
+   as it stayed mounted. `place_children` therefore walks the widget's
+   `clips_children` ancestors and mirrors the **intersection**: the visible strip
+   while some of the page is in view, and `set_visible(false)` once none of it is.
+   Mirroring the intersection is the only geometric channel there is — `set_bounds`
+   positions and sizes, and no engine here exposes a clip region — so a partly
+   clipped page is laid out to the visible strip rather than cropped to it.
+3. **Covered by an overlay** — see the next section.
+
+The overlay check is the one thing that cannot be decided in `place_children`:
+overlays are positioned *after* the main tree is laid out, so a layout pass reads
+the bounds an overlay had before it opened, and nothing marks the tree dirty again
+once they are known. The paint walk runs after both and is handed the frame's own
+rects, so the check lives in `Widget::after_paint`.
+
 ## JS ↔ Rust messaging
 
 - **JS → Rust:** the page calls `window.ipc.postMessage("…")`; it surfaces as
@@ -293,11 +371,28 @@ native map) reuses `activation_signal` the same way.
 
 ## Z-order with overlays
 
-Native subviews sit **above** the wgpu surface, so Teksilo overlays (tooltips,
-popovers, dropdowns) drawn by the `OverlayManager` render *under* a `WebView`
-where they overlap. For overlays that must cover a `WebView`, open them as a
-popup OS window via `ctx.open_window(...)` (the approach Electron uses for
-context menus over webviews).
+Native subviews sit **above** the wgpu surface, so a Teksilo overlay — a tooltip,
+a popover, a dropdown, a modal dialog — would render *under* a `WebView` where the
+two overlap, and the OS would route a press over that region to the engine rather
+than to the overlay.
+
+So the subview **stands down while an interactive overlay covers the page**: the
+widget intersects its own bounds with `OverlayManager::interactive_rects()` in
+`after_paint` and issues `set_visible(false)` for as long as one of them overlaps,
+restoring the page when the overlay goes. That is the only way a menu or a dialog
+over a web view is both visible and operable; nothing in the toolkit can reach
+over a native child.
+
+Two consequences worth stating. The page is *hidden*, not dimmed — an overlay
+covering a corner of a large web view blanks all of it, because visibility is the
+only lever the embedding APIs give us. And a fading overlay does not count:
+`interactive_rects` excludes overlays whose fade-out has begun, so a dismissing
+tooltip gives the page straight back.
+
+An app that wants a Teksilo overlay to sit *beside* a live page rather than
+replace it should keep the two regions disjoint, or open the overlay as a popup OS
+window via `ctx.open_window(...)` (the approach Electron uses for context menus
+over webviews).
 
 ## Multi-window & lifetime
 
@@ -317,6 +412,14 @@ covers open/teardown, bounds tracking, the headline dormancy assertion — a
 `WebView` parked in a real `Switcher` issues `set_visible(false)` on tab-away
 and `set_visible(true)` on tab-back — plus two-way `url_signal` navigation,
 download-event delivery to the callbacks, and the runtime devtools toggle.
+[tests/input_and_clip.rs](../crates/teksilo-webview/tests/input_and_clip.rs)
+covers the input model (both modes, by mouse and by finger, against a fixture
+with a tappable ancestor over the page — the only shape in which the two modes
+give different answers), the pointer teardown, the clip chain, the overlay yield
+and the engine-focus hand-off. Both run on the crate's **default** features,
+i.e. with no engine at all, so what they assert is the framework half of each
+mechanism: whether a real engine honours `set_input_passthrough` is a property of
+that engine and no headless test can reach it.
 Install it with
 `install_web_view(MemoryWebViewBackend::new().0)` (or the `memory_registry()`
 one-liner) and pump post-mount opens with `tree.run_mount_actions(&mut NoopWindowOps)`.
@@ -340,8 +443,18 @@ one-liner) and pump post-mount opens with `tree.run_mount_actions(&mut NoopWindo
   no further keystrokes, so it cannot offer an escape chord the way a
   `keyboard_capture` surface can. Whether Tab at the end of the document returns
   focus to the host window is engine- and platform-dependent and is **not**
-  verified here. Nor is a click on the page mirrored back onto Teksilo's focus
-  ring — the native subview receives it directly.
+  verified here.
+- **Engine focus is reported by the page, not by the engine.** A click inside the
+  page takes the OS keyboard, and Teksilo's own focus follows it onto the frame —
+  otherwise whatever held focus goes on believing it still does, caret blinking.
+  The event that says so is `WebViewEvent::EngineFocusChanged(bool)`, published as
+  `WebView::page_focused_signal()`. wry exposes no focus-changed callback, so the
+  wry backend injects an initialization script that forwards `window`'s `focus` /
+  `blur` over the same IPC channel behind a reserved message prefix
+  (`FOCUS_IPC_PREFIX`) — a page that posts that exact prefix itself loses the
+  message. The *blur* direction moves nothing: it says the page gave the keyboard
+  up, not where it went. None of this is exercised by the headless suite; it needs
+  a real engine and a display.
 
 [`WebViewBackend`]: ../crates/teksilo-webview/src/backend.rs
 [`WebViewHandle`]: ../crates/teksilo-webview/src/backend.rs
