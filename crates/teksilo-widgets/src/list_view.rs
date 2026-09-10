@@ -101,7 +101,7 @@ use teksilo_data::selection_model::SelectionModel;
 use teksilo_data::{ItemKey, KeyedSelectionModel};
 
 use crate::data_views::RowSelection;
-use teksilo_data::{DataChange, DropPosition, DropResponse, ListModel};
+use teksilo_data::{DataChange, DropResponse, ListModel};
 
 // Qualified rather than glob-imported: `data_views::ViewKind` is already in
 // scope here and means something else (which data view a drag came from).

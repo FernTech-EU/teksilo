@@ -153,8 +153,13 @@ impl DropZone {
     }
 
     /// Show or hide the keyboard-operable Browse button. Default `true`.
-    /// Keeping it visible is strongly recommended — it is the only
-    /// keyboard-accessible path to the zone's action.
+    ///
+    /// It is the zone's **only** route that is not a drag. Turning it off leaves
+    /// the drop as the sole way in, which fails WCAG 2.2 SC 2.5.7 (Dragging
+    /// Movements) as well as SC 2.1.1 — so an application that hides it owes the
+    /// same action another affordance of its own, reachable by keyboard and by a
+    /// single pointer. See
+    /// [the non-drag alternatives page](https://github.com/ferntech-eu/teksilo/blob/main/docs/a11y/non-drag-alternatives.md).
     pub fn show_browse_button(mut self, show: bool) -> Self {
         self.show_browse_button = show;
         self

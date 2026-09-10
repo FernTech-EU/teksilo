@@ -84,6 +84,12 @@ pub(crate) struct GridBodyPane<T: 'static> {
     #[allow(clippy::type_complexity)]
     pub(crate) on_tile_activate: Option<Rc<dyn Fn(usize, &mut teksilo_core::widget::EventContext)>>,
     pub(crate) activate_on: crate::data_views::ActivateOn,
+    /// The non-drag reorder, bound once by the grid. `Some` exactly when the
+    /// grid is reorderable; each realized tile binds its own index into it and
+    /// gets the menu rows and custom actions SC 2.5.7 asks for.
+    #[allow(clippy::type_complexity)]
+    pub(crate) reorder_perform:
+        Option<Rc<dyn Fn(usize, usize, &mut teksilo_core::widget::EventContext)>>,
     #[allow(clippy::type_complexity)]
     pub(crate) tile_context_menu: Option<
         Rc<
@@ -526,6 +532,32 @@ impl<T: 'static> Widget for GridBodyPane<T> {
                 });
             }
 
+            // The non-drag alternative to the tile drag: the four Move
+            // commands as AccessKit custom actions plus a context menu carrying
+            // the same rows, both calling the grid's own commit closure. See
+            // `common::ordered_move`.
+            //
+            // Installed BEFORE `extra`, so an application's own
+            // `tile_context_menu` — which rides in `extra` — replaces this menu
+            // rather than being replaced by it. The custom actions survive
+            // either way: `extra` sets no accessibility overrides.
+            if let Some(ref perform) = self.reorder_perform {
+                let count = (self.len_fn)();
+                let perform = perform.clone();
+                let idx = i;
+                crate::common::ordered_move::RowCommands {
+                    perform: Rc::new(move |mv: crate::common::ordered_move::OrderedMove, ctx| {
+                        if let Some(dest) = mv.destination(idx, count) {
+                            perform(idx, dest, ctx);
+                        }
+                    }),
+                    from: i,
+                    count,
+                    axis: crate::common::ordered_move::MoveAxis::Horizontal,
+                    extra: Vec::new(),
+                }
+                .install(ctx, tile_id);
+            }
             ctx.apply_handlers(tile_id, extra);
 
             // The reorder drag goes on a wrapper that STRICTLY encloses this

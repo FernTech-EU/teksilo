@@ -185,16 +185,91 @@ impl<T: 'static> Widget for ListView<T> {
             handlers = behavior.install(handlers);
         }
 
+        // --- The non-drag reorder, all four routes at once ---
+        //
+        // SC 2.5.7 wants the row drag reachable without a drag. One closure
+        // performs the move; the chord below, the row's context menu and the
+        // row's AccessKit custom actions all call it, so the four routes cannot
+        // reach different end states. The move itself travels the bound
+        // source's own drop-accept path — see `common::ordered_move`.
+        let reorder_perform: Option<crate::common::ordered_move::MoveRow> =
+            self.reorderable.then(|| {
+                let mover = std::rc::Rc::new(crate::common::ordered_move::RowMover {
+                    len: self.source.len_fn.clone(),
+                    stash: self.source.dnd.stash_drag_keys_fn.clone(),
+                    payload: {
+                        let view = self.model_id;
+                        Rc::new(move |from: usize| {
+                            DragPayload::typed(RowDragData::<T> {
+                                source: view,
+                                rows: vec![from],
+                                items: None,
+                            })
+                        })
+                    },
+                    accept: self.source.dnd.accept_drop_fn.clone(),
+                    view: self.model_id,
+                    name: {
+                        // The type-ahead label resolver, where the application
+                        // gave one: the same string that names a row for
+                        // find-as-you-type names it in the utterance.
+                        let with_item_str = self.source.with_item_str_fn.clone();
+                        let label = self.type_ahead_label.clone();
+                        Rc::new(move |index: usize| {
+                            let label = label.as_ref()?;
+                            (with_item_str)(index, &|item| label(item))
+                        })
+                    },
+                });
+                let sel = self.row_selection.clone();
+                let fi = self.focused_index.clone();
+                let metrics = self.metrics.clone();
+                let scroll = self.scroll_y.clone();
+                let vh = self.viewport_height.clone();
+                let vb = self.viewport_bounds.clone();
+                let max = self.max_scroll_y.clone();
+                std::rc::Rc::new(
+                    move |mv: crate::common::ordered_move::OrderedMove,
+                          from: usize,
+                          ctx: &mut teksilo_core::widget::EventContext| {
+                        let Some((dest, utterance)) = mover.commit(mv, from) else {
+                            return;
+                        };
+                        if let Some(ref sel) = sel {
+                            sel.select(dest);
+                        }
+                        fi.set(Some(dest));
+                        // Reveal the moved row (own viewport first, then chain
+                        // to any enclosing scroll area).
+                        let current = scroll.get();
+                        let new_scroll = metrics.borrow_mut().scroll_for_ensure_visible(
+                            dest,
+                            current,
+                            vh.get(),
+                            max.get(),
+                        );
+                        if (new_scroll - current).abs() > f32::EPSILON {
+                            scroll.set(new_scroll);
+                        }
+                        crate::common::row_metrics::chase_row_into_outer_view(
+                            ctx,
+                            &metrics,
+                            vb.get(),
+                            dest,
+                            new_scroll,
+                        );
+                        ctx.announce(utterance);
+                    },
+                ) as crate::common::ordered_move::MoveRow
+            });
+
         // --- Keyboard navigation + Alt+Arrow reorder ---
         {
             let len_for_key = self.source.len_fn.clone();
-            let accept_drop_for_key = self.source.dnd.accept_drop_fn.clone();
-            let stash_for_key = self.source.dnd.stash_drag_keys_fn.clone();
-            let view_id_for_key = self.model_id;
             let sel_for_key = self.row_selection.clone();
             let activate_key = self.on_activate.clone();
             let fi = self.focused_index.clone();
-            let reorderable = self.reorderable;
+            let reorder_key = reorder_perform.clone();
             let scroll_for_nav = self.scroll_y.clone();
             let metrics_for_nav = self.metrics.clone();
             let max_for_nav = self.max_scroll_y.clone();
@@ -309,68 +384,27 @@ impl<T: 'static> Widget for ListView<T> {
                         return teksilo_core::event::EventResponse::Ignored;
                     }
 
-                    // Alt+Arrow: reorder via the source's accept_drop (when
-                    // reorderable). The move is expressed as a synthetic
-                    // same-view RowDragData so it travels exactly the same
-                    // source-owned path as a pointer drop.
-                    if modifiers.alt() && reorderable {
-                        let selected_idx = sel_for_key
+                    // Alt+Arrow / Alt+Home / Alt+End: the keyboard route to
+                    // the row drag. Decoding and commit are both
+                    // `common::ordered_move`, shared with the row's context
+                    // menu and its AccessKit custom actions.
+                    if let Some(ref perform) = reorder_key
+                        && let Some(mv) = crate::common::ordered_move::OrderedMove::from_key(
+                            *key,
+                            *modifiers,
+                            crate::common::ordered_move::MoveAxis::Vertical,
+                            ctx.is_rtl(),
+                        )
+                    {
+                        let cursor = sel_for_key
                             .as_ref()
-                            .and_then(|s| s.selected_indices().first().copied());
-                        if let Some(idx) = selected_idx {
-                            let mv = match key {
-                                teksilo_core::event::Key::ArrowUp if idx > 0 => {
-                                    Some((idx - 1, DropPosition::Before, idx - 1))
-                                }
-                                teksilo_core::event::Key::ArrowDown if idx + 1 < count => {
-                                    Some((idx + 1, DropPosition::After, idx + 1))
-                                }
-                                _ => None,
-                            };
-                            if let Some((target, position, dest)) = mv {
-                                // Synthetic same-view payloads must stash the
-                                // dragged row's key at construction — the
-                                // accept path resolves identity from the
-                                // stash, never from `rows`.
-                                (stash_for_key)(&[idx]);
-                                let payload = DragPayload::typed(RowDragData::<T> {
-                                    source: view_id_for_key,
-                                    rows: vec![idx],
-                                    items: None,
-                                });
-                                if (accept_drop_for_key)(
-                                    &payload,
-                                    target,
-                                    position,
-                                    view_id_for_key,
-                                ) {
-                                    if let Some(ref sel) = sel_for_key {
-                                        sel.select(dest);
-                                    }
-                                    fi.set(Some(dest));
-                                    // Reveal the moved row (own viewport first,
-                                    // then chain to any enclosing scroll area).
-                                    let scroll = scroll_for_nav.get();
-                                    let new_scroll =
-                                        metrics_for_nav.borrow_mut().scroll_for_ensure_visible(
-                                            dest,
-                                            scroll,
-                                            vh_for_nav.get(),
-                                            max_for_nav.get(),
-                                        );
-                                    if (new_scroll - scroll).abs() > f32::EPSILON {
-                                        scroll_for_nav.set(new_scroll);
-                                    }
-                                    crate::common::row_metrics::chase_row_into_outer_view(
-                                        ctx,
-                                        &metrics_for_nav,
-                                        vb_for_nav.get(),
-                                        dest,
-                                        new_scroll,
-                                    );
-                                }
-                                return teksilo_core::event::EventResponse::Handled;
-                            }
+                            .and_then(|s| s.selected_indices().first().copied())
+                            .or_else(|| fi.get());
+                        if let Some(from) = cursor
+                            && mv.destination(from, count).is_some()
+                        {
+                            perform(mv, from, ctx);
+                            return teksilo_core::event::EventResponse::Handled;
                         }
                     }
 
@@ -726,6 +760,7 @@ impl<T: 'static> Widget for ListView<T> {
             focused_index: self.focused_index.clone(),
             row_map: self.row_map.clone(),
             reorderable: self.reorderable,
+            reorder_perform: reorder_perform.clone(),
             export: self.export.clone(),
             on_activate: self.on_activate.clone(),
             activate_on: self.activate_on,

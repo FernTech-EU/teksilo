@@ -141,6 +141,67 @@ pub struct AccessibilityOverrides {
     pub customize: Option<Box<dyn Fn(&mut crate::accessibility::AccessNodeBuilder)>>,
 }
 
+impl AccessibilityOverrides {
+    /// Fold `other` into `self`: later scalars win, lists append.
+    ///
+    /// Needed because overrides reach a node from **two** directions — a builder
+    /// chain at construction (`WidgetWithHandlers::access_*`) and a later
+    /// [`BuildContext::apply_handlers`](crate::build_context::BuildContext::apply_handlers)
+    /// on the same id, which is how a widget gives a node it already built one
+    /// more action. Assigning the second block over the first silently dropped
+    /// everything in the first, and nothing else reads an override block, so the
+    /// loss was invisible: a `TreeTableView` row lost `ScrollIntoView` and its
+    /// `Expand` / `Collapse` pair the moment it also gained a move command.
+    ///
+    /// The merge rules are the ones
+    /// [the overrides page](https://github.com/ferntech-eu/teksilo/blob/main/docs/accessibility-overrides.md)
+    /// already documents for a single block: scalars replace when set, lists
+    /// append. `customize` is the exception — it is an escape hatch and both
+    /// halves may matter, so two are **chained** in application order rather
+    /// than one winning.
+    pub(crate) fn merge_from(&mut self, other: Self) {
+        macro_rules! scalar {
+            ($($field:ident),+ $(,)?) => {
+                $(if other.$field.is_some() { self.$field = other.$field; })+
+            };
+        }
+        scalar!(
+            label,
+            description,
+            value,
+            role,
+            hidden,
+            disabled,
+            identifier,
+            live,
+            aria_current,
+            shortcut,
+            shortcut_id,
+            has_popup,
+            orientation,
+            numeric_value,
+            min_numeric_value,
+            max_numeric_value,
+            numeric_step,
+        );
+        self.controls.extend(other.controls);
+        self.described_by.extend(other.described_by);
+        self.labelled_by.extend(other.labelled_by);
+        self.actions.extend(other.actions);
+        self.removed_actions.extend(other.removed_actions);
+        // Appended, so the ids already published for the existing entries keep
+        // pointing at the same handlers.
+        self.custom_actions.extend(other.custom_actions);
+        self.customize = match (self.customize.take(), other.customize) {
+            (Some(first), Some(second)) => Some(Box::new(move |builder| {
+                first(builder);
+                second(builder);
+            })),
+            (first, second) => second.or(first),
+        };
+    }
+}
+
 impl std::fmt::Debug for AccessibilityOverrides {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("AccessibilityOverrides")
@@ -256,6 +317,12 @@ impl AccessibilityOverrides {
                 })
                 .collect();
             b.set_custom_actions(custom);
+            // A node's custom actions are only reachable when it also
+            // advertises `Action::CustomAction`: an adapter reports the list
+            // through the supported-action gate, not through the list's
+            // emptiness (`accesskit_ios-0.2.0/src/node.rs:109` is the one that
+            // says so in code). Without this the whole vector is decoration.
+            b.add_action(accesskit::Action::CustomAction);
         }
         if let Some(ref f) = self.customize {
             f(b);
@@ -920,6 +987,28 @@ impl HandlerSet {
         f: impl FnMut(crate::drag_payload::DropOutcome, &mut EventContext) + 'static,
     ) -> Self {
         self.handlers.on_drag_ended = Some(Box::new(f));
+        self
+    }
+
+    /// Advertise a named custom action on this node and register its callback.
+    ///
+    /// The [`WidgetWithHandlers`] twin
+    /// ([`access_custom_action`](WidgetWithHandlers::access_custom_action)) is
+    /// how an *application* adds one from outside. This is how a **widget**
+    /// adds one to a node it builds itself — a virtualized row, a rail item,
+    /// a header cell — where there is no builder chain to hang it on because
+    /// the node is reached through
+    /// [`BuildContext::apply_handlers`](crate::build_context::BuildContext::apply_handlers).
+    ///
+    /// Actions are dispatched by declaration order, so a node's callbacks and
+    /// its advertised list cannot drift apart.
+    pub fn access_custom_action<F>(mut self, label: impl Into<Prop<String>>, handler: F) -> Self
+    where
+        F: FnMut(&mut EventContext) + 'static,
+    {
+        self.access_mut()
+            .custom_actions
+            .push((label.into(), Box::new(handler)));
         self
     }
 }

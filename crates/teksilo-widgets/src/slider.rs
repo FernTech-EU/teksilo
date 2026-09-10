@@ -1520,6 +1520,41 @@ mod tests {
         );
     }
 
+    /// The mirroring reaches the mounted widget, off the same layout direction
+    /// the pointer path reads at event time — which is what makes the keys and
+    /// the drag agree by construction rather than by coincidence. The chord
+    /// table itself is `common::range_nav`, shared with every other bounded
+    /// scalar and tested there.
+    #[test]
+    fn an_rtl_slider_raises_its_value_on_the_leftward_arrow() {
+        use teksilo_core::environment::LayoutDirection;
+
+        for (direction, raising, lowering) in [
+            (
+                LayoutDirection::LeftToRight,
+                Key::ArrowRight,
+                Key::ArrowLeft,
+            ),
+            (
+                LayoutDirection::RightToLeft,
+                Key::ArrowLeft,
+                Key::ArrowRight,
+            ),
+        ] {
+            let value = Signal::new(50.0_f32);
+            let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+            tree.set_layout_direction(direction);
+            let s = tree.add(Slider::new(value.clone(), 0.0, 100.0).step(10.0));
+            tree.layout(SizeProposal::exact(200.0, 40.0));
+            tree.focus(s);
+            tree.press_key(raising, Modifiers::NONE);
+            assert_eq!(value.get(), 60.0, "{direction:?}: {raising:?} must raise");
+            tree.press_key(lowering, Modifiers::NONE);
+            tree.press_key(lowering, Modifiers::NONE);
+            assert_eq!(value.get(), 40.0, "{direction:?}: {lowering:?} must lower");
+        }
+    }
+
     /// A horizontal slider's minimum sits at the **leading** edge, which is the
     /// right-hand one under RTL. The painted knob and the value the press maps
     /// to must agree; before this they ran opposite ways.

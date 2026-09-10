@@ -355,21 +355,33 @@ fn swatch_grid_emits_grid_role() {
     assert_eq!(node.role(), Role::Grid);
 }
 
+/// The canvas is a **named group carrying a value**, not a placeholder.
+///
+/// A `GenericContainer` with no properties is pruned by the accessibility
+/// walker, and a pruned node advertises nothing — which is what left the one
+/// control in the picker whose value is a *pair* undriveable by assistive
+/// technology. Its children stay excluded (three gradient layers); the node
+/// does not.
 #[test]
-fn hsv_canvas_emits_placeholder_role() {
+fn the_hsv_canvas_names_itself_and_reports_both_axes() {
     let hue = Signal::new(0.0_f32);
-    let sat = Signal::new(1.0_f32);
-    let val = Signal::new(1.0_f32);
+    let sat = Signal::new(0.5_f32);
+    let val = Signal::new(0.25_f32);
     let set_hsv: Rc<dyn Fn(f32, f32, f32)> = Rc::new(|_, _, _| {});
     let dragging = Rc::new(std::cell::Cell::new(false));
     let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
     let id = tree.add(HsvCanvas::new(hue, sat, val, set_hsv, dragging));
     tree.layout(SizeProposal::exact(224.0, 192.0));
     let node = tree.accessibility_node(id);
-    // The HSV canvas emits a placeholder GenericContainer role; the
-    // containing ColorPicker excludes its subtree from the AT tree
-    // via `.access_exclude_subtree()`.
-    assert_eq!(node.role(), Role::GenericContainer);
+    assert_eq!(node.role(), Role::Group);
+    assert_eq!(node.name(), Some("Saturation and brightness"));
+    let update = tree.sync_accessibility();
+    let value = update
+        .nodes
+        .iter()
+        .find(|(n, _)| *n == teksilo_core::accessibility::widget_id_to_node_id(id))
+        .and_then(|(_, n)| n.value().map(|s| s.to_string()));
+    assert_eq!(value.as_deref(), Some("Saturation 50%, brightness 25%"));
 }
 
 #[test]

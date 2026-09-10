@@ -272,6 +272,111 @@ impl<T: 'static> Widget for TreeView<T> {
             handlers = behavior.install(handlers);
         }
 
+        // --- The non-drag reorder, all four routes at once ---
+        //
+        // The row drag can do two things here: move a row among its siblings
+        // (`OrderedMove`) and reparent it (`TreeMove`, the drag's
+        // `DropPosition::Into`). Both are committed through the source's own
+        // `accept_drop`, and both closures are shared by the chord below, the
+        // row's context menu and the row's AccessKit custom actions — see
+        // `common::ordered_move`.
+        let (reorder_perform, reparent_perform) = if self.reorderable {
+            let follow = {
+                let sel = self.row_selection.clone();
+                let fi = self.focused_index.clone();
+                let fi_anchor = self.focused_anchor.clone();
+                let source = self.source.clone();
+                let metrics = self.metrics.clone();
+                let scroll = self.scroll_y.clone();
+                let vh = self.viewport_height.clone();
+                let vb = self.viewport_bounds.clone();
+                let max = self.max_scroll_y.clone();
+                Rc::new(
+                    move |new_flat: usize, ctx: &mut teksilo_core::widget::EventContext| {
+                        fi.set(Some(new_flat));
+                        *fi_anchor.borrow_mut() = Some(source.anchor(new_flat));
+                        if let Some(ref sel) = sel {
+                            sel.select(new_flat);
+                        }
+                        let current = scroll.get();
+                        let new_scroll = metrics.borrow_mut().scroll_for_ensure_visible(
+                            new_flat,
+                            current,
+                            vh.get(),
+                            max.get(),
+                        );
+                        if (new_scroll - current).abs() > f32::EPSILON {
+                            scroll.set(new_scroll);
+                        }
+                        crate::common::row_metrics::chase_row_into_outer_view(
+                            ctx,
+                            &metrics,
+                            vb.get(),
+                            new_flat,
+                            new_scroll,
+                        );
+                    },
+                )
+            };
+            // The row's name for the utterance, from the same resolver
+            // find-as-you-type uses. `None` where the application gave none.
+            let name_of: Rc<dyn Fn(usize) -> Option<String>> = {
+                let source = self.source.clone();
+                let label = self.type_ahead_label.clone();
+                Rc::new(move |index: usize| {
+                    let label = label.as_ref()?;
+                    source.with_row_str(index, &|item| label(item))
+                })
+            };
+            let sibling = {
+                let source = self.source.clone();
+                let follow = follow.clone();
+                let name_of = name_of.clone();
+                Rc::new(
+                    move |mv: crate::common::ordered_move::OrderedMove,
+                          flat: usize,
+                          ctx: &mut teksilo_core::widget::EventContext| {
+                        let name = (name_of)(flat);
+                        let Some(new_flat) = source.sibling_move(flat, mv) else {
+                            return;
+                        };
+                        follow(new_flat, ctx);
+                        let (pos, size) = source.sibling_position(new_flat);
+                        ctx.announce(crate::common::ordered_move::move_announcement(
+                            name.as_deref(),
+                            pos.saturating_sub(1),
+                            size,
+                        ));
+                    },
+                ) as crate::common::ordered_move::MoveRow
+            };
+            let reparent = {
+                let source = self.source.clone();
+                let follow = follow.clone();
+                Rc::new(
+                    move |mv: crate::common::ordered_move::TreeMove,
+                          flat: usize,
+                          ctx: &mut teksilo_core::widget::EventContext| {
+                        let name = (name_of)(flat);
+                        let Some(new_flat) = source.reparent(flat, mv) else {
+                            return;
+                        };
+                        follow(new_flat, ctx);
+                        // `set_level` is 1-based, and so is what an adapter
+                        // announces, so the depth becomes a level here.
+                        let level = source.meta(new_flat).map_or(1, |m| m.depth + 1);
+                        ctx.announce(crate::common::ordered_move::reparent_announcement(
+                            name.as_deref(),
+                            level,
+                        ));
+                    },
+                ) as crate::common::ordered_move::TreeReparentRow
+            };
+            (Some(sibling), Some(reparent))
+        } else {
+            (None, None)
+        };
+
         // --- Keyboard navigation + expand/collapse + Alt+Arrow reorder ---
         {
             let source = self.source.clone();
@@ -279,7 +384,8 @@ impl<T: 'static> Widget for TreeView<T> {
             let activate_key = self.on_activate.clone();
             let fi = self.focused_index.clone();
             let fi_anchor = self.focused_anchor.clone();
-            let reorderable = self.reorderable;
+            let reorder_key = reorder_perform.clone();
+            let reparent_key = reparent_perform.clone();
             let scroll_for_nav = self.scroll_y.clone();
             let metrics_for_nav = self.metrics.clone();
             let max_for_nav = self.max_scroll_y.clone();
@@ -429,28 +535,44 @@ impl<T: 'static> Widget for TreeView<T> {
                         return teksilo_core::event::EventResponse::Ignored;
                     }
 
-                    // Alt+Arrow: sibling reorder (when reorderable). Routed
-                    // through the source's own `accept_drop` (cycle-guarded),
-                    // which returns the moved row's new flat index.
-                    if modifiers.alt() && reorderable {
+                    // The keyboard route to the row drag. `Alt` plus the
+                    // vertical arrows and the ends move the row among its
+                    // siblings; the accelerator plus `]` / `[` — and, off macOS,
+                    // `Alt` plus the horizontal arrows — indent and outdent,
+                    // which is the same drag's reparenting drop. Decoding and
+                    // commit are both `common::ordered_move`, shared with the
+                    // row's context menu and its AccessKit custom actions.
+                    if (modifiers.alt() || modifiers.command())
+                        && let Some(ref sibling) = reorder_key
+                        && let Some(ref reparent) = reparent_key
+                    {
                         let flat_idx = sel_for_key
                             .as_ref()
                             .and_then(|s| s.selected_indices().first().copied())
                             .or(fi.get())
                             .unwrap_or(current);
-                        let down = match key {
-                            teksilo_core::event::Key::ArrowUp => false,
-                            teksilo_core::event::Key::ArrowDown => true,
-                            _ => return teksilo_core::event::EventResponse::Ignored,
-                        };
-                        if let Some(new_flat) = source.keyboard_reorder(flat_idx, down) {
-                            set_focus(new_flat);
-                            if let Some(ref sel) = sel_for_key {
-                                sel.select(new_flat);
-                            }
+                        if let Some(mv) = crate::common::ordered_move::OrderedMove::from_key(
+                            *key,
+                            *modifiers,
+                            crate::common::ordered_move::MoveAxis::Vertical,
+                            ctx.is_rtl(),
+                        ) {
+                            sibling(mv, flat_idx, ctx);
                             return teksilo_core::event::EventResponse::Handled;
                         }
-                        return teksilo_core::event::EventResponse::Ignored;
+                        if let Some(mv) = crate::common::ordered_move::TreeMove::from_key(
+                            *key,
+                            *modifiers,
+                            ctx.is_rtl(),
+                        ) {
+                            reparent(mv, flat_idx, ctx);
+                            return teksilo_core::event::EventResponse::Handled;
+                        }
+                        // Falls THROUGH rather than swallowing: on macOS `⌥→` /
+                        // `⌥←` are the subtree expand pair
+                        // (`list_nav::mac_alias`), and the reorder decoders
+                        // deliberately decline them there. Returning `Ignored`
+                        // here made those two dead in any reorderable tree.
                     }
 
                     // Move the cursor to `to`, selecting and revealing it the
@@ -994,6 +1116,8 @@ impl<T: 'static> Widget for TreeView<T> {
             focused_index: self.focused_index.clone(),
             focused_anchor: self.focused_anchor.clone(),
             reorderable: self.reorderable,
+            reorder_perform: reorder_perform.clone(),
+            reparent_perform: reparent_perform.clone(),
             row_click_expands: self.row_click_expands,
             export: self.export.clone(),
             on_activate: self.on_activate.clone(),

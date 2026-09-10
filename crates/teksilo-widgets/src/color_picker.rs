@@ -215,7 +215,11 @@ impl ColorPicker {
             show_hue_strip: true,
             show_alpha_strip: None, // defaults to alpha_enabled
             show_rgb_spinners: true,
-            show_hsv_spinners: false,
+            // On by default: the numeric entry is the canvas's single-pointer
+            // alternative (WCAG 2.2 SC 2.5.7), so an application does not have
+            // to ask for it. `show_hsv_spinners(false)` still turns it off, for
+            // a picker whose canvas is hidden too.
+            show_hsv_spinners: true,
             show_hex_input: true,
             show_preview: true,
             show_swatches: true,
@@ -509,10 +513,15 @@ impl Widget for ColorPicker {
                 components.dragging.clone(),
             )
             .enabled(enabled);
-            // The HSV canvas is a 2D pointer surface with no ARIA
-            // precedent — exclude its subtree from the AT tree.
+            // The canvas's own children are decoration (three stacked gradient
+            // layers), so its subtree stays out of the AT tree — but the canvas
+            // node itself does not: it carries the four
+            // saturation-and-brightness steps as custom actions, which is the
+            // route an assistive client has to a 2-D value.
             use teksilo_core::widget_builder::WidgetBuilder;
-            top_row = top_row.child(canvas.access_exclude_subtree());
+            top_row = top_row.child(
+                canvas.access_subtree(teksilo_core::widget_builder::AccessSubtreeMode::Exclude),
+            );
         }
         if self.show_hue_strip {
             let hue = HueStrip::new(

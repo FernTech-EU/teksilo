@@ -1250,6 +1250,83 @@ impl<T: 'static> Widget for GridView<T> {
             .physics(ctx.theme().input.scroll_physics);
             handlers = behavior.install(handlers);
         }
+        // --- The non-drag reorder, all four routes at once ---
+        //
+        // SC 2.5.7 wants the tile drag reachable without a drag. One closure
+        // performs the move; the chord below, the tile's context menu and the
+        // tile's AccessKit custom actions all call it, so the routes cannot
+        // reach different end states. The move travels the source's own
+        // drop-accept path — see `common::ordered_move`.
+        #[allow(clippy::type_complexity)]
+        let reorder_perform: Option<
+            Rc<dyn Fn(usize, usize, &mut teksilo_core::widget::EventContext)>,
+        > = self.reorderable.then(|| {
+            let mover = Rc::new(crate::common::ordered_move::RowMover {
+                len: self.source.len_fn.clone(),
+                stash: self.source.dnd.stash_drag_keys_fn.clone(),
+                payload: {
+                    let model_id = self.model_id;
+                    Rc::new(move |idx: usize| {
+                        DragPayload::typed(RowDragData::<T> {
+                            source: model_id,
+                            rows: vec![idx],
+                            items: None,
+                        })
+                    })
+                },
+                accept: self.source.dnd.accept_drop_fn.clone(),
+                view: self.model_id,
+                name: {
+                    // The type-ahead label resolver, where the application
+                    // gave one; routed through the source's string accessor
+                    // so an unloaded row yields no name rather than a
+                    // fabricated one.
+                    let with_item_str = self.source.with_item_str_fn.clone();
+                    let label = self.type_ahead_label.clone();
+                    Rc::new(move |index: usize| {
+                        let label = label.as_ref()?;
+                        // `label` is index-keyed here (a grid's delegate
+                        // is), but the read still goes through the source so
+                        // an unloaded tile yields no name rather than one
+                        // computed for an absent item.
+                        (with_item_str)(index, &|_item: &T| label(index))
+                    })
+                },
+            });
+            let focused = self.focused_index.clone();
+            let selection = self.selection.clone();
+            let strategy = strategy.clone();
+            let scroll_y = self.scroll_y.clone();
+            let max_scroll_y = self.max_scroll_y.clone();
+            let viewport_height = self.viewport_height.clone();
+            let viewport_width = self.viewport_width.clone();
+            let viewport_origin = self.viewport_origin.clone();
+            Rc::new(
+                move |from: usize,
+                      destination: usize,
+                      ctx: &mut teksilo_core::widget::EventContext| {
+                    let Some((dest, utterance)) = mover.commit_to(from, destination) else {
+                        return;
+                    };
+                    focused.set(Some(dest));
+                    if let Some(ref sel) = selection {
+                        sel.select(dest);
+                    }
+                    keyboard::reveal_tile(
+                        &strategy,
+                        &scroll_y,
+                        &max_scroll_y,
+                        &viewport_height,
+                        &viewport_width,
+                        &viewport_origin,
+                        dest,
+                        ctx,
+                    );
+                    ctx.announce(utterance);
+                },
+            ) as Rc<dyn Fn(usize, usize, &mut teksilo_core::widget::EventContext)>
+        });
+
         handlers = handlers.on_key(build_grid_key_handler(GridKeyConfig {
             len_fn: self.source.len_fn.clone(),
             col_count: self.column_count.clone(),
@@ -1264,24 +1341,7 @@ impl<T: 'static> Widget for GridView<T> {
             wrap_navigation: self.wrap_navigation,
             tab_traversal: self.tab_traversal,
             on_tile_activate: self.on_tile_activate.clone(),
-            reorderable: self.reorderable,
-            accept_drop_fn: self.source.dnd.accept_drop_fn.clone(),
-            view_id: self.model_id,
-            make_reorder_payload: {
-                let model_id = self.model_id;
-                let stash = self.source.dnd.stash_drag_keys_fn.clone();
-                Rc::new(move |idx| {
-                    // Synthetic same-view payloads must stash the dragged
-                    // row's key at construction — the accept path resolves
-                    // identity from the stash, never from `rows`.
-                    (stash)(&[idx]);
-                    DragPayload::typed(RowDragData::<T> {
-                        source: model_id,
-                        rows: vec![idx],
-                        items: None,
-                    })
-                })
-            },
+            reorder_perform: reorder_perform.clone(),
             type_ahead_timeout: self.type_ahead_timeout,
             type_ahead: self.type_ahead.clone(),
             tile_map: self.tile_map.clone(),
@@ -1527,6 +1587,7 @@ impl<T: 'static> Widget for GridView<T> {
                 focused_index: self.focused_index.clone(),
                 on_tile_activate: self.on_tile_activate.clone(),
                 activate_on: self.activate_on,
+                reorder_perform: reorder_perform.clone(),
                 tile_context_menu: self.tile_context_menu.clone(),
                 tile_a11y_label: self.tile_a11y_label.clone(),
                 reorderable: self.reorderable,

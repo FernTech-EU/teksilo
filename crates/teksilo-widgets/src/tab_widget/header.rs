@@ -59,6 +59,37 @@ use crate::primitives::{Expand, RectWidget, ZStack};
 use crate::{HStack, IconButton, IconButtonSize, IconWidget, TextWidget};
 use teksilo_core::styles::density::{dp, spacing};
 
+/// AccessKit custom-action id for **Close**.
+///
+/// The ids on a tab header are **explicit and fixed**, not positional: the list
+/// is built conditionally (a tab at the start advertises no "move earlier"), so
+/// an action's place in the vector says nothing about which action it is.
+/// `2` is historical and stays put — an assistive client's recorded id must keep
+/// meaning the same thing.
+const CLOSE_ACTION_ID: i32 = 2;
+
+/// The custom-action id of each of the four moves.
+///
+/// `0` and `1` are the two steps, which shipped before the far ends existed;
+/// `3` and `4` are the far ends, taking the next free ids rather than renumbering
+/// around `CLOSE_ACTION_ID`.
+fn move_action_id(mv: crate::common::ordered_move::OrderedMove) -> i32 {
+    use crate::common::ordered_move::OrderedMove;
+    match mv {
+        OrderedMove::Prev => 0,
+        OrderedMove::Next => 1,
+        OrderedMove::First => 3,
+        OrderedMove::Last => 4,
+    }
+}
+
+/// The inverse of [`move_action_id`].
+fn move_for_action_id(id: i32) -> Option<crate::common::ordered_move::OrderedMove> {
+    crate::common::ordered_move::OrderedMove::ALL
+        .into_iter()
+        .find(|mv| move_action_id(*mv) == id)
+}
+
 /// Minimum natural width when the label is empty / extremely short.
 const NATURAL_MIN_WIDTH: f32 = 72.0;
 
@@ -752,6 +783,46 @@ impl Widget for TabHeader {
         let interaction_for_hover = interaction.clone();
         let focused_for_handler = focused.clone();
 
+        // --- The non-drag reorder, all four routes at once ---
+        //
+        // SC 2.5.7 wants the header drag reachable without a drag. One closure
+        // performs the move; the chord below, the header's context menu and its
+        // AccessKit custom actions all call it, so the routes cannot reach
+        // different end states. The commit is `on_reorder_to` — the bar's own
+        // handler, the same one a released drag calls.
+        let move_axis = match self.orientation {
+            super::delegate::TabBarOrientation::Horizontal => {
+                crate::common::ordered_move::MoveAxis::Horizontal
+            }
+            super::delegate::TabBarOrientation::Vertical => {
+                crate::common::ordered_move::MoveAxis::Vertical
+            }
+        };
+        // Suppressed for a pinned tab, whose order the pinned strip fixes —
+        // exactly the gate the custom actions already used.
+        let reorder_perform: Option<crate::common::ordered_move::PerformMove> = self
+            .on_reorder_to
+            .clone()
+            .filter(|_| self.initial_enabled && !self.pinned)
+            .map(|reorder| {
+                let total = self.shared.header_ids.clone();
+                let label = self.label.clone();
+                Rc::new(
+                    move |mv: crate::common::ordered_move::OrderedMove, ctx: &mut EventContext| {
+                        let count = total.borrow().len();
+                        let Some(dest) = mv.destination(index, count) else {
+                            return;
+                        };
+                        reorder(dest, ctx);
+                        ctx.announce(crate::common::ordered_move::move_announcement(
+                            Some(&label.resolve_now()),
+                            dest,
+                            count,
+                        ));
+                    },
+                ) as crate::common::ordered_move::PerformMove
+            });
+
         let mut handler_set = HandlerSet::new()
             .on_tap(move |_event, _ctx: &mut EventContext| {
                 selected.set(index);
@@ -778,10 +849,33 @@ impl Widget for TabHeader {
                 let panel_ids = panel_ids.clone();
                 let enabled_tabs = enabled_tabs.clone();
                 let on_close = self.on_close.clone();
+                let reorder_key = reorder_perform.clone();
                 move |event: &WidgetEvent, ctx: &mut EventContext| -> EventResponse {
                     let headers = header_ids.borrow();
                     if headers.is_empty() {
                         return EventResponse::Ignored;
+                    }
+                    // Alt plus the bar's own two arrows moves the tab; Alt+Home
+                    // and Alt+End take it to the ends. Read before the
+                    // navigation match below, whose arrow arms do not look at
+                    // the modifiers. Decoding and commit are both
+                    // `common::ordered_move`, shared with the header's context
+                    // menu and its custom actions.
+                    if let WidgetEvent::KeyDown { key, modifiers, .. } = event
+                        && let Some(ref perform) = reorder_key
+                        && let Some(mv) = crate::common::ordered_move::OrderedMove::from_key(
+                            *key,
+                            *modifiers,
+                            move_axis,
+                            ctx.is_rtl(),
+                        )
+                    {
+                        drop(headers);
+                        perform(mv, ctx);
+                        // The bar rebuilds around the moved tab, so the header
+                        // that had focus is gone; the reorder handler is what
+                        // re-establishes it.
+                        return EventResponse::Handled;
                     }
                     // ArrowLeft/Up = previous tab, ArrowRight/Down =
                     // next. We accept both axes regardless of bar
@@ -869,7 +963,7 @@ impl Widget for TabHeader {
             })
             .on_access_action_request({
                 let selected = self.selected.clone();
-                let on_reorder_to = self.on_reorder_to.clone();
+                let reorder_for_action = reorder_perform.clone();
                 let on_close_for_action = self.on_close.clone();
                 let header_ids_for_action = self.shared.header_ids.clone();
                 move |action, _node, data, ctx: &mut EventContext| -> EventResponse {
@@ -889,14 +983,12 @@ impl Widget for TabHeader {
                             EventResponse::Handled
                         }
                         Action::CustomAction => {
-                            // Custom action ids we advertise:
-                            //   0 = Move Left  (index → index - 1)
-                            //   1 = Move Right (index → index + 1)
-                            //   2 = Close
+                            // Custom action ids we advertise: the four moves
+                            // (`MOVE_ACTION_IDS`) plus `CLOSE_ACTION_ID`.
                             let Some(ActionData::CustomAction(idx)) = data else {
                                 return EventResponse::Ignored;
                             };
-                            if idx == 2 {
+                            if idx == CLOSE_ACTION_ID {
                                 return match on_close_for_action.as_ref() {
                                     Some(close) => {
                                         close(ctx);
@@ -905,21 +997,17 @@ impl Widget for TabHeader {
                                     None => EventResponse::Ignored,
                                 };
                             }
-                            let Some(reorder) = on_reorder_to.as_ref() else {
+                            // The four moves route through the same closure the
+                            // chord and the context menu use, so an AT client
+                            // gets the announcement too.
+                            let Some(perform) = reorder_for_action.as_ref() else {
                                 return EventResponse::Ignored;
                             };
-                            let total = header_ids_for_action.borrow().len();
-                            match idx {
-                                0 if index > 0 => {
-                                    reorder(index - 1, ctx);
-                                    EventResponse::Handled
-                                }
-                                1 if index + 1 < total => {
-                                    reorder(index + 1, ctx);
-                                    EventResponse::Handled
-                                }
-                                _ => EventResponse::Ignored,
-                            }
+                            let Some(mv) = move_for_action_id(idx) else {
+                                return EventResponse::Ignored;
+                            };
+                            perform(mv, ctx);
+                            EventResponse::Handled
                         }
                         _ => EventResponse::Ignored,
                     }
@@ -987,6 +1075,23 @@ impl Widget for TabHeader {
 
         if let Some(factory) = self.context_menu_factory.clone() {
             handler_set = handler_set.context_menu(move |pos, ctx| (factory)(pos, ctx));
+        } else if let Some(ref perform) = reorder_perform {
+            // No delegate-supplied menu, so the framework's own carries the
+            // moves. A delegate that supplies one owns the menu: it is the
+            // application's tab, and `TabInfo::context_menu` is how it says so.
+            let perform = perform.clone();
+            let total = self.shared.header_ids.clone();
+            handler_set = handler_set.context_menu(move |_pos, _ctx| {
+                let count = total.borrow().len();
+                let (list, any) = crate::common::ordered_move::append_move_items(
+                    crate::menu_list::MenuList::new(),
+                    &perform,
+                    index,
+                    count,
+                    move_axis,
+                );
+                any.then(|| Box::new(list) as Box<dyn teksilo_core::widget::Widget>)
+            });
         }
 
         ctx.apply_self_handlers(handler_set);
@@ -1126,12 +1231,9 @@ impl Widget for TabHeader {
             builder.push_controlled(teksilo_core::accessibility::widget_id_to_node_id(panel_id));
         }
 
-        // Custom actions for AT users who cannot drag or hover. The ids are
-        // **explicit and fixed** — 0 = Move Left/Up, 1 = Move Right/Down,
-        // 2 = Close — because the list is built conditionally and
-        // `on_access_action_request` routes on the id, not on the position:
-        // a tab at index 0 advertises no "Move Left", so an action's place in
-        // the vector says nothing about which action it is.
+        // Custom actions for AT users who cannot drag or hover. See
+        // [`CLOSE_ACTION_ID`] for why the ids are explicit rather than
+        // positional.
         let mut actions: Vec<teksilo_core::accesskit::CustomAction> = Vec::new();
 
         // Suppressed for pinned tabs (whose order is conceptually fixed
@@ -1142,26 +1244,18 @@ impl Widget for TabHeader {
             // would mislead a screen reader user. `LocalizedString`
             // resolves now; the locale signal binding in build()
             // dirties the AT cache on locale change so these refresh.
-            let (prev_label, next_label) = match self.orientation {
-                super::delegate::TabBarOrientation::Horizontal => (
-                    lit!("Move Left").resolve_now(),
-                    lit!("Move Right").resolve_now(),
-                ),
-                super::delegate::TabBarOrientation::Vertical => (
-                    lit!("Move Up").resolve_now(),
-                    lit!("Move Down").resolve_now(),
-                ),
+            let axis = match self.orientation {
+                super::delegate::TabBarOrientation::Horizontal => {
+                    crate::common::ordered_move::MoveAxis::Horizontal
+                }
+                super::delegate::TabBarOrientation::Vertical => {
+                    crate::common::ordered_move::MoveAxis::Vertical
+                }
             };
-            if self.index > 0 {
+            for mv in crate::common::ordered_move::OrderedMove::available(self.index, total) {
                 actions.push(teksilo_core::accesskit::CustomAction {
-                    id: 0,
-                    description: prev_label,
-                });
-            }
-            if self.index + 1 < total {
-                actions.push(teksilo_core::accesskit::CustomAction {
-                    id: 1,
-                    description: next_label,
+                    id: move_action_id(mv),
+                    description: mv.label(axis).resolve_now(),
                 });
             }
         }
@@ -1173,7 +1267,7 @@ impl Widget for TabHeader {
         // a keyboard route, not an AT action.
         if self.on_close.is_some() && self.initial_enabled {
             actions.push(teksilo_core::accesskit::CustomAction {
-                id: 2,
+                id: CLOSE_ACTION_ID,
                 description: lit!("Close").resolve_now(),
             });
         }

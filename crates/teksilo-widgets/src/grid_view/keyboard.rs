@@ -15,16 +15,14 @@ use std::cell::Cell;
 use std::rc::Rc;
 use std::time::Duration;
 
-use teksilo_core::drag_payload::DragPayload;
 use teksilo_core::event::{EventResponse, Key, WidgetEvent};
 use teksilo_core::signal::Signal;
 use teksilo_core::widget::EventContext;
-use teksilo_data::{DropPosition, SelectionModel};
+use teksilo_data::SelectionModel;
 
 use super::layout::{GridLayoutStrategy, ScrollAnchor};
 use crate::common::list_nav;
 use crate::common::type_ahead::TypeAheadState;
-use crate::data_views::ViewId;
 
 /// How Tab moves out of (or within) the grid.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -66,22 +64,13 @@ pub(crate) struct GridKeyConfig {
     /// item from its own model handle.
     #[allow(clippy::type_complexity)]
     pub(crate) on_tile_activate: Option<Rc<dyn Fn(usize, &mut EventContext)>>,
-    pub(crate) reorderable: bool,
-    /// Source-owned reorder commit (erased from the backing `ListDataSource`).
-    /// Alt+Arrow synthesizes a same-view `RowDragData<T>` (via
-    /// `make_reorder_payload`, below) and routes it through the exact same
-    /// path a pointer drop takes. `(payload, target, position, view_id) ->
-    /// applied`.
+    /// The non-drag reorder, bound once by the grid. `Some` exactly when the
+    /// grid is reorderable. `(from, destination) -> ()`: commits through the
+    /// source's own drop-accept path, follows the tile with focus and
+    /// selection, reveals it and announces once. Shared with the tile's context
+    /// menu and its AccessKit custom actions — see `common::ordered_move`.
     #[allow(clippy::type_complexity)]
-    pub(crate) accept_drop_fn: Rc<dyn Fn(&DragPayload, usize, DropPosition, ViewId) -> bool>,
-    /// This grid's id, stamped into the synthetic drag payload so the source
-    /// recognizes the move as same-view.
-    pub(crate) view_id: ViewId,
-    /// Builds the synthetic same-view reorder payload
-    /// (`DragPayload::typed(RowDragData::<T> { .. })`) for a given source
-    /// index. Erases the grid's item type `T` so this (non-generic) module
-    /// doesn't need a type parameter — mirrors the `DndLazy` erasure pattern.
-    pub(crate) make_reorder_payload: Rc<dyn Fn(usize) -> DragPayload>,
+    pub(crate) reorder_perform: Option<Rc<dyn Fn(usize, usize, &mut EventContext)>>,
     pub(crate) type_ahead_timeout: Duration,
     /// Persistent across rebuilds — see `GridView::type_ahead`.
     pub(crate) type_ahead: Rc<TypeAheadState>,
@@ -155,37 +144,28 @@ pub(crate) fn build_grid_key_handler(
         let logical_prev = if rtl { Key::ArrowRight } else { Key::ArrowLeft };
         let logical_next = if rtl { Key::ArrowLeft } else { Key::ArrowRight };
 
-        // Alt+Arrow: reorder the focused tile (when reorderable).
-        if modifiers.alt() && cfg.reorderable {
-            let target = if *key == logical_next && current + 1 < n {
-                Some(current + 1)
-            } else if *key == logical_prev && current > 0 {
-                Some(current - 1)
-            } else if *key == Key::ArrowDown && current + cols < n {
-                Some(current + cols)
-            } else if *key == Key::ArrowUp && current >= cols {
-                Some(current - cols)
-            } else {
-                None
+        // Alt+Arrow / Alt+Home / Alt+End: reorder the focused tile. The four
+        // named moves come from `common::ordered_move` (shared with the tile's
+        // context menu and its custom actions); a whole-row step is the grid's
+        // own, because "one row down" is not one of the four.
+        if modifiers.alt()
+            && let Some(ref perform) = cfg.reorder_perform
+        {
+            let named = crate::common::ordered_move::OrderedMove::from_key(
+                *key,
+                *modifiers,
+                crate::common::ordered_move::MoveAxis::Horizontal,
+                rtl,
+            )
+            .and_then(|mv| mv.destination(current, n));
+            let target = match named {
+                Some(t) => Some(t),
+                None if *key == Key::ArrowDown && current + cols < n => Some(current + cols),
+                None if *key == Key::ArrowUp && current >= cols => Some(current - cols),
+                None => None,
             };
             if let Some(t) = target {
-                // Express the positional move as a same-view drop the source
-                // can validate + apply: dropping `current` *after* `t` when
-                // moving forward, *before* `t` when moving back, yields
-                // `move_item(current, t)` for an in-memory model.
-                let position = if t > current {
-                    DropPosition::After
-                } else {
-                    DropPosition::Before
-                };
-                let payload = (cfg.make_reorder_payload)(current);
-                if (cfg.accept_drop_fn)(&payload, t, position, cfg.view_id) {
-                    cfg.focused_index.set(Some(t));
-                    if let Some(ref sel) = cfg.selection {
-                        sel.select(t);
-                    }
-                    ensure_visible(&cfg, t, ctx);
-                }
+                perform(current, t, ctx);
                 return EventResponse::Handled;
             }
         }
@@ -483,31 +463,60 @@ fn page_target(cfg: &GridKeyConfig, current: usize, cols: usize, n: usize, down:
 }
 
 fn ensure_visible(cfg: &GridKeyConfig, idx: usize, ctx: &mut EventContext) {
-    let delta = cfg.strategy.scroll_delta_to_reveal(
+    reveal_tile(
+        &cfg.strategy,
+        &cfg.scroll_y,
+        &cfg.max_scroll_y,
+        &cfg.viewport_height,
+        &cfg.viewport_width,
+        &cfg.viewport_origin,
         idx,
-        cfg.scroll_y.get(),
-        cfg.viewport_height.get(),
-        cfg.viewport_width.get(),
+        ctx,
+    );
+}
+
+/// Scroll tile `idx` into the grid's own viewport, then chase it into any
+/// enclosing scroll area.
+///
+/// Takes the pieces rather than a [`GridKeyConfig`] because the reorder commit
+/// closure — which lives in `GridView::build`, above the key handler — needs the
+/// same reveal, and one reveal is what keeps the chord and the menu row leaving
+/// the tile in the same place.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn reveal_tile(
+    strategy: &Rc<dyn GridLayoutStrategy>,
+    scroll_y: &Signal<f32>,
+    max_scroll_y: &Signal<f32>,
+    viewport_height: &Rc<Cell<f32>>,
+    viewport_width: &Rc<Cell<f32>>,
+    viewport_origin: &Rc<Cell<Option<teksilo_canvas::Point>>>,
+    idx: usize,
+    ctx: &mut EventContext,
+) {
+    let delta = strategy.scroll_delta_to_reveal(
+        idx,
+        scroll_y.get(),
+        viewport_height.get(),
+        viewport_width.get(),
         ScrollAnchor::Auto,
     );
     if delta.abs() > 0.01 {
-        let max = cfg.max_scroll_y.get();
-        let new_y = (cfg.scroll_y.get() + delta).clamp(0.0, max);
-        cfg.scroll_y.set(new_y);
+        let max = max_scroll_y.get();
+        let new_y = (scroll_y.get() + delta).clamp(0.0, max);
+        scroll_y.set(new_y);
     }
-    // After keeping the tile in the grid's OWN viewport, chase it into any
-    // enclosing scroll area. Computed analytically from the layout strategy —
-    // the tile may be virtualized (not realized as a live widget) — using the
-    // post-scroll offset so the rect is the tile's resting on-screen position.
-    // Skip when the body pane hasn't published its origin yet (a nav before the
-    // first layout), so the rect is never anchored at a stale (0, 0).
-    let Some(origin) = cfg.viewport_origin.get() else {
+    // Computed analytically from the layout strategy — the tile may be
+    // virtualized (not realized as a live widget) — using the post-scroll offset
+    // so the rect is the tile's resting on-screen position. Skipped when the
+    // body pane hasn't published its origin yet (a nav before the first layout),
+    // so the rect is never anchored at a stale (0, 0).
+    let Some(origin) = viewport_origin.get() else {
         return;
     };
-    let vp_w = cfg.viewport_width.get();
-    let r = cfg.strategy.tile_rect(idx, vp_w);
-    let scroll_y = cfg.scroll_y.get();
+    let vp_w = viewport_width.get();
+    let r = strategy.tile_rect(idx, vp_w);
+    let scroll = scroll_y.get();
     let rect =
-        teksilo_canvas::Rect::new(origin.x + r.x, origin.y + r.y - scroll_y, r.width, r.height);
+        teksilo_canvas::Rect::new(origin.x + r.x, origin.y + r.y - scroll, r.width, r.height);
     ctx.ensure_visible(rect);
 }

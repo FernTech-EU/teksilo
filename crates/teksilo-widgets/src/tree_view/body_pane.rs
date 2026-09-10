@@ -60,6 +60,12 @@ pub(crate) struct TreeViewBodyPane<T: 'static> {
     pub(crate) focused_anchor: Rc<RefCell<Option<crate::data_views::RowAnchor>>>,
 
     pub(crate) reorderable: bool,
+    /// The non-drag sibling move and the non-drag reparent, bound once by the
+    /// root. `Some` exactly when the view is reorderable; each realized row
+    /// binds its own flat index into them and gets the menu rows and custom
+    /// actions SC 2.5.7 asks for.
+    pub(crate) reorder_perform: Option<crate::common::ordered_move::MoveRow>,
+    pub(crate) reparent_perform: Option<crate::common::ordered_move::TreeReparentRow>,
     /// Whether a row-body release on a branch row auto-toggles its expansion.
     pub(crate) row_click_expands: bool,
     /// Cross-widget export / foreign-receive machinery, cloned in from the
@@ -543,6 +549,56 @@ impl<T: 'static> Widget for TreeViewBodyPane<T> {
                             }
                         }),
                     );
+                }
+
+                // The non-drag alternative to that drag: the sibling moves
+                // and the two reparents as AccessKit custom actions plus a
+                // context menu carrying the same rows, both calling the root's
+                // own commit closures. See `common::ordered_move`.
+                if let Some(ref sibling) = self.reorder_perform {
+                    let anchor = self.source.anchor(i);
+                    let live: Rc<dyn Fn() -> Option<usize>> = Rc::new(move || anchor.index());
+                    // Availability reads off the SIBLING set, not the flat one:
+                    // a row that is last among its siblings cannot move down
+                    // even with a hundred rows below it in the flattening.
+                    let (pos, size) = self.source.sibling_position(i);
+                    let mut extra: Vec<(
+                        teksilo_i18n::LocalizedString,
+                        Rc<dyn Fn(&mut teksilo_core::widget::EventContext)>,
+                    )> = Vec::new();
+                    if let Some(ref reparent) = self.reparent_perform {
+                        for mv in crate::common::ordered_move::TreeMove::ALL {
+                            // Offered only where it can land: indent needs a
+                            // previous sibling, outdent needs a parent.
+                            let reachable = match mv {
+                                crate::common::ordered_move::TreeMove::Indent => pos > 1,
+                                crate::common::ordered_move::TreeMove::Outdent => {
+                                    self.source.meta(i).is_some_and(|m| m.depth > 0)
+                                }
+                            };
+                            if !reachable {
+                                continue;
+                            }
+                            let reparent = reparent.clone();
+                            let live = live.clone();
+                            extra.push((
+                                mv.label(),
+                                Rc::new(move |ctx: &mut teksilo_core::widget::EventContext| {
+                                    if let Some(flat) = live() {
+                                        reparent(mv, flat, ctx);
+                                    }
+                                }),
+                            ));
+                        }
+                    }
+                    crate::common::ordered_move::RowCommands {
+                        perform: crate::common::ordered_move::bind_row(sibling, live),
+                        from: pos.saturating_sub(1),
+                        count: size,
+                        axis: crate::common::ordered_move::MoveAxis::Vertical,
+                        extra,
+                    }
+                    .install(ctx, child_id);
                 }
 
                 // Drag handler when reorderable OR exportable, gated by the

@@ -70,6 +70,10 @@ pub(crate) struct ListBodyPane<T: 'static> {
     pub(crate) focused_index: Rc<Cell<Option<usize>>>,
 
     pub(crate) reorderable: bool,
+    /// The non-drag reorder, bound once by the root. `Some` exactly when the
+    /// view is reorderable; each realized row binds its own index into it and
+    /// gets the menu rows and custom actions SC 2.5.7 asks for.
+    pub(crate) reorder_perform: Option<crate::common::ordered_move::MoveRow>,
     /// Cross-widget export / foreign-receive machinery, cloned in from the
     /// owning `ListView` — builds the drag-start payload here; the
     /// self-reorder flag and removal-thunk stash are `Rc`-backed, so
@@ -464,6 +468,25 @@ impl<T: 'static> Widget for ListBodyPane<T> {
                             }
                         }),
                     );
+                }
+
+                // The non-drag alternative to that drag: the four Move
+                // commands as AccessKit custom actions plus a context menu
+                // carrying the same rows, both calling the root's own commit
+                // closure. See `common::ordered_move`.
+                if let Some(ref perform) = self.reorder_perform {
+                    let anchor = self.source.anchor(i);
+                    crate::common::ordered_move::RowCommands {
+                        perform: crate::common::ordered_move::bind_row(
+                            perform,
+                            Rc::new(move || anchor.index()),
+                        ),
+                        from: i,
+                        count: self.source.len(),
+                        axis: crate::common::ordered_move::MoveAxis::Vertical,
+                        extra: Vec::new(),
+                    }
+                    .install(ctx, child_id);
                 }
 
                 // When reorderable OR exportable, attach an on_drag handler to

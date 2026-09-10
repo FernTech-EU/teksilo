@@ -27,9 +27,14 @@ pub enum SliderVariant {
     Range,
 }
 
-/// Slider orientation. Horizontal is the default; the value
-/// progresses left → right (or right → left in RTL — slider doesn't
-/// flip today, that's a known follow-up).
+/// Slider orientation. Horizontal is the default.
+///
+/// A horizontal slider's value progresses along the **reading direction**: left
+/// → right in LTR, right → left in RTL. The minimum therefore sits at the
+/// leading edge on both, and the pointer axis, the painted fill and the
+/// horizontal arrow keys all mirror together. A style that paints its own track
+/// must mirror with them — `cfg.value_normalized` is the value, not a screen
+/// position.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash, Default, Serialize, Deserialize)]
 pub enum SliderOrientation {
     #[default]

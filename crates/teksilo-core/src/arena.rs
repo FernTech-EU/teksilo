@@ -2037,7 +2037,14 @@ impl WidgetArena {
             // walker (and the event dispatcher, for action callbacks) can
             // read them after handler extraction.
             if handler_set.access.is_some() {
-                node.access_overrides = handler_set.access;
+                // Merged, not assigned: a node can already carry a
+                // block from its builder chain, and replacing it
+                // drops everything in it (see
+                // `AccessibilityOverrides::merge_from`).
+                match (&mut node.access_overrides, handler_set.access) {
+                    (Some(existing), Some(incoming)) => existing.merge_from(*incoming),
+                    (slot, incoming) => *slot = incoming,
+                }
             }
             if let Some(mode) = handler_set.access_subtree {
                 node.access_subtree = mode;

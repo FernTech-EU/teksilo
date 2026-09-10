@@ -310,44 +310,133 @@ impl<T: 'static> Widget for TreeTableView<T> {
             middle_viewport_width: self.middle_viewport_width.clone(),
         };
 
-        // Alt+Arrow tree sibling reorder wraps the shared key handler: a move
-        // among the node's siblings in the underlying `TreeModel` (cycle-free
-        // by construction). Suppressed while sorted. Every other key falls
-        // through to the navigator (cell/row movement, expand/collapse, edit).
+        // --- The non-drag reorder, all four routes at once ---
+        //
+        // The row drag moves a node among its siblings and reparents it; both
+        // are committed through the source's own `accept_drop` (cycle-free by
+        // construction) and both closures are shared by the chord below, the
+        // row's context menu and the row's AccessKit custom actions — see
+        // `common::ordered_move`. Suppressed while sorted, because a sorted view
+        // is not showing the model's order and moving a row in it would say
+        // nothing about where the row went.
+        let (reorder_perform, reparent_perform) = if self.reorderable {
+            let follow: Rc<dyn Fn(usize)> = {
+                let focused = self.focused_cell.clone();
+                let sel = self.row_selection.clone();
+                Rc::new(move |new_flat: usize| {
+                    let col = focused.get().map(|(_, c)| c).unwrap_or(0);
+                    focused.set(Some((new_flat, col)));
+                    if let Some(ref s) = sel {
+                        s.select(new_flat);
+                    }
+                })
+            };
+            let name_of: Rc<dyn Fn(usize) -> Option<String>> = {
+                let source = self.source.clone();
+                let label = self.type_ahead_label.clone();
+                Rc::new(move |index: usize| {
+                    let label = label.as_ref()?;
+                    source.with_row_str(index, &|item| label(item))
+                })
+            };
+            let sibling = {
+                let source = self.source.clone();
+                let follow = follow.clone();
+                let name_of = name_of.clone();
+                let sort = self.sort_signal.clone();
+                Rc::new(
+                    move |mv: crate::common::ordered_move::OrderedMove,
+                          flat: usize,
+                          ctx: &mut EventContext| {
+                        if sort.get().is_some() {
+                            return;
+                        }
+                        let name = (name_of)(flat);
+                        let Some(new_flat) = source.sibling_move(flat, mv) else {
+                            return;
+                        };
+                        follow(new_flat);
+                        let (pos, size) = source.sibling_position(new_flat);
+                        ctx.announce(crate::common::ordered_move::move_announcement(
+                            name.as_deref(),
+                            pos.saturating_sub(1),
+                            size,
+                        ));
+                    },
+                ) as crate::common::ordered_move::MoveRow
+            };
+            let reparent = {
+                let source = self.source.clone();
+                let follow = follow.clone();
+                let sort = self.sort_signal.clone();
+                Rc::new(
+                    move |mv: crate::common::ordered_move::TreeMove,
+                          flat: usize,
+                          ctx: &mut EventContext| {
+                        if sort.get().is_some() {
+                            return;
+                        }
+                        let name = (name_of)(flat);
+                        let Some(new_flat) = source.reparent(flat, mv) else {
+                            return;
+                        };
+                        follow(new_flat);
+                        let level = source.meta(new_flat).map_or(1, |m| m.depth + 1);
+                        ctx.announce(crate::common::ordered_move::reparent_announcement(
+                            name.as_deref(),
+                            level,
+                        ));
+                    },
+                ) as crate::common::ordered_move::TreeReparentRow
+            };
+            (Some(sibling), Some(reparent))
+        } else {
+            (None, None)
+        };
+
+        // The reorder chords wrap the shared key handler; every other key falls
+        // through to the navigator (cell/row movement, expand/collapse, edit) —
+        // including `⌥→` / `⌥←` on macOS, which the reparent decoder declines
+        // there because they already expand a whole subtree.
         let mut shared_key = keyboard::build_key_handler(key_cfg);
-        let reorderable_kbd = self.reorderable;
-        let source_kbd = self.source.clone();
+        let reorder_key = reorder_perform.clone();
+        let reparent_key = reparent_perform.clone();
         let focused_kbd = self.focused_cell.clone();
         let sel_kbd = self.row_selection.clone();
-        let sort_kbd = self.sort_signal.clone();
         let key_handler = move |event: &teksilo_core::event::WidgetEvent,
                                 ctx: &mut EventContext|
               -> EventResponse {
-            use teksilo_core::event::{Key, WidgetEvent};
-            if reorderable_kbd
-                && sort_kbd.get().is_none()
+            use teksilo_core::event::WidgetEvent;
+            if let Some(ref sibling) = reorder_key
+                && let Some(ref reparent) = reparent_key
                 && let WidgetEvent::KeyDown { key, modifiers, .. } = event
-                && modifiers.alt()
-                && matches!(key, Key::ArrowUp | Key::ArrowDown)
+                // `command()` as well as `alt()`: the reparent's portable
+                // spelling is the accelerator plus `]` / `[`.
+                && (modifiers.alt() || modifiers.command())
             {
                 let row = focused_kbd.get().map(|(r, _)| r).or_else(|| {
                     sel_kbd
                         .as_ref()
                         .and_then(|s| s.selected_indices().first().copied())
                 });
-                // Sibling reorder + the "follow the moved row" bookkeeping live
-                // in the source (key-typed there, so it works for an external
-                // store too) and hand back the row's new flat index.
-                if let Some(flat_idx) = row
-                    && let Some(new_flat) =
-                        source_kbd.keyboard_reorder(flat_idx, matches!(key, Key::ArrowDown))
-                {
-                    let col = focused_kbd.get().map(|(_, c)| c).unwrap_or(0);
-                    focused_kbd.set(Some((new_flat, col)));
-                    if let Some(ref s) = sel_kbd {
-                        s.select(new_flat);
+                if let Some(flat_idx) = row {
+                    if let Some(mv) = crate::common::ordered_move::OrderedMove::from_key(
+                        *key,
+                        *modifiers,
+                        crate::common::ordered_move::MoveAxis::Vertical,
+                        ctx.is_rtl(),
+                    ) {
+                        sibling(mv, flat_idx, ctx);
+                        return EventResponse::Handled;
                     }
-                    return EventResponse::Handled;
+                    if let Some(mv) = crate::common::ordered_move::TreeMove::from_key(
+                        *key,
+                        *modifiers,
+                        ctx.is_rtl(),
+                    ) {
+                        reparent(mv, flat_idx, ctx);
+                        return EventResponse::Handled;
+                    }
                 }
             }
             shared_key(event, ctx)
@@ -804,6 +893,8 @@ impl<T: 'static> Widget for TreeTableView<T> {
                 editing_cell: self.editing_cell.clone(),
                 focused_cell: self.focused_cell.clone(),
                 reorderable: self.reorderable,
+                reorder_perform: reorder_perform.clone(),
+                reparent_perform: reparent_perform.clone(),
                 model_id: self.model_id,
                 export: self.export.clone(),
                 drag_anchor: ctx.self_id(),

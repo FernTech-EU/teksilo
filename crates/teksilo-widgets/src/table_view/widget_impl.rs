@@ -444,65 +444,91 @@ impl<T: 'static> Widget for TableView<T> {
         let viewport_for_tick = self.viewport_height.clone();
         let header_h_for_tick = header_h;
 
-        // Alt+Arrow reorder wraps the shared key handler: the move is a
-        // synthetic same-view `RowDragData` through the source's
-        // `accept_drop`, so it travels exactly the pointer-drop path. Every
-        // other key falls through to the shared navigator (cell/row
-        // movement, edit, etc.).
+        // --- The non-drag reorder, all four routes at once ---
+        //
+        // SC 2.5.7 wants the row drag reachable without a drag. One closure
+        // performs the move; the chord below, the row's context menu and the
+        // row's AccessKit custom actions all call it, so the four routes cannot
+        // reach different end states. The move travels the source's own
+        // drop-accept path — see `common::ordered_move`.
+        let reorder_perform: Option<crate::common::ordered_move::MoveRow> =
+            self.reorderable.then(|| {
+                let mover = Rc::new(crate::common::ordered_move::RowMover {
+                    len: self.len_fn.clone(),
+                    stash: self.dnd.stash_drag_keys_fn.clone(),
+                    payload: Rc::new(move |from: usize| {
+                        teksilo_core::drag_payload::DragPayload::typed(RowDragData::<T> {
+                            source: view_id,
+                            rows: vec![from],
+                            items: None,
+                        })
+                    }),
+                    accept: self.dnd.accept_drop_fn.clone(),
+                    view: view_id,
+                    name: {
+                        // The type-ahead label resolver, where the application
+                        // gave one: the same string that names a row for
+                        // find-as-you-type names it in the utterance.
+                        let with_item = self.with_item_fn.clone();
+                        let label = self.type_ahead_label.clone();
+                        Rc::new(move |index: usize| {
+                            let label = label.as_ref()?;
+                            let out = std::cell::RefCell::new(None);
+                            (with_item)(index, &|item| *out.borrow_mut() = Some(label(item)));
+                            out.into_inner()
+                        })
+                    },
+                });
+                let sel = self.row_selection.clone();
+                let focused = self.focused_cell.clone();
+                Rc::new(
+                    move |mv: crate::common::ordered_move::OrderedMove,
+                          from: usize,
+                          ctx: &mut teksilo_core::widget::EventContext| {
+                        let Some((dest, utterance)) = mover.commit(mv, from) else {
+                            return;
+                        };
+                        if let Some(ref s) = sel {
+                            s.select(dest);
+                        }
+                        let col = focused.get().map(|(_, c)| c).unwrap_or(0);
+                        focused.set(Some((dest, col)));
+                        ctx.announce(utterance);
+                    },
+                ) as crate::common::ordered_move::MoveRow
+            });
+
+        // The reorder chord wraps the shared key handler; every other key falls
+        // through to the shared navigator (cell/row movement, edit, etc.).
         let mut shared_key = keyboard::build_key_handler(key_cfg);
-        let reorderable_kbd = self.reorderable;
-        let accept_drop_kbd = self.dnd.accept_drop_fn.clone();
-        let stash_kbd = self.dnd.stash_drag_keys_fn.clone();
+        let reorder_key = reorder_perform.clone();
         let focused_kbd = self.focused_cell.clone();
         let sel_kbd = self.row_selection.clone();
         let len_kbd = self.len_fn.clone();
         let key_handler = move |event: &teksilo_core::event::WidgetEvent,
                                 ctx: &mut teksilo_core::widget::EventContext|
               -> teksilo_core::event::EventResponse {
-            use teksilo_core::event::{EventResponse, Key, WidgetEvent};
-            if reorderable_kbd
+            use teksilo_core::event::{EventResponse, WidgetEvent};
+            if let Some(ref perform) = reorder_key
                 && let WidgetEvent::KeyDown { key, modifiers, .. } = event
-                && modifiers.alt()
+                && let Some(mv) = crate::common::ordered_move::OrderedMove::from_key(
+                    *key,
+                    *modifiers,
+                    crate::common::ordered_move::MoveAxis::Vertical,
+                    ctx.is_rtl(),
+                )
             {
                 let count = (len_kbd)();
-                if count > 0 {
-                    let cur = focused_kbd.get().map(|(r, _)| r).or_else(|| {
-                        sel_kbd
-                            .as_ref()
-                            .and_then(|s| s.selected_indices().first().copied())
-                    });
-                    if let Some(idx) = cur {
-                        let mv = match key {
-                            Key::ArrowUp if idx > 0 => {
-                                Some((idx - 1, DropPosition::Before, idx - 1))
-                            }
-                            Key::ArrowDown if idx + 1 < count => {
-                                Some((idx + 1, DropPosition::After, idx + 1))
-                            }
-                            _ => None,
-                        };
-                        if let Some((target, position, dest)) = mv {
-                            // Synthetic same-view payloads must stash the
-                            // dragged row's key at construction — the accept
-                            // path resolves identity from the stash, never
-                            // from `rows`.
-                            (stash_kbd)(&[idx]);
-                            let payload =
-                                teksilo_core::drag_payload::DragPayload::typed(RowDragData::<T> {
-                                    source: view_id,
-                                    rows: vec![idx],
-                                    items: None,
-                                });
-                            if (accept_drop_kbd)(&payload, target, position, view_id) {
-                                if let Some(ref s) = sel_kbd {
-                                    s.select(dest);
-                                }
-                                let col = focused_kbd.get().map(|(_, c)| c).unwrap_or(0);
-                                focused_kbd.set(Some((dest, col)));
-                            }
-                            return EventResponse::Handled;
-                        }
-                    }
+                let cur = focused_kbd.get().map(|(r, _)| r).or_else(|| {
+                    sel_kbd
+                        .as_ref()
+                        .and_then(|s| s.selected_indices().first().copied())
+                });
+                if let Some(from) = cur
+                    && mv.destination(from, count).is_some()
+                {
+                    perform(mv, from, ctx);
+                    return EventResponse::Handled;
                 }
             }
             shared_key(event, ctx)
@@ -813,6 +839,7 @@ impl<T: 'static> Widget for TableView<T> {
                 editing_cell: self.editing_cell.clone(),
                 focused_cell: self.focused_cell.clone(),
                 reorderable: self.reorderable,
+                reorder_perform: reorder_perform.clone(),
                 export: self.export.clone(),
                 snapshot_out_fn: self.dnd.snapshot_out_fn.clone(),
                 anchor_fn: self.anchor_fn.clone(),

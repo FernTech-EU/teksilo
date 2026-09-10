@@ -2372,7 +2372,7 @@ fn vertical_surface_role_keeps_headers_flush_leading() {
 // ─── Reorder custom actions ─────────────────────────────────────────
 
 #[test]
-fn enabled_reorderable_tabs_advertise_move_custom_actions() {
+fn enabled_reorderable_tabs_advertise_every_move_that_changes_something() {
     use accesskit::Role;
 
     let selected: Signal<Option<TabId>> = Signal::new(None);
@@ -2407,30 +2407,37 @@ fn enabled_reorderable_tabs_advertise_move_custom_actions() {
         .collect();
     assert_eq!(tabs.len(), 3);
 
-    // First tab: only "Move Right" (no left neighbor).
+    // Every move that would change something, and nothing that would not.
+    // A tab at an end advertises neither the step nor the jump toward that end.
     let first_actions = tabs[0].1.custom_actions();
     let descs: Vec<&str> = first_actions
         .iter()
         .map(|a| a.description.as_ref())
         .collect();
-    assert_eq!(descs, vec!["Move Right"], "first tab — only Move Right");
+    assert_eq!(
+        descs,
+        vec!["Move Right", "Move to End"],
+        "first tab — nothing toward the start"
+    );
 
-    // Middle tab: both directions advertised.
     let mid_actions = tabs[1].1.custom_actions();
     let descs: Vec<&str> = mid_actions.iter().map(|a| a.description.as_ref()).collect();
     assert_eq!(
         descs,
-        vec!["Move Left", "Move Right"],
-        "middle tab — both directions"
+        vec!["Move Left", "Move Right", "Move to Start", "Move to End"],
+        "middle tab — all four"
     );
 
-    // Last tab: only "Move Left".
     let last_actions = tabs[2].1.custom_actions();
     let descs: Vec<&str> = last_actions
         .iter()
         .map(|a| a.description.as_ref())
         .collect();
-    assert_eq!(descs, vec!["Move Left"], "last tab — only Move Left");
+    assert_eq!(
+        descs,
+        vec!["Move Left", "Move to Start"],
+        "last tab — nothing toward the end"
+    );
 }
 
 #[test]

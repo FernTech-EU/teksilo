@@ -90,6 +90,12 @@ pub(crate) struct TreeBodyPane<T: 'static> {
     /// Enable per-row drag-to-reorder (the root owns the drop validation +
     /// commit + sort gate; the pane only emits the drag).
     pub(crate) reorderable: bool,
+    /// The non-drag sibling move and the non-drag reparent, bound once by the
+    /// root. `Some` exactly when the view is reorderable; each realized row
+    /// binds its own flat index into them and gets the menu rows and custom
+    /// actions SC 2.5.7 asks for.
+    pub(crate) reorder_perform: Option<crate::common::ordered_move::MoveRow>,
+    pub(crate) reparent_perform: Option<crate::common::ordered_move::TreeReparentRow>,
     /// Owning `TreeTableView`'s ROW-drag identity — stamped into the drag
     /// payload so same-view reorder vs. a foreign drop can be told apart.
     /// Distinct from the column-header `table_id: usize` (an unrelated
@@ -685,6 +691,52 @@ impl<T: 'static> Widget for TreeBodyPane<T> {
                     _ => EventResponse::Ignored,
                 });
             }
+            // The non-drag alternative to that drag: the sibling moves and
+            // the two reparents as AccessKit custom actions plus a context menu
+            // carrying the same rows, both calling the root's own commit
+            // closures. See `common::ordered_move`.
+            if let Some(ref sibling) = self.reorder_perform {
+                let anchor = self.source.anchor(flat_idx);
+                let live: Rc<dyn Fn() -> Option<usize>> = Rc::new(move || anchor.index());
+                // Availability reads off the SIBLING set, not the flattening: a
+                // node last among its siblings cannot move down however many
+                // rows follow it on screen.
+                let (pos, size) = self.source.sibling_position(flat_idx);
+                let mut extra: Vec<(
+                    teksilo_i18n::LocalizedString,
+                    Rc<dyn Fn(&mut teksilo_core::widget::EventContext)>,
+                )> = Vec::new();
+                if let Some(ref reparent) = self.reparent_perform {
+                    for mv in crate::common::ordered_move::TreeMove::ALL {
+                        let reachable = match mv {
+                            crate::common::ordered_move::TreeMove::Indent => pos > 1,
+                            crate::common::ordered_move::TreeMove::Outdent => depth > 0,
+                        };
+                        if !reachable {
+                            continue;
+                        }
+                        let reparent = reparent.clone();
+                        let live = live.clone();
+                        extra.push((
+                            mv.label(),
+                            Rc::new(move |ctx: &mut teksilo_core::widget::EventContext| {
+                                if let Some(flat) = live() {
+                                    reparent(mv, flat, ctx);
+                                }
+                            }),
+                        ));
+                    }
+                }
+                crate::common::ordered_move::RowCommands {
+                    perform: crate::common::ordered_move::bind_row(sibling, live),
+                    from: pos.saturating_sub(1),
+                    count: size,
+                    axis: crate::common::ordered_move::MoveAxis::Vertical,
+                    extra,
+                }
+                .install(ctx, tree_row_id);
+            }
+
             // When reorderable OR exportable, attach an on_drag handler to
             // start the drag. Selection-aware: the whole selection when the
             // pressed row is part of a multi-selection, else just the
