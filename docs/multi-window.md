@@ -784,7 +784,7 @@ installing an observer through the current window's build context.
   [`examples/multi_window`](../examples/multi_window/src/main.rs).
 - Implementation:
   - Types — [`crates/teksilo-core/src/window/`](../crates/teksilo-core/src/window/)
-  - Dispatch — [`crates/teksilo-core/src/widget_tree/event_dispatch_impl.rs`](../crates/teksilo-core/src/widget_tree/event_dispatch_impl.rs)
+  - Dispatch — [`crates/teksilo-core/src/widget_tree/pointer_router.rs`](../crates/teksilo-core/src/widget_tree/pointer_router.rs)
   - Window manager — [`crates/teksilo-app/src/window_manager.rs`](../crates/teksilo-app/src/window_manager.rs)
   - `EventContext` methods — [`crates/teksilo-core/src/widget.rs`](../crates/teksilo-core/src/widget.rs)
 - Related docs:

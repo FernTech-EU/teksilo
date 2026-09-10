@@ -1373,4 +1373,116 @@ mod tests {
         assert!(rubber_band_inverse(extent, extent).is_finite());
         assert!(rubber_band_inverse(extent * 10.0, extent).is_finite());
     }
+
+    /// The four constant tables in `docs/kinetic-scrolling.md` §2 that this
+    /// module and `scroller` own are the shipped values.
+    ///
+    /// The tests above pin the *derived* quantities — `mPhysicalCoeff`, the
+    /// exact spline point, the overdamped solution — which is the stronger
+    /// check where it applies, because it fails if any input moved. It does not
+    /// reach every published row: the settle tolerances, the frame interval, the
+    /// spring hand-off cap and the spline scaffolding were each documented with
+    /// no assertion behind them. Six of the rows name **private** constants, so
+    /// this cannot live in `tests/`.
+    #[test]
+    fn the_documented_physics_constants_are_the_shipped_ones() {
+        use crate::kinetic::doc_table::{assert_value, rows};
+        const PAGE: &str = "kinetic-scrolling.md";
+        let t = teksilo_tokens::ScrollPhysicsTokens::DEFAULT;
+
+        let mut seen = Vec::new();
+        for row in rows(PAGE, "### Clamping physics") {
+            let key = row[0].trim_matches('`').to_string();
+            let cell = &row[1];
+            match key.as_str() {
+                "clamping_deceleration_rate" => {
+                    assert_value(PAGE, cell, t.clamping_deceleration_rate as f64, &key)
+                }
+                "clamping_inflexion" => assert_value(PAGE, cell, t.clamping_inflexion as f64, &key),
+                "clamping_friction" => assert_value(PAGE, cell, t.clamping_friction as f64, &key),
+                "START_TENSION" => assert_value(PAGE, cell, START_TENSION, &key),
+                "END_TENSION" => assert_value(PAGE, cell, END_TENSION, &key),
+                "NB_SAMPLES" => assert_value(PAGE, cell, NB_SAMPLES as f64, &key),
+                "gravity" => assert_value(PAGE, cell, GRAVITY_EARTH, &key),
+                "inches per metre" => assert_value(PAGE, cell, INCHES_PER_METER, &key),
+                "pixels per inch" => assert_value(PAGE, cell, PPI_AT_DENSITY_ONE, &key),
+                "tuning factor" => assert_value(PAGE, cell, PHYSICAL_TUNING, &key),
+                other => panic!("an unchecked clamping row {other:?}"),
+            }
+            seen.push(key);
+        }
+        assert_eq!(seen.len(), 10, "the clamping table lost a row: {seen:?}");
+
+        seen.clear();
+        for row in rows(PAGE, "### Bouncing physics") {
+            let key = row[0].trim_matches('`').to_string();
+            let cell = &row[1];
+            match key.as_str() {
+                "bouncing_decay_per_second" => {
+                    assert_value(PAGE, cell, t.bouncing_decay_per_second as f64, &key)
+                }
+                "spring_mass" => assert_value(PAGE, cell, t.spring_mass as f64, &key),
+                "spring_stiffness" => assert_value(PAGE, cell, t.spring_stiffness as f64, &key),
+                "spring_damping_ratio" => {
+                    assert_value(PAGE, cell, t.spring_damping_ratio as f64, &key)
+                }
+                "maxSpringTransferVelocity" => {
+                    assert_value(PAGE, cell, MAX_SPRING_TRANSFER_VELOCITY as f64, &key)
+                }
+                "rubber_band_factor" => assert_value(PAGE, cell, t.rubber_band_factor as f64, &key),
+                other => panic!("an unchecked bouncing row {other:?}"),
+            }
+            seen.push(key);
+        }
+        assert_eq!(seen.len(), 6, "the bouncing table lost a row: {seen:?}");
+
+        seen.clear();
+        for row in rows(PAGE, "### Settle tolerances") {
+            let key = row[0].trim_matches('`').to_string();
+            let cell = &row[1];
+            match key.as_str() {
+                "SETTLE_DISTANCE_TOLERANCE" => {
+                    assert_value(PAGE, cell, SETTLE_DISTANCE_TOLERANCE as f64, &key)
+                }
+                "SETTLE_VELOCITY_TOLERANCE" => {
+                    assert_value(PAGE, cell, SETTLE_VELOCITY_TOLERANCE as f64, &key)
+                }
+                "FLING_FRAME_INTERVAL" => assert_value(
+                    PAGE,
+                    cell,
+                    crate::kinetic::scroller::FLING_FRAME_INTERVAL.as_micros() as f64,
+                    &key,
+                ),
+                other => panic!("an unchecked settle row {other:?}"),
+            }
+            seen.push(key);
+        }
+        assert_eq!(seen.len(), 3, "the settle table lost a row: {seen:?}");
+
+        // The gates are the same value on all three profiles; the page's table
+        // has one column, so it is asserted against every profile rather than
+        // against a chosen one.
+        seen.clear();
+        for row in rows(PAGE, "### Fling velocity gates") {
+            let key = row[0].trim_matches('`').to_string();
+            let cell = &row[1];
+            for profile in [
+                teksilo_tokens::GestureProfile::MOUSE,
+                teksilo_tokens::GestureProfile::TOUCH,
+                teksilo_tokens::GestureProfile::PEN,
+            ] {
+                match key.as_str() {
+                    "min_fling_velocity" => {
+                        assert_value(PAGE, cell, profile.min_fling_velocity as f64, &key)
+                    }
+                    "max_fling_velocity" => {
+                        assert_value(PAGE, cell, profile.max_fling_velocity as f64, &key)
+                    }
+                    other => panic!("an unchecked fling-gate row {other:?}"),
+                }
+            }
+            seen.push(key);
+        }
+        assert_eq!(seen.len(), 2, "the fling-gate table lost a row: {seen:?}");
+    }
 }

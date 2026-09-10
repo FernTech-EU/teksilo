@@ -704,6 +704,15 @@ pub struct InputTokens {
     pub slop_budget: f32,
     /// The hit outset for a pen, in dp. Constant at 2.0 across densities: it
     /// describes the tool, not the UI.
+    ///
+    /// **Nothing reads this field.** The pen's outset is served by
+    /// `GestureProfile::PEN.hit_slop`, which carries the same 2.0 and is what
+    /// `HitSlop::for_pointer` consults; this is a second spelling of the same
+    /// number, kept because the density table publishes it.
+    /// `the_unread_pen_outset_agrees_with_the_pen_profile` pins the two together
+    /// so a reader who finds them disagreeing is not left guessing which one the
+    /// framework honours. Either give it the reader or delete it — do not
+    /// retune it here and expect a pen to notice.
     pub pen_hit_slop: f32,
     /// Multiplier applied to gaps and padding: 1.00 / 1.15 / 1.30.
     pub spacing_factor: f32,
@@ -1003,6 +1012,307 @@ mod tests {
             names,
             vec!["serde"],
             "teksilo-tokens must stay a serde-only leaf; found {names:?}"
+        );
+    }
+
+    // ---------------------------------------------------------------
+    // The published tables in `docs/density-and-targets.md`
+    // ---------------------------------------------------------------
+
+    /// One markdown table from a documentation page: the rows under the first
+    /// table that follows `heading`, each row as its trimmed cells.
+    ///
+    /// A documented constant is a test with no assertion unless something reads
+    /// the document back. `teksilo-tokens` is a serde-only leaf and cannot take
+    /// a dev-dependency on a parser, so this is 20 lines of `split` — which is
+    /// also all a pipe-delimited table needs. `teksilo-core` carries its own
+    /// copy for `docs/kinetic-scrolling.md` (`kinetic::doc_table`); the
+    /// duplication is deliberate, because sharing it would mean one of the two
+    /// crates depending on the other for a test helper.
+    fn doc_table(page: &str, heading: &str) -> Vec<Vec<String>> {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../docs")
+            .join(page);
+        let doc = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("reading {}: {e}", path.display()));
+        let after = doc
+            .split_once(heading)
+            .unwrap_or_else(|| panic!("{} carries no heading {heading:?}", path.display()))
+            .1;
+        let mut rows = Vec::new();
+        let mut in_table = false;
+        for line in after.lines() {
+            let line = line.trim();
+            if !line.starts_with('|') {
+                if in_table {
+                    break;
+                }
+                continue;
+            }
+            in_table = true;
+            // The header row and the `| --- |` separator carry no values.
+            if line.contains("---") {
+                rows.clear();
+                continue;
+            }
+            rows.push(
+                line.trim_matches('|')
+                    .split('|')
+                    .map(|c| c.trim().trim_matches('*').trim().to_string())
+                    .collect(),
+            );
+        }
+        assert!(
+            !rows.is_empty(),
+            "{} has no table under {heading:?}",
+            path.display()
+        );
+        rows
+    }
+
+    /// A documented cell as a number, with its units and its emphasis stripped.
+    ///
+    /// The comparison is "the code value, printed to the precision the document
+    /// chose, is what the document says" rather than a tolerance: it lets the
+    /// page write `≈ 2.3582` for `ln(0.78)/ln(0.9)` without either side
+    /// pretending to more digits than it has, and it still fails on a changed
+    /// digit.
+    fn assert_documented(cell: &str, code: f64, what: &str) {
+        let text = cell
+            .trim_matches('`')
+            .trim_start_matches('≈')
+            .trim()
+            .replace(" dp/s", "")
+            .replace(" dp", "")
+            .replace(" ms", "")
+            .replace(" samples", "");
+        let decimals = text.split_once('.').map_or(0, |(_, frac)| frac.len());
+        assert_eq!(
+            format!("{code:.decimals$}"),
+            text,
+            "docs/density-and-targets.md says {what} is {cell:?}; the code says {code}"
+        );
+    }
+
+    fn millis(cell: &str) -> Duration {
+        let text = cell.replace(" ms", "");
+        Duration::from_millis(text.trim().parse().expect("a millisecond count"))
+    }
+
+    /// The three-density ladder the page publishes is the ladder
+    /// `for_density` builds.
+    ///
+    /// Written against the document rather than against a second copy of the
+    /// numbers, so a value can only be changed in one place without something
+    /// going red. The unknown-key arm fails in **both** directions: a row the
+    /// page adds without a reader here is as much a drift as a value that moved.
+    #[test]
+    fn the_documented_density_ladder_is_the_shipped_one() {
+        let rows = doc_table("density-and-targets.md", "## The three densities");
+        let ladders = [
+            InputTokens::for_density(TargetDensity::Compact),
+            InputTokens::for_density(TargetDensity::Comfortable),
+            InputTokens::for_density(TargetDensity::Touch),
+        ];
+        let mut seen = Vec::new();
+        for row in &rows {
+            let key = row[0].trim_matches('`').to_string();
+            for (i, tokens) in ladders.iter().enumerate() {
+                let cell = &row[i + 1];
+                let what = format!("{key} at rung {i}");
+                match key.as_str() {
+                    "target_size" => assert_documented(cell, tokens.target_size as f64, &what),
+                    "grab_size" => assert_documented(cell, tokens.grab_size as f64, &what),
+                    "slop_budget" => assert_documented(cell, tokens.slop_budget as f64, &what),
+                    "spacing_factor" => {
+                        assert_documented(cell, tokens.spacing_factor as f64, &what)
+                    }
+                    "min_target_conformance" => {
+                        assert_documented(cell, tokens.min_target_conformance as f64, &what)
+                    }
+                    "pen_hit_slop" => assert_documented(cell, tokens.pen_hit_slop as f64, &what),
+                    "lines_per_notch" => {
+                        assert_documented(cell, tokens.lines_per_notch as f64, &what)
+                    }
+                    "reveal" => assert_eq!(
+                        cell.trim_matches('`'),
+                        match tokens.reveal {
+                            RevealPolicy::OnHover => "OnHover",
+                            RevealPolicy::Always => "Always",
+                            RevealPolicy::OnLongPress => "OnLongPress",
+                        },
+                        "{what}"
+                    ),
+                    "touch_enabled" => assert_eq!(
+                        cell.trim_matches('`'),
+                        tokens.touch_enabled.to_string(),
+                        "{what}"
+                    ),
+                    other => panic!(
+                        "docs/density-and-targets.md publishes a density row {other:?} \
+                         that this test does not check"
+                    ),
+                }
+            }
+            seen.push(key);
+        }
+        for expected in [
+            "target_size",
+            "grab_size",
+            "slop_budget",
+            "spacing_factor",
+            "reveal",
+            "min_target_conformance",
+            "pen_hit_slop",
+            "lines_per_notch",
+            "touch_enabled",
+        ] {
+            assert!(
+                seen.iter().any(|k| k == expected),
+                "docs/density-and-targets.md stopped publishing {expected:?}"
+            );
+        }
+    }
+
+    /// Every value in the page's per-kind gesture-profile table is the value
+    /// the shipped profile carries.
+    ///
+    /// This is the table the whole programme's tuning is quoted from, and until
+    /// it was read back most of its cells were asserted nowhere: the mouse
+    /// column had `compact_equals_todays_constants`, and the touch and pen
+    /// columns had a handful of behavioural brackets.
+    #[test]
+    fn the_documented_gesture_profiles_are_the_shipped_ones() {
+        let rows = doc_table("density-and-targets.md", "## Gesture profiles");
+        let profiles = [
+            GestureProfile::MOUSE,
+            GestureProfile::TOUCH,
+            GestureProfile::PEN,
+        ];
+        let mut seen = Vec::new();
+        for row in &rows {
+            let key = row[0].trim_matches('`').to_string();
+            for (i, profile) in profiles.iter().enumerate() {
+                let cell = &row[i + 1];
+                let what = format!("{key} on profile {i}");
+                match key.as_str() {
+                    "tap_slop" => assert_documented(cell, profile.tap_slop as f64, &what),
+                    "drag_slop" => assert_documented(cell, profile.drag_slop as f64, &what),
+                    "multi_tap_slop" => {
+                        assert_documented(cell, profile.multi_tap_slop as f64, &what)
+                    }
+                    "slop_precise" => assert_documented(cell, profile.slop_precise as f64, &what),
+                    "long_press_slop" => {
+                        assert_documented(cell, profile.long_press_slop as f64, &what)
+                    }
+                    "hit_slop" => assert_documented(cell, profile.hit_slop as f64, &what),
+                    "pan_slop" => match profile.pan_slop {
+                        None => assert_eq!(cell.trim_matches('`'), "None", "{what}"),
+                        Some(v) => assert_documented(cell, v as f64, &what),
+                    },
+                    "long_press" => assert_eq!(millis(cell), profile.long_press, "{what}"),
+                    "multi_tap_interval" => {
+                        assert_eq!(millis(cell), profile.multi_tap_interval, "{what}")
+                    }
+                    "press_feedback_delay" => {
+                        assert_eq!(millis(cell), profile.press_feedback_delay, "{what}")
+                    }
+                    "max_hold" => assert_eq!(millis(cell), profile.max_hold, "{what}"),
+                    "min_fling_velocity" => {
+                        assert_documented(cell, profile.min_fling_velocity as f64, &what)
+                    }
+                    "max_fling_velocity" => {
+                        assert_documented(cell, profile.max_fling_velocity as f64, &what)
+                    }
+                    "swipe_min_velocity" => {
+                        assert_documented(cell, profile.swipe_min_velocity as f64, &what)
+                    }
+                    "swipe_min_distance" => {
+                        assert_documented(cell, profile.swipe_min_distance as f64, &what)
+                    }
+                    "drag_activation" => assert_eq!(
+                        cell.trim_matches('`'),
+                        match profile.drag_activation {
+                            DragActivation::Immediate => "Immediate",
+                            DragActivation::AfterLongPress => "AfterLongPress",
+                            DragActivation::Auto => "Auto",
+                        },
+                        "{what}"
+                    ),
+                    other => panic!(
+                        "docs/density-and-targets.md publishes a profile row {other:?} \
+                         that this test does not check"
+                    ),
+                }
+            }
+            seen.push(key);
+        }
+        assert_eq!(
+            seen.len(),
+            16,
+            "the profile table published {} rows; `GestureProfile` has 16 fields, \
+             so one of them has stopped being documented: {seen:?}",
+            seen.len()
+        );
+    }
+
+    /// The scroll-physics table is the shipped `ScrollPhysicsTokens::DEFAULT`.
+    #[test]
+    fn the_documented_scroll_physics_are_the_shipped_ones() {
+        let rows = doc_table("density-and-targets.md", "## Scroll physics");
+        let t = ScrollPhysicsTokens::DEFAULT;
+        let mut seen = Vec::new();
+        for row in &rows {
+            let key = row[0].trim_matches('`').to_string();
+            let cell = &row[1];
+            match key.as_str() {
+                "physics" => assert_eq!(
+                    cell.trim_matches('`'),
+                    match t.physics {
+                        ScrollPhysics::Platform => "Platform",
+                        ScrollPhysics::Clamping => "Clamping",
+                        ScrollPhysics::Bouncing => "Bouncing",
+                    },
+                    "physics"
+                ),
+                "clamping_deceleration_rate" => {
+                    assert_documented(cell, t.clamping_deceleration_rate as f64, &key)
+                }
+                "clamping_inflexion" => assert_documented(cell, t.clamping_inflexion as f64, &key),
+                "clamping_friction" => assert_documented(cell, t.clamping_friction as f64, &key),
+                "bouncing_decay_per_second" => {
+                    assert_documented(cell, t.bouncing_decay_per_second as f64, &key)
+                }
+                "spring_mass" => assert_documented(cell, t.spring_mass as f64, &key),
+                "spring_stiffness" => assert_documented(cell, t.spring_stiffness as f64, &key),
+                "spring_damping_ratio" => {
+                    assert_documented(cell, t.spring_damping_ratio as f64, &key)
+                }
+                "rubber_band_factor" => assert_documented(cell, t.rubber_band_factor as f64, &key),
+                other => panic!(
+                    "docs/density-and-targets.md publishes a physics row {other:?} \
+                     that this test does not check"
+                ),
+            }
+            seen.push(key);
+        }
+        assert_eq!(seen.len(), 9, "the physics table lost a row: {seen:?}");
+    }
+
+    /// `pen_hit_slop` and `GestureProfile::PEN.hit_slop` are the same 2 dp, and
+    /// they are two fields.
+    ///
+    /// `pen_hit_slop` has **no reader in the workspace**: the pen's outset comes
+    /// from its profile, through `HitSlop::for_pointer`. The field is published
+    /// in `docs/density-and-targets.md`, so while it exists this pins the two
+    /// against each other — a reader who finds them disagreeing would have no
+    /// way to tell which one the framework honours.
+    #[test]
+    fn the_unread_pen_outset_agrees_with_the_pen_profile() {
+        assert_eq!(
+            InputTokens::for_density(TargetDensity::Compact).pen_hit_slop,
+            GestureProfile::PEN.hit_slop,
+            "two spellings of the pen's hit outset have drifted apart"
         );
     }
 }

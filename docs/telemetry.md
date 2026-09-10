@@ -286,12 +286,13 @@ durability. See §3.4 for the full reasoning.
 
 ### 2.7 The dispatch tap
 
-`teksilo-core`'s `event_dispatch_impl.rs` taps every dispatched intent
-through:
+`WidgetTree::tap_intent_dispatched` (in
+[`widget_tree.rs`](../crates/teksilo-core/src/widget_tree.rs), called from
+`dispatch_intent`) taps every dispatched intent through:
 
 ```text
-intent.fired
-  → ctx.try_telemetry_context()
+intent.dispatched                                     // name, source
+  → app_state::<TelemetryContext>()? if absent → return
   → ConsentStore::is_granted()? if not → return
   → DynamicReporter::record(&Event)
        ├── recent_log.push(event.to_owned())          // user-visible
@@ -304,6 +305,27 @@ The `recent_log_revision` signal lives on `DynamicReporter` and is
 the binding the `PrivacySettings` widget watches at
 `BindingLevel::Rebuild` so its "Inspect data sent" accordion stays
 in sync without polling.
+
+### 2.8 Input emits nothing, and that is a ruling rather than an omission
+
+The pointer, gesture, density and kinetic subsystems added by the touch
+programme emit **no telemetry at all**. No framework crate ships a telemetry
+manifest either: the only `events.yaml` in the workspace belongs to
+`examples/telemetry_codegen`, whose schema the programme left untouched, and
+`cargo teksilo-telemetry-lint --fail-on-warnings` runs over that example alone.
+There is no schema-hash test, because there is no framework schema to hash.
+
+So the whole framework-originated stream is still the one event above, and one
+consequence is worth stating because it is the interesting half: `IntentSource`
+names *how* a command was reached — `Shortcut`, `Menu`, `Handler`,
+`Programmatic`, `Accessibility` — and has **no pointer-kind variant**. A tap
+from a finger and a click from a mouse both report `Handler`. Nothing in the
+outbound stream distinguishes a touchscreen user from a mouse user, and adding a
+field that did would be a new privacy decision, not a tuning knob.
+
+An application that *wants* input analytics has the ordinary route: emit its own
+events from its own handlers, where `ctx.pointer_kind()` is in scope, through its
+own manifest and its own consent scope.
 
 ---
 

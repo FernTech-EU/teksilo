@@ -64,10 +64,13 @@ use teksilo_tokens::{InputTokens, TargetDensity};
 /// At `Compact` — the default — this is the generic ladder unchanged, so a
 /// Material 3 theme is byte-for-byte today's behaviour.
 ///
-/// Note that [`Theme::with_density`] is a generic projection and resets
-/// `input` to the generic ladder; a Material 3 app that switches density
-/// should re-apply these tokens (`theme.input = material3::input_tokens(d)`)
-/// until the density sweep wires per-preset projection.
+/// A density switch keeps this ladder: the preset's private `reproject` is
+/// registered as the theme's
+/// [`DensityProjection`](teksilo_core::styles::DensityProjection), so
+/// [`Theme::with_density`] and `WidgetTree::set_input_density` call back into
+/// this function instead of falling through to the generic
+/// [`InputTokens::for_density`]. An app therefore does not re-apply these
+/// tokens by hand; `a_density_switch_keeps_material3s_own_48_dp_target` pins it.
 pub fn input_tokens(density: TargetDensity) -> InputTokens {
     let mut tokens = InputTokens::for_density(density);
     if density == TargetDensity::Touch {

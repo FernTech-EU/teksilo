@@ -648,4 +648,60 @@ mod tests {
             e.pixels_per_second.y
         );
     }
+
+    /// The velocity-tracker table in `docs/kinetic-scrolling.md` §2 is this
+    /// module's constants.
+    ///
+    /// Before this, `HISTORY_SIZE` and `HORIZON` were used symbolically by the
+    /// tests around it and their published values — 20 samples, 100 ms — were
+    /// asserted nowhere, so retuning either would have left the document
+    /// describing a tracker that no longer existed. `DEGREE` is private, which
+    /// is why the check lives here rather than in `tests/`.
+    #[test]
+    fn the_documented_velocity_constants_are_the_shipped_ones() {
+        const PAGE: &str = "kinetic-scrolling.md";
+        let rows = crate::kinetic::doc_table::rows(PAGE, "### Velocity tracker");
+        let mut seen = Vec::new();
+        for row in &rows {
+            let key = row[0].trim_matches('`').to_string();
+            let cell = &row[1];
+            match key.as_str() {
+                "HISTORY_SIZE" => {
+                    crate::kinetic::doc_table::assert_value(PAGE, cell, HISTORY_SIZE as f64, &key)
+                }
+                "HORIZON" => crate::kinetic::doc_table::assert_value(
+                    PAGE,
+                    cell,
+                    HORIZON.as_millis() as f64,
+                    &key,
+                ),
+                "MIN_SAMPLE_SIZE" => crate::kinetic::doc_table::assert_value(
+                    PAGE,
+                    cell,
+                    MIN_SAMPLE_SIZE as f64,
+                    &key,
+                ),
+                "STOP_GAP" => crate::kinetic::doc_table::assert_value(
+                    PAGE,
+                    cell,
+                    STOP_GAP.as_millis() as f64,
+                    &key,
+                ),
+                "fit degree" => {
+                    crate::kinetic::doc_table::assert_value(PAGE, cell, DEGREE as f64, &key)
+                }
+                other => panic!(
+                    "docs/kinetic-scrolling.md publishes a velocity row {other:?} that \
+                     this test does not check"
+                ),
+            }
+            seen.push(key);
+        }
+        assert_eq!(
+            seen.len(),
+            5,
+            "the velocity table lost a row: {seen:?}. The prose below it says \
+             \"Flutter took all five from Android\"."
+        );
+    }
 }

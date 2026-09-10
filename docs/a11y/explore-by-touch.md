@@ -149,16 +149,21 @@ application registers.
 | --- | --- | --- |
 | Density switched | `WidgetTree::set_input_density`, via the wording registered with `set_density_announcement` | **implemented.** Fires once per real switch (the no-op guard on a repeated set is what makes it once), and is silent if no wording is registered. |
 | Long-press opened a context menu | the tree-owned long-press route ([`touch_route`](../../crates/teksilo-core/src/widget_tree/touch_route.rs)), via the wording registered with `set_context_menu_announcement` | **implemented.** The route is the fourth caller of `show_context_menu_for`, beside a secondary-button press, the keyboard chord and the AccessKit `ShowContextMenu` action; it announces once, only when a menu actually opened, and is silent if no wording is registered. |
-| Selection changed by a drag handle | the touch-text controller | not implemented: the controller does not exist yet. |
-| Fling settled, naming the new first visible item | the scrollable data views | not implemented: "first visible item" is `teksilo-widgets` state that `teksilo-core` cannot name. |
-| Each committed text-editing command | the touch text-editing commands | not implemented: the commands do not exist yet. |
+| Selection changed by a drag handle | `TouchSelection`, in [`text_touch`](../../crates/teksilo-core/src/text_touch.rs) | not implemented — and the reason has **changed**. The controller exists and every editing surface is a host; what is missing is a *wording door*. Core cannot name a `LocalizedString`, so a core-originated announcement needs a registration hook, and the only two that exist are `set_density_announcement` and `set_context_menu_announcement`. |
+| Fling settled, naming the new first visible item | the scrollable data views | not implemented: "first visible item" is `teksilo-widgets` state that `teksilo-core` cannot name. So this one belongs to the *widget* rather than to the fling, and no data view raises it. |
+| Each committed text-editing command | `TextAction::{Cut, Copy, Paste, SelectAll, Custom}` | not implemented, for the first row's reason: the commands exist and are committed from both the touch toolbar and the context menu; the wording door does not exist. |
 
-Every remaining unimplemented row is unimplemented because its *producer* does
-not exist, not because the announcement machinery is missing. Each will speak at
-its gesture's terminal edge, through `announce_unless_widget_speaks` — the
-quieter of the two doors, which the long-press route already uses. The density
-switch does not: it is not about any one widget, so it has none whose live
-region could be duplicating it, and it goes through the plain `announce`.
+None of the three is blocked on the announcement machinery, and only one is still
+blocked on its producer. Two of them want the same small thing — a registration
+hook in the shape of the two that already work, so the application supplies the
+sentence. The third wants a widget-side announcement, because the fact it would
+speak is widget state.
+
+Each will speak at its gesture's terminal edge, through
+`announce_unless_widget_speaks` — the quieter of the two doors, which the
+long-press route already uses. The density switch does not: it is not about any
+one widget, so it has none whose live region could be duplicating it, and it goes
+through the plain `announce`.
 
 ## 4. Reviewed rather than tested
 
@@ -176,3 +181,13 @@ that no Linux CI host can execute, and belong on a hardware sign-off checklist:
 
 The Linux `busctl` reply parser **is** tested, over recorded reply strings
 rather than a live bus.
+
+## See also
+
+- [Single-pointer alternatives to dragging](non-drag-alternatives.md) — the other
+  half of the pointer-accessibility story, SC 2.5.7.
+- [Density & targets](../density-and-targets.md) — SC 2.5.8 and the target audit.
+- [Touch & pen](../touch-and-pen.md) — the pointer model, including why a contact
+  never produces hover.
+- [Porting a widget to the pointer model](../porting-widgets-to-the-pointer-model.md)
+  — clause 6, on giving every hover-gated affordance a second route.

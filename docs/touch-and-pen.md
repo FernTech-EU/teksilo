@@ -8,22 +8,43 @@ pointer, always hovering, always precise, always present. Touchscreens and
 digitizers break all four of those assumptions at once. This document describes
 the vocabulary the framework uses to stop assuming them.
 
-It is written alongside the migration, so it grows as the packages land. What is
-here now is what exists now: the pointer model, the clock, the trace switch, and
-the platform translator that turns an OS touch packet into pointer samples.
+This page is the **model**: identity, the clock, the sample doors, the platform
+seam, the pen, the press, the budget. Three companions carry the rest — the
+dispatch and arbitration procedure is in
+[Events & gestures](events-and-gestures.md), the sizing and hit-target side is in
+[Density & targets](density-and-targets.md), and the obligations a widget author
+signs up to are a numbered contract in
+[porting-widgets-to-the-pointer-model.md](porting-widgets-to-the-pointer-model.md).
 
-> **Status.** A mouse behaves exactly as it always has. The path is now
-> connected end to end: the app event loop routes `Touch`, `CursorMoved`,
-> `MouseInput`, `MouseWheel` and the OS gesture family through the platform
-> backend into the tree's sample doors, hands `CursorLeft` straight to the tree
-> (there is no sample for a boundary crossing), drains the pen shim once
-> per event-loop turn, and revokes every live pointer — in the tree and at the
-> translator both — when a window is deactivated or occluded. A window closing
-> drains the translator too, so the process-global pointer identities its
-> contacts held are returned. What a running application does
-> **not** yet do is decide anything differently because a finger arrived rather
-> than a mouse: `DensityPolicy::FollowLastPointer` is stored and honoured by
-> nobody, and the touch text contract is a later package.
+> **Status.** A mouse behaves exactly as it always has. The path is connected end
+> to end: the app event loop routes `Touch`, `CursorMoved`, `MouseInput`,
+> `MouseWheel` and the OS gesture family through the platform backend into the
+> tree's sample doors, hands `CursorLeft` straight to the tree (there is no
+> sample for a boundary crossing), drains the pen shim once per event-loop turn,
+> and revokes every live pointer — in the tree and at the translator both — when
+> a window is deactivated or occluded. A window closing drains the translator
+> too, so the process-global pointer identities its contacts held are returned.
+> Above it, a finger scrolls, selects on release, reorders behind a hold, selects
+> text with handles and a magnifier, drags to and from the OS, pinches a scene,
+> and reaches a 24 dp target; a pen draws with pressure and tilt and hovers.
+>
+> **Three things a running application still does not do right.** It does not
+> switch density because a finger arrived
+> (`DensityPolicy::FollowLastPointer` and `Environment::prefers_touch` have an
+> ingress and no writer — what a stray tap should cost, whether a pen is coarse,
+> and when hysteresis commits are unanswered). It does not paint an overscroll
+> (`ScrollableAxes::overscroll` publishes the value; nothing renders a stretch or
+> a glow). And a **two-finger pinch over-zooms**: the two producers disagree on
+> whether `PinchChanged`'s `scale` and `rotation` are cumulative or per-sample —
+> the touchscreen recognizer reports both *cumulatively* since the gesture's
+> start, the OS trackpad arm reports per-sample deltas, and the consumer combines
+> whichever arrives — so a touchscreen spread compounds and runs into `max_zoom`.
+> A trackpad *twist* is separately off by a factor of ~57, because winit's degrees
+> are passed into a field the recognizer documents as radians. Both are
+> pinned by `#[ignore]`d tests in
+> `teksilo-scene/src/view/tests/touch_camera.rs`, and both fixes are below the
+> scene, in core and in the platform translator. §9 lists what else is reviewed
+> rather than tested.
 
 ---
 
@@ -1034,32 +1055,36 @@ anything got an invisible focus for the rest of the session.
 ### 7.3 The press-time actuation census
 
 What still happens on `PointerDown`, and why. Every entry was read in the source
-rather than inferred; the list of conversions still owed names the package that
-owes each one.
+rather than inferred. The citations are **file plus the call named in the middle
+column** — that call is what to grep for; line numbers were removed because they
+rot within a couple of packages while the verdicts stay true.
 
 #### Kept on press, with the reason
 
 | site | what it does on press | why it stays |
 | --- | --- | --- |
-| [`title_bar/resize_strip.rs:116`](../crates/teksilo-widgets/src/title_bar/resize_strip.rs) | `host.begin_resize(edge)` | The OS owns the gesture from the press onward. `begin_resize` hands the pointer to the compositor's own interactive-resize loop, which never delivers the release back to us — there is no release to move the actuation to. |
-| [`splitter/handle.rs:266`](../crates/teksilo-widgets/src/splitter/handle.rs) | captures the pointer, records the drag origin and the pane pair | A continuous manipulator: the value it produces **is** the press position, and everything after the press is measured from it. Deferring to the release would mean the divider only ever jumped, never dragged. |
-| [`docking/resize_handle.rs:235`](../crates/teksilo-widgets/src/docking/resize_handle.rs) | captures, records the drag offset | The Splitter handle's twin, and the same reason. |
-| [`table_view/header.rs:707`](../crates/teksilo-widgets/src/table_view/header.rs) | latches a column resize / reorder grip | Same family: the grip's whole output is the delta from the press point. |
-| [`spin_box/step_button.rs:252`](../crates/teksilo-widgets/src/spin_box/step_button.rs) | steps once, then arms hold-to-repeat | Qt's `QAbstractSpinBox` convention, and the auto-repeat needs a press to start counting from. A step is cheap and reversible; a release-only step would make the repeat impossible to express. |
-| [`primitives/text_input_field/mouse.rs:25`](../crates/teksilo-widgets/src/primitives/text_input_field/mouse.rs), [`rich_text/mouse.rs:251`](../crates/teksilo-widgets/src/rich_text/mouse.rs), [`code_editor/mouse.rs:46`](../crates/teksilo-widgets/src/code_editor/mouse.rs) | places the caret and latches a selection anchor | The mouse-only selection latches. A drag-select is a continuous manipulator whose anchor is the press point, and every desktop text surface behaves this way. Touch text selection is a different gesture set entirely and is owed by the touch-text package, which will not reuse this path. |
-| [`password_field.rs:527`](../crates/teksilo-widgets/src/password_field.rs) | starts a hold-to-reveal | The gesture *is* "while held". There is nothing to defer. |
-| [`grid_view/body_pane.rs:335`](../crates/teksilo-widgets/src/grid_view/body_pane.rs), [`list_view/body_pane.rs:309`](../crates/teksilo-widgets/src/list_view/body_pane.rs), [`tree_view/body_pane.rs:298`](../crates/teksilo-widgets/src/tree_view/body_pane.rs), [`table_view/body_pane.rs:392`](../crates/teksilo-widgets/src/table_view/body_pane.rs), [`tree_table_view/body_pane.rs:601`](../crates/teksilo-widgets/src/tree_table_view/body_pane.rs) | Ctrl- and Shift-modified row selection | The **mouse-only** selection latches: an accelerator-click extends a selection whose anchor is the press, and a Shift-drag range needs the press to anchor from. The unmodified press on an already-selected row is *already* deferred to the release (`data_views::deferred_select`) so grabbing a multi-selection drags the whole set; the remaining press-time paths are the modified ones. |
-| [`grid_view.rs:1274`](../crates/teksilo-widgets/src/grid_view.rs) | records the modifiers the marquee will use | Not an actuation. It reads the press so the drag that may follow knows whether it is additive; the marquee itself starts from `DragPhase::Started`. |
-| [`button.rs:128`](../crates/teksilo-widgets/src/button.rs) | sets `InteractionState::Pressed` | Not an actuation either — a press *visual*, which is what §7.1 exists to govern. The button family's own bookkeeping is left in place for now; converting it is the controls sweep's job. |
+| [`title_bar/resize_strip.rs`](../crates/teksilo-widgets/src/title_bar/resize_strip.rs) | `host.begin_resize(edge)` | The OS owns the gesture from the press onward. `begin_resize` hands the pointer to the compositor's own interactive-resize loop, which never delivers the release back to us — there is no release to move the actuation to. |
+| [`splitter/handle.rs`](../crates/teksilo-widgets/src/splitter/handle.rs) | captures the pointer, records the drag origin and the pane pair | A continuous manipulator: the value it produces **is** the press position, and everything after the press is measured from it. Deferring to the release would mean the divider only ever jumped, never dragged. |
+| [`docking/resize_handle.rs`](../crates/teksilo-widgets/src/docking/resize_handle.rs) | captures, records the drag offset | The Splitter handle's twin, and the same reason. |
+| [`table_view/header.rs`](../crates/teksilo-widgets/src/table_view/header.rs) | latches a column resize / reorder grip | Same family: the grip's whole output is the delta from the press point. |
+| [`spin_box/step_button.rs`](../crates/teksilo-widgets/src/spin_box/step_button.rs) | steps once, then arms hold-to-repeat | Qt's `QAbstractSpinBox` convention, and the auto-repeat needs a press to start counting from. A step is cheap and reversible; a release-only step would make the repeat impossible to express. |
+| [`primitives/text_input_field/mouse.rs`](../crates/teksilo-widgets/src/primitives/text_input_field/mouse.rs), [`rich_text/mouse.rs`](../crates/teksilo-widgets/src/rich_text/mouse.rs), [`code_editor/mouse.rs`](../crates/teksilo-widgets/src/code_editor/mouse.rs) | places the caret and latches a selection anchor | The **mouse-only** selection latches, and they are gated on a precise pointer. A drag-select is a continuous manipulator whose anchor is the press point, and every desktop text surface behaves this way. A direct pointer takes a different path entirely — the press commits nothing, the caret lands on a release that still belongs to it, and a hold selects the word and raises the handles. See [Touch text editing](text-touch-editing.md). |
+| [`password_field.rs`](../crates/teksilo-widgets/src/password_field.rs) | starts a hold-to-reveal | The gesture *is* "while held". There is nothing to defer. |
+| [`grid_view/body_pane.rs`](../crates/teksilo-widgets/src/grid_view/body_pane.rs), [`list_view/body_pane.rs`](../crates/teksilo-widgets/src/list_view/body_pane.rs), [`tree_view/body_pane.rs`](../crates/teksilo-widgets/src/tree_view/body_pane.rs), [`table_view/body_pane.rs`](../crates/teksilo-widgets/src/table_view/body_pane.rs), [`tree_table_view/body_pane.rs`](../crates/teksilo-widgets/src/tree_table_view/body_pane.rs) | Ctrl- and Shift-modified row selection, **for a precise pointer only** | The mouse's accelerator-click extends a selection whose anchor is the press, and a Shift-drag range needs the press to anchor from. Its one deferral is the unmodified press on an already-selected row, so grabbing a multi-selection drags the whole set. A **direct** pointer defers all three decisions to the release, because a finger has no Ctrl, no Shift, and its press is the opening sample of a possible scroll — see the conversion table below. |
+| [`grid_view.rs`](../crates/teksilo-widgets/src/grid_view.rs) | records the modifiers the marquee will use | Not an actuation. It reads the press so the drag that may follow knows whether it is additive; the marquee itself starts from `DragPhase::Started`. |
+| [`button.rs`](../crates/teksilo-widgets/src/button.rs) | sets `InteractionState::Pressed` | Not an actuation — a press *visual*, which is what §7.1 governs, and it is no longer the widget's own bookkeeping: `bind_press_interaction` mirrors the framework's `ctx.pressed_signal()` onto the button's `InteractionState`, so the router decides when the visual is up (including withholding it for the feedback delay inside a pan claimant). The remaining `set(Pressed)` calls in that file are the keyboard path, where Space and Enter have no pointer to ask about. |
 
-#### Owed to a later package
+#### Converted, and what each became
 
-| site | what it does on press | owed by |
+Nothing on this list is still owed. Each row records what the conversion turned
+out to be, because in two cases it was not what was planned.
+
+| site | what it did on press | what it does now |
 | --- | --- | --- |
-| [`widget_tree/pointer_router.rs:529`](../crates/teksilo-core/src/widget_tree/pointer_router.rs) — `handle_click_outside` | dismisses every click-outside overlay | **P17.** A finger that presses outside a popover and slides back in has not dismissed it; the dismissal belongs on the release, with the same "landed where it started" guard focus now uses. |
-| [`widget_tree/pointer_router.rs:823`](../crates/teksilo-core/src/widget_tree/pointer_router.rs) — the `PointerButton::Secondary` arm | opens the context menu | **Closed by P29**, though not as written: the Secondary arm is left exactly as it is (a mouse still has that button) and the long press is a **fourth, additive** route into the same `show_context_menu_for`. It is not a long-press *recognizer* either — see [`touch_route`](../crates/teksilo-core/src/widget_tree/touch_route.rs) for why a recognizer cannot reach a disabled node. |
-| [`title_bar/drag_region.rs:155`](../crates/teksilo-widgets/src/title_bar/drag_region.rs) | `host.show_window_menu(position)` on a Secondary press | **Already closed** before P29 looked at it: the node carries an `on_long_press` that calls `show_window_menu`, and its module header documents it. A widget's own `on_long_press` takes precedence over the tree route, so the two do not collide. (The window *move* on this node is not a press-time actor at all — it starts from `DragPhase::Started`.) |
-| `data_views::deferred_select::on_down` — the `command()` and `shift()` arms, at the five body panes listed above | modified row selection | **P23.** Listed in both tables on purpose: the *mouse* behaviour is kept and justified above; what P23 owes is the touch gesture set that replaces it, since a finger has no Ctrl and no Shift. |
+| [`widget_tree/pointer_router.rs`](../crates/teksilo-core/src/widget_tree/pointer_router.rs) — `handle_click_outside` | dismissed every click-outside overlay | **Converted.** `handle_click_outside` no longer exists: `arm_outside_press_dismissal` *arms* on the Down and `commit_outside_press_dismissal` commits on the Up, per pointer. For a direct pointer the arming Down is also **suppressed beneath**, so nothing under the overlay activates, and a press that slides off or is cancelled aborts the arm having delivered nothing. A mouse is unchanged. |
+| [`widget_tree/pointer_router.rs`](../crates/teksilo-core/src/widget_tree/pointer_router.rs) — the `PointerButton::Secondary` arm | opens the context menu | **Closed by P29**, though not as written: the Secondary arm is left exactly as it is (a mouse still has that button) and the long press is a **fourth, additive** route into the same `show_context_menu_for`. It is not a long-press *recognizer* either — see [`touch_route`](../crates/teksilo-core/src/widget_tree/touch_route.rs) for why a recognizer cannot reach a disabled node. |
+| [`title_bar/drag_region.rs`](../crates/teksilo-widgets/src/title_bar/drag_region.rs) | `host.show_window_menu(position)` on a Secondary press | **Already closed** before P29 looked at it: the node carries an `on_long_press` that calls `show_window_menu`, and its module header documents it. A widget's own `on_long_press` takes precedence over the tree route, so the two do not collide. (The window *move* on this node is not a press-time actor at all — it starts from `DragPhase::Started`.) |
+| `data_views::deferred_select::on_down` — the `command()` and `shift()` arms, at the five body panes listed above | modified row selection | **Converted, and further than planned.** For a **direct** pointer `on_down` now applies *nothing at all*: it decides which of `Collapse` / `Toggle` / `Extend` the modifiers chose, parks it, and `on_up` applies it only if `release_completes_the_press` — so a pan commits nothing a release on that row would have committed. The mouse keeps its press-time behaviour, justified above, except for the pre-existing multi-selection collapse, which was already deferred. |
 
 #### Already release-driven, and worth recording
 
@@ -1067,15 +1092,15 @@ Three widgets the design expected to find on the press turned out to be on the
 release or the drag already, and need no conversion:
 
 * the **ScrollBar** — the thumb latches from `DragPhase::Started`
-  ([`scroll_bar.rs:502`](../crates/teksilo-widgets/src/scroll_bar.rs)) and a
-  track click is an `on_tap` (`scroll_bar.rs:546`);
+  ([`scroll_bar.rs`](../crates/teksilo-widgets/src/scroll_bar.rs)) and a
+  track click is an `on_tap` (`scroll_bar.rs`);
 * the **Slider** — likewise, `DragPhase::Started` at
-  [`slider.rs:358`](../crates/teksilo-widgets/src/slider.rs) and `on_tap` at
-  `slider.rs:380`;
+  [`slider.rs`](../crates/teksilo-widgets/src/slider.rs) and `on_tap` at
+  `slider.rs`;
 * **menu triggers, submenu opening and tab activation** — all `on_tap` or
-  `on_hover` ([`menu_bar/trigger.rs:74`](../crates/teksilo-widgets/src/menu_bar/trigger.rs),
-  [`menu_item/widget_impl.rs:577`](../crates/teksilo-widgets/src/menu_item/widget_impl.rs),
-  [`tab_widget/header.rs:732`](../crates/teksilo-widgets/src/tab_widget/header.rs)),
+  `on_hover` ([`menu_bar/trigger.rs`](../crates/teksilo-widgets/src/menu_bar/trigger.rs),
+  [`menu_item/widget_impl.rs`](../crates/teksilo-widgets/src/menu_item/widget_impl.rs),
+  [`tab_widget/header.rs`](../crates/teksilo-widgets/src/tab_widget/header.rs)),
   so their remaining touch problem is the hover-only half, not the press-time
   half.
 
@@ -1232,10 +1257,14 @@ costs and an imperfect one of what the folds alone cost.
 
 ---
 
-## 9. What is not here yet
+## 9. What is reviewed rather than tested
 
-Deliberately, and in this order: touch text editing, and the remaining
-scrollable and menu sweeps. Each has its own package; this file grows with them.
+The migration is complete: the scrollable, control, menu, data-view, text and
+chrome sweeps have all landed, and touch text editing has a host in every editing
+surface. What is left on this page is not a list of missing features but a list of
+**claims a headless Linux CI host cannot check**, which is what a hardware
+sign-off is for. The three known *defects* are in the Status note at the top of
+this page.
 
 The app event loop **is** wired: a `WindowEvent::Touch` handed to
 `TeksiloAppHandler::window_event` reaches the widget tree as a touch sample.
@@ -1304,10 +1333,33 @@ The cancel teardown is complete: the framework press signal clears there
 (§7.1) and a fling this pointer was driving stops there, both at the point the
 funnel marks.
 
-See also: [Density & targets](density-and-targets.md), the
-[widget pointer inventory](widget-pointer-inventory.md), the
-[hover-affordance census](hover-affordance-census.md), and the
-[drag-operation census](drag-operation-census.md).
+### Telemetry: nothing is emitted
+
+The pointer, gesture, density and kinetic subsystems emit **no telemetry**, and no
+framework crate ships a telemetry manifest — the only `events.yaml` in the
+workspace belongs to `examples/telemetry_codegen`, and this programme left its
+schema untouched. The framework's one outbound event remains `intent.dispatched`,
+whose `IntentSource` names how a command was reached and has no pointer-kind
+variant: a tap from a finger and a click from a mouse both report `Handler`. See
+[telemetry.md §2.8](telemetry.md).
+
+## See also
+
+- [porting-widgets-to-the-pointer-model.md](porting-widgets-to-the-pointer-model.md)
+  — the numbered contract, if you are porting or writing a widget.
+- [Events & gestures](events-and-gestures.md) — dispatch, recognizers, the
+  sequence and the ordered decision procedure.
+- [Density & targets](density-and-targets.md) — the ladders, the hit mechanisms,
+  the gesture-profile tables.
+- [Kinetic scrolling](kinetic-scrolling.md), [Touch text
+  editing](text-touch-editing.md), [Soft keyboard](soft-keyboard.md),
+  [Data views under a finger](data-view-touch.md).
+- [Explore by touch](a11y/explore-by-touch.md) and [single-pointer alternatives to
+  dragging](a11y/non-drag-alternatives.md) — the accessibility halves.
+- The inventories: [widget pointer inventory](widget-pointer-inventory.md),
+  [density inventory](density-inventory.md), [hover-affordance
+  census](hover-affordance-census.md), [drag-operation
+  census](drag-operation-census.md).
 
 [`PointerInfo`]: https://docs.rs/teksilo-core
 [`PointerIdAllocator`]: https://docs.rs/teksilo-core

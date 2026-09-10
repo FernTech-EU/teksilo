@@ -93,7 +93,14 @@ pub enum ScrollBarPolicy {
     /// Always show the scroll bar, even when content fits without scrolling.
     AlwaysOn,
     /// Never show the scroll bar; the content still scrolls on a wheel, on a
-    /// finger's pan, and from the keyboard and AT actions.
+    /// finger's pan, and from the assistive-technology scroll actions the
+    /// viewport advertises.
+    ///
+    /// Not from the keyboard: `ScrollArea` installs no key handler, and the
+    /// arrow / Home / End / Page arms on [`ScrollBar`] belong to a node built
+    /// `focusable(false)`, so no keyboard user reaches them. A focused
+    /// descendant is still revealed — that is `ScrollIntoView`, not a key the
+    /// viewport handles.
     AlwaysOff,
 }
 

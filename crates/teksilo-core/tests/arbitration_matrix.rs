@@ -29,10 +29,13 @@
 //! both deliberate:
 //!
 //! * a row proves what the **framework** does with that shape, not what the
-//!   named widget does today. `ScrollArea` — and `TabBar`, through the scroll
-//!   area it wraps its header row in — is the only production declarer of a
-//!   [`PanClaim`]; every other scenario's claimant is the enclosing scroller
-//!   the real shape would sit in, written out. So the generated table in
+//!   named widget does today. The production declarers of a [`PanClaim`] are
+//!   the nine surfaces that adopt `ScrollableBehavior` — `ScrollArea`, the five
+//!   data views and the three text surfaces — plus `Terminal` and `SceneView`,
+//!   which declare their own directly because neither scrolls a pixel offset in
+//!   `[0, max]`; `TabBar` inherits one from the scroll area it wraps its header
+//!   row in. Every *other* scenario's claimant is the enclosing scroller the
+//!   real shape would sit in, written out. So the generated table in
 //!   `docs/events-and-gestures.md` is labelled as fixture behaviour;
 //! * when a widget's shape changes, this file does not notice. That is what
 //!   the source line in each scenario's doc comment is for.
@@ -1710,11 +1713,10 @@ fn render_table() -> String {
         "Each row is a **core-only fixture** reproducing the named widget's \
          arbitration shape — the handlers it installs, the claims it declares \
          and the capture it takes — not the widget itself, which lives in a \
-         crate `teksilo-core` cannot depend on. `ScrollArea` — and `TabBar`, \
-         through the scroll area it wraps its header row in — is the only \
-         production declarer of a `PanClaim`; every other row's claimant is \
-         the enclosing scroller the real shape would sit in, written out. So \
-         read a row as *what the framework does with this shape*.\n\n",
+         crate `teksilo-core` cannot depend on. A row's *claimant* is the \
+         enclosing scroller the real shape would sit in, written out, except \
+         where the named widget declares one itself. So read a row as *what \
+         the framework does with this shape*.\n\n",
     );
     out.push_str(
         "| Scenario | Pointer | Frozen | Members at press (innermost first) | \

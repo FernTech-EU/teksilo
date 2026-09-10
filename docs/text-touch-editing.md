@@ -471,6 +471,37 @@ hit-tests to zero and every caret rectangle is the same rectangle. There is no
 geometry to hang an affordance off, and three handles stacked at the start of an
 empty line would be visible nonsense.
 
+## Multi-line surfaces
+
+`RichTextEditor`, `CodeEditor`, `PlainTextEditor` and `LogView` — four widgets
+over two state types — share one mount,
+`teksilo-widgets/src/rich_text/touch_mount.rs`. It owns the controller, the two
+overlays (a `FullViewport` pass-through one for the handles and the lens, a
+standard-band one for the toolbar) and the pass-through content root that lets a
+cursor's click reach a handle. It sits under `rich_text` rather than in `common`
+because `code_editor` already reaches into `rich_text` for its hit test and its
+painter, and `rich_text` is the lower of the two in the crate's own dependency
+order.
+
+What the mount cannot do for a host is the **coordinate conversion**: everything
+in `teksilo_core::text_touch` is stated in window coordinates and the router hands
+a handler widget-local ones, so each stack converts on the way in and on the way
+out — where the editor's body sits inside its wrapper is a per-stack fact. That is
+the same pair of conversions the section above describes; the mount just makes
+them the host's only obligation.
+
+Three properties of these surfaces that the single-line family does not have:
+
+* **A read-only surface still selects.** `LogView` has no caret, so its
+  affordance set is the two selection handles and a Copy-only toolbar — which is
+  the state `clipboard_actions` derives rather than a mode anything declares.
+* **A hold is the selection gesture, and the press commits nothing.** The caret
+  lands on a release that still belongs to its press; a hold selects the word
+  under the contact and raises the handles and the toolbar together.
+* **The context menu is the toolbar.** The `CodeEditor` family gained its
+  right-click menu from the same builder that produces the touch toolbar, so a
+  command exists once and both routes reach it.
+
 ## Limits
 
 * The lens clip is rectangular, so the shipped lens frame is too. See above.
@@ -497,3 +528,16 @@ empty line would be visible nonsense.
   only consumer is the toolbar's placement, and the engines behind the shipped
   editors expose a union box. A surface with per-line geometry returns its union.
 * Nothing in the framework can verify that a magnifier painter is pure.
+
+---
+
+## See also
+
+- [Porting a widget to the pointer model](porting-widgets-to-the-pointer-model.md)
+  — the general contract; this page is the text-surface specialisation of it.
+- [Soft keyboard](soft-keyboard.md) — the request nobody makes yet, and the IME
+  candidate area.
+- [Touch & pen](touch-and-pen.md) §7 — the press, and why a caret lands on the
+  release.
+- [Density & targets](density-and-targets.md) — where a handle's 44 dp target
+  comes from and why it is not the 24 dp floor.

@@ -685,7 +685,9 @@ A press that misses a mark by a few dp is a miss a finger cannot avoid,
 so each chart's own hit test admits one — sized by
 `hit::mark_tolerance`, which is the pointer's hit-slop radius from
 `HitSlop::for_pointer`: **0 dp for a mouse**, 2 for a pen, 8 for a
-finger (capped by the density's `slop_budget`). Because the mouse's is
+finger — and the density's `slop_budget` caps only the **coarse** figure,
+because the budget describes a contact patch a precise pointer does not
+have. Because the mouse's is
 zero by arithmetic rather than by a branch, every tolerance-aware hit
 test below is the identity for a mouse.
 

@@ -67,6 +67,8 @@
 //!
 //! Reference: `docs/kinetic-scrolling.md`.
 
+#[cfg(test)]
+mod doc_table;
 pub mod scroller;
 pub mod simulation;
 pub mod velocity;

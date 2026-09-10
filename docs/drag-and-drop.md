@@ -230,7 +230,7 @@ Two related interactions, both handled by the framework:
 
 ### 6.1 Mouse-wheel scroll over a drop target
 
-While `active_drag` is `Some`, `WidgetEvent::Scroll` is routed to the drag session's `current_target` instead of the normally-hovered widget. The drop target's `on_scroll` handler (e.g. `ListView`'s internal one) fires, updating its scroll signal. The framework then synthesises a re-hover at the stationary pointer so drop-index math, feedback line, and preview placement all refresh against the new scroll offset. Implementation: the `WidgetEvent::Scroll` arm of the `active_drag.is_some()` match in [`dispatch_event`](../crates/teksilo-core/src/widget_tree/event_dispatch_impl.rs).
+While `active_drag` is `Some`, `WidgetEvent::Scroll` is routed to the drag session's `current_target` instead of the normally-hovered widget. The drop target's `on_scroll` handler (e.g. `ListView`'s internal one) fires, updating its scroll signal. The framework then synthesises a re-hover at the stationary pointer so drop-index math, feedback line, and preview placement all refresh against the new scroll offset. Implementation: the `WidgetEvent::Scroll` arm of the `active_drag.is_some()` match in [`dispatch_event_impl`](../crates/teksilo-core/src/widget_tree/pointer_router.rs).
 
 ### 6.2 Viewport-edge auto-scroll
 

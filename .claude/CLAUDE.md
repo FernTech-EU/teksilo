@@ -653,11 +653,24 @@ Visual showcase: `cargo run -p animations-kit`.
 - `.focus_within(Signal<bool>)` / `.hover_within(Signal<bool>)` — framework writes `true` whenever the focused / hovered widget is a **strict descendant** of this node. Drives unified halos around composite widgets (SpinBox, SplitButton, ComboBox, messenger composer panel, GroupBox sections). Strict-ancestors-only: a widget's own focus/hover does **not** flip its own `_within` signal — combine with `on_focus`/`on_hover` if you need both.
 - Handlers attached via `WidgetBuilder` trait (blanket impl) or `HandlerSet` in `build()`
 - Framework auto-wires gesture recognizers from handler types (on_tap → TapRecognizer)
-- **Cross-widget tap/drag disambiguation** (`GestureArena` is per-widget, no cross-arena arbitration): when a descendant `on_tap` captures the pointer on PointerDown, the framework arms **drag observers** on the captured widget's strict ancestors that carry an `on_drag`/`on_swipe` — feeding the down/move into *that ancestor's own* gesture arena; if the ancestor recognizes a drag it calls `start_drag` and the existing `active_drag` takeover (checked before capture routing) pulls the pointer from the descendant. A captured widget that already has its own `on_drag` is skipped (untouched). So press-release = descendant tap; press-drag = ancestor drag (e.g. a `SceneView` behind tappable cards: click selects, drag marquees). See docs/events-and-gestures.md §4.2.
+- **One pointer vocabulary, no touch event family.** Every `Pointer*` and `Scroll` event carries `pointer: PointerInfo` — id, kind (`Mouse` / `Touch` / `Pen(PenKind)` / `Unknown`), the W3C per-kind `primary` flag, buttons, axes (pressure / tilt / twist / contact size) and an `EventTime` from the tree's one `InputClock`. Read it as `ctx.pointer()` / `ctx.pointer_kind()`; branch on `is_direct()` (what the gesture *means*), `is_coarse()` (geometry) or `hovers()` (reachability). A mouse, a finger and a pen can all be live at once — there is no "touch mode". Construct events with `WidgetEvent::pointer_down/up/move/scroll`, which default to `PointerInfo::mouse` at the epoch.
+- **`PointerCancel { window_position, reason, pointer }` is terminal** — no `PointerUp` follows, nothing may activate, and a widget unwinds its own state from `.on_pointer_cancel(|&PointerInfo, CancelReason, ctx|)`. The framework releases capture, clears the press visual, drops the sequence and stops a fling before the handler runs. 15 `CancelReason` variants, `#[non_exhaustive]`.
+- **Two positional fields are window-space and are named for it**: `Scroll::window_position` and `PointerCancel::window_position`. Everything else a handler receives is widget-local (the router localises against the captor's *current* bounds). Those two are routing and velocity coordinates by contract — the router routes by the first, and a pan's tracker follows the *pointer*, not the widget — so a widget needing content coordinates converts at the use site. One test pins the asymmetry so a later "consistency fix" goes red.
+- **Cross-widget arbitration is `PointerSequence`, one per live pointer** (`drag_observers` and its four helpers are **deleted**). At press the router freezes the hit path and the `TouchAction` intersection, records the innermost `gesture_dead_zone` as the enrolment boundary, and enrols members innermost-first with a `MemberRole` (`Gesture` | `Pan(PanClaim)` | `RawDrag` | `RawPreview`). Then: the raw-preview pass runs first and keeps root-first order; an explicit `ctx.capture_pointer()` is an arbitration act (enrols as `RawDrag`, decides immediately for a precise pointer with no eligible pan competitor); on move, **timers before positional thresholds**, then innermost-first — a `RawDrag` wins past the latch slop, a `Gesture` when its recognizer recognizes, a `Pan` only on an axis the frozen action permits and only past `pan_slop`; on up, the release sweep. **The mouse is unchanged**: `pan_slop` is `None` for the mouse profile and `PanClaim::devices` defaults to direct pointers, so no pan member is ever eligible and every drag latches at the same 5 dp. Inspect with `WidgetTree::sequence_members/sequence_winner`; the whole procedure is a table in docs/events-and-gestures.md §4.2, generated from `crates/teksilo-core/tests/arbitration_matrix.rs`.
+- **Per-node declarations** (all on `WidgetBuilder` / `HandlerSet` / `WidgetWithHandlers`): `.touch_action(TouchAction)` (CSS `touch-action`; intersected root→target, frozen at press, ignored by a mouse), `.scroll_container(PanAxes)` / `.pan_claim(PanClaim)` (a pan surface **declares** itself — never inferred from an `on_scroll`, because SpinBox increments, TabBar remaps and SceneView zooms on wheel), `.overscroll_behavior(..)`, `.drag_activation(..)`, `.multi_contact(MultiContact::{First,All})` (default `First`: a second contact on a node is terminated *there*, neither delivered nor bubbled), `.long_press_role(LongPressRole::{Auto,None,ContextMenu,Tooltip,DragHandle})`, `.hit_slop(..)` / `.no_hit_slop()`, `.on_pointer_cancel(..)`.
+- **Arenas are per contact, tap counting is per node.** `EventHandlers::gesture_arena` is a `GestureArenaSet`: recognizer prototypes decided once, one `GestureArena` instantiated per live `PointerId`, plus a node-level `TapStreak` — every touch tap is a new `PointerId`, so per-contact state alone would make touch double-tap impossible. Recognizers hold no thresholds and read no clock: both arrive per call in a `RecognizerContext` (`theme.input.profile(pointer.kind)`), and `Instant::now()` is banned under `gesture/` by a source scan. Two cancel grains: `cancel()` (terminal) and `cancel_taps()` (tap family only, so a live drag survives a slide-off — WCAG 2.2 SC 2.5.2).
+- **Three recognizers are router-owned, not handler-installed**: `PanRecognizer` (its product is a synthesised `Scroll`, delivered along the frozen claimant chain and never the generic bubble), one `TouchPinchRecognizer` per window (a pinch is arbitrated by contact count; it emits the same `PinchPhase` the OS trackpad path emits, so `on_pinch` has one ingress), and `PalmWatch`.
+- **A press is not an activation for a direct pointer.** The router owns per-node press state (`ctx.pressed_signal()`, `ctx.is_pressed()` / `press_is_inside()` / `press_pending()`, a 100 ms feedback delay inside a pan claimant); focus lands on the *release*; `focus_visible` is set false by a pointer focus and true by keyboard / programmatic / AT. Commit on `PointerUp` guarded by `ctx.press_is_inside()`. Widget-side pattern: `common/interaction.rs`'s `bind_pressed`; data views' `deferred_select`.
+- **A contact never produces hover.** `on_hover`, `hover_within`, `PointerEnter`/`PointerLeave`, the cursor and tooltip dwell all follow the *hover owner* (a mouse, or a pen in proximity). Every hover-gated affordance needs a second route — a hold, `RevealPolicy::Always` at coarse densities, or an explicit overflow affordance.
+- **Old mechanism, for orientation**: press-release = descendant tap, press-drag = ancestor drag (a `SceneView` behind tappable cards: click selects, drag marquees) still holds — it is now a consequence of the sequence rather than of armed drag observers.
 - `EventHandlers` struct on `WidgetNode` stores closures, dispatched by framework
 - `.focusable(true)`, `.cursor(CursorIcon::Pointer)` — framework-level properties on node
 - Cross-widget behavior: `ctx.send_intent(MyIntent::X)` inside handlers; ancestor `Action`s consume it (see "Actions, Intents & Shortcuts")
-- **Tap-family callbacks take `&TapEvent` (`{ position, button, modifiers }`)** — `on_tap` / `on_double_tap` / `on_triple_tap` / `on_long_press`. Default acceptance is `ButtonMask::PRIMARY` only (right-click never activates `on_tap` by accident). Widen with `.accept_tap_buttons(...)` / `accept_double_tap_buttons(...)` / `accept_triple_tap_buttons(...)` / `accept_long_press_buttons(...)`. `PointerButton` covers `Primary | Secondary | Middle | Back | Forward`. Multi-tap recognizers require button-match across the whole sequence; mixed-button sequences fail rather than spuriously firing.
+- **Tap-family callbacks take `&TapEvent` (`{ position, button, modifiers, pointer }`)** — `on_tap` / `on_double_tap` / `on_triple_tap` / `on_long_press`. Default acceptance is `ButtonMask::PRIMARY` only (right-click never activates `on_tap` by accident). Widen with `.accept_tap_buttons(...)` / `accept_double_tap_buttons(...)` / `accept_triple_tap_buttons(...)` / `accept_long_press_buttons(...)`. `PointerButton` covers `Primary | Secondary | Middle | Back | Forward` and is `#[non_exhaustive]`. Multi-tap recognizers require button-match across the whole sequence; mixed-button sequences fail rather than spuriously firing.
+- **Hit targeting is three mechanisms with disjoint domains**, not a rectangle check: `Widget::hit_shape` / `hit_distance` (silhouette), `Widget::hit_outset` (a thin grip claiming past its bounds, consulted *inside* the exact pass, zero for a precise pointer, never escaping its parent), `Widget::target_regions` (reporting only — the targets a widget paints inside its one node), plus the arena's **miss-only** slop pass for a coarse pointer. Precedence, one chain: `no_hit_slop` > node `.hit_slop(..)` > `Widget::hit_outset`/`hit_slop` > density default; and an exact hit won *through* an outset is not re-attributed by the slop pass. See docs/density-and-targets.md.
+- **Test API** (`widget_tree/test_api.rs`, all on a `ManualClock`): `new_contact()` then `touch_down/move/up/cancel(id, point)`, `pen_down/move/up/hover`, `tap_with(kind, point)`, `long_press_at`, `touch_drag`, `fling`, `pinch`, `set_density`, `advance_time` (one door — gestures, long-press, press feedback, flings *and* animations), `assert_no_leaked_pointer_state()`, `sequence_winner/sequence_members/touch_action_for/live_pointers/is_pressed`, `tab_stops_within` (the only thing that proves keyboard *reachability* — `WidgetTree::focus(id)` does not check that a node is focusable).
+- **Porting an existing widget:** the obligations are a numbered contract in [docs/porting-widgets-to-the-pointer-model.md](docs/porting-widgets-to-the-pointer-model.md). Reference docs: [events-and-gestures.md](docs/events-and-gestures.md) (dispatch + arbitration), [touch-and-pen.md](docs/touch-and-pen.md) (the model, the clock, the platform seam, the press), [density-and-targets.md](docs/density-and-targets.md) (ladders, hit mechanisms, gesture profiles), [kinetic-scrolling.md](docs/kinetic-scrolling.md), [text-touch-editing.md](docs/text-touch-editing.md), [soft-keyboard.md](docs/soft-keyboard.md), [a11y/explore-by-touch.md](docs/a11y/explore-by-touch.md), [a11y/non-drag-alternatives.md](docs/a11y/non-drag-alternatives.md).
+- **Input emits no telemetry**, and no framework crate ships a telemetry manifest; the only `events.yaml` is `examples/telemetry_codegen`'s. `IntentSource` has no pointer-kind variant, so a finger's tap and a mouse's click both report `Handler`. See docs/telemetry.md §2.8.
 
 ## Accessibility Overrides
 
@@ -979,6 +992,63 @@ LayoutContext::for_testing(&theme)
 Test widgets: `FillWidget` (minimal leaf), `StackWidget` (minimal container) — in `teksilo-core::test_widgets` (pub(crate)).
 
 Property-based tests (proptest) cover relational invariants (round-trip, idempotence, conservation, monotonicity, oracle-vs-brute-force) in `teksilo-tokens`, `teksilo-data`, `teksilo-scene`, `teksilo-widgets` — convention, generator cost discipline, and the mandatory `--no-run` + `ulimit` safe-run protocol are in [docs/property-testing.md](docs/property-testing.md).
+
+### Touch, pen and multi-pointer tests
+
+Every kind of pointer is drivable headlessly on the tree's one simulated clock —
+no display server, no GPU, no sleeps. `new_contact()` mints an identity (one per
+press, as the platform allocator does), then `touch_down/move/up/cancel(id, at)`;
+`pen_down/move/up/hover` for a stylus; `tap_with(kind, at)`, `long_press_at`,
+`touch_drag`, `fling`, `pinch` for whole gestures; `set_density` for a ladder.
+`advance_time(d)` is **one door** — it ticks gestures, long-press deadlines,
+press feedback, flings and the animation scheduler from the same virtual now.
+Finish a pointer test with `assert_no_leaked_pointer_state()`. Arbitration is
+observable: `sequence_winner` / `sequence_members` / `touch_action_for` /
+`live_pointers` / `is_pressed`.
+
+Two habits worth copying: **delete the mechanism and confirm the test reddens**
+(reading cannot tell a pinning test from one that happens to pass), and remember
+that focusing a node proves its *handler* runs and nothing about reachability —
+`WidgetTree::focus(id)` does not check `focusable`, so a reachability claim must
+assert `test_api::tab_stops_within(root)`.
+
+## Pre-commit gates
+
+Run from the repository root. This is the CI set (`.github/workflows/ci.yml`);
+where the local form differs from CI's, the difference is called out.
+
+```bash
+cargo check --workspace
+cargo test --workspace --no-fail-fast
+cargo clippy --workspace --all-targets -- -D warnings    # CI adds -A deprecated
+cargo fmt --all -- --check
+cargo teksilo-fmt --check
+RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --document-private-items -j 4
+typos
+python3 tools/extract_widget_api.py --test
+python3 tools/check_spdx_headers.py --check
+mdbook build
+(cd examples/telemetry_codegen && cargo teksilo-telemetry-lint --fail-on-warnings)
+```
+
+Five things about that list that have each cost real time:
+
+- **The doc gate must be the `--document-private-items` form.** The short form
+  never documents a `pub(crate)` item, so it structurally cannot see a broken
+  intra-doc link in one. **And cap it at `-j 4`**: uncapped, `cargo doc` fans out
+  one `rustdoc` per crate and peaks near 32 GiB. Quote `RUSTDOCFLAGS="-D warnings"`
+  — unquoted, bash reads it as an assignment plus a command named `warnings`,
+  exits 127, and rustdoc never runs.
+- **A scoped `-p <crate>` doc run is not a substitute, in either direction.**
+  `-p teksilo-terminal` *fails* on intra-doc links into its feature-gated engine
+  module that `--workspace` resolves through feature unification. Scoped runs are
+  a fast signal, never the certificate.
+- **`check_spdx_headers.py` only inspects tracked files**, so run it after
+  `git add` (path-scoped) or a new file passes by being invisible.
+- **`typos` reads `_typos.toml` at the root**, not anything under `.github/`.
+- **`cargo check --workspace --all-features` is known broken and is not a gate**:
+  `teksilo-text` `include_bytes!`-es two Noto fonts under non-default features and
+  those files were never committed. True on `main` too.
 
 ## Implementation Status
 

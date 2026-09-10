@@ -609,7 +609,7 @@ Note: `Divider` is a *visual* separator, not a draggable splitter — for drag-t
 | Equal split (1:1, 1:2, …) | `Expand::flex(n)` pairs in a stack |
 | One panel takes the rest | `Expand::new().child(panel)` |
 | Center one child | `Center::new().child(w)` |
-| Force a minimum touch area | `MinSize::new(48.0, 48.0)` |
+| Force a minimum touch area | `MinSize::new(min.width, min.height)` with `min = density_min_size(base, TargetAxes::BOTH, tokens)` — the floor is the density's, not the call site's (§4.2) |
 | Cap reading width | `MaxSize::width(640.0)` |
 | Dialog with a fixed width | `FixedSize::new().width(w)` |
 | Animated panel width | `FixedSize::width(animated_signal)` |
@@ -622,7 +622,7 @@ Note: `Divider` is a *visual* separator, not a draggable splitter — for drag-t
 | Settings forms | `FormLayout` |
 | Tab pages / wizard steps | `Switcher` |
 
-When two primitives could express the same thing, prefer the more specific one — the name is a hint to the next reader. `Spacer::new()` instead of `Expand::new()` when you mean "empty pushable region." `MinSize::new(48, 48)` instead of `FixedSize::width(48.0).height(48.0)` when you mean "at least," not "exactly." (Note `Center` is *not* a synonym for `Expand::new().align_child(CENTER)` — it reports `flex = 0` and shrink-wraps an open axis, so it does not claim stack slack; see §3.3.)
+When two primitives could express the same thing, prefer the more specific one — the name is a hint to the next reader. `Spacer::new()` instead of `Expand::new()` when you mean "empty pushable region." `MinSize::new(w, h)` instead of `FixedSize::width(w).height(h)` when you mean "at least," not "exactly" — and for a *target*, take `w` and `h` from `density_min_size` rather than writing a number (§4.2). (Note `Center` is *not* a synonym for `Expand::new().align_child(CENTER)` — it reports `flex = 0` and shrink-wraps an open axis, so it does not claim stack slack; see §3.3.)
 
 ---
 

@@ -119,7 +119,7 @@ Declared in
 
 | Constant | Value | Source |
 | --- | --- | --- |
-| `clamping_deceleration_rate` | `ln(0.78)/ln(0.9)` ≈ 2.3582018 | Android `OverScroller.DECELERATION_RATE` |
+| `clamping_deceleration_rate` | `ln(0.78)/ln(0.9)` ≈ 2.358202 | Android `OverScroller.DECELERATION_RATE` |
 | `clamping_inflexion` | 0.35 | Android `OverScroller.INFLEXION` |
 | `clamping_friction` | 0.015 | Android `ViewConfiguration.getScrollFriction()` |
 | `START_TENSION` | 0.5 | Android `OverScroller.START_TENSION` |
@@ -622,9 +622,15 @@ Still to come:
   other two. The obstacle is the fixture, not the assertion: a headless text
   surface needs its engine viewport seeded and a pump before it has anything to
   scroll, and that scaffolding exists only in `rich_text/tests.rs` today;
-- the platform layer does not yet produce `ScrollSource::TouchPan` samples of
-  its own; the core door (`dispatch_scroll` with that source, which derives its
-  own chain from the sample's position) is open and waiting for it;
+- the platform layer produces no `ScrollSource::TouchPan` sample of its own, and
+  does not need to: a finger's pan is synthesised **in core**, by the pan
+  arbiter, from that contact's own pointer samples, which is what lets it be
+  arbitrated against every other competitor for the press before it becomes a
+  scroll at all. The translator emits only `Wheel` and `Trackpad`. The public
+  door (`dispatch_scroll` with `ScrollSource::TouchPan`, which derives its own
+  claimant chain from the sample's position) stays open for a backend that one
+  day reports OS-level touch panning — nothing in the workspace calls it that
+  way today;
 - nothing paints the overscroll yet. `ScrollableAxes::overscroll` publishes it,
   and the release is an immediate clamped settle rather than a spring: a
   surface's `KineticScroller` is driven by events, not by a per-frame
@@ -783,3 +789,16 @@ unconditionally, which is what every terminal does. The crate could not reach
 `common::scrollable` in any case — it does not depend on `teksilo-widgets`, which
 is also why its touch text selection goes through `teksilo-core::text_touch`
 directly. Full reasoning: [terminal.md](terminal.md) "Touch".
+
+---
+
+## See also
+
+- [Porting a widget to the pointer model](porting-widgets-to-the-pointer-model.md)
+  — clause 1 on declaring a pan claim, which is what routes a finger's drag here.
+- [Events & gestures §4.3](events-and-gestures.md) — the arbitration a pan claim
+  competes in, and the claimant chain a won claim is delivered along.
+- [Touch & pen](touch-and-pen.md) — velocity samples, the one clock, and the
+  coalesced history the tracker is fed from.
+- [Density & targets](density-and-targets.md) — where `ScrollPhysicsTokens` and
+  the fling velocity gates live on the theme.

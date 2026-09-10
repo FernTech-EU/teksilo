@@ -192,6 +192,8 @@ These are open, with what each needs. The census carries the full reasoning.
 
 - [The drag census](../drag-operation-census.md) — every dragging operation in the
   workspace, and the state of each.
+- [Porting a widget to the pointer model](../porting-widgets-to-the-pointer-model.md)
+  — clause 11 on what a hold means, and the obligation a draggable widget carries.
 - [Accessibility overrides](../accessibility-overrides.md) — the `.access_*`
   surface, including `access_custom_action`.
 - [Density and targets](../density-and-targets.md) — SC 2.5.8, the other pointer

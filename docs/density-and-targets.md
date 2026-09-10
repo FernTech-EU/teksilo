@@ -49,8 +49,12 @@ encode it:
   conformance claim goes wrong, and it inflates what an app is promising.
 - **48 dp is Material 3's touch-target minimum**, from M3's *Accessibility —
   Touch targets*. It is a design-language rule, not a WCAG level. The
-  `teksilo-theme-material3` preset applies it on top of the Touch ladder via
-  `material3::input_tokens`; every other preset stays at 44.
+  `teksilo-theme-material3` preset applies it **at `Touch` only**, via
+  `material3::input_tokens`; at `Compact` and `Comfortable` it is the generic
+  ladder unchanged, and every other preset stays at 44 on the `Touch` rung. The
+  preset registers that function as its `DensityProjection`, so a density switch
+  keeps the 48 rather than falling back to the generic ladder
+  (`a_density_switch_keeps_material3s_own_48_dp_target`).
 
 So: conformance is 24, Apple and AAA are 44, Material is 48. A target that
 reaches 24 dp conforms at AA even at `Compact`, which is why the Compact ladder
@@ -416,21 +420,27 @@ gesture unusable.
 ### Where each constant comes from
 
 The `MOUSE` column is exactly what Teksilo shipped before the touch programme,
-so selecting it is a no-op:
+so selecting it is a no-op. The citations below are **provenance**: they name the
+pre-programme site each number was read off, which is why several of them are
+overrides or hardcoded constants the tokens have since replaced. They are the
+place to grep from, not a claim about where the value is read today — that is
+`InputTokens::profile(kind)`, everywhere. The values themselves are pinned
+against this page by `the_documented_gesture_profiles_are_the_shipped_ones` in
+`crates/teksilo-tokens/src/input.rs`, which parses the table above.
 
 | constant | source |
 | --- | --- |
-| `tap_slop` 5.0 | `TapRecognizer::new`'s `max_distance`, `teksilo-core/src/gesture/tap.rs:28` |
-| `drag_slop` 5.0 | `DragRecognizer::new`'s `threshold`, `gesture/drag.rs:23`, and the explicit `.threshold(5.0)` at `widget_tree/gesture_dispatch_impl.rs:96` |
-| `multi_tap_slop` 10.0 | `max_distance` on `DoubleTapRecognizer::new` (`gesture/multi_tap.rs:35`) and `TripleTapRecognizer::new` (`:216`) |
-| `long_press_slop` 5.0 | `LongPressRecognizer::new`'s `max_distance`, `gesture/long_press.rs:39` |
-| `long_press` 500 ms | `LongPressRecognizer::new`'s `min_duration`, `gesture/long_press.rs:40` |
-| `multi_tap_interval` 300 ms | `max_interval` on both multi-tap recognizers, `gesture/multi_tap.rs:36` and `:217` |
-| `swipe_min_velocity` 200.0 | `SwipeRecognizer::new`, `gesture/swipe.rs:23` |
-| `swipe_min_distance` 30.0 | `SwipeRecognizer::new`, `gesture/swipe.rs:24` |
+| `tap_slop` 5.0 | `TapRecognizer::new`'s `max_distance`, `teksilo-core/src/gesture/tap.rs` |
+| `drag_slop` 5.0 | `DragRecognizer::new`'s `threshold`, `gesture/drag.rs`, and the explicit `.threshold(5.0)` at `widget_tree/gesture_dispatch_impl.rs` |
+| `multi_tap_slop` 10.0 | `max_distance` on `DoubleTapRecognizer::new` (`gesture/multi_tap.rs`) and `TripleTapRecognizer::new` (`:216`) |
+| `long_press_slop` 5.0 | `LongPressRecognizer::new`'s `max_distance`, `gesture/long_press.rs` |
+| `long_press` 500 ms | `LongPressRecognizer::new`'s `min_duration`, `gesture/long_press.rs` |
+| `multi_tap_interval` 300 ms | `max_interval` on both multi-tap recognizers, `gesture/multi_tap.rs` and `:217` |
+| `swipe_min_velocity` 200.0 | `SwipeRecognizer::new`, `gesture/swipe.rs` |
+| `swipe_min_distance` 30.0 | `SwipeRecognizer::new`, `gesture/swipe.rs` |
 | `hit_slop` 0.0 | no slop pass exists today — a mouse hit is exact |
 | `pan_slop` `None` | a mouse scrolls with the wheel, never by dragging content |
-| `lines_per_notch` 3.0 | `const LINES_PER_NOTCH` at `teksilo-platform/src/event_translation.rs:241` |
+| `lines_per_notch` 3.0 | the constant `teksilo-platform`'s `event_translation` module used to hardcode; it now multiplies by `self.input.lines_per_notch` instead, and `lines_per_notch_comes_from_the_input_tokens` pins that it does |
 
 The `TOUCH` and `PEN` columns are new:
 
@@ -451,8 +461,12 @@ The `TOUCH` and `PEN` columns are new:
 ## Scroll physics
 
 `theme.input.scroll_physics` holds the fling / settle / overscroll constants.
-Nothing reads them yet — they are declared here so the whole input surface is
-one struct and a theme carries it.
+They are **live**: every scrollable surface passes them into its own
+`KineticScroller` at build time (`ScrollHandlingOptions::physics`, filled from
+`ctx.theme().input.scroll_physics` at each of the nine adopting build sites), and
+the tree's own fling pump reads them from the effective theme. Retuning a theme's
+physics retunes the feel; the constants are on the page because scroll feel is
+muscle memory and a value nobody can trace is a value nobody can review.
 
 | field | value | source |
 | --- | --- | --- |
@@ -496,6 +510,18 @@ changes which events are accepted, never a dimension.
 All three default to today's behaviour. They are core-side enums rather than a
 re-export because `AccessibilityPreferences` lives in `teksilo-platform`, and
 `teksilo-core` cannot name it.
+
+## See also
+
+- [Porting a widget to the pointer model](porting-widgets-to-the-pointer-model.md)
+  — clause 7 (routing a dimension through `dp`) and clause 8 (which hit hook to
+  implement), as a checklist.
+- [Touch & pen](touch-and-pen.md) — the pointer model these tokens tune.
+- [Events & gestures](events-and-gestures.md) — where the profiles are consumed.
+- [The density inventory](density-inventory.md) — every dimension in the
+  workspace, its class, and its mechanism.
+- [The accessibility audit](accessibility-internal-audit.md) §3.7 — what the
+  target-conformance gate does and does not cover.
 
 [`InputTokens`]: https://github.com/ferntech-eu/teksilo/blob/main/crates/teksilo-tokens/src/input.rs
 [`partition_targets`]: https://github.com/ferntech-eu/teksilo/blob/main/crates/teksilo-core/src/partition.rs

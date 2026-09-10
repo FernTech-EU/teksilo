@@ -53,6 +53,7 @@
 # Touch & pen migration
 
 - [Touch & pen](touch-and-pen.md)
+- [Porting widgets to the pointer model](porting-widgets-to-the-pointer-model.md)
 - [Soft keyboard](soft-keyboard.md)
 - [Touch text editing](text-touch-editing.md)
 - [Density inventory](density-inventory.md)

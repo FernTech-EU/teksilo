@@ -4,17 +4,39 @@
 # Events and Gestures
 
 **Companion to:** [architecture.md](architecture.md)
-**Scope:** How input becomes widget behavior in Teksilo — attached handlers, preview/bubble dispatch, gesture recognizers, and the `EventContext` deferred-operations pattern.
+**Scope:** How input becomes widget behavior in Teksilo — the unified pointer,
+attached handlers, preview/bubble dispatch, gesture recognizers, the
+`PointerSequence` that arbitrates between widgets, and the `EventContext`
+deferred-operations pattern.
+
+**If you are porting an existing widget**, the obligations are collected as a
+numbered contract in
+[porting-widgets-to-the-pointer-model.md](porting-widgets-to-the-pointer-model.md).
+For the pointer *model* — identity, the clock, the platform seam, the press — see
+[Touch & pen](touch-and-pen.md).
 
 ---
 
 ## 1. What we designed for
 
-The event system has to handle three unrelated things cleanly:
+The event system has to handle four unrelated things cleanly:
 
 1. **Raw input** from the platform — pointer moves, key presses, scroll, IME composition, trackpad pinch.
-2. **Recognized gestures** composed from raw events — tap, double-tap, long-press, drag, swipe.
+2. **Recognized gestures** composed from raw events — tap, double-tap, long-press, drag, swipe, pan, pinch.
 3. **Accessibility actions** — a screen reader or automation tool asking the widget to do something (click, set value, set selection) without any pointer or keyboard at all.
+4. **Which device is pointing** — because a mouse, a finger and a stylus want
+   different thresholds, different target sizes and, in a few places, different
+   *meanings* for the same press. They can all be live at once.
+
+The fourth is the one that shapes everything below. There is **one** pointer
+vocabulary rather than a parallel touch event family: every `Pointer*` and
+`Scroll` event carries a
+[`PointerInfo`](../crates/teksilo-core/src/pointer.rs) — identity, kind,
+buttons, axes, timestamp — so a handler that does not care never mentions it, and
+a handler that does asks `ctx.pointer_kind()`. A second `Touch*` family would
+have doubled the handler surface on every widget in the catalogue and guaranteed
+drift; that is exactly how the trackpad pinch translator became dead code before
+the pointer model landed.
 
 The V1 design unified these behind a single `fn event(&mut self, event: &WidgetEvent, ctx: &mut EventContext) -> EventResponse` method on every `Widget`. Every widget wrote one giant `match` statement on the event enum. This worked, but it forced a pile of incidental complexity:
 
@@ -54,14 +76,40 @@ Every event that targets a specific widget (via hit testing for pointer events, 
      root
 ```
 
-Implementation is a single walk per pass in [widget_tree/event_dispatch_impl.rs](../crates/teksilo-core/src/widget_tree/event_dispatch_impl.rs): `dispatch_to_widget_returning_handled(target, &event)` collects ancestors, runs preview top-down, then runs bubble target-up, returning on the first `Handled`.
+Implementation is a single walk per pass in
+[`pointer_router.rs`](../crates/teksilo-core/src/widget_tree/pointer_router.rs)'s
+`dispatch_to_widget_returning_handled`: it collects ancestors, runs preview
+top-down, then runs bubble target-up, returning on the first `Handled`.
 
 The framework decides what "target" means per event type:
 
-- **Pointer events** (`PointerDown`, `PointerMove`, `PointerUp`, `PointerEnter`, `PointerLeave`) — hit-tested against layout bounds. The deepest hit wins. Preview runs from the root to that hit; bubble walks back up.
-- **Scroll events** — hit-tested at the pointer position; bubble to the nearest `on_scroll` that returns `Handled` (a scroll container typically).
-- **KeyDown / KeyUp / IME** — routed to the focused widget. Preview from root down, bubble focused-widget up.
-- **AccessKit actions** — routed to the target node directly. No pointer, no focus — the platform's AccessKit request carries a `NodeId`. No preview pass; handler runs on the target only, then bubbles.
+- **Pointer events** (`PointerDown`, `PointerMove`, `PointerUp`, `PointerEnter`,
+  `PointerLeave`, `PointerCancel`) — hit-tested, deepest hit first. "Hit-tested"
+  is more than a rectangle check: first the exact pass, which consults
+  `Widget::hit_shape` and, for a child declaring one, `Widget::hit_outset`; then
+  — only when the exact pass found nothing eligible, and only for a coarse
+  pointer — the miss-only slop pass, which re-attributes the press to the nearest
+  node still inside its earned outset. See
+  [Density & targets](density-and-targets.md). A **captured** pointer skips all
+  of that: its moves and its release are dispatched to the captor rather than to
+  whatever is under it (the arbitration still advances, so an ancestor can take
+  the press away — §4.2). `PointerCancel` never hit-tests at all: the funnel
+  delivers it to the captor, or failing that to the last node that accepted an
+  event from that pointer.
+- **Scroll events** — routed by `window_position` when the producer supplies
+  one (a synthesised touch pan always does, because a contact writes no hover and
+  a positionless pan would route nowhere), and by the hovered — else focused —
+  widget when it does not. The platform's wheel and trackpad samples carry no
+  position, deliberately: hover is already under the cursor, so a hit test would
+  find the same widget. A wheel or trackpad sample then **bubbles** to the nearest
+  `on_scroll` that answers `Handled`. A pan a claimant won does **not** bubble:
+  it walks that press's frozen claimant list and nothing else, which is what
+  stops a boundary pan reaching a `SpinBox`'s wheel handler. See §4.3.
+- **KeyDown / KeyUp / IME** — routed to the focused widget. Preview from root
+  down, bubble focused-widget up.
+- **AccessKit actions** — routed to the target node directly. No pointer, no
+  focus — the platform's AccessKit request carries a `NodeId`. No preview pass;
+  handler runs on the target only, then bubbles.
 
 There is no "capture phase" distinct from preview, no event replay, no explicit listener list. The tree structure is the listener list.
 
@@ -97,9 +145,9 @@ Under the hood, the builder wraps the widget in a `WidgetWithHandlers<W>` that c
 | Handler | Fires when | Signature (simplified) |
 |---|---|---|
 | `on_tap` | A single primary-button tap completes | `FnMut(&TapEvent, &mut EventContext)` |
-| `on_double_tap` | Two taps within 300 ms, within 10 px | same |
-| `on_triple_tap` | Three taps within the recognizer window | same |
-| `on_long_press` | Pointer held past the long-press threshold | same |
+| `on_double_tap` | Two taps inside the pointer's own `multi_tap_interval`, no further apart than its `multi_tap_slop` | same |
+| `on_triple_tap` | Three, on the same terms | same |
+| `on_long_press` | Pointer held past the pointer's `long_press` | same |
 | `on_hover` | Pointer enters / leaves the widget's bounds | `FnMut(bool, &mut EventContext)` |
 | `on_focus` | Widget gains or loses focus | `FnMut(bool, &mut EventContext)` |
 | `on_key` | Focused widget receives a `KeyDown` / `KeyUp` | `FnMut(&WidgetEvent, &mut EventContext) -> EventResponse` |
@@ -107,7 +155,8 @@ Under the hood, the builder wraps the widget in a `WidgetWithHandlers<W>` that c
 | `on_pointer_event` | Low-level pointer escape hatch (any `Pointer*` variant) | same |
 | `on_drag` | Gesture-based drag — `Started`, `Moved*`, `Ended` phases | `FnMut(DragPhase, &mut EventContext)` |
 | `on_swipe` | One-shot swipe with direction + velocity | `FnMut(SwipeDirection, f32, &mut EventContext)` |
-| `on_pinch` | OS trackpad magnify / rotate phases | `FnMut(PinchPhase, &mut EventContext)` |
+| `on_pinch` | Two contacts spreading or twisting, **or** the OS trackpad magnify / rotate stream — one ingress for both (§4) | `FnMut(PinchPhase, &mut EventContext)` |
+| `on_pointer_cancel` | The interaction was revoked rather than completed — terminal, no `PointerUp` follows | `FnMut(&PointerInfo, CancelReason, &mut EventContext)` |
 | `on_drag_hover` | DnD payload hovers over the widget | `FnMut(&DragPayload, Point, &mut EventContext) -> DropFeedback` |
 | `on_drag_leave` | Drag leaves the widget (target change, drop, cancel, or source destroyed) | `FnMut(&mut EventContext)` |
 | `on_drag_tick` | Per-frame tick while the widget is the current drop target | `FnMut(Point, &mut EventContext)` |
@@ -264,7 +313,35 @@ Built-in recognizers (the four click-style ones default to `ButtonMask::PRIMARY`
 - `DragRecognizer` — emits `DragStarted` once the pointer moves past the drag-start threshold, then `DragMoved` per move, then `DragEnded` on pointer-up.
 - `SwipeRecognizer` — pointer moves fast enough to qualify as a swipe in one of four cardinal directions.
 
-`PinchRecognizer` is *not* in the list because on desktop the OS delivers `TouchpadMagnify` / `RotationGesture` events directly (winit passes them through); the framework turns those into `PinchPhase` events without needing a recognizer.
+Three more recognizers exist and are **not** installed from a handler, because
+none of them is one node's business:
+
+- `PanRecognizer` — a scroll container's claim on a direct pointer's drag. The
+  router installs it on the nodes whose [`PanClaim`](#43-touch-action-and-pan-claims)
+  the frozen `TouchAction` permits; its product is a synthesised `Scroll` rather
+  than a `GestureEvent`, so it never lives in an arena. §4.3.
+- `TouchPinchRecognizer` — **one instance per window**, held by the router, fed
+  every contact. A pinch is arbitrated by contact *count*, not by which widget
+  each finger landed on, so it cannot be a per-node recognizer: an arena serves
+  exactly one contact. It emits the same `PinchStarted` / `PinchChanged` /
+  `PinchEnded` the OS trackpad path emits, and both streams arrive at the same
+  `WidgetTree::dispatch_os_gesture` — one ingress, so a widget that implements
+  `on_pinch` gets a touchscreen for free. (Before it existed, `on_pinch` was
+  reachable on macOS and nowhere else, and the trackpad translator had become
+  dead code.) Three or more contacts: the two **earliest** are used and the rest
+  ignored, because rotation through three moving points is undefined; a contact
+  leaving mid-pinch ends the gesture rather than promoting a spare, which would
+  teleport the centre.
+- `PalmWatch` — the conservative fallback for a backend that cannot tell a palm
+  from a finger, which is every one Teksilo ships (`BackendCaps::reports_palm` is
+  false everywhere; a digitiser that *does* answer has its palms refused at the
+  table, producing no event at all). It rejects a contact only when **both** hold
+  for the contact's whole life: its reported patch is larger than
+  `PALM_CONTACT_THRESHOLD` on either axis, and it never travelled past the
+  profile's `tap_slop`. A palm that slides is not rejected — false-rejecting a
+  deliberate drag from a large contact is worse than passing a stationary palm —
+  and the verdict is read only on the release, so nothing is revoked while the
+  user might still be using it.
 
 ### 4.1 GestureArena — cooperating and competing
 
@@ -610,7 +687,7 @@ fails if the two drift, and prints the replacement.
 <!-- BEGIN GENERATED ARBITRATION MATRIX -->
 <!-- Generated by crates/teksilo-core/tests/arbitration_matrix.rs. Do not edit by hand: `the_documented_table_matches_the_fixtures` fails when the two drift, and `TEKSILO_BLESS=1 cargo test -p teksilo-core --test arbitration_matrix` rewrites this region. -->
 
-Each row is a **core-only fixture** reproducing the named widget's arbitration shape — the handlers it installs, the claims it declares and the capture it takes — not the widget itself, which lives in a crate `teksilo-core` cannot depend on. `ScrollArea` — and `TabBar`, through the scroll area it wraps its header row in — is the only production declarer of a `PanClaim`; every other row's claimant is the enclosing scroller the real shape would sit in, written out. So read a row as *what the framework does with this shape*.
+Each row is a **core-only fixture** reproducing the named widget's arbitration shape — the handlers it installs, the claims it declares and the capture it takes — not the widget itself, which lives in a crate `teksilo-core` cannot depend on. A row's *claimant* is the enclosing scroller the real shape would sit in, written out, except where the named widget declares one itself. So read a row as *what the framework does with this shape*.
 
 | Scenario | Pointer | Frozen | Members at press (innermost first) | Movement → winner | Losers cancelled | What it pins |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -756,6 +833,15 @@ Via `EventContext`, any handler can:
 - `ctx.request_frame()` — ask the event loop to pump one more frame (caret blink restart, drag auto-scroll, pending document events).
 - `ctx.app_state::<T>()` — look up an app-scoped value registered on `TeksiloAppBuilder` by `TypeId`.
 
+And, for the pointer being dispatched:
+
+- `ctx.pointer()` / `pointer_kind()` / `pointer_position()` — who is pointing, and where (window-logical).
+- `ctx.capture_pointer()` / `capture_pointer_id(id)` / `release_pointer()` / `owns_pointer()` — per-pointer capture, which is also an arbitration act (§4.2).
+- `ctx.claim_gesture()` / `reject_gesture()` / `hold_gesture()` / `release_gesture()` — the arbitration API.
+- `ctx.cancel_pointer_sequence(reason)` — revoke this pointer's press from inside a handler; queued behind the current sample, never inline.
+- `ctx.is_pressed()` / `press_is_inside()` / `press_pending()` — the framework's press state, for a handler that has to *branch* on the press rather than paint it.
+- `ctx.touch_action()` / `scroll_phase()` / `scroll_source()` — the frozen action, and what kind of scroll this is.
+
 These are the methods that make it possible to build app-level behavior (menu routing, theme switching, shortcut rebind UIs) without any global statics or hardcoded backchannels.
 
 ## 6. Focus management
@@ -763,7 +849,8 @@ These are the methods that make it possible to build app-level behavior (menu ro
 Focus is a single `Option<WidgetId>` stored on the tree. Tab / Shift+Tab moves it across widgets whose node has `focusable = true`. The framework publishes three signals that widgets can observe:
 
 - The currently focused node id (read via `tree.focused()`).
-- **Focus origin** — `Keyboard` (tab/shift-tab/programmatic) or `Pointer` (tap) or `Programmatic`. Used to paint a focus ring only on keyboard focus by default; pointer focus typically omits the ring per Int UI style.
+- **Focus origin** — `#[non_exhaustive] FocusOrigin { Keyboard, Pointer(PointerKind), Programmatic, Accessibility }`, so a consumer matches with a `_` arm and `Pointer(_)` where the device does not matter. `Keyboard` and `Accessibility` reveal the focus ring; `Pointer(_)` hides it (a direct-pointer focus assignment sets `focus_visible` *false* — one tree-level signal, so it has to be set rather than merely not set, or a keyboard focus followed by a tap would leave a ring behind); `Programmatic` carries no modality of its own and leaves the ring as the last real interaction left it, which is what `:focus-visible` does for `element.focus()`. `FocusOrigin::POINTER` is the constant for a site that knows the keyboard was not involved and cannot know which device was — it says `Pointer(PointerKind::Unknown)` rather than claiming a finger was a mouse.
+- For a **direct** pointer, focus is assigned on the `PointerUp`, guarded by "the release landed on the same focusable as the press".
 - **Focus-gained / focus-lost** events dispatched to widgets via `on_focus(gained: bool, ctx)`.
 
 Programmatic focus transfer goes through `ctx.request_focus(id)`. The framework also exposes `first_focusable_descendant(id)` for modal openers (dialogs that should land focus on the primary action button — it returns the widget Tab would land on *first*, respecting the scope rules below) and `ScrollIntoView` synthesized on focus change so that tab-focusing an offscreen widget scrolls the nearest clipping ancestor to reveal it.
@@ -838,14 +925,17 @@ Framework guarantees the ordering: `on_drag_leave` runs before `on_drop` on the 
 
 The framework dispatches a few synthetic events the widget code doesn't see from the platform:
 
-- **`PointerEnter` / `PointerLeave`.** Derived from `PointerMove` by comparing the hit target frame-over-frame. A widget moving out from under a stationary pointer still gets `PointerLeave` — the hit target changed even if the pointer didn't.
+- **`PointerEnter` / `PointerLeave`.** Derived from `PointerMove` by comparing the hit target frame-over-frame. A widget moving out from under a stationary pointer still gets `PointerLeave` — the hit target changed even if the pointer didn't. Both follow the **hover owner** (the most recent pointer that can hover: a mouse, or a pen in proximity), so a contact produces neither. When a pen in proximity takes hover from a live mouse, the mouse's node gets a `PointerLeave` and the pen's gets a `PointerEnter`.
 - **`FocusGained` / `FocusLost`.** Issued when focus moves.
 - **`ScrollIntoView { target }`.** Issued by the focus system after a focus change to a widget outside the viewport. Nearest clipping ancestor handles it by adjusting its scroll offset.
 - **Synthetic clicks.** `ctx.synthetic_click(id)` dispatches a simulated tap at the widget's center — used by AccessKit action routing (`Action::Click`), menu item activation, and some shortcut-triggered activations that want to go through the full tap path.
 
 ## 8. Testing
 
-Events are synthesizable from tests without a real platform:
+Events are synthesizable from tests without a real platform. Build them with the
+constructors rather than by struct literal — each one fills in
+`PointerInfo::mouse` at the tree epoch, so a test that says nothing about
+pointers keeps meaning what it meant before pointers were distinguishable:
 
 ```rust
 let mut tree = WidgetTree::new();
@@ -854,21 +944,34 @@ let btn_id = tree.add(Button::new(lit!("OK")).on_activate_fn(|ctx| {
 }));
 tree.layout(SizeProposal::exact(200.0, 100.0));
 
-// Synthesize a pointer tap at the button's center:
-let bounds = tree.bounds(btn_id);
-tree.dispatch_event(WidgetEvent::PointerDown {
-    position: bounds.center(),
-    button: PointerButton::Primary,
-    modifiers: Modifiers::NONE,
-});
-tree.dispatch_event(WidgetEvent::PointerUp {
-    position: bounds.center(),
-    button: PointerButton::Primary,
-    modifiers: Modifiers::NONE,
-});
+// A mouse tap at the button's centre.
+let at = tree.bounds(btn_id).center();
+tree.dispatch_event(WidgetEvent::pointer_down(at, PointerButton::Primary, Modifiers::NONE));
+tree.dispatch_event(WidgetEvent::pointer_up(at, PointerButton::Primary, Modifiers::NONE));
 ```
 
-For gesture-level assertions the `test_api` module on `WidgetTree` exposes helpers like `synthesise_tap(id)` that run the preview-bubble walk with a fabricated event. Timing-sensitive recognizers (double-tap, long-press) use the tree's simulated clock — `advance_time(Duration)` in tests.
+**A finger, a stylus, a pinch, a fling** come from the `test_api` module on
+`WidgetTree`, which is the *sample* door rather than the legacy event door:
+
+```rust
+let finger = tree.new_contact();               // one identity per press
+tree.touch_down(finger, at);
+tree.touch_move(finger, at + Vec2::new(0.0, 40.0));
+tree.touch_up(finger, at + Vec2::new(0.0, 40.0));
+tree.assert_no_leaked_pointer_state();
+```
+
+Also there: `pen_down` / `pen_move` / `pen_up` / `pen_hover`, `touch_cancel`,
+`tap_with(kind, point)`, `long_press_at`, `touch_drag`, `fling`, `pinch`,
+`set_density`, and the arbitration queries `sequence_winner` /
+`sequence_members` / `touch_action_for` / `live_pointers` / `is_pressed`.
+`synthesise_tap(id)` still runs the preview-bubble walk with a fabricated event
+where only the handler matters.
+
+Timing-sensitive behaviour — a long press, a multi-tap window, a fling, a
+press-feedback delay, an animation — runs on the tree's **one** simulated clock:
+`advance_time(Duration)` moves all of them together. Nothing sleeps, and nothing
+in the gesture layer may read `Instant::now()` (a source scan enforces it).
 
 No Xvfb, no GPU, no display server required.
 
@@ -877,7 +980,10 @@ No Xvfb, no GPU, no display server required.
 - Widget authors register typed closures per event type; no monolithic `event()` method.
 - Events travel preview (root → target) then bubble (target → root); first `Handled` stops the pass.
 - Attach handlers on children with `.on_foo(…)` via `WidgetBuilder`; attach on self with `HandlerSet` + `ctx.apply_self_handlers`.
-- Gesture recognizers are auto-wired from attached handlers; `GestureArena` arbitrates cooperation and reset.
+- Gesture recognizers are auto-wired from attached handlers. Within one node a `GestureArena` arbitrates cooperation and reset — one arena per live contact, under a `GestureArenaSet`, with the tap count on the node itself. *Across* nodes there is one `PointerSequence` per live pointer, and the ordered decision procedure in §4.2 says who wins.
+- A pointer has an identity, a kind, buttons, axes and a timestamp, and every `Pointer*` and `Scroll` event carries them. Read them through `ctx.pointer()` / `ctx.pointer_kind()`. There is no "touch mode": a mouse, a finger and a pen can be live at once, each with its own capture, its own arbitration and its own gesture profile.
+- Every position a handler receives is widget-local except the two fields named `window_position` (`Scroll` and `PointerCancel`), which are routing and velocity coordinates by contract.
+- A `PointerCancel` is terminal: no `PointerUp` follows, and nothing may activate.
 - Handlers express mutations by calling methods on `EventContext`; the framework applies them after dispatch.
 - `ctx.send_intent(X)` is the single way to request app-level behavior from a handler; `ctx.set_theme / set_locale / close_window / request_focus / dismiss_all_overlays` cover the framework-level ambient ops.
 - Focus is a single optional WidgetId; transfers happen via `ctx.request_focus(id)`; Tab/Shift+Tab walks a tree of `FocusScope`s (scoped `tab_index`, per-scope `Continue`/`Cycle` policy), defaulting to a flat document-order ring when no scopes are present.
@@ -887,6 +993,10 @@ No Xvfb, no GPU, no display server required.
 
 ## See also
 
+- [porting-widgets-to-the-pointer-model.md](porting-widgets-to-the-pointer-model.md) — the numbered contract a widget satisfies to be correct under a finger and a pen.
+- [touch-and-pen.md](touch-and-pen.md) — the pointer model itself: identity, the one clock, the platform seam, the press, the performance budget.
+- [density-and-targets.md](density-and-targets.md) — the three density ladders, the three hit mechanisms, the gesture-profile tables §4.1.1 quotes.
+- [kinetic-scrolling.md](kinetic-scrolling.md) — where a won pan claim's deltas go, and the physics behind a fling.
 - [animation.md](animation.md) — `Signal<f32>::animate_to` and the scheduler. Handlers that kick off motion (toggle thumb, accordion height, snackbar slide-in) call `animate_to` on animation-capable signals; the docs here and there are two halves of the "handler runs → something moves" path.
 - [shortcut-intent-action.md](shortcut-intent-action.md) — how intents travel source → root and fire `Action`s; rebindable keystrokes via `ShortcutRegistry`.
 - [architecture.md §22 Window Management](architecture.md) — modal-vs-modeless, window focus routing.
@@ -896,7 +1006,9 @@ No Xvfb, no GPU, no display server required.
 - [crates/teksilo-core/src/gesture.rs](../crates/teksilo-core/src/gesture.rs) — recognizer state machines.
 - [crates/teksilo-core/src/pointer/touch_action.rs](../crates/teksilo-core/src/pointer/touch_action.rs) — `TouchAction` / `PanAxes` / `PanClaim` (§4.3).
 - [crates/teksilo-core/src/widget_tree/pointer_state.rs](../crates/teksilo-core/src/widget_tree/pointer_state.rs) — `effective_touch_action` / `pan_candidates`, the two path folds (§4.3).
-- [crates/teksilo-core/src/widget_tree/event_dispatch_impl.rs](../crates/teksilo-core/src/widget_tree/event_dispatch_impl.rs) — dispatch walk.
+- [crates/teksilo-core/src/widget_tree/pointer_router.rs](../crates/teksilo-core/src/widget_tree/pointer_router.rs) — the dispatch walk and the sample doors.
+- [crates/teksilo-core/src/gesture/sequence.rs](../crates/teksilo-core/src/gesture/sequence.rs) — `PointerSequence` and the decision procedure it documents (§4.2).
+- [crates/teksilo-core/src/pointer.rs](../crates/teksilo-core/src/pointer.rs) — `PointerInfo` / `PointerId` / `EventTime` / `CancelReason`.
 - [crates/teksilo-core/src/widget.rs](../crates/teksilo-core/src/widget.rs) — `EventContext`.
 - [crates/teksilo-widgets/src/focus_scope.rs](../crates/teksilo-widgets/src/focus_scope.rs) — the `FocusScope` traversal-scope wrapper (§6.1).
 - [crates/teksilo-core/src/widget_tree/focus_impl.rs](../crates/teksilo-core/src/widget_tree/focus_impl.rs) — `cycle_focus` scope-tree traversal, `set_traversal_scope`, `view_focus_*` chrome signals.

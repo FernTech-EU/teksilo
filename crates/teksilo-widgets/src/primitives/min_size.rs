@@ -16,12 +16,34 @@
 //!
 //! For the inverse operation (capping a maximum size) see [`MaxSize`](super::MaxSize).
 //!
+//! # Hit targets: take the floor from the theme
+//!
+//! `MinSize` is the mechanism for a minimum hit box, but the *number* belongs to
+//! the active density rather than to the call site. Route it through
+//! [`density_min_size`](teksilo_core::styles::density::density_min_size) (or
+//! `dp(.., TargetRole::Target, ..)`), which raises the named axes to
+//! `theme.input.target_size` — 24 dp at `Compact`, 32 at `Comfortable`, 44 at
+//! `Touch`, and 48 under the Material 3 preset. That is what every shipped
+//! recipe does; see `docs/density-and-targets.md`.
+//!
 //! ```rust
 //! # use teksilo_widgets::primitives::{MinSize, icon_widget::IconWidget};
-//! // Guarantee a 44×44 dp tap target around a 20 dp icon.
-//! let _tap_target = MinSize::new(44.0, 44.0)
+//! # use teksilo_core::styles::density::density_min_size;
+//! # use teksilo_tokens::{InputTokens, TargetAxes, TargetDensity};
+//! # let tokens = InputTokens::for_density(TargetDensity::Touch);
+//! # let base = teksilo_canvas::Size::new(20.0, 20.0);
+//! // The density decides the floor; the call site only says "both axes".
+//! let min = density_min_size(base, TargetAxes::BOTH, &tokens);
+//! let _tap_target = MinSize::new(min.width, min.height)
 //!     .child(IconWidget::checkmark(20.0));
 //! ```
+//!
+//! A hard-coded literal is right only where the number is a *design* dimension
+//! that must not move with density. Where it is a target, name its bar: 24 dp is
+//! WCAG 2.2 SC 2.5.8 *Target Size (Minimum)*, level AA — the floor
+//! `min_target_conformance` holds at every density; 44 dp is Apple's HIG minimum
+//! and SC 2.5.5 *Target Size (Enhanced)*, level AAA, which is what the `Touch`
+//! ladder aims for. 44 dp is never the AA figure.
 
 use teksilo_canvas::{Rect, Size, SizeProposal};
 use teksilo_core::signal::Prop;

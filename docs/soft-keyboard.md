@@ -226,9 +226,20 @@ tree, which knows the layout direction, that decides which is which.
 
 ## 6. What this does not do
 
-- It does not decide **when** to ask. A touch landing in a text field is a
-  question about the touch text contract, not about the keyboard, and no widget
-  calls `request_soft_keyboard` yet.
+- It does not decide **when** to ask, and that is now an **unowned gap rather
+  than a dependency**. When this page was written the touch text contract did not
+  exist; it does now, and every editing surface is a host — and still no widget
+  calls `request_soft_keyboard`. Its only caller is the plumbing that drains
+  `EventContext::soft_keyboard_request`. What is missing is the policy: which
+  gesture on which surface counts as a request (a caret placed by a release? a
+  hold that selected a word? a focus arriving from a `Tab`?), and what
+  `SoftKeyboardPolicy::Auto` should mean for each.
+- It does not follow a **touch-placed** caret with the IME candidate area.
+  `TouchSelection::report_ime_area` exists for exactly that and has **no caller**;
+  the three editing stacks report the area from their *keyboard* paths
+  (`…/keyboard.rs`, each deduping it itself), so a caret a finger placed leaves
+  the last keyboard-reported rectangle standing. One call per host closes it, and
+  the same policy question above decides where it goes.
 - It does not learn instantly that the user dismissed the keyboard by hand;
   see the polling note in §4.
 - It does not raise a keyboard on `None`, and it will not pretend to.
@@ -243,3 +254,12 @@ tree, which knows the layout direction, that decides which is which.
   `WindowOps::soft_keyboard_support`
 - `crates/teksilo-core/src/overlay/viewport.rs` — how the two insets become one
   usable rectangle
+
+## See also
+
+- [Touch text editing](text-touch-editing.md) — the contract that would decide
+  *when* to ask.
+- [Touch & pen](touch-and-pen.md) — the pointer model, and §9's list of what a
+  hardware sign-off has to check by hand.
+- [Overlays](overlays.md) — how the occluded and safe-area insets reach a
+  placement.
