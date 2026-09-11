@@ -195,6 +195,24 @@ See [docs/range-keyboard.md](docs/range-keyboard.md) for the full chord table.
   `type_text` take a `command` modifier beside `ctrl`, because a chord declared
   `Ctrl+S` resolves to ⌘S on macOS.
 
+#### Previewer
+
+- **`--export-docs` renders at a chosen density**: `--density=compact,touch`
+  writes `docs/widgets/img/<slug>-touch.png` beside the canonical image, and a
+  catalog page grows a `## Density` section when one exists. Compact stays
+  canonical and keeps every existing filename, so nothing committed moves.
+- `teksilo_preview::PreviewPass` — the density a preview renders at, and the
+  image-naming rule that follows from it.
+
+#### Documentation
+
+- **`docs/porting-widgets-to-the-pointer-model.md`** — the contract for moving a
+  widget onto the pointer model, as numbered clauses, each stating the rule, how
+  to comply, and what checks it.
+- Documented constants are asserted against the pages that document them. The
+  density ladder, all three gesture profiles and the kinetic constants are read
+  back from their own tables by a test, so a number lives in one place.
+
 ### Changed
 
 #### Core
@@ -659,8 +677,21 @@ can override, and none of them changes what a mouse does.
   full-screen program that splits its window scrolled the wrong pane.
 - **Dragging a selection handle moved the selection to the neighbouring row.**
 
+#### Previewer
+
+- **The toolbar's Export PNG ignored the live density**, so exporting while the
+  previewer was set to Touch produced a Compact image — over the Compact
+  filename. The density now reaches both the render and the name.
+
 #### Text
 
+- **`--all-features` builds.** Five `fonts-*` features named a Noto face that is
+  not in the repository, and because `include_bytes!` resolves at compile time,
+  enabling one was a hard build error — so those five features, both
+  `fonts-all` meta-features, and any `--all-features` build of the workspace
+  had never compiled on any revision. A face is now embedded only if its file
+  is present; enabling a feature without it warns and names the path to drop it
+  at, rather than failing the build.
 - **The code editor's gutter returned from inside a clip scope when no text
   backend was installed**, leaving the render frame unbalanced.
 - **A `PlainTextEditor` could neither replace nor suppress the context menu its
@@ -691,6 +722,13 @@ can override, and none of them changes what a mouse does.
 - **The soft-keyboard documentation claimed a touch-placed caret leaves a stale
   IME area standing.** Each editing stack reports the area from its own touch path;
   the unused core method is superseded rather than missing.
+- **Two committed catalog images had gone stale**, one of them contradicting a
+  safety fix: the message-box preview showed **Yes** as the accented default
+  after the widget had switched to **No**, and the colour-picker preview predated
+  the widget growing its HSV row.
+- **Catalog pages linked to rustdoc module pages that do not exist on docs.rs**,
+  because the module is crate-internal; each link now resolves to the nearest
+  published module.
 
 #### teksu
 
