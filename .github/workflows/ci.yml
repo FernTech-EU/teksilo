@@ -226,11 +226,19 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         uses: ./.github/actions/install-linux-deps
 
-      - name: Install X server
+      # Xvfb gives the window a display; `mesa-vulkan-drivers` gives it a GPU.
+      # The runner image has neither a GPU nor a Vulkan ICD, and its only
+      # OpenGL adapter cannot present to an Xvfb surface — wgpu reports
+      # `NotFound { active_backends: GL, incompatible_surface_backends: GL }`
+      # and window creation panics before the bridge is ever exercised. The
+      # package supplies lavapipe (llvmpipe), a CPU rasterizer that does
+      # support X11 WSI, which is the Linux counterpart of the DX12 WARP device
+      # that makes this job pass on a GPU-less Windows runner.
+      - name: Install X server and a software GPU
         if: matrix.os == 'ubuntu-latest'
         run: |
           sudo apt-get update
-          sudo apt-get install --no-install-recommends -y xvfb x11-utils
+          sudo apt-get install --no-install-recommends -y xvfb x11-utils mesa-vulkan-drivers
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@master
@@ -250,8 +258,11 @@ jobs:
 
       # Drives a real window over the real endpoint: snapshot_tree →
       # invoke_action → snapshot_tree → screenshot. Exits 0 on success, 1 on
-      # any failure, so the job result is the assertion. A GPU-less runner is
-      # expected — the smoke treats GPU_UNAVAILABLE as a skip, not a failure.
+      # any failure, so the job result is the assertion. Every runner here has
+      # at least a software adapter — lavapipe above, DX12 WARP on Windows,
+      # Metal on macOS — so the screenshot is expected to really capture; the
+      # smoke's GPU_UNAVAILABLE skip is the fallback for a host without one,
+      # not the normal path.
       - name: Live-bridge smoke (Unix socket)
         if: matrix.os != 'windows-latest'
         run: |
