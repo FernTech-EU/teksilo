@@ -128,6 +128,25 @@ fn run_server(
 }
 
 fn handle_request(mut stream: TcpStream, state: Arc<MockServerState>) {
+    // The listener is non-blocking so the accept loop can poll `shutdown`, but
+    // an accepted connection must block: this handler reads until it has a
+    // whole request, and a `WouldBlock` takes the `Err(_) => break` arm below —
+    // dropping the request without capturing it or answering, which the client
+    // sees as a broken pipe.
+    //
+    // Whether that happens is platform-dependent, so it has to be said out
+    // loud. POSIX specifies that the accepted socket does NOT inherit
+    // `O_NONBLOCK`; Winsock specifies the opposite — the socket `accept`
+    // returns "has the same properties as socket s". Rust's std passes both
+    // through unchanged, so on Windows this handler inherits non-blocking mode
+    // and loses any request whose bytes have not landed by the time `accept`
+    // returns — a real race, since `accept` completes at the TCP handshake and
+    // the client writes the POST after that. That is what made
+    // `shutdown_drains_pending_events` below fail on Windows and nowhere else:
+    // one lost request turns the worker's drain into a `Retry`, and a `Retry`
+    // during `Shutdown` re-queues the remaining events into a queue that is
+    // about to be dropped — so the captured count never reaches three.
+    stream.set_nonblocking(false).ok();
     stream.set_read_timeout(Some(Duration::from_secs(2))).ok();
     let mut buf = [0u8; 8192];
     let mut accumulated = Vec::new();
