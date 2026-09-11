@@ -112,6 +112,20 @@ impl SearchFieldStyle for RecipeSearchFieldStyle {
     fn make_body(&self, cfg: &SearchFieldStyleConfig, _ctx: &mut BuildContext) -> WidgetId {
         cfg.body
     }
+
+    /// This style's own row gutter, so a recipe built by a preset — macOS's
+    /// 8 dp `NSSearchField` results row, say — is the one a suggestion row
+    /// pads by. `tokens` is unused: the recipe was already resolved against a
+    /// density by [`SearchFieldRecipe::for_tokens`] at the widget's build site.
+    fn row_padding_horizontal(&self, _tokens: &InputTokens) -> f32 {
+        self.recipe.row_padding_horizontal
+    }
+
+    /// This style's own vertical row gutter. See
+    /// [`row_padding_horizontal`](Self::row_padding_horizontal).
+    fn row_padding_vertical(&self, _tokens: &InputTokens) -> f32 {
+        self.recipe.row_padding_vertical
+    }
 }
 
 pub fn resolve_search_field_style(

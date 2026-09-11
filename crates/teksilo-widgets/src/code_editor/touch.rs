@@ -228,6 +228,10 @@ impl TouchTextSurface for CodeTouchSurface {
         true
     }
 
+    fn report_ime_area(&self, ctx: &mut EventContext<'_>) {
+        super::keyboard::report_ime_cursor_area(&self.state, ctx);
+    }
+
     fn lens_painter(&self) -> Option<LensPainter> {
         Some(magnifier_painter(self.state.clone()))
     }

@@ -291,4 +291,12 @@ impl CalendarStyle for RecipeCalendarStyle {
         }
         ctx.add(row)
     }
+
+    /// This style's own arrow footprint, so a recipe built by a preset —
+    /// macOS's 20 dp `NSDatePicker` stepper, say — is the one the arrows are
+    /// sized to. `tokens` is unused: the recipe was already resolved against a
+    /// density by [`CalendarRecipe::for_tokens`] at the widget's build site.
+    fn nav_arrow_size(&self, _tokens: &InputTokens) -> f32 {
+        self.recipe.nav_arrow_size
+    }
 }

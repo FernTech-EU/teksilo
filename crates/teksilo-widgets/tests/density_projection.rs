@@ -17,6 +17,11 @@
 //!    artifact; this parses it and holds it to its own rules, so a row that
 //!    claims a treatment the code does not implement fails here rather than in
 //!    a reader's head.
+//! 4. **The style traits' metric defaults have not drifted.** A few widgets
+//!    compose a dimension the recipe owns but the style trait's composition
+//!    hooks do not hand over, so the trait carries a defaulted metrics
+//!    accessor. `teksilo-core` cannot name a `teksilo-widgets` constant, so
+//!    each default restates one as a literal; this holds the two equal.
 //!
 //! Reference: `docs/density-inventory.md`, and the touch design's A11.
 
@@ -480,4 +485,181 @@ fn every_fixed_row_says_it_is_fixed() {
             row.treatment,
         );
     }
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// 5. The style traits' metric defaults restate the module constants
+// ───────────────────────────────────────────────────────────────────────────
+//
+// Three style traits carry a defaulted metrics accessor for a dimension the
+// widget composes itself and the trait's `make_*` hooks never see — a table
+// cell's gutter, a calendar nav arrow's footprint, a search suggestion row's
+// gutter. Each default is the module constant put through the same helper
+// `for_tokens` uses, restated as a literal because `teksilo-core` sits below
+// `teksilo-widgets` and cannot name the constant. A literal in one crate and a
+// constant in another is exactly the shape that drifts, so it is pinned here —
+// and the tests are named in the trait doc comments, so a reader who finds the
+// literal finds the pin.
+
+/// The `TableStyle` gutter defaults equal
+/// `recipe_table_style::CELL_PADDING_{HORIZONTAL,VERTICAL}` at every density.
+#[test]
+fn the_table_trait_defaults_restate_the_module_constants() {
+    use teksilo_core::styles::TableStyle;
+    use teksilo_widgets::styles::recipe_table_style as cp;
+
+    /// A `TableStyle` that overrides nothing but `make_*`, so every accessor
+    /// answers from the trait's own default body.
+    struct BareTableStyle;
+    impl TableStyle for BareTableStyle {
+        fn make_header_cell(
+            &self,
+            cfg: &teksilo_core::styles::TableHeaderCellConfig,
+            _ctx: &mut teksilo_core::BuildContext,
+        ) -> teksilo_core::WidgetId {
+            cfg.label
+        }
+        fn make_sort_indicator(
+            &self,
+            _d: teksilo_core::styles::SortDirection,
+            ctx: &mut teksilo_core::BuildContext,
+        ) -> teksilo_core::WidgetId {
+            ctx.add(teksilo_widgets::primitives::Spacer::new())
+        }
+        fn make_row_background(
+            &self,
+            _cfg: &teksilo_core::styles::TableRowConfig,
+            ctx: &mut teksilo_core::BuildContext,
+        ) -> teksilo_core::WidgetId {
+            ctx.add(teksilo_widgets::primitives::Spacer::new())
+        }
+        fn grid(&self) -> teksilo_core::styles::TableGridRecipe {
+            teksilo_core::styles::TableGridRecipe::default()
+        }
+    }
+
+    for t in [compact(), comfortable(), touch()] {
+        assert_eq!(
+            BareTableStyle.cell_padding_horizontal(&t),
+            spacing(cp::CELL_PADDING_HORIZONTAL, &t),
+            "the TableStyle default drifted from CELL_PADDING_HORIZONTAL",
+        );
+        assert_eq!(
+            BareTableStyle.cell_padding_vertical(&t),
+            spacing(cp::CELL_PADDING_VERTICAL, &t),
+            "the TableStyle default drifted from CELL_PADDING_VERTICAL",
+        );
+    }
+}
+
+/// The `CalendarStyle` arrow default equals
+/// `recipe_calendar_style::CALENDAR_NAV_ARROW_SIZE` at every density.
+#[test]
+fn the_calendar_trait_default_restates_the_module_constant() {
+    use teksilo_core::styles::CalendarStyle;
+    use teksilo_widgets::styles::recipe_calendar_style as cal;
+
+    /// A `CalendarStyle` that overrides nothing but `make_*`.
+    struct BareCalendarStyle;
+    impl CalendarStyle for BareCalendarStyle {
+        fn make_day_cell(
+            &self,
+            _cfg: &teksilo_core::styles::CalendarDayConfig,
+            ctx: &mut teksilo_core::BuildContext,
+        ) -> teksilo_core::WidgetId {
+            ctx.add(teksilo_widgets::primitives::Spacer::new())
+        }
+        fn make_zoom_cell(
+            &self,
+            _cfg: &teksilo_core::styles::CalendarZoomCellConfig,
+            ctx: &mut teksilo_core::BuildContext,
+        ) -> teksilo_core::WidgetId {
+            ctx.add(teksilo_widgets::primitives::Spacer::new())
+        }
+        fn make_header(
+            &self,
+            cfg: &teksilo_core::styles::CalendarHeaderConfig,
+            _ctx: &mut teksilo_core::BuildContext,
+        ) -> teksilo_core::WidgetId {
+            cfg.title
+        }
+    }
+
+    for t in [compact(), comfortable(), touch()] {
+        assert_eq!(
+            BareCalendarStyle.nav_arrow_size(&t),
+            dp(cal::CALENDAR_NAV_ARROW_SIZE, TargetRole::Target, &t),
+            "the CalendarStyle default drifted from CALENDAR_NAV_ARROW_SIZE",
+        );
+    }
+}
+
+/// The `SearchFieldStyle` row-gutter defaults equal
+/// `recipe_search_field_style::ROW_PADDING_{HORIZONTAL,VERTICAL}` at every
+/// density.
+#[test]
+fn the_search_field_trait_defaults_restate_the_module_constants() {
+    use teksilo_core::styles::SearchFieldStyle;
+    use teksilo_widgets::styles::recipe_search_field_style as sf;
+
+    /// A `SearchFieldStyle` that overrides nothing but `make_body`.
+    struct BareSearchFieldStyle;
+    impl SearchFieldStyle for BareSearchFieldStyle {
+        fn make_body(
+            &self,
+            cfg: &teksilo_core::styles::SearchFieldStyleConfig,
+            _ctx: &mut teksilo_core::BuildContext,
+        ) -> teksilo_core::WidgetId {
+            cfg.body
+        }
+    }
+
+    for t in [compact(), comfortable(), touch()] {
+        assert_eq!(
+            BareSearchFieldStyle.row_padding_horizontal(&t),
+            spacing(sf::ROW_PADDING_HORIZONTAL, &t),
+            "the SearchFieldStyle default drifted from ROW_PADDING_HORIZONTAL",
+        );
+        assert_eq!(
+            BareSearchFieldStyle.row_padding_vertical(&t),
+            spacing(sf::ROW_PADDING_VERTICAL, &t),
+            "the SearchFieldStyle default drifted from ROW_PADDING_VERTICAL",
+        );
+    }
+}
+
+/// The shipped `Recipe*Style` answers from *its own recipe*, not from the
+/// trait default — which is the half of the mechanism that lets a preset's
+/// number reach the screen at all.
+///
+/// At Compact the two coincide by construction (`Default` is the Compact
+/// projection), so the discriminating check is a recipe built with a value no
+/// constant carries.
+#[test]
+fn a_recipe_style_answers_from_its_own_recipe() {
+    use teksilo_core::styles::{CalendarStyle, SearchFieldStyle, TableStyle};
+
+    let t = compact();
+
+    let table = RecipeTableStyle::new(TableRecipe {
+        cell_padding_horizontal: 12.0,
+        cell_padding_vertical: 7.0,
+        ..TableRecipe::for_tokens(&t)
+    });
+    assert_eq!(table.cell_padding_horizontal(&t), 12.0);
+    assert_eq!(table.cell_padding_vertical(&t), 7.0);
+
+    let calendar = RecipeCalendarStyle::new(CalendarRecipe {
+        nav_arrow_size: 20.0,
+        ..CalendarRecipe::for_tokens(&t)
+    });
+    assert_eq!(calendar.nav_arrow_size(&t), 20.0);
+
+    let search = RecipeSearchFieldStyle::new(SearchFieldRecipe {
+        row_padding_horizontal: 8.0,
+        row_padding_vertical: 3.0,
+        ..SearchFieldRecipe::for_tokens(&t)
+    });
+    assert_eq!(search.row_padding_horizontal(&t), 8.0);
+    assert_eq!(search.row_padding_vertical(&t), 3.0);
 }

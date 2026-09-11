@@ -474,6 +474,15 @@ impl TextAffordanceDelegate for TerminalDelegate {
         self.with_source(|controller, source| {
             controller.drag_handle(kind, phase, window, ctx, source);
         });
+        // No IME-area report, unlike the three editing stacks, and the omission
+        // is deliberate twice over. This crate owns no IME machinery at all —
+        // nothing here reports a cursor area, handles a preedit, or asks for a
+        // keyboard — so there is no per-stack reporter to call. And a terminal
+        // answers `is_editable() == false`, so `compute_handles` never offers
+        // it the caret handle whose drag is the thing that would need
+        // reporting: the only handles a terminal ever raises are the two ends
+        // of a selection, and `drag_moves_the_caret` excludes those for every
+        // surface.
         ctx.request_frame();
     }
 

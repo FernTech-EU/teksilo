@@ -566,6 +566,76 @@ fn a_pointer_caret_placement_reports_the_ime_area() {
     }
 }
 
+/// Dragging the **caret** handle reports the IME area at the caret it left
+/// behind — the second surface on the shared mount, so its own reporter is
+/// wired and not only the rich-text editor's.
+///
+/// The controller moves a dragged caret with `set_selection(moving..moving)`,
+/// which no press path sees, so before this the candidate list stayed beside
+/// wherever the caret was last *typed* to.
+#[test]
+fn dragging_the_caret_handle_reports_the_ime_area() {
+    let mut h = Harness::code("fn main() { let value = 1; }");
+    h.finger_tap(h.at(4));
+    h.render();
+    let caret = h
+        .handles()
+        .into_iter()
+        .find(|g| g.kind == SelectionHandleKind::Caret)
+        .expect("a tap raises the caret handle");
+    // Clear the report the tap itself made, so what is measured is the drag's.
+    h.state.borrow_mut().last_ime_area = None;
+
+    let target = Point::new(h.at(18).x, caret.anchor.y);
+    let contact = h.tree.new_contact();
+    h.tree.touch_down(contact, caret.anchor);
+    h.tree.touch_move(contact, target);
+    h.tree.touch_up(contact, target);
+
+    assert_eq!(h.caret(), 18, "the drag moved the caret");
+    let reported = h
+        .state
+        .borrow()
+        .last_ime_area
+        .expect("a caret the finger dragged reported no IME area");
+    let expected = {
+        let st = h.state.borrow();
+        super::keyboard::window_rect_at(&st, 18).expect("caret 18 has geometry")
+    };
+    assert!(
+        (reported.x - expected.x).abs() < 1.0 && (reported.y - expected.y).abs() < 1.0,
+        "reported {reported:?}, caret 18 is at {expected:?}"
+    );
+}
+
+/// Dragging a **selection** handle reports nothing: it chooses a range, not an
+/// insertion point, and the mouse's own drag-extend reports nothing either.
+#[test]
+fn dragging_a_selection_handle_reports_no_ime_area() {
+    let mut h = Harness::code("fn main() { let value = 1; }");
+    h.hold_at(PointerKind::Touch, h.at(4));
+    h.render();
+    let end = h
+        .handles()
+        .into_iter()
+        .find(|g| g.kind == SelectionHandleKind::End)
+        .expect("a hold raises an end handle");
+    h.state.borrow_mut().last_ime_area = None;
+
+    let target = Point::new(h.at(18).x, end.anchor.y);
+    let contact = h.tree.new_contact();
+    h.tree.touch_down(contact, end.anchor);
+    h.tree.touch_move(contact, target);
+    h.tree.touch_up(contact, target);
+
+    assert!(!h.selection().is_empty(), "the drag kept a range");
+    assert_eq!(
+        h.state.borrow().last_ime_area,
+        None,
+        "a range drag placed no caret, so it owed no report"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // The context menu these three faces never had
 // ---------------------------------------------------------------------------

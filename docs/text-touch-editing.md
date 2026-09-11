@@ -285,12 +285,23 @@ what it used to prescribe.
    platform does, and the toolbar belongs to a deliberate selection (a hold, a
    multi-tap, the end of a handle drag).
 
-6. **Report the IME area**, not the keyboard. Use the *editor's own* reporter
-   rather than `TouchSelection::report_ime_area` when it has one: the shipped
-   text stacks dedupe the area against the last one they sent, because
-   re-forwarding an unchanged rectangle echoes back a fresh empty preedit on some
-   winit IME backends and sustains a feedback loop — and the controller's version
-   would leave that cache stale as well as skipping the focus and layout guard.
+6. **Report the IME area**, not the keyboard, and report it from **your own**
+   reporter. The shipped text stacks dedupe the area against the last one they
+   sent, because re-forwarding an unchanged rectangle echoes back a fresh empty
+   preedit on some winit IME backends and sustains a feedback loop; a
+   controller-side reporter would leave that cache stale as well as skipping the
+   focus and layout guard, which is why the controller offers none.
+
+   Report on **every** route that moves the caret, not only the press. A press is
+   the obvious one; the two that get missed are the **caret-handle drag** and the
+   assistive-technology `SetValue` on a caret handle, both of which move the caret
+   inside the controller — `update_drag` writes `set_selection(moving..moving)` —
+   where nothing downstream can see it. Ask
+   `text_touch::drag_moves_the_caret(kind, phase)` rather than deciding for
+   yourself: it excludes a `Start` / `End` drag, which chooses a range rather than
+   an insertion point and which the mouse's own drag-extend does not report
+   either, and it excludes `Cancel`, which moves nothing.
+
    Either way, report the area only. Re-asserting IME allowance cancels a live
    composition, and a touch caret placement during composition must preserve the
    preedit.

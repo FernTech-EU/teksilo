@@ -11413,6 +11413,7 @@ version = "0.9.5"
 dependencies = [
  "teksilo-canvas",
  "teksilo-core",
+ "teksilo-data",
  "teksilo-i18n",
  "teksilo-tokens",
  "teksilo-widgets",
@@ -11424,6 +11425,7 @@ version = "0.9.5"
 dependencies = [
  "teksilo-canvas",
  "teksilo-core",
+ "teksilo-data",
  "teksilo-i18n",
  "teksilo-tokens",
  "teksilo-widgets",

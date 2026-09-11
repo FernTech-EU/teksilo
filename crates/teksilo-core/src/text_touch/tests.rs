@@ -1859,3 +1859,79 @@ fn a_handles_target_shadows_text_and_only_a_finger_claims_it() {
          host's arm there cannot read a decline off its arrival"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Which drag samples moved a caret
+// ---------------------------------------------------------------------------
+
+/// The predicate every host asks before reporting the IME cursor area, checked
+/// over its whole domain rather than on the two cases the wiring happens to
+/// exercise.
+///
+/// Three claims, and each is the reason a shipped host does what it does:
+/// a caret drag reports on every phase that writes a selection; a range drag
+/// never reports, because it chooses a range rather than an insertion point and
+/// the editors' own reporters read a cursor that `set_selection` leaves on the
+/// range's upper end; and `Cancel` never reports, because `cancel_drag` drops
+/// the drag and recomputes geometry without moving anything.
+#[test]
+fn only_a_caret_drag_that_wrote_a_selection_moved_the_caret() {
+    use crate::text_touch::drag_moves_the_caret;
+
+    let writes = [
+        HandleDragPhase::Begin,
+        HandleDragPhase::Move,
+        HandleDragPhase::End,
+    ];
+    for phase in writes {
+        assert!(
+            drag_moves_the_caret(SelectionHandleKind::Caret, phase),
+            "a caret drag's {phase:?} writes a selection and so moves the caret"
+        );
+    }
+    assert!(
+        !drag_moves_the_caret(SelectionHandleKind::Caret, HandleDragPhase::Cancel),
+        "Cancel drops the drag without writing a selection"
+    );
+
+    for kind in [SelectionHandleKind::Start, SelectionHandleKind::End] {
+        for phase in [
+            HandleDragPhase::Begin,
+            HandleDragPhase::Move,
+            HandleDragPhase::End,
+            HandleDragPhase::Cancel,
+        ] {
+            assert!(
+                !drag_moves_the_caret(kind, phase),
+                "{kind:?} chooses a range, not an insertion point ({phase:?})"
+            );
+        }
+    }
+}
+
+/// The three phases the predicate accepts are exactly the three that reach
+/// `update_drag`, so the predicate cannot drift from the controller it
+/// describes: a phase added to `HandleDragPhase` fails to compile here until it
+/// is classified.
+#[test]
+fn every_drag_phase_is_classified() {
+    for phase in [
+        HandleDragPhase::Begin,
+        HandleDragPhase::Move,
+        HandleDragPhase::End,
+        HandleDragPhase::Cancel,
+    ] {
+        let writes_a_selection = match phase {
+            // `begin_drag` ends with an `update_drag`; `end_drag` begins with
+            // one; `update_drag` is `Move` itself.
+            HandleDragPhase::Begin | HandleDragPhase::Move | HandleDragPhase::End => true,
+            // `cancel_drag` clears the drag and refreshes geometry.
+            HandleDragPhase::Cancel => false,
+        };
+        assert_eq!(
+            crate::text_touch::drag_moves_the_caret(SelectionHandleKind::Caret, phase),
+            writes_a_selection,
+            "{phase:?}",
+        );
+    }
+}

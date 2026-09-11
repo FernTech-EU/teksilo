@@ -452,6 +452,21 @@ impl FieldTouch {
         true
     }
 
+    /// Tell the platform where the caret is, so an on-screen keyboard's
+    /// candidate window follows it.
+    ///
+    /// The field's own reporter, not the controller's — the same one
+    /// [`Self::place_caret_at`] ends with: it holds the focus / layout guard
+    /// and the ibus-feedback-loop dedup, and a second route into the same
+    /// report would leave that cache stale. Reports the area only; re-asserting
+    /// IME allowance cancels a live composition.
+    pub(crate) fn report_ime_area(&self, ctx: &mut EventContext<'_>) {
+        let Some(state) = self.state() else {
+            return;
+        };
+        super::keyboard::report_ime_cursor_area(&state, ctx);
+    }
+
     /// Take the toolbar down without touching the handles.
     ///
     /// The press that is about to place a caret, and the first sample of a
@@ -601,6 +616,13 @@ impl TextAffordanceDelegate for FieldDelegate {
         self.0.with_source(|controller, source| {
             controller.drag_handle(kind, phase, window, ctx, source)
         });
+        // The controller moved the caret by writing a selection, which nothing
+        // downstream sees, so the candidate window would stay where the caret
+        // last was *typed* to. See `drag_moves_the_caret` for which samples
+        // count as a caret move.
+        if teksilo_core::text_touch::drag_moves_the_caret(kind, phase) {
+            self.0.report_ime_area(ctx);
+        }
         // Every phase, not only the last: the overlay's rectangle is the
         // affordances' own, so it has to follow them sample by sample.
         self.0.mount(
@@ -635,6 +657,11 @@ impl TextAffordanceDelegate for FieldDelegate {
             source.set_selection(next);
             controller.refresh(direction, source);
         });
+        // The same caret move as a drag's, reached from assistive technology
+        // instead of a finger, so it owes the same report.
+        if kind == SelectionHandleKind::Caret {
+            self.0.report_ime_area(ctx);
+        }
         self.0.mount(ctx, ToolbarIntent::Keep);
         ctx.request_frame();
     }

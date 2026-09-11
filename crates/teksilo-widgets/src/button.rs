@@ -262,9 +262,24 @@ pub(crate) fn target_outset(
     if !kind.is_direct() {
         return teksilo_canvas::EdgeInsets::ZERO;
     }
+    outset_to(visual, |extent| dp(extent, TargetRole::Target, tokens))
+}
+
+/// Half the shortfall between each of `visual`'s extents and the floor `to`
+/// puts under it, per edge, never negative.
+///
+/// Split out from [`target_outset`] so the shortfall arithmetic is stated once
+/// and a widget that needs a different floor reuses it rather than re-deriving
+/// it. A
+/// non-positive or non-finite extent grows by nothing: there is no meaningful
+/// centre to grow around.
+fn outset_to(
+    visual: teksilo_canvas::Size,
+    floor: impl Fn(f32) -> f32,
+) -> teksilo_canvas::EdgeInsets {
     let grow = |extent: f32| {
         if extent > 0.0 && extent.is_finite() {
-            ((dp(extent, TargetRole::Target, tokens) - extent) * 0.5).max(0.0)
+            ((floor(extent) - extent) * 0.5).max(0.0)
         } else {
             0.0
         }

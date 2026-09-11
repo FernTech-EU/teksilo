@@ -1379,16 +1379,27 @@ expecting a behaviour to change is the failure mode they share.
   `the_unread_pen_outset_agrees_with_the_pen_profile` so a reader who finds them
   disagreeing is not left guessing which the framework honours — but the field
   itself still has no effect.
-- **`TouchSelection::report_ime_area`.** No caller. **Not an IME defect**, and a
-  package report that called it one was wrong: all three editing stacks report the
-  IME area from their own *touch* paths, in `handle_direct_pointer_event` in each
-  of `primitives/text_input_field/mouse.rs`, `rich_text/mouse.rs` and
-  `code_editor/mouse.rs`, plus a second reporter in each stack's `place_caret_at`.
-  The field's own reporter is used deliberately rather than the controller's,
-  because it holds the focus/layout guard and the dedup that keeps an input method
-  from feeding its own report back. So this is one superseded method, with no user
-  impact. (`docs/soft-keyboard.md` asserted the opposite — that the stacks report
-  from their *keyboard* paths and that a touch-placed caret leaves a stale
+- **`TouchSelection::report_ime_area`. Closed: deleted, and a real gap beside it
+  fixed.** The method had no caller and is gone. The reasoning that found it
+  harmless was right about presses and wrong about drags: every stack does report
+  from its own *touch* path — the direct-pointer arm of `mouse.rs` in each of
+  `primitives/text_input_field`, `rich_text` and `code_editor`, plus a second
+  reporter in each `place_caret_at` — but **dragging the caret handle went through
+  none of them**. `TouchSelection::update_drag` moves the caret with
+  `source.set_selection(moving..moving)`, which nothing downstream sees, so a
+  finger that dragged the caret to a new position and then typed Japanese, Chinese
+  or Korean got its candidate window at the old one. Each delegate now reports
+  from its own stack's reporter — `TouchTextSurface::report_ime_area` for the two
+  multi-line editors, `FieldTouch::report_ime_area` for the single-line family —
+  gated on the core predicate `text_touch::drag_moves_the_caret`, which replaces
+  the deleted method: the controller answers *when* a caret moved, and the host
+  answers *what* to report, because only the host's reporter holds that stack's
+  focus / read-only / layout guard and the dedup that stops an input method
+  feeding an unchanged rectangle back as a fresh empty preedit. The terminal is
+  exempt and doubly so: the crate owns no IME machinery, and a terminal answers
+  `is_editable() == false`, so it is never offered a caret handle to drag.
+  (`docs/soft-keyboard.md` asserted something different again — that the stacks
+  report from their *keyboard* paths and that a touch-placed caret leaves a stale
   rectangle standing — and has been corrected.)
 - **`WidgetTree::touch_pinch_active`.** No production reader; every call is a test.
   The pinch *state* behind it is live — the arbiter drives contact tracking and
@@ -1397,19 +1408,21 @@ expecting a behaviour to change is the failure mode they share.
   suppresses the per-contact pan sessions during a two-finger pinch. Suppression
   could come from the claim chain rather than from this flag, and an earlier note
   that read the unread accessor as proof of an arbitration gap overstated it.
-- **Six projected recipe fields with no reader.** An earlier report counted four
-  and never listed them; what it had actually measured was that a *row height* was
-  frozen at its Compact value, which was fixed by projecting the module constants
-  — leaving the recipe fields themselves still unread. The six are
-  `SegmentedControlRecipe::height`, `StandardItemRecipe::min_height_single_line`
-  and `min_height_two_line`, and `CalendarRecipe::nav_arrow_size`,
-  `nav_arrow_radius` and `nav_icon_size`. Each is written by its recipe's
-  `for_tokens` and by the Fluent and macOS metrics builders, and read only by
-  those crates' own assertions. The widgets take their floors from the raw
-  module constants projected at runtime instead — so a preset that retunes one of
-  these six changes nothing. `MenuItemRecipe::item_height`, which that earlier
-  list included, *does* have a reader (`RecipeMenuItemStyle::metrics` → the menu
-  list's own metrics), and is not one of these.
+- **Projected recipe fields with no reader.** Counted twice before and wrong both
+  times — four, then six — because both counts were spot checks rather than a
+  sweep. The sweep is now in
+  [density-projection-gaps.md](density-projection-gaps.md), which enumerates every
+  one, cites its raw-const use site by file and function, says what it would
+  become at Comfortable and Touch, and is held to the set by a guard test so a
+  newly added projected field with no reader is caught rather than joining the
+  pile. Four of them were configured by a shipped preset and are now wired —
+  `TableRecipe::cell_padding_horizontal`/`_vertical`,
+  `CalendarRecipe::nav_arrow_size` and
+  `SearchFieldRecipe::row_padding_horizontal`/`_vertical` — through defaulted
+  metrics accessors on `TableStyle`, `CalendarStyle` and `SearchFieldStyle`.
+  `MenuItemRecipe::item_height`, which the earlier list included, *does* have a
+  reader (`RecipeMenuItemStyle::metrics` → the menu list's own metrics) and never
+  belonged on it.
 - **`KineticScroller::pointer_velocity`.** No production caller. A fling is seeded
   in core from the pan recognizer's own window-space tracker, not from here. It is
   a public accessor whose only correct coordinate frame is the one the

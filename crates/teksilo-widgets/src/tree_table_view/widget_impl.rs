@@ -789,12 +789,18 @@ impl<T: 'static> Widget for TreeTableView<T> {
             );
             let mut cell_ids: Vec<WidgetId> = Vec::with_capacity(display_indices.len());
             let active_sort = self.sort_signal.get();
+            let cell_padding_horizontal =
+                crate::styles::recipe_table_style::resolve_table_style(ctx)
+                    .cell_padding_horizontal(&ctx.theme().input);
             for (display_pos, &col_idx) in display_indices.iter().enumerate() {
                 let col = &self.columns[col_idx];
                 let current_sort = active_sort
                     .as_ref()
                     .and_then(|(id, dir)| if id == &col.id { Some(*dir) } else { None });
-                let filter_zone_width = cp::FILTER_INDICATOR_SIZE + cp::CELL_PADDING_HORIZONTAL;
+                // The gutter half comes from the active `TableStyle`, matching
+                // what `HeaderCell::build` actually pads by — see the twin in
+                // `table_view/widget_impl.rs`.
+                let filter_zone_width = cp::FILTER_INDICATOR_SIZE + cell_padding_horizontal;
                 let cell = HeaderCell::new(HeaderCellSpec {
                     col_id: col.id.clone(),
                     label: col.header_label.resolve_now(),

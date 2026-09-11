@@ -59,6 +59,7 @@
 - [Soft keyboard](soft-keyboard.md)
 - [Touch text editing](text-touch-editing.md)
 - [Density inventory](density-inventory.md)
+- [Density-projection gaps](density-projection-gaps.md)
 - [Widget pointer inventory](widget-pointer-inventory.md)
 - [Hover-affordance census](hover-affordance-census.md)
 - [Drag-operation census](drag-operation-census.md)

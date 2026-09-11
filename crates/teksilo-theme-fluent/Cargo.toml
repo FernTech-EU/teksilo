@@ -41,6 +41,9 @@ teksilo-widgets = { workspace = true }
 # `tests/mount.rs` builds a real `WidgetTree` per widget; `lit!` supplies
 # the untranslated labels those constructors take.
 teksilo-i18n = { workspace = true }
+# `tests/preset_metrics.rs` mounts the data views this preset restyles, and
+# those take a `ListModel` rather than a plain slice.
+teksilo-data = { workspace = true }
 
 [package.metadata.docs.rs]
 all-features = true

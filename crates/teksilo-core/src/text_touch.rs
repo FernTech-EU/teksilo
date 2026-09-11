@@ -434,6 +434,46 @@ pub enum HandleDragPhase {
     Cancel,
 }
 
+/// Whether a handle-drag sample of this `kind` and `phase` moved the **caret**
+/// — the question a host answers by reporting the IME cursor area.
+///
+/// The controller moves the caret itself, through
+/// [`TextHitSource::set_selection`], so nothing downstream of it knows the
+/// insertion point changed. Without a report the OS candidate window stays
+/// wherever the caret last was *typed* to, and a finger that drags the caret
+/// handle across a document and then types Japanese, Chinese or Korean gets its
+/// candidate list at the old position.
+///
+/// The two discriminations this makes, and why:
+///
+/// * **`Caret` only.** A `Start` / `End` drag is choosing a *range*, not an
+///   insertion point — the controller publishes no caret handle while a
+///   selection stands. It also could not be reported coherently: the shipped
+///   reporters read the editor's own cursor, and
+///   [`TextHitSource::set_selection`] leaves that on the range's upper end, so
+///   an `End` drag would move the candidate window and a `Start` drag would
+///   not. The mouse agrees — a drag-extend reports nothing either, and the
+///   shipped rule across every stack is "report where a caret is *placed*".
+/// * **Not `Cancel`.** Every other phase writes a selection —
+///   `Begin` runs one update immediately and `End` runs a last one — while
+///   `Cancel` drops the drag and only recomputes geometry. Nothing moved, so
+///   there is nothing to report.
+///
+/// The **report itself** is deliberately not offered here. Each editing stack
+/// has its own reporter, holding that stack's focus / read-only / layout guard
+/// and the dedup that keeps an input method from feeding an unchanged rectangle
+/// back as a fresh empty preedit; a reporter on the controller would skip all
+/// of it and leave the stack's cache stale besides. So this answers *when*, and
+/// the host answers *what* — which is also why the controller's own
+/// `report_ime_area` is gone rather than wired.
+pub fn drag_moves_the_caret(kind: SelectionHandleKind, phase: HandleDragPhase) -> bool {
+    kind == SelectionHandleKind::Caret
+        && matches!(
+            phase,
+            HandleDragPhase::Begin | HandleDragPhase::Move | HandleDragPhase::End
+        )
+}
+
 #[derive(Debug, Clone, Copy)]
 struct HandleDrag {
     /// Which handle the finger grabbed. Read only to tell a caret drag from a
@@ -581,16 +621,6 @@ impl TouchSelection {
         self.drag = None;
         self.raised = false;
         self.affordances.publish(AffordanceState::default());
-    }
-
-    /// Tell the platform where the caret is, so an on-screen keyboard's
-    /// candidate window does not cover it.
-    ///
-    /// Reports the area only; it deliberately does not ask for the keyboard.
-    /// Re-asserting IME allowance cancels a live composition, and a touch
-    /// caret placement during composition must preserve the preedit.
-    pub fn report_ime_area(&self, ctx: &mut EventContext<'_>, source: &dyn TextHitSource) {
-        ctx.set_ime_cursor_area(source.caret_rect(source.selection().end));
     }
 
     /// Recompute every affordance from `source`.

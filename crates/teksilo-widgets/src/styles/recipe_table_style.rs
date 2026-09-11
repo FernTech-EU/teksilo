@@ -22,7 +22,8 @@ use teksilo_core::build_context::BuildContext;
 use teksilo_core::color_prop::ColorProp;
 use teksilo_core::signal::Signal;
 use teksilo_core::styles::{
-    SortDirection, TableGridRecipe, TableHeaderCellConfig, TableRowConfig, TableStyle,
+    SharedTableStyle, SortDirection, TableGridRecipe, TableHeaderCellConfig, TableRowConfig,
+    TableStyle,
 };
 use teksilo_core::widget_id::WidgetId;
 use teksilo_tokens::{CornerRadius, InputTokens, SurfaceRole, TargetRole};
@@ -259,4 +260,31 @@ impl TableStyle for RecipeTableStyle {
     fn grid(&self) -> TableGridRecipe {
         TableGridRecipe::default()
     }
+
+    /// This style's own gutter, so a recipe built by a preset — Fluent's 12 dp
+    /// `ListViewItem` gutter, say — is the one the header cell pads by.
+    /// `tokens` is unused: the recipe was already resolved against a density
+    /// by [`TableRecipe::for_tokens`] at the widget's build site.
+    fn cell_padding_horizontal(&self, _tokens: &InputTokens) -> f32 {
+        self.recipe.cell_padding_horizontal
+    }
+
+    /// This style's own vertical gutter. See
+    /// [`cell_padding_horizontal`](Self::cell_padding_horizontal).
+    fn cell_padding_vertical(&self, _tokens: &InputTokens) -> f32 {
+        self.recipe.cell_padding_vertical
+    }
+}
+
+/// The `TableStyle` a `TableView` / `TreeTableView` builds against: the
+/// theme-wide `style_slots.table` if an app or a preset installed one, else
+/// this module's default resolved against the active density.
+///
+/// Shared by the three sites that need it — the header cell's chrome and its
+/// gutter, and the two views' filter-zone arithmetic — so the gutter the cell
+/// pads by and the gutter the hit zone is measured from cannot disagree.
+pub fn resolve_table_style(ctx: &BuildContext) -> SharedTableStyle {
+    ctx.theme().style_slots.table.clone().unwrap_or_else(|| {
+        std::rc::Rc::new(RecipeTableStyle::for_tokens(&ctx.theme().input)) as SharedTableStyle
+    })
 }

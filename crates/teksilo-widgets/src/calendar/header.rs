@@ -19,7 +19,7 @@ use teksilo_core::accesskit::{Action, Role};
 use teksilo_core::build_context::BuildContext;
 use teksilo_core::event::{EventResponse, Key, WidgetEvent};
 use teksilo_core::signal::Signal;
-use teksilo_core::styles::{CalendarHeaderConfig, SharedCalendarStyle};
+use teksilo_core::styles::{CalendarHeaderConfig, CalendarStyle, SharedCalendarStyle};
 use teksilo_core::widget::{CursorIcon, LayoutContext, Widget, WidgetPlacement};
 use teksilo_core::widget_builder::HandlerSet;
 use teksilo_core::widget_id::WidgetId;
@@ -30,9 +30,7 @@ use crate::common::datetime::Date;
 use crate::common::datetime::month_long_key;
 use crate::common::datetime::types::YearMonth;
 use crate::primitives::{Center, FixedSize, IconWidget, RectWidget, ZStack};
-use crate::styles::recipe_calendar_style::{
-    CALENDAR_NAV_ARROW_RADIUS, CALENDAR_NAV_ARROW_SIZE, RecipeCalendarStyle,
-};
+use crate::styles::recipe_calendar_style::{CALENDAR_NAV_ARROW_RADIUS, RecipeCalendarStyle};
 
 use super::{CalendarMode, OnMonthChanged};
 
@@ -243,20 +241,6 @@ impl Widget for CalendarHeader {
     }
 }
 
-/// [`CALENDAR_NAV_ARROW_SIZE`] raised to the density's `target_size`
-/// (24 / 32 / 44 dp). The identity at Compact.
-///
-/// The same projection `CalendarRecipe::for_tokens` applies to
-/// `nav_arrow_size`; the arrow builds its own chrome rather than asking the
-/// style for it, so it applies the projection itself.
-fn nav_arrow_extent(tokens: &teksilo_tokens::InputTokens) -> f32 {
-    teksilo_core::styles::density::dp(
-        CALENDAR_NAV_ARROW_SIZE,
-        teksilo_tokens::TargetRole::Target,
-        tokens,
-    )
-}
-
 // ── Single icon-only navigation arrow (prev/next) ────────────────────
 
 #[derive(Clone, Copy)]
@@ -274,6 +258,15 @@ struct NavArrow {
     label: String,
     on_activate: std::rc::Rc<dyn Fn(&mut teksilo_core::widget::EventContext)>,
     root_id: Option<WidgetId>,
+    /// The footprint `build` resolved, in logical pixels.
+    ///
+    /// [`Widget::hit_outset`] is handed a pointer kind and the token ladder and
+    /// nothing else — no theme, no text scale — so the size it has to make up
+    /// the shortfall from is parked here when it is decided. A build-time read
+    /// cannot go stale: a density change marks the tree at
+    /// `BindingLevel::Rebuild`, and so does a text-scale change, which is the
+    /// same reason `HeaderCell::zone_floor` is a `Cell`.
+    extent: std::cell::Cell<f32>,
 }
 
 impl std::fmt::Debug for NavArrow {
@@ -292,6 +285,7 @@ impl NavArrow {
             label,
             on_activate: std::rc::Rc::new(f),
             root_id: None,
+            extent: std::cell::Cell::new(0.0),
         }
     }
 }
@@ -331,18 +325,37 @@ impl Widget for NavArrow {
             .corner_radius(CornerRadius::uniform(CALENDAR_NAV_ARROW_RADIUS * scale));
         let bg_id = ctx.add(bg);
         let z = ctx.add(ZStack::new().add_child(bg_id).add_child(centered));
-        // The arrow's footprint is a target, so it follows the density ladder
-        // (24 dp at Compact — the identity — 32 at Comfortable, 44 at Touch) as
-        // well as the global text scale. `CalendarRecipe` has projected
-        // `nav_arrow_size` since the density sweep; the arrow read the raw
-        // constant, so it stayed 24 dp under a theme that had decided on 44
-        // while the day cells beside it grew.
-        let arrow_extent = nav_arrow_extent(&ctx.theme().input) * scale;
+        // The arrow's painted footprint comes from the active `CalendarStyle`,
+        // which is what lets a preset set it — macOS's `NSDatePicker` stepper is
+        // 20 dp, and the arrow used to render the shipped 24 whatever the
+        // theme had decided. The default accessor is still the density ladder
+        // (24 dp at Compact — the identity — 32 at Comfortable, 44 at Touch),
+        // and the global text scale multiplies whichever number comes back.
+        let painted = nav_arrow_extent(ctx.theme()) * scale;
+        // …and the *node* is that, or the 24 dp conformance floor, whichever is
+        // larger. A preset is entitled to paint under the floor and macOS does;
+        // WCAG 2.2 SC 2.5.8 is about the target rather than the chrome, so the
+        // chrome stays at the preset's number and the box around it reaches the
+        // floor, with the arrow centred inside. Exactly the bargain `Checkbox`
+        // already strikes — a 19 dp painted box inside a `box_hit_area` — and
+        // the reason it is a box here rather than only a `hit_outset` is that an
+        // outset cannot escape its parent: the first and last arrows sit flush
+        // against the header row's own edge, so their outer 2 dp has nowhere to
+        // grow into and they stayed non-conformant with the outset alone
+        // (measured: 22 x 24 for those two, 24 x 24 for the two interior ones).
+        //
+        // `min_target_conformance` is 24 dp at every density and is never
+        // scaled, so under Int UI — whose arrow is already 24 — this is the
+        // identity at every density and changes no layout at all.
+        let box_extent = painted.max(ctx.theme().input.min_target_conformance);
+        self.extent.set(box_extent);
+        let chrome = ctx.add(FixedSize::new().width(painted).height(painted).child_id(z));
+        let centred_chrome = ctx.add(Center::new().child_id(chrome));
         let sized = ctx.add(
             FixedSize::new()
-                .width(arrow_extent)
-                .height(arrow_extent)
-                .child_id(z),
+                .width(box_extent)
+                .height(box_extent)
+                .child_id(centred_chrome),
         );
 
         // Activation needs to fire from pointer click (`on_tap`),
@@ -389,7 +402,9 @@ impl Widget for NavArrow {
         proposal: SizeProposal,
         ctx: &LayoutContext,
     ) -> teksilo_core::widget::LayoutResponse {
-        let extent = nav_arrow_extent(&ctx.theme.input);
+        // The *box*, not the painted chrome — see `build`. Only a fallback:
+        // the mounted arrow answers from its `FixedSize` child.
+        let extent = nav_arrow_extent(ctx.theme).max(ctx.theme.input.min_target_conformance);
         match self.root_id {
             Some(id) => ctx
                 .child_size(id, proposal)
@@ -410,6 +425,32 @@ impl Widget for NavArrow {
             child.origin = bounds.origin();
             child.size = bounds.size();
         }
+    }
+
+    /// Top the arrow's box up to the density's target size for a coarse
+    /// pointer, between the pointer and the arena.
+    ///
+    /// The **conformance** floor is the box's job — `build` sizes the node to
+    /// at least `min_target_conformance` and centres the preset's chrome inside
+    /// it — because an outset cannot escape its parent and the outermost arrows
+    /// sit flush against the header row's edge. What is left for an outset is
+    /// the part above that floor: 24 to 32 at Comfortable, 24 to 44 at Touch,
+    /// for a finger or a pen, where growing the box would move the header's
+    /// layout for a mouse user too.
+    ///
+    /// So this is the coarse-pointer top-up and nothing else, and
+    /// [`target_outset`](crate::button::target_outset) — which is zero for a
+    /// precise pointer — says exactly that. Conformance is the box's job, not
+    /// this one's: the box is what `a_macos_calendars_nav_arrows_clear_the_
+    /// conformance_floor_at_every_density` holds, and splitting the guarantee
+    /// across two mechanisms would leave neither owning it.
+    fn hit_outset(
+        &self,
+        kind: teksilo_tokens::PointerKind,
+        tokens: &teksilo_tokens::InputTokens,
+    ) -> teksilo_canvas::EdgeInsets {
+        let extent = self.extent.get();
+        crate::button::target_outset(Size::new(extent, extent), kind, tokens)
     }
 
     fn children(&self) -> Vec<WidgetId> {
@@ -476,6 +517,21 @@ fn double_chevron_right_icon(size: f32) -> IconWidget {
     path.line_to(Point::new(s * 0.80, s * 0.50));
     path.line_to(Point::new(s * 0.50, s * 0.75));
     IconWidget::from_path(path, size)
+}
+
+/// The nav arrow's footprint under `theme`: the active [`CalendarStyle`]'s
+/// `nav_arrow_size`, or the shipped recipe's when no slot is installed.
+///
+/// Takes a whole `&Theme` rather than `&InputTokens` because the answer is the
+/// *style's*, not the density's alone — and because `layout_response` reaches
+/// the theme through a `LayoutContext`, where no `BuildContext` exists. Both
+/// call sites go through here so the built footprint and the measured one
+/// cannot disagree.
+fn nav_arrow_extent(theme: &teksilo_core::styles::Theme) -> f32 {
+    match &theme.style_slots.calendar {
+        Some(style) => style.nav_arrow_size(&theme.input),
+        None => RecipeCalendarStyle::for_tokens(&theme.input).nav_arrow_size(&theme.input),
+    }
 }
 
 fn resolve_calendar_style(ctx: &BuildContext) -> SharedCalendarStyle {

@@ -560,22 +560,26 @@ impl Widget for HeaderCell {
             let popover_id = ctx.add(popover);
             row = row.add_child(popover_id);
         }
-        let row_id = ctx.add(row);
-        let padded = ctx.add(
-            Padding::symmetric(cp::CELL_PADDING_VERTICAL, cp::CELL_PADDING_HORIZONTAL)
-                .child_id(row_id),
-        );
-
         // Route the header cell's chrome through `TableStyle::make_header_cell`.
         // The default `RecipeTableStyle` returns a `ZStack` that overlays
         // a hover/resize background behind the label — apps install a
         // theme-wide `style_slots.table` or pass their own when wrapping
         // the table to swap the chrome wholesale.
-        let style: SharedTableStyle = ctx.theme().style_slots.table.clone().unwrap_or_else(|| {
-            Rc::new(crate::styles::RecipeTableStyle::for_tokens(
-                &ctx.theme().input,
-            ))
-        });
+        let style: SharedTableStyle = crate::styles::recipe_table_style::resolve_table_style(ctx);
+        let row_id = ctx.add(row);
+        // The gutter comes from the style, not from `cp::CELL_PADDING_*`: a
+        // preset writes its own on the recipe (Fluent's 12 dp `ListViewItem`
+        // gutter) and reading the module constant here rendered 8 dp whatever
+        // the theme had decided. The two views measure their filter zone from
+        // the same accessor, so the padding and the hit zone agree.
+        let tokens = ctx.theme().input;
+        let padded = ctx.add(
+            Padding::symmetric(
+                style.cell_padding_vertical(&tokens),
+                style.cell_padding_horizontal(&tokens),
+            )
+            .child_id(row_id),
+        );
         let cell_cfg = TableHeaderCellConfig {
             label: padded,
             sort: self.current_sort.map(style_sort),

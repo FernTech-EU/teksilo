@@ -234,15 +234,17 @@ tree, which knows the layout direction, that decides which is which.
   gesture on which surface counts as a request (a caret placed by a release? a
   hold that selected a word? a focus arriving from a `Tab`?), and what
   `SoftKeyboardPolicy::Auto` should mean for each.
-- `TouchSelection::report_ime_area` has **no caller**, and that is a superseded
-  method rather than a missing report. Each editing stack reports the IME area
-  from its *own* touch path — the direct-pointer arm of its `mouse.rs`, plus a
-  second reporter in its `place_caret_at` — so a caret a finger placed **does**
-  move the candidate area. The stacks use their own reporter rather than the
-  controller's deliberately: it holds the focus/layout guard and the dedup that
-  keeps an input method from feeding its own report back. The decision the unused
-  core method needs is to be wired or deleted, and it is recorded in
-  `docs/touch-and-pen.md` §10.1.
+- `TouchSelection::report_ime_area` is **gone**. Each editing stack reports the
+  IME area from its *own* touch paths — the direct-pointer arm of its `mouse.rs`,
+  a second reporter in its `place_caret_at`, and a third on a caret-handle drag —
+  so a caret a finger placed or dragged **does** move the candidate area. The
+  stacks use their own reporter rather than a controller-side one deliberately: it
+  holds the focus / read-only / layout guard and the dedup that keeps an input
+  method from feeding an unchanged rectangle back as a fresh empty preedit. What
+  the controller supplies instead is the *question*:
+  `text_touch::drag_moves_the_caret(kind, phase)` says which handle-drag samples
+  moved a caret, and the host answers them with its own reporter. See
+  `docs/touch-and-pen.md` §10.1 for the drag gap that closing this found.
 - It does not learn instantly that the user dismissed the keyboard by hand;
   see the polling note in §4.
 - It does not raise a keyboard on `None`, and it will not pretend to.

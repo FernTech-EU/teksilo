@@ -84,6 +84,21 @@ pub(crate) trait TouchTextSurface {
     /// handle refuses and the editor never sees.
     fn place_caret_at(&self, window: Point, ctx: &mut EventContext<'_>) -> bool;
 
+    /// Tell the platform where this surface's caret is, so an on-screen
+    /// keyboard's candidate window follows it.
+    ///
+    /// A seam on the surface rather than a call the mount could make itself,
+    /// because the reporter is **per stack**: it holds that stack's focus /
+    /// read-only / layout guard and dedups against that stack's own
+    /// `last_ime_area`, and the mount serves two unrelated state types. Its
+    /// implementations are the same one-liner `place_caret_at` already ends
+    /// with, so a caret the mount moves and a caret a press moves report
+    /// through exactly one route each.
+    ///
+    /// Reports the area only; it deliberately does not ask for the keyboard.
+    /// Re-asserting IME allowance cancels a live composition.
+    fn report_ime_area(&self, ctx: &mut EventContext<'_>);
+
     /// The closure that fills the magnifier, or `None` for a surface that
     /// mounts no lens.
     fn lens_painter(&self) -> Option<LensPainter>;
@@ -631,6 +646,14 @@ impl TextAffordanceDelegate for EditorTouchDelegate {
         self.0.with_source(|controller, source| {
             controller.drag_handle(kind, phase, window, ctx, source)
         });
+        // The controller moved the caret by writing a selection, which nothing
+        // downstream sees, so the candidate window would stay where the caret
+        // last was *typed* to. See `drag_moves_the_caret` for which samples
+        // count as a caret move, and `TouchTextSurface::report_ime_area` for
+        // why the surface's own reporter is the one that runs.
+        if teksilo_core::text_touch::drag_moves_the_caret(kind, phase) {
+            self.0.surface.report_ime_area(ctx);
+        }
         self.0.mount_overlays(
             ctx,
             match phase {
@@ -663,6 +686,11 @@ impl TextAffordanceDelegate for EditorTouchDelegate {
             source.set_selection(next);
             controller.refresh(direction, source);
         });
+        // The same caret move as a drag's, reached from assistive technology
+        // instead of a finger, so it owes the same report.
+        if kind == SelectionHandleKind::Caret {
+            self.0.surface.report_ime_area(ctx);
+        }
         self.0.mount_overlays(ctx, ToolbarIntent::Keep);
         ctx.request_frame();
     }

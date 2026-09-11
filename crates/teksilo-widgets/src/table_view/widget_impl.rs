@@ -735,6 +735,9 @@ impl<T: 'static> Widget for TableView<T> {
             );
             let mut cell_ids: Vec<WidgetId> = Vec::with_capacity(display_indices.len());
             let active_sort = self.sort_signal.get();
+            let cell_padding_horizontal =
+                crate::styles::recipe_table_style::resolve_table_style(ctx)
+                    .cell_padding_horizontal(&ctx.theme().input);
             for (display_pos, &col_idx) in display_indices.iter().enumerate() {
                 let col = &self.columns[col_idx];
                 let current_sort = active_sort
@@ -742,8 +745,20 @@ impl<T: 'static> Widget for TableView<T> {
                     .and_then(|(id, dir)| if id == &col.id { Some(*dir) } else { None });
                 // Filter zone width: indicator glyph + a small horizontal
                 // padding for tap tolerance. Mirrors the layout of the
-                // HStack inside HeaderCell::build.
-                let filter_zone_width = cp::FILTER_INDICATOR_SIZE + cp::CELL_PADDING_HORIZONTAL;
+                // HStack inside HeaderCell::build — including its gutter,
+                // which comes from the active `TableStyle` rather than from
+                // `cp::CELL_PADDING_HORIZONTAL`, so the padding the cell
+                // applies and the zone the press handler measures cannot name
+                // different cells.
+                //
+                // At every shipped gutter this is currently inert:
+                // `header_cell_zones` hands the figure to `partition_targets`
+                // with a floor of `target_size`, and 12 + 8 (IntUI) and
+                // 12 + 12 (Fluent) are both under the 24 dp Compact floor, so
+                // the solved zone is 24 either way. It stops being inert the
+                // moment a preset's gutter takes the sum past the floor, which
+                // is exactly when the two numbers disagreeing would show.
+                let filter_zone_width = cp::FILTER_INDICATOR_SIZE + cell_padding_horizontal;
                 let cell = header::HeaderCell::new(header::HeaderCellSpec {
                     col_id: col.id.clone(),
                     label: col.header_label.resolve_now(),

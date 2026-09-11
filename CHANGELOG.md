@@ -667,6 +667,21 @@ can override, and none of them changes what a mouse does.
   `NaN`, and a rectangle containing `NaN` contains no point.
 - **With the debug inspector installed, switching density destroyed the wrapped
   application's tree.**
+- **Four dimensions a shipped theme sets now reach the screen.** A table header
+  cell pads by the Fluent gutter (12 dp, not 8); a calendar's navigation arrows
+  are drawn the size macOS asks for (20 dp, not 24); a search field's suggestion
+  rows carry the macOS row gutters (8 x 3 dp, not 10 x 4). Each was written on
+  the theme's recipe and discarded, because the widget measured the shipped
+  Int UI constant instead of asking the style. `TableStyle`, `CalendarStyle` and
+  `SearchFieldStyle` now hand the dimension over, and a custom style keeps the
+  ladder it had unless it says otherwise. Int UI at the default density is
+  unchanged.
+- **A theme may draw a control below the 24 dp target floor without costing the
+  app its WCAG 2.2 SC 2.5.8 conformance.** A calendar's navigation arrow keeps
+  whatever size the theme asks for and sits inside a box that reaches the floor,
+  so macOS's 20 dp stepper is drawn at 20 dp and still answers a 24 dp press —
+  from a mouse as much as from a finger. Under Int UI, whose arrow is already
+  the floor, nothing moves at any density.
 
 #### Terminal
 
@@ -692,6 +707,13 @@ can override, and none of them changes what a mouse does.
   had never compiled on any revision. A face is now embedded only if its file
   is present; enabling a feature without it warns and names the path to drop it
   at, rather than failing the build.
+- **Dragging the caret handle moves the on-screen keyboard's candidate window
+  with it.** Every editing surface reported the caret's position when a press
+  placed it, and none did when a finger *dragged* it, so composing Japanese,
+  Chinese or Korean after a handle drag put the candidate list at the caret's
+  old position. `RichTextEditor`, `CodeEditor`, `PlainTextEditor`, `TextInput`,
+  `PasswordField`, `SearchField`, `SpinBox` and the date/time family; the
+  assistive-technology route onto the same handle reports it too.
 - **The code editor's gutter returned from inside a clip scope when no text
   backend was installed**, leaving the render frame unbalanced.
 - **A `PlainTextEditor` could neither replace nor suppress the context menu its

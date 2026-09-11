@@ -445,6 +445,128 @@ fn dragging_the_end_handle_extends_the_selection() {
     );
 }
 
+/// Dragging the **caret** handle reports the OS IME candidate area at the caret
+/// it left behind.
+///
+/// The controller moves a dragged caret with `set_selection(moving..moving)`,
+/// which no press path sees — so before this the candidate list stayed beside
+/// wherever the caret was last *typed* to, and a finger that dragged the caret
+/// across the document and then composed Japanese got its candidates at the old
+/// position.
+#[test]
+fn dragging_the_caret_handle_reports_the_ime_area() {
+    let mut h = Harness::focused("hello world and a longer line of prose");
+    h.finger_tap(h.at(3));
+    h.render();
+    let caret = h
+        .handle_of(SelectionHandleKind::Caret)
+        .expect("a tap raises the caret handle");
+    // Clear the report the tap itself made, so what is measured is the drag's.
+    h.state.borrow_mut().last_ime_area = None;
+
+    let target = Point::new(h.at(20).x, caret.anchor.y);
+    let contact = h.tree.new_contact();
+    h.tree.touch_down(contact, caret.anchor);
+    h.tree.touch_move(contact, target);
+    h.tree.touch_up(contact, target);
+
+    assert_eq!(h.caret(), 20, "the drag moved the caret");
+    let reported = h
+        .state
+        .borrow()
+        .last_ime_area
+        .expect("a caret the finger dragged reported no IME area");
+    let expected = h.handle.offset_rect(20).expect("caret 20 has geometry");
+    assert!(
+        (reported.x - expected.x).abs() < 1.0 && (reported.y - expected.y).abs() < 1.0,
+        "reported {reported:?}, caret 20 is at {expected:?}"
+    );
+}
+
+/// Dragging a **selection** handle reports nothing.
+///
+/// It chooses a range, not an insertion point — and the mouse's own
+/// drag-extend reports nothing either, so this keeps the two devices on one
+/// rule rather than giving a finger a report a cursor does not get.
+#[test]
+fn dragging_a_selection_handle_reports_no_ime_area() {
+    let mut h = Harness::focused("hello world and a longer line of prose");
+    h.hold_at(PointerKind::Touch, h.at(8));
+    h.render();
+    let end = h
+        .handle_of(SelectionHandleKind::End)
+        .expect("a hold raises an end handle");
+    h.state.borrow_mut().last_ime_area = None;
+
+    let target = Point::new(h.at(15).x, end.anchor.y);
+    let contact = h.tree.new_contact();
+    h.tree.touch_down(contact, end.anchor);
+    h.tree.touch_move(contact, target);
+    h.tree.touch_up(contact, target);
+
+    assert_eq!(h.selection(), 6..15, "the drag moved the range");
+    assert_eq!(
+        h.state.borrow().last_ime_area,
+        None,
+        "a range drag placed no caret, so it owed no report"
+    );
+}
+
+/// `SetValue` on the **caret** handle reports the IME area, exactly as a finger
+/// dragging the same handle does.
+///
+/// The assistive route reaches the identical caret move by a different door —
+/// `set_handle_offset` rather than `handle_drag` — and a report that depended
+/// on which device asked would leave a screen-reader user composing at a stale
+/// candidate position.
+#[test]
+fn an_assistive_caret_move_reports_the_ime_area() {
+    use teksilo_core::accesskit::{Action, ActionData};
+    let mut h = Harness::focused("hello world and a longer line of prose");
+    h.finger_tap(h.at(3));
+    h.render();
+    let caret = h
+        .handle_of(SelectionHandleKind::Caret)
+        .expect("a tap raises the caret handle");
+    let host = h
+        .touch
+        .layer_content()
+        .expect("the affordance host was built");
+    let layer = h.tree.children(host)[0];
+    let caret_node = h
+        .tree
+        .children(layer)
+        .into_iter()
+        .find(|id| {
+            let b = h.tree.bounds(*id);
+            h.tree.is_active(*id)
+                && (b.x - caret.hit.x).abs() < 0.5
+                && (b.y - caret.hit.y).abs() < 0.5
+        })
+        .expect("the caret handle has a node placed on its own hit rectangle");
+    // Clear the report the tap itself made, so what is measured is the action's.
+    h.state.borrow_mut().last_ime_area = None;
+
+    let handled = h.tree.dispatch_access_action(
+        teksilo_core::accessibility::widget_id_to_node_id(caret_node),
+        Action::SetValue,
+        Some(ActionData::NumericValue(20.0)),
+        &mut teksilo_core::window::NoopWindowOps,
+    );
+    assert!(handled, "the handle refused SetValue");
+    assert_eq!(h.caret(), 20);
+    let reported = h
+        .state
+        .borrow()
+        .last_ime_area
+        .expect("an assistive caret move reported no IME area");
+    let expected = h.handle.offset_rect(20).expect("caret 20 has geometry");
+    assert!(
+        (reported.x - expected.x).abs() < 1.0 && (reported.y - expected.y).abs() < 1.0,
+        "reported {reported:?}, caret 20 is at {expected:?}"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Touch: the toolbar's contents
 // ---------------------------------------------------------------------------
