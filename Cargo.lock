@@ -11344,6 +11344,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "teksilo-target-conformance"
+version = "0.9.4"
+dependencies = [
+ "jiff",
+ "teksilo-canvas",
+ "teksilo-core",
+ "teksilo-data",
+ "teksilo-i18n",
+ "teksilo-text",
+ "teksilo-theme-fluent",
+ "teksilo-theme-macos",
+ "teksilo-theme-material3",
+ "teksilo-tokens",
+ "teksilo-widgets",
+]
+
+[[package]]
 name = "teksilo-teksu-guard"
 version = "0.9.5"
 dependencies = [

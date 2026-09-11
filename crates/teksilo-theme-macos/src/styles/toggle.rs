@@ -161,8 +161,18 @@ impl Widget for MacOsSwitchBody {
         vec![]
     }
 
-    fn layout_response(&self, _proposal: SizeProposal, _ctx: &LayoutContext) -> LayoutResponse {
-        Size::new(TRACK_W, TRACK_H).into()
+    /// The track keeps Apple's 22 dp; the **node** takes the conformance floor.
+    ///
+    /// A 22 dp switch is 2 dp under WCAG 2.2 SC 2.5.8's floor, and neither hit
+    /// mechanism can make that up: the floor does not scale, so a projection
+    /// cannot reach it, and a `hit_outset` never escapes its parent. The
+    /// remedy the framework already uses for a control whose chrome is
+    /// deliberately smaller than its target is to grow the node and centre the
+    /// chrome in it — which is what the stock `RecipeToggleStyle` does with
+    /// the same floor, and what `paint` below already assumes by centring the
+    /// track in whatever bounds it is given.
+    fn layout_response(&self, _proposal: SizeProposal, ctx: &LayoutContext) -> LayoutResponse {
+        Size::new(TRACK_W, TRACK_H.max(ctx.theme.input.min_target_conformance)).into()
     }
 
     fn place_children(

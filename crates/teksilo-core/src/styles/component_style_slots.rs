@@ -162,6 +162,88 @@ impl ComponentStyleSlots {
         )
     }
 
+    /// The slots installed here that are **the same object** in `other` — the
+    /// ones a re-derivation left alone.
+    ///
+    /// One consumer, and it is the same one [`installed`](Self::installed)
+    /// has: the target-conformance audit's
+    /// [`unprojected_style_slots`](crate::accessibility::target_audit::unprojected_style_slots),
+    /// which asks a theme for the styles no
+    /// [`DensityProjection`](crate::styles::DensityProjection) rebuilds by
+    /// deriving it at two densities and comparing.
+    ///
+    /// `Rc::ptr_eq`, not any comparison of contents: a Tier-3 style is a trait
+    /// object with no equality of its own, and identity is the right question.
+    /// A projection that re-derives a slot builds a fresh `Rc` for it, so a slot
+    /// still pointing at the same allocation at two densities is one the ladder
+    /// did not reach — whoever installed it.
+    ///
+    /// The body destructures `self` without a `..` rest pattern, for the reason
+    /// [`installed`](Self::installed) does: adding a slot to the struct and
+    /// forgetting it here is a compile error rather than a silent omission.
+    pub fn unchanged_against(&self, other: &Self) -> Vec<&'static str> {
+        fn same<T: ?Sized>(a: &Option<std::rc::Rc<T>>, b: &Option<std::rc::Rc<T>>) -> bool {
+            matches!((a, b), (Some(x), Some(y)) if std::rc::Rc::ptr_eq(x, y))
+        }
+        macro_rules! probe {
+            ($($name:ident),* $(,)?) => {{
+                // The destructure is what makes this exhaustive: a slot added
+                // to the struct and not listed below fails to compile here.
+                // `other` is then read field by field under the same names.
+                let Self { $($name),* } = self;
+                let mut out = Vec::new();
+                $(if same($name, &other.$name) {
+                    out.push(stringify!($name));
+                })*
+                out
+            }};
+        }
+        probe!(
+            button,
+            split_button,
+            splitter,
+            icon_button,
+            toggle,
+            checkbox,
+            radio,
+            radio_tile,
+            slider,
+            text_input,
+            combo_box,
+            menu_item,
+            panel,
+            card,
+            chart,
+            popover,
+            tooltip,
+            scroll_bar,
+            standard_item,
+            tab,
+            dialog,
+            snackbar,
+            toast,
+            banner,
+            badge,
+            progress_bar,
+            link,
+            segmented_control,
+            avatar,
+            calendar,
+            color_picker,
+            spin_box,
+            date_edit,
+            search_field,
+            rich_text_editor,
+            table,
+            list_container,
+            drop_zone,
+            drop_target,
+            grid_view,
+            web_view,
+            text_selection
+        )
+    }
+
     /// Whether no slot carries an override — the state every shipped preset
     /// that ships raw tokens alone is in.
     pub fn is_empty(&self) -> bool {

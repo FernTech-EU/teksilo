@@ -1555,17 +1555,58 @@ patch. They are the only `#[ignore]`s the programme added.
 
 ### 10.5 Coverage boundaries
 
-- **The target-size gate is green for three crates' named fixtures, not for the
-  framework.** `teksilo-widgets`, `teksilo-charts` and `teksilo-scene` have fixture
-  lists; `teksilo-inspector`, `teksilo-terminal`, `teksilo-preview-ui` and
-  `teksilo-webview` own targets and have none. The lists install the IntUI preset
-  only. Of the three Compact-visible under-floor exceptions
+- **The target-size gate is green for three named fixture lists, not for the
+  framework.** The stock widget catalog's list (in `teksilo-target-conformance`),
+  `teksilo-charts`' and `teksilo-scene`'s; `teksilo-inspector`,
+  `teksilo-terminal`, `teksilo-preview-ui` and `teksilo-webview` own targets and
+  have none. The widget list sweeps all four shipped presets at three densities;
+  charts and scene sweep Int UI alone, each for a written reason. Of the three
+  Compact-visible under-floor exceptions
   [density-inventory.md](density-inventory.md) §0 enumerates, the gate reaches
   none. The boundary is written out crate by crate, with the feasibility of each
   missing list, in
   [accessibility-internal-audit.md](accessibility-internal-audit.md) §3.7 and in
   the shared walker's own module docs. **Do not read a green gate as "the framework
   conforms."**
+- **The fixture lists measure every label through a flat line height.** Nothing in
+  them installs a text backend, and the two headless measurers — `TextWidget`'s own
+  8-dp-per-character fallback and `MockTextBackend` — both report one fixed line
+  height whatever the theme's typography asks for. Every text-derived dimension in
+  the census is therefore that constant rather than the theme's line box, which is
+  how a menu row comes out under the floor in three presets and at its declared
+  height in the fourth. The allow-list entry on the menu row says so at the point
+  it matters; the general consequence is that a fixture measuring a control sized
+  by its label is measuring the harness's metrics as much as the widget's.
+  Unowned, and the remedy (a backend that reads the theme) would re-measure every
+  pin in the list.
+- **A window's top resize ring swallows the top band of its own content at Touch.**
+  The 6 dp strip's coarse `hit_outset` reaches roughly a `target_size` into the
+  window, so a control laid out against the top edge is unreachable by a finger.
+  Present under every preset; the gate reports it under Material 3 alone, because
+  that is the preset whose larger Touch target moves the control's *centre* inside
+  the ring — under the others the audit files the same row as shadowed by another
+  target rather than judging it. Same owner as A10's outset-versus-target
+  precedence, and the same finding as the docking gutter already on the list.
+- **A `SearchField` with an empty query reports a 16 × 16 clear slot reaching
+  22 × 24 at Compact, under all four presets.** Measured, not described: the
+  `search_field/empty` fixture produces exactly that row, and the figure above is
+  read off the gate rather than written beside it. The same slot with a query
+  typed reaches 24 × 24 and does not appear at all — `HitTarget::active`
+  withdraws the *outset* when the affordance is hidden, and nothing withdraws the
+  *target*. What is left is a live node that keeps its `on_tap` and its
+  `CursorIcon::Pointer`: a press on an empty field's trailing 16 dp is swallowed
+  by an affordance that is not painted and does nothing, shows a hand while it
+  does it, and eats the caret placement the press was aiming at. Now an
+  allow-list entry with an owner rather than a bullet here, because the question
+  is answerable: stop being a target when inactive. It is not a one-line change —
+  an outset must be declared by the node that *takes* the press, so the handler
+  cannot simply move onto the `visible_when`-gated glyph inside, and `HitTarget`
+  has no reactive way to drop a handler — which is why it is escalated rather
+  than fixed in passing.
+- **Fluent pins its icon button at 32 dp and its menu row at 33 / 33 / 40 across
+  the whole ladder.** Both clear the 24 dp AA floor at every density, so neither is
+  a gate failure; both are the same class as the macOS constants that *were* under
+  it, and both would become failures the day the floor moved. Recorded, not gated.
 - **`WidgetTree::set_input_density` destroys a subtree rooted in a layout
   primitive.** Measured twice, most recently on a `Padding → HStack → [TextWidget,
   Button]` root: six nodes to two. Every fixture list builds *at* a density and so

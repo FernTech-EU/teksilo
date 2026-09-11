@@ -51,8 +51,8 @@ use teksilo_canvas::{Point, Rect, Size, SizeProposal};
 use teksilo_core::accessibility::target_audit::{
     AllowedViolation,
     PinnedDp::{ClearsFloor, Is},
-    PinnedGeometry, TargetFixture, TargetMeasurement, TargetRule, audit_fixtures, measure_fixtures,
-    measure_targets,
+    PinnedGeometry, TargetFixture, TargetMeasurement, TargetRule, TargetViolation, audit_fixtures,
+    gate, measure_fixtures, measure_targets,
 };
 use teksilo_core::event::{Modifiers, PointerButton, WidgetEvent};
 use teksilo_core::pointer::{
@@ -268,6 +268,28 @@ fn fixtures() -> Vec<TargetFixture> {
 // The gate
 // =========================================================================
 
+/// The one preset this crate's gate installs, and the id its pins name.
+///
+/// **Int UI only**, and that is a coverage boundary rather than an oversight: a
+/// scene's heavyweight tier is whatever widget the app puts in it, measured by
+/// the widget catalog's own gate under all four presets, and its lightweight
+/// tier has no arena node for any preset to style. Naming the theme on the pin
+/// rather than leaving it implicit is what makes the boundary visible.
+const INTUI: &str = "intui.light";
+
+static ROSTER: gate::Roster = gate::Roster {
+    themes: &[gate::ThemeSubject {
+        id: INTUI,
+        theme: teksilo_core::presets::intui::light,
+    }],
+    allow: ALLOW_LIST,
+};
+
+/// Every conformance failure the fixture list produces, computed once.
+fn census() -> Vec<TargetViolation> {
+    gate::conformance_census(&fixtures(), &ROSTER)
+}
+
 /// **The seed.** One entry, and it is not a layout defect: it is what a camera
 /// does.
 ///
@@ -281,6 +303,7 @@ const ALLOW_LIST: &[AllowedViolation] = &[AllowedViolation {
     path: "button_zoomed_out",
     measured: &[PinnedGeometry {
         densities: &DENSITIES,
+        themes: &[INTUI],
         paints: (Is(60.0), Is(16.0)),
         reaches: (ClearsFloor, Is(16.0)),
     }],
@@ -297,7 +320,7 @@ const ALLOW_LIST: &[AllowedViolation] = &[AllowedViolation {
           user-chosen magnification is the same class of thing as browser zoom. \
           The *Equivalent* route back is the view's own zoom (Ctrl+wheel, pinch, \
           `SceneView::zoom_to` / `fit_to_content`), and the AT tree publishes \
-          each item with screen-projected bounds either way. Owner: nobody -- \
+          each item with screen-projected bounds either way. No owner -- \
           this entry is a statement about cameras, and \
           `zoom_scales_a_heavyweight_targets_screen_size` is the measurement \
           behind it.",
@@ -307,19 +330,7 @@ const ALLOW_LIST: &[AllowedViolation] = &[AllowedViolation {
 /// all three densities.
 #[test]
 fn no_scene_target_falls_below_the_conformance_floor_at_any_density() {
-    let fixtures = fixtures();
-    let mut failures = Vec::new();
-    for density in DENSITIES {
-        for violation in audit_fixtures(&fixtures, density) {
-            if !violation.rule.is_conformance_failure() {
-                continue;
-            }
-            if ALLOW_LIST.iter().any(|e| e.matches(&violation)) {
-                continue;
-            }
-            failures.push(violation.to_string());
-        }
-    }
+    let failures = gate::conformance_failures(&census(), &ROSTER);
     assert!(
         failures.is_empty(),
         "{} scene target(s) below the 24 dp WCAG 2.2 SC 2.5.8 (AA) floor:\n{}",
@@ -328,76 +339,25 @@ fn no_scene_target_falls_below_the_conformance_floor_at_any_density() {
     );
 }
 
-/// Every allow-list entry, every geometry it pins, and every density it claims
-/// still matches something — and nothing it does not pin is excused.
+/// Every allow-list entry, every geometry it pins, and every (theme, density)
+/// pair it claims still matches something — and nothing it does not pin is
+/// excused.
 ///
 /// Empty is the healthy state for this list. Until it is, both halves are
 /// needed: the first stops an entry outliving what it excused, the second stops
 /// it covering a geometry it never measured. A fixture-name matcher — which this
 /// entry's `path` is — passes the first and fails the second, so the seeding is
-/// what makes the name safe to key on.
+/// what makes the name safe to key on. Both are the shared matcher's, so this
+/// crate cannot drift from the other gates on what either question means.
 #[test]
 fn no_scene_allow_list_entry_is_stale() {
-    let fixtures = fixtures();
-    let mut seeded = 0_usize;
-    for entry in ALLOW_LIST {
-        assert!(!entry.why.is_empty(), "entry `{}` has no why", entry.path);
-        assert!(
-            !entry.owner.is_empty() || entry.why.contains("Owner: nobody"),
-            "entry `{}` names no owner and does not say why it needs none",
-            entry.path,
-        );
-        assert!(
-            !entry.measured.is_empty(),
-            "entry `{}` pins no measurement, so it excuses whatever its path \
-             happens to match",
-            entry.path,
-        );
-        for (index, pin) in entry.measured.iter().enumerate() {
-            for &density in pin.densities {
-                let violations = audit_fixtures(&fixtures, density);
-                assert!(
-                    violations.iter().any(|v| v.rule.is_conformance_failure()
-                        && v.path.contains(entry.path)
-                        && pin.covers(v)),
-                    "allow-list entry `{}` pin {index} matches no conformance \
-                     failure at {density:?} any more — re-measure it, narrow its \
-                     densities, or delete it and its justification with it",
-                    entry.path,
-                );
-            }
-        }
-    }
-    for density in DENSITIES {
-        for violation in audit_fixtures(&fixtures, density) {
-            if !violation.rule.is_conformance_failure() {
-                continue;
-            }
-            for axis in 0..4 {
-                let mut broken = violation.clone();
-                match axis {
-                    0 => broken.size.width = 2.0,
-                    1 => broken.size.height = 2.0,
-                    2 => broken.expanded.width = 2.0,
-                    _ => broken.expanded.height = 2.0,
-                }
-                assert!(
-                    !ALLOW_LIST.iter().any(|e| e.matches(&broken)),
-                    "a regression seeded on axis {axis} of a real violation is \
-                     still excused, so the entry covering it is a blanket over \
-                     its fixture rather than a pin on a geometry:\n  real:   \
-                     {violation}\n  seeded: {broken}",
-                );
-                seeded += 1;
-            }
-        }
-    }
-    assert_eq!(
-        seeded, 12,
-        "one zoomed-out button at three densities, four scalars each — a \
-         different number means the census moved and this test is proving \
-         something else",
-    );
+    let census = census();
+    let mut findings = gate::roster_defects(&census, &ROSTER);
+    findings.extend(gate::stale_entries(&census, &ROSTER));
+    // One zoomed-out button at three densities, four scalars each, and no other
+    // theme to seed into — a smaller number means the census moved.
+    findings.extend(gate::non_narrowing(&census, &ROSTER, 12));
+    assert!(findings.is_empty(), "{}", findings.join("\n"));
 }
 
 /// The whole conformance story of this crate, as numbers, with the AA failures
@@ -1193,8 +1153,13 @@ fn a_magnet_handle_is_invisible_to_the_core_walker() {
 // A deliberately undersized heavyweight subject must fail
 // =========================================================================
 
-/// The heavyweight half's liveness proof: a 10 dp widget at scene coordinates,
-/// inside a card that is itself tappable, must fail at every density.
+/// The heavyweight half's liveness proof, in two halves of its own — because the
+/// two can fail separately: a 10 dp widget at scene coordinates, inside a card
+/// that is itself tappable, must fail at every density (the *walker* measures),
+/// and the same fixture through [`gate::conformance_census`] and
+/// [`gate::conformance_failures`] must come back out (the *gate* reports). The
+/// first loop calls [`audit_fixtures`] directly, so on its own it would pass with
+/// the matcher returning nothing.
 #[test]
 fn a_deliberately_undersized_heavyweight_subject_fails() {
     let undersized = vec![TargetFixture::new("undersized", |t| {
@@ -1221,4 +1186,13 @@ fn a_deliberately_undersized_heavyweight_subject_fails() {
              {violations:#?}",
         );
     }
+
+    // The second half: the gate's own path. Nothing in the allow-list names
+    // this fixture, so every row of it must be reported.
+    let census = gate::conformance_census(&undersized, &ROSTER);
+    let reported = gate::conformance_failures(&census, &ROSTER);
+    assert!(
+        reported.iter().any(|f| f.contains("Port")),
+        "the gate reports no failure for the undersized fixture: {reported:#?}",
+    );
 }

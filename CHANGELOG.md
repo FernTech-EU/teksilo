@@ -195,6 +195,14 @@ See [docs/range-keyboard.md](docs/range-keyboard.md) for the full chord table.
   `type_text` take a `command` modifier beside `ctrl`, because a chord declared
   `Ctrl+S` resolves to ⌘S on macOS.
 
+#### Accessibility
+
+- **The target-size gate measures every shipped preset**, not the default theme
+  alone: Int UI, macOS, Fluent and Material 3, each at all three densities, with
+  light and dark compared for identical geometry. The fixtures moved into a
+  crate the theme crates can reach, so a preset is audited by the same 70
+  fixtures the default theme is.
+
 #### Previewer
 
 - **`--export-docs` renders at a chosen density**: `--density=compact,touch`
@@ -655,6 +663,15 @@ can override, and none of them changes what a mouse does.
   `set_expanded` was reporting collapsed over the same window.
 
 #### Widgets
+
+- **A Fluent list or tree row can be clicked again.** The preset's selection pill
+  spans the whole row and was hit-tested ahead of the row's contents, so nothing
+  inside a Fluent row — a checkbox, a disclosure arrow, a trailing button — took
+  a press, by mouse or by finger.
+- **A macOS switch and an icon button meet the 24 dp target floor.** Both are
+  drawn at the size the preset asks for, Apple's 22 dp track and the 18 dp
+  compact icon button among them; the node around the chrome is what grew.
+
 
 - **Three controls showed no pressed appearance for a pointer at all** — the
   `ToolBox` header, `RadioTile`, and the calendar's month/year cell, the last only

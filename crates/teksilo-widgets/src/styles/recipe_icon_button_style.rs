@@ -155,11 +155,36 @@ impl IconButtonStyle for RecipeIconButtonStyle {
 
         let centered_id = ctx.add(Center::new().child_id(cfg.icon));
         let zstack_id = ctx.add(ZStack::new().add_child(bg_id).add_child(centered_id));
-        ctx.add(
+        let painted = ctx.add(
             FixedSize::new()
                 .width(button_dim)
                 .height(button_dim)
                 .child_id(zstack_id),
+        );
+        // The conformance box. The chrome stays whatever the recipe asked for;
+        // the NODE never comes out under `min_target_conformance`, with the
+        // chrome centred inside it. That floor does not scale with density, so
+        // a recipe pinned below it is below it at every density, and neither
+        // hit mechanism can make it up: an outset cannot escape its parent, and
+        // the miss-only pass gives a control nothing when a neighbour of its
+        // own kind sits flush beside it, which is what a row of icon buttons
+        // is. Same bargain as `Checkbox`, `RadioButton` and the calendar's nav
+        // arrow.
+        //
+        // The identity case is the common one: a recipe routing its sizes
+        // through `dp(.., Target, ..)` already clears the floor, so this
+        // changes nothing for it at any density. Only a recipe that pins a
+        // dimension below the floor moves, and only its node.
+        let box_dim = button_dim.max(ctx.theme().input.min_target_conformance);
+        if box_dim <= button_dim {
+            return painted;
+        }
+        let centred = ctx.add(Center::new().child_id(painted));
+        ctx.add(
+            FixedSize::new()
+                .width(box_dim)
+                .height(box_dim)
+                .child_id(centred),
         )
     }
 }

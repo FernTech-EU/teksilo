@@ -171,6 +171,11 @@ teksilo-theme-material3 = { path = "crates/teksilo-theme-material3", version = "
 teksilo-theme-macos = { path = "crates/teksilo-theme-macos", version = "0.9.5" }
 teksilo-theme-fluent = { path = "crates/teksilo-theme-fluent", version = "0.9.5" }
 
+# Path only, no `version`: this crate is `publish = false`, so a versioned
+# dependency on it would have to resolve from crates.io the moment a
+# dependant is packaged.
+teksilo-target-conformance = { path = "crates/teksilo-target-conformance" }
+
 # gRPC proto crate — lives in a sibling repo at `../teksilo-collector-proto`
 # so the wire-format spec has its own version stream (and the
 # `teksilo-collector` server can consume it without needing the entire

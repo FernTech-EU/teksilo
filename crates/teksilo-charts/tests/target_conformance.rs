@@ -55,8 +55,8 @@ use teksilo_charts::{
 use teksilo_core::accessibility::target_audit::{
     AllowedViolation,
     PinnedDp::{ClearsFloor, Is},
-    PinnedGeometry, SkipReason, TargetFixture, TargetMeasurement, TargetRule, audit_fixtures,
-    measure_fixtures, measure_targets,
+    PinnedGeometry, SkipReason, TargetFixture, TargetMeasurement, TargetRule, TargetViolation,
+    audit_fixtures, gate, measure_fixtures, measure_targets,
 };
 use teksilo_core::widget_builder::WidgetBuilder;
 use teksilo_core::widget_id::WidgetId;
@@ -266,6 +266,28 @@ const LEGEND_ROW_PAINT: f32 = 13.2;
 /// neighbouring row, at distance zero.
 const LEGEND_ROW_TOPPED_UP: f32 = 18.6;
 
+/// This crate's gate installs **Int UI only**, which is a coverage boundary and
+/// not an oversight: a chart carries no Tier-3 chrome from any shipped preset
+/// (`ChartStyle`'s default impl lives in this crate, not in a theme), so a
+/// preset changes a chart's geometry only through typography. Naming the theme
+/// on the pin rather than leaving it implicit is what makes that boundary
+/// visible, and what makes a preset added later a decision rather than a
+/// silence.
+const INTUI: &str = "intui.light";
+
+static ROSTER: gate::Roster = gate::Roster {
+    themes: &[gate::ThemeSubject {
+        id: INTUI,
+        theme: teksilo_core::presets::intui::light,
+    }],
+    allow: ALLOW_LIST,
+};
+
+/// Every conformance failure the fixture list produces, computed once.
+fn census() -> Vec<TargetViolation> {
+    gate::conformance_census(&fixtures(), &ROSTER)
+}
+
 /// **The seed.** One entry, for a shortfall this crate had already recorded in
 /// prose before the audit existed, with the decision that produced it — and two
 /// pinned geometries, because the row measures differently depending on whether
@@ -277,6 +299,7 @@ const ALLOW_LIST: &[AllowedViolation] = &[AllowedViolation {
         // distance zero, so the row reaches exactly what it paints.
         PinnedGeometry {
             densities: &[TargetDensity::Compact],
+            themes: &[INTUI],
             paints: (ClearsFloor, Is(LEGEND_ROW_PAINT)),
             reaches: (ClearsFloor, Is(LEGEND_ROW_PAINT)),
         },
@@ -284,6 +307,7 @@ const ALLOW_LIST: &[AllowedViolation] = &[AllowedViolation {
         // target: the pass tops the row up on one side and it is still short.
         PinnedGeometry {
             densities: &[TargetDensity::Compact],
+            themes: &[INTUI],
             paints: (ClearsFloor, Is(LEGEND_ROW_PAINT)),
             reaches: (ClearsFloor, Is(LEGEND_ROW_TOPPED_UP)),
         },
@@ -310,19 +334,7 @@ const ALLOW_LIST: &[AllowedViolation] = &[AllowedViolation {
 /// three densities, except the written entry above.
 #[test]
 fn no_chart_target_falls_below_the_conformance_floor_at_any_density() {
-    let fixtures = fixtures();
-    let mut failures = Vec::new();
-    for density in DENSITIES {
-        for violation in audit_fixtures(&fixtures, density) {
-            if !violation.rule.is_conformance_failure() {
-                continue;
-            }
-            if ALLOW_LIST.iter().any(|e| e.matches(&violation)) {
-                continue;
-            }
-            failures.push(violation.to_string());
-        }
-    }
+    let failures = gate::conformance_failures(&census(), &ROSTER);
     assert!(
         failures.is_empty(),
         "{} chart target(s) below the 24 dp WCAG 2.2 SC 2.5.8 (AA) floor:\n{}",
@@ -331,55 +343,38 @@ fn no_chart_target_falls_below_the_conformance_floor_at_any_density() {
     );
 }
 
-/// Every allow-list entry, every geometry it pins, and every density it claims
-/// still matches something — and nothing it does not pin is excused.
+/// Every allow-list entry, every geometry it pins, and every (theme, density)
+/// pair it claims still matches something — and nothing it does not pin is
+/// excused.
 ///
 /// Both halves, because they ask opposite questions. An entry that outlives what
 /// it excused is a hole waiting for the next control whose name contains the
 /// same substring; an entry that matches something it should *not* is the same
 /// hole from the other side, and it is the one a path-only matcher walks into.
-/// The seeding drives each scalar of each real violation to 2 dp — a genuinely
-/// broken target — and requires the list to stop covering it.
+/// Both are the shared matcher's, so this crate cannot drift from the other
+/// gates on what either question means.
+///
+/// The third half is this crate's own: an entry that pins *nothing* at a density
+/// where its path does produce a failure. The gate already reports that failure,
+/// so this only names it better — but naming it better is the difference between
+/// "widen the entry with a reason" and "add a pin and move on".
 #[test]
 fn no_chart_allow_list_entry_is_stale() {
-    let fixtures = fixtures();
-    let mut seeded = 0_usize;
+    let census = census();
+    let mut findings = gate::roster_defects(&census, &ROSTER);
+    findings.extend(gate::stale_entries(&census, &ROSTER));
+    // Ten Compact legend rows, four scalars each, and no other theme to seed
+    // into — a smaller number means the census moved.
+    findings.extend(gate::non_narrowing(&census, &ROSTER, 40));
     for entry in ALLOW_LIST {
-        assert!(!entry.why.is_empty(), "entry `{}` has no why", entry.path);
-        assert!(
-            !entry.owner.is_empty(),
-            "entry `{}` names no owner",
-            entry.path
-        );
-        assert!(
-            !entry.measured.is_empty(),
-            "entry `{}` pins no measurement, so it excuses whatever its path \
-             happens to match",
-            entry.path,
-        );
-        if let Some(name) = entry.exception {
-            assert!(
-                entry.why.contains(name),
-                "`{}` claims the SC 2.5.8 *{name}* exception in a field its \
-                 justification never mentions",
+        if let Some(name) = entry.exception
+            && !entry.why.contains(name)
+        {
+            findings.push(format!(
+                "`{}` claims the SC 2.5.8 *{name}* exception in a field its justification \
+                 never mentions",
                 entry.path,
-            );
-        }
-        for (index, pin) in entry.measured.iter().enumerate() {
-            for &density in pin.densities {
-                let violations = audit_fixtures(&fixtures, density);
-                assert!(
-                    violations.iter().any(|v| v.rule.is_conformance_failure()
-                        && v.path.contains(entry.path)
-                        && pin.covers(v)),
-                    "allow-list entry `{}` pin {index} matches no conformance \
-                     failure at {density:?} any more. Either the geometry moved \
-                     — re-measure it and rewrite the pin — or the row now \
-                     conforms there, in which case narrow the pin or delete it \
-                     and its justification with it.",
-                    entry.path,
-                );
-            }
+            ));
         }
         for density in DENSITIES {
             let claimed = entry
@@ -389,47 +384,20 @@ fn no_chart_allow_list_entry_is_stale() {
             if claimed {
                 continue;
             }
-            let violations = audit_fixtures(&fixtures, density);
-            assert!(
-                !violations
-                    .iter()
-                    .any(|v| v.rule.is_conformance_failure() && v.path.contains(entry.path)),
-                "allow-list entry `{}` pins nothing at {density:?}, but there is \
-                 a failure there — the gate is reporting it, which is correct; \
-                 widen the entry only with a written reason and a measurement",
-                entry.path,
-            );
-        }
-    }
-    for density in DENSITIES {
-        for violation in audit_fixtures(&fixtures, density) {
-            if !violation.rule.is_conformance_failure() {
-                continue;
-            }
-            for axis in 0..4 {
-                let mut broken = violation.clone();
-                match axis {
-                    0 => broken.size.width = 2.0,
-                    1 => broken.size.height = 2.0,
-                    2 => broken.expanded.width = 2.0,
-                    _ => broken.expanded.height = 2.0,
-                }
-                assert!(
-                    !ALLOW_LIST.iter().any(|e| e.matches(&broken)),
-                    "a regression seeded on axis {axis} of a real violation is \
-                     still excused, so the entry covering it is a blanket over \
-                     its region rather than a pin on a geometry:\n  real:   \
-                     {violation}\n  seeded: {broken}",
-                );
-                seeded += 1;
+            if census
+                .iter()
+                .any(|v| v.density == density && v.path.contains(entry.path))
+            {
+                findings.push(format!(
+                    "allow-list entry `{}` pins nothing at {density:?}, but there is a failure \
+                     there — the gate is reporting it, which is correct; widen the entry only \
+                     with a written reason and a measurement",
+                    entry.path,
+                ));
             }
         }
     }
-    assert_eq!(
-        seeded, 40,
-        "ten Compact legend rows, four scalars each — a different number means \
-         the census moved and this test is proving something else",
-    );
+    assert!(findings.is_empty(), "{}", findings.join("\n"));
 }
 
 /// The two pinned legend-row figures are the ones the widget computes, so the
@@ -872,11 +840,13 @@ fn a_live_charts_own_handler_denies_the_slop_pass_to_its_legend() {
 // A deliberately undersized subject must fail
 // =========================================================================
 
-/// The harness's liveness proof for this crate: a 10 dp tappable control in a
-/// card that is itself tappable, beside a chart, must fail at every density.
-///
-/// A gate that reports zero because it measures nothing passes every other test
-/// in this file.
+/// The harness's liveness proof for this crate, in two halves — because the two
+/// can fail separately: a 10 dp tappable control in a card that is itself
+/// tappable, beside a chart, must fail at every density (the *walker* measures),
+/// and the same fixture through [`gate::conformance_census`] and
+/// [`gate::conformance_failures`] must come back out (the *gate* reports). The
+/// first half calls [`audit_fixtures`] directly, so on its own it would pass
+/// with the matcher returning nothing.
 ///
 /// **Why the subject is not in the donut's centre slot**, which would have been
 /// the more pointed place for it: a `PieChart` gives its centre widget the whole
@@ -911,6 +881,15 @@ fn a_deliberately_undersized_subject_fails() {
              {violations:#?}",
         );
     }
+
+    // The second half: the gate's own path. Nothing in the allow-list names
+    // this fixture, so every row of it must be reported.
+    let census = gate::conformance_census(&undersized, &ROSTER);
+    let reported = gate::conformance_failures(&census, &ROSTER);
+    assert!(
+        reported.iter().any(|f| f.contains("Tiny")),
+        "the gate reports no failure for the undersized fixture: {reported:#?}",
+    );
 }
 
 /// A `PieChart`'s centre slot is stretched to the donut hole, so a control put

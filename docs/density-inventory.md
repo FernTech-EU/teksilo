@@ -67,12 +67,13 @@ The only Compact-visible changes the density work makes, and the enumeration the
 rest of this document and the target-conformance gate both defer to: an exception
 that is not a row here has not been taken. Each was an interactive control whose own
 minimum hit box sat below WCAG 2.2 SC 2.5.8 (level AA). Rows are not call sites — the
-macOS entry below is two `MinSize` sites sharing one constant.
+macOS entry below is four sites, three of them on one constant and the fourth on
+two rungs of its own.
 
 | Site | Was | Is | What a reader sees at Compact |
 | --- | ---: | ---: | --- |
 | `teksilo-preview-ui/src/navigator.rs` — a navigator tree row | 22 dp | 24 dp | Each row in the previewer's navigator is 2 dp taller; a full-height list shows marginally fewer rows. |
-| `teksilo-theme-macos` — `MinSize` on the button and the text field (two sites, one number: `MACOS_CONTROL_HEIGHT`) | 22 dp | 24 dp | A macOS-preset push button and field are 2 dp taller. The **painted bezel metric stays at Apple's 22 dp**; only the minimum box around it moves. |
+| `teksilo-theme-macos` — the push button, the text field and the switch (one number: `MACOS_CONTROL_HEIGHT`), plus the icon button (`IconButtonRecipe`'s own two small rungs) | 22 dp, and **18 dp** at `IconButtonSize::Compact` | 24 dp | Four macOS-preset controls get a 24 dp minimum hit box. **The painted metric is unchanged in every one of them** — Apple's 22 dp bezel, field chrome and switch track, and the icon button's own square, which is 22 dp at its default rung and **18 dp** at `IconButtonSize::Compact` — and only the box around it moves, with the paint centred inside. So three of the four gain 2 dp and the icon button's small rung gains **6**. The button and the field take theirs from a `MinSize`; the icon button's is the conformance box in `RecipeIconButtonStyle::make_body` (the identity under every other preset, whose recipes already clear the floor) and the switch's is the floor in `MacOsSwitchBody::layout_response` that its Int UI counterpart already had. Added by the preset-gate package, which measured all four under the floor at **every** density — the floor does not scale, so this was never a Compact-only shortfall. |
 | `teksilo-widgets/src/code_editor/completion.rs` — a suggestion row (added by P25) | 22 dp measured | 24 dp | Up to 2 dp taller per row of the completion popup. The text and its padding are unchanged; the floor is a `MinSize` around them. The 22 dp is the row's height in a headless tree under the shipped typography — a real text backend with a taller line may already clear the floor, in which case the `MinSize` is inert at Compact as well. |
 
 Nothing else in the rows below changes at Compact.
@@ -87,7 +88,11 @@ every field in the workspace at Compact"), and the target-conformance gate
 measures the result: the slot paints 16 × 16 and reaches 24 × 24 at Compact,
 pinned by `an_outsets_claim_survives_the_slop_pass_in_the_shipped_controls`. It
 is therefore **not** a Compact-visible change and cannot sit in a table whose
-whole job is to enumerate those. The §1 row for its old `MinSize::new` call site
+whole job is to enumerate those. That figure is the slot **with a query typed**;
+with the field empty `HitTarget::active` withdraws the outset and the same slot
+reaches 22 × 24 while still taking the press — a written allow-list entry of its
+own, measured by the `search_field/empty` fixture, and a targeting question
+rather than a dimension one. The §1 row for its old `MinSize::new` call site
 is corrected in place rather than deleted, so the site P02 audited is still
 accounted for.
 

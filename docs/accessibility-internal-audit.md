@@ -251,7 +251,7 @@ mislabelled 2.4.13 as Level AA when it is AAA. They are separated here.
 | 2.4.12 Focus Not Obscured (Enhanced) | AAA | ❌ | Follows from the above |
 | 2.4.13 Focus Appearance | AAA | ✅ | 2.0 dp stroke at ≥3:1 (G3). **Level corrected from AA** |
 | 2.5.7 Dragging Movements | AA | 🟡 | G6 (scene Alt+Arrow nudge), plus two further alternatives since: Splitter keyboard resize, and the scene magnetism keyboard connect flow ([magnetism.rs:172-240](../crates/teksilo-scene/src/view/magnetism.rs)). GridView's Alt+Arrow reorder is a validated same-view drop. **Docking drag-to-dock is the gap:** its only non-drag route is a context menu. That menu is now keyboard-reachable on a focused rail item (§5.8), but the `split_into_tab`/`stack_into_tab` drop zones still have no menu equivalent |
-| 2.5.8 Target Size (Minimum) | AA | 🟡 | The floor is **24 dp at every density and never scaled** (`InputTokens::min_target_conformance`), and it is now enforced two ways rather than asserted nowhere: `dp(.., TargetRole::Target, ..)` clamps upward to it, asserted by `a_target_never_lands_below_the_conformance_floor` in [density.rs](../crates/teksilo-core/src/styles/density.rs) at all three densities; and [target_audit.rs](../crates/teksilo-core/src/accessibility/target_audit.rs) measures each target's *reachable* extent — painted size plus whatever `hit_outset`, `target_regions`, `partition_targets` and the miss-only slop pass actually deliver — with a named-fixture gate at all three densities in [tests/target_conformance.rs](../crates/teksilo-widgets/tests/target_conformance.rs). **Three limits keep this 🟡 and not ✅.** (i) The gate measures the **IntUI** preset only, and a shipped preset can paint under the floor on purpose: macOS does, at 18 dp for `IconButtonSize::Compact` and 22 dp for the icon-button default, the `NSPopUpButton` height and the menu row, each with the trade written at the constant. Only the macOS push button and text field were given a 24 dp `MinSize` (density inventory §0); over the icon-button rung `size_compact < size_default` remains the only assertion. (ii) **Ten** allow-listed findings remain, each carrying a written justification, a **pinned** measurement (the geometry *is* the matcher, so a figure cannot drift from what the gate excuses) and an owner wherever there is a decision left to take — nine of the ten name one. **Five** rest on a 2.5.8 exception rather than on geometry: the `SpinBox` step buttons (18 × 13 dp), the `ColorPicker` swatch (22 × 22 dp), the `TreeTableView` chevron (12 × 12 dp, whose row expands and collapses on ArrowLeft / ArrowRight) and the window frame's diagonal corner grips (6 × 6 dp) under *Equivalent*, and `Link` (text-height, 17 dp) under *Inline* — four of those five still name an owner for the geometry, because an exception discharges the criterion without making the shape good. **Five** are real shortfalls escalated rather than excused: a `SpinBox`'s editable field is 20 dp tall at Compact; the tree chevron's `hit_outset` is inert because `StandardTreeItem` wraps it in a `FixedSize` its own size, so it reaches 16 dp in a `TreeView` at every density where the same chevron unwrapped reaches 24; at Touch a dock's tab strip is unreachable at its centre line because `DockResizeHandle`'s hit outset covers it — the outset inflates the 6 dp divider across its thickness to the density's **`target_size`** (24 dp at Compact, 44 at Touch: the AAA/HIG figure, *not* `grab_size`, which is 16 dp at Touch), which `grab_outset` in [docking/resize_handle.rs](../crates/teksilo-widgets/src/docking/resize_handle.rs) computes; and the table header's resize grip and filter glyph reach exactly their own paint. The split is a field on each entry rather than a sentence here, and `the_allow_lists_roster_is_what_it_says_it_is` asserts both counts — the paragraph they replaced carried four numbers and every one was wrong. The header grip and the filter glyph were invisible until P40's mutation round, because the `table_view` fixture built its columns from the defaults and a `HeaderCell` reports **no** regions unless a column is filterable: a column's resize grip is a reported `Grab` reaching exactly its own paint, and the paint is itself only half the divider band, which straddles the boundary with `resize_grip` inside each of the two cells; and a filterable column's filter glyph reaches exactly its paint, the header cell around it owning every near miss at distance zero. Neither is excused by an exception: [drag-operation-census.md](drag-operation-census.md) row 7 rates column resize *Partial* — `Increment`/`Decrement` assistive actions and **no keyboard route at all**, the header cell being `.focusable(false)` — and there is no larger equivalent control for opening a filter. Both wait on that row's own remediation, a focusable header row with a roving tab index. The dock one is still the first to read: it is not a size failure at all but a gap in A10's outset-versus-target precedence, and it costs half a 38 dp tab strip at every dock side. (iii) Reaching the floor for a mouse is a *paint* question, and every hit-widening mechanism is 0 dp for a precise pointer on purpose, so a preset that paints under 24 dp fails for a mouse user unless 2.5.8's *Spacing* exception carries it |
+| 2.5.8 Target Size (Minimum) | AA | 🟡 | The floor is **24 dp at every density and never scaled** (`InputTokens::min_target_conformance`), and it is now enforced two ways rather than asserted nowhere: `dp(.., TargetRole::Target, ..)` clamps upward to it, asserted by `a_target_never_lands_below_the_conformance_floor` in [density.rs](../crates/teksilo-core/src/styles/density.rs) at all three densities; and [target_audit.rs](../crates/teksilo-core/src/accessibility/target_audit.rs) measures each target's *reachable* extent — painted size plus whatever `hit_outset`, `target_regions`, `partition_targets` and the miss-only slop pass actually deliver — with named-fixture gates at all three densities, the stock catalog's in [teksilo-target-conformance/tests/conformance.rs](../crates/teksilo-target-conformance/tests/conformance.rs) and two more in `teksilo-charts` and `teksilo-scene`. **The preset limit this row used to carry is closed:** the widget gate sweeps **all four shipped presets** (Int UI, macOS, Fluent, Material 3), one family representative each. That sweep found 64 failures no Int UI gate could see, of which three were preset defects and are **fixed** — Fluent's list selection pill owned every press in a row, so a checkbox in a Fluent list could not be ticked by a mouse; the macOS icon button and switch sat under the floor at every density and now carry a conformance box around unchanged Apple chrome. **Three limits keep this 🟡 and not ✅.** (i) Coverage is whatever the three fixture lists name, and **four crates that own pointer targets have no list at all** (`teksilo-inspector`, `teksilo-terminal`, `teksilo-preview-ui`, `teksilo-webview`); §3.7 gives each one's feasibility. Charts and scene sweep Int UI alone, each for a written reason. (ii) **Fourteen** allow-listed findings remain, each carrying a written justification, a **pinned** measurement (the geometry *is* the matcher, so a figure cannot drift from what the gate excuses), an explicit theme axis, and an owner wherever there is a decision left to take — thirteen of the fourteen name one. **Five** rest on a 2.5.8 exception rather than on geometry: the `SpinBox` step buttons (18 × 13 dp), the `ColorPicker` swatch (22 × 22 dp), the `TreeTableView` chevron (12 × 12 dp, whose row expands and collapses on ArrowLeft / ArrowRight) and the window frame's diagonal corner grips (6 × 6 dp) under *Equivalent*, and `Link` (text-height, 17 dp) under *Inline* — four of those five still name an owner for the geometry, because an exception discharges the criterion without making the shape good. **Nine** are real shortfalls escalated rather than excused: a `SpinBox`'s editable field is 20 dp tall at Compact; a `SearchField`'s clear slot keeps its press and its pointer cursor while the query is empty and reaches 22 × 24 there; the tree chevron's `hit_outset` is inert because `StandardTreeItem` wraps it in a `FixedSize` its own size, so it reaches 16 dp in a `TreeView` at every density where the same chevron unwrapped reaches 24; at Touch a dock's tab strip is unreachable at its centre line because `DockResizeHandle`'s hit outset covers it — the outset inflates the 6 dp divider across its thickness to the density's **`target_size`** (24 dp at Compact, 44 at Touch: the AAA/HIG figure, *not* `grab_size`, which is 16 dp at Touch), which `grab_outset` in [docking/resize_handle.rs](../crates/teksilo-widgets/src/docking/resize_handle.rs) computes; a window's top resize ring swallows the top band of its own content at Touch, reported under Material 3 and present under all four; a Material 3 calendar's header title is 11.2 dp wide between four 48 dp nav arrows; a menu row comes out under the `item_height` its own recipe asked for; and the table header's resize grip and filter glyph reach exactly their own paint. The split is a field on each entry rather than a sentence here, and `the_allow_lists_roster_is_what_it_says_it_is` asserts both counts — the paragraph they replaced carried four numbers and every one was wrong. The header grip and the filter glyph were invisible until P40's mutation round, because the `table_view` fixture built its columns from the defaults and a `HeaderCell` reports **no** regions unless a column is filterable: a column's resize grip is a reported `Grab` reaching exactly its own paint, and the paint is itself only half the divider band, which straddles the boundary with `resize_grip` inside each of the two cells; and a filterable column's filter glyph reaches exactly its paint, the header cell around it owning every near miss at distance zero. Neither is excused by an exception: [drag-operation-census.md](drag-operation-census.md) row 7 rates column resize *Partial* — `Increment`/`Decrement` assistive actions and **no keyboard route at all**, the header cell being `.focusable(false)` — and there is no larger equivalent control for opening a filter. Both wait on that row's own remediation, a focusable header row with a roving tab index. The dock one is still the first to read: it is not a size failure at all but a gap in A10's outset-versus-target precedence, and it costs half a 38 dp tab strip at every dock side. (iii) Reaching the floor for a mouse is a *paint* question, and every hit-widening mechanism is 0 dp for a precise pointer on purpose, so a preset that paints under 24 dp fails for a mouse user unless 2.5.8's *Spacing* exception carries it |
 | 3.2.6 Consistent Help | A | ➖ | Author-scope |
 | 3.3.7 Redundant Entry | A | author | ➖ | Framework hooks exist (`Wizard`/`Stepper` for multi-step processes; `MruList`/`SettingsStore` for re-entry avoidance) but the criterion is satisfied at application level |
 | 3.3.8 Accessible Authentication (Min) | AA | ✅ | **`PasswordField` gets the asymmetry right, which is worth stating explicitly.** `copy_allowed()` is consulted at exactly two sites — `clipboard_copy` and `clipboard_cut` ([keyboard.rs:445, :460](../crates/teksilo-widgets/src/primitives/text_input_field/keyboard.rs)). `clipboard_paste` has no such guard, and the context-menu Paste row is the only one of the four built without an `.enabled(..)` clause. So a password manager's paste into a masked field works, while plaintext cannot be copied out. The reveal toggle is an additional transcription aid |
@@ -295,12 +295,25 @@ Chapter 5 applies to all ICT including software and is not subsumed by either.
 
 ### 3.7 What the target-conformance gate covers — and what a green gate does not say
 
-The SC 2.5.8 row above rests on `tests/target_conformance.rs`, and a reader is
-entitled to know the shape of its coverage rather than infer it from the word
-"gate". **Three crates carry a named fixture list: `teksilo-widgets`,
-`teksilo-charts` and `teksilo-scene`.** A green gate says *those three crates'
-listed fixtures conform at all three densities, except the written allow-list
-entries*. It does not say "the framework conforms".
+The SC 2.5.8 row above rests on three fixture-driven gates — the stock widget
+catalog's, in `crates/teksilo-target-conformance/tests/conformance.rs`, plus
+`tests/target_conformance.rs` in `teksilo-charts` and in `teksilo-scene` — and a
+reader is entitled to know the shape of their coverage rather than infer it from
+the word "gate". **Three fixture lists exist**, one per gate. A green gate says
+*those three lists' fixtures conform at all three densities, except the written
+allow-list entries*. It does not say "the framework conforms".
+
+**Where the widget list lives, and what that costs.** It names only
+teksilo-widgets' public API and was an integration test of that crate until the
+gate needed it under more than one theme — a preset crate sits *above*
+teksilo-widgets in the crate graph, so no test binary inside teksilo-widgets can
+install one. The list, the allow-list and all four preset gates therefore live in
+`crates/teksilo-target-conformance`, which is `publish = false` and dev-depends
+on the three presets; **no published manifest changed.** The cost is that `cargo
+test -p teksilo-widgets` no longer catches an undersized control — `cargo test
+--workspace` does, and there is deliberately **no stub** left in
+`teksilo-widgets/tests/` to stand in for the gate, because a test that passes by
+containing nothing is worse than an absent one.
 
 **Four crates the touch programme changed own pointer targets and have no fixture
 list at all.** Each is feasible or not for a stated reason, so this is a backlog
@@ -313,18 +326,57 @@ rather than an omission:
 | `teksilo-preview-ui` | The previewer's navigator, whose row is **§0 row 1** of `docs/density-inventory.md` — one of the three Compact-visible exceptions the whole density treatment defers to. | **Feasible** (one fixture over the navigator), and the only place that particular exception could ever be measured. |
 | `teksilo-webview` | One `WebView` node. It declares neither hit hook and routes no dimension through `dp`; the page's own targets are the page's, and the widget is a native subview the walker cannot see into. | **Not worth a list**, and this is the reason rather than an excuse: a fixture would measure one large rectangle and assert that it clears the floor. Stated here so the crate's absence is a decision. |
 
-Two further boundaries, both already named above and repeated here so the three
-sit together: the gate installs the **IntUI** preset only (limit (i) of the 2.5.8
-row — macOS deliberately paints under the floor at four constants, and
-`TargetFixture::with_theme` is the door a preset crate's own conformance test
-would use), and every hit-widening mechanism is 0 dp for a **precise** pointer by
-design (limit (iii)), so a sub-24 dp paint fails for a mouse user unless 2.5.8's
+**The preset axis, which used to be a boundary and is now covered.** The widget
+list sweeps **all four shipped presets** — Int UI, macOS, Fluent and Material 3 —
+at all three densities, one family representative each (light and dark are
+geometrically identical in every one of them, which the gate asserts rather than
+assumes). Charts and scene sweep Int UI alone, and that is a decision with a
+reason at each: a chart carries no preset chrome at all, and a scene's
+heavyweight tier is whatever widget the app puts in it, measured by the widget
+list under all four.
+
+**What the preset sweep cost when it was first run: 64 failures no Int UI gate
+could see.** Three were preset defects and are fixed — the Fluent selection pill
+owned every press in a list row, so a checkbox in a Fluent list could not be
+ticked *by a mouse*; the macOS icon button and switch sat 2 dp under the floor at
+every density with no mechanism to make it up. Two more are new written entries
+with owners: a window's top resize ring swallows the top band of its own content
+at Touch, and a Material 3 calendar's header title is 11.2 dp wide between four
+48 dp nav arrows. A green four-preset gate is a much stronger statement than a
+green Int UI one, and the difference is exactly those five findings.
+
+One further boundary, already named above and repeated here so it sits with the
+others: every hit-widening mechanism is 0 dp for a **precise** pointer by design
+(limit (iii)), so a sub-24 dp paint fails for a mouse user unless 2.5.8's
 *Spacing* exception carries it.
+
+**The Int UI Compact census moved, and it is not the invariant breaking.** The
+programme's invariant is that *Compact layout* does not move: no shipped control
+changes size at the densest rung without a `docs/density-inventory.md` §0 entry.
+Nothing in this package moved one. What moved is the **audit's own measurement**
+of Int UI at Compact, by three rows, and the honest statement is that the
+invariant is re-scoped rather than broken — it was always about geometry and
+never about the census, and this is the first package where the two came apart.
+The cause is `PROBE_EPSILON`, the slack the walker allows for its own bisection
+error, widened from 0.05 dp to three refinement quanta (0.094). The old figure
+was 1.6 quanta, under the two-quanta worst case an *extent* carries, so the
+shadow test — which reads "the reach is materially under the paint" as "another
+target is on top of this one" — mis-filed rows that were short only by the probe.
+A row filed that way carries **no verdict at all**, so the old figure was
+silencing findings rather than forgiving them. Seven rows across the widget list
+come back: four Fluent Touch tree chevrons (reach 15.9375 against 16 dp of
+paint), and three **Int UI Compact** menu rows (21.75 against 21.8), the ones a
+reader of this section would otherwise not expect to see move. Each is covered by
+the allow-list entry that already named that geometry, with the epsilon recorded
+at the pin. Measured both ways: 474 rows at 0.05, 481 at the current value, and
+identical at two quanta and three.
 
 **The sharpest consequence, measured.** Of the **three** Compact-visible `MinSize`
 exceptions `docs/density-inventory.md` §0 now enumerates, the gate can reach
 **none**: the previewer's navigator row is in a crate with no list; the macOS
-control height is behind a preset no list installs; and the code editor's
+control height is now behind a preset the list *does* install, but the row §0
+names is the one `mount.rs` holds to `bezel.max(24.0)` rather than a fixture
+subject; and the code editor's
 completion row only exists while the popup is open, which the `code_editor`
 fixture does not do (it builds `CodeEditor::new(document).gutter(true)` and
 nothing else). The exceptions are each asserted somewhere — `mount.rs` holds the

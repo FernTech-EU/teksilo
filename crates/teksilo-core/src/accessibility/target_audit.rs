@@ -64,15 +64,17 @@
 //! # What a green gate says
 //!
 //! This module measures; it does not know what it was pointed at. Coverage is
-//! whatever the per-crate fixture lists name, and three crates carry one —
-//! teksilo-widgets, teksilo-charts, teksilo-scene. Four crates the touch
-//! programme changed own pointer targets and carry none (teksilo-inspector,
-//! teksilo-terminal, teksilo-preview-ui, and teksilo-webview, which has nothing
-//! this walker can see into), the lists install the IntUI preset only, and of the
-//! three Compact-visible exceptions `docs/density-inventory.md` §0 enumerates the
-//! lists reach none. So a green gate says *these fixtures conform*, never *the
-//! framework conforms* — the boundary is written out, crate by crate and with the
-//! feasibility of each missing list, in
+//! whatever the fixture lists name, and there are three — the stock widget
+//! catalog's (in the unpublished `teksilo-target-conformance` crate, which is
+//! where it can reach a preset), teksilo-charts' and teksilo-scene's. Four
+//! crates the touch programme changed own pointer targets and carry none
+//! (teksilo-inspector, teksilo-terminal, teksilo-preview-ui, and
+//! teksilo-webview, which has nothing this walker can see into), and of the three
+//! Compact-visible exceptions `docs/density-inventory.md` §0 enumerates the lists
+//! reach none. The widget list sweeps all four shipped presets; charts and scene
+//! sweep Int UI alone, each for a written reason. So a green gate says *these
+//! fixtures conform*, never *the framework conforms* — the boundary is written
+//! out, crate by crate and with the feasibility of each missing list, in
 //! `docs/accessibility-internal-audit.md` §3.7.
 //!
 //! Reference: `docs/density-and-targets.md`, `docs/accessibility-internal-audit.md`.
@@ -118,6 +120,47 @@ const PROBE_STEP: f32 = 0.5;
 /// [`PROBE_STEP`] interval — 0.5 / 2⁴ ≈ 0.03 dp, fine enough for an exact
 /// equality assertion against a token value.
 const PROBE_REFINE: u32 = 4;
+
+/// The slack every comparison between a measured **extent** and a dp figure
+/// carries, in dp.
+///
+/// The refinement quantum `PROBE_STEP / 2^PROBE_REFINE` (0.031 dp) bounds the
+/// error of one **direction**'s boundary. Every figure this module compares — a
+/// reach against a floor, a reach against the paint — is an *extent*, the sum of
+/// two directions, so the worst case is two quanta and a one-quantum slack
+/// judges a target that is short only by its own measurement. Three quanta
+/// rather than two for the same reason [`PIN_TOLERANCE`] carries three — two
+/// rows of one control can land either side of a quantum — and the third is
+/// margin rather than a census mover: the widget fixture list produces the
+/// identical 481-row census at two quanta and at three.
+///
+/// The slack is **absolute**, not a fraction of the figure it judges, because
+/// the error it bounds is absolute: a bisection quantum is the same 0.031 dp on
+/// a 16 dp chevron and on a 752 dp menu row. A relative test would spend most of
+/// its slack on the large targets that never needed it and under-protect exactly
+/// the small ones this audit exists to find.
+///
+/// **What widening it from the pre-programme 0.05 un-hid, measured.** 0.05 dp is
+/// 1.6 quanta, under the worst case it has to cover, and what it mis-read was
+/// not a forgiven failure but a **silenced** one: the shadow test in
+/// [`Walker::measure_node`](Walker::measure_node) reads "the reach is materially under the
+/// paint" as "another target is on top of this one", and a row filed that way
+/// carries no verdict at all. Seven rows of the widget list were filed that way
+/// and are now judged — the census goes 474 to 481. Four are Fluent Touch tree
+/// chevrons, whose reach the probe reports 0.0625 dp (exactly two quanta) under
+/// their own 16 dp paint; three are Int UI Compact menu rows, 0.05 dp under
+/// their 21.8. Each is the geometry its allow-list entry already names, and no
+/// control moved to produce them. The Int UI three are recorded in
+/// `docs/accessibility-internal-audit.md` §3.7 as well, because they move an Int
+/// UI **Compact** census and the programme's invariant is about that rung.
+///
+/// Pinned from **both sides** by
+/// `the_shadow_slack_covers_an_extent_not_a_direction`: at least the two quanta
+/// an extent carries, and at most twice that, so the figure stays a bound on the
+/// probe's own error rather than becoming a tolerance on the finding. The
+/// shortfall it un-hides is the subject of
+/// `a_target_short_of_its_paint_only_by_measurement_noise_is_still_judged`.
+const PROBE_EPSILON: f32 = 3.0 * PROBE_STEP / (1 << PROBE_REFINE) as f32;
 
 /// Which rule a target failed to clear.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -198,6 +241,10 @@ pub struct TargetMeasurement {
     pub path: String,
     /// The density ladder this measurement was taken against.
     pub density: TargetDensity,
+    /// The theme the tree was built with, read from the tree rather than
+    /// supplied — so it cannot disagree with what was measured, the same
+    /// by-construction property [`audit_at_density`] gives `density`.
+    pub theme: crate::styles::ThemeId,
     /// What the target paints — the node's rectangle, or the region's.
     pub size: Size,
     /// What a coarse pointer can reach: the contiguous cross through the
@@ -300,6 +347,10 @@ pub struct TargetViolation {
     pub path: String,
     /// The density ladder this violation was found at.
     pub density: TargetDensity,
+    /// The theme the tree was built with. Carried because a failure list over
+    /// four presets is unreadable without it, and because an allow-list pin
+    /// discriminates on it.
+    pub theme: crate::styles::ThemeId,
     /// What the target paints.
     pub size: Size,
     /// What a coarse pointer can reach — always an exact measurement.
@@ -314,7 +365,11 @@ pub struct TargetViolation {
 
 impl std::fmt::Display for TargetViolation {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:?} at {:?}: {}", self.rule, self.density, self.path)?;
+        write!(
+            f,
+            "{:?} at {:?} under {}: {}",
+            self.rule, self.density, self.theme, self.path
+        )?;
         if let Some(part) = self.part {
             write!(f, " [part {part}]")?;
         }
@@ -342,15 +397,31 @@ impl std::fmt::Display for TargetViolation {
     }
 }
 
-/// Every pointer target in `tree`, measured against `density`'s ladder — the
-/// audit's reasoning, not only its verdict.
+/// Every pointer target in `tree`, measured against **the tree's own** token
+/// ladder — the audit's reasoning, not only its verdict.
 ///
-/// `density` names the token ladder to judge against. It must be the density
-/// the tree was **built** at: a control's painted size is baked in `build()`, so
-/// judging a Compact tree against the Touch ladder measures a mixture of the
-/// two. [`audit_at_density`] is the door that cannot get this wrong.
+/// The ladder comes from `tree.theme().input`, not from the generic
+/// [`InputTokens::for_density`] table, because a theme may install its own: a
+/// preset that raises `target_size` above the generic rung would otherwise be
+/// measured against a probe budget smaller than its own recommendation, and the
+/// measurement would be capped by the audit rather than by the tree. Reading the
+/// tree's tokens is also what makes an app-installed ladder auditable at all.
+///
+/// `density` names the ladder the tree was **built** at: a control's painted
+/// size is baked in `build()`, so judging a Compact tree against the Touch
+/// ladder measures a mixture of the two. It must therefore agree with the
+/// theme's own `input.density`, which a debug build asserts;
+/// [`audit_at_density`] is the door that cannot get it wrong.
 pub fn measure_targets(tree: &WidgetTree, density: TargetDensity) -> Vec<TargetMeasurement> {
-    let tokens = InputTokens::for_density(density);
+    let tokens = tree.theme().input;
+    debug_assert_eq!(
+        tokens.density, density,
+        "the tree was built at {:?} and is being judged against {:?}: a \
+         control's painted size is baked in `build()`, so this measures a \
+         mixture of two ladders. Build the tree at the density you audit, or \
+         use `audit_at_density`.",
+        tokens.density, density,
+    );
     let walker = Walker::new(tree, density, &tokens);
     walker.run()
 }
@@ -370,6 +441,7 @@ pub fn target_audit(tree: &WidgetTree, density: TargetDensity) -> Vec<TargetViol
                 part: m.part,
                 path: m.path,
                 density: m.density,
+                theme: m.theme,
                 size: m.size,
                 expanded: m.expanded,
                 sources: m.sources,
@@ -508,26 +580,33 @@ pub fn measure_fixtures(
 }
 
 /// The Tier-3 style slots a theme carries that **no** density projection will
-/// re-derive — the app-installed styles whose dimensions therefore stay
-/// whatever their author wrote them as, at every density.
+/// re-derive — the styles whose dimensions therefore stay whatever their author
+/// wrote them as, at every density.
 ///
-/// A shipped preset (Fluent, macOS, Material 3) registers a
-/// [`DensityProjection`](crate::styles::DensityProjection) and rebuilds its own
-/// slots, so its chrome follows the ladder; this returns empty for one. An app
-/// that installs a slot of its own without such a projection gets its slot names
-/// back, which is the attribution a reader needs when the audit reports a
-/// control that could not grow.
+/// Asked by deriving the theme at two densities and naming the slots that are
+/// still the same object in both (`ComponentStyleSlots::unchanged_against`),
+/// which is what "the ladder did not reach this" means operationally. A shipped
+/// preset registers a [`DensityProjection`](crate::styles::DensityProjection)
+/// whose function rebuilds every slot the preset owns, so none of a preset's own
+/// chrome is named here; a theme with no projection is cloned verbatim, so all
+/// of its installed slots are.
+///
+/// The case it serves is an **app-installed** slot, and it is the reason this is
+/// not a one-line `if projection.is_some() { return empty }`. A projection
+/// rebuilds the slots *it* owns and leaves the app's alone — that is the
+/// contract `DensityProjection`'s own docs state — so an app style installed on
+/// top of macOS, Fluent or Material 3 is exactly as frozen as one installed on
+/// top of Int UI, and refusing to look at a projected theme reported nothing in
+/// the common case. (An app slot in a field the preset *also* owns is a
+/// different story: the projection overwrites it at the next density change, so
+/// it is not frozen and is correctly not named.)
 ///
 /// Reported rather than fixed: a hand-written Tier-3 style owns its own metrics,
 /// and the framework overruling them would be worse than saying so.
 pub fn unprojected_style_slots(theme: &crate::styles::Theme) -> Vec<&'static str> {
-    if theme
-        .extension::<crate::styles::DensityProjection>()
-        .is_some()
-    {
-        return Vec::new();
-    }
-    theme.style_slots.installed()
+    let compact = theme.with_density(TargetDensity::Compact);
+    let touch = theme.with_density(TargetDensity::Touch);
+    compact.style_slots.unchanged_against(&touch.style_slots)
 }
 
 // ---------------------------------------------------------------------------
@@ -584,6 +663,18 @@ pub struct PinnedGeometry {
     /// an entry to *every* one of them, so it cannot claim a density where the
     /// control actually conforms.
     pub densities: &'static [TargetDensity],
+    /// Every theme id this geometry is measured under, matched **literally**.
+    ///
+    /// The theme axis belongs here rather than on [`AllowedViolation`] because
+    /// it is the same question `densities` asks: at which points of the
+    /// (theme x density) product does this geometry hold? One entry can excuse
+    /// one of its geometries under every preset and another under three.
+    ///
+    /// A prefix or substring match would be the theme-axis form of a blanket
+    /// over a region, which is the failure a pin exists to prevent; and
+    /// `ThemeId::default()` is `"custom"`, shared by every app theme, so a
+    /// gate's roster check refuses it outright.
+    pub themes: &'static [&'static str],
     /// What the target paints.
     pub paints: (PinnedDp, PinnedDp),
     /// What a coarse pointer reaches. A figure equal to the probe budget
@@ -598,6 +689,7 @@ impl PinnedGeometry {
     pub fn covers(&self, v: &TargetViolation) -> bool {
         let floor = InputTokens::for_density(v.density).min_target_conformance;
         self.densities.contains(&v.density)
+            && self.themes.iter().any(|t| *t == v.theme.as_str())
             && self.paints.0.matches(v.size.width, floor)
             && self.paints.1.matches(v.size.height, floor)
             && self.reaches.0.matches(v.expanded.width, floor)
@@ -648,6 +740,8 @@ impl AllowedViolation {
     }
 }
 
+pub mod gate;
+
 // ---------------------------------------------------------------------------
 // The walker
 // ---------------------------------------------------------------------------
@@ -668,6 +762,7 @@ struct Candidate {
 struct Walker<'a> {
     tree: &'a WidgetTree,
     density: TargetDensity,
+    theme: crate::styles::ThemeId,
     tokens: &'a InputTokens,
     limit: f32,
     /// The window's client area, from the tree's last layout proposal.
@@ -690,6 +785,7 @@ impl<'a> Walker<'a> {
         Self {
             tree,
             density,
+            theme: tree.theme().id.clone(),
             tokens,
             limit: probe_limit(tokens),
             viewport,
@@ -870,6 +966,7 @@ impl<'a> Walker<'a> {
                 part: None,
                 path: candidate.path.clone(),
                 density: self.density,
+                theme: self.theme.clone(),
                 size: rect.size(),
                 expanded,
                 capped,
@@ -976,15 +1073,13 @@ impl<'a> Walker<'a> {
         // is one dp past the largest floor, so an axis that spends it is known
         // to clear every floor.
         //
-        // The 0.05 dp slack is the same epsilon [`classify`](Self::classify)
-        // uses, and for the same reason: the boundary is found by
-        // [`PROBE_REFINE`] bisection steps inside one [`PROBE_STEP`], so an
-        // exact edge is reported up to `PROBE_STEP / 2^PROBE_REFINE` short of
-        // itself.
+        // [`PROBE_EPSILON`] is the slack, and it is the same one
+        // [`classify`](Self::classify) uses: both compare an extent, so both
+        // carry two directions' worth of refinement error.
         let shadowed = expanded.width > 0.0
             && expanded.height > 0.0
-            && ((!capped_axis[0] && expanded.width + 0.05 < rect.width)
-                || (!capped_axis[1] && expanded.height + 0.05 < rect.height));
+            && ((!capped_axis[0] && expanded.width + PROBE_EPSILON < rect.width)
+                || (!capped_axis[1] && expanded.height + PROBE_EPSILON < rect.height));
         if shadowed {
             m.skipped = Some(SkipReason::ShadowedByAnotherTarget);
             return Some(m);
@@ -1023,6 +1118,7 @@ impl<'a> Walker<'a> {
                 part: Some(part),
                 path: candidate.path.clone(),
                 density: self.density,
+                theme: self.theme.clone(),
                 size: rect.size(),
                 expanded: Size::new(0.0, 0.0),
                 capped: false,
@@ -1060,6 +1156,7 @@ impl<'a> Walker<'a> {
             part: Some(part),
             path: candidate.path.clone(),
             density: self.density,
+            theme: self.theme.clone(),
             size: rect.size(),
             expanded: grown.size(),
             capped: false,
@@ -1091,7 +1188,7 @@ impl<'a> Walker<'a> {
         neighbours: &[Neighbour],
     ) -> Option<TargetRule> {
         let smaller = reach.width.min(reach.height);
-        if smaller + 0.05 < self.tokens.min_target_conformance {
+        if smaller + PROBE_EPSILON < self.tokens.min_target_conformance {
             return Some(
                 if self.spacing_exception_applies(painted, identity, neighbours) {
                     TargetRule::SpacingException
@@ -1104,7 +1201,7 @@ impl<'a> Walker<'a> {
             TargetRole::Grab => self.tokens.min_target_conformance,
             _ => self.tokens.target_size,
         };
-        if smaller + 0.05 < recommended {
+        if smaller + PROBE_EPSILON < recommended {
             return Some(TargetRule::TouchTargetRecommendation);
         }
         None

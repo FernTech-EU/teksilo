@@ -858,7 +858,17 @@ fn audit_at_density_switches_the_tree_before_it_measures() {
 
 /// An app-installed Tier-3 slot is **reported**, because a hand-written style
 /// owns its own metrics and the framework overruling them would be worse than
-/// saying so. A shipped preset registers a projection and reports nothing.
+/// saying so.
+///
+/// The question is asked of the slots themselves — derive the theme at two
+/// densities and name the ones that are still the same object — and *not* of
+/// whether the theme happens to carry a
+/// [`DensityProjection`](crate::styles::DensityProjection). The third and fourth
+/// legs below are why, and the third is the one that used to be wrong: a
+/// projection that re-derives only the tokens leaves an app's style exactly as
+/// frozen as a theme with no projection at all, and every shipped preset carries
+/// a projection, so a presence check reported nothing in the case this function
+/// exists for.
 #[test]
 fn an_app_installed_style_slot_is_reported_as_unprojected() {
     let plain = crate::presets::intui::light();
@@ -867,21 +877,46 @@ fn an_app_installed_style_slot_is_reported_as_unprojected() {
         "a preset with no slots installed has nothing to report",
     );
 
+    // 1. No projection, an app slot: frozen at every density, so reported.
     let mut custom = crate::presets::intui::light();
     custom.style_slots.button = Some(std::rc::Rc::new(StubButtonStyle));
     assert_eq!(unprojected_style_slots(&custom), vec!["button"]);
 
-    let projected = crate::presets::intui::light().with_density_projection(|theme, density| {
-        crate::styles::Theme {
-            input: InputTokens::for_density(density),
-            ..theme.clone()
-        }
-    });
-    let mut projected = projected;
-    projected.style_slots.button = Some(std::rc::Rc::new(StubButtonStyle));
+    // 2. A projection that moves the tokens and carries the slots across
+    //    untouched — which is what `Theme::with_density`'s own default branch
+    //    does, and what a preset's projection does to any slot the preset does
+    //    not own. The style is just as frozen, and saying otherwise because a
+    //    projection is *registered* is the defect this leg holds.
+    let mut tokens_only =
+        crate::presets::intui::light().with_density_projection(|theme, density| {
+            crate::styles::Theme {
+                input: InputTokens::for_density(density),
+                ..theme.clone()
+            }
+        });
+    tokens_only.style_slots.button = Some(std::rc::Rc::new(StubButtonStyle));
+    assert_eq!(
+        unprojected_style_slots(&tokens_only),
+        vec!["button"],
+        "a projection that does not rebuild this slot leaves it frozen, \
+         whatever else it re-derives",
+    );
+
+    // 3. And a projection that really does rebuild the slot reports nothing for
+    //    it: the re-derived theme carries a different `Rc`, at every density.
+    let mut rebuilding =
+        crate::presets::intui::light().with_density_projection(|theme, density| {
+            let mut out = crate::styles::Theme {
+                input: InputTokens::for_density(density),
+                ..theme.clone()
+            };
+            out.style_slots.button = Some(std::rc::Rc::new(StubButtonStyle));
+            out
+        });
+    rebuilding.style_slots.button = Some(std::rc::Rc::new(StubButtonStyle));
     assert!(
-        unprojected_style_slots(&projected).is_empty(),
-        "a theme that re-derives its own slots reports none",
+        unprojected_style_slots(&rebuilding).is_empty(),
+        "a theme that re-derives this slot reports none",
     );
 }
 
@@ -1042,4 +1077,197 @@ fn a_target_another_target_covers_part_of_is_not_judged_on_its_size() {
         "what limits it is the sibling on top, not its size: {m:#?}",
     );
     assert_eq!(m.rule, None, "so it carries no verdict: {m:#?}");
+}
+
+// ---------------------------------------------------------------------------
+// The ladder is the tree's own, not the generic table
+// ---------------------------------------------------------------------------
+
+/// A theme whose `target_size` at Touch is above the generic ladder's rung —
+/// the shape Material 3 ships (`teksilo_theme_material3::input_tokens` raises it
+/// to 48 dp), reproduced here so the walker's own crate can hold the property
+/// without reaching for a preset crate.
+fn theme_with_target_size(density: TargetDensity, target_size: f32) -> crate::styles::Theme {
+    let mut theme = crate::presets::intui::light();
+    theme.input = InputTokens {
+        target_size,
+        ..InputTokens::for_density(density)
+    };
+    theme
+}
+
+/// The probe budget and the recommendation floor both come from the **tree's**
+/// token ladder, so a preset that raises `target_size` is measured against its
+/// own number rather than against the generic table's.
+///
+/// The leaf is 46 dp inside a tappable row: the row denies the miss-only slop
+/// pass any claim outside the leaf, so the reach is the leaf's own rectangle and
+/// nothing else, and the figure below is a boundary the probe found rather than
+/// a budget it spent.
+///
+/// Reading the generic table instead caps the measurement at `44 + 1` — one dp
+/// past a floor this tree does not use — so the leaf comes back 45 dp wide,
+/// `capped`, and clearing a recommendation it does not meet.
+#[test]
+fn the_probe_reads_the_trees_own_token_ladder() {
+    let mut tree = WidgetTree::new().with_theme(theme_with_target_size(TargetDensity::Touch, 48.0));
+    let leaf_tap = tap();
+    let lt = leaf_tap.clone();
+    let leaf = tree.add(Leaf::new(46.0, 46.0).on_tap(move |_, _| lt.set(lt.get() + 1)));
+    let row_tap = tap();
+    let rt = row_tap.clone();
+    let row = tree.add(
+        Row::new(300.0, 120.0)
+            .pad(40.0)
+            .child(leaf)
+            .on_tap(move |_, _| rt.set(rt.get() + 1)),
+    );
+    let _root = tree.add(Row::new(400.0, 300.0).pad(20.0).child(row));
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+
+    let m = find(&measure_targets(&tree, TargetDensity::Touch), "Leaf");
+    assert!(
+        (m.expanded.width - 46.0).abs() < 0.1 && (m.expanded.height - 46.0).abs() < 0.1,
+        "the leaf's own 46 dp, measured to a boundary: {:?}",
+        m.expanded,
+    );
+    assert!(
+        !m.capped,
+        "a budget one dp past this tree's own 48 dp floor reaches the boundary: {m:?}",
+    );
+    assert_eq!(
+        m.rule,
+        Some(TargetRule::TouchTargetRecommendation),
+        "46 dp clears the 24 dp AA floor and falls short of this theme's 48 dp \
+         recommendation: {m:?}",
+    );
+}
+
+/// What makes the change above a no-op for every existing measurement: the
+/// ladder a tree carrying the Int UI preset ends up with **is** the generic
+/// table's, at every density.
+///
+/// Int UI registers no `DensityProjection`, so `Theme::with_density` takes its
+/// default branch. This asserts that through the real plumbing — `with_theme`,
+/// `set_input_density`, `Theme::with_density` — rather than by restating the
+/// expression, so it reddens if a projection is ever registered for Int UI or if
+/// the density switch stops writing the theme. A preset that *does* carry one is
+/// measured against its own ladder, which is
+/// [`the_probe_reads_the_trees_own_token_ladder`].
+#[test]
+fn an_int_ui_trees_ladder_is_the_generic_table() {
+    for density in [
+        TargetDensity::Compact,
+        TargetDensity::Comfortable,
+        TargetDensity::Touch,
+    ] {
+        let tree = tree_at(density);
+        assert_eq!(
+            tree.theme().input,
+            InputTokens::for_density(density),
+            "an Int UI tree at {density:?} must carry the generic ladder, or \
+             every measurement taken through the generic table before this \
+             change silently moved",
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// The measurement slack covers an extent, not a direction
+// ---------------------------------------------------------------------------
+
+/// Every figure this module compares is an **extent** — two directions'
+/// boundaries added — so the slack it allows for its own refinement error must
+/// cover two quanta, not one; and it must stay a bound on that error rather than
+/// growing into a tolerance on the finding.
+///
+/// Two-sided deliberately, because the two sides fail in opposite directions and
+/// both are live. Below two quanta the slack judges a target that is short only
+/// by the probe — a verdict about the audit rather than about the tree — and,
+/// because the same arithmetic decides whether a row is filed as shadowed, it
+/// silences a real shortfall rather than forgiving it. Far above it the slack
+/// starts forgiving genuine shortfalls at the floor: the same constant sits in
+/// [`classify`](super::Walker::classify), where every extra dp is a dp under
+/// 24 that stops being reported.
+///
+/// The upper bound is twice the noise band, which is where the current value's
+/// third quantum lives — margin for two rows of one control landing either side
+/// of a quantum, the reason [`PIN_TOLERANCE`] carries a third as well, and
+/// measured to move no row of any fixture list.
+#[test]
+fn the_shadow_slack_covers_an_extent_not_a_direction() {
+    let quantum = PROBE_STEP / (1 << PROBE_REFINE) as f32;
+    assert!(
+        PROBE_EPSILON >= 2.0 * quantum,
+        "an extent carries two directions' refinement error ({} dp), and the \
+         slack is {} dp",
+        2.0 * quantum,
+        PROBE_EPSILON,
+    );
+    assert!(
+        PROBE_EPSILON <= 4.0 * quantum,
+        "a slack more than twice the noise band ({} dp) is no longer a bound on \
+         the probe's error but a tolerance on the finding, and the same constant \
+         decides what `classify` reports against the 24 dp floor; it is {} dp",
+        4.0 * quantum,
+        PROBE_EPSILON,
+    );
+}
+
+/// A target short of its own paint **only by the probe's own rounding** is
+/// judged, not filed as shadowed by something on top of it.
+///
+/// The shadow test exists to say "what limits this target is another target,
+/// not its size". A slack narrower than two refinement quanta makes it say that
+/// about a target nothing overlaps, and the row then carries no verdict at all
+/// — a gate that goes quiet rather than red. This leaf has a tappable row
+/// around it and no sibling anywhere near it, so the only thing between its
+/// paint and its reach is the bisection.
+///
+/// The extent is deliberately off the refinement grid and chosen near the TOP
+/// of the noise band: a shortfall anywhere in the band is noise, so a slack
+/// picked from inside the band would still pass against a fixture near the
+/// bottom of it. The assertions below hold the fixture there.
+#[test]
+fn a_target_short_of_its_paint_only_by_measurement_noise_is_still_judged() {
+    let quantum = PROBE_STEP / (1 << PROBE_REFINE) as f32;
+    let mut tree = tree_at(TargetDensity::Compact);
+    let leaf_tap = tap();
+    let lt = leaf_tap.clone();
+    // 21.748 dp: half of it falls just under a refinement grid point, so each
+    // direction's boundary is reported almost a whole quantum short.
+    let leaf = tree.add(Leaf::new(21.748, 21.748).on_tap(move |_, _| lt.set(lt.get() + 1)));
+    let row_tap = tap();
+    let rt = row_tap.clone();
+    let row = tree.add(
+        Row::new(300.0, 120.0)
+            .pad(40.0)
+            .child(leaf)
+            .on_tap(move |_, _| rt.set(rt.get() + 1)),
+    );
+    let _root = tree.add(Row::new(400.0, 300.0).pad(20.0).child(row));
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+
+    let m = find(&measure_targets(&tree, TargetDensity::Compact), "Leaf");
+    let shortfall = m.size.height - m.expanded.height;
+    assert!(
+        shortfall > 1.9 * quantum && shortfall < 2.0 * quantum,
+        "the fixture must sit near the top of the two-quantum noise band, or a \
+         slack picked from inside the band would still cover it: shortfall {} \
+         dp, band ({}, {})",
+        shortfall,
+        quantum,
+        2.0 * quantum,
+    );
+    assert_eq!(
+        m.skipped, None,
+        "nothing overlaps this leaf, so the only gap between its paint and its \
+         reach is the probe's own: {m:#?}",
+    );
+    assert_eq!(
+        m.rule,
+        Some(TargetRule::MinTargetConformance),
+        "and a 21.7 dp target under the 24 dp floor is the failure it looks \
+         like: {m:#?}",
+    );
 }

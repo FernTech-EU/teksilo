@@ -296,20 +296,24 @@ Three things about them that are easy to get wrong:
 own miss-only slop pass are *redundant* in the geometry a naive test builds:
 both deliver a near-miss press, and a subject sitting in a bare stack has no
 eligible handler on its bubble path, so the slop pass catches the press whether
-or not your outset exists. Five of seven `hit_outset` implementations in one
-package initially passed their own deletion for exactly this reason. The
+or not your outset exists. When P24 first measured this, most of the
+`hit_outset` implementations in the tree at the time passed their own deletion
+for exactly this reason — the count is not restated because the tree carries a
+different number of them now and the rule is about the geometry, not the
+population. The
 discriminating fixture puts an **eligible bubble owner** on the path — a
 tappable row containing the control, which is what a swatch in a picker row or a
 chevron in a tree row actually is — because the rule then requires a slop
 candidate to be *strictly closer* than the row, which a mere near-miss is not.
 
 **Checked by** `crates/teksilo-core/src/widget_tree/hit_targeting_tests.rs`, and
-by the fixture-driven `tests/target_conformance.rs` in `teksilo-widgets`,
-`teksilo-charts` and `teksilo-scene`. Note the boundary: those three crates have
-fixture lists and four others that own targets do not
-(`teksilo-inspector`, `teksilo-terminal`, `teksilo-preview-ui`,
-`teksilo-webview`), and the lists install the IntUI preset only. A green gate says
-three crates' named fixtures conform — not that the framework does. The table is
+by three fixture-driven gates: the stock widget catalog's in
+`teksilo-target-conformance`, plus `tests/target_conformance.rs` in
+`teksilo-charts` and `teksilo-scene`. Note the boundary: those three lists exist
+and four crates that own targets have none (`teksilo-inspector`,
+`teksilo-terminal`, `teksilo-preview-ui`, `teksilo-webview`). The widget list
+sweeps all four shipped presets; charts and scene sweep Int UI alone. A green
+gate says the named fixtures conform — not that the framework does. The table is
 in [accessibility-internal-audit.md §3.7](accessibility-internal-audit.md).
 
 ## 9. Never read the wall clock in a recognizer

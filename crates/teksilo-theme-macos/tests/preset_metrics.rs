@@ -21,8 +21,10 @@ use teksilo_core::styles::Theme;
 use teksilo_core::widget::Widget;
 use teksilo_core::widget_id::WidgetId;
 use teksilo_core::widget_tree::WidgetTree;
+use teksilo_i18n::lit;
 use teksilo_tokens::TargetDensity;
-use teksilo_widgets::{Calendar, SearchField};
+use teksilo_widgets::primitives::{HStack, IconWidget, Padding, TextWidget};
+use teksilo_widgets::{Calendar, IconButton, SearchField, Toggle};
 
 /// Mount `w` under `theme` in a tree with a real text backend and lay it out.
 fn mounted(theme: Theme, w: impl Widget + 'static, size: (f32, f32)) -> (WidgetTree, WidgetId) {
@@ -348,4 +350,154 @@ fn the_int_ui_calendar_needs_neither_mechanism() {
             );
         }
     }
+}
+
+// ── The two constants that sit under the conformance floor ─────────────
+
+/// A subject inside a tappable row, which is what every one of these controls
+/// actually ships in (a toolbar, a toast, a segmented control's overflow).
+///
+/// The row is what makes these tests discriminate. A control in a bare stack is
+/// topped up by the miss-only slop pass, because that pass wins wherever the
+/// exact hit's bubble path carries no eligible handler — so a 22 dp control in a
+/// bare stack measures 24 whether or not it has a conformance box, and a test
+/// there passes its own deletion.
+fn in_tappable_row(tree: &mut WidgetTree, subject: impl Widget + 'static) -> WidgetId {
+    use teksilo_core::widget_builder::WidgetBuilder;
+    tree.add(
+        Padding::uniform(20.0)
+            .child(
+                HStack::new()
+                    .spacing(8.0)
+                    .child(TextWidget::new(lit!("Row label")))
+                    .child(subject),
+            )
+            .on_tap(|_, _| {}),
+    )
+}
+
+/// Apple's 22 dp control height must not cost an icon button its WCAG 2.2
+/// SC 2.5.8 conformance.
+///
+/// `min_target_conformance` is 24 dp at every density and never scales, so a
+/// recipe that pins a size below it is below it at Touch as much as at Compact
+/// — which is why this sweeps all three rather than only the densest. Neither
+/// hit mechanism can close the gap: an outset never escapes its parent, and the
+/// slop pass gives nothing to a control whose bubble path carries an eligible
+/// handler, which a toolbar row is.
+#[test]
+fn a_macos_icon_button_reaches_the_conformance_floor_at_every_density() {
+    for density in [
+        TargetDensity::Compact,
+        TargetDensity::Comfortable,
+        TargetDensity::Touch,
+    ] {
+        let mut tree = WidgetTree::new()
+            .with_theme(teksilo_theme_macos::light().with_density(density))
+            .with_text_backend(Rc::new(RefCell::new(MockTextBackend::new())));
+        in_tappable_row(&mut tree, IconButton::new(IconWidget::checkmark(16.0)));
+        tree.layout(SizeProposal::exact(400.0, 200.0));
+
+        let button = measure_targets(&tree, density)
+            .into_iter()
+            .find(|m| m.widget.ends_with("IconButton") && m.part.is_none())
+            .unwrap_or_else(|| panic!("{density:?}: the row holds an icon button"));
+        let floor = teksilo_tokens::InputTokens::for_density(density).min_target_conformance;
+        assert!(
+            button.expanded.width + 0.1 >= floor && button.expanded.height + 0.1 >= floor,
+            "{density:?}: a macOS icon button reaches {:?} against a {floor} dp floor",
+            button.expanded,
+        );
+        assert_eq!(
+            target_audit(&tree, density)
+                .into_iter()
+                .filter(|v| v.rule.is_conformance_failure())
+                .count(),
+            0,
+            "{density:?}: the row reports a conformance failure",
+        );
+    }
+}
+
+/// And the chrome is still Apple's 22 dp, so "clears the floor" has not been
+/// implemented by falsifying the preset.
+///
+/// Measured on the laid-out tree rather than on the recipe: a recipe field
+/// nothing renders is the failure this whole file exists to catch. The two
+/// `FixedSize` nodes in an icon button's chrome are the conformance box and the
+/// painted square inside it.
+#[test]
+fn a_macos_icon_buttons_chrome_is_still_apples_twenty_two_dp() {
+    let mut tree = WidgetTree::new()
+        .with_theme(teksilo_theme_macos::light())
+        .with_text_backend(Rc::new(RefCell::new(MockTextBackend::new())));
+    let root = in_tappable_row(&mut tree, IconButton::new(IconWidget::checkmark(16.0)));
+    tree.layout(SizeProposal::exact(400.0, 200.0));
+
+    let mut squares: Vec<(f32, f32)> = nodes_named(&tree, root, "FixedSize")
+        .into_iter()
+        .map(|id| {
+            let b = tree.bounds(id);
+            (b.width, b.height)
+        })
+        .collect();
+    squares.sort_by(|a, b| a.0.total_cmp(&b.0));
+    assert_eq!(
+        squares,
+        vec![(22.0, 22.0), (24.0, 24.0)],
+        "the painted square stays at Apple's control height and sits centred in \
+         a box that reaches the floor",
+    );
+}
+
+/// The same bargain for `NSSwitch`: the track keeps Apple's 22 dp and the node
+/// clears the floor.
+#[test]
+fn a_macos_toggle_reaches_the_conformance_floor_at_every_density() {
+    for density in [
+        TargetDensity::Compact,
+        TargetDensity::Comfortable,
+        TargetDensity::Touch,
+    ] {
+        let mut tree = WidgetTree::new()
+            .with_theme(teksilo_theme_macos::light().with_density(density))
+            .with_text_backend(Rc::new(RefCell::new(MockTextBackend::new())));
+        in_tappable_row(&mut tree, Toggle::new(Signal::new(true)));
+        tree.layout(SizeProposal::exact(400.0, 200.0));
+
+        let toggle = measure_targets(&tree, density)
+            .into_iter()
+            .find(|m| m.widget.ends_with("Toggle") && m.part.is_none())
+            .unwrap_or_else(|| panic!("{density:?}: the row holds a toggle"));
+        let floor = teksilo_tokens::InputTokens::for_density(density).min_target_conformance;
+        assert!(
+            toggle.expanded.height + 0.1 >= floor,
+            "{density:?}: a macOS switch reaches {:?} against a {floor} dp floor",
+            toggle.expanded,
+        );
+    }
+}
+
+/// And the track is still 38 x 22, so the switch has not been resized to reach
+/// the floor.
+#[test]
+fn a_macos_switchs_track_is_still_thirty_eight_by_twenty_two() {
+    let mut tree = WidgetTree::new()
+        .with_theme(teksilo_theme_macos::light())
+        .with_text_backend(Rc::new(RefCell::new(MockTextBackend::new())));
+    tree.add(Toggle::new(Signal::new(true)));
+    tree.layout(SizeProposal::exact(400.0, 200.0));
+
+    let frame = tree.render();
+    let tracks: Vec<[f32; 4]> = frame
+        .shapes
+        .iter()
+        .map(|s| s.screen)
+        .filter(|s| (s[2] - 38.0).abs() < 0.01 && (s[3] - 22.0).abs() < 0.01)
+        .collect();
+    assert!(
+        !tracks.is_empty(),
+        "the 38 x 22 track is painted; shapes were {:?}",
+        frame.shapes.iter().map(|s| s.screen).collect::<Vec<_>>(),
+    );
 }

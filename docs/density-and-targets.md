@@ -315,7 +315,7 @@ this rule and 22 × 24 without it, while a `TableView`'s scroll bar reaches 32 d
 across its thickness at Touch with it and 18 dp without. Both figures are
 assertions —
 `an_outsets_claim_survives_the_slop_pass_in_the_shipped_controls` in
-`crates/teksilo-widgets/tests/target_conformance.rs` — not prose. The predicate
+`crates/teksilo-target-conformance/tests/conformance.rs` — not prose. The predicate
 is `won_through_outset` in `arena.rs`, consulted by `apply_slop` before it walks
 any candidate; `no_hit_slop` still silences the outset and the slop together,
 which is what keeps one chain one.

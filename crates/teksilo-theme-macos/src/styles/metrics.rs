@@ -176,8 +176,13 @@ pub fn macos_combo_box_style_for(tokens: &InputTokens) -> RecipeComboBoxStyle {
 pub fn macos_icon_button_style_for(tokens: &InputTokens) -> RecipeIconButtonStyle {
     RecipeIconButtonStyle::new(IconButtonRecipe {
         // `[measured]` AppKit sizes. `size_compact` (18 dp) and the regular
-        // 22 dp control are below the 24 dp WCAG floor and stay there — see
-        // `macos_menu_item_recipe_for`; the larger rungs rise with the density.
+        // 22 dp control are below the 24 dp WCAG floor and the PAINT stays
+        // there — see `macos_menu_item_recipe_for`. The NODE does not: since
+        // the preset-gate package, `RecipeIconButtonStyle::make_body` wraps
+        // whatever the recipe asked for in a conformance box of at least
+        // `min_target_conformance` and centres the chrome in it, so both rungs
+        // reach 24 dp as targets while painting Apple's numbers. The larger
+        // rungs rise with the density and never meet that box.
         size_compact: 18.0,
         size_default: H_CONTROL,
         size_toolbar: dp(28.0, TargetRole::Target, tokens),

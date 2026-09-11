@@ -32,6 +32,7 @@ use teksilo_core::signal::Signal;
 use teksilo_core::styles::density::{dp, spacing};
 use teksilo_core::styles::{StandardItemStyle, StandardItemStyleConfig};
 use teksilo_core::widget::{LayoutContext, LayoutResponse, PaintContext, Widget, WidgetPlacement};
+use teksilo_core::widget_builder::WidgetBuilder;
 use teksilo_core::widget_id::WidgetId;
 use teksilo_tokens::{CornerRadius, InputTokens, TargetRole};
 use teksilo_widgets::styles::{RecipeStandardItemStyle, StandardItemRecipe};
@@ -89,16 +90,32 @@ impl StandardItemStyle for FluentStandardItemStyle {
     fn make_body(&self, cfg: &StandardItemStyleConfig, ctx: &mut BuildContext) -> WidgetId {
         let row = RecipeStandardItemStyle::new(fluent_standard_item_recipe_for(&ctx.theme().input))
             .make_body(cfg, ctx);
-        let pill = ctx.add(FluentSelectionPill {
-            is_selected: cfg.is_selected.clone(),
-            is_disabled: cfg.is_disabled.clone(),
-        });
+        let pill = ctx.add(
+            FluentSelectionPill {
+                is_selected: cfg.is_selected.clone(),
+                is_disabled: cfg.is_disabled.clone(),
+            }
+            // The pill spans the whole row and is listed last, so the
+            // reverse-sibling hit walk reaches it first and it would own every
+            // press in the row -- a checkbox in a Fluent list could not be
+            // ticked by a mouse, let alone a finger. `hit_transparent` prunes
+            // the subtree from the walk, so the press falls through to the
+            // delegated row beneath. NOT `event_pass_through`, which keeps the
+            // node in the walk and means something else; and not reordering to
+            // `[pill, row]`, because this pill paints an accent bar OVER the
+            // row and the row's own selection wash would cover it.
+            .hit_transparent(true),
+        );
         ctx.add(FluentRowFrame { row, pill })
     }
 }
 
 /// Stacks the selection pill over the delegated row, stretching **both** to
 /// the frame's bounds.
+///
+/// Painting over the row is what makes the pill the topmost sibling in the hit
+/// walk as well, so the pill declares `hit_transparent` at the point it is
+/// added. Anything else placed over this row owes the same declaration.
 ///
 /// The obvious composition — a `ZStack` — is wrong here, and silently so.
 /// `ZStack::layout_response` measures its children at an *unspecified* width
