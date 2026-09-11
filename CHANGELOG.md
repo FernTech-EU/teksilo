@@ -13,6 +13,15 @@ by crate for clarity, not because crates version independently.
 
 ## [Unreleased]
 
+## [0.9.5] - 2026-09-11
+
+Three main strands: text ranges on every visible label, one chord table for
+the bounded-scalar controls, and a submenu that survives the diagonal to
+reach it. Plus `stretch_last_column` on the tables, an assistive-technology
+whole-value write that commits, and a `FormLayout` that keeps its rows
+across a rebuild. One breaking change: `TextInputField::on_access_set_value`
+now returns whether the host accepted the string.
+
 ### Added
 
 #### Bounded-scalar controls
@@ -308,6 +317,19 @@ See [docs/range-keyboard.md](docs/range-keyboard.md) for the full chord table.
 
 #### Data views
 
+- `TableView` / `TreeTableView`: dragging a column divider now moves it with
+  the pointer. Only the columns after the divider reflow; a `Flex` column
+  before it is frozen at its current width in the same `column_widths_signal`
+  write. Before, the resized column's delta was shared with every flex column,
+  so the divider lagged the pointer (or stood still) while the dividers before
+  it slid the other way.
+- `TableView` / `TreeTableView`: dropping a dragged column at the very front
+  or the very end of a strip with no pinned pane on that side moves it there
+  instead of pinning it `Leading` / `Trailing`.
+- `TableView` / `TreeTableView`: the header strip's column separators now
+  follow a column resize and a horizontal scroll. The strip's bounds change on
+  neither, so its cached paint was replayed and the lines stayed where they
+  were while the cells moved.
 - **A row height a view *declares* is laid out at the height it declares.**
   `ListView::item_height_fn`, `TableView::row_height_fn` and `GridView`'s exact
   `item_height` fed the offset table through the same setter a measurement pass
@@ -418,22 +440,6 @@ to hold a socket: it could not bind at all on macOS, and on Linux it reached
 for a permission change on `/tmp` that was never its to make.
 
 ### Fixed
-
-#### Data views
-
-- `TableView` / `TreeTableView`: dragging a column divider now moves it with
-  the pointer. Only the columns after the divider reflow; a `Flex` column
-  before it is frozen at its current width in the same `column_widths_signal`
-  write. Before, the resized column's delta was shared with every flex column,
-  so the divider lagged the pointer (or stood still) while the dividers before
-  it slid the other way.
-- `TableView` / `TreeTableView`: dropping a dragged column at the very front
-  or the very end of a strip with no pinned pane on that side moves it there
-  instead of pinning it `Leading` / `Trailing`.
-- `TableView` / `TreeTableView`: the header strip's column separators now
-  follow a column resize and a horizontal scroll. The strip's bounds change on
-  neither, so its cached paint was replayed and the lines stayed where they
-  were while the cells moved.
 
 #### Automation
 
@@ -1075,7 +1081,8 @@ building them exposed.
 Entries before this file was introduced are not backfilled; see `git log`
 for the full history.
 
-[Unreleased]: https://github.com/FernTech-EU/teksilo/compare/v0.9.4...HEAD
+[Unreleased]: https://github.com/FernTech-EU/teksilo/compare/v0.9.5...HEAD
+[0.9.5]: https://github.com/FernTech-EU/teksilo/compare/v0.9.4...v0.9.5
 [0.9.4]: https://github.com/FernTech-EU/teksilo/compare/v0.9.3...v0.9.4
 [0.9.3]: https://github.com/FernTech-EU/teksilo/compare/v0.9.2...v0.9.3
 [0.9.2]: https://github.com/FernTech-EU/teksilo/compare/v0.9.1...v0.9.2
