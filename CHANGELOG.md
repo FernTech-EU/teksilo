@@ -666,6 +666,13 @@ can override, and none of them changes what a mouse does.
 - **A `PlainTextEditor` could neither replace nor suppress the context menu its
   documentation offered it**, and the `CodeEditor` family gained the right-click
   menu it never had.
+- **`--all-features` builds.** Five `fonts-*` features named a Noto face that is
+  not in the repository, and because `include_bytes!` resolves at compile time,
+  enabling one was a hard build error — so those five features, both
+  `fonts-all` meta-features, and any `--all-features` build of the workspace
+  had never compiled on any revision. A face is now embedded only if its file
+  is present; enabling a feature without it warns and names the path to drop it
+  at, rather than failing the build.
 
 #### Documentation
 

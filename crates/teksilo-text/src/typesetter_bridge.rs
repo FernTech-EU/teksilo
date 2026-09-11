@@ -295,37 +295,37 @@ impl TypesetterBridge {
             .service
             .register_font_shared(shared_static(mono_italic));
 
-        #[cfg(feature = "fonts-arabic")]
+        #[cfg(font_arabic)]
         {
             let data = include_bytes!("../fonts/NotoSansArabic-VariableFont_wdth,wght.ttf");
             let _ = self.service.register_font_shared(shared_static(data));
         }
-        #[cfg(feature = "fonts-hebrew")]
+        #[cfg(font_hebrew)]
         {
             let data = include_bytes!("../fonts/NotoSansHebrew-VariableFont_wdth,wght.ttf");
             let _ = self.service.register_font_shared(shared_static(data));
         }
-        #[cfg(feature = "fonts-thai")]
+        #[cfg(font_thai)]
         {
             let data = include_bytes!("../fonts/NotoSansThai-VariableFont_wdth,wght.ttf");
             let _ = self.service.register_font_shared(shared_static(data));
         }
-        #[cfg(feature = "fonts-devanagari")]
+        #[cfg(font_devanagari)]
         {
             let data = include_bytes!("../fonts/NotoSansDevanagari-VariableFont_wdth,wght.ttf");
             let _ = self.service.register_font_shared(shared_static(data));
         }
-        #[cfg(feature = "fonts-cjk-sc")]
+        #[cfg(font_cjk_sc)]
         {
             let data = include_bytes!("../fonts/NotoSansSC-VariableFont_wght.ttf");
             let _ = self.service.register_font_shared(shared_static(data));
         }
-        #[cfg(feature = "fonts-cjk-jp")]
+        #[cfg(font_cjk_jp)]
         {
             let data = include_bytes!("../fonts/NotoSansJP-VariableFont_wght.ttf");
             let _ = self.service.register_font_shared(shared_static(data));
         }
-        #[cfg(feature = "fonts-cjk-kr")]
+        #[cfg(font_cjk_kr)]
         {
             let data = include_bytes!("../fonts/NotoSansKR-VariableFont_wght.ttf");
             let _ = self.service.register_font_shared(shared_static(data));
@@ -1331,7 +1331,7 @@ mod tests {
     /// advance is positive and (b) at least one glyph in the layout
     /// rasterizes to a non-zero atlas rect, proving a real glyph was
     /// found (not an invisible `.notdef`).
-    #[cfg(feature = "fonts-arabic")]
+    #[cfg(font_arabic)]
     #[test]
     fn arabic_text_renders_with_visible_glyphs() {
         let mut bridge = TypesetterBridge::new_with_default_font();
@@ -1357,7 +1357,7 @@ mod tests {
 
     /// Regression test for a text-typeset bidi bug: Latin text
     /// embedded in an Arabic string must not be visually reversed.
-    #[cfg(feature = "fonts-arabic")]
+    #[cfg(font_arabic)]
     #[test]
     fn latin_in_arabic_is_not_visually_reversed() {
         let mut bridge = TypesetterBridge::new_with_default_font();
@@ -1398,7 +1398,7 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "fonts-hebrew")]
+    #[cfg(font_hebrew)]
     #[test]
     fn hebrew_text_renders_with_visible_glyphs() {
         let mut bridge = TypesetterBridge::new_with_default_font();
@@ -1469,6 +1469,35 @@ mod tests {
             glyphs.len() <= 15,
             "got {} glyphs — expected ~10 for 'First text', not ~31 for the stale last_result",
             glyphs.len()
+        );
+    }
+
+    /// A bundled face is gated on its `font_*` cfg, never on its feature.
+    ///
+    /// The difference is the whole reason `build.rs` exists. `include_bytes!`
+    /// resolves at compile time, so gating on the *feature* makes a face whose
+    /// file is absent a hard build error — which is what made five features,
+    /// both meta-features and `--all-features` unbuildable on every revision of
+    /// this workspace. Gating on the cfg the probe emits makes the same case a
+    /// warning.
+    ///
+    /// Scanning the source is the only way to hold this: the wrong gate
+    /// compiles perfectly whenever the file happens to be present, so it is
+    /// invisible in a normal build and surfaces only under `--all-features`, or
+    /// on the day someone adds a feature without its file.
+    #[test]
+    fn a_bundled_face_is_gated_on_its_probe_cfg_and_never_on_its_feature() {
+        let src = include_str!("typesetter_bridge.rs");
+        let offenders: Vec<&str> = src
+            .lines()
+            .map(str::trim)
+            .filter(|l| l.starts_with("#[cfg(") && l.contains("feature = \"fonts-"))
+            .collect();
+        assert!(
+            offenders.is_empty(),
+            "gate a bundled face on its `font_*` cfg from build.rs, not on its \
+             feature — `include_bytes!` of an absent file is a build error, and \
+             that is what broke `--all-features`. Offending: {offenders:?}"
         );
     }
 }
