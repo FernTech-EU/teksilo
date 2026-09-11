@@ -14,6 +14,16 @@
 //! - Drag-to-reorder (and Alt+Arrow) with a live insertion bar.
 //! - Sections grouped by album, with sticky pinned headers.
 //! - A live selection-count status line.
+//!
+//! # Touch
+//!
+//! Both of the grid's drag gestures — the marquee and the tile reorder — wait
+//! for a **hold** when the pointer is a finger or a stylus, because the grid's
+//! body pane claims the pan and a direct pointer's press belongs to it first. A
+//! mouse gets both from the first few pixels. A tap selects on the release.
+//! [docs/data-view-touch.md](../../docs/data-view-touch.md) §2 explains why the
+//! pane is the node that holds the arena here, which is also why the marquee is
+//! unaffected by the short-row limit the row views have.
 
 use teksilo::canvas::EdgeInsets;
 use teksilo::data::{ListModel, SelectionMode, SelectionModel};

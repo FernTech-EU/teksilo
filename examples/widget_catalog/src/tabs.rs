@@ -39,6 +39,7 @@ pub mod scene;
 pub mod settings;
 pub mod styling;
 pub mod text;
+pub mod touch;
 pub mod visuals;
 
 /// One tab entry. `title_fn` and `refs_fn` return reactive
@@ -195,6 +196,13 @@ pub static TABS: &[TabEntry] = &[
         refs_fn: animations::refs,
         classic: animations::classic,
         teksu: animations::teksu,
+    },
+    TabEntry {
+        lowercase_name: "touch",
+        title_fn: touch::title,
+        refs_fn: touch::refs,
+        classic: touch::classic,
+        teksu: touch::teksu,
     },
     TabEntry {
         lowercase_name: "settings",

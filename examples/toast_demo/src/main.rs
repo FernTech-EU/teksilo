@@ -30,6 +30,14 @@
 //!   job ends. This is the supported bridge for driving toasts from a
 //!   backend long-operation's progress events (Qleany
 //!   `Origin::LongOperation(Progress | Completed | Cancelled)`).
+//!
+//! # Touch
+//!
+//! A touch contact never hovers, so the hover-to-pause above is unreachable with
+//! a finger and two coarse-pointer-only routes answer instead: **press and hold**
+//! a toast pauses it, and a **horizontal swipe** dismisses it. Swipe is
+//! horizontal only — a vertical swipe on a toast stack would fight whatever the
+//! stack is sitting over. The close button stays where it is for a mouse.
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -171,7 +179,9 @@ fn body() -> impl Widget {
             .child(TextWidget::new(lit!(
                 "Click the buttons in the toolbar to spawn toasts. They appear at the \
                  bottom-right corner. Hover any toast to pause every timer (the auto-dismiss \
-                 won't fire while your pointer is over the group). The bell icon in the \
+                 won't fire while your pointer is over the group) \u{2014} a finger never hovers, \
+                 so press and hold a toast to pause it, and swipe it sideways to dismiss it. \
+                 The bell icon in the \
                  status bar shows the persistent archive — every toast is logged there \
                  (unless you call `.archive(false)`), and the log survives app restarts."
             ))),

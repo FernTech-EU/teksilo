@@ -10,6 +10,12 @@
 //!   trailing slot opens new dynamic tabs.
 //! - Closable tabs with the close button + middle-click; pinned
 //!   tabs suppress the close button (Firefox / Chrome convention).
+//!   **Both of those routes are for a mouse**: the close button is revealed by
+//!   hover, and a touch contact never hovers, so at this example's density a
+//!   finger cannot reach it. `Delete` on the focused header and the tab's
+//!   assistive-technology close action are the routes that do not need hover; a
+//!   theme built at `RevealPolicy::Always` (which the Touch density selects)
+//!   shows the button unconditionally instead.
 //! - Drag-to-reorder, with the insertion-line drop indicator.
 //! - Overflow dropdown — `PopoverButton` + `ListView` listing all
 //!   tabs by stable `TabId`, click activates and dismisses.

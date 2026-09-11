@@ -26,6 +26,17 @@ pub struct CliOptions {
     /// (aliases `m3-light` / `m3-dark`) / `fluent-light` / `fluent-dark` /
     /// `macos-light` / `macos-dark`. `None` → restore the saved theme.
     pub theme: Option<String>,
+    /// The target density the whole catalog is built at: `compact` (the
+    /// default), `comfortable` or `touch`.
+    ///
+    /// A flag rather than an in-app control on purpose. A density is decided
+    /// inside every `build()`, so switching it needs a rebuild of every root —
+    /// which is what `WidgetTree::set_input_density` does and what nothing on
+    /// `EventContext` reaches. A tab that re-themed and rebuilt only itself would
+    /// leave the other twenty showing their build-time dimensions. Launch again
+    /// instead; `cargo run -p touch-playground` is the one that switches live,
+    /// because it owns its own root.
+    pub density: teksilo::tokens::TargetDensity,
 }
 
 /// Parse command-line args. On `--help`, prints usage and exits 0.
@@ -95,6 +106,20 @@ pub fn parse(tab_names: &[&str]) -> CliOptions {
                     other => eprintln!("--mode: expected `classic` or `teksu`, got `{other}`"),
                 }
             }
+            "--density" => {
+                let Some(value) = iter.next() else {
+                    eprintln!("--density expects one of: compact, comfortable, touch");
+                    continue;
+                };
+                match value.to_ascii_lowercase().as_str() {
+                    "compact" => opts.density = teksilo::tokens::TargetDensity::Compact,
+                    "comfortable" => opts.density = teksilo::tokens::TargetDensity::Comfortable,
+                    "touch" => opts.density = teksilo::tokens::TargetDensity::Touch,
+                    other => eprintln!(
+                        "--density: expected compact, comfortable or touch, got `{other}`"
+                    ),
+                }
+            }
             "--theme" => {
                 let Some(value) = iter.next() else {
                     eprintln!(
@@ -140,6 +165,9 @@ fn print_help(tab_names: &[&str]) {
            --cycle-ms <MS>      Like --cycle, but MS is mandatory. Script-friendly\n  \
                                 (no silent fall-back to the default interval).\n  \
            --mode <classic|teksu>  Initial view mode (default `classic`).\n  \
+           --density <NAME>     Build the whole catalog at this target density.\n  \
+                                compact (default) | comfortable | touch.\n  \
+                                See the Touch tab for what each rung moves.\n  \
            --theme <NAME>       Force the startup theme, overriding the saved one.\n  \
                                 intui-light | intui-dark | material3-light | material3-dark\n  \
                                 | fluent-light | fluent-dark | macos-light | macos-dark\n  \

@@ -33,7 +33,10 @@
 //!   * Double-click a word → selects it. Triple-click → selects the
 //!     paragraph. Both via cooperative double/triple tap recognizers.
 //!   * Drag from inside text to near the top or bottom edge → selection
-//!     extends, viewport auto-scrolls.
+//!     extends, viewport auto-scrolls. **Mouse only**: a direct pointer's drag
+//!     belongs to the editor's own pan claim, so a finger scrolls instead. A
+//!     finger selects by holding a word and then dragging a handle, and a handle
+//!     dragged to the edge does scroll the view to follow it.
 //!   * Use the formatting toolbar between the dark-mode bar and the
 //!     editor: Bold / Italic / Underline / Strikethrough tint when the
 //!     caret sits in that format; alignment buttons reflect the
@@ -357,15 +360,17 @@ loop drops them on the floor:
   bold, italic, lists, tables.
 - Double-click selects a word, triple-click selects the paragraph.
 - Drag past the top or bottom edge to engage auto-scroll while
-  extending the selection.
+  extending the selection. With a finger a drag scrolls instead: hold a
+  word to select it, then drag one of the two handles.
 - Tab at the start of a list item increases the indent; Shift+Tab
   decreases it. Backspace at the start of an indented list item
   dedents; at indent 0 it exits the list.
-- Right-click for Cut / Copy / Paste / Paste Unformatted / Select
-  All — items grey out when not applicable (Cut/Copy without a
-  selection, Select All in an empty document).
-- Scroll with the mouse wheel — overlay scrollbars fade in on the
-  right/bottom edges.
+- Right-click — or hold, with a finger — for Cut / Copy / Paste / Paste
+  Unformatted / Select All; items grey out when not applicable (Cut/Copy
+  without a selection, Select All in an empty document). A hold also
+  raises the touch selection toolbar.
+- Scroll with the mouse wheel, or drag with a finger; overlay scrollbars
+  fade in on the right/bottom edges.
 
 Type anywhere below; watch the preview pane mirror every edit.
 "#;

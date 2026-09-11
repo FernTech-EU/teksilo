@@ -68,9 +68,13 @@
 //!
 //! ## Touch and pen
 //!
-//! A row's **height** is a target floor and follows the density ladder — the
-//! recipe has carried both projected heights since the density sweep, and the row
-//! now reads them rather than the raw Compact constants.
+//! A row's **height** is a target floor and follows the density ladder: the row
+//! projects the raw module constants through `density::dp` at layout time. It does
+//! **not** read `StandardItemRecipe::min_height_single_line` /
+//! `min_height_two_line`, which have carried the same projected values since the
+//! density sweep and have no reader — so retuning either of those two recipe
+//! fields in a preset moves nothing. `layout_response` says the same thing at the
+//! site; `docs/touch-and-pen.md` §10.1 carries it as an open finding.
 //!
 //! A row's **press** is not the row's. Inside a `ListView` or a `TreeView` the
 //! body pane owns the tap, the double tap and the reorder drag, and resolves which

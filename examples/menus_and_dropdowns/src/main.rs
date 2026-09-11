@@ -5,7 +5,8 @@
 //!
 //! Demonstrates the menu system:
 //! - ComboBox with dropdown selection
-//! - Context menu (right-click) with MenuList and MenuItem
+//! - Context menu (right-click, or a hold with a finger) with MenuList and
+//!   MenuItem
 //! - MenuBar with `&`-marker mnemonics (hold Alt to see the underlines;
 //!   Alt+F / Alt+E / Alt+V opens the matching menu; F10 focuses the
 //!   menubar; bare Alt-tap focuses the menubar)
@@ -15,6 +16,15 @@
 //! - Type-ahead inside menus (open the View menu, type a few letters)
 //! - Submenu hover + safe-triangle (open File → Recent and sweep
 //!   diagonally toward the submenu)
+//!
+//! # Touch
+//!
+//! A touch contact never hovers, so the safe triangle is inert for a finger and
+//! tapping a submenu trigger opens it outright. Dismissing an open dropdown or
+//! context menu by pressing outside it now completes on the **release**, and the
+//! press that dismissed does not also reach whatever is under it — so dismissing
+//! a menu and activating the control beneath it are two separate presses, for
+//! every pointer kind.
 //!
 //! Run with: `cargo run -p menus-and-dropdowns`
 

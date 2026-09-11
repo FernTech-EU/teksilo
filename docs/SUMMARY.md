@@ -53,6 +53,8 @@
 # Touch & pen migration
 
 - [Touch & pen](touch-and-pen.md)
+- [Touch verification — the hardware procedure](touch-verification.md)
+- [Touch verification sign-off](touch-verification-signoff.md)
 - [Porting widgets to the pointer model](porting-widgets-to-the-pointer-model.md)
 - [Soft keyboard](soft-keyboard.md)
 - [Touch text editing](text-touch-editing.md)

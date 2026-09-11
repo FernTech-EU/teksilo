@@ -300,10 +300,21 @@ pub struct PointerInfo {
     pub id: PointerId,
     /// What kind of device it is — the axis gesture tuning reads.
     pub kind: PointerKind,
-    /// Whether this is the *primary* pointer in the W3C sense: the one that
-    /// drives the legacy singular signals (`hovered`, the cursor, the one
-    /// `PointerDown` a widget that knows nothing of multi-touch will see).
-    /// Exactly one live pointer is primary; a mouse always wins the role.
+    /// The W3C Pointer Events `isPrimary` flag, which is **per kind**: every
+    /// mouse sample is primary, and so is the first contact of a touch sequence.
+    /// On a machine with both, a mouse and a first finger are *both* primary at
+    /// once. It is a property of the sample, set by whoever produced it, and
+    /// [`PointerTable`](table::PointerTable) never rewrites it.
+    ///
+    /// **Not** the framework's singular pointer. The one that drives the legacy
+    /// singular signals — `hovered`, the cursor, the one `PointerDown` a widget
+    /// that knows nothing of multi-touch sees — is
+    /// [`PointerTable::primary`](table::PointerTable::primary), a table-level
+    /// election that exactly one live pointer holds and that a mouse always wins.
+    /// A third notion, [`PointerTable::hover_owner`](table::PointerTable::hover_owner),
+    /// is the most recent hovering-*capable* pointer. `table.rs`'s module docs
+    /// separate all three; reading this flag as either of the others is the
+    /// mistake the separation exists to prevent.
     pub primary: bool,
     /// The buttons held *after* this sample is applied. A press sets its own
     /// bit; a release clears it. Empty for a hovering pointer.
@@ -350,8 +361,10 @@ impl PointerInfo {
         }
     }
 
-    /// A touch contact. Not primary by default: primacy is decided by the
-    /// pointer table against the other live pointers, not by the constructor.
+    /// A touch contact, with the W3C per-kind [`primary`](Self::primary) flag
+    /// **clear**. A producer that knows this is the first contact of a sequence
+    /// sets it; the platform translator does. The pointer table's own election is
+    /// a separate thing and never writes this field.
     pub const fn touch(id: PointerId, time: EventTime) -> Self {
         Self {
             id,

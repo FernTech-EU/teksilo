@@ -28,8 +28,11 @@
 //!   the focused cell. (This example does not write the edited value
 //!   back into the model — see the comment on `name_column`.)
 //!
-//! Resize columns by dragging their trailing edge. Reorder columns by
-//! dragging a header. Click a header to cycle sort. Use arrow keys /
+//! Resize columns by dragging their trailing edge — its grab reaches the
+//! density's target size for a coarse pointer, so the strip is wider to hit than
+//! to look at. Reorder columns by dragging a header; with a finger or a stylus,
+//! **hold the header first** — the header's plain press stays unclaimed so that a
+//! finger can pan the table from the strip. Click a header to cycle sort. Use arrow keys /
 //! Home / End / PgUp / PgDn / Tab on the focused cell to navigate.
 //! Press F2 (or just start typing) on a focused name cell to edit it.
 

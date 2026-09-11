@@ -7,7 +7,8 @@
 //! unit test can't exercise the bridge's `send_external` path. This example
 //! builds a real app with `install_automation_bridge_in_debug()`, then a client
 //! thread discovers the published endpoint, connects, runs
-//! `snapshot_tree → invoke_action → snapshot_tree → screenshot`, and `exit(0)`s
+//! `snapshot_tree → invoke_action → snapshot_tree → scroll → drag_node →
+//! screenshot`, and `exit(0)`s
 //! the whole process on success (or `exit(1)` on failure).
 //!
 //! It is platform-agnostic: discovery goes through [`EndpointFile`] and the

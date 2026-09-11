@@ -41,7 +41,7 @@ live target of Milestone 8a of §27.10 of the Teksilo architecture.
   to land on the same visual X across short lines.
 - No caret: view-only widgets don't expose one. The editable
   preset (`RichTextEditor::editor`) is the one with a blinking
-  caret, reached by M8b and not yet usable from this example.
+  caret; `cargo run -p rich-text-editor` is that example.
 - Multiple editors can bind to one `TextDocument`: each one
   subscribes to `on_change` independently, so edits propagate to
   every view.
@@ -49,8 +49,8 @@ live target of Milestone 8a of §27.10 of the Teksilo architecture.
 ## What's not here yet
 
 - Editing: typing, backspace, enter, formatting, undo/redo, paste.
-  These all come in Milestone 8b via the `RichTextEditor::editor`
-  preset on top of the same shared modules.
+  All of it lives on the `RichTextEditor::editor` preset, built on the
+  same shared modules — see `cargo run -p rich-text-editor`.
 - Tables and frames still render via the base (non-HiDPI-aware)
   path until the scaling helper is extended to cover them.
 - Full rich clipboard round-trip (in-process rich fragment +
@@ -59,10 +59,10 @@ live target of Milestone 8a of §27.10 of the Teksilo architecture.
 
 ## Try it
 
-Scroll with the mouse wheel. Click anywhere to place the (invisible)
-caret. Hold the arrow keys to move the selection anchor through the
+Scroll with the mouse wheel, or drag with a finger. Click anywhere to
+place the (invisible) caret. Hold the arrow keys to move the selection anchor through the
 text — Shift+click and Shift+arrows extend a visible selection you
-can then Ctrl+C (no-op until M8b) or Ctrl+A to select everything.
+can then Ctrl+C, or Ctrl+A to select everything.
 None of the keys that would mutate the document (typing, Enter,
 Delete) do anything — the `CommandFilter::ReadOnly` rejects them
 before they reach the cursor.

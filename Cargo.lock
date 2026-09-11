@@ -12197,6 +12197,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "aa7c7f42dea4b1b99439786f5633aeb9c14c1b53f75e282803c2ec2ad545873c"
 
 [[package]]
+name = "touch-playground"
+version = "0.9.4"
+dependencies = [
+ "serde_json",
+ "teksilo",
+ "teksilo-automation",
+]
+
+[[package]]
 name = "tower"
 version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"

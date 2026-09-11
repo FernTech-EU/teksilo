@@ -79,8 +79,13 @@ pub enum ScrollBarMode {
     Permanent,
     /// Floats over the content like `Overlay` but only ever shows the thin resting
     /// indicator, never the full track. A passive scroll-position display for
-    /// minimal UIs; drag, track-click, and keyboard still work against the full
-    /// slot bounds.
+    /// minimal UIs; drag and track-click still work against the full slot bounds.
+    ///
+    /// **Not the keyboard.** The bar's arrow / `Home` / `End` / `Page` arms sit on
+    /// a node built `focusable(false)`, so no keyboard user reaches them under any
+    /// of the three modes — see [`ScrollBarPolicy::AlwaysOff`], which states the
+    /// same limit from the other side, and `docs/touch-and-pen.md` §10.2, which
+    /// carries it as an open finding.
     Thin,
 }
 

@@ -15,6 +15,18 @@
 //!   reparenting, and auto-measured rows (branches carry a subtitle
 //!   line; measured heights above a toggle survive expand/collapse)
 //!
+//! # Touch
+//!
+//! "Drag reordering" and "drag reparenting" both mean **hold the row, then
+//! drag**, for a touchscreen or a stylus: a direct pointer's press belongs to
+//! the view's own scrolling until a hold arms the row's drag. A mouse drags from
+//! the first few pixels, as it always did. A tap selects on the release rather
+//! than on the press, so a tap that slides off a row commits nothing.
+//! [docs/data-view-touch.md](../../docs/data-view-touch.md) §2 carries the rule
+//! and the one case where it is unreliable — a row shorter than the drag slop can
+//! lose the armed drag on its first sample, and the `TreeView` rows here are
+//! taller than a default row for exactly that reason.
+//!
 //! Uses the `on_activate_fn(|ctx| …)` handler for button activation.
 //! Handlers can fire typed intents via `ctx.send_intent(AppIntent::X)`
 //! for source → root dispatch, or run closures directly for local
@@ -212,7 +224,8 @@ impl Root {
                                  Variable row heights via item_height_fn: \
                                  two-line rows are 64 px, single-line 40 px. \
                                  Multi-select: click, Ctrl+click, Shift+click. \
-                                 Drag to reorder. Alt+Arrow to reorder via keyboard."
+                                 Drag to reorder (hold first with a finger). \
+                                 Alt+Arrow to reorder via keyboard."
                             ))
                             .style(theme.typography.body.clone())
                             .color(theme.colors.text_primary),

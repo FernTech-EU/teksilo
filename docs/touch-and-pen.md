@@ -34,7 +34,8 @@ signs up to are a numbered contract in
 > ingress and no writer — what a stray tap should cost, whether a pen is coarse,
 > and when hysteresis commits are unanswered). And it does not paint an overscroll
 > (`ScrollableAxes::overscroll` publishes the value; nothing renders a stretch or
-> a glow). §9 lists what else is reviewed rather than tested.
+> a glow). §9 lists what a headless host cannot check and §10 is the standing
+> ledger of what needs an owner's decision.
 >
 > The pinch payload the two producers hand over is now one contract, stated on
 > `GestureEvent::PinchChanged`: `scale` is the factor **since the previous
@@ -1264,8 +1265,9 @@ The migration is complete: the scrollable, control, menu, data-view, text and
 chrome sweeps have all landed, and touch text editing has a host in every editing
 surface. What is left on this page is not a list of missing features but a list of
 **claims a headless Linux CI host cannot check**, which is what a hardware
-sign-off is for. The three known *defects* are in the Status note at the top of
-this page.
+sign-off is for. The two things a running application still does not do right are
+in the Status note at the top of this page, and §10 is the standing ledger of
+everything else that needs an owner's decision.
 
 The app event loop **is** wired: a `WindowEvent::Touch` handed to
 `TeksiloAppHandler::window_event` reaches the widget tree as a touch sample.
@@ -1343,6 +1345,252 @@ schema untouched. The framework's one outbound event remains `intent.dispatched`
 whose `IntentSource` names how a command was reached and has no pointer-kind
 variant: a tap from a finger and a click from a mouse both report `Handler`. See
 [telemetry.md §2.8](telemetry.md).
+
+## 10. Open findings
+
+§9 is a different list from this one and the distinction is load-bearing. There,
+every item is a claim **this host cannot check** — a platform constant, a protocol
+behaviour — and the answer exists on some machine. Here, every item is a question
+**nobody has answered**: an unread token, a missing route, a contract that is
+wrong and worked around. No amount of hardware settles these; they need a ruling.
+
+They are collected on this page because the Status note at the top already sends a
+reader here for what the pointer model does not do, and because a finding recorded
+only in a package report is a finding that evaporates. One of them — the trackpad
+rotation sign — *is* answerable on hardware and appears in
+[touch-verification.md §12](touch-verification.md) as an explicit check; it is
+listed here too so that the ledger is complete and so that closing it there closes
+it here.
+
+Each entry carries the measurement that establishes it. Where a stated *reason*
+was found to be wrong, the correction is part of the entry: a finding with the
+wrong cause attached sends the next person to the wrong file.
+
+### 10.1 Dead API — declared, never read
+
+Each of these is a public or projected surface with no production reader. The
+decision each needs is the same one: **wire it, or delete it.** Retuning one and
+expecting a behaviour to change is the failure mode they share.
+
+- **`InputTokens::pen_hit_slop`.** Programme-introduced, and the only reader of
+  the identifier anywhere is a test. The pen's outset is served by
+  `GestureProfile::PEN.hit_slop`, which carries the same value and is what
+  `HitSlop::for_pointer` consults. The two are pinned together by
+  `the_unread_pen_outset_agrees_with_the_pen_profile` so a reader who finds them
+  disagreeing is not left guessing which the framework honours — but the field
+  itself still has no effect.
+- **`TouchSelection::report_ime_area`.** No caller. **Not an IME defect**, and a
+  package report that called it one was wrong: all three editing stacks report the
+  IME area from their own *touch* paths, in `handle_direct_pointer_event` in each
+  of `primitives/text_input_field/mouse.rs`, `rich_text/mouse.rs` and
+  `code_editor/mouse.rs`, plus a second reporter in each stack's `place_caret_at`.
+  The field's own reporter is used deliberately rather than the controller's,
+  because it holds the focus/layout guard and the dedup that keeps an input method
+  from feeding its own report back. So this is one superseded method, with no user
+  impact. (`docs/soft-keyboard.md` asserted the opposite — that the stacks report
+  from their *keyboard* paths and that a touch-placed caret leaves a stale
+  rectangle standing — and has been corrected.)
+- **`WidgetTree::touch_pinch_active`.** No production reader; every call is a test.
+  The pinch *state* behind it is live — the arbiter drives contact tracking and
+  emission — so what is dead is the query. Worth being precise about the
+  consequence: it is **not** established by this measurement that nothing
+  suppresses the per-contact pan sessions during a two-finger pinch. Suppression
+  could come from the claim chain rather than from this flag, and an earlier note
+  that read the unread accessor as proof of an arbitration gap overstated it.
+- **Six projected recipe fields with no reader.** An earlier report counted four
+  and never listed them; what it had actually measured was that a *row height* was
+  frozen at its Compact value, which was fixed by projecting the module constants
+  — leaving the recipe fields themselves still unread. The six are
+  `SegmentedControlRecipe::height`, `StandardItemRecipe::min_height_single_line`
+  and `min_height_two_line`, and `CalendarRecipe::nav_arrow_size`,
+  `nav_arrow_radius` and `nav_icon_size`. Each is written by its recipe's
+  `for_tokens` and by the Fluent and macOS metrics builders, and read only by
+  those crates' own assertions. The widgets take their floors from the raw
+  module constants projected at runtime instead — so a preset that retunes one of
+  these six changes nothing. `MenuItemRecipe::item_height`, which that earlier
+  list included, *does* have a reader (`RecipeMenuItemStyle::metrics` → the menu
+  list's own metrics), and is not one of these.
+- **`KineticScroller::pointer_velocity`.** No production caller. A fling is seeded
+  in core from the pan recognizer's own window-space tracker, not from here. It is
+  a public accessor whose only correct coordinate frame is the one the
+  `window_position` naming rule preserves; harmless today by construction rather
+  than by design.
+- **`SceneItemHandlerSet::on_double_tap`.** A public builder with no dispatcher
+  anywhere in `teksilo-scene`.
+- **A `MultiContact::All` on a reporting surface.** Measured twice, in two
+  unrelated places: the debug inspector's pointer-watch overlay and the touch
+  playground's pointer pad both had one, and deleting it changed nothing. A
+  handler that answers `EventResponse::Ignored` never becomes the arena owner, so
+  there is no live arena for the default `First` to refuse a second contact from.
+  Both declarations are gone and the behaviour is pinned by a test instead. This
+  is a note for widget authors rather than a defect: declaring `All` on a surface
+  that consumes nothing is a claim, not a mechanism.
+
+### 10.2 Missing routes and accessors
+
+- **A plain `ScrollArea` has no keyboard scroll route at all.** `ScrollBar`'s
+  arrow / `Home` / `End` / `Page` arms are installed on a node built
+  `HandlerSet::new().focusable(false)` in `ScrollBar::build`, and that node also
+  calls `set_hidden()` in its own `accessibility`, so it is unreachable by
+  keyboard *and* invisible to assistive technology. `ScrollArea` installs no key
+  handler of its own — the only `on_key` in the whole file is a test fixture.
+  **Pre-existing, not programme-introduced, and not a touch matter**, but a
+  WCAG 2.1.1 gap on any scroll region whose content is not itself focusable — a
+  long read-only text panel, most obviously. Two things narrow it and neither
+  closes it: `ScrollArea::accessibility` does advertise `ScrollUp` / `ScrollDown`
+  / `ScrollLeft` / `ScrollRight` per overflowing axis and answers them in its
+  `on_access_action`, so an AT client can scroll it; and `ListView`, `TreeView` and
+  `TableView` each install their own `on_key`, so the gap does not reach them. The
+  decision is an owner's: make the bar focusable, or give `ScrollArea` an
+  `on_key`.
+- **Nothing a widget can reach reports the tree's live pointers, or the hover
+  owner.** `WidgetTree::hover_owner` and the pointer table behind it are the
+  tree's. `EventContext` describes only the sample being dispatched;
+  `LayoutContext` carries focus, shortcuts and overlays; `BuildContext` carries
+  neither. The closest thing that exists is `EventContext::tree_pointer_position`,
+  and it is not a substitute: it reports the table's *elected* primary, which
+  prefers the mouse, so on a machine with both it answers for the wrong device.
+  Measured by two tools that wanted it and could not have it — the debug
+  inspector's Pointers tab, whose live half needs an armed full-window probe that
+  takes the application's input while it is up, and the touch playground, whose
+  inspector is therefore a *pad* the user touches on purpose. One accessor (or a
+  pointer-table field on the layout extras) would make both passive.
+- **`EventContext::set_input_density` does not exist.** An application can only
+  switch density from a handler by doing both halves itself: re-project the theme
+  through `ctx.set_theme`, then write a signal its own root binds at
+  `BindingLevel::Rebuild`. That works only for an app that owns its root — the
+  widget previewer and the touch playground both do it, and the widget catalog
+  takes a `--density` flag instead precisely because a tab cannot rebuild the
+  other twenty. `WidgetTree::set_input_density` does both halves in one call and
+  nothing on `EventContext` reaches it; it should be parked like `set_theme` and
+  drained into every window.
+- **Scene item context menus by hold are not shipped.** Attaching `on_long_press`
+  to a `SceneView` puts a long-press recognizer in the view's own arena, which
+  cannot address a lightweight item because an item has no `WidgetId`. Needs a core
+  hook. The hover-affordance census row stays open with it.
+- **`CancelReason` has no variant for "an embedded native surface owns this
+  pointer now".** The webview uses the documented catch-all `Deactivated`;
+  `NativeSurfaceTakeover` would be the honest name, and `Platform` would
+  misattribute the producer.
+- **`density::grab_outset(visual, kind, tokens)` exists three times privately** —
+  in `splitter/handle.rs`, `docking/resize_handle.rs` and
+  `title_bar/resize_strip.rs`. It wants hoisting into core; a fourth copy was
+  deleted rather than added.
+
+### 10.3 Contracts that are wrong, and worked around
+
+- **`TouchSelection::update_drag` hit-tests the raw contact position.** A
+  selection handle's disc sits *above* the glyph row it marks, and the core takes
+  no account of the rise — so every host is handed a sample a dozen dp off the
+  text. Both shipped hosts compensate entirely host-side, capturing the grab
+  offset when the handle drag begins, which is correct for them and leaves the
+  **contract** wrong for the next one. A core fix is `update_drag` taking the caret
+  the handle marks, or `HandleDrag` carrying the grab offset. Until then the
+  adoption checklist is the only defence, which is why
+  [touch-verification.md §10](touch-verification.md) F4 checks for exactly this
+  offset by hand.
+- **`take_handler_set` does not merge the inner widget's handler set.** It is the
+  one `Widget` method deliberately not forwarded by `WidgetWithHandlers` — it
+  exists so the arena can lift off the handlers the builder chain just attached,
+  which live on the wrapper. But now that the branch types delegate the whole
+  trait, `WidgetWithHandlers<TeksiBranch<WidgetWithHandlers<Button>, _>>` is
+  reachable, which is what `teksu!` produces from a builder method applied to an
+  `if`/`else` whose arms carry handlers — and the inner arm's handlers are
+  silently dropped. Fixing it needs a per-field precedence decision between two
+  handler sets: an owner's call.
+- **`TextSurface::allows_copy` for a text-field handle returns the raw opt-in**
+  rather than the resolved permission, so a *revealed* password field greys out
+  Edit ▸ Copy while `Ctrl+C` works. Pre-existing.
+- **`PointerInfo::primary`'s own field doc is false.** It says "Exactly one live
+  pointer is primary; a mouse always wins the role" — which is verbatim the rule
+  for `PointerTable::primary`, the table's *election*, sitting on the W3C
+  *per-kind* flag. On a hybrid machine a mouse and a first touch are both primary,
+  and the table never rewrites `info.primary`: its `elect` writes only its own
+  field, and the only writers of the flag are the producers in the platform
+  translator. The three notions are separated correctly in `pointer/table.rs`'s
+  module docs and nowhere at the field. `PointerInfo::touch`'s constructor doc is
+  false in a second way, claiming the table decides primacy "not the
+  constructor" — the table decides *its* election; the producer decides the flag.
+  Both corrected by this package; recorded here because the shape of the error —
+  a rule written at the wrong one of three similarly-named things — is the one to
+  watch for.
+
+### 10.4 Known defects carried behind an `#[ignore]`
+
+Two, both in the data views, both measured, both needing a ruling rather than a
+patch. They are the only `#[ignore]`s the programme added.
+
+- **A deferred drag is revoked if the first sample after the hold leaves the
+  pressed row.** A coarse pointer's press boundary is the pressed node's own
+  bounds, and ending the press takes the drag member with it. The touch drag slop
+  is 18 dp and a default tree row is 28, so on short rows a real finger's first
+  reported sample is as likely as not to be outside, and the reorder silently
+  becomes a scroll. `a_finger_reorder_survives_its_first_sample_leaving_the_row`
+  is `#[ignore]`d against it and carries the numbers. The grid's marquee is
+  unaffected: its press is captured by the body pane, whose bounds are the whole
+  viewport.
+- **An application that wraps a data view in anything tappable takes the row's
+  release.** The wrapper captures the press, the release is dispatched to the
+  wrapper and bubbled wrapper→root, and the row never sees the release its press
+  deferred. The obvious fix — the press absorber applied unconditionally at the
+  four row sites — was applied and measured: it greens this and breaks
+  `TableView`'s *cell* selection, because the row's new arena takes the press the
+  cell needs on its own release. So it needs a ruling on which node owns a press
+  when an application wraps a data view, plus a cell-level absorber.
+  `a_finger_tap_on_a_list_row_under_a_tappable_ancestor_still_selects_it` is
+  `#[ignore]`d against it.
+
+### 10.5 Coverage boundaries
+
+- **The target-size gate is green for three crates' named fixtures, not for the
+  framework.** `teksilo-widgets`, `teksilo-charts` and `teksilo-scene` have fixture
+  lists; `teksilo-inspector`, `teksilo-terminal`, `teksilo-preview-ui` and
+  `teksilo-webview` own targets and have none. The lists install the IntUI preset
+  only. Of the three Compact-visible under-floor exceptions
+  [density-inventory.md](density-inventory.md) §0 enumerates, the gate reaches
+  none. The boundary is written out crate by crate, with the feasibility of each
+  missing list, in
+  [accessibility-internal-audit.md](accessibility-internal-audit.md) §3.7 and in
+  the shared walker's own module docs. **Do not read a green gate as "the framework
+  conforms."**
+- **`WidgetTree::set_input_density` destroys a subtree rooted in a layout
+  primitive.** Measured twice, most recently on a `Padding → HStack → [TextWidget,
+  Button]` root: six nodes to two. Every fixture list builds *at* a density and so
+  never meets it, but `audit_at_density` is public and a caller can walk into it.
+  Unowned.
+- **`DensityPolicy::FollowLastPointer` and `Environment::prefers_touch` have an
+  ingress and no writer.** Honouring the policy needs decisions nobody has taken:
+  what a stray tap should cost, whether a pen is coarse, and when hysteresis
+  commits. The three doc sites say what is true.
+- **`ScrollableAxes::overscroll` publishes a value nothing renders.** No stretch,
+  no glow. The value is correct and the paint does not exist.
+
+### 10.6 Not ours, but in the way
+
+- **`cargo check --workspace --all-features` cannot build on any revision,
+  including `main`.** `teksilo-text` embeds seven feature-gated fallback font
+  faces and only two of them — the Arabic and Hebrew ones, which are on by
+  default — were ever committed. The Thai face, the Devanagari one and the three
+  CJK ones are named by `include_bytes!` and absent from the tree on every branch,
+  so five of those features have never been buildable by anyone who clones this
+  repository. Verified against `main`, so not branch-introduced. **Deliberately not
+  added to any gate.** It needs either the fonts committed or the features gated
+  behind a build-time probe.
+- **The trackpad rotation sign may be inverted, and only macOS hardware can say.**
+  `Transform2D::rotate` maps a positive angle to a clockwise turn in y-down screen
+  space, and the touchscreen arm is self-consistent with that — its `atan2` is in
+  the same space. AppKit documents `NSEvent.rotation` as positive for
+  *counter*-clockwise, and winit documents no sign convention at all for its
+  rotation gesture, so the source tree cannot settle whether the platform seam
+  should negate. It was deliberately not guessed at. Trackpad-only,
+  magnitude-independent, and orthogonal to the degrees-versus-radians defect that
+  *is* fixed. The check is [touch-verification.md §12](touch-verification.md) H4,
+  and it closes this entry either way.
+- **`rustfmt` joins backslash-continued string literals** when the join fits,
+  dropping the continuation and leaving its indent as runs of spaces *inside* the
+  literal — which silently mangles a multi-line assertion message. Not a pointer
+  matter at all; recorded because it bit this programme twice and the damage looks
+  like a bad assertion rather than a formatter artefact.
 
 ## See also
 
