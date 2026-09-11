@@ -94,12 +94,14 @@ See [docs/range-keyboard.md](docs/range-keyboard.md) for the full chord table.
 
 #### Core
 
-- `EventContext::arm_overlay_safe_region` / `pointer_in_overlay_safe_region`:
-  an open overlay can claim a "safe triangle" from the point the pointer left
-  its anchor to its own near edge. While the pointer is inside it, the
-  overlay's pointer-leave grace is held off, and any widget whose hover would
-  tear the overlay down can ask the same question and stand aside. Bounded to
-  600 ms so it stays a travel allowance. Used by cascading submenus.
+- `EventContext::arm_overlay_safe_region` / `overlay_safe_region_armed`: an
+  open overlay can claim a "safe triangle" from the point the pointer left its
+  anchor to its own near edge. While the pointer is inside it, the overlay's
+  pointer-leave grace is held off; leaving it starts that grace and coming back
+  cancels it. Any widget whose hover would tear the overlay down asks whether a
+  traversal is under way at all and stands aside for as long as one is, leaving
+  the dismissal to that one re-evaluated grace. Bounded to 600 ms so it stays a
+  travel allowance. Used by cascading submenus.
 - `EventContext::show_overlay_after_replacing_siblings`: like
   `show_overlay_after_with_focus`, but the anchor's sibling overlays are
   dismissed when the overlay actually shows rather than when it was requested
@@ -361,6 +363,17 @@ See [docs/range-keyboard.md](docs/range-keyboard.md) for the full chord table.
   the pointer leaves the trigger — so a submenu opened by click, Enter or
   ArrowRight is covered too, and it expires after 600 ms so a parked pointer
   releases the menu instead of pinning it.
+- **The submenu no longer goes the instant the pointer leaves the trigger
+  row.** The safe triangle is a needle at its apex, and the sample that decided
+  whether the user was heading for the submenu was the first one off the row —
+  a pixel or two out, where the cone is a few degrees wide. For a menu wider
+  than its submenu is tall, which is the usual shape, any departure steeper
+  than about 30° missed, and one miss was final: the region could only ever be
+  armed as the pointer left the row, so nothing could re-arm it. Straying out
+  of the cone now merely starts the ordinary close delay, and heading back in
+  cancels it; a sibling row stands aside for the whole traversal instead of
+  ruling on that one sample. A change of mind still closes the submenu, one
+  close delay later rather than at once.
 - **Crossing a neighbouring submenu trigger no longer closes the submenu you
   are walking to.** The hover-switch between two submenu triggers now dismisses
   the open submenu when the new one *opens*, not when the pointer first touches

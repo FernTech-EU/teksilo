@@ -1355,19 +1355,29 @@ impl Widget for MenuItem {
                     let safe_triangle_sibling = self.safe_triangle.clone();
                     move |entered: bool, ctx: &mut EventContext| {
                         if entered {
-                            // Safe-triangle gate: while the pointer is
-                            // inside the region armed by an open
-                            // submenu in this list, skip the dismiss —
-                            // the user is crossing this row on the way
-                            // there, not choosing it. The framework
-                            // holds the overlay's own pointer-leave
-                            // grace off over the same region, so the
-                            // two halves of the gate agree.
-                            let travelling = safe_triangle_sibling
+                            // Safe-triangle gate: while a traversal
+                            // toward an open submenu in this list is
+                            // live, skip the dismiss — the user may be
+                            // crossing this row on the way there rather
+                            // than choosing it — and let the overlay's
+                            // own pointer-leave grace decide. That grace
+                            // tests the cone on every sample and closes
+                            // the submenu one close-delay after the
+                            // pointer stops heading there, which is the
+                            // decision this handler cannot make: it
+                            // fires once, at the instant the pointer
+                            // crosses onto the row, a pixel or two from
+                            // the apex where the cone is still a needle.
+                            // Asking whether *that* sample was inside
+                            // the cone let one quantized step settle it,
+                            // and a submenu died the moment the pointer
+                            // left the trigger row for any departure
+                            // steeper than the cone.
+                            let traversal_live = safe_triangle_sibling
                                 .as_ref()
                                 .and_then(|state_rc| state_rc.borrow().submenu_content_id)
-                                .is_some_and(|sub| ctx.pointer_in_overlay_safe_region(sub));
-                            if !travelling {
+                                .is_some_and(|sub| ctx.overlay_safe_region_armed(sub));
+                            if !traversal_live {
                                 ctx.dismiss_child_overlays();
                             }
                             int_hover.set(MenuItemState::Hovered);

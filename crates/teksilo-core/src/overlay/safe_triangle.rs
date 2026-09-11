@@ -33,6 +33,24 @@
 //! [`SAFE_REGION_BUDGET`](super::SAFE_REGION_BUDGET) — a pointer that
 //! parks inside the cone must not pin the submenu open forever.
 //!
+//! **One sample never decides.** The cone is a needle at its apex: the
+//! first sample after the pointer leaves the trigger row is a pixel or
+//! two away, so whether it lands inside is a single quantized step's
+//! direction rather than the user's intent — and that sample is exactly
+//! the one a sibling row's hover fires on, since hover fires once, on
+//! the crossing. So neither consumer treats a miss as final. Leaving the
+//! cone starts the overlay's ordinary pointer-leave grace and re-entering
+//! it cancels that countdown, while the *region* stays armed until the
+//! pointer arrives or the budget runs out; a sibling row stands aside for
+//! the whole armed window and lets that one re-evaluated grace own the
+//! dismissal. A wobble mid-diagonal therefore costs nothing, a real
+//! change of mind still closes the submenu one close-delay later, and the
+//! budget bounds the whole affair. Deciding on the crossing sample
+//! instead is what made the gate look absent: for a menu wider than its
+//! submenu is tall — the usual shape — the cone is about 30° wide, so any
+//! departure steeper than that lost the submenu the instant the pointer
+//! left the row, which is most of the departures a hand actually makes.
+//!
 //! The algorithm is RTL-symmetric **automatically** because the
 //! "near edge" is inferred from `anchor.x` vs `submenu.x`, not from
 //! a hardcoded `Leading` / `Trailing` enum. A submenu opened to the

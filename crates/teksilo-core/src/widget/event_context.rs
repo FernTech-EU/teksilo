@@ -227,7 +227,7 @@ pub struct EventContext<'ops> {
     /// when the overlay has one — snapshotted at handler invocation. A
     /// flat vec is fine: open overlays are typically 0–3 per tree. Read
     /// by [`EventContext::overlay_bounds_for_content`] and
-    /// [`EventContext::pointer_in_overlay_safe_region`].
+    /// [`EventContext::overlay_safe_region_armed`].
     pub(crate) overlay_bounds_snapshot: Vec<(
         WidgetId,
         teksilo_canvas::Rect,
@@ -780,30 +780,37 @@ impl<'ops> EventContext<'ops> {
             .map(|(_, r, _)| *r)
     }
 
-    /// Whether the pointer currently sits inside the armed safe triangle
-    /// of the overlay rooted at `content_id` — i.e. whether the user is
-    /// still travelling toward that submenu.
+    /// Whether a safe-triangle traversal toward the overlay rooted at
+    /// `content_id` is still live — i.e. whether the user may still be on
+    /// their way to that submenu.
     ///
     /// A widget whose hover would otherwise tear the overlay down (a
     /// sibling menu row switching the selection) asks this first and
-    /// stands aside while it is `true`. The framework applies the same
-    /// test to the overlay's own pointer-leave grace, so the two agree.
-    /// `false` when no region is armed, when the region's budget is
-    /// spent, or when the context carries no pointer snapshot.
+    /// stands aside while it is `true`, leaving the dismissal to the
+    /// overlay's own pointer-leave grace — which tests the cone on every
+    /// sample and closes the overlay one `delay` after the pointer stops
+    /// heading there.
+    ///
+    /// **This is deliberately the armed window, not a point-in-cone
+    /// test.** A sibling row's hover fires exactly once, at the instant
+    /// the pointer crosses onto it — a pixel or two from the apex, where
+    /// the cone is a needle — so answering "is this one sample inside the
+    /// cone" made a single quantized step final, and any departure
+    /// steeper than the cone (which is most of them, for a wide menu with
+    /// a short submenu) killed the submenu the moment the pointer left
+    /// the trigger row. Whether *this* sample is inside the cone is the
+    /// framework's question, asked continuously; the widget's question is
+    /// only whether to get out of the way.
+    ///
+    /// `false` when no region is armed and when its budget is spent.
     ///
     /// Arm the region with
     /// [`arm_overlay_safe_region`](Self::arm_overlay_safe_region).
-    pub fn pointer_in_overlay_safe_region(&self, content_id: WidgetId) -> bool {
-        let Some(pointer) = self.tree_pointer_position else {
-            return false;
-        };
+    pub fn overlay_safe_region_armed(&self, content_id: WidgetId) -> bool {
         self.overlay_bounds_snapshot
             .iter()
             .find(|(cid, _, _)| *cid == content_id)
-            .and_then(|(_, bounds, apex)| {
-                apex.map(|apex| crate::overlay::point_in_safe_triangle(pointer, apex, *bounds))
-            })
-            .unwrap_or(false)
+            .is_some_and(|(_, _, apex)| apex.is_some())
     }
 
     pub fn window(&self) -> Option<&crate::window::WindowState> {
@@ -1539,11 +1546,15 @@ impl<'ops> EventContext<'ops> {
     ///
     /// Call this from the anchor's hover-leave handler: the pointer is
     /// then exactly at the point the diagonal toward the overlay
-    /// starts. Until the pointer leaves the triangle spanned by that
-    /// apex and the overlay's near edge — or the framework's budget
-    /// runs out — the overlay's pointer-leave grace is held off, and
-    /// [`pointer_in_overlay_safe_region`](Self::pointer_in_overlay_safe_region)
-    /// reports `true` so sibling widgets can stand aside too.
+    /// starts. While the pointer sits inside the triangle spanned by
+    /// that apex and the overlay's near edge, the overlay's
+    /// pointer-leave grace is held off; leaving the triangle starts the
+    /// grace and re-entering it cancels the grace again, so a wobble
+    /// mid-diagonal costs nothing. Throughout — cone or no cone, until
+    /// the pointer arrives or the framework's budget runs out —
+    /// [`overlay_safe_region_armed`](Self::overlay_safe_region_armed)
+    /// reports `true` so sibling widgets stand aside and let that one
+    /// re-evaluated grace own the dismissal.
     ///
     /// No-ops when the overlay is not open (a submenu whose hover-open
     /// delay was cancelled before it ever showed) or when no pointer

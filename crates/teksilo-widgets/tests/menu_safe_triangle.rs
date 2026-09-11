@@ -222,7 +222,7 @@ fn a_pointer_parked_inside_the_cone_releases_the_submenu() {
 }
 
 #[test]
-fn a_sibling_hover_outside_the_cone_dismisses_immediately() {
+fn a_sibling_hover_outside_the_cone_dismisses_after_the_close_delay() {
     let (mut tree, root) = tree_with_menu(false);
     let (submenu, apex) = open_submenu(&mut tree, root);
     // The *leading* edge of the last row: away from the submenu, well
@@ -232,8 +232,84 @@ fn a_sibling_hover_outside_the_cone_dismisses_immediately() {
     assert!(!in_cone(point, apex, submenu), "precondition: {point:?}");
 
     tree.pointer_move(point);
+    tree.advance_time(Duration::from_millis(200));
     assert!(
         tree.active_overlays().is_empty(),
-        "leaving the cone must still dismiss the submenu at once"
+        "leaving the cone must still dismiss the submenu"
+    );
+}
+
+#[test]
+fn the_first_sample_off_the_trigger_row_does_not_decide_on_its_own() {
+    let (mut tree, root) = tree_with_menu(false);
+    let (submenu, apex) = open_submenu(&mut tree, root);
+    // A steep departure — down and only slightly toward the submenu.
+    // The cone is a needle this close to its apex, so this sample lands
+    // outside it, and this is exactly the sample a sibling row's hover
+    // fires on. Deciding there killed the submenu the instant the
+    // pointer left the trigger row, for every departure steeper than the
+    // cone — which, for a menu wider than its submenu is tall, is most
+    // of them.
+    let trigger = row_bounds(&tree, root, 0);
+    let point = Point::new(apex.x + 6.0, trigger.y + trigger.height + 2.0);
+    assert!(!in_cone(point, apex, submenu), "precondition: {point:?}");
+
+    tree.pointer_move(point);
+    assert_eq!(
+        tree.active_overlays().len(),
+        1,
+        "one off-cone sample must not be final — the grace decides"
+    );
+}
+
+#[test]
+fn correcting_course_back_into_the_cone_keeps_the_submenu() {
+    let (mut tree, root) = tree_with_menu(false);
+    let (submenu, apex) = open_submenu(&mut tree, root);
+    let trigger = row_bounds(&tree, root, 0);
+    let strayed = Point::new(apex.x + 6.0, trigger.y + trigger.height + 2.0);
+    assert!(
+        !in_cone(strayed, apex, submenu),
+        "precondition: {strayed:?}"
+    );
+    let corrected = point_on_row(&tree, root, 1);
+    assert!(
+        in_cone(corrected, apex, submenu),
+        "precondition: {corrected:?}"
+    );
+
+    tree.pointer_move(strayed);
+    // Part-way through the grace the user swings back onto the diagonal.
+    tree.advance_time(Duration::from_millis(80));
+    tree.pointer_move(corrected);
+    // Well past the close delay measured from the stray sample: the
+    // re-entry has to have cancelled that countdown, not merely paused
+    // the cone test.
+    tree.advance_time(Duration::from_millis(140));
+    assert_eq!(
+        tree.active_overlays().len(),
+        1,
+        "re-entering the cone must cancel the countdown the stray started"
+    );
+}
+
+#[test]
+fn a_stray_sample_still_costs_the_traversal_its_budget() {
+    let (mut tree, root) = tree_with_menu(false);
+    let (submenu, apex) = open_submenu(&mut tree, root);
+    let trigger = row_bounds(&tree, root, 0);
+    let strayed = Point::new(apex.x + 6.0, trigger.y + trigger.height + 2.0);
+    assert!(
+        !in_cone(strayed, apex, submenu),
+        "precondition: {strayed:?}"
+    );
+
+    // Staying off the cone spends the grace exactly once — hysteresis
+    // must not turn "armed" into "pinned".
+    tree.pointer_move(strayed);
+    tree.advance_time(Duration::from_millis(200));
+    assert!(
+        tree.active_overlays().is_empty(),
+        "a pointer that never comes back must still lose the submenu"
     );
 }

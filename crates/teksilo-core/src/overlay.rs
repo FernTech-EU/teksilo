@@ -240,7 +240,9 @@ pub(crate) struct ActiveOverlay {
     /// While it is set and unexpired, a pointer inside the triangle
     /// spanned by it and this overlay's near edge counts as still
     /// inside the overlay's region, so the pointer-leave grace does
-    /// not run. See [`safe_triangle`].
+    /// not run — and a pointer that strays back out only starts that
+    /// grace, keeping the apex so a course correction can stop it
+    /// again. See [`safe_triangle`].
     pub safe_apex: Option<Point>,
     /// When the safe region was armed (real time). Bounds it by
     /// [`SAFE_REGION_BUDGET`].
@@ -1453,9 +1455,11 @@ impl OverlayManager {
     }
 
     /// Disarm the safe triangle on the overlay with the given id. Called
-    /// when the pointer arrives (or returns), when it strays out of the
-    /// cone, and when the budget is spent — after which the overlay
-    /// dismisses on the ordinary schedule.
+    /// when the pointer arrives (or returns) and when the budget is
+    /// spent — after which the overlay dismisses on the ordinary
+    /// schedule. Straying out of the cone does **not** disarm: it only
+    /// starts the pointer-leave grace, which a re-entry cancels. See
+    /// [`safe_triangle`].
     pub(crate) fn clear_safe_region(&mut self, id: OverlayId) {
         if let Some(overlay) = self.stack.iter_mut().find(|o| o.id == id) {
             overlay.safe_apex = None;
@@ -1464,9 +1468,11 @@ impl OverlayManager {
         }
     }
 
-    /// The armed apex of the overlay rooted at `content_id`, if any.
-    /// Read into the per-dispatch `EventContext` snapshot so a widget
-    /// handler can run the same test the dismissal path runs.
+    /// The armed apex of the overlay rooted at `content_id`, if any —
+    /// without regard to the budget, which only the tree's clocks can
+    /// judge. Callers wanting the answer a widget may act on go through
+    /// `WidgetTree::unexpired_safe_apex_for_content`, which is what
+    /// fills the per-dispatch `EventContext` snapshot.
     pub(crate) fn safe_apex_for_content(&self, content_id: WidgetId) -> Option<Point> {
         self.stack
             .iter()

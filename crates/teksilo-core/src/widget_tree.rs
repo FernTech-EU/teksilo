@@ -781,7 +781,7 @@ impl WidgetTree {
             .filter_map(|cid| {
                 self.overlay_manager
                     .bounds_for_content(cid)
-                    .map(|r| (cid, r, self.overlay_manager.safe_apex_for_content(cid)))
+                    .map(|r| (cid, r, self.unexpired_safe_apex_for_content(cid)))
             })
             .collect();
         crate::widget::EventContext::new()
@@ -1197,6 +1197,28 @@ impl WidgetTree {
         real_ok && sim_ok
     }
 
+    /// The armed safe-triangle apex of the overlay rooted at
+    /// `content_id`, or `None` when no region is armed or its budget is
+    /// spent.
+    ///
+    /// This is the form the per-dispatch `EventContext` snapshot carries,
+    /// because a widget asking "is a traversal toward that submenu still
+    /// live?" must get the same answer the dismissal path acts on — an
+    /// unfiltered apex outlives the region by up to a frame and makes a
+    /// sibling row stand aside for a submenu the framework has already
+    /// stopped protecting.
+    fn unexpired_safe_apex_for_content(
+        &self,
+        content_id: crate::widget_id::WidgetId,
+    ) -> Option<teksilo_canvas::Point> {
+        // Cheap short-circuit first: nothing is armed in the common case,
+        // and this runs once per node per pointer dispatch.
+        let apex = self.overlay_manager.safe_apex_for_content(content_id)?;
+        let id = self.overlay_manager.find_by_content(content_id)?;
+        self.safe_region_unexpired(id, std::time::Instant::now(), self.sim_clock)
+            .then_some(apex)
+    }
+
     fn update_pointer_leave_overlays(
         &mut self,
         position: Point,
@@ -1232,11 +1254,23 @@ impl WidgetTree {
                 && self
                     .overlay_manager
                     .point_in_safe_region(overlay_id, position);
-            if armed && !travelling {
-                // Arrived, returned, or strayed out of the cone — either
-                // way the traversal is over. (A region whose budget is
-                // spent is retired by the frame pass, which also has to
-                // handle the pointer that stopped moving entirely.)
+            // Arrived, or returned to the trigger row: the traversal is
+            // over and the ordinary rules apply again.
+            //
+            // Straying out of the cone deliberately does NOT disarm. The
+            // cone is a needle at its apex — the first sample after the
+            // pointer leaves the trigger row is a pixel or two away, so
+            // whether it lands inside is one quantized step's direction
+            // rather than the user's intent. Disarming there made that
+            // sample final, because a region is only ever armed as the
+            // pointer leaves the row and the pointer has already left:
+            // nothing could re-arm it. Keeping it armed makes the cone a
+            // per-sample hold that the grace below re-evaluates instead,
+            // so a wobble mid-diagonal costs nothing while a real change
+            // of mind still closes the submenu one close-delay later. The
+            // budget is what retires a region for good; the frame pass
+            // spends it even for a pointer that stopped moving entirely.
+            if armed && inside {
                 self.overlay_manager.clear_safe_region(overlay_id);
             }
             if let Some(overlay) = self
