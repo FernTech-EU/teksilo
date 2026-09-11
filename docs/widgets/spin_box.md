@@ -177,6 +177,14 @@ hover-wheel test named above is what can witness it. P24 owns
 `spin_box/step_button.rs`.
 
 
+## Density
+
+The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keyboard ladder. Below is the same subject on the same canvas with only the ladder changed, so what moves is the density and nothing else — where the subject no longer fits, that is what the denser targets cost it at that size. See `docs/density-and-targets.md`.
+
+**Touch**
+
+![SpinBox at Touch density](img/spin_box-touch.png)
+
 ## Builder methods at a glance
 
 `style`, `single_step`, `page_step`, `decimals`, `localized`, `use_grouping`, `suffix`, `special_value_text`, `wrap_mode`, `step_type`, `button_layout`, `show_buttons`, `wheel_mode`, `width`, `width_chars`, `fill_width`, `label`, `placeholder`, `enabled`, `read_only`, `text_from_value`, `value_from_text`, `on_value_changed`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`, `value`

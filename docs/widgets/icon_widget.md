@@ -34,6 +34,14 @@ let _chevron = IconWidget::chevron_down(16.0)
     .follow_text_scale(false);
 ```
 
+## Density
+
+The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keyboard ladder. Below is the same subject on the same canvas with only the ladder changed, so what moves is the density and nothing else — where the subject no longer fits, that is what the denser targets cost it at that size. See `docs/density-and-targets.md`.
+
+**Touch**
+
+![IconWidget at Touch density](img/icon_widget-touch.png)
+
 ## Builder methods at a glance
 
 `from_path`, `checkmark`, `dash`, `radio_dot`, `chevron_down`, `chevron_right`, `chevron_left`, `chevron_up`, `from_svg`, `from_svg_icon`, `from_png`, `from_webp`, `from_raster`, `from_animated`, `mode`, `color`, `icon_size`, `follow_text_scale`

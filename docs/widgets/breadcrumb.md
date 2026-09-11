@@ -44,6 +44,14 @@ pointer and the arena, so the trail's own geometry never moves. The current
 crumb and a trail with no navigation action declare none — a widened node
 that then refuses the press is a hole in whatever is behind it.
 
+## Density
+
+The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keyboard ladder. Below is the same subject on the same canvas with only the ladder changed, so what moves is the density and nothing else — where the subject no longer fits, that is what the denser targets cost it at that size. See `docs/density-and-targets.md`.
+
+**Touch**
+
+![Breadcrumb at Touch density](img/breadcrumb-touch.png)
+
 ## Builder methods at a glance
 
 `label`, `item`, `item_id`, `trailing_slot`, `trailing_slot_id`, `is_overflowing`

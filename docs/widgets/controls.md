@@ -20,9 +20,20 @@ For M2 the maximize/restore swap is *not* implemented — the maximize
 button always shows the `□` glyph. M3+ will add a `Signal<bool>`-driven
 glyph swap once the host can update it from `WindowEvent::Resized`.
 
+## Touch and pen
+
+A control cell clears the conformance floor on both axes at every density, so
+nothing here needs widening, and each button activates on the release. The cell
+is **not** density-projected: its height is the title bar's, which the platform
+chrome sizes, and raising it at Touch would overflow the bar.
+
+The hover tint is decoration. On Windows the OS owns hover over the non-client
+area, which is what the external hover signal is for; a contact produces no
+hover on any platform and loses nothing by it.
+
 ## API reference
 
-📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/title_bar/controls/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/title_bar/index.html)
 
 ## `pub struct WindowControlsLayout`
 

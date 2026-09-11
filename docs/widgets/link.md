@@ -38,11 +38,24 @@ survives a slide-off and comes back on re-entry, and a pan claimant winning
 the press clears it with no release. Following the link lands on the
 release, as it always did.
 
-A link is text-height, so it can fall under the 24 dp target floor; it is
-reached by the miss-only slop pass, which re-attributes a coarse near miss
-to it whenever nothing nearer takes presses. WCAG 2.2 SC 2.5.8's *inline*
-exception covers a link whose size is constrained by the line height of the
-text around it.
+A link is text-height, so it can fall under the 24 dp target floor. What
+carries it is WCAG 2.2 SC 2.5.8's *inline* exception — the target's size is
+constrained by the line height of the text it is set in — and **not** the
+miss-only slop pass, which this module used to claim as well. The pass
+re-attributes a near miss only where the exact hit's whole bubble path
+carries no eligible handler, so it is denied wherever the link sits inside a
+row that takes presses: a link in a list row, a link in an archived
+notification. Measured by `target_conformance.rs`: 112 × 17 dp beside a
+tappable row label and 32 × 17 dp as a notification's replay action both
+reach exactly their own 17 dp on the short axis, at all three densities.
+
+## Density
+
+The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keyboard ladder. Below is the same subject on the same canvas with only the ladder changed, so what moves is the density and nothing else — where the subject no longer fits, that is what the denser targets cost it at that size. See `docs/density-and-targets.md`.
+
+**Touch**
+
+![Link at Touch density](img/link-touch.png)
 
 ## Builder methods at a glance
 

@@ -73,6 +73,14 @@ answers for itself. In particular the family does **not** declare
 declaring it would stop a finger scrolling a form that contains a date
 field.
 
+## Density
+
+The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keyboard ladder. Below is the same subject on the same canvas with only the ladder changed, so what moves is the density and nothing else — where the subject no longer fits, that is what the denser targets cost it at that size. See `docs/density-and-targets.md`.
+
+**Touch**
+
+![DateEdit at Touch density](img/date_edit-touch.png)
+
 ## Builder methods at a glance
 
 `style`, `required`, `min_date`, `max_date`, `format_pattern`, `placeholder`, `first_day_of_week`, `show_calendar_button`, `calendar_popover_placement`, `enabled`, `read_only`, `validation_behavior`, `width_policy`, `validation_feedback_signal`, `label`, `on_value_changed`, `value`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`

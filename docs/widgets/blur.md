@@ -51,6 +51,14 @@ widgets that animate every frame at full radius. For "fade-blur on
 reveal" patterns, animate the radius up to a static value and leave
 it there. See `docs/animation.md` §5.8.
 
+## Density
+
+The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keyboard ladder. Below is the same subject on the same canvas with only the ladder changed, so what moves is the density and nothing else — where the subject no longer fits, that is what the denser targets cost it at that size. See `docs/density-and-targets.md`.
+
+**Touch**
+
+![Blur at Touch density](img/blur-touch.png)
+
 ## Builder methods at a glance
 
 `child`, `child_id`

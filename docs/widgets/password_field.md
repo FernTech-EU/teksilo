@@ -34,6 +34,14 @@ PasswordField::new(password.clone())
     })
 ```
 
+## Density
+
+The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keyboard ladder. Below is the same subject on the same canvas with only the ladder changed, so what moves is the density and nothing else — where the subject no longer fits, that is what the denser targets cost it at that size. See `docs/density-and-targets.md`.
+
+**Touch**
+
+![PasswordField at Touch density](img/password_field-touch.png)
+
 ## Builder methods at a glance
 
 `placeholder`, `label`, `enabled`, `read_only`, `max_length`, `char_filter`, `validator`, `on_submit_fn`, `on_blur_fn`, `min_width`, `variant`, `style`, `echo_char`, `echo_mode`, `reveal_mode`, `revealed`, `allow_copy`, `caps_lock_warning`, `at_reveal_policy`, `tooltip`, `rich_tooltip_key`, `rich_tooltip_content`, `rich_tooltip`, `composite_tooltip`, `revealed_signal`, `text`

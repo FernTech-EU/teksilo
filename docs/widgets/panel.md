@@ -33,6 +33,14 @@ let _w = Panel::new()
     .child(TextWidget::new(lit!("Content")));
 ```
 
+## Density
+
+The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keyboard ladder. Below is the same subject on the same canvas with only the ladder changed, so what moves is the density and nothing else — where the subject no longer fits, that is what the denser targets cost it at that size. See `docs/density-and-targets.md`.
+
+**Touch**
+
+![Panel at Touch density](img/panel-touch.png)
+
 ## Builder methods at a glance
 
 `variant`, `style`, `a11y_presentational`, `child_id`, `child`, `background`, `border_color`, `border_width`, `corner_radius`, `padding`

@@ -73,6 +73,14 @@ which is the right-hand one in an RTL UI, so both the painted fill and the
 position→value map mirror. They were previously mirrored in neither, so an
 RTL slider's knob moved away from the finger dragging it.
 
+## Density
+
+The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keyboard ladder. Below is the same subject on the same canvas with only the ladder changed, so what moves is the density and nothing else — where the subject no longer fits, that is what the denser targets cost it at that size. See `docs/density-and-targets.md`.
+
+**Touch**
+
+![Slider at Touch density](img/slider-touch.png)
+
 ## Builder methods at a glance
 
 `step`, `page_step`, `orientation`, `enabled`, `variant`, `tick_count`, `style`, `label`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`

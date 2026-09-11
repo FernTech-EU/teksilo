@@ -107,6 +107,34 @@ unavailable on platforms with no external-DnD backend (e.g. X11, where OS
 drag-and-drop is a no-op). `DropZone` is the better choice when the drop
 *is* the primary action.
 
+## Touch and pen
+
+An edge zone's depth is `zone_size_factor` of the axis, **floored** per axis to
+the density's target size: the fraction is the shape the caller asked for and
+wins wherever it already conforms, and below that the floor takes over. Without
+it a fifth of a small pane is a band no finger can land in, and the drop it
+swallows goes to the neighbouring zone with no warning.
+
+The floor is itself capped at a third of the extent, for the reason
+`partition_targets` splits evenly
+when its own floor cannot be met: on a target too small for
+`leading | centre | trailing` at the floor, three equal bands keep every zone
+reachable and visibly sub-floor, where an uncapped floor would let two opposing
+bands meet and delete the centre.
+
+One function answers both the hit test and the highlight
+(`band_depth`), so the zone a user sees stays the zone that drops. A
+**custom** `DropTargetStyle` that calls core's `region_rect` directly paints the
+unfloored band; call `region_rect_floored` instead.
+
+## Density
+
+The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keyboard ladder. Below is the same subject on the same canvas with only the ladder changed, so what moves is the density and nothing else — where the subject no longer fits, that is what the denser targets cost it at that size. See `docs/density-and-targets.md`.
+
+**Touch**
+
+![DropTarget at Touch density](img/drop_target-touch.png)
+
 ## Builder methods at a glance
 
 `child`, `child_id`, `region`, `zone_size_factor`, `hint`, `hint_id`, `accept_any`, `accept_external`, `accept_external_files`, `accept_external_text`, `accept_external_extensions`, `accept_typed`, `accept_when`, `targeted_signal`, `drag_state_signal`, `active_region_signal`, `on_drop`, `on_drop_typed`, `on_region_drop`, `on_drag_leave`, `variant`, `style`
@@ -114,6 +142,62 @@ drag-and-drop is a no-op). `DropZone` is the better choice when the drop
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/drop_target/index.html)
+
+## `pub fn band_depth(...)`
+
+The depth of one edge band along the axis it is measured on: the caller's
+fraction of the extent, raised to `floor` when that fraction does not reach
+it.
+
+A fraction alone cannot answer this. `zone_size_factor` is one number for
+both axes, and it is the *shape* the caller wants — a fifth, a quarter, a
+bisection — so on a large target it is right and must not be touched. On a
+small enough one, any of those fractions is a band no finger can land in, and
+the drop it swallows goes to the neighbouring zone with no warning. So the
+fraction wins wherever it already conforms and the floor
+takes over below that, which is the same shape as
+`dp` — a floor that only ever raises,
+leaving every target that was already big enough exactly as it was.
+
+The floor itself is capped at a third of the extent, for the reason
+`partition_targets` splits
+evenly when its own floor cannot be met: on a target too small for
+`leading | centre | trailing` at the floor, three equal bands keep every
+zone reachable and visibly sub-floor, where an uncapped floor would let two
+opposing bands meet and delete the centre.
+
+```rust
+pub fn band_depth(extent: f32, factor: f32, floor: f32) -> f32;
+```
+
+## `pub fn region_at_floored(...)`
+
+`region_at` with `band_depth`'s floor
+applied per axis.
+
+Priority is core's, unchanged: leading → trailing → top → bottom → centre,
+so an overlapping pair still resolves the way the un-floored function does
+and a caller that reads the region index reads the same thing.
+
+```rust
+pub fn region_at_floored(
+    local: Point,
+    size: Size,
+    set: teksilo_core::styles::DropRegionSet,
+    factor: f32,
+    floor: f32,
+) -> Option<DropRegion>;
+```
+
+## `pub fn region_rect_floored(...)`
+
+`region_rect` with `band_depth`'s
+floor applied per axis — the paint side of `region_at_floored`, so the
+zone a user sees stays the zone that drops.
+
+```rust
+pub fn region_rect_floored(region: DropRegion, bounds: Rect, factor: f32, floor: f32) -> Rect;
+```
 
 ## `pub struct DropRegionSpec`
 

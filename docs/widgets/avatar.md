@@ -49,6 +49,14 @@ floor, but `AvatarSize::Custom` need not, so a clickable avatar declares a
 zero for the shipped sizes, and zero for a decorative avatar, which takes no
 press and must not punch a hole in what it sits on.
 
+## Density
+
+The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keyboard ladder. Below is the same subject on the same canvas with only the ladder changed, so what moves is the density and nothing else — where the subject no longer fits, that is what the denser targets cost it at that size. See `docs/density-and-targets.md`.
+
+**Touch**
+
+![Avatar at Touch density](img/avatar-touch.png)
+
 ## Builder methods at a glance
 
 `with_initials`, `with_name`, `with_image`, `from_raw_image`, `style`, `size`, `shape`, `fallback_initials`, `image_visible`, `background`, `foreground`, `seed`, `border`, `border_color`, `presence`, `presence_corner`, `label`, `alt`, `a11y_hidden`, `on_activate_fn`, `has_popup`, `expanded_when`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`, `name_signal`, `image_signal`, `alt_signal`, `label_signal`, `presence_signal`

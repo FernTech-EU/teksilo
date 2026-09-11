@@ -102,6 +102,14 @@ The widget exposes `Role::AlertDialog` (distinct from
 `set_description(text + informative_text)` so screen readers
 announce the dialog and its body on open.
 
+## Density
+
+The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keyboard ladder. Below is the same subject on the same canvas with only the ladder changed, so what moves is the density and nothing else — where the subject no longer fits, that is what the denser targets cost it at that size. See `docs/density-and-targets.md`.
+
+**Touch**
+
+![MessageBox at Touch density](img/message_box-touch.png)
+
 ## Builder methods at a glance
 
 `information`, `warning`, `critical`, `question`, `plain`, `text`, `informative_text`, `detailed_text`, `buttons`, `add_button`, `default_button`, `escape_button`, `show_again_checkbox`, `show_again_checkbox_state`, `on_result`, `present`

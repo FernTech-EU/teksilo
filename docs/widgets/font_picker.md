@@ -46,6 +46,14 @@ Only family selection is offered, matching Qt's `QFontComboBox`. Face /
 weight / size selection belongs to a larger font *dialog* and is out of
 scope.
 
+## Density
+
+The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keyboard ladder. Below is the same subject on the same canvas with only the ladder changed, so what moves is the density and nothing else — where the subject no longer fits, that is what the denser targets cost it at that size. See `docs/density-and-targets.md`.
+
+**Touch**
+
+![FontPicker at Touch density](img/font_picker-touch.png)
+
 ## Builder methods at a glance
 
 `families`, `families_with_meta`, `spacing_filter`, `writing_system`, `preview_mode`, `preview_in_own_font`, `sample_text`, `sample_text_for`, `sample_text_for_family`, `show_selected_in_own_font`, `placeholder`, `label`, `enabled`, `variant`, `style`, `max_visible_items`, `searchable`, `search_query`, `on_select`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`

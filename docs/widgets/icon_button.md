@@ -89,6 +89,14 @@ see that module's "Touch and pen" section. Every shipped size clears the
 24 dp target floor at Compact (`Compact` and `Default` are both 24 dp) and
 follows the density ladder above it.
 
+## Density
+
+The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keyboard ladder. Below is the same subject on the same canvas with only the ladder changed, so what moves is the density and nothing else — where the subject no longer fits, that is what the denser targets cost it at that size. See `docs/density-and-targets.md`.
+
+**Touch**
+
+![IconButton at Touch density](img/icon_button-touch.png)
+
 ## Builder methods at a glance
 
 `style`, `style_shared`, `size_variant`, `is_embedded`, `share_interaction`, `embedded`, `icon_role`, `focusable`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`, `composite_tooltip_boxed`, `enabled`, `size`, `toolbar`, `large`, `hero`, `on_activate_fn`, `toggle`, `toggle_with_icon`, `has_popup`, `expanded_when`, `browse`, `expand`, `search`, `copy`, `clear`, `add`, `bell`, `menu`, `more`, `visibility_toggle`

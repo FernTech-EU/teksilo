@@ -32,6 +32,14 @@ let _row = HStack::new()
     .child(Expand::new().flex(2.0).child(RectWidget::new()));
 ```
 
+## Density
+
+The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keyboard ladder. Below is the same subject on the same canvas with only the ladder changed, so what moves is the density and nothing else — where the subject no longer fits, that is what the denser targets cost it at that size. See `docs/density-and-targets.md`.
+
+**Touch**
+
+![Expand at Touch density](img/expand-touch.png)
+
 ## Builder methods at a glance
 
 `horizontal`, `vertical`, `flex`, `align_child`, `respect_intrinsic`, `child_id`, `child`

@@ -27,6 +27,14 @@ Shares `build_interaction_handlers` with `Button`; see that
 module's "Touch and pen" section. A command link is a tall, wide target by
 construction, so no hit-widening mechanism is involved.
 
+## Density
+
+The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keyboard ladder. Below is the same subject on the same canvas with only the ladder changed, so what moves is the density and nothing else — where the subject no longer fits, that is what the denser targets cost it at that size. See `docs/density-and-targets.md`.
+
+**Touch**
+
+![CommandLinkButton at Touch density](img/command_link_button-touch.png)
+
 ## Builder methods at a glance
 
 `description`, `icon`, `enabled`, `on_activate_fn`, `title_style`, `description_style`, `title_color`, `description_color`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`

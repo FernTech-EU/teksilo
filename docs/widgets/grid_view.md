@@ -66,6 +66,14 @@ to the captor and then bubbled target→root, which never reaches a tile
 beneath it. A plain selectable grid lost both its finger tap and, under a
 mouse, the release that collapses a multi-selection that way.
 
+## Density
+
+The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keyboard ladder. Below is the same subject on the same canvas with only the ladder changed, so what moves is the density and nothing else — where the subject no longer fits, that is what the denser targets cost it at that size. See `docs/density-and-targets.md`.
+
+**Touch**
+
+![GridView at Touch density](img/grid_view-touch.png)
+
 ## Builder methods at a glance
 
 `from_source`, `enabled`, `sizing`, `tile_size`, `column_count`, `variable_row_heights`, `item_height`, `waterfall`, `column_spacing`, `row_spacing`, `spacing`, `content_inset`, `selection`, `on_selection_changed`, `marquee_selection`, `wrap_navigation`, `tab_traversal`, `show_scrollbar`, `overscroll_behavior`, `smooth_scrolling`, `smooth_scroll_duration`, `scroll_bar_style`, `scroll_y_signal`, `max_scroll_y_signal`, `viewport_ratio_y_signal`, `ensure_index_visible`, `scroll_to_index`, `sections`, `section_header_delegate`, `section_header_height`, `pinned_section_headers`, `a11y_label`, `style`, `empty_view`, `loading_view`, `is_loading`, `reorderable`, `exportable`, `export_external`, `on_rows_transferred_out`, `accept_foreign_rows`, `on_rows_received`, `on_item_drop`, `on_tile_activate`, `activate_on`, `tile_context_menu`, `type_ahead_label`, `tile_a11y_label`, `type_ahead_timeout`

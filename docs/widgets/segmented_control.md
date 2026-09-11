@@ -89,6 +89,14 @@ it too — so none of the three hit-targeting mechanisms is involved. And
 carries no pressed state, so there is no press visual to move onto the
 framework press.
 
+## Density
+
+The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keyboard ladder. Below is the same subject on the same canvas with only the ladder changed, so what moves is the density and nothing else — where the subject no longer fits, that is what the denser targets cost it at that size. See `docs/density-and-targets.md`.
+
+**Touch**
+
+![SegmentedControl at Touch density](img/segmented_control-touch.png)
+
 ## Builder methods at a glance
 
 `indexed`, `segment`, `segments`, `segment_ids`, `enabled`, `label`, `on_change`, `style`, `text_style`, `display`, `sizing`, `overflow`, `is_overflowing`, `fill_width`

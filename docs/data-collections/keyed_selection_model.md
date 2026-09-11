@@ -42,7 +42,7 @@ assert_eq!(sel.count(), 0);
 
 ## Builder methods at a glance
 
-`mode`, `selection_signal`, `is_selected`, `selected_keys`, `count`, `select`, `toggle`, `extend_to`, `select_keys`, `clear`, `prune_missing`, `debug_named`
+`mode`, `selection_signal`, `is_selected`, `selected_keys`, `count`, `select`, `toggle`, `extend_to`, `extend_to_additive`, `select_keys`, `clear`, `prune_missing`, `debug_named`
 
 ## API reference
 
@@ -102,6 +102,17 @@ Extend the selection from the anchor to `target` over the current visible
 key order (Shift+click). `ordered_keys` is the projection's visible order
 at click time. If the anchor isn't currently visible (scrolled out /
 evicted), falls back to a single-key select.
+
+#### `pub fn extend_to_additive(&self, target: K, ordered_keys: &[K])`
+
+Extend from the anchor to `target`, keeping whatever was selected when
+this gesture began (Ctrl+Shift+navigation).
+
+The keyed twin of
+`SelectionModel::extend_to_additive`:
+the range is unioned with the live selection captured on the gesture's
+first keystroke, so a second disjoint range can be built without losing
+the first, and the range still shrinks when reversed.
 
 #### `pub fn select_keys(&self, keys: impl IntoIterator<Item = K>, additive: bool)`
 

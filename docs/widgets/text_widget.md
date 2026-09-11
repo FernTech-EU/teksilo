@@ -67,6 +67,14 @@ the text around it, which is exactly WCAG 2.2 SC 2.5.8's *inline* exception,
 so it is not raised to the 24 dp floor and is not reported as a target
 region.
 
+## Density
+
+The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keyboard ladder. Below is the same subject on the same canvas with only the ladder changed, so what moves is the density and nothing else — where the subject no longer fits, that is what the denser targets cost it at that size. See `docs/density-and-targets.md`.
+
+**Touch**
+
+![TextWidget at Touch density](img/text_widget-touch.png)
+
 ## Builder methods at a glance
 
 `color`, `style`, `overflow`, `single_line`, `min_shrink_width`, `no_shrink`, `max_lines`, `text_backend`, `text`, `resolved_text`, `markup`, `on_link_click`, `on_link_hover`, `a11y_hidden`, `geometry_handle`

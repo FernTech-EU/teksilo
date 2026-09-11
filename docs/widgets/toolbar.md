@@ -77,6 +77,14 @@ keyboard navigation and takes no press of its own. The overflow chevron is
 gated on the layout-derived `is_overflowing` signal, not on hover, so it is
 reachable by a finger without any reveal policy.
 
+## Density
+
+The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keyboard ladder. Below is the same subject on the same canvas with only the ladder changed, so what moves is the density and nothing else — where the subject no longer fits, that is what the denser targets cost it at that size. See `docs/density-and-targets.md`.
+
+**Touch**
+
+![Toolbar at Touch density](img/toolbar-touch.png)
+
 ## Builder methods at a glance
 
 `item`, `action`, `child`, `add_child`, `orientation`, `button_size`, `button_style`, `spacing`, `label`, `compact`, `is_overflowing`

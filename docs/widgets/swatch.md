@@ -30,6 +30,14 @@ let _swatch = ColorSwatch::new(Color::new(0.21, 0.52, 0.89, 1.0))
     .corner_radius(4.0);
 ```
 
+## Density
+
+The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keyboard ladder. Below is the same subject on the same canvas with only the ladder changed, so what moves is the density and nothing else — where the subject no longer fits, that is what the denser targets cost it at that size. See `docs/density-and-targets.md`.
+
+**Touch**
+
+![ColorSwatch at Touch density](img/swatch-touch.png)
+
 ## Builder methods at a glance
 
 `selected`, `label`, `size`, `corner_radius`, `enabled`, `on_activate_fn`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`

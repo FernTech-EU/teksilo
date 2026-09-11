@@ -46,6 +46,14 @@ let _w = ScrollArea::new()
     .smooth_scrolling(true);
 ```
 
+## Density
+
+The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keyboard ladder. Below is the same subject on the same canvas with only the ladder changed, so what moves is the density and nothing else — where the subject no longer fits, that is what the denser targets cost it at that size. See `docs/density-and-targets.md`.
+
+**Touch**
+
+![ScrollArea at Touch density](img/scroll_area-touch.png)
+
 ## Builder methods at a glance
 
 `rubber_band`, `overscroll_signal`, `child`, `from_id`, `scroll_bar_style`, `scroll_bar_thumb_color`, `vertical_scroll_bar_policy`, `horizontal_scroll_bar_policy`, `line_height`, `scroll_bar_thickness`, `widget_resizable`, `smooth_scrolling`, `smooth_scroll_duration`, `scroll_past_end`, `preferred_size`, `preferred_height`, `overscroll_behavior`, `restore_scroll_y`, `scroll_y_signal`, `scroll_x_signal`, `max_scroll_y_signal`, `viewport_ratio_y_signal`, `max_scroll_x_signal`
@@ -80,7 +88,7 @@ pub enum ScrollBarPolicy { /* variants */ }
 
 - **`AsNeeded`** — Show the scroll bar only when content exceeds the viewport size (default).
 - **`AlwaysOn`** — Always show the scroll bar, even when content fits without scrolling.
-- **`AlwaysOff`** — Never show the scroll bar; the content still scrolls on a wheel, on a finger's pan, and from the keyboard and AT actions.
+- **`AlwaysOff`** — Never show the scroll bar; the content still scrolls on a wheel, on a finger's pan, and from the assistive-technology scroll actions the viewport advertises.  Not from the keyboard: `ScrollArea` installs no key handler, and the arrow / Home / End / Page arms on `ScrollBar` belong to a node built `focusable(false)`, so no keyboard user reaches them. A focused descendant is still revealed — that is `ScrollIntoView`, not a key the viewport handles.
 
 ## `pub struct ScrollArea`
 

@@ -45,6 +45,14 @@ feature is a tooltip, whose touch route is the long press the tooltip
 package owns. A badge that an app makes tappable does so by wrapping it,
 and the wrapper is the target.
 
+## Density
+
+The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keyboard ladder. Below is the same subject on the same canvas with only the ladder changed, so what moves is the density and nothing else — where the subject no longer fits, that is what the denser targets cost it at that size. See `docs/density-and-targets.md`.
+
+**Touch**
+
+![Badge at Touch density](img/badge-touch.png)
+
 ## Builder methods at a glance
 
 `style`, `background`, `text_role`, `text_style`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`

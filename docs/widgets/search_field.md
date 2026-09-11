@@ -58,6 +58,14 @@ carries the matching `set_size_of_set(total)`, since AccessKit
 resolves a set size by walking up from the item. Together they
 let screen readers announce "Apple, 1 of 5".
 
+## Density
+
+The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keyboard ladder. Below is the same subject on the same canvas with only the ladder changed, so what moves is the density and nothing else — where the subject no longer fits, that is what the denser targets cost it at that size. See `docs/density-and-targets.md`.
+
+**Touch**
+
+![SearchField at Touch density](img/search_field-touch.png)
+
 ## Builder methods at a glance
 
 `style`, `placeholder`, `label`, `drives_listbox`, `enabled`, `on_submit_fn`, `with_suggestions`, `max_suggestions`, `min_chars`, `on_select`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`

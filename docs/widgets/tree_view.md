@@ -71,6 +71,14 @@ let _w = TreeView::new(tree_model, |item, entry, _selected| {
 .item_height(28.0);
 ```
 
+## Density
+
+The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keyboard ladder. Below is the same subject on the same canvas with only the ladder changed, so what moves is the density and nothing else — where the subject no longer fits, that is what the denser targets cost it at that size. See `docs/density-and-targets.md`.
+
+**Touch**
+
+![TreeView at Touch density](img/tree_view-touch.png)
+
 ## Builder methods at a glance
 
 `toggle_callback`, `slice_handle`, `node_id`

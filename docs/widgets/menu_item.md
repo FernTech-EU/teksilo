@@ -66,6 +66,14 @@ let _w = MenuItem::new(lit!("&Save"))
     .on_activate_fn(|ctx| ctx.send_intent(Intent::new("app.save")));
 ```
 
+## Density
+
+The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keyboard ladder. Below is the same subject on the same canvas with only the ladder changed, so what moves is the density and nothing else — where the subject no longer fits, that is what the denser targets cost it at that size. See `docs/density-and-targets.md`.
+
+**Touch**
+
+![MenuItem at Touch density](img/menu_item-touch.png)
+
 ## Builder methods at a glance
 
 `on_activate_fn`, `label`, `label_localized`, `action`, `icon`, `icon_keeps_color`, `shortcut_label`, `trailing_hint`, `for_shortcut`, `enabled`, `style`, `text_style`, `text_role`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`, `submenu`, `submenu_delay`, `is_submenu`, `checked`, `reflect_checked`, `check_state`, `radio`

@@ -29,6 +29,14 @@ let _w = RectWidget::new()
     .corner_radius(CornerRadius::uniform(12.0));
 ```
 
+## Density
+
+The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keyboard ladder. Below is the same subject on the same canvas with only the ladder changed, so what moves is the density and nothing else — where the subject no longer fits, that is what the denser targets cost it at that size. See `docs/density-and-targets.md`.
+
+**Touch**
+
+![RectWidget at Touch density](img/rect_widget-touch.png)
+
 ## Builder methods at a glance
 
 `background`, `border_sides`, `border_position`, `border_color`, `border_width`, `corner_radius`

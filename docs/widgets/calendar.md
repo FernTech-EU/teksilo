@@ -86,6 +86,14 @@ from the press position and owns no drag. It therefore does **not** declare
 scrolling the dialog or form the calendar sits in, which is what a user
 expects and what declaring NONE would forbid for nothing gained.
 
+## Density
+
+The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keyboard ladder. Below is the same subject on the same canvas with only the ladder changed, so what moves is the density and nothing else — where the subject no longer fits, that is what the denser targets cost it at that size. See `docs/density-and-targets.md`.
+
+**Touch**
+
+![Calendar at Touch density](img/calendar-touch.png)
+
 ## Builder methods at a glance
 
 `single`, `range`, `first_day_of_week`, `week_numbers`, `show_today_button`, `show_navigation`, `min_date`, `max_date`, `disabled_date_filter`, `label`, `enabled`, `on_selection_changed`, `on_range_changed`, `on_month_changed`, `on_activate`, `visible_month_signal`, `focused_date_signal`, `mode_signal`

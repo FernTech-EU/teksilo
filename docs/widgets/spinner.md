@@ -32,6 +32,14 @@ falls back to a static three-quarter arc — the indicator is still
 visible (so the user can tell the surface is busy) but doesn't
 rotate.
 
+## Density
+
+The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keyboard ladder. Below is the same subject on the same canvas with only the ladder changed, so what moves is the density and nothing else — where the subject no longer fits, that is what the denser targets cost it at that size. See `docs/density-and-targets.md`.
+
+**Touch**
+
+![Spinner at Touch density](img/spinner-touch.png)
+
 ## Builder methods at a glance
 
 `period`, `arc_fraction`, `stroke_fraction`, `color`, `label`

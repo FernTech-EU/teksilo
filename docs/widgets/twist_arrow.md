@@ -32,6 +32,14 @@ at distance zero from it, so the miss-only slop pass could never reach the
 chevron. Zero for a leaf chevron and for a decorative one, which take no
 press.
 
+## Density
+
+The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keyboard ladder. Below is the same subject on the same canvas with only the ladder changed, so what moves is the density and nothing else — where the subject no longer fits, that is what the denser targets cost it at that size. See `docs/density-and-targets.md`.
+
+**Touch**
+
+![TwistArrow at Touch density](img/twist_arrow-touch.png)
+
 ## Builder methods at a glance
 
 `color`, `on_click`

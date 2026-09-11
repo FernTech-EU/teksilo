@@ -39,6 +39,14 @@ let _w = GroupBox::new(lit!("Indentation"))
     .child(TextWidget::new(lit!("Tab width: 4")));
 ```
 
+## Density
+
+The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keyboard ladder. Below is the same subject on the same canvas with only the ladder changed, so what moves is the density and nothing else — where the subject no longer fits, that is what the denser targets cost it at that size. See `docs/density-and-targets.md`.
+
+**Touch**
+
+![GroupBox at Touch density](img/group_box-touch.png)
+
 ## Builder methods at a glance
 
 `checkable`, `child`, `child_id`

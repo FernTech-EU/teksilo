@@ -41,6 +41,20 @@ ctx.add(
 );
 ```
 
+## Touch and pen
+
+The trigger activates on the release, whether it is the default `Button` or a
+caller's widget, and the actions inside the surface are buttons and links with
+their own targets. Nothing here actuates on a press.
+
+## Density
+
+The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keyboard ladder. Below is the same subject on the same canvas with only the ladder changed, so what moves is the density and nothing else — where the subject no longer fits, that is what the denser targets cost it at that size. See `docs/density-and-targets.md`.
+
+**Touch**
+
+![Snackbar at Touch density](img/snackbar-touch.png)
+
 ## Builder methods at a glance
 
 `style`, `content`, `content_id`, `variant`, `enabled`, `dismiss_behavior`, `auto_dismiss_after`, `persistent`, `trigger`, `trigger_id`, `announcement`

@@ -43,13 +43,21 @@ decided in that walk and nowhere else, so it is exempt. A finger on the
 text therefore scrolls the text, and hands the gesture outward only at this
 surface's own boundary. See `docs/kinetic-scrolling.md` §10.1.
 
+## Density
+
+The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keyboard ladder. Below is the same subject on the same canvas with only the ladder changed, so what moves is the density and nothing else — where the subject no longer fits, that is what the denser targets cost it at that size. See `docs/density-and-targets.md`.
+
+**Touch**
+
+![LogView at Touch density](img/log_view-touch.png)
+
 ## Builder methods at a glance
 
 `context_menu`, `default_context_menu`, `follow_tail`, `scrollback_limit`, `severity_highlighter`, `announce_appends`, `font_family`, `follow_text_scale`, `v_scroll_policy`, `h_scroll_policy`, `background`, `text_color`, `selection_color`, `handle`
 
 ## API reference
 
-📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/code_editor/log_view/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/code_editor/index.html)
 
 ## `pub struct LogView`
 

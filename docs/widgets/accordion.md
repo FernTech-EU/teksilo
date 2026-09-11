@@ -33,6 +33,27 @@ let expanded = Signal::new(false);
 let _accordion = Accordion::new(lit!("Advanced settings"), expanded);
 ```
 
+## Touch and pen
+
+The header is one target on the density ladder and toggles from its tap, so on
+the release. Where a dock panel installs `on_header_drag`, the same header is
+also a drag source: `DragActivation::Auto` resolves that to `Immediate` when
+nothing competes for the axis and to the hold when a scroller does, so a contact
+needs no declaration to move a panel — and a press that lifts without
+travelling still toggles.
+
+The trailing slot is wrapped in a `DeadZone`, so
+its action buttons and `⋮` menu take a press — jitter and all — without arming
+the panel drag behind them.
+
+## Density
+
+The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keyboard ladder. Below is the same subject on the same canvas with only the ladder changed, so what moves is the density and nothing else — where the subject no longer fits, that is what the denser targets cost it at that size. See `docs/density-and-targets.md`.
+
+**Touch**
+
+![Accordion at Touch density](img/accordion-touch.png)
+
 ## Builder methods at a glance
 
 `orientation`, `horizontal`, `fill`, `on_header_drag`, `trailing`, `trailing_id`, `title_color`, `title_style`, `content_id`, `content`

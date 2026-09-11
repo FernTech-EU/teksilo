@@ -176,7 +176,7 @@ Every public widget in `teksilo-widgets`, grouped by category. Each page links t
 - [CodeEditorHandle](code_editor.md) — Multi-line plain-text and code editing surfaces
 - [CommandPalette](command_palette.md) — CommandPalette — type-to-run access to every command an app has registered
 - [NotificationEntry](notification.md) — Persistent notification archive — the storage and data-model layer
-- [OverlayTrigger](overlay_trigger.md)
+- [OverlayTrigger](overlay_trigger.md) — `OverlayTrigger` — the shared "this widget opens that overlay" wrapper
 - [PopoverSurface](popover_surface.md) — `PopoverSurface` — the themed panel a popover's content sits in
 - [PopoverWidget](popover_widget.md) — `PopoverWidget<T>` — a generic trigger that opens a popover when
 - [TreeRowMeta](tree_source.md) — Type-erased data source adapter for `TreeView`

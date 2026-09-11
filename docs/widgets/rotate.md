@@ -35,6 +35,14 @@ caller's angle signal currently holds. Reduced-motion handling
 belongs at the *caller's* `animate_to` site (use `to_or_snap` or
 gate the animation behind `prefers_reduced_motion`).
 
+## Density
+
+The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keyboard ladder. Below is the same subject on the same canvas with only the ladder changed, so what moves is the density and nothing else — where the subject no longer fits, that is what the denser targets cost it at that size. See `docs/density-and-targets.md`.
+
+**Touch**
+
+![Rotate at Touch density](img/rotate-touch.png)
+
 ## Builder methods at a glance
 
 `origin`, `child`, `child_id`

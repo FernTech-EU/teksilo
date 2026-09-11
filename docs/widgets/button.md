@@ -56,6 +56,14 @@ let _btn = Button::new(lit!("Save"))
     .on_activate_fn(|ctx| ctx.send_intent(Intent::new("app.save")));
 ```
 
+## Density
+
+The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keyboard ladder. Below is the same subject on the same canvas with only the ladder changed, so what moves is the density and nothing else — where the subject no longer fits, that is what the denser targets cost it at that size. See `docs/density-and-targets.md`.
+
+**Touch**
+
+![Button at Touch density](img/button-touch.png)
+
 ## Builder methods at a glance
 
 `current_variant`, `share_interaction`, `variant`, `style`, `label`, `on_activate_fn`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`, `enabled`, `text_role`, `text_style`, `icon`, `icon_keeps_color`, `has_popup`, `expanded_when`, `leading`, `trailing`

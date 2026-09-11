@@ -25,6 +25,14 @@ let _bar = StatusBar::new()
     .announce_changes(false);
 ```
 
+## Density
+
+The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keyboard ladder. Below is the same subject on the same canvas with only the ladder changed, so what moves is the density and nothing else — where the subject no longer fits, that is what the denser targets cost it at that size. See `docs/density-and-targets.md`.
+
+**Touch**
+
+![StatusBar at Touch density](img/status_bar-touch.png)
+
 ## Builder methods at a glance
 
 `child`, `add_child`, `background`, `corner_radius`, `border_color`, `border_width`, `name`, `announce_changes`

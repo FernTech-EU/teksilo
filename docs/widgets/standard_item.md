@@ -70,6 +70,33 @@ a nameless `Role::CheckBox`. The chevron's `TwistArrow` is
 decorative (`set_hidden`); the row's expanded state is owned by
 the wrapper.
 
+## Touch and pen
+
+A row's **height** is a target floor and follows the density ladder — the
+recipe has carried both projected heights since the density sweep, and the row
+now reads them rather than the raw Compact constants.
+
+A row's **press** is not the row's. Inside a `ListView` or a `TreeView` the
+body pane owns the tap, the double tap and the reorder drag, and resolves which
+row they mean by coordinate; the framework press belongs to the node whose
+gesture arena took it, so a row's own `pressed_signal` is structurally always
+false. The `Pressed` chrome the recipe paints is therefore reachable only
+through a caller-supplied `interaction_signal`. Changing that means ruling on
+which node owns a press when a data view is wrapped in something tappable,
+which is an open design question rather than a widget change.
+
+Hover is decoration plus the reveal policy: at a density that reveals every
+affordance the row pins its `reveal` signal on, so trailing actions do not
+depend on a hover a contact never produces.
+
+## Density
+
+The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keyboard ladder. Below is the same subject on the same canvas with only the ladder changed, so what moves is the density and nothing else — where the subject no longer fits, that is what the denser targets cost it at that size. See `docs/density-and-targets.md`.
+
+**Touch**
+
+![StandardListItem at Touch density](img/standard_item-touch.png)
+
 ## Builder methods at a glance
 
 `style`, `subtitle`, `leading_slot`, `leading_slot_boxed`, `center_slot`, `center_slot_boxed`, `trailing_slot`, `trailing_slot_boxed`, `subtitle_leading_slot`, `subtitle_leading_slot_boxed`, `subtitle_trailing_slot`, `subtitle_trailing_slot_boxed`, `checkbox`, `tristate_checkbox`, `selected`, `enabled`, `label_style`, `subtitle_style`, `label_color`, `subtitle_color`, `interaction_signal`, `reveal_signal`, `label_slot`, `label_overflow`, `subtitle_overflow`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`

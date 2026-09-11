@@ -54,6 +54,14 @@ strips also report what they painted through `Widget::target_regions`, so
 the knob a user aims at is visible to a conformance audit even though no
 layout ever produced it.
 
+## Density
+
+The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keyboard ladder. Below is the same subject on the same canvas with only the ladder changed, so what moves is the density and nothing else — where the subject no longer fits, that is what the denser targets cost it at that size. See `docs/density-and-targets.md`.
+
+**Touch**
+
+![ColorPicker at Touch density](img/color_picker-touch.png)
+
 ## Builder methods at a glance
 
 `nullable`, `style`, `alpha_enabled`, `show_hsv_canvas`, `show_hue_strip`, `show_alpha_strip`, `show_rgb_spinners`, `show_hsv_spinners`, `show_hex_input`, `show_preview`, `show_swatches`, `show_footer`, `on_done`, `on_cancel`, `swatches`, `swatch_columns`, `layout`, `label`, `enabled`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`, `current`

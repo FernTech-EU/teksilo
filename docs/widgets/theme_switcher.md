@@ -37,6 +37,14 @@ Custom themes: `.themes([(label, theme), …])` replaces Light/Dark with an
 app-supplied set (e.g. the `teksilo-theme-{fluent,macos,material3}` presets);
 `.system(false)` drops the System entry.
 
+## Density
+
+The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keyboard ladder. Below is the same subject on the same canvas with only the ladder changed, so what moves is the density and nothing else — where the subject no longer fits, that is what the denser targets cost it at that size. See `docs/density-and-targets.md`.
+
+**Touch**
+
+![ThemeSwitcher at Touch density](img/theme_switcher-touch.png)
+
 ## Builder methods at a glance
 
 `variant`, `label`, `themes`, `system`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`

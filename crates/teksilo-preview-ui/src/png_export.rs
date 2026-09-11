@@ -6,8 +6,8 @@
 //! The rendering itself lives in [`crate::shot`] — shared with the
 //! documentation image exporter, so a toolbar export and a `--export-docs`
 //! run produce the same picture. This module only resolves *what* to
-//! render (the selected widget/variant plus its live knob values) and
-//! *where* to save it.
+//! render (the selected widget/variant plus its live knob values, at the
+//! toolbar's live density) and *where* to save it.
 
 use std::path::PathBuf;
 
@@ -35,12 +35,16 @@ pub fn export_current(state: &AppState) -> Result<PathBuf, String> {
     let widget = entry.build(variant_name, &knobs);
 
     let canvas_theme = state.canvas_theme.get();
-    let theme = canvas_theme.theme();
+    // The canvas is showing the widget at the toolbar's density, so the
+    // export has to be that widget: a theme resolved without one is the
+    // Compact ladder, which is a different picture.
+    let pass = teksilo_preview::PreviewPass::new(state.density.get());
+    let theme = canvas_theme.theme_at(pass.density());
 
     let mut shooter = Shooter::new(EXPORT_SCALE)?;
-    let shot = shooter.capture(widget, theme, &ShotOptions::default())?;
+    let shot = shooter.capture(widget, theme, &ShotOptions::default().with_pass(pass))?;
 
-    let out_path = output_path(widget_id, variant_name, canvas_theme)?;
+    let out_path = output_path(widget_id, variant_name, canvas_theme, pass)?;
     write_png(&out_path, &shot.rgba, shot.width, shot.height)?;
     Ok(out_path)
 }
@@ -49,6 +53,7 @@ fn output_path(
     widget_id: &'static str,
     variant_name: &'static str,
     canvas_theme: crate::app_state::CanvasTheme,
+    pass: teksilo_preview::PreviewPass,
 ) -> Result<PathBuf, String> {
     let mut out_dir = home_dir().ok_or_else(|| "couldn't resolve home directory".to_string())?;
     out_dir.push(".teksilo-previewer");
@@ -71,9 +76,11 @@ fn output_path(
             }
         }
     };
+    // The density rides in the stem the same way it does for the catalog
+    // images, so a Touch export cannot silently overwrite a Compact one.
     Ok(out_dir.join(format!(
-        "{}__{}__{}.png",
-        widget_id, variant_name, theme_label
+        "{}.png",
+        pass.image_stem(&format!("{}__{}__{}", widget_id, variant_name, theme_label))
     )))
 }
 

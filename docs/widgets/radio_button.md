@@ -40,6 +40,14 @@ let _r1 = RadioButton::new(1, selected.clone()).label(lit!("Dark"));
 let _r2 = RadioButton::new(2, selected.clone()).label(lit!("System"));
 ```
 
+## Density
+
+The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keyboard ladder. Below is the same subject on the same canvas with only the ladder changed, so what moves is the density and nothing else — where the subject no longer fits, that is what the denser targets cost it at that size. See `docs/density-and-targets.md`.
+
+**Touch**
+
+![RadioButton at Touch density](img/radio_button-touch.png)
+
 ## Builder methods at a glance
 
 `label`, `caption`, `enabled`, `variant`, `style`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`

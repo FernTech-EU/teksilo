@@ -20,7 +20,10 @@
 //!
 //! `--export-docs` is the headless batch that fills `docs/widgets/img/`
 //! with the pictures the generated mdBook catalog pages reference. It
-//! needs a wgpu adapter but no display server.
+//! needs a wgpu adapter but no display server. It takes the same
+//! `--density=` flag, and accepts a comma-separated list — one pass per
+//! density, `Compact` writing `img/<slug>.png` and every other density
+//! writing `img/<slug>-<density>.png` beside it.
 //!
 //! The binary intentionally has no logic beyond delegation —
 //! everything happens inside `teksilo_preview_ui::run_previewer`.
@@ -60,9 +63,16 @@ fn main() {
 /// --dark                    render the dark theme instead of light
 /// --scale=N                 HiDPI factor (default 2)
 /// --only=slug[,slug...]     restrict the batch
+/// --density=NAME[,NAME...]  compact | comfortable | touch (default compact)
 /// ```
+///
+/// Each density is a separate pass over the whole catalog. `compact` is the
+/// canonical one and writes `img/<slug>.png`; the others are additive and
+/// write `img/<slug>-<density>.png`, so `--density=compact,touch`
+/// regenerates the committed images and adds the Touch variants in one run.
 fn run_doc_export(args: &[String]) -> i32 {
     let mut opts = teksilo_preview_ui::DocExportOptions::default();
+    let mut passes = Vec::new();
     for arg in args {
         if let Some(dir) = arg.strip_prefix("--export-docs=") {
             opts.out_dir = std::path::PathBuf::from(dir);
@@ -82,6 +92,20 @@ fn run_doc_export(args: &[String]) -> i32 {
             }
         } else if let Some(list) = arg.strip_prefix("--only=") {
             opts.only = list.split(',').map(str::to_string).collect();
+        } else if let Some(list) = arg.strip_prefix("--density=") {
+            for name in list.split(',') {
+                match teksilo_preview::PreviewPass::from_name(name) {
+                    Some(p) => passes.push(p),
+                    None => {
+                        eprintln!(
+                            "teksilo-previewer: unknown --density '{}' \
+                             (compact | comfortable | touch)",
+                            name
+                        );
+                        return 2;
+                    }
+                }
+            }
         } else if arg != "--export-docs" {
             eprintln!(
                 "teksilo-previewer: unrecognised argument '{}' for --export-docs",
@@ -91,14 +115,28 @@ fn run_doc_export(args: &[String]) -> i32 {
         }
     }
 
-    println!("Exporting catalog images to {} …", opts.out_dir.display());
-    match teksilo_preview_ui::export_doc_images(&opts) {
-        Ok(report) => teksilo_preview_ui::print_report(&report, &opts),
-        Err(e) => {
-            eprintln!("teksilo-previewer: {}", e);
-            1
-        }
+    if passes.is_empty() {
+        passes.push(teksilo_preview::PreviewPass::compact());
     }
+    passes.dedup();
+
+    let mut code = 0;
+    for pass in passes {
+        opts.pass = pass;
+        println!(
+            "Exporting catalog images to {} at {} density …",
+            opts.out_dir.display(),
+            opts.pass.label()
+        );
+        code |= match teksilo_preview_ui::export_doc_images(&opts) {
+            Ok(report) => teksilo_preview_ui::print_report(&report, &opts),
+            Err(e) => {
+                eprintln!("teksilo-previewer: {}", e);
+                1
+            }
+        };
+    }
+    code
 }
 
 // ---------------------------------------------------------------------------
@@ -220,28 +258,43 @@ mod tests {
         use teksilo_core::widget_tree::WidgetTree;
 
         let mut failures: Vec<String> = Vec::new();
-        for entry in iter_entries() {
-            for variant in entry.variants() {
-                let label = format!("{}/{}", entry.id(), variant.name());
-                // Run each (widget, variant) pair in a separate
-                // `catch_unwind` so one failure doesn't prevent the
-                // rest from being checked — the failure list at the
-                // end is more useful than a single first-failure stack.
-                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    let knobs = teksilo_preview::KnobValues::from_spec(&entry.knobs(), None);
-                    let widget = entry.build(variant.name(), &knobs);
-                    let mut tree =
-                        WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
-                    let _ = tree.add_boxed(widget);
-                    tree.layout(SizeProposal::exact(800.0, 600.0));
-                }));
-                if let Err(err) = result {
-                    let msg = err
-                        .downcast_ref::<&'static str>()
-                        .map(|s| s.to_string())
-                        .or_else(|| err.downcast_ref::<String>().cloned())
-                        .unwrap_or_else(|| "<unknown panic>".to_string());
-                    failures.push(format!("{}: {}", label, msg));
+        // Every density the previewer and `--export-docs` can be asked for:
+        // a catalog entry is a documentation subject too, and the ladder is
+        // applied before `build()` runs.
+        for pass in [
+            teksilo_preview::PreviewPass::compact(),
+            teksilo_preview::PreviewPass::new(teksilo_tokens::TargetDensity::Comfortable),
+            teksilo_preview::PreviewPass::new(teksilo_tokens::TargetDensity::Touch),
+        ] {
+            for entry in iter_entries() {
+                for variant in entry.variants() {
+                    let label = format!("[{}] {}/{}", pass.label(), entry.id(), variant.name());
+                    // Run each (widget, variant) pair in a separate
+                    // `catch_unwind` so one failure doesn't prevent the
+                    // rest from being checked — the failure list at the
+                    // end is more useful than a single first-failure stack.
+                    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        let knobs = teksilo_preview::KnobValues::from_spec(&entry.knobs(), None);
+                        let widget = entry.build(variant.name(), &knobs);
+                        let mut tree =
+                            WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+                        tree.set_input_density(pass.density());
+                        assert_eq!(
+                            tree.theme().input.density,
+                            pass.density(),
+                            "the pass must reach the tree, or this loop checks Compact three times"
+                        );
+                        let _ = tree.add_boxed(widget);
+                        tree.layout(SizeProposal::exact(800.0, 600.0));
+                    }));
+                    if let Err(err) = result {
+                        let msg = err
+                            .downcast_ref::<&'static str>()
+                            .map(|s| s.to_string())
+                            .or_else(|| err.downcast_ref::<String>().cloned())
+                            .unwrap_or_else(|| "<unknown panic>".to_string());
+                        failures.push(format!("{}: {}", label, msg));
+                    }
                 }
             }
         }
@@ -363,20 +416,43 @@ mod tests {
         use teksilo_core::widget_tree::WidgetTree;
 
         let mut failures: Vec<String> = Vec::new();
-        for snippet in teksilo_preview::iter_doc_snippets() {
-            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                let widget = (snippet.build)();
-                let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
-                let _ = tree.add_boxed(widget);
-                tree.layout(SizeProposal::exact(800.0, 600.0));
-            }));
-            if let Err(err) = result {
-                let msg = err
-                    .downcast_ref::<&'static str>()
-                    .map(|s| s.to_string())
-                    .or_else(|| err.downcast_ref::<String>().cloned())
-                    .unwrap_or_else(|| "<unknown panic>".to_string());
-                failures.push(format!("{}: {}", snippet.source_file, msg));
+        // Every pass `--export-docs` can be asked for, not just the canonical
+        // one: a density is applied before `build()` runs, so a snippet that
+        // survives Compact can still panic on the ladder that moves its
+        // dimensions — and the exporter would only report it as a failed
+        // subject long after CI was green.
+        for pass in [
+            teksilo_preview::PreviewPass::compact(),
+            teksilo_preview::PreviewPass::new(teksilo_tokens::TargetDensity::Comfortable),
+            teksilo_preview::PreviewPass::new(teksilo_tokens::TargetDensity::Touch),
+        ] {
+            for snippet in teksilo_preview::iter_doc_snippets() {
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    let widget = (snippet.build)();
+                    let mut tree =
+                        WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+                    tree.set_input_density(pass.density());
+                    assert_eq!(
+                        tree.theme().input.density,
+                        pass.density(),
+                        "the pass must reach the tree, or this loop checks Compact three times"
+                    );
+                    let _ = tree.add_boxed(widget);
+                    tree.layout(SizeProposal::exact(800.0, 600.0));
+                }));
+                if let Err(err) = result {
+                    let msg = err
+                        .downcast_ref::<&'static str>()
+                        .map(|s| s.to_string())
+                        .or_else(|| err.downcast_ref::<String>().cloned())
+                        .unwrap_or_else(|| "<unknown panic>".to_string());
+                    failures.push(format!(
+                        "[{}] {}: {}",
+                        pass.label(),
+                        snippet.source_file,
+                        msg
+                    ));
+                }
             }
         }
         assert!(

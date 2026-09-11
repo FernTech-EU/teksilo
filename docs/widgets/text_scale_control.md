@@ -33,6 +33,14 @@ Writing the bound signal triggers the `SettingsStore`'s debounced auto-save
 (immediate app-wide application). At startup `teksilo-app` reads the saved
 key and seeds every window, so the chosen size is restored automatically.
 
+## Density
+
+The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keyboard ladder. Below is the same subject on the same canvas with only the ladder changed, so what moves is the density and nothing else — where the subject no longer fits, that is what the denser targets cost it at that size. See `docs/density-and-targets.md`.
+
+**Touch**
+
+![TextScaleControl at Touch density](img/text_scale_control-touch.png)
+
 ## Builder methods at a glance
 
 `label`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`

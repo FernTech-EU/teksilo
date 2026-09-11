@@ -55,12 +55,12 @@ replacement. `after_paint` is post-order, so wrapping the title bar (the
 canonical shape — `WindowFrame::content(VStack { TitleBar, body })`) puts
 the band update after the aggregate snapshot every frame.
 
-Wrapping the frame in a `WidgetBuilder` method is safe: `WidgetWithHandlers`
-forwards `wants_after_paint` / `after_paint` along with the rest of the trait,
-so `WindowFrame::new(host).content(..).on_tap(..)` still publishes. It did not
-always — the wrapper's forwarding list was incomplete, and an unforwarded hook
-silences a publish with no diagnostic — so the list is now exhaustive and
-lint-guarded at its impl.
+Wrapping the frame in a `WidgetBuilder` method is safe:
+`WidgetWithHandlers` forwards `wants_after_paint` / `after_paint` along with
+the rest of the trait, so `WindowFrame::new(host).content(..).on_tap(..)`
+still publishes. It did not always — the wrapper's forwarding list was
+incomplete, and an unforwarded hook silences a publish with no diagnostic —
+so the list is now exhaustive and lint-guarded at its own impl.
 
 ## Builder methods at a glance
 
@@ -68,7 +68,7 @@ lint-guarded at its impl.
 
 ## API reference
 
-📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/title_bar/window_frame/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/title_bar/index.html)
 
 ## `pub struct WindowFrame`
 

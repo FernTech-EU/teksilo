@@ -40,6 +40,14 @@ let _bar = ProgressBar::new(0.0).value(progress);
 let _spinner_bar = ProgressBar::indeterminate();
 ```
 
+## Density
+
+The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keyboard ladder. Below is the same subject on the same canvas with only the ladder changed, so what moves is the density and nothing else — where the subject no longer fits, that is what the denser targets cost it at that size. See `docs/density-and-targets.md`.
+
+**Touch**
+
+![ProgressBar at Touch density](img/progress_bar-touch.png)
+
 ## Builder methods at a glance
 
 `indeterminate`, `value`, `orientation`, `thickness`, `track_color`, `fill_color`, `style`, `label`
