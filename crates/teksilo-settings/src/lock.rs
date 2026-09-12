@@ -145,10 +145,10 @@ impl FileLock {
 
     /// Make a single, immediate attempt to acquire an exclusive lock on
     /// `<settings_path>.lock`, creating the sidecar file (and its parent
-    /// directory) if necessary. Returns `Err` (kind
-    /// [`io::ErrorKind::WouldBlock`], via `fs2::lock_contended_error()`)
-    /// at once, instead of waiting, if another holder already has the
-    /// lock — it never blocks.
+    /// directory) if necessary. Returns `Err` of kind
+    /// [`io::ErrorKind::WouldBlock`] at once — on every platform, see
+    /// [`normalize_contention`] — instead of waiting, if another holder
+    /// already has the lock: it never blocks.
     ///
     /// Used by the shared debounced-writer worker thread (`flush.rs`),
     /// which must never block on one writer's lock at the expense of
@@ -170,8 +170,36 @@ impl FileLock {
             .read(true)
             .write(true)
             .open(&lock_path)?;
-        file.try_lock_exclusive()?;
+        file.try_lock_exclusive().map_err(normalize_contention)?;
         Ok(Self { file })
+    }
+}
+
+/// Translate `fs2`'s platform-specific "someone else holds this lock"
+/// error into the single [`io::ErrorKind::WouldBlock`] that
+/// [`FileLock::try_acquire_exclusive`] promises its callers.
+///
+/// `fs2` reports contention as the raw OS error, and only POSIX's
+/// `EWOULDBLOCK` happens to be one `std` classifies as `WouldBlock`.
+/// Windows' `LockFileEx(LOCKFILE_FAIL_IMMEDIATELY)` fails with
+/// `ERROR_LOCK_VIOLATION` (33), which `std` has no mapping for and
+/// surfaces as `ErrorKind::Uncategorized` — a kind stable code cannot
+/// even name, let alone match on. Translating once, here, is what keeps
+/// "contended means `WouldBlock`" a portable contract instead of a
+/// Unix-only one; callers stay free of raw OS codes.
+///
+/// Only the contention error is rewritten — compared against
+/// `fs2::lock_contended_error()` so it tracks `fs2` rather than
+/// hard-coding either platform's number. Every other failure (a
+/// permission problem, a vanished directory) passes through with its own
+/// kind intact, and the original error is kept as the source so the
+/// platform's own message survives in the chain.
+fn normalize_contention(e: io::Error) -> io::Error {
+    match (e.raw_os_error(), fs2::lock_contended_error().raw_os_error()) {
+        (Some(actual), Some(contended)) if actual == contended => {
+            io::Error::new(io::ErrorKind::WouldBlock, e)
+        }
+        _ => e,
     }
 }
 
@@ -409,6 +437,39 @@ mod tests {
         assert!(
             start.elapsed() < Duration::from_millis(50),
             "an uncontended try_acquire_exclusive must also return immediately"
+        );
+    }
+
+    /// The contention kind is normalized, not inherited from the OS.
+    /// `fs2` reports contention as the raw OS error, and only POSIX's
+    /// `EWOULDBLOCK` lands on `WouldBlock` by itself — Windows'
+    /// `ERROR_LOCK_VIOLATION` arrives as `Uncategorized`, which no caller
+    /// can match on. This runs on every platform, so the translation is
+    /// pinned from a Linux host too, where the assertion would otherwise
+    /// pass for the wrong reason.
+    #[test]
+    fn the_platform_contention_error_is_normalized_to_would_block() {
+        let normalized = normalize_contention(fs2::lock_contended_error());
+        assert_eq!(
+            normalized.kind(),
+            io::ErrorKind::WouldBlock,
+            "fs2's contention error must be reported as WouldBlock on every platform"
+        );
+        assert!(
+            normalized.get_ref().is_some() || normalized.raw_os_error().is_some(),
+            "the platform's own error must survive as the source, not be discarded"
+        );
+    }
+
+    /// …and nothing else is rewritten: a permission failure must keep its
+    /// own kind, or a caller distinguishing "busy, retry" from "broken,
+    /// give up" would be told the wrong thing.
+    #[test]
+    fn unrelated_errors_pass_through_normalization_untouched() {
+        let e = io::Error::new(io::ErrorKind::PermissionDenied, "no");
+        assert_eq!(
+            normalize_contention(e).kind(),
+            io::ErrorKind::PermissionDenied
         );
     }
 }
