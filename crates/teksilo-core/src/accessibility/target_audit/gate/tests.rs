@@ -37,6 +37,7 @@
 //! unmutated source, and the test confirmed red.
 
 use teksilo_canvas::{Rect, Size, SizeProposal};
+use teksilo_tokens::InputTokens;
 
 use super::*;
 use crate::accessibility::target_audit::{
@@ -148,6 +149,7 @@ const UNDERSIZED: &[TargetFixture] = &[TargetFixture::new(
 
 const ALPHA: &str = "alpha.light";
 const BETA: &str = "beta.light";
+const LENIENT: &str = "lenient.light";
 
 fn alpha() -> Theme {
     crate::presets::intui::light().with_id(ALPHA)
@@ -155,6 +157,19 @@ fn alpha() -> Theme {
 
 fn beta() -> Theme {
     crate::presets::intui::light().with_id(BETA)
+}
+
+/// A theme that sets its own, lower conformance floor.
+///
+/// Artificial on purpose: no shipped preset moves `min_target_conformance`, and
+/// the programme's rule is that it is 24 dp everywhere. This exists so the
+/// matcher can be asked what it does when two themes disagree about the floor,
+/// which is the case a carried floor is for and the case no real roster
+/// exercises.
+fn lenient() -> Theme {
+    let mut theme = crate::presets::intui::light().with_id(LENIENT);
+    theme.input.min_target_conformance = 16.0;
+    theme
 }
 
 /// A theme whose declared roster id is not the id it carries.
@@ -183,6 +198,10 @@ fn violation(
         path: path.to_string(),
         density,
         theme: ThemeId::new(theme.to_string()),
+        // The generic ladder's floor: these fixtures carry no theme that
+        // raises it, and a pin's `ClearsFloor` axis is judged against what the
+        // violation carries.
+        conformance_floor: InputTokens::for_density(density).min_target_conformance,
         size: Size::new(paints.0, paints.1),
         expanded: Size::new(reaches.0, reaches.1),
         sources: ReachSources::default(),
@@ -206,6 +225,69 @@ const GRIP: AllowedViolation = AllowedViolation {
     owner: "a fixture",
     exception: None,
     why: "a fixture entry",
+};
+
+/// A 20 x 20 geometry whose paint is pinned against the floor, so the two
+/// themes below disagree about whether it clears.
+const TWENTY_CLEARS: PinnedGeometry = PinnedGeometry {
+    densities: ALL_DENSITIES,
+    themes: &[ALPHA, LENIENT],
+    paints: (ClearsFloor, ClearsFloor),
+    reaches: (Is(20.0), Is(20.0)),
+};
+
+/// The same geometry pinned exactly, so no floor enters the question.
+const TWENTY_EXACT: PinnedGeometry = PinnedGeometry {
+    densities: ALL_DENSITIES,
+    themes: &[ALPHA, LENIENT],
+    paints: (Is(20.0), Is(20.0)),
+    reaches: (Is(20.0), Is(20.0)),
+};
+
+const CLEARS_ENTRY: AllowedViolation = AllowedViolation {
+    path: "Grip",
+    measured: &[TWENTY_CLEARS],
+    owner: "a fixture",
+    exception: None,
+    why: "a fixture entry whose paint axis is judged against the floor",
+};
+
+const EXACT_ENTRY: AllowedViolation = AllowedViolation {
+    path: "Grip",
+    measured: &[TWENTY_EXACT],
+    owner: "a fixture",
+    exception: None,
+    why: "a fixture entry that names a geometry outright",
+};
+
+/// Two themes that disagree about the conformance floor.
+static TWO_FLOORS: Roster = Roster {
+    themes: &[
+        ThemeSubject {
+            id: ALPHA,
+            theme: alpha,
+        },
+        ThemeSubject {
+            id: LENIENT,
+            theme: lenient,
+        },
+    ],
+    allow: &[CLEARS_ENTRY],
+};
+
+/// The same pair, over a pin no floor reaches.
+static TWO_FLOORS_EXACT: Roster = Roster {
+    themes: &[
+        ThemeSubject {
+            id: ALPHA,
+            theme: alpha,
+        },
+        ThemeSubject {
+            id: LENIENT,
+            theme: lenient,
+        },
+    ],
+    allow: &[EXACT_ENTRY],
 };
 
 /// The roster the fixtures above are written against.
@@ -471,6 +553,56 @@ fn a_theme_axis_that_decorates_rather_than_narrows_is_reported() {
         findings.iter().any(|f| f.contains(BETA)),
         "the geometry is excused under {BETA}, where nothing produces it: \
          {findings:#?}",
+    );
+}
+
+/// A theme seed is judged against the floor of the theme it moved to.
+///
+/// The seed asks what an entry would do if the same finding appeared under
+/// another preset. That question is only well posed if the whole cloned row is
+/// the other preset's — a clone that says it is `lenient` while carrying
+/// `alpha`'s floor judges a `ClearsFloor` axis for one theme against another
+/// theme's number, which is the divergence `TargetViolation::conformance_floor`
+/// exists to close.
+///
+/// Both legs are here because the first is an assertion of absence, and an
+/// absence proves nothing about a function that might report nothing at all.
+/// The second runs the same roster and the same census shape through a pin that
+/// genuinely does decorate, so the empty result in the first leg is a verdict
+/// rather than a silence.
+#[test]
+fn a_theme_seed_is_judged_against_the_floor_of_the_theme_it_moved_to() {
+    // 20 dp clears `lenient`'s 16 and not `alpha`'s 24, so it is exactly the
+    // figure the two themes disagree about.
+    let mut row = violation(
+        "Grip",
+        LENIENT,
+        TargetDensity::Compact,
+        (20.0, 20.0),
+        (20.0, 20.0),
+    );
+    // The helper stamps the generic ladder's floor. This row is `lenient`'s, so
+    // it carries `lenient`'s — and without this the entry does not match the
+    // subject at all, the seeds never run, and the first leg below passes
+    // because nothing happened rather than because the floor moved. It did
+    // exactly that when this test was first written.
+    row.conformance_floor = 16.0;
+    let census = vec![row];
+
+    let findings = non_narrowing(&census, &TWO_FLOORS, 0);
+    assert!(
+        findings.is_empty(),
+        "moving the row to {ALPHA} raises its floor to 24, so a 20 dp paint no \
+         longer clears it and the pin stops covering — nothing decorates: {findings:#?}",
+    );
+
+    // The same roster, the same census, a pin that really is theme-blind.
+    let decorating = non_narrowing(&census, &TWO_FLOORS_EXACT, 0);
+    assert!(
+        decorating.iter().any(|f| f.contains(ALPHA)),
+        "an exactly-pinned geometry is excused under {ALPHA} too, where the \
+         census produces nothing — so this roster does report a decorating \
+         axis, and the empty result above is a verdict: {decorating:#?}",
     );
 }
 

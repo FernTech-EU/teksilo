@@ -21,6 +21,7 @@
 //! | drop the shadow test altogether | [`a_target_another_target_covers_part_of_is_not_judged_on_its_size`] |
 //! | drop a region's credit for the growth confirmed at a shared edge | [`a_region_sharing_its_nodes_edge_inherits_the_growth_confirmed_there`] |
 //! | revert `arena.rs`'s `won_through_outset`, so the slop pass takes an outset's claim back | [`a_grip_that_won_through_its_outset_keeps_its_point_against_the_slop_pass`] |
+//! | re-derive the conformance floor downstream — in [`PinnedGeometry::covers`], or by stamping the generic table onto a row instead of the ladder the walker judged with | [`an_entry_is_judged_against_the_floor_the_walker_measured_not_the_generic_one`] |
 //!
 //! Every row above has been **run**, and two of them were wrong when the table
 //! was first written. "Probe with the slop door only" named the attribution test,
@@ -42,6 +43,7 @@ use teksilo_canvas::{EdgeInsets, Point, Rect, Size, SizeProposal};
 use teksilo_tokens::{InputTokens, PointerKind, TargetDensity};
 
 use super::*;
+use crate::accessibility::target_audit::PinnedDp::{ClearsFloor, Is};
 use crate::partition::TargetRegion;
 use crate::widget::{LayoutContext, LayoutResponse, Widget, WidgetPlacement};
 use crate::widget_builder::WidgetBuilder;
@@ -1170,6 +1172,130 @@ fn an_int_ui_trees_ladder_is_the_generic_table() {
              change silently moved",
         );
     }
+}
+
+/// A theme whose SC 2.5.8 conformance floor is above the generic ladder's
+/// 24 dp, with `target_size` left where the density puts it — so the floor is
+/// the only thing that moved, and `target_size >= min_target_conformance` still
+/// holds the way every shipped `InputTokens` does.
+fn theme_with_conformance_floor(density: TargetDensity, floor: f32) -> crate::styles::Theme {
+    let mut theme = crate::presets::intui::light();
+    theme.input = InputTokens {
+        min_target_conformance: floor,
+        ..InputTokens::for_density(density)
+    };
+    theme
+}
+
+/// **The floor a violation is excused against is the one it was judged
+/// against.** An allow-list entry may not re-derive it from the generic table.
+///
+/// The two readings only differ where a theme raises the floor, which no shipped
+/// preset does — so the divergence is invisible to every other test in the
+/// programme, and this one builds the theme that exposes it. A 30 x 16 leaf
+/// inside a tappable row under a 32 dp floor reaches its own rectangle and
+/// nothing else: 16 dp fails the floor, and 30 dp — comfortably past the generic
+/// 24 and comfortably short of this theme's 32 — is the axis the two readings
+/// disagree about. An entry pinning that axis [`PinnedDp::ClearsFloor`] excuses
+/// the failure if `covers` asks `InputTokens::for_density`, and refuses it if it
+/// asks the violation.
+///
+/// Three legs, because the first two alone would pass for the wrong reason. The
+/// walker must stamp the theme's floor; the entry must refuse; and the *same*
+/// entry with that one axis pinned exactly must still cover, so what refuses is
+/// the floor comparison and not a path, a density, a theme or a second axis.
+///
+/// Mutation contract: restore
+/// `let floor = InputTokens::for_density(v.density).min_target_conformance;` in
+/// [`PinnedGeometry::covers`] and this test goes red on its second leg.
+#[test]
+fn an_entry_is_judged_against_the_floor_the_walker_measured_not_the_generic_one() {
+    const RAISED: f32 = 32.0;
+    let generic = InputTokens::for_density(TargetDensity::Touch).min_target_conformance;
+    assert_eq!(
+        generic, 24.0,
+        "the generic table's floor is what this test contrasts against",
+    );
+
+    let a = tap();
+    let b = tap();
+    let (ca, cb) = (a.clone(), b.clone());
+    let mut tree =
+        WidgetTree::new().with_theme(theme_with_conformance_floor(TargetDensity::Touch, RAISED));
+    let small = tree.add(Leaf::new(30.0, 16.0).on_tap(move |_, _| ca.set(ca.get() + 1)));
+    let _row = tree.add(
+        Row::new(400.0, 60.0)
+            .pad(40.0)
+            .child(small)
+            .on_tap(move |_, _| cb.set(cb.get() + 1)),
+    );
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+
+    let violation = target_audit(&tree, TargetDensity::Touch)
+        .into_iter()
+        .find(|v| v.path.ends_with("Leaf"))
+        .expect("the leaf fails the raised floor");
+    assert_eq!(
+        violation.rule,
+        TargetRule::MinTargetConformance,
+        "16 dp is under 32: {violation:?}",
+    );
+    assert!(
+        (violation.expanded.width - 30.0).abs() < 0.1
+            && (violation.expanded.height - 16.0).abs() < 0.1,
+        "the tappable row denies the slop pass, so the reach is the leaf's own \
+         rectangle: {violation:?}",
+    );
+
+    // 1. The walker judged against the tree's floor and says so on the row.
+    assert_eq!(
+        violation.conformance_floor, RAISED,
+        "the row must carry the floor its verdict was taken against, not the \
+         generic {generic}: {violation:?}",
+    );
+
+    // 2. And the entry reads that, not the generic table. 30 dp clears 24 and
+    //    does not clear 32, so the two readings give opposite answers here.
+    assert!(
+        ClearsFloor.matches(violation.expanded.width, generic),
+        "read against the generic table, 30 dp clears the floor — which is what \
+         would excuse this failure",
+    );
+    let entry = AllowedViolation {
+        path: "Leaf",
+        measured: &[PinnedGeometry {
+            densities: &[TargetDensity::Touch],
+            themes: &["intui.light"],
+            paints: (ClearsFloor, Is(16.0)),
+            reaches: (ClearsFloor, Is(16.0)),
+        }],
+        owner: "this test",
+        exception: None,
+        why: "a fixture entry",
+    };
+    assert!(
+        !entry.matches(&violation),
+        "30 dp is under this tree's {RAISED} dp floor, so a `ClearsFloor` axis \
+         does not clear it and the entry must not excuse the failure the walker \
+         just reported: {violation}",
+    );
+
+    // 3. Nothing else about the entry refuses it: pin that one axis exactly and
+    //    the same entry covers, so leg 2 failed on the floor comparison alone.
+    let exact = AllowedViolation {
+        measured: &[PinnedGeometry {
+            densities: &[TargetDensity::Touch],
+            themes: &["intui.light"],
+            paints: (Is(30.0), Is(16.0)),
+            reaches: (Is(30.0), Is(16.0)),
+        }],
+        ..entry
+    };
+    assert!(
+        exact.matches(&violation),
+        "the path, density, theme and both exact axes all match — only the \
+         `ClearsFloor` reading separates the two entries: {violation}",
+    );
 }
 
 // ---------------------------------------------------------------------------

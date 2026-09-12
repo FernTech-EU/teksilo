@@ -402,7 +402,10 @@ fn a_macos_icon_button_reaches_the_conformance_floor_at_every_density() {
             .into_iter()
             .find(|m| m.widget.ends_with("IconButton") && m.part.is_none())
             .unwrap_or_else(|| panic!("{density:?}: the row holds an icon button"));
-        let floor = teksilo_tokens::InputTokens::for_density(density).min_target_conformance;
+        // The floor the walker judged this row against, off the row itself —
+        // never `InputTokens::for_density`, which answers for the generic
+        // ladder rather than for the theme under measurement.
+        let floor = button.conformance_floor;
         assert!(
             button.expanded.width + 0.1 >= floor && button.expanded.height + 0.1 >= floor,
             "{density:?}: a macOS icon button reaches {:?} against a {floor} dp floor",
@@ -469,7 +472,10 @@ fn a_macos_toggle_reaches_the_conformance_floor_at_every_density() {
             .into_iter()
             .find(|m| m.widget.ends_with("Toggle") && m.part.is_none())
             .unwrap_or_else(|| panic!("{density:?}: the row holds a toggle"));
-        let floor = teksilo_tokens::InputTokens::for_density(density).min_target_conformance;
+        // The floor the walker judged this row against, off the row itself —
+        // never `InputTokens::for_density`, which answers for the generic
+        // ladder rather than for the theme under measurement.
+        let floor = toggle.conformance_floor;
         assert!(
             toggle.expanded.width + 0.1 >= floor && toggle.expanded.height + 0.1 >= floor,
             "{density:?}: a macOS switch reaches {:?} against a {floor} dp floor",

@@ -1490,6 +1490,10 @@ fn the_allow_lists_discriminators_narrow_by_size_and_by_density() {
                 path: path.to_string(),
                 density,
                 theme: teksilo_core::styles::ThemeId::new(INTUI),
+                // Int UI carries the generic ladder at every density — the
+                // subject of `an_int_ui_trees_ladder_is_the_generic_table` in
+                // teksilo-core — so this is the floor the walker would stamp.
+                conformance_floor: InputTokens::for_density(density).min_target_conformance,
                 size: Size::new(paints.0, paints.1),
                 expanded: Size::new(reaches.0, reaches.1),
                 sources: Default::default(),

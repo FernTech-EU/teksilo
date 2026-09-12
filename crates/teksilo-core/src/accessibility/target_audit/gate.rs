@@ -245,6 +245,18 @@ pub fn non_narrowing(
                 }
                 let mut moved = violation.clone();
                 moved.theme = crate::styles::ThemeId::new(other.id);
+                // The floor moves with the theme. A clone that says it is
+                // `other` while carrying the subject theme's floor would judge
+                // a `ClearsFloor` axis for one preset against another preset's
+                // number — the divergence `TargetViolation::conformance_floor`
+                // exists to close, reintroduced here by a falsified clone. The
+                // seed asks what this entry would do if the same finding
+                // appeared under `other`, and that question is only well posed
+                // if the whole row is `other`'s.
+                moved.conformance_floor = (other.theme)()
+                    .with_density(violation.density)
+                    .input
+                    .min_target_conformance;
                 for entry in roster.allow.iter().filter(|e| e.matches(&moved)) {
                     for pin in entry.measured.iter().filter(|p| p.covers(&moved)) {
                         // Two things are deliberately NOT compared as literal

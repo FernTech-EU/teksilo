@@ -57,7 +57,7 @@
 //!
 //! | rule | floor | is it a failure? |
 //! | --- | --- | --- |
-//! | [`MinTargetConformance`](TargetRule::MinTargetConformance) | `min_target_conformance`, 24 dp at **every** density | yes — WCAG 2.2 SC 2.5.8, level AA |
+//! | [`MinTargetConformance`](TargetRule::MinTargetConformance) | `min_target_conformance`, which never scales with density and is 24 dp in every shipped preset | yes — WCAG 2.2 SC 2.5.8, level AA |
 //! | [`SpacingException`](TargetRule::SpacingException) | the same 24 dp, but the target is isolated enough for SC 2.5.8's *spacing* exception | no — a recorded exemption |
 //! | [`TouchTargetRecommendation`](TargetRule::TouchTargetRecommendation) | the density's `target_size` (24 / 32 / 44 dp) | no — 44 dp is Apple HIG and SC 2.5.5 **AAA**, never AA |
 //!
@@ -165,9 +165,13 @@ const PROBE_EPSILON: f32 = 3.0 * PROBE_STEP / (1 << PROBE_REFINE) as f32;
 /// Which rule a target failed to clear.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TargetRule {
-    /// The reachable extent is below `InputTokens::min_target_conformance` —
-    /// **24 dp at every density, never scaled** — and the spacing exception
-    /// does not rescue it.
+    /// The reachable extent is below `InputTokens::min_target_conformance` — a
+    /// floor that **never scales with density**, and is **24 dp in every
+    /// shipped preset** — and the spacing exception does not rescue it.
+    ///
+    /// Read from the **tree's** tokens, so a theme that installs a higher floor
+    /// is judged against its own; the number a given verdict was taken against
+    /// is on the row, as [`TargetMeasurement::conformance_floor`].
     ///
     /// WCAG 2.2 SC 2.5.8 *Target Size (Minimum)*, level **AA**. The only rule
     /// [`TargetRule::is_conformance_failure`] reports, and the only one the
@@ -245,6 +249,21 @@ pub struct TargetMeasurement {
     /// supplied — so it cannot disagree with what was measured, the same
     /// by-construction property [`audit_at_density`] gives `density`.
     pub theme: crate::styles::ThemeId,
+    /// The SC 2.5.8 conformance floor this row was **judged against**, in dp:
+    /// `min_target_conformance` read from the tree's own [`InputTokens`], which
+    /// is the number [`rule`](Self::rule) was decided with and nothing else.
+    ///
+    /// **Carried rather than derived, and that is the whole field.** The obvious
+    /// way to recover it downstream —
+    /// `InputTokens::for_density(density).min_target_conformance` — reads the
+    /// *generic* table, 24 dp at every density, and a theme may install its own
+    /// (the same reason [`measure_targets`] reads the tree's ladder in the first
+    /// place). Derived twice, the two answers can differ, and they did: a failure
+    /// the walker reported against a raised floor was excused one function later
+    /// by [`PinnedGeometry::covers`] against the generic 24, so the audit
+    /// contradicted itself in exactly the case reading the tree's tokens was
+    /// introduced for. Read this field; do not re-derive it.
+    pub conformance_floor: f32,
     /// What the target paints — the node's rectangle, or the region's.
     pub size: Size,
     /// What a coarse pointer can reach: the contiguous cross through the
@@ -351,6 +370,17 @@ pub struct TargetViolation {
     /// four presets is unreadable without it, and because an allow-list pin
     /// discriminates on it.
     pub theme: crate::styles::ThemeId,
+    /// The SC 2.5.8 conformance floor this violation was judged against, in dp —
+    /// carried forward verbatim from
+    /// [`TargetMeasurement::conformance_floor`], where the reason it is carried
+    /// rather than re-derived is written out.
+    ///
+    /// Every consumer that has to ask "does this figure clear the floor?" —
+    /// [`PinnedDp::ClearsFloor`] above all — reads it from here. A consumer that
+    /// reaches for [`InputTokens::for_density`] instead is asking the generic
+    /// table a question this violation has already answered, and will excuse a
+    /// failure under any theme that raises the floor.
+    pub conformance_floor: f32,
     /// What the target paints.
     pub size: Size,
     /// What a coarse pointer can reach — always an exact measurement.
@@ -445,6 +475,7 @@ pub fn target_audit(tree: &WidgetTree, density: TargetDensity) -> Vec<TargetViol
                 path: m.path,
                 density: m.density,
                 theme: m.theme,
+                conformance_floor: m.conformance_floor,
                 size: m.size,
                 expanded: m.expanded,
                 sources: m.sources,
@@ -642,13 +673,20 @@ pub const PIN_TOLERANCE: f32 = 0.1;
 pub enum PinnedDp {
     /// Exactly this many dp, to [`PIN_TOLERANCE`].
     Is(f32),
-    /// At least [`InputTokens::min_target_conformance`] — 24 dp at every
-    /// density.
+    /// At least the conformance floor the audit judged the violation against —
+    /// [`TargetViolation::conformance_floor`], which is the generic ladder's
+    /// 24 dp under every shipped preset and whatever a theme installs otherwise.
     ClearsFloor,
 }
 
 impl PinnedDp {
-    /// Whether `actual` dp satisfies this pin, against the density's floor.
+    /// Whether `actual` dp satisfies this pin, against `floor`.
+    ///
+    /// `floor` must be the audited floor the violation carries in
+    /// [`TargetViolation::conformance_floor`], never one re-derived from
+    /// [`InputTokens::for_density`]: a pin judged against the generic table
+    /// excuses, under a theme that raises the floor, exactly the failures that
+    /// theme exists to refuse.
     pub fn matches(self, actual: f32, floor: f32) -> bool {
         match self {
             PinnedDp::Is(dp) => (actual - dp).abs() <= PIN_TOLERANCE,
@@ -693,8 +731,14 @@ pub struct PinnedGeometry {
 
 impl PinnedGeometry {
     /// Whether `v` is one of the violations this geometry pins.
+    ///
+    /// The floor a [`PinnedDp::ClearsFloor`] axis is held to is the one the
+    /// walker **measured** `v` against, taken off the violation. Re-deriving it
+    /// from [`InputTokens::for_density`] here was a defect: under a theme whose
+    /// `min_target_conformance` is above the generic 24, the walker reported a
+    /// failure the entry then excused.
     pub fn covers(&self, v: &TargetViolation) -> bool {
-        let floor = InputTokens::for_density(v.density).min_target_conformance;
+        let floor = v.conformance_floor;
         self.densities.contains(&v.density)
             && self.themes.iter().any(|t| *t == v.theme.as_str())
             && self.paints.0.matches(v.size.width, floor)
@@ -772,6 +816,12 @@ struct Walker<'a> {
     theme: crate::styles::ThemeId,
     tokens: &'a InputTokens,
     limit: f32,
+    /// The SC 2.5.8 conformance floor, read from `tokens` **once**: what
+    /// [`Walker::classify`] judges against, what the spacing exception's circle
+    /// is sized from, and what every row is stamped with in
+    /// [`TargetMeasurement::conformance_floor`]. One read, so a row's verdict
+    /// and the floor it carries cannot be two different numbers.
+    floor: f32,
     /// The window's client area, from the tree's last layout proposal.
     ///
     /// A press outside it never reaches this tree, so a probe there must not be
@@ -795,6 +845,7 @@ impl<'a> Walker<'a> {
             theme: tree.theme().id.clone(),
             tokens,
             limit: probe_limit(tokens),
+            floor: tokens.min_target_conformance,
             viewport,
         }
     }
@@ -974,6 +1025,7 @@ impl<'a> Walker<'a> {
                 path: candidate.path.clone(),
                 density: self.density,
                 theme: self.theme.clone(),
+                conformance_floor: self.floor,
                 size: rect.size(),
                 expanded,
                 capped,
@@ -1126,6 +1178,7 @@ impl<'a> Walker<'a> {
                 path: candidate.path.clone(),
                 density: self.density,
                 theme: self.theme.clone(),
+                conformance_floor: self.floor,
                 size: rect.size(),
                 expanded: Size::new(0.0, 0.0),
                 capped: false,
@@ -1164,6 +1217,7 @@ impl<'a> Walker<'a> {
             path: candidate.path.clone(),
             density: self.density,
             theme: self.theme.clone(),
+            conformance_floor: self.floor,
             size: rect.size(),
             expanded: grown.size(),
             capped: false,
@@ -1195,7 +1249,7 @@ impl<'a> Walker<'a> {
         neighbours: &[Neighbour],
     ) -> Option<TargetRule> {
         let smaller = reach.width.min(reach.height);
-        if smaller + PROBE_EPSILON < self.tokens.min_target_conformance {
+        if smaller + PROBE_EPSILON < self.floor {
             return Some(
                 if self.spacing_exception_applies(painted, identity, neighbours) {
                     TargetRule::SpacingException
@@ -1205,7 +1259,7 @@ impl<'a> Walker<'a> {
             );
         }
         let recommended = match role {
-            TargetRole::Grab => self.tokens.min_target_conformance,
+            TargetRole::Grab => self.floor,
             _ => self.tokens.target_size,
         };
         if smaller + PROBE_EPSILON < recommended {
@@ -1229,7 +1283,7 @@ impl<'a> Walker<'a> {
         identity: (WidgetId, Option<u16>),
         neighbours: &[Neighbour],
     ) -> bool {
-        let radius = self.tokens.min_target_conformance / 2.0;
+        let radius = self.floor / 2.0;
         let centre = painted.center();
         for neighbour in neighbours {
             if (neighbour.node, neighbour.part) == identity {

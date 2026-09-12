@@ -617,6 +617,12 @@ can override, and none of them changes what a mouse does.
   reveal.
 - **Two overlay-dismissal defects a mouse could feel**, and a hold dispatched
   under a mouse identity that was never there.
+- **A target-size allow-list entry is held to the floor the audit judged against,
+  not to the generic 24 dp table.** Under a theme raising
+  `InputTokens::min_target_conformance`, a `PinnedDp::ClearsFloor` axis excused
+  the very failures the raised floor exists to report.
+  `TargetMeasurement`/`TargetViolation` carry the measured floor as
+  `conformance_floor`, and every consumer reads it instead of re-deriving one.
 
 
 #### Menus

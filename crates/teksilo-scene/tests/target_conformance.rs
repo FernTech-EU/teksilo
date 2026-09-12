@@ -446,7 +446,6 @@ fn the_only_aa_shortfall_in_this_crate_is_a_camera_state() {
 #[test]
 fn the_scroll_bars_reach_comes_from_hit_outset_and_not_from_the_slop_pass() {
     for density in DENSITIES {
-        let tokens = InputTokens::for_density(density);
         let rows: Vec<TargetMeasurement> = measure_fixtures(
             &[TargetFixture::new("bars", |t| {
                 let mut scene = Scene::new();
@@ -475,7 +474,7 @@ fn the_scroll_bars_reach_comes_from_hit_outset_and_not_from_the_slop_pass() {
             );
             if density == TargetDensity::Compact {
                 assert!(
-                    row.capped && reached >= tokens.min_target_conformance,
+                    row.capped && reached >= row.conformance_floor,
                     "at Compact the 25 dp axis budget runs out before the ring \
                      does, so the reach is a bound past the floor: {row:#?}",
                 );
