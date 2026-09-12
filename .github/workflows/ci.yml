@@ -260,21 +260,32 @@ jobs:
       # invoke_action → snapshot_tree → screenshot. Exits 0 on success, 1 on
       # any failure, so the job result is the assertion. Every runner here has
       # at least a software adapter — lavapipe above, DX12 WARP on Windows,
-      # Metal on macOS — so the screenshot is expected to really capture; the
-      # smoke's GPU_UNAVAILABLE skip is the fallback for a host without one,
-      # not the normal path.
+      # Metal on macOS — so the screenshot is expected to really capture.
+      # `TEKSILO_SMOKE_REQUIRE_GPU` is what makes that an assertion rather than
+      # a hope: without it the smoke treats GPU_UNAVAILABLE as a skip and the
+      # job would go green having never exercised the capture path, so an
+      # adapter that stopped loading would retire this job's whole reason to
+      # exist without anyone noticing.
       - name: Live-bridge smoke (Unix socket)
         if: matrix.os != 'windows-latest'
+        env:
+          TEKSILO_SMOKE_REQUIRE_GPU: "1"
         run: |
           if [ "$RUNNER_OS" = "Linux" ]; then
             export DISPLAY=:99
             Xvfb :99 -screen 0 1280x1024x24 &
             for _ in $(seq 1 50); do xdpyinfo -display :99 >/dev/null 2>&1 && break; sleep 0.2; done
+            # The loop above falls through on failure. Without this the window
+            # fails later inside wgpu and the log blames the wrong thing.
+            xdpyinfo -display :99 >/dev/null 2>&1 || {
+              echo "::error::Xvfb never came up on :99"; exit 1; }
           fi
           cargo run -p automation_bridge_smoke
 
       - name: Live-bridge smoke (named pipe)
         if: matrix.os == 'windows-latest'
+        env:
+          TEKSILO_SMOKE_REQUIRE_GPU: "1"
         run: cargo run -p automation_bridge_smoke
 
       # The bridge is debug-gated, so a release binary with the feature on must

@@ -19,6 +19,8 @@
 //! `automation` feature; it is a workspace package, not a cargo example).
 //! With `--serve` it keeps the app alive so an external
 //! `teksilo-automation-mcp --attach` can drive it interactively.
+//! Set `TEKSILO_SMOKE_REQUIRE_GPU=1` on a host that is supposed to have an
+//! adapter (CI does) to turn the screenshot's no-GPU skip into a failure.
 
 use std::time::{Duration, Instant};
 
@@ -151,16 +153,29 @@ fn run_smoke() -> Result<(), String> {
                 data["scale"]
             );
         }
-        // Both GPU codes are a skip, not a failure. `GPU_READBACK_FAILED` is
-        // just as expected as `GPU_UNAVAILABLE` on the GPU-less runners this
-        // smoke is meant to pass on — a software adapter that opens and then
+        // Both GPU codes are a skip, not a failure, on a host that genuinely
+        // has no adapter: `GPU_READBACK_FAILED` is as expected as
+        // `GPU_UNAVAILABLE` there — a software adapter that opens and then
         // cannot map its readback buffer takes that branch — and treating it as
-        // an error would fail the `test-automation` job for the exact hosts it
-        // exists to cover.
+        // an error would fail the smoke for the exact hosts it exists to cover.
+        //
+        // A caller that has provisioned an adapter and wants the capture path
+        // actually exercised sets `TEKSILO_SMOKE_REQUIRE_GPU`, which turns the
+        // skip back into a failure. CI sets it: every runner there has at least
+        // a software adapter (lavapipe on Linux, DX12 WARP on Windows, Metal on
+        // macOS), so a skip means the adapter regressed — and a silent skip
+        // would retire the screenshot assertion without anyone noticing.
         AutomationReply::Err { code, message }
             if code == teksilo::automation::dto::codes::GPU_UNAVAILABLE
                 || code == teksilo::automation::dto::codes::GPU_READBACK_FAILED =>
         {
+            if std::env::var_os("TEKSILO_SMOKE_REQUIRE_GPU").is_some() {
+                return Err(format!(
+                    "screenshot was skipped ({code}: {message}) but \
+                     TEKSILO_SMOKE_REQUIRE_GPU demands a real capture — \
+                     this host was expected to have at least a software adapter"
+                ));
+            }
             eprintln!(
                 "automation_bridge_smoke: no usable GPU for the screenshot ({code}: {message}) — skipped"
             );
