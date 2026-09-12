@@ -98,7 +98,21 @@ fn worker_loop(
                 stats.queued.store(0, Ordering::Relaxed);
             }
             Ok(WorkerCommand::Shutdown) => {
-                let _ = drain(&*queue, &agent, &config, &stats, &mut current_backoff);
+                // `drain` takes at most `max_batch_size` events, so a single
+                // call is not a "final flush" for a queue bigger than one batch
+                // — with the in-memory queue the surplus would die with the
+                // worker. Keep draining while each pass makes progress. A pass
+                // that fails to shrink the queue means either an empty queue or
+                // a failing endpoint (a `Retry` re-queues what it could not
+                // send), and neither is worth asking about twice, so exit stays
+                // bounded by one extra request.
+                loop {
+                    let before = queue.len();
+                    let _ = drain(&*queue, &agent, &config, &stats, &mut current_backoff);
+                    if queue.len() >= before {
+                        break;
+                    }
+                }
                 break;
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {

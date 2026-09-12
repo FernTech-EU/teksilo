@@ -122,7 +122,25 @@ fn run_server(
             Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
                 thread::sleep(Duration::from_millis(10));
             }
-            Err(_) => break,
+            // `accept` reports a transient, per-connection failure the same way
+            // it reports a dead listener. Breaking on one would retire the whole
+            // mock server mid-test and make every later request vanish — the
+            // same unreadable "captured count never reaches N" signature the
+            // blocking fix in `handle_request` exists to remove.
+            Err(e)
+                if matches!(
+                    e.kind(),
+                    std::io::ErrorKind::Interrupted | std::io::ErrorKind::ConnectionAborted
+                ) =>
+            {
+                // Back off like the `WouldBlock` arm rather than spinning, in
+                // case the condition repeats.
+                thread::sleep(Duration::from_millis(10));
+            }
+            Err(e) => {
+                eprintln!("mock server: accept failed, stopping: {e}");
+                break;
+            }
         }
     }
 }
@@ -146,7 +164,9 @@ fn handle_request(mut stream: TcpStream, state: Arc<MockServerState>) {
     // one lost request turns the worker's drain into a `Retry`, and a `Retry`
     // during `Shutdown` re-queues the remaining events into a queue that is
     // about to be dropped — so the captured count never reaches three.
-    stream.set_nonblocking(false).ok();
+    stream
+        .set_nonblocking(false)
+        .expect("the accepted connection must be blocking");
     stream.set_read_timeout(Some(Duration::from_secs(2))).ok();
     let mut buf = [0u8; 8192];
     let mut accumulated = Vec::new();
@@ -155,7 +175,14 @@ fn handle_request(mut stream: TcpStream, state: Arc<MockServerState>) {
         let n = match stream.read(&mut buf) {
             Ok(0) => break,
             Ok(n) => n,
-            Err(_) => break,
+            // Reaching here drops the request without capturing it or
+            // answering it — the client sees a broken pipe and the test fails
+            // as a bare count mismatch. The read timeout above can still land
+            // us here on a loaded host, so name the cause.
+            Err(e) => {
+                eprintln!("mock server: read failed before a whole request arrived: {e}");
+                break;
+            }
         };
         accumulated.extend_from_slice(&buf[..n]);
         if let Some(headers_end) = find_headers_end(&accumulated) {
