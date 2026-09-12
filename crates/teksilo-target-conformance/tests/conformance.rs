@@ -770,18 +770,22 @@ fn light_and_dark_are_the_same_geometry_in_every_preset() {
     }
     let light = keys(census());
     let dark = keys(&gate::conformance_census(&widget_fixtures(), &DARK));
-    let only_light: Vec<&String> = light.iter().filter(|k| !dark.contains(k)).collect();
-    let only_dark: Vec<&String> = dark.iter().filter(|k| !light.contains(k)).collect();
-    assert!(
-        only_light.is_empty() && only_dark.is_empty(),
-        "an appearance changed a geometry, so one representative per family is no longer \
-         enough:\n  light only: {only_light:#?}\n  dark only: {only_dark:#?}",
-    );
-    assert_eq!(
-        light.len(),
-        dark.len(),
-        "the two appearances produce the same failures but not the same number of them",
-    );
+    // Both are sorted, so `==` IS the multiset comparison: it holds every key
+    // AND how many times each occurs. A set difference plus a length check is
+    // not the same question — it accepts light `{A, A, B}` against dark
+    // `{A, B, B}`, which is two appearances disagreeing on which rows they are.
+    if light != dark {
+        let only_light: Vec<&String> = light.iter().filter(|k| !dark.contains(k)).collect();
+        let only_dark: Vec<&String> = dark.iter().filter(|k| !light.contains(k)).collect();
+        panic!(
+            "an appearance changed a geometry, so one representative per family is no longer \
+             enough: {} light rows against {} dark\n  light only: {only_light:#?}\n  dark only: \
+             {only_dark:#?}\n(both lists empty means the two agree on every key and differ on how \
+             many times one occurs)",
+            light.len(),
+            dark.len(),
+        );
+    }
 }
 
 /// An allow-list `path` may not span a type one preset owns.
@@ -838,14 +842,15 @@ fn no_entry_names_a_theme_owned_wrapper_in_its_path() {
 fn the_allow_list_excuses_only_the_geometry_it_pinned() {
     // Per preset: four size seeds and three theme seeds for each covered
     // violation — so seven times that preset's own census, and the figure below
-    // is the smallest of the four **exactly**, the way the sibling gates set
-    // theirs (scene 12, charts 40). Exactly, not comfortably under: this number
-    // is the only thing standing between "every geometry in the list was seeded
-    // against" and "the census quietly collapsed and the seeding proved
-    // nothing", and a slack figure buys a silent collapse the room to hide in.
-    // It reddens when the census moves, which is the point — re-measure with
-    // `zz_census` (the CENSUS-TOTAL lines), take the smallest preset's total,
-    // and multiply by seven.
+    // is the smallest of the four **exactly**. Exactly, not comfortably under:
+    // this number is the only thing standing between "every geometry in the list
+    // was seeded against" and "the census quietly collapsed and the seeding
+    // proved nothing", and a slack figure buys a silent collapse the room to
+    // hide in. It reddens when the census shrinks — re-measure with `zz_census`
+    // (the CENSUS-TOTAL lines), take the smallest preset's total, and multiply
+    // by seven. Note what it does NOT catch, because the shared matcher takes a
+    // floor rather than an equality: a census that GREW, which is what the
+    // sibling gates hold with an explicit `census.len()` assertion of their own.
     let findings = gate::non_narrowing(census(), &ROSTER, 7 * 116);
     assert!(findings.is_empty(), "{}", findings.join("\n"));
 }

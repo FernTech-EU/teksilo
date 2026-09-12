@@ -285,9 +285,12 @@ static ROSTER: gate::Roster = gate::Roster {
     allow: ALLOW_LIST,
 };
 
-/// Every conformance failure the fixture list produces, computed once.
-fn census() -> Vec<TargetViolation> {
-    gate::conformance_census(&fixtures(), &ROSTER)
+/// Every conformance failure the fixture list produces, computed **once** per
+/// test binary — the sweep is the whole fixture list at three densities, and the
+/// tests run as threads in one process, so each of them wants the same answer.
+fn census() -> &'static [TargetViolation] {
+    static CENSUS: std::sync::OnceLock<Vec<TargetViolation>> = std::sync::OnceLock::new();
+    CENSUS.get_or_init(|| gate::conformance_census(&fixtures(), &ROSTER))
 }
 
 /// **The seed.** One entry, and it is not a layout defect: it is what a camera
@@ -330,7 +333,7 @@ const ALLOW_LIST: &[AllowedViolation] = &[AllowedViolation {
 /// all three densities.
 #[test]
 fn no_scene_target_falls_below_the_conformance_floor_at_any_density() {
-    let failures = gate::conformance_failures(&census(), &ROSTER);
+    let failures = gate::conformance_failures(census(), &ROSTER);
     assert!(
         failures.is_empty(),
         "{} scene target(s) below the 24 dp WCAG 2.2 SC 2.5.8 (AA) floor:\n{}",
@@ -352,12 +355,21 @@ fn no_scene_target_falls_below_the_conformance_floor_at_any_density() {
 #[test]
 fn no_scene_allow_list_entry_is_stale() {
     let census = census();
-    let mut findings = gate::roster_defects(&census, &ROSTER);
-    findings.extend(gate::stale_entries(&census, &ROSTER));
+    let mut findings = gate::roster_defects(census, &ROSTER);
+    findings.extend(gate::stale_entries(census, &ROSTER));
     // One zoomed-out button at three densities, four scalars each, and no other
-    // theme to seed into — a smaller number means the census moved.
-    findings.extend(gate::non_narrowing(&census, &ROSTER, 12));
+    // theme to seed into — a smaller number means the census shrank.
+    findings.extend(gate::non_narrowing(census, &ROSTER, 12));
     assert!(findings.is_empty(), "{}", findings.join("\n"));
+    // And the seed floor above is a floor: it cannot see a census that GREW,
+    // which is exactly how a newly-appearing geometry an existing pin happens to
+    // cover slips past all three questions. The count is the other half.
+    assert_eq!(
+        census.len(),
+        3,
+        "one zoomed-out button at three densities — a different number means the \
+         census moved and this test is proving something else: {census:#?}",
+    );
 }
 
 /// The whole conformance story of this crate, as numbers, with the AA failures

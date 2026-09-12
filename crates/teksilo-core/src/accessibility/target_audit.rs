@@ -422,7 +422,10 @@ pub fn measure_targets(tree: &WidgetTree, density: TargetDensity) -> Vec<TargetM
          use `audit_at_density`.",
         tokens.density, density,
     );
-    let walker = Walker::new(tree, density, &tokens);
+    // `tokens.density` rather than the argument: a release build compiles the
+    // assertion above away, and a row whose `density` names one ladder while its
+    // verdict came from another is incoherent rather than merely wrong.
+    let walker = Walker::new(tree, tokens.density, &tokens);
     walker.run()
 }
 
@@ -613,8 +616,12 @@ pub fn unprojected_style_slots(theme: &crate::styles::Theme) -> Vec<&'static str
 // The allow-list vocabulary the per-crate gates share
 // ---------------------------------------------------------------------------
 
-/// Tolerance for a pinned dp figure: three times the probe's refinement quantum
-/// (`PROBE_STEP` / 2^`PROBE_REFINE`, 0.031 dp).
+/// Tolerance for a pinned dp figure: the probe's refinement quantum
+/// (`PROBE_STEP` / 2^`PROBE_REFINE`, 0.031 dp) three times over, **rounded up**
+/// to a round number — 0.09375 dp of error, written 0.1. The rounding is why
+/// this is a literal where `PROBE_EPSILON` is an expression: that one is a
+/// bound on the probe and must track it exactly; this one is a legibility
+/// figure a human writes pins against.
 ///
 /// A pin is therefore written as the round number the geometry implies, and
 /// still fails on any dp-scale regression. Three quanta rather than one because

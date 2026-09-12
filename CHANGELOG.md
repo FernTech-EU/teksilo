@@ -671,8 +671,6 @@ can override, and none of them changes what a mouse does.
 - **A macOS switch and an icon button meet the 24 dp target floor.** Both are
   drawn at the size the preset asks for, Apple's 22 dp track and the 18 dp
   compact icon button among them; the node around the chrome is what grew.
-
-
 - **Three controls showed no pressed appearance for a pointer at all** — the
   `ToolBox` header, `RadioTile`, and the calendar's month/year cell, the last only
   ever writing `false` into its own state.

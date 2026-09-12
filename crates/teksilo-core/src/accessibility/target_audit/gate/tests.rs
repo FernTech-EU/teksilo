@@ -542,8 +542,11 @@ fn the_roster_lints() {
         exception: None,
         why: "a fixture entry",
     }];
+    // Both positions the lint has to reach: a theme-owned type in the
+    // fixture-name-prefixed FIRST segment, which the lint has to strip the name
+    // off before it can see, and one in an ordinary later segment.
     static THEME_OWNED_PATH: &[AllowedViolation] = &[AllowedViolation {
-        path: "Row > FluentRowFrame > Grip",
+        path: "row: FluentRowFrame > MacOsRowFrame > Grip",
         measured: &[SIXTEEN],
         owner: "a fixture",
         exception: None,
@@ -595,19 +598,13 @@ fn the_roster_lints() {
     let rows: Vec<(&str, Roster, Vec<TargetViolation>, &str)> = vec![
         (
             "a roster id that has drifted from the theme's own",
-            Roster {
-                themes: DRIFTED_ID.themes,
-                allow: DRIFTED_ID.allow,
-            },
+            DRIFTED_ID,
             Vec::new(),
             "calls itself",
         ),
         (
             "a roster naming the anonymous id",
-            Roster {
-                themes: ANONYMOUS_ROSTER.themes,
-                allow: ANONYMOUS_ROSTER.allow,
-            },
+            ANONYMOUS_ROSTER,
             Vec::new(),
             "measures no particular preset",
         ),
@@ -675,6 +672,18 @@ fn the_roster_lints() {
             "{what}: no finding contains `{expected}`: {findings:#?}",
         );
     }
+
+    // The theme-owned-path row above carries the defect twice, and the lint owes
+    // a finding for each: the segment behind a fixture name is the one a plain
+    // `split(" > ")` cannot see, and it is the form the real list's own entries
+    // are written in.
+    let both = roster_defects(&[], &roster_with(THEME_OWNED_PATH));
+    assert!(
+        both.iter().any(|f| f.contains("`FluentRowFrame`"))
+            && both.iter().any(|f| f.contains("`MacOsRowFrame`")),
+        "the lint must name the type behind the fixture name as well as the \
+         plain one; it reported {both:#?}",
+    );
 
     // The clean roster every row was derived from carries none of them, so each
     // row above reports the defect it seeded and not the fixture's own noise.

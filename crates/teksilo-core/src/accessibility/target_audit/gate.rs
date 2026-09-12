@@ -80,6 +80,7 @@ const NO_OWNER_MARKER: &str = "No owner";
 /// The id is declared rather than derived so [`roster_defects`] can check the
 /// two agree — a roster whose declared id has drifted from the theme's own
 /// [`ThemeId`](crate::styles::ThemeId) would silently excuse nothing.
+#[derive(Clone, Copy)]
 pub struct ThemeSubject {
     /// The theme's own `ThemeId`, as a pin writes it.
     pub id: &'static str,
@@ -90,6 +91,7 @@ pub struct ThemeSubject {
 
 /// Everything a gate measures against: the presets, the allow-list, and the
 /// per-preset viewport overrides.
+#[derive(Clone, Copy)]
 pub struct Roster {
     /// One entry per theme family the gate sweeps.
     ///
@@ -118,6 +120,14 @@ pub struct Roster {
 /// rows are returned: the other two rules are a census, not a gate. Compute it
 /// once and hand it to the four questions below — each sweeps the whole product
 /// and a gate that recomputed it per test would pay for it four times.
+///
+/// **The roster owns the theme axis, so a fixture's own
+/// [`TargetFixture::with_theme`](super::TargetFixture::with_theme) is
+/// overwritten here** — a list swept over a product cannot also have per-fixture
+/// presets, or a pin's theme would name something the fixture never used. A
+/// fixture that genuinely needs its own theme belongs in a test that calls
+/// [`audit_fixtures`] or `measure_fixtures` directly, never in a list handed to
+/// this function.
 pub fn conformance_census(fixtures: &[TargetFixture], roster: &Roster) -> Vec<TargetViolation> {
     let mut out = Vec::new();
     for subject in roster.themes {
@@ -326,7 +336,11 @@ pub fn roster_defects(census: &[TargetViolation], roster: &Roster) -> Vec<String
             ));
         }
         for segment in entry.path.split(" > ") {
-            let segment = segment.trim();
+            // A path's first segment may carry the fixture's name
+            // (`"docking: DockingLayout"`), which is the form several real
+            // entries use — so the name is stripped before the prefix test, or
+            // a theme-owned type in exactly that position escapes the lint.
+            let segment = segment.rsplit(": ").next().unwrap_or(segment).trim();
             if THEME_OWNED_PREFIXES.iter().any(|p| segment.starts_with(p)) {
                 out.push(format!(
                     "allow-list entry `{}` names `{segment}`, a type one preset owns. A path \

@@ -471,9 +471,20 @@ fn a_macos_toggle_reaches_the_conformance_floor_at_every_density() {
             .unwrap_or_else(|| panic!("{density:?}: the row holds a toggle"));
         let floor = teksilo_tokens::InputTokens::for_density(density).min_target_conformance;
         assert!(
-            toggle.expanded.height + 0.1 >= floor,
+            toggle.expanded.width + 0.1 >= floor && toggle.expanded.height + 0.1 >= floor,
             "{density:?}: a macOS switch reaches {:?} against a {floor} dp floor",
             toggle.expanded,
+        );
+        // Both axes, and the gate's own verdict as well — the height alone is
+        // satisfied by a switch that still fails on the other axis, or by a row
+        // whose other targets do. Its icon-button sibling asks the same pair.
+        assert_eq!(
+            target_audit(&tree, density)
+                .into_iter()
+                .filter(|v| v.rule.is_conformance_failure())
+                .count(),
+            0,
+            "{density:?}: the row reports a conformance failure",
         );
     }
 }

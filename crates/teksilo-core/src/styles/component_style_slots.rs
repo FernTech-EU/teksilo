@@ -92,31 +92,17 @@ pub struct ComponentStyleSlots {
     pub text_selection: Option<SharedTextSelectionStyle>,
 }
 
-impl ComponentStyleSlots {
-    /// The names of the slots that carry an override, in declaration order.
-    ///
-    /// One consumer: the target-conformance audit
-    /// ([`unprojected_style_slots`](crate::accessibility::target_audit::unprojected_style_slots)),
-    /// which reports the app-installed Tier-3 styles no
-    /// [`DensityProjection`](crate::styles::DensityProjection) will re-derive —
-    /// so a control that could not follow the density ladder is attributed to
-    /// the style that owns its metrics rather than looking like a framework bug.
-    ///
-    /// The body destructures `Self` **without** a `..` rest pattern, so adding a
-    /// slot to the struct and forgetting it here is a compile error rather than
-    /// a silently unreported override.
-    pub fn installed(&self) -> Vec<&'static str> {
-        macro_rules! probe {
-            ($($name:ident),* $(,)?) => {{
-                let Self { $($name),* } = self;
-                let mut out = Vec::new();
-                $(if $name.is_some() {
-                    out.push(stringify!($name));
-                })*
-                out
-            }};
-        }
-        probe!(
+/// Every slot's name, written **once**, expanded through by each probe below.
+///
+/// Two hand-maintained copies of a forty-two-name list is how one of them loses
+/// a slot, which for [`ComponentStyleSlots::installed`] and
+/// [`ComponentStyleSlots::unchanged_against`] means an override that is silently
+/// never reported. The `Self { .. }`-less destructure inside each probe still
+/// makes a slot added to the struct a compile error; this makes a slot added
+/// *here* reach both askers at once.
+macro_rules! for_every_slot {
+    ($probe:ident) => {
+        $probe!(
             button,
             split_button,
             splitter,
@@ -160,6 +146,34 @@ impl ComponentStyleSlots {
             web_view,
             text_selection
         )
+    };
+}
+
+impl ComponentStyleSlots {
+    /// The names of the slots that carry an override, in declaration order.
+    ///
+    /// One consumer: the target-conformance audit
+    /// ([`unprojected_style_slots`](crate::accessibility::target_audit::unprojected_style_slots)),
+    /// which reports the app-installed Tier-3 styles no
+    /// [`DensityProjection`](crate::styles::DensityProjection) will re-derive —
+    /// so a control that could not follow the density ladder is attributed to
+    /// the style that owns its metrics rather than looking like a framework bug.
+    ///
+    /// The body destructures `Self` **without** a `..` rest pattern, so adding a
+    /// slot to the struct and forgetting it in `for_every_slot!` is a compile
+    /// error rather than a silently unreported override.
+    pub fn installed(&self) -> Vec<&'static str> {
+        macro_rules! probe {
+            ($($name:ident),* $(,)?) => {{
+                let Self { $($name),* } = self;
+                let mut out = Vec::new();
+                $(if $name.is_some() {
+                    out.push(stringify!($name));
+                })*
+                out
+            }};
+        }
+        for_every_slot!(probe)
     }
 
     /// The slots installed here that are **the same object** in `other` — the
@@ -180,7 +194,9 @@ impl ComponentStyleSlots {
     ///
     /// The body destructures `self` without a `..` rest pattern, for the reason
     /// [`installed`](Self::installed) does: adding a slot to the struct and
-    /// forgetting it here is a compile error rather than a silent omission.
+    /// forgetting it in `for_every_slot!` is a compile error rather than a
+    /// silent omission. Both probes expand through that one roster, so neither
+    /// can be the copy that fell behind.
     pub fn unchanged_against(&self, other: &Self) -> Vec<&'static str> {
         fn same<T: ?Sized>(a: &Option<std::rc::Rc<T>>, b: &Option<std::rc::Rc<T>>) -> bool {
             matches!((a, b), (Some(x), Some(y)) if std::rc::Rc::ptr_eq(x, y))
@@ -198,50 +214,7 @@ impl ComponentStyleSlots {
                 out
             }};
         }
-        probe!(
-            button,
-            split_button,
-            splitter,
-            icon_button,
-            toggle,
-            checkbox,
-            radio,
-            radio_tile,
-            slider,
-            text_input,
-            combo_box,
-            menu_item,
-            panel,
-            card,
-            chart,
-            popover,
-            tooltip,
-            scroll_bar,
-            standard_item,
-            tab,
-            dialog,
-            snackbar,
-            toast,
-            banner,
-            badge,
-            progress_bar,
-            link,
-            segmented_control,
-            avatar,
-            calendar,
-            color_picker,
-            spin_box,
-            date_edit,
-            search_field,
-            rich_text_editor,
-            table,
-            list_container,
-            drop_zone,
-            drop_target,
-            grid_view,
-            web_view,
-            text_selection
-        )
+        for_every_slot!(probe)
     }
 
     /// Whether no slot carries an override — the state every shipped preset

@@ -283,9 +283,12 @@ static ROSTER: gate::Roster = gate::Roster {
     allow: ALLOW_LIST,
 };
 
-/// Every conformance failure the fixture list produces, computed once.
-fn census() -> Vec<TargetViolation> {
-    gate::conformance_census(&fixtures(), &ROSTER)
+/// Every conformance failure the fixture list produces, computed **once** per
+/// test binary — the sweep is the whole fixture list at three densities, and the
+/// tests run as threads in one process, so each of them wants the same answer.
+fn census() -> &'static [TargetViolation] {
+    static CENSUS: std::sync::OnceLock<Vec<TargetViolation>> = std::sync::OnceLock::new();
+    CENSUS.get_or_init(|| gate::conformance_census(&fixtures(), &ROSTER))
 }
 
 /// **The seed.** One entry, for a shortfall this crate had already recorded in
@@ -334,7 +337,7 @@ const ALLOW_LIST: &[AllowedViolation] = &[AllowedViolation {
 /// three densities, except the written entry above.
 #[test]
 fn no_chart_target_falls_below_the_conformance_floor_at_any_density() {
-    let failures = gate::conformance_failures(&census(), &ROSTER);
+    let failures = gate::conformance_failures(census(), &ROSTER);
     assert!(
         failures.is_empty(),
         "{} chart target(s) below the 24 dp WCAG 2.2 SC 2.5.8 (AA) floor:\n{}",
@@ -361,11 +364,20 @@ fn no_chart_target_falls_below_the_conformance_floor_at_any_density() {
 #[test]
 fn no_chart_allow_list_entry_is_stale() {
     let census = census();
-    let mut findings = gate::roster_defects(&census, &ROSTER);
-    findings.extend(gate::stale_entries(&census, &ROSTER));
+    let mut findings = gate::roster_defects(census, &ROSTER);
+    findings.extend(gate::stale_entries(census, &ROSTER));
     // Ten Compact legend rows, four scalars each, and no other theme to seed
-    // into — a smaller number means the census moved.
-    findings.extend(gate::non_narrowing(&census, &ROSTER, 40));
+    // into — a smaller number means the census shrank.
+    findings.extend(gate::non_narrowing(census, &ROSTER, 40));
+    // And the seed floor above is a floor: it cannot see a census that GREW,
+    // which is exactly how a newly-appearing geometry an existing pin happens to
+    // cover slips past all three questions. The count is the other half.
+    assert_eq!(
+        census.len(),
+        10,
+        "ten Compact legend rows — a different number means the census moved and \
+         this test is proving something else: {census:#?}",
+    );
     for entry in ALLOW_LIST {
         if let Some(name) = entry.exception
             && !entry.why.contains(name)
