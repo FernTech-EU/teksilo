@@ -49,34 +49,41 @@ fn row(theme: Theme, density: TargetDensity, checked: &Signal<bool>, selected: b
 /// satisfied by the defect.
 #[test]
 fn a_mouse_can_tick_a_checkbox_in_a_fluent_list_row() {
-    for density in [TargetDensity::Compact, TargetDensity::Touch] {
-        let checked = Signal::new(false);
-        let mut tree = row(teksilo_theme_fluent::light(), density, &checked, false);
+    // Selected as well as not: the pill is *painted* only on a selected row,
+    // and selected is therefore the state the accent bar exists for — a
+    // refactor that mounts the pill only when selected (or adds a second
+    // selection-only overlay without `hit_transparent`) regresses exactly the
+    // rows an unselected-only test never presses.
+    for selected in [false, true] {
+        for density in [TargetDensity::Compact, TargetDensity::Touch] {
+            let checked = Signal::new(false);
+            let mut tree = row(teksilo_theme_fluent::light(), density, &checked, selected);
 
-        let box_node = measure_targets(&tree, density)
-            .into_iter()
-            .find(|m| m.widget.ends_with("Checkbox") && m.part.is_none())
-            .unwrap_or_else(|| panic!("the row builds a checkbox at {density:?}"));
-        let at = tree.bounds(box_node.node).center();
+            let box_node = measure_targets(&tree, density)
+                .into_iter()
+                .find(|m| m.widget.ends_with("Checkbox") && m.part.is_none())
+                .unwrap_or_else(|| panic!("the row builds a checkbox at {density:?}"));
+            let at = tree.bounds(box_node.node).center();
 
-        tree.pointer_move(at);
-        tree.dispatch_event(WidgetEvent::pointer_down(
-            at,
-            PointerButton::Primary,
-            Modifiers::default(),
-        ));
-        tree.dispatch_event(WidgetEvent::pointer_up(
-            at,
-            PointerButton::Primary,
-            Modifiers::default(),
-        ));
+            tree.pointer_move(at);
+            tree.dispatch_event(WidgetEvent::pointer_down(
+                at,
+                PointerButton::Primary,
+                Modifiers::default(),
+            ));
+            tree.dispatch_event(WidgetEvent::pointer_up(
+                at,
+                PointerButton::Primary,
+                Modifiers::default(),
+            ));
 
-        assert!(
-            checked.get(),
-            "a mouse press at the centre of the checkbox in a Fluent row at \
-             {density:?} did not tick it: the press was taken by something \
-             painted over the row",
-        );
+            assert!(
+                checked.get(),
+                "a mouse press at the centre of the checkbox in a Fluent row \
+                 (selected: {selected}) at {density:?} did not tick it: the \
+                 press was taken by something painted over the row",
+            );
+        }
     }
 }
 

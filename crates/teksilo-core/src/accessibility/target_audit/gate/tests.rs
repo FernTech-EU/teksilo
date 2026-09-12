@@ -30,7 +30,8 @@
 //! | [`non_narrowing`](super::non_narrowing) stops seeding the size axes | [`a_blanket_entry_survives_a_seeded_size_regression`] |
 //! | it stops seeding the theme axis | [`a_theme_axis_that_decorates_rather_than_narrows_is_reported`] |
 //! | it stops counting its seeds | [`a_census_that_collapsed_is_reported_as_proving_less`] |
-//! | any one of [`roster_defects`](super::roster_defects)' eleven lints | that lint's own row in [`the_roster_lints`] |
+//! | it re-derives the moved seed's floor through `Theme::with_density` instead of reading the census | [`a_theme_seeds_floor_comes_from_the_censuss_own_rows`] |
+//! | any one of [`roster_defects`](super::roster_defects)' thirteen lints | that lint's own row in [`the_roster_lints`] |
 //!
 //! Every row above has been run: the named check was replaced by an early
 //! `return`, the file touched so cargo could not reuse the object built from the
@@ -150,6 +151,7 @@ const UNDERSIZED: &[TargetFixture] = &[TargetFixture::new(
 const ALPHA: &str = "alpha.light";
 const BETA: &str = "beta.light";
 const LENIENT: &str = "lenient.light";
+const RELAXED: &str = "relaxed.light";
 
 fn alpha() -> Theme {
     crate::presets::intui::light().with_id(ALPHA)
@@ -168,6 +170,15 @@ fn beta() -> Theme {
 /// exercises.
 fn lenient() -> Theme {
     let mut theme = crate::presets::intui::light().with_id(LENIENT);
+    theme.input.min_target_conformance = 16.0;
+    theme
+}
+
+/// A second theme with [`lenient`]'s lowered floor and the same projection-less
+/// shape, so `Theme::with_density` would reset its ladder to the generic table.
+/// The pair exists for [`a_theme_seeds_floor_comes_from_the_censuss_own_rows`].
+fn relaxed() -> Theme {
+    let mut theme = crate::presets::intui::light().with_id(RELAXED);
     theme.input.min_target_conformance = 16.0;
     theme
 }
@@ -288,6 +299,39 @@ static TWO_FLOORS_EXACT: Roster = Roster {
         },
     ],
     allow: &[EXACT_ENTRY],
+};
+
+/// A 20 x 20 geometry pinned under both lowered-floor themes, with the paint
+/// judged against the floor — the axis their real 16 dp and the generic 24
+/// disagree about.
+const TWENTY_UNDER_BOTH: PinnedGeometry = PinnedGeometry {
+    densities: ALL_DENSITIES,
+    themes: &[LENIENT, RELAXED],
+    paints: (ClearsFloor, ClearsFloor),
+    reaches: (Is(20.0), Is(20.0)),
+};
+
+const SHARED_FLOOR_ENTRY: AllowedViolation = AllowedViolation {
+    path: "Grip",
+    measured: &[TWENTY_UNDER_BOTH],
+    owner: "a fixture",
+    exception: None,
+    why: "a fixture entry over two themes that share a lowered floor",
+};
+
+/// Two projection-less themes sharing a lowered floor.
+static SHARED_FLOOR: Roster = Roster {
+    themes: &[
+        ThemeSubject {
+            id: LENIENT,
+            theme: lenient,
+        },
+        ThemeSubject {
+            id: RELAXED,
+            theme: relaxed,
+        },
+    ],
+    allow: &[SHARED_FLOOR_ENTRY],
 };
 
 /// The roster the fixtures above are written against.
@@ -606,6 +650,56 @@ fn a_theme_seed_is_judged_against_the_floor_of_the_theme_it_moved_to() {
     );
 }
 
+/// The moved seed's floor is read off the census's own rows under the
+/// destination theme, and only falls back to `Theme::with_density` for a pair
+/// the census never measured.
+///
+/// The two sources disagree exactly for the theme shape this file already
+/// models: `lenient` and `relaxed` install a 16 dp floor with **no**
+/// projection, so the density door resets them to the generic 24. A 20 dp
+/// paint pinned `ClearsFloor` clears 16 and not 24 — re-derived, the pin stops
+/// covering the moved seed, the exhibited check never runs, and a theme axis
+/// that decorates goes unreported. The census carries `relaxed`'s floor on its
+/// own rows (a row that need not match the entry at all), which is where the
+/// matcher reads it.
+///
+/// Mutation contract: restore the unconditional
+/// `(other.theme)().with_density(..)` derivation in
+/// [`non_narrowing`](super::non_narrowing) and this reddens.
+#[test]
+fn a_theme_seeds_floor_comes_from_the_censuss_own_rows() {
+    let mut excused = violation(
+        "Row > Grip",
+        LENIENT,
+        TargetDensity::Compact,
+        (20.0, 20.0),
+        (20.0, 20.0),
+    );
+    excused.conformance_floor = 16.0;
+    // Any `relaxed` row at the same density carries the floor the walker
+    // judged that theme with; its geometry deliberately matches nothing.
+    let mut elsewhere = violation(
+        "Elsewhere",
+        RELAXED,
+        TargetDensity::Compact,
+        (10.0, 10.0),
+        (10.0, 10.0),
+    );
+    elsewhere.conformance_floor = 16.0;
+    let census = vec![excused, elsewhere];
+
+    let findings = non_narrowing(&census, &SHARED_FLOOR, 0);
+    assert_eq!(
+        findings.len(),
+        1,
+        "the moved seed keeps `relaxed`'s real 16 dp floor, so the pin still \
+         covers it there and the un-exhibited geometry is reported; a floor \
+         re-derived through the density door comes back 24, the pin stops \
+         covering, and nothing is reported at all: {findings:#?}",
+    );
+    assert!(findings[0].contains(RELAXED), "{findings:#?}");
+}
+
 /// The guard's own guard: a census that collapsed proves less than the question
 /// above reads as proving, and says so.
 #[test]
@@ -622,7 +716,7 @@ fn a_census_that_collapsed_is_reported_as_proving_less() {
 // roster_defects
 // ---------------------------------------------------------------------------
 
-/// Each of the eleven lints, seeded one at a time.
+/// Each of the thirteen lints, seeded one at a time.
 ///
 /// A table rather than eleven functions because the shape is identical in every
 /// row — build the one defect, assert the lint names it — and because a table is
@@ -665,7 +759,21 @@ fn the_roster_lints() {
         measured: &[SIXTEEN],
         owner: "",
         exception: Some("Inline"),
-        why: "No owner: the exception is the answer, not a deferral.",
+        why: "No owner: the *Inline* exception is the answer, not a deferral.",
+    }];
+    static UNMENTIONED_EXCEPTION: &[AllowedViolation] = &[AllowedViolation {
+        path: "Grip",
+        measured: &[SIXTEEN],
+        owner: "a fixture",
+        exception: Some("Inline"),
+        why: "a fixture entry whose justification never names the exception it claims",
+    }];
+    static INVENTED_EXCEPTION: &[AllowedViolation] = &[AllowedViolation {
+        path: "Grip",
+        measured: &[SIXTEEN],
+        owner: "a fixture",
+        exception: Some("Redundant"),
+        why: "a fixture entry claiming Redundant, a discharge SC 2.5.8 does not grant",
     }];
     static NO_PIN: &[AllowedViolation] = &[AllowedViolation {
         path: "Grip",
@@ -753,6 +861,18 @@ fn the_roster_lints() {
             "a debt with an address",
         ),
         (
+            "an entry claiming an exception its justification never mentions",
+            roster_with(UNMENTIONED_EXCEPTION),
+            grip_census(),
+            "exception in a field its justification",
+        ),
+        (
+            "an entry claiming an exception SC 2.5.8 does not define",
+            roster_with(INVENTED_EXCEPTION),
+            grip_census(),
+            "not one of SC 2.5.8's exceptions",
+        ),
+        (
             "an entry that pins nothing",
             roster_with(NO_PIN),
             grip_census(),
@@ -795,7 +915,7 @@ fn the_roster_lints() {
             "absent from the list without being clean",
         ),
     ];
-    assert_eq!(rows.len(), 11, "one row per lint");
+    assert_eq!(rows.len(), 13, "one row per lint");
 
     for (what, roster, census, expected) in &rows {
         let findings = roster_defects(census, roster);

@@ -152,12 +152,11 @@ macro_rules! for_every_slot {
 impl ComponentStyleSlots {
     /// The names of the slots that carry an override, in declaration order.
     ///
-    /// One consumer: the target-conformance audit
-    /// ([`unprojected_style_slots`](crate::accessibility::target_audit::unprojected_style_slots)),
-    /// which reports the app-installed Tier-3 styles no
-    /// [`DensityProjection`](crate::styles::DensityProjection) will re-derive —
-    /// so a control that could not follow the density ladder is attributed to
-    /// the style that owns its metrics rather than looking like a framework bug.
+    /// The direct "what is installed here" question, kept for diagnostics and
+    /// tests. Its original consumer — the target-conformance audit's
+    /// [`unprojected_style_slots`](crate::accessibility::target_audit::unprojected_style_slots)
+    /// — now asks [`unchanged_against`](Self::unchanged_against) instead,
+    /// comparing the theme derived at two densities.
     ///
     /// The body destructures `Self` **without** a `..` rest pattern, so adding a
     /// slot to the struct and forgetting it in `for_every_slot!` is a compile

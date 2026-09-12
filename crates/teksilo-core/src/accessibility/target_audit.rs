@@ -405,8 +405,12 @@ impl std::fmt::Display for TargetViolation {
         }
         write!(
             f,
-            " — paints {:.1}×{:.1}, reaches {:.1}×{:.1}",
-            self.size.width, self.size.height, self.expanded.width, self.expanded.height
+            " — paints {:.1}×{:.1}, reaches {:.1}×{:.1} against a {} dp floor",
+            self.size.width,
+            self.size.height,
+            self.expanded.width,
+            self.expanded.height,
+            self.conformance_floor,
         )?;
         if self.sources.any() {
             write!(
@@ -517,6 +521,7 @@ pub fn audit_at_density(
 /// fixture certifies a target that a real tappable row would deny. That is the
 /// redundancy trap A10 records, and a fixture list is where it is either avoided
 /// or walked into wholesale.
+#[derive(Clone, Copy)]
 pub struct TargetFixture {
     /// The name that prefixes every violation's `path`, so a failure names its
     /// subject before it names a widget type.
@@ -525,6 +530,15 @@ pub struct TargetFixture {
     pub viewport: Size,
     /// The theme to install **before** the subject is built, so its recipes bake
     /// the audited density's dimensions. Defaults to the IntUI light preset.
+    ///
+    /// The driver derives it per density through
+    /// [`Theme::with_density`](crate::styles::Theme::with_density), whose
+    /// **default branch replaces the whole `input` token group with the generic
+    /// table**. A theme that installs
+    /// its own ladder — a raised `min_target_conformance` above all — keeps it
+    /// through this door only by registering a
+    /// [`DensityProjection`](crate::styles::DensityProjection); without one the
+    /// custom ladder is silently reset and the audit judges the generic floor.
     pub theme: fn() -> crate::styles::Theme,
     /// Builds the subject and returns its root. Must not install a theme of its
     /// own — that would discard the density the driver just set.

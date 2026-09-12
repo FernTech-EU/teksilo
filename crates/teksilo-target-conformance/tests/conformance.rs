@@ -13,7 +13,7 @@ use std::rc::Rc;
 use teksilo_canvas::Size;
 use teksilo_core::accessibility::target_audit::TargetFixture;
 use teksilo_core::accessibility::target_audit::{
-    AllowedViolation,
+    AllowedViolation, PIN_TOLERANCE,
     PinnedDp::{ClearsFloor, Is},
     PinnedGeometry, TargetRule, TargetViolation, audit_fixtures, gate, measure_fixtures,
     unprojected_style_slots,
@@ -21,7 +21,9 @@ use teksilo_core::accessibility::target_audit::{
 use teksilo_core::presets::intui;
 use teksilo_core::widget_id::WidgetId;
 use teksilo_i18n::lit;
-use teksilo_target_conformance::{EXPECTED_SUBJECTS, in_tappable_row, widget_fixtures};
+use teksilo_target_conformance::{
+    EXPECTED_NON_TARGETS, EXPECTED_SUBJECTS, in_tappable_row, widget_fixtures,
+};
 use teksilo_tokens::{Color, InputTokens, TargetDensity};
 use teksilo_widgets::primitives::{HStack, Padding, TextWidget};
 use teksilo_widgets::*;
@@ -215,7 +217,14 @@ const ALLOW_LIST: &[AllowedViolation] = &[
               which the invariant forbids.",
     },
     AllowedViolation {
-        path: "HStack > HitTarget",
+        // Scoped to the fixture, deliberately: the POPULATED field's clear slot
+        // is the same `HitTarget` node on the same `HStack > HitTarget` path,
+        // and 16 x 16 reaching 22 x 24 at Compact is exactly the regression
+        // signature `an_outsets_claim_survives_the_slop_pass_in_the_shipped_controls`
+        // exists to refuse — that test runs under Int UI alone, so an unscoped
+        // entry would pre-excuse the populated slot's regression under the
+        // other three presets.
+        path: "search_field/empty:",
         measured: &[PinnedGeometry {
             densities: AT_COMPACT,
             themes: ALL_THEMES,
@@ -664,7 +673,8 @@ fn no_allow_list_entry_is_stale() {
 /// green while every preset gate was red. It now asks, through the shared
 /// matcher, whether each preset the gate measures is either reached by an entry
 /// or proven clean by the census, whether every pin names a theme, whether any
-/// names `custom` (the id every app theme shares), and whether any entry's
+/// names `custom` (the id every app theme shares), whether an entry's claimed
+/// SC 2.5.8 exception is named in its justification, and whether any entry's
 /// `path` crosses a type one preset owns — which would go silently stale the day
 /// that preset restacked its chrome.
 ///
@@ -673,18 +683,7 @@ fn no_allow_list_entry_is_stale() {
 /// over [`ALLOW_LIST`] used to prove: it carried four counts and not one held.
 #[test]
 fn the_allow_lists_roster_is_what_it_says_it_is() {
-    let mut findings = gate::roster_defects(census(), &ROSTER);
-    for entry in ALLOW_LIST {
-        if let Some(name) = entry.exception
-            && !entry.why.contains(name)
-        {
-            findings.push(format!(
-                "`{}` claims the SC 2.5.8 *{name}* exception in a field its justification \
-                 never mentions",
-                entry.path,
-            ));
-        }
-    }
+    let findings = gate::roster_defects(census(), &ROSTER);
     assert!(findings.is_empty(), "{}", findings.join("\n"));
 
     assert_eq!(ALLOW_LIST.len(), 14, "fourteen written findings");
@@ -848,11 +847,25 @@ fn the_allow_list_excuses_only_the_geometry_it_pinned() {
     // proved nothing", and a slack figure buys a silent collapse the room to
     // hide in. It reddens when the census shrinks — re-measure with `zz_census`
     // (the CENSUS-TOTAL lines), take the smallest preset's total, and multiply
-    // by seven. Note what it does NOT catch, because the shared matcher takes a
-    // floor rather than an equality: a census that GREW, which is what the
-    // sibling gates hold with an explicit `census.len()` assertion of their own.
+    // by seven.
     let findings = gate::non_narrowing(census(), &ROSTER, 7 * 116);
     assert!(findings.is_empty(), "{}", findings.join("\n"));
+
+    // And the seed floor above is a floor: it cannot see a census that GREW,
+    // which is exactly how a newly-appearing geometry an existing pin happens
+    // to cover slips past all three questions — a second 18 x 13 `StepButton`
+    // anywhere in the tree would be excused with no written entry naming its
+    // site. The count is the other half, exactly as the charts and scene gates
+    // hold it; re-derive with `zz_census` (sum the CENSUS-TOTAL lines) when a
+    // fixture or a preset legitimately moves it, and re-read any entry whose
+    // region the new rows fall into.
+    assert_eq!(
+        census().len(),
+        481,
+        "the (theme x density) census moved — this test is proving something \
+         else until the figure, the per-preset seed floor above, and the \
+         entries covering any new rows are re-derived together",
+    );
 }
 
 /// The type of the node a measurement is about — the last segment of its path.
@@ -872,15 +885,47 @@ fn every_fixture_measures_the_subject_it_names() {
         fixtures.len(),
     );
     let mut problems = Vec::new();
+    // The reverse direction first: a table row whose fixture was renamed or
+    // deleted is a claim about nothing, silently — the `.find` below never
+    // visits it — and a duplicated name shadows its second row the same way
+    // (`.find` reads the first).
+    for (index, (name, _)) in EXPECTED_SUBJECTS.iter().enumerate() {
+        if !fixtures.iter().any(|f| f.name == *name) {
+            problems.push(format!(
+                "EXPECTED_SUBJECTS row `{name}` names no fixture — the claim it holds is \
+                 about nothing; delete it, or rename it with the fixture",
+            ));
+        }
+        if EXPECTED_SUBJECTS[..index].iter().any(|(n, _)| n == name) {
+            problems.push(format!(
+                "EXPECTED_SUBJECTS names `{name}` twice — the first row shadows the \
+                 second, which is dead",
+            ));
+        }
+    }
+    // And the fixture list itself: the expectation lookup is first-match, and a
+    // fixture-prefixed path (`"window_frame: …"`) merges twins' rows — so a
+    // duplicated fixture name lets a broken copy hide behind a healthy one.
+    for (index, fixture) in fixtures.iter().enumerate() {
+        if fixtures[..index].iter().any(|f| f.name == fixture.name) {
+            problems.push(format!(
+                "`widget_fixtures()` names `{}` twice — the expectation and \
+                 allow-list matchers cannot tell the twins apart",
+                fixture.name,
+            ));
+        }
+    }
+    for (name, _) in EXPECTED_NON_TARGETS {
+        if !fixtures.iter().any(|f| f.name == *name) {
+            problems.push(format!(
+                "EXPECTED_NON_TARGETS row `{name}` names no fixture",
+            ));
+        }
+    }
     for subject in ROSTER.themes {
         let under_theme: Vec<TargetFixture> = fixtures
             .iter()
-            .map(|f| TargetFixture {
-                name: f.name,
-                viewport: f.viewport,
-                theme: subject.theme,
-                build: f.build,
-            })
+            .map(|f| (*f).with_theme(subject.theme))
             .collect();
         let measured = measure_fixtures(&under_theme, TargetDensity::Compact);
         for fixture in &fixtures {
@@ -917,16 +962,40 @@ fn every_fixture_measures_the_subject_it_names() {
                     ));
                 }
             }
-            if expected.is_empty() && !leaves.is_empty() && subject.id == INTUI {
-                // Not a failure: the row wrapper `in_tappable_row` installs is a
-                // target and shows up here. What would be a failure is the subject
-                // itself becoming one silently, which is why the entry is `&[]`
-                // rather than absent — and why this prints instead of passing mute.
-                println!(
-                    "NOTE fixture `{}` claims no target of its own and measured: {}",
-                    fixture.name,
-                    leaves.join(", "),
-                );
+            if expected.is_empty() {
+                // The `&[]` row claims the subject is deliberately NOT a
+                // pointer target — the row wrapper's own target still shows up
+                // here, so "nothing measured" cannot be the assertion. The
+                // claim is held by name: the subject's type must not appear as
+                // a measured leaf under any preset, which is what reddens the
+                // day a Badge gains a press handler instead of it slipping
+                // into the census.
+                match EXPECTED_NON_TARGETS
+                    .iter()
+                    .find(|(name, _)| *name == fixture.name)
+                {
+                    Some((_, subject_type)) => {
+                        if leaves.contains(subject_type) {
+                            problems.push(format!(
+                                "under {}, fixture `{}`'s subject `{subject_type}` IS a \
+                                 measured target, and its EXPECTED_SUBJECTS row says it \
+                                 deliberately is not — if it became one on purpose, give \
+                                 it a real expectation",
+                                subject.id, fixture.name,
+                            ));
+                        }
+                    }
+                    None => {
+                        if subject.id == INTUI {
+                            problems.push(format!(
+                                "fixture `{}` claims no target of its own but has no \
+                                 EXPECTED_NON_TARGETS row naming its subject's type — \
+                                 that row is what holds the claim",
+                                fixture.name,
+                            ));
+                        }
+                    }
+                }
             }
         }
     }
@@ -968,11 +1037,7 @@ fn a_deliberately_undersized_fixture_fails() {
                 .on_tap(|_, _| {}),
         )
     })];
-    for density in [
-        TargetDensity::Compact,
-        TargetDensity::Comfortable,
-        TargetDensity::Touch,
-    ] {
+    for &density in ALL_DENSITIES {
         let violations = audit_fixtures(&undersized, density);
         assert!(
             violations
@@ -1069,11 +1134,7 @@ fn an_app_installed_style_slot_is_reported() {
     let stock = [TargetFixture::new("stock", |t| {
         in_tappable_row(t, Button::new(lit!("Save")))
     })];
-    for density in [
-        TargetDensity::Compact,
-        TargetDensity::Comfortable,
-        TargetDensity::Touch,
-    ] {
+    for &density in ALL_DENSITIES {
         let measured = measure_fixtures(&custom, density);
         let button = measured
             .iter()
@@ -1218,15 +1279,20 @@ fn measurements_of(
         .collect()
 }
 
-/// The probe finds each boundary by bisecting inside one `PROBE_STEP`, so a
-/// reach is exact to `0.5 / 2^4` dp and is compared with the walker's own
-/// epsilon. A *paint* is compared the same way for symmetry; both are
-/// equalities, not bounds — a bound would be satisfied by a target sized by
-/// something other than itself.
+/// The probe finds each boundary by bisecting inside one `PROBE_STEP`, and a
+/// reach is an **extent** — two directions' boundaries added — so it can land
+/// up to two refinement quanta (0.0625 dp) short of itself; the diff's own
+/// Fluent Touch chevrons do. The tolerance is therefore [`PIN_TOLERANCE`], the
+/// same three-quantum slack every pinned figure carries (the pre-programme
+/// 0.05 sat *inside* the probe's error band and flaked the first time a
+/// boundary bisected two quanta short). A *paint* is compared the same way for
+/// symmetry; both are equalities, not bounds — a bound would be satisfied by a
+/// target sized by something other than itself.
 #[track_caller]
 fn assert_dp(actual: Size, expected: (f32, f32), what: &str) {
     assert!(
-        (actual.width - expected.0).abs() <= 0.05 && (actual.height - expected.1).abs() <= 0.05,
+        (actual.width - expected.0).abs() <= PIN_TOLERANCE
+            && (actual.height - expected.1).abs() <= PIN_TOLERANCE,
         "{what}: measured {:.4} x {:.4}, expected {:.2} x {:.2}",
         actual.width,
         actual.height,
@@ -1249,11 +1315,7 @@ fn assert_dp(actual: Size, expected: (f32, f32), what: &str) {
 /// allow-list entry stops matching with it.
 #[test]
 fn the_chevrons_outset_is_inert_inside_a_standard_tree_row() {
-    for density in [
-        TargetDensity::Compact,
-        TargetDensity::Comfortable,
-        TargetDensity::Touch,
-    ] {
+    for &density in ALL_DENSITIES {
         let in_a_tree = measurements_of("tree_view", "TwistArrow", density);
         assert!(
             !in_a_tree.is_empty(),
@@ -1342,7 +1404,7 @@ fn a_window_corner_grip_is_boxed_in_by_its_own_edge_strips() {
             m.expanded.width
         };
         assert!(
-            (thin_reach - 24.0).abs() <= 0.05,
+            (thin_reach - 24.0).abs() <= PIN_TOLERANCE,
             "an edge strip must reach the Compact floor across its thickness — \
              it is the same `hit_outset` the corner cannot use — measured \
              {thin_reach:.4}",
@@ -1367,7 +1429,7 @@ fn the_dock_gutters_touch_ring_swallows_the_tab_strip_beside_it() {
         .find(|m| m.size.height == 6.0)
         .expect("the bottom side's gutter is 6 dp tall");
     assert!(
-        (horizontal.expanded.height - 44.0).abs() <= 0.05,
+        (horizontal.expanded.height - 44.0).abs() <= PIN_TOLERANCE,
         "the gutter's Touch ring is what covers the strip; if it shrank, this \
          finding is stale — measured {:.4}",
         horizontal.expanded.height,
@@ -1615,7 +1677,7 @@ fn an_outsets_claim_survives_the_slop_pass_in_the_shipped_controls() {
         "the table's scroll bar paints 12 dp",
     );
     assert!(
-        (node.expanded.width - 32.0).abs() <= 0.05,
+        (node.expanded.width - 32.0).abs() <= PIN_TOLERANCE,
         "the bar must keep its Touch ring across its thickness — 18 dp means a \
          28 dp row beside it won the ring back, and the reach then falls as the \
          density rises — measured {:.4}",

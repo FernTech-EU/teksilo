@@ -338,8 +338,9 @@ from inside.
 ## Measuring conformance: the audit and its fixture lists
 
 `teksilo_core::accessibility::target_audit` measures how big every target in a
-laid-out tree actually is **to a finger**, and each crate holds a named fixture
-list that drives it (`tests/target_conformance.rs`). The walker does not add the
+laid-out tree actually is **to a finger**, driven by named fixture lists — the
+stock widget catalog's in `crates/teksilo-target-conformance`, plus
+`tests/target_conformance.rs` in teksilo-charts and teksilo-scene. The walker does not add the
 mechanisms above up: every one of them is conditional, so it proposes a growth
 and then confirms it against the real hit test, probing outward from the point a
 user aims at. The module docs carry the reasoning; five rules govern writing a

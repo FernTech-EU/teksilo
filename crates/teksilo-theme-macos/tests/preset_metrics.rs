@@ -14,17 +14,18 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use teksilo_canvas::{MockTextBackend, SizeProposal};
-use teksilo_core::accessibility::target_audit::{measure_targets, target_audit};
+use teksilo_core::accessibility::target_audit::{
+    PIN_TOLERANCE, gate::ALL_DENSITIES, measure_targets, target_audit,
+};
 use teksilo_core::event::{Key, Modifiers};
 use teksilo_core::signal::Signal;
 use teksilo_core::styles::Theme;
 use teksilo_core::widget::Widget;
 use teksilo_core::widget_id::WidgetId;
 use teksilo_core::widget_tree::WidgetTree;
-use teksilo_i18n::lit;
 use teksilo_tokens::TargetDensity;
-use teksilo_widgets::primitives::{HStack, IconWidget, Padding, TextWidget};
-use teksilo_widgets::{Calendar, IconButton, SearchField, Toggle};
+use teksilo_widgets::primitives::IconWidget;
+use teksilo_widgets::{Calendar, IconButton, IconButtonSize, SearchField, Toggle};
 
 /// Mount `w` under `theme` in a tree with a real text backend and lay it out.
 fn mounted(theme: Theme, w: impl Widget + 'static, size: (f32, f32)) -> (WidgetTree, WidgetId) {
@@ -354,27 +355,12 @@ fn the_int_ui_calendar_needs_neither_mechanism() {
 
 // ── The two constants that sit under the conformance floor ─────────────
 
-/// A subject inside a tappable row, which is what every one of these controls
-/// actually ships in (a toolbar, a toast, a segmented control's overflow).
-///
-/// The row is what makes these tests discriminate. A control in a bare stack is
-/// topped up by the miss-only slop pass, because that pass wins wherever the
-/// exact hit's bubble path carries no eligible handler — so a 22 dp control in a
-/// bare stack measures 24 whether or not it has a conformance box, and a test
-/// there passes its own deletion.
-fn in_tappable_row(tree: &mut WidgetTree, subject: impl Widget + 'static) -> WidgetId {
-    use teksilo_core::widget_builder::WidgetBuilder;
-    tree.add(
-        Padding::uniform(20.0)
-            .child(
-                HStack::new()
-                    .spacing(8.0)
-                    .child(TextWidget::new(lit!("Row label")))
-                    .child(subject),
-            )
-            .on_tap(|_, _| {}),
-    )
-}
+// The tappable row around each subject — what makes these tests discriminate
+// (a control in a bare stack is topped up by the miss-only slop pass and
+// passes its own deletion) — is `teksilo_target_conformance::in_tappable_row`,
+// imported rather than copied: that helper is public precisely because "a
+// second copy of this geometry is a second thing to get wrong".
+use teksilo_target_conformance::in_tappable_row;
 
 /// Apple's 22 dp control height must not cost an icon button its WCAG 2.2
 /// SC 2.5.8 conformance.
@@ -387,38 +373,44 @@ fn in_tappable_row(tree: &mut WidgetTree, subject: impl Widget + 'static) -> Wid
 /// handler, which a toolbar row is.
 #[test]
 fn a_macos_icon_button_reaches_the_conformance_floor_at_every_density() {
-    for density in [
-        TargetDensity::Compact,
-        TargetDensity::Comfortable,
-        TargetDensity::Touch,
-    ] {
-        let mut tree = WidgetTree::new()
-            .with_theme(teksilo_theme_macos::light().with_density(density))
-            .with_text_backend(Rc::new(RefCell::new(MockTextBackend::new())));
-        in_tappable_row(&mut tree, IconButton::new(IconWidget::checkmark(16.0)));
-        tree.layout(SizeProposal::exact(400.0, 200.0));
+    // Both sub-floor rungs, because the two regress independently: the default
+    // 22 dp control and the 18 dp `IconButtonSize::Compact` — the rung the §0
+    // density-inventory row says gains 6 dp, which no gate fixture builds.
+    for size in [IconButtonSize::Default, IconButtonSize::Compact] {
+        for &density in ALL_DENSITIES {
+            let mut tree = WidgetTree::new()
+                .with_theme(teksilo_theme_macos::light().with_density(density))
+                .with_text_backend(Rc::new(RefCell::new(MockTextBackend::new())));
+            in_tappable_row(
+                &mut tree,
+                IconButton::new(IconWidget::checkmark(12.0)).size(size),
+            );
+            tree.layout(SizeProposal::exact(400.0, 200.0));
 
-        let button = measure_targets(&tree, density)
-            .into_iter()
-            .find(|m| m.widget.ends_with("IconButton") && m.part.is_none())
-            .unwrap_or_else(|| panic!("{density:?}: the row holds an icon button"));
-        // The floor the walker judged this row against, off the row itself —
-        // never `InputTokens::for_density`, which answers for the generic
-        // ladder rather than for the theme under measurement.
-        let floor = button.conformance_floor;
-        assert!(
-            button.expanded.width + 0.1 >= floor && button.expanded.height + 0.1 >= floor,
-            "{density:?}: a macOS icon button reaches {:?} against a {floor} dp floor",
-            button.expanded,
-        );
-        assert_eq!(
-            target_audit(&tree, density)
+            let button = measure_targets(&tree, density)
                 .into_iter()
-                .filter(|v| v.rule.is_conformance_failure())
-                .count(),
-            0,
-            "{density:?}: the row reports a conformance failure",
-        );
+                .find(|m| m.widget.ends_with("IconButton") && m.part.is_none())
+                .unwrap_or_else(|| panic!("{density:?}: the row holds an icon button"));
+            // The floor the walker judged this row against, off the row itself
+            // — never `InputTokens::for_density`, which answers for the generic
+            // ladder rather than for the theme under measurement.
+            let floor = button.conformance_floor;
+            assert!(
+                button.expanded.width + PIN_TOLERANCE >= floor
+                    && button.expanded.height + PIN_TOLERANCE >= floor,
+                "{density:?}: a macOS {size:?} icon button reaches {:?} against a \
+                 {floor} dp floor",
+                button.expanded,
+            );
+            assert_eq!(
+                target_audit(&tree, density)
+                    .into_iter()
+                    .filter(|v| v.rule.is_conformance_failure())
+                    .count(),
+                0,
+                "{density:?}: the row reports a conformance failure at {size:?}",
+            );
+        }
     }
 }
 
@@ -431,37 +423,43 @@ fn a_macos_icon_button_reaches_the_conformance_floor_at_every_density() {
 /// painted square inside it.
 #[test]
 fn a_macos_icon_buttons_chrome_is_still_apples_twenty_two_dp() {
-    let mut tree = WidgetTree::new()
-        .with_theme(teksilo_theme_macos::light())
-        .with_text_backend(Rc::new(RefCell::new(MockTextBackend::new())));
-    let root = in_tappable_row(&mut tree, IconButton::new(IconWidget::checkmark(16.0)));
-    tree.layout(SizeProposal::exact(400.0, 200.0));
+    // (rung, painted square) — the compact rung keeps its 18 dp square inside
+    // the same 24 dp box, so "clears the floor" has not resized either chrome.
+    for (size, painted) in [
+        (IconButtonSize::Default, 22.0),
+        (IconButtonSize::Compact, 18.0),
+    ] {
+        let mut tree = WidgetTree::new()
+            .with_theme(teksilo_theme_macos::light())
+            .with_text_backend(Rc::new(RefCell::new(MockTextBackend::new())));
+        let root = in_tappable_row(
+            &mut tree,
+            IconButton::new(IconWidget::checkmark(12.0)).size(size),
+        );
+        tree.layout(SizeProposal::exact(400.0, 200.0));
 
-    let mut squares: Vec<(f32, f32)> = nodes_named(&tree, root, "FixedSize")
-        .into_iter()
-        .map(|id| {
-            let b = tree.bounds(id);
-            (b.width, b.height)
-        })
-        .collect();
-    squares.sort_by(|a, b| a.0.total_cmp(&b.0));
-    assert_eq!(
-        squares,
-        vec![(22.0, 22.0), (24.0, 24.0)],
-        "the painted square stays at Apple's control height and sits centred in \
-         a box that reaches the floor",
-    );
+        let mut squares: Vec<(f32, f32)> = nodes_named(&tree, root, "FixedSize")
+            .into_iter()
+            .map(|id| {
+                let b = tree.bounds(id);
+                (b.width, b.height)
+            })
+            .collect();
+        squares.sort_by(|a, b| a.0.total_cmp(&b.0));
+        assert_eq!(
+            squares,
+            vec![(painted, painted), (24.0, 24.0)],
+            "the painted square stays at Apple's number for {size:?} and sits \
+             centred in a box that reaches the floor",
+        );
+    }
 }
 
 /// The same bargain for `NSSwitch`: the track keeps Apple's 22 dp and the node
 /// clears the floor.
 #[test]
 fn a_macos_toggle_reaches_the_conformance_floor_at_every_density() {
-    for density in [
-        TargetDensity::Compact,
-        TargetDensity::Comfortable,
-        TargetDensity::Touch,
-    ] {
+    for &density in ALL_DENSITIES {
         let mut tree = WidgetTree::new()
             .with_theme(teksilo_theme_macos::light().with_density(density))
             .with_text_backend(Rc::new(RefCell::new(MockTextBackend::new())));
@@ -477,7 +475,8 @@ fn a_macos_toggle_reaches_the_conformance_floor_at_every_density() {
         // ladder rather than for the theme under measurement.
         let floor = toggle.conformance_floor;
         assert!(
-            toggle.expanded.width + 0.1 >= floor && toggle.expanded.height + 0.1 >= floor,
+            toggle.expanded.width + PIN_TOLERANCE >= floor
+                && toggle.expanded.height + PIN_TOLERANCE >= floor,
             "{density:?}: a macOS switch reaches {:?} against a {floor} dp floor",
             toggle.expanded,
         );
@@ -498,7 +497,7 @@ fn a_macos_toggle_reaches_the_conformance_floor_at_every_density() {
 /// And the track is still 38 x 22, so the switch has not been resized to reach
 /// the floor.
 #[test]
-fn a_macos_switchs_track_is_still_thirty_eight_by_twenty_two() {
+fn a_macos_switch_track_is_still_thirty_eight_by_twenty_two() {
     let mut tree = WidgetTree::new()
         .with_theme(teksilo_theme_macos::light())
         .with_text_backend(Rc::new(RefCell::new(MockTextBackend::new())));

@@ -45,7 +45,8 @@ miss-only slop pass, which this module used to claim as well. The pass
 re-attributes a near miss only where the exact hit's whole bubble path
 carries no eligible handler, so it is denied wherever the link sits inside a
 row that takes presses: a link in a list row, a link in an archived
-notification. Measured by `target_conformance.rs`: 112 × 17 dp beside a
+notification. Measured by the target-conformance gate (the
+`teksilo-target-conformance` crate): 112 × 17 dp beside a
 tappable row label and 32 × 17 dp as a notification's replay action both
 reach exactly their own 17 dp on the short axis, at all three densities.
 

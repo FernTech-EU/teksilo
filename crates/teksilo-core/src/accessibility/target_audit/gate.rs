@@ -33,7 +33,7 @@
 //! | [`conformance_failures`] | is there a failure no entry excuses? |
 //! | [`stale_entries`] | does every entry, every pin, and every (theme, density) pair it claims still meet a real failure? |
 //! | [`non_narrowing`] | does an entry excuse something it should **not** — a seeded regression, or a theme that does not exhibit the geometry? |
-//! | [`roster_defects`] | is the list itself well formed: an owner, a justification, a pin per geometry, and a theme axis that names only themes the gate measures? |
+//! | [`roster_defects`] | is the list itself well formed: an owner, a justification that names any exception it claims, a pin per geometry, and a theme axis that names only themes the gate measures? |
 //!
 //! [`stale_entries`] and [`non_narrowing`] are opposite questions and both are
 //! load-bearing. An entry that outlives what it excused is a hole waiting for
@@ -60,11 +60,31 @@ pub const ALL_DENSITIES: &[TargetDensity] = &[
 /// it: the path stops matching, the entry excuses nothing, and the gate reports
 /// nothing wrong with the entry. A path must name framework structure, which
 /// every preset's delegated row shares.
-const THEME_OWNED_PREFIXES: &[&str] = &["Fluent", "MacOs", "Material3"];
+///
+/// `M3` is on the list because it is the prefix Material 3 actually gives its
+/// private widgets (`M3SwitchBody`); no `Widget` type in that crate starts with
+/// `Material3`, which stays here only to catch a future one written longhand.
+const THEME_OWNED_PREFIXES: &[&str] = &["Fluent", "MacOs", "Material3", "M3"];
 
 /// The id every theme built from raw tokens carries, so it names no preset and
 /// is never an admissible pin.
 const ANONYMOUS_THEME: &str = "custom";
+
+/// The closed set of WCAG 2.2 SC 2.5.8 exceptions, as an entry's
+/// [`exception`](AllowedViolation::exception) writes them.
+///
+/// The field is documented as "structural rather than prose, so a roster's
+/// counts can be asserted" — which only holds if the value itself is held to
+/// the criterion's own list. A typo'd or invented name would otherwise pass
+/// every lint (the justification echoes it) and inflate the exception count
+/// with a discharge no criterion grants.
+const SC_2_5_8_EXCEPTIONS: &[&str] = &[
+    "Spacing",
+    "Equivalent",
+    "Inline",
+    "User agent control",
+    "Essential",
+];
 
 /// The one spelling of "this entry needs no owner", which a justification must
 /// carry before an empty [`AllowedViolation::owner`] is accepted.
@@ -86,11 +106,18 @@ pub struct ThemeSubject {
     pub id: &'static str,
     /// Builds the theme. The gate re-derives it per density through
     /// `Theme::with_density`, so a preset's own density projection runs.
+    ///
+    /// That door's default branch **replaces the whole `input` token group with
+    /// the generic table**: a subject theme that installs its own ladder (a
+    /// raised `min_target_conformance` above all) keeps it through the sweep
+    /// only by registering a
+    /// [`DensityProjection`](crate::styles::DensityProjection).
     pub theme: fn() -> Theme,
 }
 
-/// Everything a gate measures against: the presets, the allow-list, and the
-/// per-preset viewport overrides.
+/// Everything a gate measures against: the presets and the allow-list.
+/// (A per-preset viewport override was designed for and then measured away —
+/// the comment below the struct records why.)
 #[derive(Clone, Copy)]
 pub struct Roster {
     /// One entry per theme family the gate sweeps.
@@ -133,12 +160,7 @@ pub fn conformance_census(fixtures: &[TargetFixture], roster: &Roster) -> Vec<Ta
     for subject in roster.themes {
         let under_theme: Vec<TargetFixture> = fixtures
             .iter()
-            .map(|f| TargetFixture {
-                name: f.name,
-                viewport: f.viewport,
-                theme: subject.theme,
-                build: f.build,
-            })
+            .map(|f| (*f).with_theme(subject.theme))
             .collect();
         for &density in ALL_DENSITIES {
             out.extend(
@@ -214,6 +236,19 @@ pub fn non_narrowing(
     min_seeds_per_theme: usize,
 ) -> Vec<String> {
     let mut out = Vec::new();
+    // The floor a moved seed carries, per (theme, density). The census's own
+    // rows are the authority — they carry the floor the walker actually judged
+    // that preset with, the same "read it off the row" rule every matcher
+    // follows — and a pair the census never measured falls back to deriving
+    // through the theme's own density door, once per pair rather than once per
+    // seed (a preset build re-runs its whole projection to answer one `f32`).
+    let mut floors: std::collections::HashMap<(&str, TargetDensity), f32> =
+        std::collections::HashMap::new();
+    for v in census {
+        floors
+            .entry((v.theme.as_str(), v.density))
+            .or_insert(v.conformance_floor);
+    }
     for subject in roster.themes {
         let mut seeded = 0_usize;
         for violation in census.iter().filter(|v| v.theme.as_str() == subject.id) {
@@ -252,11 +287,19 @@ pub fn non_narrowing(
                 // exists to close, reintroduced here by a falsified clone. The
                 // seed asks what this entry would do if the same finding
                 // appeared under `other`, and that question is only well posed
-                // if the whole row is `other`'s.
-                moved.conformance_floor = (other.theme)()
-                    .with_density(violation.density)
-                    .input
-                    .min_target_conformance;
+                // if the whole row is `other`'s — which is why the floor comes
+                // off the census's own rows under `other` first, and only falls
+                // back to `Theme::with_density` for a pair the census never
+                // measured (that door resets a projection-less theme's custom
+                // ladder to the generic table).
+                moved.conformance_floor = *floors
+                    .entry((other.id, violation.density))
+                    .or_insert_with(|| {
+                        (other.theme)()
+                            .with_density(violation.density)
+                            .input
+                            .min_target_conformance
+                    });
                 for entry in roster.allow.iter().filter(|e| e.matches(&moved)) {
                     for pin in entry.measured.iter().filter(|p| p.covers(&moved)) {
                         // Two things are deliberately NOT compared as literal
@@ -339,6 +382,22 @@ pub fn roster_defects(census: &[TargetViolation], roster: &Roster) -> Vec<String
                  entry is a debt with an address",
                 entry.path,
             ));
+        }
+        if let Some(name) = entry.exception {
+            if !SC_2_5_8_EXCEPTIONS.contains(&name) {
+                out.push(format!(
+                    "`{}` claims `{name}`, which is not one of SC 2.5.8's exceptions \
+                     (Spacing / Equivalent / Inline / User agent control / Essential)",
+                    entry.path,
+                ));
+            }
+            if !entry.why.contains(name) {
+                out.push(format!(
+                    "`{}` claims the SC 2.5.8 *{name}* exception in a field its justification \
+                     never mentions",
+                    entry.path,
+                ));
+            }
         }
         if entry.measured.is_empty() {
             out.push(format!(

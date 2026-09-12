@@ -115,7 +115,9 @@ pub fn in_tappable_row(
 /// where the widget genuinely ships that way (a dialog, a toolbar, a window
 /// shell) — a bare stack around a small control makes a fixture blind.
 ///
-/// Public for the same reason [`in_tappable_row`] is.
+/// Public alongside [`in_tappable_row`] so a sibling test crate that needs the
+/// page shape reuses this geometry instead of growing a second copy; today its
+/// only callers are the fixtures in this file.
 pub fn on_a_page(
     tree: &mut WidgetTree,
     subject: impl teksilo_core::widget::Widget + 'static,
@@ -458,7 +460,7 @@ pub fn widget_fixtures() -> Vec<TargetFixture> {
         // (`list_view/body_pane.rs`), where `TreeView`'s sibling call installs
         // it unconditionally. A selection-less fixture measured the 400 x 300
         // view and its scroll bar and nothing else — a comfortable number about
-        // nothing, and the exact failure this file's `EXPECTATIONS` table
+        // nothing, and the exact failure this file's `EXPECTED_SUBJECTS` table
         // exists to catch.
         TargetFixture::sized("list_view", 400.0, 300.0, |t| {
             let model = list_model();
@@ -1072,4 +1074,20 @@ pub const EXPECTED_SUBJECTS: &[(&str, &[&str])] = &[
     ("code_editor", &["CodeEditor"]),
     ("plain_text_editor/one_line", &["CodeEditor"]),
     ("rich_text_editor", &["RichTextEditor"]),
+];
+
+/// The subject type each `&[]` row of [`EXPECTED_SUBJECTS`] deliberately claims
+/// is **not** a pointer target — so the claim is held, not assumed.
+///
+/// An empty expectation says "output, not a control". Without a named type
+/// there is nothing to assert against: the row wrapper's own target keeps the
+/// fixture's measurement list non-empty on every run, so "measured nothing"
+/// can never be the check. The conformance gate asserts the type named here
+/// never appears as a **measured leaf** under any preset; a `Badge` that gains
+/// a press handler reddens that assertion instead of slipping into the census
+/// as one more conformant target nobody decided on.
+pub const EXPECTED_NON_TARGETS: &[(&str, &str)] = &[
+    ("badge", "Badge"),
+    ("progress_bar", "ProgressBar"),
+    ("spinner", "Spinner"),
 ];

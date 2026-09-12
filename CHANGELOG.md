@@ -200,7 +200,7 @@ See [docs/range-keyboard.md](docs/range-keyboard.md) for the full chord table.
 - **The target-size gate measures every shipped preset**, not the default theme
   alone: Int UI, macOS, Fluent and Material 3, each at all three densities, with
   light and dark compared for identical geometry. The fixtures moved into a
-  crate the theme crates can reach, so a preset is audited by the same 70
+  crate the theme crates can reach, so a preset is audited by the same 68
   fixtures the default theme is.
 
 #### Previewer

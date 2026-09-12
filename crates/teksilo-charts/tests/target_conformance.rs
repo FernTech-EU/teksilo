@@ -379,15 +379,6 @@ fn no_chart_allow_list_entry_is_stale() {
          this test is proving something else: {census:#?}",
     );
     for entry in ALLOW_LIST {
-        if let Some(name) = entry.exception
-            && !entry.why.contains(name)
-        {
-            findings.push(format!(
-                "`{}` claims the SC 2.5.8 *{name}* exception in a field its justification \
-                 never mentions",
-                entry.path,
-            ));
-        }
         for density in DENSITIES {
             let claimed = entry
                 .measured
