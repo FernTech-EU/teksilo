@@ -11,6 +11,7 @@
 //! surface.
 
 pub(crate) mod column_geometry;
+pub(crate) mod conformance_box;
 pub mod datetime;
 pub mod drag_autoscroll;
 pub(crate) mod drop_bands;

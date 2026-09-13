@@ -328,7 +328,8 @@ fn a_coarse_pointer_reaches_past_the_nav_arrows_box_above_the_floor() {
 /// Int UI is untouched by either mechanism, at every density.
 ///
 /// Its arrow is `dp(24, Target, ..)` — the density's target size exactly — so
-/// the conformance box is the identity and the outset has nothing to add. The
+/// the conformance box is not built at all (the shared helper's identity
+/// early-return adds no nodes) and the outset has nothing to add. The
 /// control arm for both tests above, and the programme's Compact-is-unchanged
 /// invariant for this widget.
 #[test]

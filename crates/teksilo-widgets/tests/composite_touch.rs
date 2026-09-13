@@ -272,6 +272,45 @@ fn a_calendar_nav_arrow_follows_the_density_ladder() {
     }
 }
 
+/// The structural half of the ladder test above: the Int UI arrow is the
+/// density's target at every rung, so the conformance box is the identity and
+/// `common::conformance_box` builds no wrapper — the painted `FixedSize` is
+/// the only one under each arrow. Reddens if the calendar goes back to
+/// wrapping unconditionally (a second `FixedSize` per arrow), while the macOS
+/// preset's `a_macos_icon_buttons_chrome_is_still_apples_twenty_two_dp` holds
+/// the non-identity arm.
+#[test]
+fn an_int_ui_nav_arrow_carries_no_conformance_wrapper() {
+    use teksilo_widgets::calendar::Calendar;
+
+    for density in [
+        TargetDensity::Compact,
+        TargetDensity::Comfortable,
+        TargetDensity::Touch,
+    ] {
+        let mut tree = tree_at(density);
+        let root = tree.add(Calendar::single(teksilo_core::signal::Signal::new(None)));
+        tree.layout(SizeProposal::exact(600.0, 600.0));
+        let arrow = find_by_type(&tree, root, "NavArrow").expect("a nav arrow node");
+        let mut fixed_sizes = 0;
+        let mut stack = vec![arrow];
+        while let Some(id) = stack.pop() {
+            if tree
+                .widget_type_name(id)
+                .is_some_and(|name| name.contains("FixedSize"))
+            {
+                fixed_sizes += 1;
+            }
+            stack.extend(tree.children(id));
+        }
+        assert_eq!(
+            fixed_sizes, 1,
+            "{density:?}: the painted square is the arrow's only FixedSize \
+             — no box was built around a chrome already at the target",
+        );
+    }
+}
+
 /// A month cell's pressed chrome, which nothing could reach: the cell only ever
 /// wrote `false` into the signal its `CalendarStyle` paints from.
 #[test]

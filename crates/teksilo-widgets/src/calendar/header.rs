@@ -26,6 +26,7 @@ use teksilo_core::widget_id::WidgetId;
 use teksilo_i18n::resolve_message_widget;
 use teksilo_tokens::{BorderRole, CornerRadius, SurfaceRole};
 
+use crate::common::conformance_box::{conformance_box, conformance_box_size};
 use crate::common::datetime::Date;
 use crate::common::datetime::month_long_key;
 use crate::common::datetime::types::YearMonth;
@@ -258,7 +259,9 @@ struct NavArrow {
     label: String,
     on_activate: std::rc::Rc<dyn Fn(&mut teksilo_core::widget::EventContext)>,
     root_id: Option<WidgetId>,
-    /// The footprint `build` resolved, in logical pixels.
+    /// The node extent `build` resolved, in logical pixels — the conformance
+    /// box's when one was built, the painted chrome's when the box was the
+    /// identity (the same number `conformance_box` hands back either way).
     ///
     /// [`Widget::hit_outset`] is handed a pointer kind and the token ladder and
     /// nothing else — no theme, no text scale — so the size it has to make up
@@ -332,31 +335,17 @@ impl Widget for NavArrow {
         // (24 dp at Compact — the identity — 32 at Comfortable, 44 at Touch),
         // and the global text scale multiplies whichever number comes back.
         let painted = nav_arrow_extent(ctx.theme()) * scale;
-        // …and the *node* is that, or the 24 dp conformance floor, whichever is
-        // larger. A preset is entitled to paint under the floor and macOS does;
-        // WCAG 2.2 SC 2.5.8 is about the target rather than the chrome, so the
-        // chrome stays at the preset's number and the box around it reaches the
-        // floor, with the arrow centred inside. Exactly the bargain `Checkbox`
-        // already strikes — a 19 dp painted box inside a `box_hit_area` — and
-        // the reason it is a box here rather than only a `hit_outset` is that an
-        // outset cannot escape its parent: the first and last arrows sit flush
-        // against the header row's own edge, so their outer 2 dp has nowhere to
-        // grow into and they stayed non-conformant with the outset alone
-        // (measured: 22 x 24 for those two, 24 x 24 for the two interior ones).
-        //
-        // `min_target_conformance` is 24 dp at every density and is never
-        // scaled, so under Int UI — whose arrow is already 24 — this is the
-        // identity at every density and changes no layout at all.
-        let box_extent = painted.max(ctx.theme().input.min_target_conformance);
-        self.extent.set(box_extent);
+        // …and the *node* is the conformance box over that chrome (see
+        // `common::conformance_box` for the bargain). The reason it is a box
+        // here rather than only a `hit_outset` is that an outset cannot escape
+        // its parent: the first and last arrows sit flush against the header
+        // row's own edge, so their outer sliver has nowhere to grow into and
+        // they stayed non-conformant with the outset alone. Under Int UI —
+        // whose arrow is the density's target at every rung — the box is the
+        // identity and the helper adds no nodes at all.
         let chrome = ctx.add(FixedSize::new().width(painted).height(painted).child_id(z));
-        let centred_chrome = ctx.add(Center::new().child_id(chrome));
-        let sized = ctx.add(
-            FixedSize::new()
-                .width(box_extent)
-                .height(box_extent)
-                .child_id(centred_chrome),
-        );
+        let (sized, box_size) = conformance_box(ctx, chrome, Size::new(painted, painted));
+        self.extent.set(box_size.width);
 
         // Activation needs to fire from pointer click (`on_tap`),
         // keyboard Enter / Space when the button is focused
@@ -403,13 +392,16 @@ impl Widget for NavArrow {
         ctx: &LayoutContext,
     ) -> teksilo_core::widget::LayoutResponse {
         // The *box*, not the painted chrome — see `build`. Only a fallback:
-        // the mounted arrow answers from its `FixedSize` child.
-        let extent = nav_arrow_extent(ctx.theme).max(ctx.theme.input.min_target_conformance);
+        // the mounted arrow answers from its child. Shares the helper's
+        // arithmetic so the built extent and the fallback cannot disagree.
+        let side = nav_arrow_extent(ctx.theme);
+        let fallback = conformance_box_size(
+            Size::new(side, side),
+            ctx.theme.input.min_target_conformance,
+        );
         match self.root_id {
-            Some(id) => ctx
-                .child_size(id, proposal)
-                .unwrap_or_else(|| Size::new(extent, extent)),
-            None => Size::new(extent, extent),
+            Some(id) => ctx.child_size(id, proposal).unwrap_or(fallback),
+            None => fallback,
         }
         .into()
     }
@@ -430,20 +422,21 @@ impl Widget for NavArrow {
     /// Top the arrow's box up to the density's target size for a coarse
     /// pointer, between the pointer and the arena.
     ///
-    /// The **conformance** floor is the box's job — `build` sizes the node to
-    /// at least `min_target_conformance` and centres the preset's chrome inside
-    /// it — because an outset cannot escape its parent and the outermost arrows
-    /// sit flush against the header row's edge. What is left for an outset is
-    /// the part above that floor: 24 to 32 at Comfortable, 24 to 44 at Touch,
+    /// The **conformance** floor is the box's job — `build` hands the chrome
+    /// to `common::conformance_box`, which grows the node to the floor and
+    /// centres the preset's chrome inside it — because an outset cannot
+    /// escape its parent and the outermost arrows sit flush against the header
+    /// row's edge. What is left for an outset is the part above that floor,
     /// for a finger or a pen, where growing the box would move the header's
     /// layout for a mouse user too.
     ///
     /// So this is the coarse-pointer top-up and nothing else, and
     /// [`target_outset`](crate::button::target_outset) — which is zero for a
     /// precise pointer — says exactly that. Conformance is the box's job, not
-    /// this one's: the box is what `a_macos_calendars_nav_arrows_clear_the_
-    /// conformance_floor_at_every_density` holds, and splitting the guarantee
-    /// across two mechanisms would leave neither owning it.
+    /// this one's: the box is what `a_calendars_nav_arrows_clear_the_
+    /// conformance_floor_at_every_density` holds in the macOS preset's tests,
+    /// and splitting the guarantee across two mechanisms would leave neither
+    /// owning it.
     fn hit_outset(
         &self,
         kind: teksilo_tokens::PointerKind,

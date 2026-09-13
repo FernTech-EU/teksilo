@@ -177,12 +177,14 @@ pub fn macos_icon_button_style_for(tokens: &InputTokens) -> RecipeIconButtonStyl
     RecipeIconButtonStyle::new(IconButtonRecipe {
         // `[measured]` AppKit sizes. `size_compact` (18 dp) and the regular
         // 22 dp control are below the 24 dp WCAG floor and the PAINT stays
-        // there — see `macos_menu_item_recipe_for`. The NODE does not: since
-        // the preset-gate package, `RecipeIconButtonStyle::make_body` wraps
-        // whatever the recipe asked for in a conformance box of at least
+        // there — see `macos_menu_item_recipe_for`. The NODE does not:
+        // `RecipeIconButtonStyle::make_body` hands the painted square to the
+        // shared conformance-box helper (teksilo-widgets,
+        // `common::conformance_box`), which grows the node to
         // `min_target_conformance` and centres the chrome in it, so both rungs
-        // reach 24 dp as targets while painting Apple's numbers. The larger
-        // rungs rise with the density and never meet that box.
+        // reach the floor as targets while painting Apple's numbers. The
+        // larger rungs rise with the density, clear the floor on their own,
+        // and get no box at all.
         size_compact: 18.0,
         size_default: H_CONTROL,
         size_toolbar: dp(28.0, TargetRole::Target, tokens),

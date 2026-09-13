@@ -171,10 +171,12 @@ impl Widget for MacOsSwitchBody {
     /// deliberately smaller than its target is to grow the node and centre the
     /// chrome in it — which is what the stock `RecipeToggleStyle` does with
     /// the same floor, and what `paint` below assumes by centring the track in
-    /// whatever bounds it is given. Both axes, matching the icon button's
-    /// conformance box: the width is an identity under every shipped floor
-    /// (38 dp is over 24), and flooring only the height would leave the one
-    /// axis a raised-floor theme could still fail.
+    /// whatever bounds it is given. Both axes, floored independently like the
+    /// icon button's conformance box (teksilo-widgets,
+    /// `common::conformance_box` — this widget floors its own node instead of
+    /// wrapping, but the per-axis rule is the same): the width is an identity
+    /// under every shipped floor, and flooring only the height would leave the
+    /// one axis a raised-floor theme could still fail.
     fn layout_response(&self, _proposal: SizeProposal, ctx: &LayoutContext) -> LayoutResponse {
         let floor = ctx.theme.input.min_target_conformance;
         Size::new(TRACK_W.max(floor), TRACK_H.max(floor)).into()

@@ -14,6 +14,7 @@
 //! (`IconButton::style(...)`) or theme-wide
 //! (`theme.style_slots.icon_button = Some(Rc::new(MyIconButton))`).
 
+use teksilo_canvas::Size;
 use teksilo_core::build_context::BuildContext;
 use teksilo_core::color_prop::ColorProp;
 use teksilo_core::signal::Signal;
@@ -22,6 +23,7 @@ use teksilo_core::widget_id::WidgetId;
 use teksilo_tokens::CornerRadius;
 use teksilo_tokens::{BorderRole, InputTokens, SurfaceRole, TargetRole};
 
+use crate::common::conformance_box::conformance_box;
 use crate::primitives::{Center, FixedSize, RectWidget, ZStack};
 use teksilo_core::styles::density::dp;
 
@@ -161,31 +163,14 @@ impl IconButtonStyle for RecipeIconButtonStyle {
                 .height(button_dim)
                 .child_id(zstack_id),
         );
-        // The conformance box. The chrome stays whatever the recipe asked for;
-        // the NODE never comes out under `min_target_conformance`, with the
-        // chrome centred inside it. That floor does not scale with density, so
-        // a recipe pinned below it is below it at every density, and neither
-        // hit mechanism can make it up: an outset cannot escape its parent, and
-        // the miss-only pass gives a control nothing when a neighbour of its
-        // own kind sits flush beside it, which is what a row of icon buttons
-        // is. Same bargain as `Checkbox`, `RadioButton` and the calendar's nav
-        // arrow.
-        //
-        // The identity case is the common one: a recipe routing its sizes
-        // through `dp(.., Target, ..)` already clears the floor, so this
-        // changes nothing for it at any density. Only a recipe that pins a
-        // dimension below the floor moves, and only its node.
-        let box_dim = button_dim.max(ctx.theme().input.min_target_conformance);
-        if box_dim <= button_dim {
-            return painted;
-        }
-        let centred = ctx.add(Center::new().child_id(painted));
-        ctx.add(
-            FixedSize::new()
-                .width(box_dim)
-                .height(box_dim)
-                .child_id(centred),
-        )
+        // The conformance box (see `common::conformance_box` for the bargain).
+        // The shipped recipe routes every rung through `dp(.., Target, ..)`
+        // and is the identity — no box is built. What earns one is a preset
+        // pinning a rung below the floor, as macOS does at 22 dp (18 at
+        // `Compact`), and a row of icon buttons is exactly the flush-neighbour
+        // geometry where no hit mechanism could stand in for it.
+        let (root, _) = conformance_box(ctx, painted, Size::new(button_dim, button_dim));
+        root
     }
 }
 
@@ -248,5 +233,82 @@ fn resolve_size(size: IconButtonSize, recipe: &IconButtonRecipe) -> f32 {
         IconButtonSize::Toolbar => recipe.size_toolbar,
         IconButtonSize::Large => recipe.size_large,
         IconButtonSize::Hero => recipe.size_hero,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use teksilo_canvas::SizeProposal;
+    use teksilo_core::widget_id::WidgetId;
+    use teksilo_core::widget_tree::WidgetTree;
+
+    use super::*;
+    use crate::icon_button::IconButton;
+    use crate::primitives::IconWidget;
+
+    /// Every `FixedSize` under `root`, as `(width, height)` sorted by width.
+    fn fixed_size_squares(tree: &WidgetTree, root: WidgetId) -> Vec<(f32, f32)> {
+        let mut out = Vec::new();
+        let mut stack = vec![root];
+        while let Some(id) = stack.pop() {
+            if tree
+                .widget_type_name(id)
+                .is_some_and(|t| t.rsplit("::").next() == Some("FixedSize"))
+            {
+                let b = tree.bounds(id);
+                out.push((b.width, b.height));
+            }
+            for c in tree.children(id) {
+                stack.push(c);
+            }
+        }
+        out.sort_by(|a, b| a.0.total_cmp(&b.0));
+        out
+    }
+
+    fn mounted(button: IconButton) -> (WidgetTree, WidgetId) {
+        // Inside a stack, not bare at the root: a root child is stretched to
+        // the window proposal, which would hide the squares under measurement.
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let id = tree.add(crate::primitives::HStack::new().child(button));
+        tree.layout(SizeProposal::exact(200.0, 200.0));
+        (tree, id)
+    }
+
+    /// The identity contract at this call site: the shipped recipe routes
+    /// every rung through `dp(.., Target, ..)`, so the conformance box is not
+    /// built at all — the painted square is the only `FixedSize` in the
+    /// button's chrome. Reddens if `make_body` goes back to wrapping
+    /// unconditionally (a second `FixedSize` appears).
+    #[test]
+    fn an_int_ui_icon_button_gains_no_conformance_wrapper() {
+        let (tree, id) = mounted(IconButton::new(IconWidget::checkmark(12.0)));
+        assert_eq!(
+            fixed_size_squares(&tree, id),
+            vec![(ICON_BUTTON_SIZE_DEFAULT, ICON_BUTTON_SIZE_DEFAULT)],
+            "one FixedSize — the painted square — and no box above it",
+        );
+    }
+
+    /// And the box contract at this call site: a recipe pinning a rung under
+    /// the floor (the macOS shape, reproduced here without the preset crate)
+    /// gets exactly one extra `FixedSize` at the floor around the untouched
+    /// painted square. Reddens if the `conformance_box` call is dropped from
+    /// `make_body` or its floor read is neutered.
+    #[test]
+    fn a_sub_floor_recipe_earns_exactly_the_conformance_box() {
+        let sub_floor = RecipeIconButtonStyle::new(IconButtonRecipe {
+            size_default: 18.0,
+            ..IconButtonRecipe::default()
+        });
+        let (tree, id) = mounted(IconButton::new(IconWidget::checkmark(12.0)).style(sub_floor));
+        let floor = teksilo_core::presets::intui::light()
+            .input
+            .min_target_conformance;
+        assert_eq!(
+            fixed_size_squares(&tree, id),
+            vec![(18.0, 18.0), (floor, floor)],
+            "the painted square keeps the recipe's number inside a box at the floor",
+        );
     }
 }
