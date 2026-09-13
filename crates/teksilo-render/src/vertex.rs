@@ -308,7 +308,7 @@ impl SdfVertex {
 
         // Encode paint type and gradient data
         let (paint_type, gradient_geo, colors, offsets) =
-            encode_paint_data(&shape.paint_data, w, h);
+            encode_paint_data(&shape.paint_data, [0.0, 0.0], w, h);
 
         let stroke = stroke_px;
         // Rasterization padding: enough to contain the outer half of the
@@ -377,24 +377,31 @@ impl SdfVertex {
 /// `pub(crate)` — shared by [`SdfVertex`] (Tier 2) and
 /// [`PathGradientVertex`] (Tier 3 gradient paths), which both encode the
 /// same `PaintData` into the same vertex-attribute shape.
+///
+/// Geometry is normalized into the **quad's** 0..1 UV space, which is not
+/// always the space the paint was authored in: a Tier-3 path's quad may be
+/// snapped outward to whole device pixels, leaving its origin up to a pixel
+/// before the bounds the gradient endpoints are relative to. `origin` is
+/// where the quad starts in the paint's own coordinate space (`[0, 0]`
+/// when they coincide, which is every Tier-2 shape), and `width` / `height`
+/// are the quad's size in that same space. Without the shift a snapped
+/// path's gradient would sit a pixel off the identical unsnapped one.
 pub(crate) fn encode_paint_data(
     paint_data: &PaintData,
+    origin: [f32; 2],
     width: f32,
     height: f32,
 ) -> (u32, [f32; 4], [[f32; 4]; 4], [f32; 4]) {
     let zero_colors = [[0.0; 4]; 4];
     let zero_offsets = [0.0; 4];
+    let u = |x: f32| (x - origin[0]) / width;
+    let v = |y: f32| (y - origin[1]) / height;
 
     match paint_data {
         PaintData::Solid => (0, [0.0; 4], zero_colors, zero_offsets),
         PaintData::LinearGradient { start, end, stops } => {
             // Normalize coordinates to 0..1 UV space
-            let geo = [
-                start[0] / width,
-                start[1] / height,
-                end[0] / width,
-                end[1] / height,
-            ];
+            let geo = [u(start[0]), v(start[1]), u(end[0]), v(end[1])];
             let (colors, offsets) = encode_stops(stops);
             (1, geo, colors, offsets)
         }
@@ -408,12 +415,7 @@ pub(crate) fn encode_paint_data(
             // so we normalize the radius relative to width (x-axis) and let the
             // shader use aspect-corrected distance.
             let aspect = height / width.max(0.0001);
-            let geo = [
-                center[0] / width,
-                center[1] / height,
-                *radius / width,
-                aspect,
-            ];
+            let geo = [u(center[0]), v(center[1]), *radius / width, aspect];
             let (colors, offsets) = encode_stops(stops);
             (2, geo, colors, offsets)
         }
@@ -422,7 +424,7 @@ pub(crate) fn encode_paint_data(
             start_angle,
             stops,
         } => {
-            let geo = [center[0] / width, center[1] / height, *start_angle, 0.0];
+            let geo = [u(center[0]), v(center[1]), *start_angle, 0.0];
             let (colors, offsets) = encode_stops(stops);
             (3, geo, colors, offsets)
         }
@@ -511,18 +513,17 @@ impl PathGradientVertex {
     /// scope here) does not fold `SetOpacity` into gradient `ShapeQuad`s.
     pub(crate) fn from_path_entry(
         entry: &PathEntry,
-        region: &crate::path_atlas::AtlasRegion,
+        placement: &crate::path_atlas::PathPlacement,
         scale_factor: f32,
         atlas_width: u32,
         atlas_height: u32,
         opacity: f32,
         transform: &Transform2D,
     ) -> [PathGradientVertex; 4] {
-        let [bx, by, bw, bh] = entry.bounds;
-        let sx = bx * scale_factor;
-        let sy = by * scale_factor;
-        let sw = bw * scale_factor;
-        let sh = bh * scale_factor;
+        // Same rule as `path_quad_verts`: the rect is the placement's, never
+        // re-derived from `entry.bounds`.
+        let region = &placement.region;
+        let [sx, sy, sw, sh] = placement.device_rect;
 
         let aw = atlas_width.max(1) as f32;
         let ah = atlas_height.max(1) as f32;
@@ -531,8 +532,18 @@ impl PathGradientVertex {
         let u1 = (region.x + region.w) as f32 / aw;
         let v1 = (region.y + region.h) as f32 / ah;
 
+        // Gradient endpoints are authored in logical pixels relative to
+        // `entry.bounds`' origin, but the quad may have been snapped outward
+        // to the device pixel grid. Re-base into the quad's space, in those
+        // same logical units, so the gradient lands where the author put it
+        // whether or not the snap moved the quad.
+        let sf = scale_factor.max(1e-4);
+        let origin = [
+            (sx - entry.bounds[0] * scale_factor) / sf,
+            (sy - entry.bounds[1] * scale_factor) / sf,
+        ];
         let (paint_type, gradient_geo, raw_colors, gradient_offsets) =
-            encode_paint_data(&entry.paint_data, bw, bh);
+            encode_paint_data(&entry.paint_data, origin, sw / sf, sh / sf);
         // Linearize (sRGB → linear, matching every other pipeline) and
         // fold opacity into alpha — see the doc comment above.
         let colors: [[f32; 4]; 4] = std::array::from_fn(|i| {
@@ -1115,7 +1126,16 @@ mod tests {
     /// for a `PathGradientVertex` test (its `last_used_frame` field is
     /// private to `path_atlas`, so tests outside that module can't
     /// construct one by hand).
-    fn rasterize_for_test(entry: &PathEntry, atlas_size: u32) -> crate::path_atlas::AtlasRegion {
+    fn rasterize_for_test(entry: &PathEntry, atlas_size: u32) -> crate::path_atlas::PathPlacement {
+        place_for_test(entry, atlas_size, 1.0, false)
+    }
+
+    fn place_for_test(
+        entry: &PathEntry,
+        atlas_size: u32,
+        scale_factor: f32,
+        snap: bool,
+    ) -> crate::path_atlas::PathPlacement {
         let mut atlas = crate::path_atlas::PathAtlas::new(atlas_size, atlas_size);
         atlas.begin_frame();
         atlas
@@ -1124,10 +1144,66 @@ mod tests {
                 &entry.stroke_style,
                 entry.fill_rule,
                 entry.bounds,
+                scale_factor,
                 1.0,
-                1.0,
+                snap,
             )
             .expect("test path rasterizes")
+    }
+
+    /// Snapping the quad to the pixel grid must not move the gradient.
+    ///
+    /// The quad grows outward by up to a pixel on each side, and gradient
+    /// geometry is normalized across the quad — so without re-basing, the
+    /// same gradient would land in a different place depending on whether
+    /// the snap happened to fire. The invariant: the device position of the
+    /// gradient's start point is the path bounds' own origin, either way.
+    #[test]
+    fn snapping_the_quad_does_not_move_the_gradient() {
+        // A half-pixel bounds origin: the case the snap exists for.
+        let bounds_rect = teksilo_canvas::Rect::new(1.5, 1.5, 13.0, 13.0);
+        let entry = gradient_path_entry(
+            bounds_rect,
+            PaintData::LinearGradient {
+                start: [0.0, 0.0],
+                end: [13.0, 0.0],
+                stops: vec![
+                    GradientStop {
+                        offset: 0.0,
+                        color: Color::RED,
+                    },
+                    GradientStop {
+                        offset: 1.0,
+                        color: Color::BLUE,
+                    },
+                ],
+            },
+        );
+
+        for snap in [false, true] {
+            let placement = place_for_test(&entry, 256, 1.0, snap);
+            let verts = PathGradientVertex::from_path_entry(
+                &entry,
+                &placement,
+                1.0,
+                256,
+                256,
+                1.0,
+                &Transform2D::IDENTITY,
+            );
+            let [qx, _, qw, _] = placement.device_rect;
+            // Where the gradient's first stop lands, in device pixels.
+            let start_x = qx + verts[0].gradient_geo[0] * qw;
+            let end_x = qx + verts[0].gradient_geo[2] * qw;
+            assert!(
+                (start_x - 1.5).abs() < 0.01,
+                "snap={snap}: gradient start must sit at the bounds origin, got {start_x}"
+            );
+            assert!(
+                (end_x - 14.5).abs() < 0.01,
+                "snap={snap}: gradient end must sit at the bounds' far edge, got {end_x}"
+            );
+        }
     }
 
     fn gradient_path_entry(bounds_rect: teksilo_canvas::Rect, paint_data: PaintData) -> PathEntry {
@@ -1162,11 +1238,11 @@ mod tests {
                 ],
             },
         );
-        let region = rasterize_for_test(&entry, 256);
+        let placement = rasterize_for_test(&entry, 256);
 
         let verts = PathGradientVertex::from_path_entry(
             &entry,
-            &region,
+            &placement,
             1.0,
             256,
             256,
@@ -1217,11 +1293,11 @@ mod tests {
                 ],
             },
         );
-        let region = rasterize_for_test(&entry, 512);
+        let placement = rasterize_for_test(&entry, 512);
 
         let verts = PathGradientVertex::from_path_entry(
             &entry,
-            &region,
+            &placement,
             1.0,
             512,
             512,
@@ -1259,11 +1335,11 @@ mod tests {
                 ],
             },
         );
-        let region = rasterize_for_test(&entry, 128);
+        let placement = rasterize_for_test(&entry, 128);
 
         let full = PathGradientVertex::from_path_entry(
             &entry,
-            &region,
+            &placement,
             1.0,
             128,
             128,
@@ -1272,7 +1348,7 @@ mod tests {
         );
         let half = PathGradientVertex::from_path_entry(
             &entry,
-            &region,
+            &placement,
             1.0,
             128,
             128,

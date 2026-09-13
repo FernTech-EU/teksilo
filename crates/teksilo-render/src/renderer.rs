@@ -350,11 +350,11 @@ impl Renderer {
         // known by replaying the transform commands, so we walk `draw_order`
         // with the same SetTransform / PushTransform / PopTransform bookkeeping
         // the main render loop uses and rasterize each path at its effective
-        // zoom. `path_regions` is indexed by path index (one Path command per
+        // zoom. `path_placements` is indexed by path index (one Path command per
         // entry). Logical strokes ignore the zoom; a path inside a blurred
         // subtree may get a slightly off zoom estimate (acceptably rare —
         // positioning is unaffected, only raster sharpness).
-        let mut path_regions: Vec<Option<crate::path_atlas::AtlasRegion>> =
+        let mut path_placements: Vec<Option<crate::path_atlas::PathPlacement>> =
             vec![None; frame.paths.len()];
         {
             let mut ptf_stack: Vec<Transform2D> = vec![Transform2D::IDENTITY];
@@ -393,13 +393,24 @@ impl Renderer {
                             // (no scale_factor — it lives only in the
                             // translation column, see SetTransform handling).
                             let zoom = ptf_current.m[0].hypot(ptf_current.m[1]);
-                            path_regions[*idx] = self.path_atlas.lookup_or_rasterize(
+                            // Snap the quad to whole device pixels only when
+                            // nothing else is going to move it. Under the
+                            // identity transform (every dock, menu, button
+                            // and icon in a normal window — `PushTransform`
+                            // is not even emitted for an identity) the mask
+                            // can sample 1:1 and stay sharp; under a scale
+                            // or a translate animation it cannot, and
+                            // rounding would only make the path step between
+                            // pixels. See `PathAtlas::lookup_or_rasterize`.
+                            let snap = ptf_current == Transform2D::IDENTITY;
+                            path_placements[*idx] = self.path_atlas.lookup_or_rasterize(
                                 &entry.path,
                                 &entry.stroke_style,
                                 entry.fill_rule,
                                 entry.bounds,
                                 scale_factor,
                                 zoom,
+                                snap,
                             );
                         }
                     }
@@ -1115,7 +1126,7 @@ impl Renderer {
                                     index_binding
                                 );
                                 quad_source = None;
-                                if let Some(Some(region)) = path_regions.get(*idx) {
+                                if let Some(Some(placement)) = path_placements.get(*idx) {
                                     let Some(entry) = frame.paths.get(*idx) else {
                                         continue;
                                     };
@@ -1134,8 +1145,7 @@ impl Renderer {
                                         quad_source = Some(QuadSource::PathAtlas);
                                         let verts = path_quad_verts(
                                             entry,
-                                            region,
-                                            scale_factor,
+                                            placement,
                                             path_atlas.width,
                                             path_atlas.height,
                                             current_opacity,
@@ -1160,7 +1170,7 @@ impl Renderer {
                                         // tint.
                                         let verts = path_gradient_quad_verts(
                                             entry,
-                                            region,
+                                            placement,
                                             scale_factor,
                                             path_atlas.width,
                                             path_atlas.height,
@@ -2034,18 +2044,18 @@ impl Renderer {
 /// Build 4 QuadVertex for a path entry (in pixel space, pre-NDC).
 fn path_quad_verts(
     entry: &teksilo_canvas::PathEntry,
-    region: &crate::path_atlas::AtlasRegion,
-    scale_factor: f32,
+    placement: &crate::path_atlas::PathPlacement,
     atlas_width: u32,
     atlas_height: u32,
     opacity: f32,
     transform: &Transform2D,
 ) -> [QuadVertex; 4] {
-    let [bx, by, bw, bh] = entry.bounds;
-    let sx = bx * scale_factor;
-    let sy = by * scale_factor;
-    let sw = bw * scale_factor;
-    let sh = bh * scale_factor;
+    // The rect comes from the placement, never recomputed from
+    // `entry.bounds` — the atlas baked its bitmap against this exact rect,
+    // and a second derivation of it is how the two drifted apart before
+    // (see `PathPlacement`).
+    let region = &placement.region;
+    let [sx, sy, sw, sh] = placement.device_rect;
 
     let aw = atlas_width.max(1) as f32;
     let ah = atlas_height.max(1) as f32;
@@ -2115,7 +2125,7 @@ fn path_quad_verts(
 /// `path_quad_verts`.
 fn path_gradient_quad_verts(
     entry: &teksilo_canvas::PathEntry,
-    region: &crate::path_atlas::AtlasRegion,
+    placement: &crate::path_atlas::PathPlacement,
     scale_factor: f32,
     atlas_width: u32,
     atlas_height: u32,
@@ -2124,7 +2134,7 @@ fn path_gradient_quad_verts(
 ) -> [crate::vertex::PathGradientVertex; 4] {
     crate::vertex::PathGradientVertex::from_path_entry(
         entry,
-        region,
+        placement,
         scale_factor,
         atlas_width,
         atlas_height,
@@ -3561,6 +3571,85 @@ mod tests {
                          the snapped quad must not bleed past its bitmap"
                     );
                 }
+            }
+        }
+    }
+
+    /// The same guarantee for Tier-3 paths, which did not have it.
+    ///
+    /// Every SVG icon in an app is a path, and a path's quad used to be
+    /// derived from `entry.bounds × scale_factor` while its bitmap was baked
+    /// on its own integer grid. `Rect::expand` alone puts a line-style 16 dp
+    /// icon's bounds on a half pixel, so the two disagreed by half a texel
+    /// and the linear sampler smeared every stroke: a 1 px hairline peaked
+    /// at 48 % coverage instead of 100 %, and a dashed ring's sub-pixel gaps
+    /// closed up into a grey haze.
+    ///
+    /// A 1 px vertical stroke must therefore land as exactly one fully
+    /// opaque column with nothing either side of it.
+    #[test]
+    fn fractional_origin_path_renders_pixel_exact() {
+        let Some((mut renderer, device, queue)) = pollster::block_on(
+            crate::test_support::create_test_renderer("teksilo_render_path_snap_test_device"),
+        ) else {
+            return;
+        };
+
+        // A hairline centred on x = 8.5, so it covers exactly device column
+        // 8. Its stroke-expanded bounds start at x = 7.5: the half pixel.
+        let mut path = teksilo_canvas::Path::new();
+        path.move_to(teksilo_canvas::Point::new(8.5, 4.0));
+        path.line_to(teksilo_canvas::Point::new(8.5, 12.0));
+        let stroke_style = teksilo_canvas::StrokeStyle::solid(1.0);
+        let bounds = path.bounds().expand(stroke_style.width);
+        assert_eq!(bounds.x, 7.5, "the half-pixel origin this test is about");
+
+        let mut frame = RenderFrame::new();
+        frame.paths.push(teksilo_canvas::PathEntry {
+            path,
+            color: [1.0, 1.0, 1.0, 1.0],
+            stroke_style,
+            fill_rule: teksilo_canvas::FillRule::Winding,
+            bounds: bounds.to_array(),
+            paint_data: teksilo_canvas::PaintData::Solid,
+        });
+        frame.draw_order.push(DrawCommand::Path(0));
+
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("teksilo_render_path_snap_test_target"),
+            size: wgpu::Extent3d {
+                width: 32,
+                height: 32,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+        renderer.render(&frame, &view, 1.0, 32, 32, [0.0, 0.0, 0.0, 0.0]);
+
+        let pixels = crate::test_support::read_texture_rgba(&device, &queue, &texture, 32, 32);
+        let alpha = |x: usize, y: usize| pixels[(y * 32 + x) * 4 + 3];
+
+        for y in 5..11 {
+            assert_eq!(
+                alpha(8, y),
+                255,
+                "the hairline's own column must be fully inked at y={y} — \
+                 anything less means the quad was resampled off the pixel grid"
+            );
+            for x in [6, 7, 9, 10] {
+                assert_eq!(
+                    alpha(x, y),
+                    0,
+                    "({x},{y}) must be untouched — a 1 px stroke that leaks \
+                     into its neighbours is the blur this snap removes"
+                );
             }
         }
     }

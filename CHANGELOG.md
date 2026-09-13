@@ -238,6 +238,30 @@ can override, and none of them changes what a mouse does.
 
 ### Fixed
 
+#### Rendering
+
+- **CPU-rasterized paths, which is every SVG icon, draw pixel-exact.** A Tier-3
+  path's coverage mask is rasterized on its own integer grid, but its quad was
+  placed at `bounds × scale_factor` and sized to `ceil` of that — so the quad sat
+  at a fractional device position, and at a fractional display scale it was not
+  even the same size as its atlas region.
+  Sampled through the atlas's linear filter, both errors smear. A 1 px hairline
+  drawn this way peaked at **48 % coverage instead of 100 %**, and a 16 dp dashed
+  ring lost its gaps entirely and read as a grey haze. The path pipeline now snaps
+  the quad out to whole device pixels and bakes the bitmap against that same
+  origin, so one texel lands on one pixel — the guarantee
+  `QuadVertex::from_glyph_quad_transformed` has always given glyphs, which is why
+  text was sharp and icons were not. The rect now travels with the raster as one
+  `PathPlacement`, so the two can no longer be derived apart. Snapping is skipped
+  under a transform, where the mask is being resampled anyway and rounding would
+  make a translating path step between pixels instead of gliding; a gradient's
+  geometry is re-based onto the snapped quad, so it lands in the same place either
+  way.
+- **Two path-atlas entries no longer share an edge.** The shelf packer placed them
+  flush, so an edge fragment of any quad that is not pixel-exact on its region
+  read a texel belonging to the *next icon* rather than transparent space. Each
+  entry now reserves a one-texel transparent gutter, matching the glyph atlas.
+
 #### Core
 
 - **A two-finger pinch reaches the zoom it asked for instead of running into

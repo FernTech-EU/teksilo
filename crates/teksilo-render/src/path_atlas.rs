@@ -21,6 +21,18 @@ const MAX_COSMETIC_RASTER_DIM: f32 = 2048.0;
 /// frame rarely runs out of room mid-walk (where reclaiming is unsafe).
 const COMPACT_SLACK_PX: u32 = 256;
 
+/// Transparent margin reserved after each entry, so no two entries touch.
+///
+/// The atlas is sampled with `FilterMode::Linear` and each quad's UVs run to
+/// its region's outer edge. Whenever a quad is not pixel-exact on its region
+/// — any path under a transform, where snapping is deliberately off (see
+/// [`PathAtlas::lookup_or_rasterize`]) — an edge fragment's bilinear kernel
+/// reaches past the region, and edge-to-edge packing made that the
+/// *neighbouring icon's* pixels. One transparent row and column keeps the
+/// worst case a fade to nothing rather than a smear of unrelated ink. The
+/// glyph atlas has always reserved the same gutter.
+const ENTRY_GUTTER_PX: u32 = 1;
+
 /// A region within the atlas texture.
 #[derive(Debug, Clone, Copy)]
 pub struct AtlasRegion {
@@ -32,7 +44,31 @@ pub struct AtlasRegion {
     last_used_frame: u64,
 }
 
-/// Cache key derived from path geometry + stroke style + rasterized size.
+/// A rasterized path plus the **exact** rect it must be drawn at.
+///
+/// The two travel together because they are one decision, not two. The atlas
+/// bitmap is rasterized on its own integer grid; if the quad that samples it
+/// is placed or sized even slightly differently, every texel is resampled
+/// through the atlas's `FilterMode::Linear` and the coverage mask smears.
+/// A 16 dp line-style icon does not survive that: a 1 px stroke drawn at a
+/// half-pixel offset peaks at **48 % coverage** instead of 100 %, and
+/// sub-pixel dash gaps close up entirely, so a dashed ring renders as a grey
+/// haze. Returning the rect from the same call that decides the raster is
+/// what stops the two from ever disagreeing again.
+///
+/// See [`PathAtlas::lookup_or_rasterize`] for when the rect is snapped.
+#[derive(Debug, Clone, Copy)]
+pub struct PathPlacement {
+    /// Where the coverage mask lives in the atlas texture.
+    pub region: AtlasRegion,
+    /// `[x, y, w, h]` in **pre-transform device pixels** — the quad the
+    /// caller must emit. When snapped this is integral and exactly
+    /// `region.w × region.h`, so the mask samples 1:1 onto whole pixels.
+    pub device_rect: [f32; 4],
+}
+
+/// Cache key derived from path geometry + stroke style + rasterized size +
+/// the device-space origin the bitmap was baked against.
 ///
 /// Deliberately does **not** include color: the atlas now always
 /// rasterizes an opaque-white AA coverage mask (see [`rasterize_path`]),
@@ -43,7 +79,14 @@ pub struct AtlasRegion {
 struct PathCacheKey(u64);
 
 impl PathCacheKey {
-    fn new(path: &Path, style: &StrokeStyle, fill_rule: FillRule, w: u32, h: u32) -> Self {
+    fn new(
+        path: &Path,
+        style: &StrokeStyle,
+        fill_rule: FillRule,
+        origin: [f32; 2],
+        w: u32,
+        h: u32,
+    ) -> Self {
         let mut hasher = std::hash::DefaultHasher::new();
         // Hash path commands
         for cmd in &path.commands {
@@ -105,6 +148,15 @@ impl PathCacheKey {
         // Hash rasterized dimensions
         w.hash(&mut hasher);
         h.hash(&mut hasher);
+        // And the device-space origin the bitmap was baked against. The
+        // path's own commands are absolute, so two *different* paths already
+        // key apart — but the SAME path drawn once under the identity
+        // transform (snapped to the pixel grid) and once under a transform
+        // (not snapped) wants two different bitmaps at the same dimensions.
+        // Without the origin here the second draw would silently reuse the
+        // first's phase.
+        origin[0].to_bits().hash(&mut hasher);
+        origin[1].to_bits().hash(&mut hasher);
         PathCacheKey(hasher.finish())
     }
 }
@@ -228,6 +280,12 @@ impl PathAtlas {
     /// zoom-independent device width — the border holds a constant
     /// device-pixel thickness at any zoom. **Logical** strokes ignore `zoom`
     /// (the body bitmap is stretched by the display quad, as before).
+    ///
+    /// `snap` asks for the quad to be aligned to whole device pixels and the
+    /// bitmap baked to match, so the mask samples 1:1 — pass it when the
+    /// effective transform is the identity, and only then (see the body for
+    /// why). The returned [`PathPlacement`] carries the rect the caller must
+    /// draw; it is not to be re-derived from `bounds`.
     #[allow(clippy::too_many_arguments)] // rasterization params; bundling adds no clarity
     pub fn lookup_or_rasterize(
         &mut self,
@@ -237,7 +295,8 @@ impl PathAtlas {
         bounds: [f32; 4],
         scale_factor: f32,
         zoom: f32,
-    ) -> Option<AtlasRegion> {
+        snap: bool,
+    ) -> Option<PathPlacement> {
         // Cosmetic paths rasterize the body at the current zoom (so it stays
         // sharp 1:1 with the transform-scaled display quad). Cost: the zoom is
         // baked into the raster dimensions, which are part of the cache key,
@@ -261,8 +320,64 @@ impl PathAtlas {
             (scale_factor, scale_factor)
         };
 
-        let raster_w = (bounds[2] * geom_scale).ceil() as u32;
-        let raster_h = (bounds[3] * geom_scale).ceil() as u32;
+        // The quad the caller will emit, in pre-transform device pixels.
+        let dx = bounds[0] * scale_factor;
+        let dy = bounds[1] * scale_factor;
+        let dw = bounds[2] * scale_factor;
+        let dh = bounds[3] * scale_factor;
+
+        // Snap the quad out to whole device pixels and bake the bitmap
+        // against that same origin, so one texel lands on one pixel and the
+        // sampler has nothing to interpolate. Without this a path's mask is
+        // rasterized on its own integer grid and then drawn wherever layout
+        // put it — `Rect::expand` alone leaves a 16 dp ring's bounds at
+        // `x = 1.5`, and a half-pixel bilinear smear costs that ring more
+        // than half its ink (see `PathPlacement`). The glyph pipeline has
+        // always done this; see `QuadVertex::from_glyph_quad_transformed`'s
+        // `one_to_one` branch.
+        //
+        // Only under the identity transform (`snap`, decided by the caller):
+        // under a scale the mask is being resampled anyway, and under a
+        // translate animation rounding the origin would make the path step
+        // between pixels instead of gliding. The `geom_scale` check keeps a
+        // cosmetic (device-space) stroke out of it unless its zoom is 1,
+        // since its bitmap is baked at zoom while its quad is not.
+        let ox = dx.floor();
+        let oy = dy.floor();
+        let snapped_rect = [
+            ox,
+            oy,
+            ((dx + dw).ceil() - ox).max(1.0),
+            ((dy + dh).ceil() - oy).max(1.0),
+        ];
+        // Snapping grows the bitmap by up to a pixel on each axis. A path
+        // sitting exactly on `max_size` would then be rejected below and
+        // simply not drawn, so give up the sharpness rather than the path —
+        // at that size it is one texel in four thousand anyway.
+        let snapped = snap
+            && (geom_scale - scale_factor).abs() < 1e-4
+            && snapped_rect[2] as u32 <= self.max_size
+            && snapped_rect[3] as u32 <= self.max_size;
+        let device_rect = if snapped {
+            snapped_rect
+        } else {
+            [dx, dy, dw, dh]
+        };
+
+        // Device-space origin the bitmap is baked against, and its size.
+        let (raster_origin, raster_w, raster_h) = if snapped {
+            (
+                [device_rect[0], device_rect[1]],
+                device_rect[2] as u32,
+                device_rect[3] as u32,
+            )
+        } else {
+            (
+                [bounds[0] * geom_scale, bounds[1] * geom_scale],
+                (bounds[2] * geom_scale).ceil() as u32,
+                (bounds[3] * geom_scale).ceil() as u32,
+            )
+        };
         if raster_w == 0 || raster_h == 0 {
             return None;
         }
@@ -286,19 +401,34 @@ impl PathAtlas {
             return None;
         }
 
-        let key = PathCacheKey::new(path, style, fill_rule, raster_w, raster_h);
+        let key = PathCacheKey::new(path, style, fill_rule, raster_origin, raster_w, raster_h);
 
         // Cache hit
         if let Some(region) = self.cache.get_mut(&key) {
             region.last_used_frame = self.current_frame;
-            return Some(*region);
+            return Some(PathPlacement {
+                region: *region,
+                device_rect,
+            });
         }
 
         // Rasterize — always opaque white; see PathCacheKey and this
         // function's doc comment for why color is not a parameter.
-        let pixels = rasterize_path(path, style, fill_rule, bounds, geom_scale, stroke_scale)?;
+        let pixels = rasterize_path(
+            path,
+            style,
+            fill_rule,
+            raster_origin,
+            raster_w,
+            raster_h,
+            geom_scale,
+            stroke_scale,
+        )?;
         let region = self.allocate_and_write(key, raster_w, raster_h, &pixels)?;
-        Some(region)
+        Some(PathPlacement {
+            region,
+            device_rect,
+        })
     }
 
     /// Try to allocate space in the atlas via shelf packing.
@@ -358,7 +488,10 @@ impl PathAtlas {
 
     /// Try to allocate a region using shelf packing.
     fn try_allocate(&mut self, w: u32, h: u32) -> Option<AtlasRegion> {
-        // Does it fit on the current shelf?
+        // The region is `w × h`; the shelf cursor advances past a further
+        // `ENTRY_GUTTER_PX` so the next entry cannot abut this one. Only the
+        // region has to fit — a gutter running off the right edge costs
+        // nothing, since the cursor is past the edge either way.
         if self.shelf_x + w <= self.width && self.shelf_y + h.max(self.shelf_height) <= self.height
         {
             let region = AtlasRegion {
@@ -368,8 +501,8 @@ impl PathAtlas {
                 h,
                 last_used_frame: self.current_frame,
             };
-            self.shelf_x += w;
-            self.shelf_height = self.shelf_height.max(h);
+            self.shelf_x += w + ENTRY_GUTTER_PX;
+            self.shelf_height = self.shelf_height.max(h + ENTRY_GUTTER_PX);
             return Some(region);
         }
 
@@ -377,8 +510,8 @@ impl PathAtlas {
         let new_y = self.shelf_y + self.shelf_height;
         if w <= self.width && new_y + h <= self.height {
             self.shelf_y = new_y;
-            self.shelf_x = w;
-            self.shelf_height = h;
+            self.shelf_x = w + ENTRY_GUTTER_PX;
+            self.shelf_height = h + ENTRY_GUTTER_PX;
             let region = AtlasRegion {
                 x: 0,
                 y: new_y,
@@ -549,45 +682,47 @@ impl PathAtlas {
 /// sharp at the current zoom). `stroke_scale` scales the **stroke width** (=
 /// `scale_factor` always; for cosmetic strokes this bakes a zoom-independent
 /// device-pixel thickness). The two are equal for the logical/fill path.
+///
+/// `origin` is the bitmap's top-left in **device pixels**: a path point `p`
+/// lands at `p * geom_scale - origin`. It is a device-space origin rather
+/// than the path's own bounds because the caller may have snapped it to the
+/// pixel grid, and the bitmap has to be baked against the very grid the quad
+/// will be drawn on — see [`PathAtlas::lookup_or_rasterize`]. `w` / `h` are
+/// the bitmap's size in texels, likewise decided by the caller.
+#[allow(clippy::too_many_arguments)]
 fn rasterize_path(
     path: &Path,
     style: &StrokeStyle,
     fill_rule: FillRule,
-    bounds: [f32; 4],
+    origin: [f32; 2],
+    w: u32,
+    h: u32,
     geom_scale: f32,
     stroke_scale: f32,
 ) -> Option<Vec<u8>> {
-    let w = (bounds[2] * geom_scale).ceil() as u32;
-    let h = (bounds[3] * geom_scale).ceil() as u32;
     if w == 0 || h == 0 {
         return None;
     }
 
     let mut pixmap = tiny_skia::Pixmap::new(w, h)?;
 
-    // Build tiny-skia path, translating from bounds origin
+    // Build the tiny-skia path in bitmap space. Scale first, then subtract
+    // the device-space origin — NOT the other way round: the origin may be
+    // snapped to a pixel the path's own bounds do not sit on, so it is not a
+    // multiple of `geom_scale` and cannot be folded into the path's units.
+    let bx = |x: f32| x * geom_scale - origin[0];
+    let by = |y: f32| y * geom_scale - origin[1];
     let mut pb = tiny_skia::PathBuilder::new();
     for cmd in &path.commands {
         match *cmd {
             PathCommand::MoveTo(p) => {
-                pb.move_to(
-                    (p.x - bounds[0]) * geom_scale,
-                    (p.y - bounds[1]) * geom_scale,
-                );
+                pb.move_to(bx(p.x), by(p.y));
             }
             PathCommand::LineTo(p) => {
-                pb.line_to(
-                    (p.x - bounds[0]) * geom_scale,
-                    (p.y - bounds[1]) * geom_scale,
-                );
+                pb.line_to(bx(p.x), by(p.y));
             }
             PathCommand::QuadTo { control, to } => {
-                pb.quad_to(
-                    (control.x - bounds[0]) * geom_scale,
-                    (control.y - bounds[1]) * geom_scale,
-                    (to.x - bounds[0]) * geom_scale,
-                    (to.y - bounds[1]) * geom_scale,
-                );
+                pb.quad_to(bx(control.x), by(control.y), bx(to.x), by(to.y));
             }
             PathCommand::CubicTo {
                 control1,
@@ -595,12 +730,12 @@ fn rasterize_path(
                 to,
             } => {
                 pb.cubic_to(
-                    (control1.x - bounds[0]) * geom_scale,
-                    (control1.y - bounds[1]) * geom_scale,
-                    (control2.x - bounds[0]) * geom_scale,
-                    (control2.y - bounds[1]) * geom_scale,
-                    (to.x - bounds[0]) * geom_scale,
-                    (to.y - bounds[1]) * geom_scale,
+                    bx(control1.x),
+                    by(control1.y),
+                    bx(control2.x),
+                    by(control2.y),
+                    bx(to.x),
+                    by(to.y),
                 );
             }
             PathCommand::ArcTo {
@@ -611,13 +746,14 @@ fn rasterize_path(
                 // Approximate arc with cubic Bézier segments
                 arc_to_cubics(
                     &mut pb,
-                    rect.x - bounds[0],
-                    rect.y - bounds[1],
+                    rect.x,
+                    rect.y,
                     rect.width,
                     rect.height,
                     start_angle,
                     sweep_angle,
                     geom_scale,
+                    origin,
                 );
             }
             PathCommand::Close => {
@@ -691,6 +827,10 @@ fn rasterize_path(
 /// public `Path::arc_to` API and existing call sites like
 /// `Path::circle` and `Path::rounded_rect`). They are converted to
 /// radians internally before being fed to `f32::cos`/`f32::sin`.
+///
+/// `cx` / `cy` are the arc rect's top-left in the path's own units; `origin`
+/// is the bitmap's top-left in device pixels, subtracted after scaling for
+/// the reason [`rasterize_path`] gives.
 #[allow(clippy::too_many_arguments)]
 fn arc_to_cubics(
     pb: &mut tiny_skia::PathBuilder,
@@ -701,11 +841,12 @@ fn arc_to_cubics(
     start_angle: f32,
     sweep_angle: f32,
     scale_factor: f32,
+    origin: [f32; 2],
 ) {
     let rx = w * 0.5;
     let ry = h * 0.5;
-    let center_x = (cx + rx) * scale_factor;
-    let center_y = (cy + ry) * scale_factor;
+    let center_x = (cx + rx) * scale_factor - origin[0];
+    let center_y = (cy + ry) * scale_factor - origin[1];
     let rx_s = rx * scale_factor;
     let ry_s = ry * scale_factor;
 
@@ -791,6 +932,7 @@ mod tests {
             [0.0, 0.0, w, h],
             1.0,
             1.0,
+            false,
         );
 
         assert!(
@@ -842,6 +984,7 @@ mod tests {
             [0.0, 0.0, side, side],
             1.0,
             1.0,
+            false,
         );
         assert!(
             region.is_some(),
@@ -869,8 +1012,16 @@ mod tests {
         path.commands.push(PathCommand::Close);
 
         let style = StrokeStyle::solid(0.0);
-        let bounds = [0.0, 0.0, 10.0, 10.0];
-        let pixels = rasterize_path(&path, &style, FillRule::Winding, bounds, 1.0, 1.0);
+        let pixels = rasterize_path(
+            &path,
+            &style,
+            FillRule::Winding,
+            [0.0, 0.0],
+            10,
+            10,
+            1.0,
+            1.0,
+        );
         assert!(pixels.is_some());
         let px = pixels.unwrap();
         assert_eq!(px.len(), 10 * 10 * 4);
@@ -892,8 +1043,16 @@ mod tests {
             .push(PathCommand::LineTo(Point::new(9.0, 5.0)));
 
         let style = StrokeStyle::solid(2.0);
-        let bounds = [0.0, 0.0, 10.0, 10.0];
-        let pixels = rasterize_path(&path, &style, FillRule::Winding, bounds, 1.0, 1.0);
+        let pixels = rasterize_path(
+            &path,
+            &style,
+            FillRule::Winding,
+            [0.0, 0.0],
+            10,
+            10,
+            1.0,
+            1.0,
+        );
         assert!(pixels.is_some());
     }
 
@@ -920,8 +1079,8 @@ mod tests {
             ..StrokeStyle::solid(2.0)
         };
         assert_ne!(
-            PathCacheKey::new(&path, &miter, FillRule::Winding, 12, 12),
-            PathCacheKey::new(&path, &round, FillRule::Winding, 12, 12),
+            PathCacheKey::new(&path, &miter, FillRule::Winding, [0.0, 0.0], 12, 12),
+            PathCacheKey::new(&path, &round, FillRule::Winding, [0.0, 0.0], 12, 12),
             "miter and round joins must hash to different cache keys"
         );
     }
@@ -940,10 +1099,151 @@ mod tests {
         path.commands.push(PathCommand::Close);
         let style = StrokeStyle::solid(0.0);
         assert_ne!(
-            PathCacheKey::new(&path, &style, FillRule::Winding, 12, 12),
-            PathCacheKey::new(&path, &style, FillRule::EvenOdd, 12, 12),
+            PathCacheKey::new(&path, &style, FillRule::Winding, [0.0, 0.0], 12, 12),
+            PathCacheKey::new(&path, &style, FillRule::EvenOdd, [0.0, 0.0], 12, 12),
             "winding and even-odd fills must hash to different cache keys"
         );
+    }
+
+    /// A hairline icon stroke is the case the snap exists for.
+    ///
+    /// `Rect::expand` leaves a 16 dp ring's stroke-expanded bounds at
+    /// `x = 1.5` (measured: the app's "no status" glyph is exactly this),
+    /// so at scale factor 1 the quad used to be emitted at a half pixel and
+    /// resampled through a linear sampler. The snap must round that outward
+    /// to whole pixels AND size the bitmap to match, because a quad that is
+    /// integral but a different size from its region is resampled just the
+    /// same.
+    #[test]
+    fn a_snapped_path_draws_one_texel_per_device_pixel() {
+        let mut atlas = PathAtlas::new(256, 256);
+        atlas.begin_frame();
+
+        let path = Path::circle(Point::new(8.0, 8.0), 5.5);
+        let style = StrokeStyle::solid(1.0);
+        let bounds = path.bounds().expand(style.width).to_array();
+        assert_eq!(
+            [bounds[0], bounds[1]],
+            [1.5, 1.5],
+            "the geometry this guards against: a half-pixel bounds origin"
+        );
+
+        for sf in [1.0_f32, 1.2, 2.0] {
+            let p = atlas
+                .lookup_or_rasterize(&path, &style, FillRule::Winding, bounds, sf, 1.0, true)
+                .expect("ring rasterizes");
+            let [x, y, w, h] = p.device_rect;
+            assert_eq!(
+                [x, y, w, h],
+                [x.floor(), y.floor(), w.floor(), h.floor()],
+                "sf {sf}: a snapped quad must land on whole device pixels"
+            );
+            assert_eq!(
+                (w as u32, h as u32),
+                (p.region.w, p.region.h),
+                "sf {sf}: the quad must be exactly as many pixels as the region \
+                 has texels, or the mask is resampled even on the integer grid"
+            );
+            assert!(
+                x <= bounds[0] * sf && x + w >= (bounds[0] + bounds[2]) * sf,
+                "sf {sf}: snapping must grow the rect outward, never clip the path"
+            );
+        }
+    }
+
+    /// The other half of the contract: under a transform the caller passes
+    /// `snap: false`, and the placement must be exactly what it always was.
+    /// Snapping there would be wrong twice over — the mask is being resampled
+    /// by the transform anyway, and rounding a translating path's origin
+    /// makes it step between pixels instead of gliding.
+    #[test]
+    fn an_unsnapped_path_keeps_the_raw_rect() {
+        let mut atlas = PathAtlas::new(256, 256);
+        atlas.begin_frame();
+
+        let path = Path::circle(Point::new(8.0, 8.0), 5.5);
+        let style = StrokeStyle::solid(1.0);
+        let bounds = path.bounds().expand(style.width).to_array();
+
+        let p = atlas
+            .lookup_or_rasterize(&path, &style, FillRule::Winding, bounds, 1.0, 1.0, false)
+            .expect("ring rasterizes");
+        assert_eq!(p.device_rect, [1.5, 1.5, 13.0, 13.0]);
+        assert_eq!((p.region.w, p.region.h), (13, 13));
+    }
+
+    /// The same path, snapped and unsnapped, must not share one bitmap.
+    ///
+    /// Both rasterize at 13×13 here, and the path's commands are identical
+    /// (they are absolute, so position alone never separates them), so
+    /// without the raster origin in the key the second lookup would be
+    /// served the first's phase.
+    #[test]
+    fn cache_key_distinguishes_the_snapped_phase() {
+        let path = Path::circle(Point::new(8.0, 8.0), 5.5);
+        let style = StrokeStyle::solid(1.0);
+        assert_ne!(
+            PathCacheKey::new(&path, &style, FillRule::Winding, [1.0, 1.0], 13, 13),
+            PathCacheKey::new(&path, &style, FillRule::Winding, [1.5, 1.5], 13, 13),
+            "a snapped and an unsnapped raster of one path must key apart"
+        );
+    }
+
+    /// Two entries must never share an edge.
+    ///
+    /// The atlas sampler is bilinear and each quad's UVs run to its region's
+    /// outer edge, so an edge fragment of a quad that is not pixel-exact on
+    /// its region reads one texel past it. Packed edge to edge, that texel
+    /// belonged to a different icon.
+    #[test]
+    fn atlas_entries_never_touch() {
+        let mut atlas = PathAtlas::new(256, 256);
+        atlas.begin_frame();
+
+        let style = StrokeStyle::solid(0.0);
+        let mut placed: Vec<AtlasRegion> = Vec::new();
+        for i in 0..6 {
+            let mut path = Path::new();
+            let side = 10.0 + i as f32;
+            path.commands
+                .push(PathCommand::MoveTo(Point::new(0.0, 0.0)));
+            path.commands
+                .push(PathCommand::LineTo(Point::new(side, 0.0)));
+            path.commands
+                .push(PathCommand::LineTo(Point::new(side, side)));
+            path.commands.push(PathCommand::Close);
+            let p = atlas
+                .lookup_or_rasterize(
+                    &path,
+                    &style,
+                    FillRule::Winding,
+                    [0.0, 0.0, side, side],
+                    1.0,
+                    1.0,
+                    true,
+                )
+                .expect("rasterizes");
+            placed.push(p.region);
+        }
+
+        for (i, a) in placed.iter().enumerate() {
+            for (j, b) in placed.iter().enumerate() {
+                if i >= j {
+                    continue;
+                }
+                // Grow each region by the gutter and require they still
+                // don't overlap: that is exactly "at least one transparent
+                // texel apart on every side".
+                let overlaps = a.x < b.x + b.w + ENTRY_GUTTER_PX
+                    && b.x < a.x + a.w + ENTRY_GUTTER_PX
+                    && a.y < b.y + b.h + ENTRY_GUTTER_PX
+                    && b.y < a.y + a.h + ENTRY_GUTTER_PX;
+                assert!(
+                    !overlaps,
+                    "entries {i} {a:?} and {j} {b:?} are packed closer than the gutter"
+                );
+            }
+        }
     }
 
     #[test]
@@ -964,15 +1264,15 @@ mod tests {
         let bounds = [0.0, 0.0, 10.0, 10.0];
 
         let r1 = atlas
-            .lookup_or_rasterize(&path, &style, FillRule::Winding, bounds, 1.0, 1.0)
+            .lookup_or_rasterize(&path, &style, FillRule::Winding, bounds, 1.0, 1.0, false)
             .unwrap();
         let r2 = atlas
-            .lookup_or_rasterize(&path, &style, FillRule::Winding, bounds, 1.0, 1.0)
+            .lookup_or_rasterize(&path, &style, FillRule::Winding, bounds, 1.0, 1.0, false)
             .unwrap();
 
         // Same region (cache hit)
-        assert_eq!(r1.x, r2.x);
-        assert_eq!(r1.y, r2.y);
+        assert_eq!(r1.region.x, r2.region.x);
+        assert_eq!(r1.region.y, r2.region.y);
     }
 
     #[test]
@@ -1003,16 +1303,16 @@ mod tests {
         // different colors — the API no longer distinguishes them, so
         // both lookups are for the exact same cache key.
         let r1 = atlas
-            .lookup_or_rasterize(&path, &style, FillRule::Winding, bounds, 1.0, 1.0)
+            .lookup_or_rasterize(&path, &style, FillRule::Winding, bounds, 1.0, 1.0, false)
             .expect("first lookup rasterizes and caches");
         let r2 = atlas
-            .lookup_or_rasterize(&path, &style, FillRule::Winding, bounds, 1.0, 1.0)
+            .lookup_or_rasterize(&path, &style, FillRule::Winding, bounds, 1.0, 1.0, false)
             .expect("second lookup hits the same cache entry");
 
-        assert_eq!(r1.x, r2.x, "cache hit: same region x");
-        assert_eq!(r1.y, r2.y, "cache hit: same region y");
-        assert_eq!(r1.w, r2.w);
-        assert_eq!(r1.h, r2.h);
+        assert_eq!(r1.region.x, r2.region.x, "cache hit: same region x");
+        assert_eq!(r1.region.y, r2.region.y, "cache hit: same region y");
+        assert_eq!(r1.region.w, r2.region.w);
+        assert_eq!(r1.region.h, r2.region.h);
         assert_eq!(atlas.cache.len(), 1, "only one atlas entry for both calls");
     }
 
@@ -1042,7 +1342,7 @@ mod tests {
         let bounds = [0.0, 0.0, 8.0, 8.0];
 
         atlas.begin_frame(); // frame 1
-        atlas.lookup_or_rasterize(&path, &style, FillRule::Winding, bounds, 1.0, 1.0);
+        atlas.lookup_or_rasterize(&path, &style, FillRule::Winding, bounds, 1.0, 1.0, false);
 
         // Advance well past the entry
         atlas.begin_frame(); // frame 2
@@ -1087,6 +1387,7 @@ mod tests {
                 [0.0, 0.0, 40.0, 40.0],
                 1.0,
                 1.0,
+                false,
             )
             .expect("p1 fits");
 
@@ -1099,6 +1400,7 @@ mod tests {
             [0.0, 0.0, 50.0, 50.0],
             1.0,
             1.0,
+            false,
         );
 
         // Looking up p1 again must still hit cache (with possibly a new
@@ -1111,6 +1413,7 @@ mod tests {
                 [0.0, 0.0, 40.0, 40.0],
                 1.0,
                 1.0,
+                false,
             )
             .expect("p1 still cached after eviction");
         // The repacked region may have moved, but lookup_or_rasterize
@@ -1120,6 +1423,7 @@ mod tests {
             &p1,
             &style,
             FillRule::Winding,
+            [0.0, 0.0],
             40,
             40,
         )));
@@ -1159,6 +1463,7 @@ mod tests {
                 [0.0, 0.0, 60.0, 60.0],
                 1.0,
                 1.0,
+                false,
             )
             .expect("p1 fits");
 
@@ -1170,6 +1475,7 @@ mod tests {
             [0.0, 0.0, 62.0, 62.0],
             1.0,
             1.0,
+            false,
         );
         assert!(
             r2.is_none(),
@@ -1185,10 +1491,11 @@ mod tests {
                 [0.0, 0.0, 60.0, 60.0],
                 1.0,
                 1.0,
+                false,
             )
             .expect("p1 still cached");
-        assert_eq!(r1.x, r1b.x, "live entry must not move");
-        assert_eq!(r1.y, r1b.y, "live entry must not move");
+        assert_eq!(r1.region.x, r1b.region.x, "live entry must not move");
+        assert_eq!(r1.region.y, r1b.region.y, "live entry must not move");
     }
 
     #[test]
@@ -1216,6 +1523,7 @@ mod tests {
                 [0.0, 0.0, 8.0, 8.0],
                 1.0,
                 1.0,
+                false,
             )
             .expect("entry fits");
         assert_eq!(atlas.cache.len(), 1);
@@ -1276,6 +1584,7 @@ mod tests {
                 [0.0, 0.0, 50.0, 50.0],
                 1.0,
                 1.0,
+                false,
             )
             .expect("p1 fits");
 
@@ -1290,6 +1599,7 @@ mod tests {
                 [0.0, 0.0, 60.0, 60.0],
                 1.0,
                 1.0,
+                false,
             )
             .expect("p2 fits after grow");
 
@@ -1301,10 +1611,17 @@ mod tests {
                 [0.0, 0.0, 50.0, 50.0],
                 1.0,
                 1.0,
+                false,
             )
             .expect("p1 still cached");
-        assert_eq!(r1.x, r1_after.x, "p1 must not move when atlas grows");
-        assert_eq!(r1.y, r1_after.y, "p1 must not move when atlas grows");
+        assert_eq!(
+            r1.region.x, r1_after.region.x,
+            "p1 must not move when atlas grows"
+        );
+        assert_eq!(
+            r1.region.y, r1_after.region.y,
+            "p1 must not move when atlas grows"
+        );
     }
 
     #[test]
@@ -1325,34 +1642,34 @@ mod tests {
 
         let cosmetic = StrokeStyle::hairline(2.0);
         let r1 = atlas
-            .lookup_or_rasterize(&path, &cosmetic, FillRule::Winding, bounds, 1.0, 1.0)
+            .lookup_or_rasterize(&path, &cosmetic, FillRule::Winding, bounds, 1.0, 1.0, false)
             .unwrap();
         let r2 = atlas
-            .lookup_or_rasterize(&path, &cosmetic, FillRule::Winding, bounds, 1.0, 2.0)
+            .lookup_or_rasterize(&path, &cosmetic, FillRule::Winding, bounds, 1.0, 2.0, false)
             .unwrap();
-        assert_eq!(r1.w, 40, "cosmetic body at zoom 1: 40·sf1·zoom1");
+        assert_eq!(r1.region.w, 40, "cosmetic body at zoom 1: 40·sf1·zoom1");
         assert_eq!(
-            r2.w, 80,
+            r2.region.w, 80,
             "cosmetic body at zoom 2: 40·sf1·zoom2 (zoom-aware)"
         );
 
         let logical = StrokeStyle::solid(2.0);
         let l1 = atlas
-            .lookup_or_rasterize(&path, &logical, FillRule::Winding, bounds, 1.0, 1.0)
+            .lookup_or_rasterize(&path, &logical, FillRule::Winding, bounds, 1.0, 1.0, false)
             .unwrap();
         let l2 = atlas
-            .lookup_or_rasterize(&path, &logical, FillRule::Winding, bounds, 1.0, 4.0)
+            .lookup_or_rasterize(&path, &logical, FillRule::Winding, bounds, 1.0, 4.0, false)
             .unwrap();
-        assert_eq!(l1.w, l2.w, "logical raster size ignores zoom");
+        assert_eq!(l1.region.w, l2.region.w, "logical raster size ignores zoom");
         assert_eq!(
-            (l1.x, l1.y),
-            (l2.x, l2.y),
+            (l1.region.x, l1.region.y),
+            (l2.region.x, l2.region.y),
             "logical hits the same cache entry"
         );
 
         // Same width/dims but different stroke space must not collide.
-        let k_cos = PathCacheKey::new(&path, &cosmetic, FillRule::Winding, 40, 4);
-        let k_log = PathCacheKey::new(&path, &logical, FillRule::Winding, 40, 4);
+        let k_cos = PathCacheKey::new(&path, &cosmetic, FillRule::Winding, [0.0, 0.0], 40, 4);
+        let k_log = PathCacheKey::new(&path, &logical, FillRule::Winding, [0.0, 0.0], 40, 4);
         assert_ne!(
             k_cos, k_log,
             "cache key must distinguish cosmetic vs logical"
