@@ -53,7 +53,7 @@ use teksilo_charts::{
     LegendPosition, LineChart, PieChart,
 };
 use teksilo_core::accessibility::target_audit::{
-    AllowedViolation,
+    AllowedViolation, Owner,
     PinnedDp::{ClearsFloor, Is},
     PinnedGeometry, SkipReason, TargetFixture, TargetMeasurement, TargetRule, TargetViolation,
     audit_fixtures, gate, measure_fixtures, measure_targets,
@@ -287,8 +287,8 @@ static ROSTER: gate::Roster = gate::Roster {
 /// test binary — the sweep is the whole fixture list at three densities, and the
 /// tests run as threads in one process, so each of them wants the same answer.
 fn census() -> &'static [TargetViolation] {
-    static CENSUS: std::sync::OnceLock<Vec<TargetViolation>> = std::sync::OnceLock::new();
-    CENSUS.get_or_init(|| gate::conformance_census(&fixtures(), &ROSTER))
+    static CENSUS: gate::CensusCell = gate::CensusCell::new();
+    CENSUS.get(&fixtures(), &ROSTER)
 }
 
 /// **The seed.** One entry, for a shortfall this crate had already recorded in
@@ -315,7 +315,7 @@ const ALLOW_LIST: &[AllowedViolation] = &[AllowedViolation {
             reaches: (ClearsFloor, Is(LEGEND_ROW_TOPPED_UP)),
         },
     ],
-    owner: "whoever takes the Compact-layout decision docs/charts.md \u{a7}6 defers",
+    owner: Owner::Named("whoever takes the Compact-layout decision docs/charts.md \u{a7}6 defers"),
     exception: Some("Equivalent"),
     why: "An interactive legend row paints a swatch beside a Tiny label -- the \
           pinned height above, which is `legend_painted_line_height` -- and \
@@ -887,8 +887,7 @@ fn a_deliberately_undersized_subject_fails() {
 
     // The second half: the gate's own path. Nothing in the allow-list names
     // this fixture, so every row of it must be reported.
-    let census = gate::conformance_census(&undersized, &ROSTER);
-    let reported = gate::conformance_failures(&census, &ROSTER);
+    let reported = gate::reported_failures(&undersized, &ROSTER);
     assert!(
         reported.iter().any(|f| f.contains("Tiny")),
         "the gate reports no failure for the undersized fixture: {reported:#?}",

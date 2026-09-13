@@ -13,7 +13,7 @@ use std::rc::Rc;
 use teksilo_canvas::Size;
 use teksilo_core::accessibility::target_audit::TargetFixture;
 use teksilo_core::accessibility::target_audit::{
-    AllowedViolation, PIN_TOLERANCE,
+    AllowedViolation, Owner, PIN_TOLERANCE,
     PinnedDp::{ClearsFloor, Is},
     PinnedGeometry, TargetRule, TargetViolation, audit_fixtures, gate, measure_fixtures,
     unprojected_style_slots,
@@ -84,8 +84,8 @@ static ROSTER: gate::Roster = gate::Roster {
 /// is a `OnceLock` rather than a `lazy_static`-style cell because the tests run
 /// as threads in one process and each of them wants the same answer.
 fn census() -> &'static [TargetViolation] {
-    static CENSUS: std::sync::OnceLock<Vec<TargetViolation>> = std::sync::OnceLock::new();
-    CENSUS.get_or_init(|| gate::conformance_census(&widget_fixtures(), &ROSTER))
+    static CENSUS: gate::CensusCell = gate::CensusCell::new();
+    CENSUS.get(&widget_fixtures(), &ROSTER)
 }
 
 /// The findings, each measured, none of them a mechanism that could be switched
@@ -121,7 +121,7 @@ const ALLOW_LIST: &[AllowedViolation] = &[
             paints: (Is(18.0), Is(13.0)),
             reaches: (Is(18.0), Is(13.0)),
         }],
-        owner: "whoever revisits SpinBox's step geometry",
+        owner: Owner::Named("whoever revisits SpinBox's step geometry"),
         exception: Some("Equivalent"),
         why: "A SpinBox's two step buttons are stacked halves of the field's \
               `TEXT_FIELD_HEIGHT` box, and the pin says what they get from the \
@@ -176,7 +176,7 @@ const ALLOW_LIST: &[AllowedViolation] = &[
                 reaches: (Is(23.0), Is(24.0)),
             },
         ],
-        owner: "whoever revisits ColorPicker's grid geometry",
+        owner: Owner::Named("whoever revisits ColorPicker's grid geometry"),
         exception: Some("Equivalent"),
         why: "A 22 dp swatch, 2 dp under the floor, whose ring earns back at \
               most 1 dp per side because every neighbour is a swatch: where two \
@@ -200,8 +200,10 @@ const ALLOW_LIST: &[AllowedViolation] = &[
             paints: (ClearsFloor, Is(20.0)),
             reaches: (ClearsFloor, Is(20.0)),
         }],
-        owner: "whoever revisits SpinBox's frame inset (the same owner as the \
+        owner: Owner::Named(
+            "whoever revisits SpinBox's frame inset (the same owner as the \
                 step buttons above)",
+        ),
         exception: None,
         why: "A SpinBox's editable field is 20 dp tall inside the frame's own \
               box because the frame reserves space above and below it, and it \
@@ -231,8 +233,10 @@ const ALLOW_LIST: &[AllowedViolation] = &[
             paints: (Is(16.0), Is(16.0)),
             reaches: (Is(22.0), Is(24.0)),
         }],
-        owner: "whoever decides whether a clear affordance should exist at all \
+        owner: Owner::Named(
+            "whoever decides whether a clear affordance should exist at all \
                 on an empty query",
+        ),
         exception: None,
         why: "A `SearchField`'s 16 dp clear slot **while the query is empty**, \
               measured by the `search_field/empty` fixture under every preset. \
@@ -286,7 +290,7 @@ const ALLOW_LIST: &[AllowedViolation] = &[
                 reaches: (Is(20.0), Is(24.0)),
             },
         ],
-        owner: "whoever revisits the tree row's indent column",
+        owner: Owner::Named("whoever revisits the tree row's indent column"),
         exception: None,
         why: "The tree chevron's outset is INERT in the one composition it \
               ships in, and this key names the reason: \
@@ -321,8 +325,10 @@ const ALLOW_LIST: &[AllowedViolation] = &[
                 reaches: (Is(22.0), Is(28.0)),
             },
         ],
-        owner: "whoever revisits the tree table's indent column (the same \
+        owner: Owner::Named(
+            "whoever revisits the tree table's indent column (the same \
                 question as the entry above)",
+        ),
         exception: Some("Equivalent"),
         why: "The same chevron in a TreeTableView cell, 12 dp rather than 16 \
               and NOT hugged -- its outset is credited, and the pins say by how \
@@ -345,7 +351,7 @@ const ALLOW_LIST: &[AllowedViolation] = &[
             paints: (ClearsFloor, Is(17.0)),
             reaches: (ClearsFloor, Is(17.0)),
         }],
-        owner: "",
+        owner: Owner::NobodyBecause("the *Inline* exception is the answer, not a deferral"),
         exception: Some("Inline"),
         why: "A link is text-height -- 17 dp, reaching exactly that at every \
               density, in both the `link` fixture and an archived \
@@ -356,8 +362,7 @@ const ALLOW_LIST: &[AllowedViolation] = &[
               FIRST leg is wrong and the sentence is corrected there: link.rs \
               said the miss-only slop pass reaches it, and the slop pass is \
               denied whenever the link sits in a row that takes presses, which \
-              is where both of these links are. No owner: the exception is the \
-              answer, not a deferral.",
+              is where both of these links are.",
     },
     AllowedViolation {
         path: "window_frame: WindowFrame > ResizeStrip",
@@ -367,8 +372,10 @@ const ALLOW_LIST: &[AllowedViolation] = &[
             paints: (Is(6.0), Is(6.0)),
             reaches: (Is(6.0), Is(6.0)),
         }],
-        owner: "whoever decides whether the diagonal grip should be bigger than \
+        owner: Owner::Named(
+            "whoever decides whether the diagonal grip should be bigger than \
                 the edges it sits between",
+        ),
         exception: Some("Equivalent"),
         why: "A window's four diagonal corner grips reach exactly their own \
               6 x 6 at every density, while the four EDGE strips on the same \
@@ -397,7 +404,7 @@ const ALLOW_LIST: &[AllowedViolation] = &[
             paints: (ClearsFloor, Is(38.0)),
             reaches: (Is(0.0), Is(0.0)),
         }],
-        owner: "whoever owns A10's outset-versus-target precedence",
+        owner: Owner::Named("whoever owns A10's outset-versus-target precedence"),
         exception: None,
         why: "At Touch a dock's tab strip is UNREACHABLE at the point a user \
               aims at -- a reach of exactly zero on both axes for a strip \
@@ -429,7 +436,7 @@ const ALLOW_LIST: &[AllowedViolation] = &[
             paints: (Is(4.0), ClearsFloor),
             reaches: (Is(4.0), ClearsFloor),
         }],
-        owner: "whoever closes drag-operation-census rows 7 and 8",
+        owner: Owner::Named("whoever closes drag-operation-census rows 7 and 8"),
         exception: None,
         why: "A table column's resize grip, reported from \
               `HeaderCell::target_regions` as `HEADER_PART_RESIZE`: 4 dp wide, \
@@ -464,7 +471,7 @@ const ALLOW_LIST: &[AllowedViolation] = &[
             paints: (Is(12.0), Is(12.0)),
             reaches: (Is(12.0), Is(12.0)),
         }],
-        owner: "whoever revisits the table header's filter affordance",
+        owner: Owner::Named("whoever revisits the table header's filter affordance"),
         exception: None,
         why: "A filterable column's filter glyph, `FILTER_INDICATOR_SIZE`, \
               reaching exactly its paint at every density. The header cell \
@@ -518,8 +525,10 @@ const ALLOW_LIST: &[AllowedViolation] = &[
                 reaches: (ClearsFloor, Is(20.0)),
             },
         ],
-        owner: "whoever owns `RecipeMenuItemStyle`'s vertical padding, jointly \
+        owner: Owner::Named(
+            "whoever owns `RecipeMenuItemStyle`'s vertical padding, jointly \
                 with docs/density-inventory.md \u{a7}0",
+        ),
         exception: None,
         why: "A menu row, which is the target itself -- no SC 2.5.8 exception \
               applies, and the row reaches exactly what it paints, at a height \
@@ -555,8 +564,10 @@ const ALLOW_LIST: &[AllowedViolation] = &[
             paints: (ClearsFloor, Is(48.0)),
             reaches: (Is(0.0), Is(0.0)),
         }],
-        owner: "whoever owns A10's outset-versus-target precedence (the same \
+        owner: Owner::Named(
+            "whoever owns A10's outset-versus-target precedence (the same \
                 owner as the docking entry above)",
+        ),
         exception: None,
         why: "A window's top resize strip is 6 dp of paint with a coarse \
               `hit_outset` around it, and at Touch that ring reaches down into \
@@ -588,8 +599,10 @@ const ALLOW_LIST: &[AllowedViolation] = &[
             paints: (Is(11.2), Is(48.0)),
             reaches: (Is(11.2), Is(48.0)),
         }],
-        owner: "whoever owns Calendar's header layout under a 48 dp target \
+        owner: Owner::Named(
+            "whoever owns Calendar's header layout under a 48 dp target \
                 ladder",
+        ),
         exception: None,
         why: "The month/year button between a calendar's four nav arrows. A \
               calendar sizes to its own grid, so the header's width is fixed \
@@ -704,7 +717,10 @@ fn the_allow_lists_roster_is_what_it_says_it_is() {
         "and nine are real failures escalated to an owner",
     );
     assert_eq!(
-        ALLOW_LIST.iter().filter(|e| e.owner.is_empty()).count(),
+        ALLOW_LIST
+            .iter()
+            .filter(|e| matches!(e.owner, Owner::NobodyBecause(_)))
+            .count(),
         1,
         "exactly one entry needs no owner — the *Inline* exception is the \
          answer there, not a deferral",
@@ -813,7 +829,7 @@ fn no_entry_names_a_theme_owned_wrapper_in_its_path() {
                 paints: (Is(16.0), Is(16.0)),
                 reaches: (Is(16.0), Is(16.0)),
             }],
-            owner: "nobody, this entry is a fixture",
+            owner: Owner::Named("nobody, this entry is a fixture"),
             exception: None,
             why: "a synthetic entry, to hold the lint",
         }],
@@ -1051,8 +1067,7 @@ fn a_deliberately_undersized_fixture_fails() {
     // census it computes over all four presets, and the matcher it hands that
     // census to. Nothing in the real allow-list names this fixture, so every
     // row of it must come back out.
-    let census = gate::conformance_census(&undersized, &ROSTER);
-    let reported = gate::conformance_failures(&census, &ROSTER);
+    let reported = gate::reported_failures(&undersized, &ROSTER);
     for subject in ROSTER.themes {
         assert!(
             reported

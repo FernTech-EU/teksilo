@@ -694,17 +694,19 @@ pub enum PinnedDp {
 }
 
 impl PinnedDp {
-    /// Whether `actual` dp satisfies this pin, against `floor`.
+    /// Whether `actual` dp satisfies this pin, judged against `v`.
     ///
-    /// `floor` must be the audited floor the violation carries in
-    /// [`TargetViolation::conformance_floor`], never one re-derived from
-    /// [`InputTokens::for_density`]: a pin judged against the generic table
+    /// The floor comes off the violation — [`TargetViolation::conformance_floor`],
+    /// the number the walker actually measured `v` against. It is deliberately
+    /// not a parameter: a caller who could supply one could supply the generic
+    /// [`InputTokens::for_density`] table, and a pin judged against that
     /// excuses, under a theme that raises the floor, exactly the failures that
-    /// theme exists to refuse.
-    pub fn matches(self, actual: f32, floor: f32) -> bool {
+    /// theme exists to refuse. That was a real defect once, fixed at the call
+    /// site and then fixed again here so the call site cannot come back.
+    fn matches(self, actual: f32, v: &TargetViolation) -> bool {
         match self {
             PinnedDp::Is(dp) => (actual - dp).abs() <= PIN_TOLERANCE,
-            PinnedDp::ClearsFloor => actual + PIN_TOLERANCE >= floor,
+            PinnedDp::ClearsFloor => actual + PIN_TOLERANCE >= v.conformance_floor,
         }
     }
 }
@@ -752,13 +754,41 @@ impl PinnedGeometry {
     /// `min_target_conformance` is above the generic 24, the walker reported a
     /// failure the entry then excused.
     pub fn covers(&self, v: &TargetViolation) -> bool {
-        let floor = v.conformance_floor;
         self.densities.contains(&v.density)
             && self.themes.iter().any(|t| *t == v.theme.as_str())
-            && self.paints.0.matches(v.size.width, floor)
-            && self.paints.1.matches(v.size.height, floor)
-            && self.reaches.0.matches(v.expanded.width, floor)
-            && self.reaches.1.matches(v.expanded.height, floor)
+            && self.paints.0.matches(v.size.width, v)
+            && self.paints.1.matches(v.size.height, v)
+            && self.reaches.0.matches(v.expanded.width, v)
+            && self.reaches.1.matches(v.expanded.height, v)
+    }
+}
+
+/// Who owes the work an allow-list entry defers.
+///
+/// A type rather than a string with an agreed spelling inside it. The rule used
+/// to be that an empty owner was accepted if the justification happened to
+/// contain the words "No owner", which made a policy decision out of prose:
+/// rewording a justification silently flipped an entry between owned debt and
+/// accepted exception, and a justification that mentioned the phrase for any
+/// other reason passed the check while meaning the opposite. Saying which of the
+/// two an entry is, is now the entry's job and the compiler's.
+pub enum Owner {
+    /// Whoever takes the decision this entry defers. The string is an address,
+    /// not a name: "whoever revisits SpinBox's step geometry" is what a reader
+    /// six months from now can act on.
+    Named(&'static str),
+    /// Nobody, and why there is nothing to decide — an exception *is* the
+    /// answer here, so there is no debt to address.
+    NobodyBecause(&'static str),
+}
+
+impl Owner {
+    /// The address, or the reason there is none. Empty in neither case, which
+    /// is what `gate::roster_defects` checks.
+    pub fn text(&self) -> &'static str {
+        match self {
+            Owner::Named(s) | Owner::NobodyBecause(s) => s,
+        }
     }
 }
 
@@ -782,13 +812,30 @@ impl PinnedGeometry {
 /// regression into each geometry the census produces; that is the question a
 /// path-only or fixture-name-only matcher fails.
 pub struct AllowedViolation {
-    /// A substring of the violation's `path`.
+    /// Which violations this entry may excuse, as whole path elements.
+    ///
+    /// A violation's path is `"<fixture>: <Widget> > <Widget> > <Leaf>"`, and an
+    /// entry names either a fixture (`"search_field/empty:"`), a run of one or
+    /// more widget segments (`"HStack > HitTarget"`), or both
+    /// (`"window_frame: WindowFrame > ResizeStrip"`). A run must appear
+    /// **contiguously** in the violation's segments, and every element is
+    /// compared whole.
+    ///
+    /// Whole elements rather than a substring, which is what this used to be.
+    /// `"> Link"` also matched `"> LinkButton"`, so the day a `LinkButton`
+    /// landed it would have inherited the real `Link`'s SC 2.5.8 *Inline*
+    /// exemption — at every density, under every preset, with nothing to report
+    /// it. Staleness cannot catch that either: the real `Link` keeps the entry
+    /// matching something, so the entry never looks dead.
+    ///
+    /// A lone element with no `:` may name a fixture or a segment; both are
+    /// accepted, because a bare word is how the shortest entries in every gate
+    /// are written and only one of the two readings can be true of any path.
     pub path: &'static str,
     /// Every geometry this entry excuses, pinned. Nothing else is excused.
     pub measured: &'static [PinnedGeometry],
-    /// Who decides. Empty only where the exception *is* the answer and there is
-    /// nothing left to decide.
-    pub owner: &'static str,
+    /// Who decides, or that nobody does and why. See [`Owner`].
+    pub owner: Owner,
     /// The SC 2.5.8 exception this rests on, or `None` for a real failure
     /// escalated to its owner. Structural rather than prose, so a roster's
     /// counts can be asserted instead of remembered.
@@ -797,11 +844,50 @@ pub struct AllowedViolation {
     pub why: &'static str,
 }
 
+/// Split a path into its fixture name, if it carries one, and its widget
+/// segments — the form both sides of a path comparison are put in.
+///
+/// Tolerant of the spellings the gates actually use: a trailing `:` with
+/// nothing after it (a fixture-only entry), and a leading `>` (a segment-only
+/// entry written to read like a path tail).
+fn split_path(path: &str) -> (Option<&str>, Vec<&str>) {
+    let (fixture, rest) = match path.split_once(':') {
+        Some((f, r)) => (Some(f.trim()), r),
+        None => (None, path),
+    };
+    let segments = rest
+        .split('>')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .collect();
+    (fixture, segments)
+}
+
 impl AllowedViolation {
-    /// Whether this entry excuses `v` — its path matches and one of its pinned
-    /// geometries covers it.
+    /// Whether this entry excuses `v` — its path names `v`, and one of its
+    /// pinned geometries covers it.
     pub fn matches(&self, v: &TargetViolation) -> bool {
-        v.path.contains(self.path) && self.measured.iter().any(|m| m.covers(v))
+        self.names(&v.path) && self.measured.iter().any(|m| m.covers(v))
+    }
+
+    /// Whether this entry's path names `path`. See [`Self::path`] for the rule.
+    fn names(&self, path: &str) -> bool {
+        let (want_fixture, want_segments) = split_path(self.path);
+        let (got_fixture, got_segments) = split_path(path);
+        // A lone word with no `:` may be either a fixture or a segment.
+        if want_fixture.is_none()
+            && want_segments.len() == 1
+            && got_fixture == Some(want_segments[0])
+        {
+            return true;
+        }
+        if want_fixture.is_some() && want_fixture != got_fixture {
+            return false;
+        }
+        want_segments.is_empty()
+            || got_segments
+                .windows(want_segments.len())
+                .any(|w| w == want_segments.as_slice())
     }
 }
 

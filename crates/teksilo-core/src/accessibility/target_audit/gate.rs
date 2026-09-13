@@ -42,7 +42,7 @@
 
 use teksilo_tokens::TargetDensity;
 
-use super::{AllowedViolation, TargetFixture, TargetViolation, audit_fixtures};
+use super::{AllowedViolation, Owner, TargetFixture, TargetViolation, audit_fixtures};
 use crate::styles::Theme;
 
 /// The three density rungs, in ladder order — the list every gate sweeps.
@@ -85,14 +85,6 @@ const SC_2_5_8_EXCEPTIONS: &[&str] = &[
     "User agent control",
     "Essential",
 ];
-
-/// The one spelling of "this entry needs no owner", which a justification must
-/// carry before an empty [`AllowedViolation::owner`] is accepted.
-///
-/// One spelling rather than a family of them: three gates used to check this
-/// themselves and two had drifted onto different wordings, which is the whole
-/// reason the matcher moved here.
-const NO_OWNER_MARKER: &str = "No owner";
 
 /// One preset a gate measures: the id its pins name, and the constructor that
 /// builds it.
@@ -171,6 +163,49 @@ pub fn conformance_census(fixtures: &[TargetFixture], roster: &Roster) -> Vec<Ta
         }
     }
     out
+}
+
+/// A gate's census, computed once per test binary.
+///
+/// The sweep is the whole fixture list at three densities under every preset in
+/// the roster, and a gate's tests run as threads in one process, so each of them
+/// wants the same answer. Every gate used to carry its own `OnceLock` and its
+/// own copy of this paragraph; the policy lives here instead, so a fourth gate
+/// costs a [`Roster`] and nothing else.
+///
+/// ```ignore
+/// static CENSUS: gate::CensusCell = gate::CensusCell::new();
+/// fn census() -> &'static [TargetViolation] { CENSUS.get(&fixtures(), &ROSTER) }
+/// ```
+pub struct CensusCell(std::sync::OnceLock<Vec<TargetViolation>>);
+
+impl CensusCell {
+    /// An empty cell, `const` so a gate can declare one as a `static`.
+    pub const fn new() -> Self {
+        Self(std::sync::OnceLock::new())
+    }
+
+    /// The census, computing it on the first call.
+    pub fn get(&self, fixtures: &[TargetFixture], roster: &Roster) -> &[TargetViolation] {
+        self.0.get_or_init(|| conformance_census(fixtures, roster))
+    }
+}
+
+impl Default for CensusCell {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// What the gate would report for `fixtures` — the census and the matcher in one
+/// call.
+///
+/// The liveness half of a gate's "a deliberately undersized fixture fails" test:
+/// a fixture no entry names must come back out of the gate's own path, not just
+/// out of the walker. Each gate then asserts on the failure text it expects,
+/// which is the part that is genuinely its own.
+pub fn reported_failures(fixtures: &[TargetFixture], roster: &Roster) -> Vec<String> {
+    conformance_failures(&conformance_census(fixtures, roster), roster)
 }
 
 /// **The gate.** Every conformance failure no entry excuses.
@@ -376,11 +411,15 @@ pub fn roster_defects(census: &[TargetViolation], roster: &Roster) -> Vec<String
                 entry.path,
             ));
         }
-        if entry.owner.is_empty() && !entry.why.contains(NO_OWNER_MARKER) {
+        if entry.owner.text().is_empty() {
             out.push(format!(
-                "allow-list entry `{}` names no owner and does not say why it needs none — an \
-                 entry is a debt with an address",
+                "allow-list entry `{}` leaves its {} empty — an entry is a debt with an \
+                 address, or a written reason there is no debt",
                 entry.path,
+                match entry.owner {
+                    Owner::Named(_) => "owner",
+                    Owner::NobodyBecause(_) => "reason for having no owner",
+                },
             ));
         }
         if let Some(name) = entry.exception {

@@ -1256,10 +1256,16 @@ fn an_entry_is_judged_against_the_floor_the_walker_measured_not_the_generic_one(
 
     // 2. And the entry reads that, not the generic table. 30 dp clears 24 and
     //    does not clear 32, so the two readings give opposite answers here.
+    let as_generic = TargetViolation {
+        conformance_floor: generic,
+        ..violation.clone()
+    };
     assert!(
-        ClearsFloor.matches(violation.expanded.width, generic),
+        ClearsFloor.matches(violation.expanded.width, &as_generic),
         "read against the generic table, 30 dp clears the floor — which is what \
-         would excuse this failure",
+         would excuse this failure. The floor can no longer be handed to the pin \
+         as a bare number, so saying this costs a falsified row, which is the \
+         point: nothing reaches that comparison by accident any more",
     );
     let entry = AllowedViolation {
         path: "Leaf",
@@ -1269,7 +1275,7 @@ fn an_entry_is_judged_against_the_floor_the_walker_measured_not_the_generic_one(
             paints: (ClearsFloor, Is(16.0)),
             reaches: (ClearsFloor, Is(16.0)),
         }],
-        owner: "this test",
+        owner: Owner::Named("this test"),
         exception: None,
         why: "a fixture entry",
     };

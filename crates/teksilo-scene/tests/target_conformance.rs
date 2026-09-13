@@ -49,7 +49,7 @@ use std::rc::Rc;
 
 use teksilo_canvas::{Point, Rect, Size, SizeProposal};
 use teksilo_core::accessibility::target_audit::{
-    AllowedViolation,
+    AllowedViolation, Owner,
     PinnedDp::{ClearsFloor, Is},
     PinnedGeometry, TargetFixture, TargetMeasurement, TargetRule, TargetViolation, audit_fixtures,
     gate, measure_fixtures, measure_targets,
@@ -289,8 +289,8 @@ static ROSTER: gate::Roster = gate::Roster {
 /// test binary — the sweep is the whole fixture list at three densities, and the
 /// tests run as threads in one process, so each of them wants the same answer.
 fn census() -> &'static [TargetViolation] {
-    static CENSUS: std::sync::OnceLock<Vec<TargetViolation>> = std::sync::OnceLock::new();
-    CENSUS.get_or_init(|| gate::conformance_census(&fixtures(), &ROSTER))
+    static CENSUS: gate::CensusCell = gate::CensusCell::new();
+    CENSUS.get(&fixtures(), &ROSTER)
 }
 
 /// **The seed.** One entry, and it is not a layout defect: it is what a camera
@@ -303,14 +303,17 @@ fn census() -> &'static [TargetViolation] {
 /// the probe budget (25 / 33 / 45 dp), so it is recorded as clearing the floor
 /// rather than pinned to a number that is really the budget.
 const ALLOW_LIST: &[AllowedViolation] = &[AllowedViolation {
-    path: "button_zoomed_out",
+    path: "heavyweight/button_zoomed_out: SceneView > Button",
     measured: &[PinnedGeometry {
         densities: &DENSITIES,
         themes: &[INTUI],
         paints: (Is(60.0), Is(16.0)),
         reaches: (ClearsFloor, Is(16.0)),
     }],
-    owner: "",
+    owner: Owner::NobodyBecause(
+        "this entry is a statement about cameras rather than a deferral: the zoom \
+         is the user's, and the framework cannot take it back",
+    ),
     exception: Some("Equivalent"),
     why: "A 120 x 32 dp control in a scene at 0.5 zoom is 60 x 16 dp on glass, \
           so it is under the 24 dp floor at every density -- and the framework \
@@ -323,8 +326,7 @@ const ALLOW_LIST: &[AllowedViolation] = &[AllowedViolation {
           user-chosen magnification is the same class of thing as browser zoom. \
           The *Equivalent* route back is the view's own zoom (Ctrl+wheel, pinch, \
           `SceneView::zoom_to` / `fit_to_content`), and the AT tree publishes \
-          each item with screen-projected bounds either way. No owner -- \
-          this entry is a statement about cameras, and \
+          each item with screen-projected bounds either way. \
           `zoom_scales_a_heavyweight_targets_screen_size` is the measurement \
           behind it.",
 }];
@@ -1200,8 +1202,7 @@ fn a_deliberately_undersized_heavyweight_subject_fails() {
 
     // The second half: the gate's own path. Nothing in the allow-list names
     // this fixture, so every row of it must be reported.
-    let census = gate::conformance_census(&undersized, &ROSTER);
-    let reported = gate::conformance_failures(&census, &ROSTER);
+    let reported = gate::reported_failures(&undersized, &ROSTER);
     assert!(
         reported.iter().any(|f| f.contains("Port")),
         "the gate reports no failure for the undersized fixture: {reported:#?}",

@@ -42,7 +42,7 @@ use teksilo_tokens::InputTokens;
 
 use super::*;
 use crate::accessibility::target_audit::{
-    AllowedViolation,
+    AllowedViolation, Owner,
     PinnedDp::{ClearsFloor, Is},
     PinnedGeometry, ReachSources, TargetRule, TargetViolation, audit_fixtures,
 };
@@ -233,7 +233,7 @@ const SIXTEEN: PinnedGeometry = PinnedGeometry {
 const GRIP: AllowedViolation = AllowedViolation {
     path: "Grip",
     measured: &[SIXTEEN],
-    owner: "a fixture",
+    owner: Owner::Named("a fixture"),
     exception: None,
     why: "a fixture entry",
 };
@@ -258,7 +258,7 @@ const TWENTY_EXACT: PinnedGeometry = PinnedGeometry {
 const CLEARS_ENTRY: AllowedViolation = AllowedViolation {
     path: "Grip",
     measured: &[TWENTY_CLEARS],
-    owner: "a fixture",
+    owner: Owner::Named("a fixture"),
     exception: None,
     why: "a fixture entry whose paint axis is judged against the floor",
 };
@@ -266,7 +266,7 @@ const CLEARS_ENTRY: AllowedViolation = AllowedViolation {
 const EXACT_ENTRY: AllowedViolation = AllowedViolation {
     path: "Grip",
     measured: &[TWENTY_EXACT],
-    owner: "a fixture",
+    owner: Owner::Named("a fixture"),
     exception: None,
     why: "a fixture entry that names a geometry outright",
 };
@@ -314,7 +314,7 @@ const TWENTY_UNDER_BOTH: PinnedGeometry = PinnedGeometry {
 const SHARED_FLOOR_ENTRY: AllowedViolation = AllowedViolation {
     path: "Grip",
     measured: &[TWENTY_UNDER_BOTH],
-    owner: "a fixture",
+    owner: Owner::Named("a fixture"),
     exception: None,
     why: "a fixture entry over two themes that share a lowered floor",
 };
@@ -545,7 +545,7 @@ fn a_blanket_entry_survives_a_seeded_size_regression() {
             paints: (Is(2.0), ClearsFloor),
             reaches: (Is(2.0), ClearsFloor),
         }],
-        owner: "a fixture",
+        owner: Owner::Named("a fixture"),
         exception: None,
         why: "a fixture entry",
     }];
@@ -743,42 +743,42 @@ fn the_roster_lints() {
     static NO_WHY: &[AllowedViolation] = &[AllowedViolation {
         path: "Grip",
         measured: &[SIXTEEN],
-        owner: "a fixture",
+        owner: Owner::Named("a fixture"),
         exception: None,
         why: "",
     }];
     static NO_OWNER: &[AllowedViolation] = &[AllowedViolation {
         path: "Grip",
         measured: &[SIXTEEN],
-        owner: "",
+        owner: Owner::NobodyBecause(""),
         exception: None,
         why: "a fixture entry that names nobody and does not say why",
     }];
     static NO_OWNER_EXCUSED: &[AllowedViolation] = &[AllowedViolation {
         path: "Grip",
         measured: &[SIXTEEN],
-        owner: "",
+        owner: Owner::NobodyBecause("the *Inline* exception is the answer, not a deferral"),
         exception: Some("Inline"),
         why: "No owner: the *Inline* exception is the answer, not a deferral.",
     }];
     static UNMENTIONED_EXCEPTION: &[AllowedViolation] = &[AllowedViolation {
         path: "Grip",
         measured: &[SIXTEEN],
-        owner: "a fixture",
+        owner: Owner::Named("a fixture"),
         exception: Some("Inline"),
         why: "a fixture entry whose justification never names the exception it claims",
     }];
     static INVENTED_EXCEPTION: &[AllowedViolation] = &[AllowedViolation {
         path: "Grip",
         measured: &[SIXTEEN],
-        owner: "a fixture",
+        owner: Owner::Named("a fixture"),
         exception: Some("Redundant"),
         why: "a fixture entry claiming Redundant, a discharge SC 2.5.8 does not grant",
     }];
     static NO_PIN: &[AllowedViolation] = &[AllowedViolation {
         path: "Grip",
         measured: &[],
-        owner: "a fixture",
+        owner: Owner::Named("a fixture"),
         exception: None,
         why: "a fixture entry",
     }];
@@ -788,7 +788,7 @@ fn the_roster_lints() {
     static THEME_OWNED_PATH: &[AllowedViolation] = &[AllowedViolation {
         path: "row: FluentRowFrame > MacOsRowFrame > Grip",
         measured: &[SIXTEEN],
-        owner: "a fixture",
+        owner: Owner::Named("a fixture"),
         exception: None,
         why: "a fixture entry",
     }];
@@ -798,7 +798,7 @@ fn the_roster_lints() {
             densities: &[],
             ..SIXTEEN
         }],
-        owner: "a fixture",
+        owner: Owner::Named("a fixture"),
         exception: None,
         why: "a fixture entry",
     }];
@@ -808,7 +808,7 @@ fn the_roster_lints() {
             themes: &[],
             ..SIXTEEN
         }],
-        owner: "a fixture",
+        owner: Owner::Named("a fixture"),
         exception: None,
         why: "a fixture entry",
     }];
@@ -818,7 +818,7 @@ fn the_roster_lints() {
             themes: &[ANONYMOUS_THEME],
             ..SIXTEEN
         }],
-        owner: "a fixture",
+        owner: Owner::Named("a fixture"),
         exception: None,
         why: "a fixture entry",
     }];
@@ -828,7 +828,7 @@ fn the_roster_lints() {
             themes: &["gamma.light"],
             ..SIXTEEN
         }],
-        owner: "a fixture",
+        owner: Owner::Named("a fixture"),
         exception: None,
         why: "a fixture entry",
     }];
@@ -941,8 +941,113 @@ fn the_roster_lints() {
     // row above reports the defect it seeded and not the fixture's own noise.
     let clean = roster_defects(&grip_census(), &TWO_THEMES);
     assert!(clean.is_empty(), "{clean:#?}");
-    // And the owner lint's escape hatch is one spelling rather than a family:
-    // an entry whose justification carries the marker is accepted.
+    // And an entry that says outright that nobody owns it, and why, is accepted:
+    // the question is asked of a field now, not of a phrase in the justification.
     let excused = roster_defects(&grip_census(), &roster_with(NO_OWNER_EXCUSED));
     assert!(excused.is_empty(), "{excused:#?}");
+}
+
+/// An entry's path names whole elements: a widget whose name merely *begins*
+/// with the one an entry names is a different widget.
+///
+/// The real case, and the reason this exists: the stock gate excuses `Link` at
+/// every density under every preset, on WCAG 2.2 SC 2.5.8's *Inline* exception.
+/// Matched as a substring, `"> Link"` also named a `LinkButton` — a control with
+/// no Inline rationale at all, which would have arrived pre-excused, with
+/// nothing to report it. Staleness cannot see it either: the real `Link` keeps
+/// the entry matching, so the entry never looks dead.
+#[test]
+fn an_entry_does_not_excuse_a_widget_whose_name_merely_starts_with_its_own() {
+    static LINK: &[AllowedViolation] = &[AllowedViolation {
+        path: "> Link",
+        measured: &[SIXTEEN],
+        owner: Owner::NobodyBecause("a fixture"),
+        exception: None,
+        why: "a fixture entry",
+    }];
+    let sized = |path: &str| {
+        violation(
+            path,
+            ALPHA,
+            TargetDensity::Compact,
+            (16.0, 16.0),
+            (16.0, 16.0),
+        )
+    };
+    assert!(
+        LINK[0].matches(&sized("row: HStack > Link")),
+        "the entry must still excuse the control it was written for",
+    );
+    assert!(
+        !LINK[0].matches(&sized("row: HStack > LinkButton")),
+        "`LinkButton` is not `Link`, and it inherits none of Link's exception",
+    );
+    assert!(
+        !LINK[0].matches(&sized("row: HStack > InlineLink")),
+        "nor does a name that merely ends with it",
+    );
+}
+
+/// The same rule on the fixture half of a path.
+///
+/// Also a real case: the scene gate's one entry named `button_zoomed_out`, and
+/// the fixture it meant is `heavyweight/button_zoomed_out`. It matched on the
+/// tail of the name, so a second fixture whose name ended the same way would
+/// have been excused by an entry that had never measured it.
+#[test]
+fn an_entry_naming_a_fixture_names_the_whole_fixture() {
+    static FIXTURE: &[AllowedViolation] = &[AllowedViolation {
+        path: "zoomed_out:",
+        measured: &[SIXTEEN],
+        owner: Owner::NobodyBecause("a fixture"),
+        exception: None,
+        why: "a fixture entry",
+    }];
+    let sized = |path: &str| {
+        violation(
+            path,
+            ALPHA,
+            TargetDensity::Compact,
+            (16.0, 16.0),
+            (16.0, 16.0),
+        )
+    };
+    assert!(
+        FIXTURE[0].matches(&sized("zoomed_out: SceneView > Button")),
+        "the fixture it names",
+    );
+    assert!(
+        !FIXTURE[0].matches(&sized("heavyweight/zoomed_out: SceneView > Button")),
+        "a different fixture whose name ends with the one the entry names",
+    );
+}
+
+/// A run of segments must appear contiguously, in order.
+#[test]
+fn an_entry_naming_a_run_of_segments_requires_them_adjacent_and_in_order() {
+    static RUN: &[AllowedViolation] = &[AllowedViolation {
+        path: "HStack > Grip",
+        measured: &[SIXTEEN],
+        owner: Owner::NobodyBecause("a fixture"),
+        exception: None,
+        why: "a fixture entry",
+    }];
+    let sized = |path: &str| {
+        violation(
+            path,
+            ALPHA,
+            TargetDensity::Compact,
+            (16.0, 16.0),
+            (16.0, 16.0),
+        )
+    };
+    assert!(RUN[0].matches(&sized("row: Padding > HStack > Grip")));
+    assert!(
+        !RUN[0].matches(&sized("row: HStack > Padding > Grip")),
+        "something between them is a different tree",
+    );
+    assert!(
+        !RUN[0].matches(&sized("row: Grip > HStack")),
+        "and the order is part of the claim",
+    );
 }
